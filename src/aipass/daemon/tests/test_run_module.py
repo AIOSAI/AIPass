@@ -300,6 +300,45 @@ def interval_job_with_slot(slot: Optional[str] = "2026-09-06T03:00:00", minutes=
     }
 
 
+def freeze_runstate_clock(monkeypatch, at: str) -> None:
+    """Stop the clock that runstate reads (the slot seeder and the due check) at ``at``.
+
+    A seeded slot is rolled forward to the latest occurrence at or before now, so
+    its expected value is a fact about now. A test that lets the wall clock supply
+    now is only true for a week (main went red at 2026-09-13T03:00 on exactly this).
+    """
+    frozen = datetime.fromisoformat(at)
+    real = runstate_mod.datetime
+
+    class Frozen(real):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr(runstate_mod, "datetime", Frozen)
+
+
+# (frozen now, the last_run the weekly Sunday 03:00 slot must seed). The expected
+# values are written out by hand from a calendar, never derived with the
+# arithmetic under test, so a wrong roll-forward cannot agree with itself.
+SLOT_SEED_CASES = [
+    ("2026-09-13T12:31:00", "2026-09-13T03:00:00"),
+    ("2026-10-04T12:00:00", "2026-10-04T03:00:00"),
+    ("2026-10-04T02:59:00", "2026-09-27T03:00:00"),
+    ("2026-10-07T12:00:00", "2026-10-04T03:00:00"),
+    ("2026-09-06T03:00:00", "2026-09-06T03:00:00"),
+    ("2026-09-01T09:00:00", "2026-08-30T03:00:00"),
+]
+SLOT_SEED_IDS = [
+    "sunday-main-went-red",
+    "later-sunday-after-the-hour",
+    "same-sunday-a-minute-before",
+    "wednesday",
+    "the-slot-instant-itself",
+    "slot-still-ahead-one-week-behind",
+]
+
+
 class TestMissedWindowLine:
     def _tick(self, runstate, dry_run=False, catch_up=None):
         job = live_job()
@@ -392,16 +431,19 @@ class TestSlotSeeding:
             results = run_tick(dry_run=dry_run)
         return results, mock_save
 
-    def test_a_slotted_job_is_seeded_before_it_can_fire(self, capsys):
+    @pytest.mark.parametrize("now,seeded", SLOT_SEED_CASES, ids=SLOT_SEED_IDS)
+    def test_a_slotted_job_is_seeded_before_it_can_fire(self, capsys, monkeypatch, now, seeded):
         # The whole point: seeding runs BEFORE the due check, so the job never
-        # fires at the arbitrary minute the daemon happened to tick.
+        # fires at the arbitrary minute the daemon happened to tick. The test owns
+        # the clock: the slot is 2026-09-06T03:00, weekly, and now is frozen.
+        freeze_runstate_clock(monkeypatch, now)
         runstate = {"jobs": {}}
         results, _save = self._tick(interval_job_with_slot(), runstate)
         out = capsys.readouterr().out
         assert results["seeded"] == 1
         assert results["fired"] == 0
         assert "SEED: @seedgo/shadow-cycle-weekly" in flat(out)
-        assert runstate["jobs"]["@seedgo/shadow-cycle-weekly"]["last_run"] == "2026-09-06T03:00:00"
+        assert runstate["jobs"]["@seedgo/shadow-cycle-weekly"]["last_run"] == seeded
 
     def test_a_slotless_job_warns_and_still_fires(self, caplog):
         # Asserted on the LOGGER, not the console: this is the line that lands
@@ -983,6 +1025,6 @@ class TestHelpNamesCommandJobs:
     def test_run_help_shows_the_command_job_shape(self, capsys):
         handle_command("run", ["--help"])
         out = flat(capsys.readouterr().out)
-        assert '"command": "drone rm --stale 10d ../.."' in out
+        assert '"command": "drone rm --stale 10d .."' in out
         assert "drone must be the first token" in out
         assert '"notify": { "email": "@devpulse" }' in out

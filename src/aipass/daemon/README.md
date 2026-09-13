@@ -332,15 +332,17 @@ one is @prax's weekly sweep of stale staging temps (DPLAN-0338 wave 2a):
 {
   "id": "tmp-sweep-weekly",
   "enabled": true,
-  "schedule": { "type": "interval", "interval_minutes": 10080, "slot": "2026-09-14T04:00:00" },
-  "command": "drone rm --stale 10d ../..",
-  "timeout_seconds": 600,
+  "schedule": { "type": "interval", "interval_minutes": 10080, "slot": "2026-09-13T04:00:00" },
+  "command": "drone rm --stale 10d ..",
+  "timeout_seconds": 120,
   "notify": { "email": "@devpulse" }
 }
 ```
 
 It lives in `src/aipass/prax/.daemon/schedule.json`, so it runs from `src/aipass/prax/`. A
-relative path in the command resolves from there, which makes `../..` the `src/` directory.
+relative path in the command resolves from there, which makes `..` the `src/aipass/` directory:
+one call covers every branch. The slot names a Sunday, 04:00. The live file's `_note` explains its
+120-second timeout, which is shorter than the default because a command job holds the tick lock for its whole run.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
