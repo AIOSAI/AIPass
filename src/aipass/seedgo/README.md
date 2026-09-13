@@ -216,7 +216,7 @@ every log line in the branch.
 
 ---
 
-## The 45 Standards
+## The 47 Standards
 
 `Scope` is the checker's own `AUDIT_SCOPE` (where a result is REPORTED); `Applies to`
 is its `APPLIES_TO` (which files are ELIGIBLE, default `everywhere`). These are two
@@ -230,6 +230,7 @@ by accident while the table was wrong.
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
 | architecture | all_files | production | Module/handler separation, entry point structure |
+| calendar_bound | branch_level | everywhere | A test that asserts a date literal against code that computes with the clock, and does not own the clock — true only while the calendar agrees (corpus: tests/ and lib/*/tests/) |
 | cli | all_files | production | Rich console usage, no bare print() |
 | cli_flags | entry_point | everywhere | --help, --version flag handling |
 | cli_ux | entry_point | everywhere | CLI navigation + output quality (Nav/Output scoring) |
@@ -276,10 +277,11 @@ by accident while the table was wrong.
 | unused_function | branch_level | everywhere | No unreferenced public functions |
 | windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs) |
 
-The audit consults **47** entries for a branch — these 46 plus `diagnostics` (pyright), which has
-no `_check.py` of its own. That 47 is what CI's `EXPECTED_STANDARDS` pins.
-`host_portability` landed 2026-09-12 and is the 46th checker; `.github/scripts/seedgo_audit.py`
-must carry `EXPECTED_STANDARDS = 47` or every branch trips the tripwire.
+The audit consults **48** entries for a branch — these 47 plus `diagnostics` (pyright), which has
+no `_check.py` of its own. That 48 is what CI's `EXPECTED_STANDARDS` pins.
+`host_portability` landed 2026-09-12 as the 46th checker and `calendar_bound` 2026-09-13 as the
+47th; `.github/scripts/seedgo_audit.py` must carry `EXPECTED_STANDARDS = 48` or every branch trips
+the tripwire.
 
 **`test_quality` (v4) left this table on 2026-09-07.** It was the pack's only
 `APPLIES_TO = tests` checker: a per-branch TEXT scan that awarded an item for finding a

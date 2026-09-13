@@ -1777,3 +1777,269 @@ def test_lib_is_in_the_corpus(tmp_path):
     assert result["score"] == 0
     failing = [c for c in result["checks"] if not c["passed"]]
     assert failing[0]["violations"][0]["file"] == "lib/telegram/apps/handlers/tmux_manager.py"
+
+
+# ---------------------------------------------------------------------------
+# Tests -- calendar_bound_check (CALENDAR_BOUND)
+#
+# Every fixture is a minimised copy of the CI red of 2026-09-13: daemon's
+# weekly slot seeder rolled a slot forward from datetime.now(), and a test
+# asserted the seeded value as a literal with nothing frozen - green for one
+# week, then red on every host. The rule reads production through the test's
+# own imports, so each fixture lays down a tiny package: pkg/demo/apps/slots.py
+# beside pkg/demo/tests/test_slots.py.
+# ---------------------------------------------------------------------------
+
+_SLOTS_PRODUCTION = '''from datetime import datetime, timedelta
+
+WEEK = timedelta(days=7)
+
+
+def _anchor(slot, now):
+    start = datetime.fromisoformat(slot)
+    return start + ((now - start) // WEEK) * WEEK
+
+
+def seed(runstate, job, now=None):
+    """Seeds last_run; the incident's slot was 2026-09-06T03:00:00."""
+    if now is None:
+        now = datetime.now()
+    runstate["last_run"] = _anchor(job["slot"], now).isoformat()
+
+
+def tick(runstate, job):
+    seed(runstate, job)
+
+
+def touch(doc, now=None):
+    if now is None:
+        now = datetime.now()
+    today = datetime.now().date().isoformat()
+    doc.setdefault("created", today)
+    doc.setdefault("first_seen", now)
+    doc["updated"] = now.isoformat()
+    return doc
+
+
+def refuse(locked_at, now=None):
+    now = now or datetime.now()
+    age = (now - locked_at).total_seconds()
+    return f"refused per the ruling of 2026-09-08; lock age {age:.0f}s"
+'''
+
+_SLOTS_UNIT = """from pkg.demo.apps.slots import tick
+
+
+def job_with_slot(slot="2026-09-06T03:00:00"):
+    return {"slot": slot}
+
+
+class TestSeeding:
+    def _tick(self, runstate):
+        tick(runstate, job_with_slot())
+
+    def test_the_slot_is_seeded(self):
+        runstate = {}
+        self._tick(runstate)
+        assert runstate["last_run"] == "2026-09-06T03:00:00"
+"""
+
+
+def _calendar_package(tmp_path, unit_source, where=("tests",)):
+    """Lay down pkg/demo with apps/slots.py and one test file; return (branch_root, test_file)."""
+    branch = tmp_path / "pkg" / "demo"
+    (branch / "apps").mkdir(parents=True)
+    (branch / "apps" / "slots.py").write_text(_SLOTS_PRODUCTION, encoding="utf-8")
+    test_dir = branch.joinpath(*where)
+    test_dir.mkdir(parents=True)
+    test_file = test_dir / "test_slots.py"
+    test_file.write_text(unit_source, encoding="utf-8")
+    return branch, test_file
+
+
+def _calendar_scan(tmp_path, unit_source):
+    """scan_file over a laid-down package: (violations, context)."""
+    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
+
+    branch, test_file = _calendar_package(tmp_path, unit_source)
+    return calendar_bound_check.scan_file(str(test_file), str(branch.parent))
+
+
+def _line_of(source, needle):
+    """1-based line of the first line of *source* containing *needle*."""
+    return next(number for number, text in enumerate(source.splitlines(), start=1) if needle in text)
+
+
+def test_calendar_bound_declares_the_branch_level_contract():
+    """AUDIT_SCOPE and the entry point the audit pipeline dispatches on."""
+    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
+
+    assert calendar_bound_check.AUDIT_SCOPE == "branch_level"
+    assert calendar_bound_check.STANDARD_NAME == "CALENDAR_BOUND"
+    assert callable(calendar_bound_check.check_branch)
+
+
+def test_the_slot_seeder_time_bomb_is_convicted(tmp_path):
+    """The CI red itself: literal expected value, seeder reads now three calls in, nothing frozen.
+
+    The date also sits in the test's own helper default and in the seeder's
+    docstring. Neither is production spelling the date, so neither acquits -
+    the first build read the test module as production and let this exact row go.
+    """
+    violations, context = _calendar_scan(tmp_path, _SLOTS_UNIT)
+
+    assert _lines(violations) == [_line_of(_SLOTS_UNIT, 'assert runstate["last_run"]')]
+    detail = violations[0][1]
+    assert detail.startswith("test_the_slot_is_seeded asserts 2026-09-06T03:00:00"), detail
+    assert "demo/apps/slots.py:" in detail and "seed" in detail, detail
+    assert "(3 call(s) in)" in detail, detail
+    assert context == {"owned": 0, "spelled": 0}
+
+
+def test_freezing_the_module_clock_in_a_same_file_helper_acquits(tmp_path):
+    """daemon's own cure shape: a helper the unit calls monkeypatches the module's datetime."""
+    source = """from datetime import datetime
+
+from pkg.demo.apps import slots
+from pkg.demo.apps.slots import tick
+
+
+class Frozen(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        return datetime(2026, 9, 13, 12, 31)
+
+
+def freeze(monkeypatch):
+    monkeypatch.setattr(slots, "datetime", Frozen)
+
+
+def test_the_slot_is_seeded(monkeypatch):
+    freeze(monkeypatch)
+    runstate = {}
+    tick(runstate, {"slot": "2026-09-06T03:00:00"})
+    assert runstate["last_run"] == "2026-09-13T03:00:00"
+"""
+    violations, context = _calendar_scan(tmp_path, source)
+
+    assert violations == []
+    assert context == {"owned": 1, "spelled": 0}
+
+
+def test_an_injected_instant_acquits(tmp_path):
+    """now= handed to the seeder is the unit owning the clock (daemon test_runstate's shape)."""
+    source = """from datetime import datetime
+
+from pkg.demo.apps.slots import seed
+
+
+def test_the_slot_is_seeded_at_an_injected_instant():
+    runstate = {}
+    seed(runstate, {"slot": "2026-09-06T03:00:00"}, now=datetime(2026, 9, 13, 12, 31))
+    assert runstate["last_run"] == "2026-09-13T03:00:00"
+"""
+    violations, context = _calendar_scan(tmp_path, source)
+
+    assert violations == []
+    assert context == {"owned": 1, "spelled": 0}
+
+
+def test_a_stamp_is_not_a_derivation(tmp_path):
+    """A round trip through code that only STAMPS now is clear (api test_tracking's shape).
+
+    touch() checks now against None, stores it with setdefault, and turns it into
+    a string with isoformat - none of which can change what 'created' holds.
+    57 of the 58 units the first, wider shape convicted were exactly this.
+    """
+    source = """from pkg.demo.apps.slots import touch
+
+
+def test_created_survives_a_touch():
+    doc = touch({"created": "2025-11-13"})
+    assert doc["created"] == "2025-11-13"
+"""
+    violations, context = _calendar_scan(tmp_path, source)
+
+    assert violations == []
+    assert context == {"owned": 0, "spelled": 0}
+
+
+def test_a_patched_seam_is_cut_from_the_walk(tmp_path):
+    """The only road to the clock goes through seed(), and the unit stubbed it."""
+    source = """from unittest.mock import patch
+
+from pkg.demo.apps.slots import tick
+
+
+def test_tick_hands_the_job_to_the_seeder():
+    runstate = {"last_run": "2026-09-06T03:00:00"}
+    with patch("pkg.demo.apps.slots.seed") as seeder:
+        tick(runstate, {"slot": "2026-09-06T03:00:00"})
+    seeder.assert_called_once()
+    assert runstate["last_run"] == "2026-09-06T03:00:00"
+"""
+    violations, context = _calendar_scan(tmp_path, source)
+
+    assert violations == []
+    assert context == {"owned": 0, "spelled": 0}
+
+
+def test_a_date_production_spells_is_acquitted(tmp_path):
+    """ai_mail test_wake's shape: the asserted date is a ruling written into the refusal text."""
+    source = """from datetime import datetime
+
+from pkg.demo.apps.slots import refuse
+
+
+def test_the_refusal_names_the_ruling():
+    message = refuse(datetime.fromisoformat("2026-09-07T10:00:00"))
+    assert "2026-09-08" in message
+"""
+    violations, context = _calendar_scan(tmp_path, source)
+
+    assert violations == []
+    assert context == {"owned": 0, "spelled": 1}
+
+
+def test_a_sleep_patch_does_not_own_the_clock(tmp_path):
+    """Stopping a wait freezes nothing; ai_mail's wake helper was acquitted by the word 'time'."""
+    source = """from pkg.demo.apps.slots import tick
+
+
+def test_the_slot_is_seeded(monkeypatch):
+    monkeypatch.setattr("pkg.demo.apps.slots.time.sleep", lambda _: None)
+    runstate = {}
+    tick(runstate, {"slot": "2026-09-06T03:00:00"})
+    assert runstate["last_run"] == "2026-09-06T03:00:00"
+"""
+    violations, _context = _calendar_scan(tmp_path, source)
+
+    assert _lines(violations) == [_line_of(source, "assert runstate")]
+
+
+def test_calendar_bound_scores_by_clean_test_file_share(tmp_path):
+    """check_branch: two test files, one convicted - 50, and the row names the file."""
+    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
+
+    branch, _test_file = _calendar_package(tmp_path, _SLOTS_UNIT)
+    (branch / "tests" / "test_clean.py").write_text("def test_arithmetic():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+
+    result = calendar_bound_check.check_branch(str(branch))
+
+    assert result["standard"] == "CALENDAR_BOUND"
+    assert result["score"] == 50
+    failing = [c for c in result["checks"] if not c["passed"]]
+    assert [row["file"] for row in failing[0]["violations"]] == ["tests/test_slots.py"]
+
+
+def test_a_skills_own_tests_under_lib_are_in_the_corpus(tmp_path):
+    """skills keeps tests beside each skill in lib/<skill>/tests/, outside the branch tests/ root."""
+    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
+
+    branch, _test_file = _calendar_package(tmp_path, _SLOTS_UNIT, where=("lib", "reminder", "tests"))
+
+    result = calendar_bound_check.check_branch(str(branch))
+
+    assert result["score"] == 0
+    failing = [c for c in result["checks"] if not c["passed"]]
+    assert failing[0]["violations"][0]["file"] == "lib/reminder/tests/test_slots.py"

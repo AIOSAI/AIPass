@@ -12,7 +12,7 @@ THRESHOLD = 100
 # gate silently: retire a checker, or break its import, and the audit would
 # quietly average one fewer standard, still print 100, and this job would stay
 # green. The number moves ONLY by hand, in the same commit that adds or retires
-# a standard. Today: 46 *_check.py in the aipass pack + the diagnostics checker.
+# a standard. Today: 47 *_check.py in the aipass pack + the diagnostics checker.
 #
 # Counted = every standard the audit CONSULTED: the ones that scored plus the
 # ones that reported not_applicable (measured nothing by design and stay out of
@@ -21,7 +21,7 @@ THRESHOLD = 100
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 47  # host_portability added 2026-09-12 (FPLAN-0554)
+EXPECTED_STANDARDS = 48  # calendar_bound added 2026-09-13 (CI red, daemon slot seeder time bomb)
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"
