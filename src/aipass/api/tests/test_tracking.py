@@ -3,7 +3,7 @@
 # Description: Tests for usage tracking handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -12,7 +12,8 @@ Tests for tracking.py -- usage tracking handler.
 Tests:
 - get_generation_metrics() HTTP success, non-200, invalid structure, exception
 - store_usage_data() new file creation, existing file update, per-caller stats,
-  daily totals, newest-first ordering, exception handling
+  daily totals, newest-first ordering, exception handling, the json service's
+  keys kept on its data leg (with and without a 'data' key)
 """
 
 import json
@@ -159,6 +160,8 @@ def test_get_generation_metrics_defaults_missing_fields(mock_requests: MagicMock
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
 def test_store_usage_data_creates_new_file(mock_dir: MagicMock, tmp_path: Path):
     """store_usage_data creates initial structure when file doesn't exist."""
+    from datetime import datetime
+
     mock_dir.__truediv__ = lambda self, other: tmp_path / other
     mock_dir.mkdir = MagicMock()
 
@@ -181,7 +184,10 @@ def test_store_usage_data_creates_new_file(mock_dir: MagicMock, tmp_path: Path):
     with open(data_path, "r", encoding="utf-8") as f:
         wrapper = json.load(f)
 
-    assert wrapper["module_name"] == "api_usage"
+    today = datetime.now().date().isoformat()
+    assert wrapper["module_name"] == "usage_tracker"
+    assert wrapper["created"] == today
+    assert wrapper["last_updated"] == today
     data = wrapper["data"]
 
     # Session totals
@@ -240,6 +246,86 @@ def test_store_usage_data_updates_existing(mock_dir: MagicMock, tmp_path: Path):
     caller_data = data["usage_by_caller"]["caller_a"]
     assert caller_data["requests"] == 2
     assert caller_data["models_used"]["openai/gpt-4"] == 2
+
+
+@patch(f"{_TRACKING_MOD}.API_JSON_DIR")
+def test_store_usage_data_stores_into_a_data_leg_with_no_data_key(mock_dir: MagicMock, tmp_path: Path):
+    """The file is the json service's data leg and may hold no 'data' key: store into it, keep its keys.
+
+    Shape measured on this box 2026-09-13. The old read took get('data', {}) and died
+    on current_session, so the first generation tracked into it was refused.
+    """
+    from datetime import datetime
+
+    mock_dir.__truediv__ = lambda self, other: tmp_path / other
+    mock_dir.mkdir = MagicMock()
+
+    data_path = tmp_path / "usage_tracker_data.json"
+    service_doc = {
+        "module_name": "usage_tracker",
+        "created": "2025-11-13",
+        "last_updated": "2025-11-13",
+        "operations_total": 4,
+        "operations_successful": 0,
+        "operations_failed": 0,
+        "last_operation": "track_usage",
+    }
+    data_path.write_text(json.dumps(service_doc), encoding="utf-8")
+
+    metrics = {
+        "total_cost": 0.003,
+        "tokens_prompt": 30,
+        "tokens_completion": 10,
+        "generation_time": 100,
+        "latency": 150,
+        "provider_name": "test",
+    }
+
+    result = store_usage_data("caller", "model/a", "gen-leg", metrics)
+
+    assert result is True
+    document = json.loads(data_path.read_text(encoding="utf-8"))
+    for key in ("module_name", "created", "operations_total", "operations_successful", "operations_failed"):
+        assert document[key] == service_doc[key]
+    assert document["last_operation"] == "track_usage"
+    assert document["last_updated"] == datetime.now().date().isoformat()
+    assert document["data"]["current_session"]["total_requests"] == 1
+    assert list(document["data"]["generation_tracking"]) == ["gen-leg"]
+
+
+@patch(f"{_TRACKING_MOD}.API_JSON_DIR")
+def test_store_usage_data_writes_back_the_keys_it_does_not_own(mock_dir: MagicMock, tmp_path: Path):
+    """A store after the service bumped the document keeps the bump (FPLAN-0542).
+
+    The old write rebuilt the document from module_name, timestamp and data alone,
+    wiping the lifetime operations_total and last_operation the service keeps there.
+    """
+    mock_dir.__truediv__ = lambda self, other: tmp_path / other
+    mock_dir.mkdir = MagicMock()
+
+    metrics = {
+        "total_cost": 0.01,
+        "tokens_prompt": 200,
+        "tokens_completion": 100,
+        "generation_time": 500,
+        "latency": 700,
+        "provider_name": "openai",
+    }
+    data_path = tmp_path / "usage_tracker_data.json"
+
+    store_usage_data("caller_a", "openai/gpt-4", "gen-100", metrics)
+    bumped = json.loads(data_path.read_text(encoding="utf-8"))
+    bumped.update({"created": "2025-11-13", "operations_total": 9, "last_operation": "track_usage"})
+    data_path.write_text(json.dumps(bumped), encoding="utf-8")
+
+    result = store_usage_data("caller_a", "openai/gpt-4", "gen-101", metrics)
+
+    assert result is True
+    document = json.loads(data_path.read_text(encoding="utf-8"))
+    assert document["created"] == "2025-11-13"
+    assert document["operations_total"] == 9
+    assert document["last_operation"] == "track_usage"
+    assert document["data"]["current_session"]["total_requests"] == 2
 
 
 @patch(f"{_TRACKING_MOD}.API_JSON_DIR")
