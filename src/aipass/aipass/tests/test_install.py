@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-05
-# Modified: 2026-07-05
+# Modified: 2026-09-14
 # =============================================
 
 """Tests for the aipass install module (DPLAN-0233)."""
@@ -40,6 +40,26 @@ from aipass.aipass.apps.modules.install import (
 )
 
 _MOD = "aipass.aipass.apps.modules.install"
+
+
+@pytest.fixture(autouse=True)
+def phone_face_step_stays_offline():
+    """No test in this file runs the real Phone face + baud-cli step, or reaches the network.
+
+    The leak this closes, measured 2026-09-14: once a baud release carried the phone
+    bundle, TestThrowawayGate.test_force_flag_overrides ran run_install with step 4
+    unpatched, fetched 'latest' with the seat's gh token, installed into the real
+    ~/.aipass/baud and pointed the live host api at it. install_best_effort is stubbed
+    for every test (the step's own tests patch it again), and a network call fails at
+    teardown: the step is best-effort and swallows exceptions, so a raise inside it
+    would pass silently.
+    """
+    with (
+        patch("aipass.aipass.apps.modules.baud.install_best_effort", return_value=False) as step,
+        patch("urllib.request.urlopen") as network,
+    ):
+        yield step
+    assert not network.called, f"a test reached the network: {network.call_args_list}"
 
 
 class TestLooksLikeAipassTree:
@@ -340,7 +360,7 @@ class TestRunInstall:
             rc = run_install(non_interactive=True, dry_run=False, no_baud=False)
         assert rc == 0
         assert [c[0] for c in order.mock_calls] == ["verify", "face", "chat"]
-        assert header.call_args_list[3:] == [call(4, 5, "Phone face"), call(5, 5, "Welcome")]
+        assert header.call_args_list[3:] == [call(4, 5, "Phone face + baud-cli"), call(5, 5, "Welcome")]
 
 
 class TestHandleCommand:
@@ -406,7 +426,7 @@ class TestHandleCommand:
 
 
 class TestInstallPhoneFaceStep:
-    """The Phone face step delegates to aipass baud and honours --no-baud (FPLAN-0587)."""
+    """The Phone face + baud-cli step delegates to aipass baud and honours --no-baud (FPLAN-0587, FPLAN-0589)."""
 
     def test_no_baud_skips_without_touching_baud(self) -> None:
         """--no-baud: skipped, reported as not installed, baud never called."""
@@ -732,7 +752,7 @@ class TestSmoke:
             print_help()
         printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
         assert "aipass install[/bold cyan] \u2014 one-command bootstrap of AIPass" in printed
-        assert "resolve home -> fetch -> setup.sh -> verify -> phone face -> welcome chat" in printed
+        assert "resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> welcome chat" in printed
         assert "--no-baud" in printed
         assert "aipass init run" in printed
 

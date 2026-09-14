@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-05
-# Modified: 2026-09-13
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -15,10 +15,11 @@ this command materializes a working, writable AIPass home and wires it up:
     1. Resolve where AIPass should live (default ~/AIPass; --here / --path to steer).
     2. Fetch the framework there (git clone of the public repo) if not already present.
     3. Run the canonical setup.sh (venv, editable install, provider-hook wiring, binaries).
-    4. Install the phone face: @baud's phone bundle from a release, pointed at by
-       @api's host server (``aipass baud install``). BEST-EFFORT: offline, a private
-       repo or no token is one honest line plus the retry command, and the install
-       carries on (FPLAN-0587). --no-baud skips it.
+    4. Install the phone face and baud-cli: @baud's phone bundle and headless binary
+       from a release, pointed at by @api's host server (``aipass baud install``).
+       BEST-EFFORT: offline, a private repo or no token is one honest line plus the
+       retry command, and the install carries on (FPLAN-0587, FPLAN-0589). No
+       baud-cli build for this platform lands the face alone. --no-baud skips it.
     5. End in a conversation: the @aipass concierge opens in this terminal with the
        install report in hand (interactive default; --no-chat to skip). Project
        creation is NOT part of install — the concierge points users at
@@ -32,7 +33,7 @@ Usage:
     aipass install                       # interactive, ends in a welcome chat
     aipass install --non-interactive     # CI/headless (~/AIPass), no chat
     aipass install --no-chat             # install the engine only, skip the chat
-    aipass install --no-baud             # skip the phone face step
+    aipass install --no-baud             # skip the phone face + baud-cli step
     aipass install --path ~/tools/aipass # explicit home
     aipass install --here                # install into the current directory
     aipass install --chat-only           # skip the build, just the welcome chat
@@ -501,7 +502,7 @@ def _install_phone_face(dry_run: bool, no_baud: bool) -> bool:
         True when the face was installed and pointed (or the dry-run walked it).
     """
     if no_baud:
-        console.print("[dim]Skipped the phone face (--no-baud). Install it anytime: aipass baud install[/dim]")
+        console.print("[dim]Skipped the phone face and baud-cli (--no-baud). Install later: aipass baud install[/dim]")
         return False
     from aipass.aipass.apps.modules.baud import install_best_effort
 
@@ -641,7 +642,7 @@ def run_install(
 
     # Step 4 — the phone face, best-effort: its result is reported, never fatal
     console.print()
-    console.print(render_step_header(4, TOTAL_STEPS, "Phone face"))
+    console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
     face_installed = _install_phone_face(dry_run, no_baud)
 
     # Step 5 — end in a welcome chat (no project creation — see module docstring)
@@ -676,14 +677,16 @@ def print_help() -> None:
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
     console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
-    console.print("  [green]aipass install --no-baud[/green]            [dim]# skip the phone face step[/dim]")
+    console.print("  [green]aipass install --no-baud[/green]            [dim]# skip phone face + baud-cli[/dim]")
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
     console.print("  [green]aipass install --chat-only[/green]          [dim]# skip the build, just the chat[/dim]")
     console.print("  [green]aipass install --force-global-home[/green]  [dim]# allow install into /tmp (unsafe)[/dim]")
     console.print("  [green]aipass install --dry-run[/green]            [dim]# walk steps, no side effects[/dim]")
     console.print()
-    console.print("[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face -> welcome chat")
+    console.print(
+        "[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> welcome chat"
+    )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
     console.print()

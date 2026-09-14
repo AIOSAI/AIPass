@@ -7,7 +7,8 @@
 # =============================================
 
 """
-Point @api's host server at the installed bundle (FPLAN-0587 row 2).
+Point @api's host server at the installed bundle (FPLAN-0587 row 2) and the
+installed baud-cli (FPLAN-0589 row 3, ``set_baud_bin``).
 
 @api owns the face_dir setting and its validation (row 1): ``set_face_dir(path)``
 refuses a relative path, a missing directory, or one without phone.html, at write
@@ -74,21 +75,62 @@ def point_api_at(dest: Path, host_config: Any) -> PointResult:
     return PointResult(True, f"@api serves the phone face from {stored or dest}")
 
 
-def api_face_dir_state(dest: Path, host_config: Any) -> str:
-    """One line: where @api's face_dir points, relative to `dest`."""
-    face_dir = getattr(host_config, "face_dir", None)
-    if face_dir is None:
-        return "unknown (@api's face_dir is not available on this install)"
+def point_api_at_binary(path: Path, host_config: Any) -> PointResult:
+    """Ask @api to exec the fleet lanes' baud binary from `path` (FPLAN-0589).
+
+    @api's ``set_baud_bin`` validates the path (absolute, exists, regular file,
+    executable) before it stores anything, and a running server picks it up on its
+    next request: no restart line.
+
+    Args:
+        path: The installed baud-cli.
+        host_config: @api's host config module, or None when it is not importable.
+
+    Returns:
+        ok=True with the path @api stored, or ok=False with the refusal and the manual command.
+    """
+    set_baud_bin = getattr(host_config, "set_baud_bin", None)
+    if set_baud_bin is None:
+        logger.warning("[baud] @api set_baud_bin unavailable (host config: %s)", type(host_config).__name__)
+        return PointResult(
+            False,
+            "@api's baud-bin setting is not available on this install. "
+            f"Run: drone @api host-api set-config --baud-bin {path}",
+        )
     try:
-        configured = face_dir()
+        stored = set_baud_bin(path)
+    except Exception as exc:  # @api owns the validation (BaudBinRefused); its refusal IS the message
+        logger.warning("[baud] @api refused baud binary %s: %s", path, exc)
+        return PointResult(False, f"@api refused the baud binary: {exc}")
+    json_handler.log_operation("baud_cli_pointed", {"path": str(stored or path)}, module_name="baud")
+    return PointResult(True, f"@api runs the fleet lanes on {stored or path} (from its next request, no restart)")
+
+
+def _setting_state(getter_name: str, here: Path, host_config: Any, not_set: str) -> str:
+    """One line: where one of @api's path settings points, relative to `here`."""
+    getter = getattr(host_config, getter_name, None)
+    if getter is None:
+        return f"unknown (@api's {getter_name} is not available on this install)"
+    try:
+        configured = getter()
     except OSError as exc:
-        logger.warning("[baud] @api face_dir unreadable: %s", exc)
+        logger.warning("[baud] @api %s unreadable: %s", getter_name, exc)
         return f"unreadable ({exc})"
     if configured is None:
-        return "not set (@api serves the source-checkout bundle)"
-    if Path(configured) == dest:
-        return f"points here ({dest})"
+        return f"not set ({not_set})"
+    if Path(configured) == here:
+        return f"points here ({here})"
     return f"points elsewhere: {configured}"
+
+
+def api_face_dir_state(dest: Path, host_config: Any) -> str:
+    """One line: where @api's face_dir points, relative to `dest`."""
+    return _setting_state("face_dir", dest, host_config, "@api serves the source-checkout bundle")
+
+
+def api_baud_bin_state(path: Path, host_config: Any) -> str:
+    """One line: where @api's baud_bin points, relative to the installed binary at `path`."""
+    return _setting_state("baud_bin", path, host_config, "@api looks the binary up itself on each request")
 
 
 def phone_url(host_config: Any) -> str:

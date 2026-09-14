@@ -7,7 +7,8 @@
 # =============================================
 
 """
-Verify the phone tarball against the release's SHA256SUMS (FPLAN-0587).
+Verify the phone tarball, and the baud-cli binary beside it (FPLAN-0589), against
+the release's one SHA256SUMS (FPLAN-0587).
 
 ``SHA256SUMS.txt`` is ``sha256sum`` output: one line per file, ``<64 hex>`` then a
 space, then a space (text mode) or ``*`` (binary mode), then the name. baud's
@@ -81,10 +82,10 @@ def sha256_file(path: Path) -> str:
 
 
 def verify_tarball(tarball: Path, sums_file: Path, delete_on_mismatch: bool) -> str:
-    """Check `tarball` against its line in `sums_file`.
+    """Check `tarball` (or any release file: the baud-cli binary too) against its line in `sums_file`.
 
     Args:
-        tarball: The bundle to verify. Its file name is the line looked up.
+        tarball: The file to verify. Its file name is the line looked up.
         sums_file: A sha256sum-format file.
         delete_on_mismatch: True for a download (removed on mismatch); False for
             a file the user handed over with --from, which is theirs to keep.
@@ -103,7 +104,7 @@ def verify_tarball(tarball: Path, sums_file: Path, delete_on_mismatch: bool) -> 
     expected = parse_sums(text).get(tarball.name)
     if expected is None:
         raise VerifyError(
-            f"{sums_file.name} has no line for {tarball.name}. Refusing to install a bundle that cannot be verified."
+            f"{sums_file.name} has no line for {tarball.name}. Refusing to install a file that cannot be verified."
         )
 
     actual = sha256_file(tarball)

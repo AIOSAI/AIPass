@@ -20,6 +20,11 @@ Two doors, tried in order:
 No token and a 404 is reported as what it is: the repo is private or the asset
 is missing. The message names ``--from``.
 
+The headless binary ``baud-cli-<tag>-linux-x86_64`` (FPLAN-0589) rides the same
+door and the same tag, and is optional: on a platform releases do not build for
+it is never asked for, and a release that does not carry it delivers the face
+alone (``FetchedRelease.binary`` is None).
+
 WHY "latest" RESOLVES THE TAG FIRST
 -----------------------------------
 The tarball's asset name carries the tag (``baud-phone-<tag>.tar.gz``), so
@@ -55,6 +60,7 @@ from typing import Callable
 
 from aipass.prax import logger
 from aipass.aipass.apps.handlers.json import json_handler
+from aipass.aipass.apps.handlers.baud.binary import binary_asset_name
 
 REPO = "AIOSAI/baud"
 LATEST = "latest"
@@ -80,12 +86,16 @@ class FetchError(Exception):
 
 @dataclass(frozen=True)
 class FetchedRelease:
-    """Two files on disk, both from one tag, and which door delivered them."""
+    """The files on disk, all from one tag, and which door delivered them.
+
+    binary is None when this platform has no release build or the release carries none.
+    """
 
     tag: str
     tarball: Path
     sums: Path
     source: str
+    binary: Path | None = None
 
 
 def phone_asset_name(tag: str) -> str:
@@ -158,6 +168,20 @@ def _resolve_public_latest() -> str:
     return validate_tag(match.group(1))
 
 
+def _fetch_public_binary(base: str, tag: str, workdir: Path) -> Path | None:
+    """The binary through door 1, or None: no build for this platform, or a 404 for this one asset."""
+    asset = binary_asset_name(tag)
+    if asset is None:
+        return None
+    try:
+        return _download(_public_request(f"{base}/{asset}"), workdir / asset)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        logger.info("[baud] release %s has no public %s", tag, asset)
+        return None
+
+
 def _fetch_public(tag: str, workdir: Path) -> FetchedRelease:
     """Door 1: the public release download."""
     real_tag = _resolve_public_latest() if tag == LATEST else tag
@@ -165,7 +189,8 @@ def _fetch_public(tag: str, workdir: Path) -> FetchedRelease:
     asset = phone_asset_name(real_tag)
     sums = _download(_public_request(f"{base}/{SUMS_ASSET}"), workdir / SUMS_ASSET)
     tarball = _download(_public_request(f"{base}/{asset}"), workdir / asset)
-    return FetchedRelease(tag=real_tag, tarball=tarball, sums=sums, source="github-release")
+    binary = _fetch_public_binary(base, real_tag, workdir)
+    return FetchedRelease(tag=real_tag, tarball=tarball, sums=sums, source="github-release", binary=binary)
 
 
 def _fetch_api(tag: str, workdir: Path, token: str) -> FetchedRelease:
@@ -192,14 +217,18 @@ def _fetch_api(tag: str, workdir: Path, token: str) -> FetchedRelease:
         )
     sums = _download(_api_request(assets[SUMS_ASSET], token, _OCTET_ACCEPT), workdir / SUMS_ASSET)
     tarball = _download(_api_request(assets[asset], token, _OCTET_ACCEPT), workdir / asset)
-    return FetchedRelease(tag=real_tag, tarball=tarball, sums=sums, source="github-api")
+    bin_asset = binary_asset_name(real_tag)
+    binary = None
+    if bin_asset in assets:
+        binary = _download(_api_request(assets[bin_asset], token, _OCTET_ACCEPT), workdir / bin_asset)
+    return FetchedRelease(tag=real_tag, tarball=tarball, sums=sums, source="github-api", binary=binary)
 
 
 def _logged(release: FetchedRelease) -> FetchedRelease:
     """Record which tag arrived through which door, then hand the release back."""
     json_handler.log_operation(
         "baud_release_fetched",
-        {"tag": release.tag, "source": release.source},
+        {"tag": release.tag, "source": release.source, "binary": release.binary is not None},
         module_name="baud",
     )
     return release

@@ -13,7 +13,7 @@ aipass read drone                   # Full branch README, rendered in the termin
 aipass new myapp --template python  # Create a new project
 aipass adopt myapp --dry-run        # Preview adopting an existing projects/ dir
 aipass init run                     # Guided setup (10 stages, resumable)
-aipass baud install                 # The phone face, from a baud release
+aipass baud install                 # The phone face + baud-cli, from a baud release
 ```
 
 ## Invoke
@@ -37,7 +37,7 @@ aipass/
 │   │   ├── help_chat.py                   # README-backed Q&A (reads via readme_map handler)
 │   │   ├── init_flow.py                   # 10-stage guided setup + update / scaffold / agent forms
 │   │   ├── install.py                     # aipass install — one-command bootstrap (clone + setup + chat)
-│   │   ├── baud.py                        # aipass baud — the phone face from a baud release, pointed at by @api
+│   │   ├── baud.py                        # aipass baud — phone face + baud-cli from a baud release, pointed at by @api
 │   │   ├── new_project.py                 # aipass new — create projects inside the installation
 │   │   ├── adopt.py                       # aipass adopt — bring an existing projects/ dir into AIPass
 │   │   ├── profile.py                     # User profile read/write
@@ -46,7 +46,7 @@ aipass/
 │   │   └── feedback.py                    # Feedback pulse toggle — aipass feedback on/off
 │   ├── handlers/
 │   │   ├── admin_lane.py                  # Admin-lane state for doctor — presence only, never a verdict
-│   │   ├── baud/                          # fetch, verify (SHA256SUMS), unpack (filter + swap), installer, point
+│   │   ├── baud/                          # fetch, verify (SHA256SUMS), unpack (filter + swap), binary, installer, point
 │   │   ├── cross_os/                      # Cross-OS pre-flight: gap_registry, preflight, run_record
 │   │   ├── handoff_platform/              # OS-dispatched CLI session launch — tmux, wt.exe, inline
 │   │   ├── init/                          # bootstrap.py, git_auth.py (re-exports shared/scaffold_content.py)
@@ -101,18 +101,18 @@ aipass/
 | `aipass init update [target]` | Print the scaffold plan, then apply it + provision owner-tier repo auth |
 | `aipass init update --dry-run` | Print the plan and write nothing — exit 0 current, exit 2 pending (stamp-only plans say no go is needed) |
 | `aipass init update --json` | The same plan as a JSON document, for machines |
-| `aipass install` | One-command bootstrap — clone + setup.sh + hooks, the phone face (best-effort), then a concierge welcome chat |
+| `aipass install` | One-command bootstrap — clone + setup.sh + hooks, the phone face and baud-cli (best-effort), then a concierge welcome chat |
 | `aipass install --path DIR` / `--here` | Choose the install home |
 | `aipass install --non-interactive` / `--no-chat` / `--chat-only` | Headless, install-only, or chat-only |
 | `aipass install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
 | `aipass install --force-global-home` | Allow installing into `/tmp` — unsafe, absent from this table until 09-05 |
 | `aipass install --dry-run` | Walk the steps, no side effects |
-| `aipass install --no-baud` | Skip the Phone face step (step 4 of 5) |
-| `aipass baud install` | Fetch the latest baud release's phone bundle, verify it against `SHA256SUMS.txt`, unpack it to `~/.aipass/baud/phone/`, point @api's host server at it |
+| `aipass install --no-baud` | Skip the Phone face + baud-cli step (step 4 of 5) |
+| `aipass baud install` | Fetch the latest baud release's phone bundle and `baud-cli-<tag>-linux-x86_64`, verify both against `SHA256SUMS.txt`, unpack the face to `~/.aipass/baud/phone/`, land the binary at `~/.aipass/baud/bin/baud-cli`, point @api's host server at both. No build for this platform, or none in the release: one line, the face alone, exit 0 |
 | `aipass baud install --tag vX.Y.Z` | A named release instead of the latest |
-| `aipass baud install --from TAR [--sums SUMS]` | A tarball on disk, no network. Without `--sums`, `SHA256SUMS.txt` beside the tarball; no sums, no install |
-| `aipass baud install --dest DIR` / `--dry-run` | Install somewhere else / walk the steps and write nothing |
-| `aipass baud status [--dest DIR]` | Installed tag and sha256, whether `phone.html` is there, where @api's face dir points |
+| `aipass baud install --from TAR [--sums SUMS] [--binary BIN]` | Files on disk, no network. Without `--sums`, `SHA256SUMS.txt` beside the tarball; no sums, no install. `--binary` lands a baud-cli too, verified against the same sums |
+| `aipass baud install --dest DIR` / `--dry-run` | Face in DIR and baud-cli in `DIR/../bin` / walk the steps and write nothing |
+| `aipass baud status [--dest DIR]` | Two rows, face and baud-cli: installed tag and sha256, `phone.html` / executable, where @api's face dir and baud binary point |
 | `aipass profile` | Show user profile |
 | `aipass profile set <field> <value>` | Update a profile field |
 | `aipass profile clear [--yes]` | Reset the profile |
@@ -157,9 +157,23 @@ vendors the bundle, so the two licences stay apart.
   `phone` -> `phone.prev`, staging -> `phone`, prev dropped. If the swap fails,
   the previous install goes back. A non-empty destination without the marker is
   refused: it is not an install this command made.
-- **Point.** `set_face_dir(dest)` on @api's host config, called in-process so @api
-  validates the directory. aipass never writes api's config file. A running host
-  api only sees the new directory after a restart, and the command says so.
+- **baud-cli** (FPLAN-0589). The headless binary, `baud-cli-<tag>-linux-x86_64`,
+  from the same release and the same door. It is verified against the same
+  `SHA256SUMS.txt` BEFORE the face is placed, so a bad binary refuses the whole
+  install. It lands at `bin/baud-cli` beside the face's directory: bytes copied
+  into `bin/.baud-cli.staging`, hashed again, 0755, then `baud-cli` ->
+  `baud-cli.prev` (kept) and staging -> `baud-cli`. The marker `.baud-cli.json`
+  (tag, sha256, installed_at, source) is written last. A `baud-cli` with no marker
+  is refused. Releases build for linux-x86_64 only: on any other platform, or for
+  a release that carries no binary, the install says so in one line, lands the
+  face alone and still exits 0.
+- **Point.** `set_face_dir(dest)` and `set_baud_bin(path)` on @api's host config,
+  called in-process so @api validates each path. aipass never writes api's config
+  file. A running host api only sees a new face directory after a restart, and the
+  command says so; it uses a new binary from its next request.
+
+A `--dest` install points @api at the scratch location too. Undo with
+`drone @api host-api set-config --face-dir <previous|default> --baud-bin <previous|default>`.
 
 `aipass install` runs this as step 4, best-effort: offline, a private repo or a
 missing token prints one line plus the retry command, and the install carries on.
@@ -352,5 +366,5 @@ Each verified against live code on 2026-09-05.
 
 ## Last Updated
 
-Last Updated: 2026-09-13 — FPLAN-0587 row 2: `aipass baud install` / `status` and the best-effort
-Phone face step in `aipass install` (TOTAL_STEPS 5, `--no-baud`).
+Last Updated: 2026-09-14 — FPLAN-0589 row 3: `aipass baud install` lands baud-cli beside the phone
+face (`--binary` for `--from`, `set_baud_bin`, two-row `status`); step 4 of `aipass install` covers both.
