@@ -36,7 +36,7 @@ For each collected file, the checker builds a search corpus from ALL `.py` conte
 |--------|---------|
 | Full dotted import | `from aipass.branch.apps.handlers.foo import bar` |
 | Relative dotted path | `handlers.foo` in the source |
-| Import statement with stem | `from ... import foo_handler` |
+| Import statement with stem | `from ... import foo_handler`, or inside a parenthesised block `from ... import (\n    foo_handler,\n)` (read since 2026-09-14; comments in the block do not count) |
 | importlib.import_module | `import_module("...foo_handler")` |
 | Glob-based discovery | `glob("*_check.py")`, `glob("*.py")` |
 | Filename string literal | `"foo_handler.py"` in source |

@@ -270,6 +270,64 @@ class TestDeadCodeCheck:
         assert result["score"] == 100
         assert result["passed"] is True
 
+    def test_a_handler_imported_only_inside_a_parenthesised_block_is_referenced(
+        self, mock_json, tmp_path: Path
+    ) -> None:
+        """A name inside `from pkg import (\\n    a,\\n    b,\\n)` is an import - @drone, 2026-09-13.
+
+        Rule 5's line pattern stopped at the newline after `(`, so drone's
+        repo_door.py, imported only inside that block, scored unreferenced and
+        took drone to 99 under CI's 100. Mutation caught:
+        `_imported_in_parenthesised_block` returning False.
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(
+            branch / "apps" / "handlers" / "git" / "repo_door.py",
+            "def extract_repo_flag(args):\n    return args\n",
+        )
+        _write_file(
+            branch / "apps" / (branch.name + ".py"),
+            "from aipass.{name}.apps.handlers.git import (\n"
+            "    lock_handler,\n"
+            "    repo_door,\n"
+            ")\n\n"
+            "def handle_command(args):\n"
+            "    return repo_door.extract_repo_flag(args)\n".format(name=branch.name),
+        )
+
+        result = dead_code_check_branch(str(branch))
+
+        assert result["score"] == 100
+        assert result["checks"][0]["passed"] is True
+
+    def test_a_stem_named_only_in_a_comment_inside_an_import_block_is_still_dead(
+        self, mock_json, tmp_path: Path
+    ) -> None:
+        """The block's comments are stripped before the name is read.
+
+        `lock_handler,  # repo_door moved out` names the stem, and it imports
+        nothing. Mutation caught: `re.sub(r"#[^\\n]*", "", block.group(1))` in
+        `_imported_in_parenthesised_block` becoming `block.group(1)`.
+        """
+        branch = _make_branch(tmp_path)
+        _write_file(
+            branch / "apps" / "handlers" / "git" / "repo_door.py",
+            "def extract_repo_flag(args):\n    return args\n",
+        )
+        _write_file(
+            branch / "apps" / (branch.name + ".py"),
+            "from aipass.{name}.apps.handlers.git import (\n"
+            "    lock_handler,  # repo_door moved out\n"
+            ")\n\n"
+            "def handle_command():\n"
+            "    return lock_handler\n".format(name=branch.name),
+        )
+
+        result = dead_code_check_branch(str(branch))
+
+        assert result["score"] == 0
+        assert "repo_door.py" in result["checks"][0]["message"]
+
 
 # =============================================
 # 6. unused_function_check (check_branch)

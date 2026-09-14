@@ -3946,6 +3946,140 @@ class TestPosixLiteralRenderedAndReturnedPaths:
         assert [r["species"] for r in result["violations"]] == ["REPR-HAYSTACK"]
         assert result["violations"][0]["record"] == "warned.call_args"
 
+    def test_a_join_over_a_rendered_call_list_is_the_same_haystack(self, tmp_path):
+        """A rendering inside a join is still a rendering - Windows CI red 34882199024.
+
+        `" ".join(str(call) for call in m.call_args_list)` puts every call through
+        `repr()` one at a time, which doubles a backslash exactly as
+        `str(m.call_args)` does. Until 2026-09-14 the arm asked only the outermost
+        expression, saw a join, and read both red rows clean. The cure names an
+        index, because the list itself has no `.args`. Mutations caught: `for
+        render in ast.walk(node)` in `_renders_a_call_record` becoming `for render
+        in [node]`; `_iterated_records` returning `{}`; `index = "[i]" if ... else
+        ""` in `_haystack_finding` becoming `index = ""`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_host_api.py",
+            """
+            def test_the_log_path_is_printed(console, logs_dir):
+                run_it()
+                printed = " ".join(str(call) for call in console.print.call_args_list)
+                assert str(logs_dir / "app.log") in printed
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+        row = result["violations"][0]
+
+        assert [r["species"] for r in result["violations"]] == ["REPR-HAYSTACK"]
+        assert result["score"] == 0
+        assert row["record"] == "console.print.call_args_list"
+        assert "console.print.call_args_list[i].args[n]" in row["reason"]
+
+    def test_a_needle_bound_to_a_path_one_hop_back_is_read_as_a_path(self, tmp_path):
+        """`str(bundle)` names no path; `bundle = _face_bundle(tmp_path / "face")` does.
+
+        The first red row's needle. The haystack already got one hop through a
+        local name and the needle got none, so a path held in a variable called
+        `bundle` read as not-a-path. Mutation caught: `return node.id in bindings
+        and pathish_expression(bindings[node.id])` in `_names_a_path` becoming
+        `return False`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_host_api.py",
+            """
+            def test_the_face_dir_is_shown(warned, tmp_path):
+                bundle = _face_bundle(tmp_path / "face")
+                run_it(bundle)
+                assert str(bundle) in str(warned.call_args)
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["REPR-HAYSTACK"]
+        assert result["violations"][0]["literal"] == "str(bundle)"
+
+    def test_a_needle_from_a_call_named_for_a_path_is_read_as_a_path(self, tmp_path):
+        """`str(host_face.face_root())` - the call's own name is the evidence.
+
+        The second red row's needle: nothing in `host_face.face_root()` is a Path
+        constructor, a join or a fixture, and the old reading never read a call's
+        name. Mutation caught: `return _is_pathish_name(...)` in `_names_a_path`
+        becoming `return False`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_host_api.py",
+            """
+            def test_the_checkout_default_is_named(warned):
+                run_it()
+                assert str(host_face.face_root()) in str(warned.call_args)
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert [r["species"] for r in result["violations"]] == ["REPR-HAYSTACK"]
+        assert result["violations"][0]["literal"] == "str(host_face.face_root())"
+
+    def test_joining_the_arguments_instead_of_the_calls_is_clean(self, tmp_path):
+        """The cure api landed: the haystack is built from `call.args`, not from calls.
+
+        `str(arg)` of a Path argument spells ONE backslash on Windows, so a needle
+        built with `str()` is found in it. A rule that convicted this would
+        convict the fix. Mutation caught: the `sub.iter` test in
+        `_iterated_records` becoming `True`, which binds every comprehension
+        variable whatever it iterates.
+        """
+        _write(
+            tmp_path,
+            "tests/test_host_api.py",
+            """
+            def test_the_face_dir_is_shown(console, tmp_path):
+                bundle = _face_bundle(tmp_path / "face")
+                run_it(bundle)
+                printed = " ".join(str(arg) for call in console.print.call_args_list for arg in call.args)
+                assert str(bundle) in printed
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
+    def test_a_join_over_calls_searched_for_text_that_is_not_a_path_is_clean(self, tmp_path):
+        """The widened haystack reads 112 fleet comparisons; the needle keeps them clean.
+
+        api's own list of the join shape searches for a verb, a count and a loop
+        variable over plain strings - text no host spells differently, which
+        `repr()` leaves alone. A local bound to a plain string is not a path
+        either. Mutations caught: `_pathish_needle` returning `True`; the Name
+        branch of `_names_a_path` dropping `pathish_expression(bindings[node.id])`.
+        """
+        _write(
+            tmp_path,
+            "tests/test_cli_routing.py",
+            """
+            def test_the_help_names_its_verbs(console, report):
+                run_it()
+                verb = "get-key"
+                printed = " ".join(str(call) for call in console.print.call_args_list)
+                assert verb in printed
+                assert "10 of 25" in printed
+                for step in report["steps"]:
+                    assert step in printed
+            """,
+        )
+
+        result = posix_literal_check.check_branch(str(tmp_path))
+
+        assert result["violations"] == []
+        assert result["score"] == 100
+
     def test_a_value_the_code_under_test_returned_nominates_and_moves_no_number(self, tmp_path):
         """RETURNED-PATH: reported in its own line, `passed: True`, never scored.
 

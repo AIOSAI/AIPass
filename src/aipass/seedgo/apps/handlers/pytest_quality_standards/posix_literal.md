@@ -174,15 +174,62 @@ found inside that haystack, because the haystack is not the argument — it is a
 Flagged: `str()`, `repr()` or an f-string over `.call_args`, `.call_args_list`,
 `.mock_calls`, `.await_args`, `.await_args_list` or `.method_calls` — directly, or
 one hop through a local `name = ...` — used as the haystack of an `in` / `not in`
-whose needle is path-ish.
+whose needle is path-ish. The rendering may sit anywhere inside the haystack
+expression, including a join over the record's calls:
+
+```python
+printed = " ".join(str(call) for call in console.print.call_args_list)   # the haystack
+assert str(bundle) in printed          # flagged: bundle = _face_bundle(tmp_path / "face")
+assert str(host_face.face_root()) in printed   # flagged: the call's name says path
+```
 
 **Cure, and the template line:** assert on `call_args.args[n]` or
-`call_args.kwargs` directly. Never on a rendered repr.
+`call_args.kwargs` directly, or build the haystack from the arguments rather
+than from the calls. Never on a rendered repr.
 
 ```python
 # after
 assert warned.call_args.args[0] == logs_dir / "app.log"
+printed = " ".join(str(arg) for call in console.print.call_args_list for arg in call.args)
 ```
+
+### Arm 4 widened, 2026-09-14 — CI red 34882199024
+
+Windows went red on two rows in api's `test_host_api.py` (PR #768, head
+9594a1a8), written on 2026-09-13 with this arm already in the pack. The arm
+did not score them because **both** of its readings missed, and each widening
+alone still catches nothing:
+
+| Row (9594a1a8) | Needle read as a path? | Haystack read as a rendered record? |
+|---|---|---|
+| `test_config_shows_a_configured_face_dir_and_its_entry:1802` | no: `str(bundle)`, and `bundle` names no path | no: the `str()` sits inside `" ".join(...)`, over a comprehension variable |
+| `test_config_names_the_checkout_default_when_unset:1828` | no: `str(host_face.face_root())`, and the call name was never read | no: the same join |
+
+Three readings were added, and every other arm is untouched (`pathish_expression`
+did not change, so arms 1–3 count exactly what they counted):
+
+- **haystack:** the rendering is found anywhere in the haystack expression, and
+  a comprehension variable iterating a call record directly
+  (`for call in m.call_args_list`) counts as a call record. A variable iterating
+  `call.args` does not: its elements are the arguments, and `str()` of a Path
+  argument spells one backslash. That is the cure's shape, and it stays clean.
+- **needle, one hop:** a local name bound to a path-ish expression
+  (`bundle = _face_bundle(tmp_path / "face")`), the same single hop the
+  haystack already had.
+- **needle, call name:** a call whose own name carries a path word
+  (`face_root()`), read on the needle only.
+
+**Measured, 18 branches.** The widened haystack reading sees 112 `in` / `not in`
+comparisons, where the old one saw 34. Not one of them outside the two rows has a path-ish
+needle. Before: 0 REPR-HAYSTACK rows at HEAD and in the working tree. After: 2 at
+HEAD (the two red rows, api only) and 0 in the working tree, where api's cure
+builds the haystack from arguments. api's own list of the same join shape stays
+acquitted by its needles: `test_host_autostart.py:407` (`step`, a loop variable
+over plain strings, which `repr()` leaves alone), `test_cli_routing.py:130/149`
+(`'get-key'`, `'handlers.auth.keys'`), `test_registry.py:197/198`,
+`test_openrouter_client.py:340/393-398` (`'10 of 25'`, `'2/5'` and friends).
+`test_usage_tracker.py:209/260/312` binds the list, then joins it, which is
+two hops and not read; their needles are numbers either way.
 
 ## What does not get flagged, and why that matters more
 
@@ -387,7 +434,13 @@ And the 2026-09-08 arms have their own, in the same direction:
   of the four rows the arm exists for.
 - **arm 4 follows a haystack one hop** through a local `name = ...` and no
   further, and reads only `in` / `not in`. A rendered repr compared with `==` is a
-  different and much rarer mistake.
+  different and much rarer mistake. A haystack built in a helper (`_printed(mock)`)
+  or bound twice (`calls = [str(c) for c ...]` then `output = " ".join(calls)`) is
+  not seen. The needle gets the same single hop, and a needle held in a loop
+  variable is not read.
+- **arm 4's call-name reading is spelling.** `str(load_profile())` reads as a
+  path because `profile` contains `file`. It is read on the needle only, and only
+  inside a rendered-record haystack, and it added no row in the fleet.
 - **arm 4 nominates a rendered repr even when the argument was a plain string.**
   `trigger/tests/test_log_watcher.py:1080` sets `event.src_path` to a string and
   would pass on either host. It is the same shape as the row three files over that
