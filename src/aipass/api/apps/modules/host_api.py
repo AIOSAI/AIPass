@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-09-13
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -27,7 +27,10 @@ Commands (via drone @api):
     host-api list-tokens                        Show tokens (never the values)
     host-api revoke-token <id>                  Revoke, effective next request
     host-api config                             Show the effective config
-    host-api set-config [--host H] [--port P] [--face-dir DIR|default]
+    host-api set-config [--host H] [--port P] [--face-dir DIR|default] [--baud-bin PATH|default]
+
+config and set-config live in host_config_cli.py, serve/status/stop/autostart in
+host_serve.py; this module offers them every call and owns the tokens.
 """
 
 import os
@@ -48,15 +51,12 @@ from aipass.cli.apps.modules import console, header, success, error, warning
 from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger  # noqa: F401
 from aipass.api.apps.handlers.host import config as host_config
-from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.modules import host_config_cli
 from aipass.api.apps.modules import host_serve
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 HELP_FLAGS = ("--help", "-h", "help")
-
-# set-config --face-dir's spelling for "clear it: serve the checkout build again".
-FACE_DIR_DEFAULT = "default"
 
 
 # =============================================
@@ -119,7 +119,7 @@ def print_help() -> None:
     console.print("  [cyan]host-api revoke-token <id>[/cyan]     [dim]Revoke, effective on the next request[/dim]")
     console.print("  [cyan]host-api config[/cyan]                [dim]Show the effective server config[/dim]")
     console.print(
-        "  [cyan]host-api set-config[/cyan]            [dim]Set the bind or the face dir (validated first)[/dim]"
+        "  [cyan]host-api set-config[/cyan]            [dim]Set bind, face dir or baud binary (validated first)[/dim]"
     )
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
@@ -127,6 +127,8 @@ def print_help() -> None:
     console.print("  [cyan]--port <n>[/cyan]       [dim]Port override[/dim]")
     console.print("  [cyan]--face-dir <dir>[/cyan] [dim]set-config: the phone face's built bundle, absolute[/dim]")
     console.print("  [dim]                'default' clears it back to the checkout build; restart to serve[/dim]")
+    console.print("  [cyan]--baud-bin <path>[/cyan] [dim]set-config: the binary the fleet lanes exec, absolute[/dim]")
+    console.print("  [dim]                'default' clears it back to the automatic lookup; no restart[/dim]")
     console.print("  [cyan]--detach[/cyan]         [dim]serve: run in its own session, output to a log file[/dim]")
     console.print("  [dim]                a serve under drone dies on drone's exec timeout[/dim]")
     console.print("  [dim]                and a detached one dies with the machine — see autostart[/dim]")
@@ -148,6 +150,9 @@ def print_help() -> None:
     console.print()
     console.print("  [dim]# Serve an installed phone face instead of the checkout build[/dim]")
     console.print("  [cyan]drone @api host-api set-config --face-dir <dir>[/cyan]")
+    console.print()
+    console.print("  [dim]# Exec a headless baud-cli for the fleet lanes, from the next request[/dim]")
+    console.print("  [cyan]drone @api host-api set-config --baud-bin <path>[/cyan]")
     console.print()
     console.print("  [dim]# A server that outlives the shell that started it[/dim]")
     console.print("  [cyan]drone @api host-api serve --detach[/cyan]")
@@ -185,6 +190,37 @@ def revoke_token(token_id: str) -> bool:
 def serve(host: Optional[str] = None, port: Optional[int] = None) -> None:
     """Validate the configured bind address, then run the server."""
     host_server.serve(host=host, port=port)
+
+
+# The door for other branches' in-process calls (@aipass's installer), so none
+# reaches into handlers/host/config.py. Same functions, same refusals.
+FaceDirRefused = host_config.FaceDirRefused
+BaudBinRefused = host_config.BaudBinRefused
+
+
+def load_config() -> dict:
+    """The effective host config: defaults merged under the stored values."""
+    return host_config.load_config()
+
+
+def face_dir() -> Optional[Path]:
+    """The configured phone-face directory, or None: the checkout build serves."""
+    return host_config.face_dir()
+
+
+def set_face_dir(path: Optional[Path]) -> Optional[Path]:
+    """Validate and store the face dir, or clear it with None. Raises FaceDirRefused."""
+    return host_config.set_face_dir(path)
+
+
+def baud_bin() -> Optional[Path]:
+    """The configured baud binary, or None: the automatic lookup answers."""
+    return host_config.baud_bin()
+
+
+def set_baud_bin(path: Optional[Path]) -> Optional[Path]:
+    """Validate and store the baud binary, or clear it with None. Raises BaudBinRefused."""
+    return host_config.set_baud_bin(path)
 
 
 # =============================================
@@ -236,6 +272,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     # rather than disappearing into a silent True.
     if host_serve.handle_command(command, args):
         return True
+    if host_config_cli.handle_command(command, args):
+        return True
 
     if subcommand == "issue-token":
         _cmd_issue_token(rest)
@@ -245,12 +283,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
     if subcommand == "revoke-token":
         _cmd_revoke_token(rest)
-        return True
-    if subcommand == "config":
-        _cmd_config()
-        return True
-    if subcommand == "set-config":
-        _cmd_set_config(rest)
         return True
 
     error(
@@ -340,6 +372,8 @@ def _cmd_issue_token(args: List[str]) -> None:
         # The token is already in the store. Say so — a caller who thinks the
         # write failed cleanly would issue a second one and leave a live orphan.
         logger.error("[host_api] token %s issued but its file write failed: %s", record["id"], e)
+        # The handler logged the issuance; only this module knows the receipt never landed.
+        json_handler.log_operation("host_api_token_receipt_unwritten", {"id": record["id"], "error": str(e)})
         error(
             f"Token was issued but could not be written to {target}: {e}",
             suggestion=f"Revoke it: drone @api host-api revoke-token {record['id']}",
@@ -446,132 +480,6 @@ def _cmd_revoke_token(args: List[str]) -> None:
         # seam, the same channel its sibling refusal above already uses.
         error(f"No active token with id: {token_id}")
     console.print()
-
-
-def _cmd_config() -> None:
-    """Show the effective server configuration."""
-    header("Host API Config")
-    console.print()
-
-    config = host_config.load_config()
-    console.print(f"  [cyan]host:[/cyan] {config['host']}")
-    console.print(f"  [cyan]port:[/cyan] {config['port']}")
-
-    # The face a server starting now would serve, and which source named it.
-    face = host_face.face_location()
-    servable = face.has_entry()
-    console.print(f"  [cyan]face:[/cyan] {face.root} [dim]({face.source})[/dim]")
-    entry_state = "[green]present[/green]" if servable else "[yellow]missing[/yellow]"
-    console.print(f"  [cyan]{host_face.FACE_ENTRY}:[/cyan] {entry_state}")
-    if not servable:
-        console.print(f"  [dim]{face.unavailable_message()}[/dim]")
-    console.print("  [dim]A running server serves the face it started with.[/dim]")
-    console.print()
-
-    try:
-        host_config.validate_bind(config["host"], int(config["port"]))
-        success("Bind address would be accepted")
-    except host_config.BindRefused as e:
-        logger.info("[host_api] config preview: bind would be refused (%s)", e)
-        warning("Bind address would be REFUSED")
-        console.print(f"  [dim]{e}[/dim]")
-    console.print()
-
-
-def _cmd_set_config(args: List[str]) -> None:
-    """
-    Write the server config: the bind address, the face dir, or both.
-
-    Both are controls, so they get a real command rather than leaving the
-    operator to hand-edit JSON in the secrets store. Every value is validated
-    BEFORE it is stored — a config that would be refused at startup is refused
-    at write time, where the person who typed it is still watching.
-
-    One refusal stores nothing. The bind is validated first, then the face dir
-    is validated and stored, and only then is the bind written, onto a config
-    re-read after the face dir so it cannot overwrite it.
-    """
-    header("Set Host API Config")
-    console.print()
-
-    host = host_serve.flag_value(args, "--host")
-    port_raw = host_serve.flag_value(args, "--port")
-    face_raw = host_serve.flag_value(args, "--face-dir")
-
-    if host is None and port_raw is None and face_raw is None:
-        error(
-            "Nothing to set",
-            suggestion="drone @api host-api set-config --host 127.0.0.1 --port 8787, or --face-dir <dir>|default",
-        )
-        return
-
-    config = host_config.load_config()
-    bind_host = host if host is not None else config["host"]
-    bind_port = config["port"]
-    if port_raw is not None:
-        try:
-            bind_port = int(port_raw)
-        except ValueError:
-            logger.warning("[host_api] non-numeric port rejected at set-config: %s", port_raw)
-            error(f"Port must be a number, got: {port_raw}")
-            return
-
-    # Validated only when this command changes the bind: a face dir write must
-    # not be refused over a stored address its caller never touched.
-    bind_changed = host is not None or port_raw is not None
-    if bind_changed:
-        try:
-            host_config.validate_bind(bind_host, int(bind_port))
-        except host_config.BindRefused as e:
-            logger.warning("[host_api] set-config refused: %s", e)
-            error("Refusing to store a bind that would not start", suggestion=str(e))
-            return
-
-    if face_raw is not None and not _set_face_dir(face_raw):
-        return
-
-    if bind_changed:
-        # Re-read: _set_face_dir may have just written this same store.
-        config = host_config.load_config()
-        config["host"], config["port"] = bind_host, bind_port
-        path = host_config.save_config(config)
-        json_handler.log_operation("host_api_config_saved", {"host": bind_host, "port": bind_port})
-
-        success(f"Config saved: {bind_host}:{bind_port}")
-        console.print(f"  [dim]{path}[/dim]")
-    console.print()
-
-
-# =============================================
-# PRIVATE HELPERS
-# =============================================
-
-
-def _set_face_dir(raw: str) -> bool:
-    """
-    Store or clear the face dir named by set-config's --face-dir.
-
-    Args:
-        raw: A directory, "~" expanded here, or FACE_DIR_DEFAULT to clear.
-
-    Returns:
-        True when stored or cleared; False when refused, the error already shown.
-    """
-    target = None if raw == FACE_DIR_DEFAULT else Path(os.path.expanduser(raw))
-
-    try:
-        stored = host_config.set_face_dir(target)
-    except host_config.FaceDirRefused as e:
-        logger.warning("[host_api] set-config refused the face dir: %s", e)
-        error("Refusing to store a face dir that would not serve", suggestion=str(e))
-        return False
-
-    if stored is None:
-        success(f"Face dir cleared: the checkout build is served from {host_face.face_root()}")
-    else:
-        success(f"Face dir saved: {stored}")
-    console.print("  [dim]A running server keeps the face it started with: restart it to serve this one.[/dim]")
-    return True
 
 
 # =============================================

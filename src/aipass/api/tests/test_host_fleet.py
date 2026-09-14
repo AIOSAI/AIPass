@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -30,6 +29,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
@@ -43,7 +43,7 @@ from aipass.skills.lib.system_status import handler as system_status
 # A real card, trimmed from @baud's verified run.
 SNAPSHOT = {
     "project": "AIPASS",
-    "root": "/home/patrick/Projects/AIPass",
+    "root": "/srv/aipass",
     "generated_at": "2026-08-14T20:04:40Z",
     "error": None,
     "live_agent_sessions": ["baud-devpulse"],
@@ -51,7 +51,7 @@ SNAPSHOT = {
         {
             "name": "devpulse",
             "project": "AIPASS",
-            "path": "/home/patrick/Projects/AIPass/src/aipass/devpulse",
+            "path": "/srv/aipass/src/aipass/devpulse",
             "is_citizen": True,
             "manager": True,
             "dispatched": False,
@@ -71,7 +71,7 @@ SNAPSHOT = {
         {
             "name": "api",
             "project": "AIPASS",
-            "path": "/home/patrick/Projects/AIPass/src/aipass/api",
+            "path": "/srv/aipass/src/aipass/api",
             "is_citizen": True,
             "manager": False,
             "dispatched": True,
@@ -157,71 +157,170 @@ class TestTheGate:
         run.assert_not_called()
 
 
+PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
+PATCH_FLEET_LOGGER = "aipass.api.apps.handlers.host.fleet.logger"
+
+posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
+
+
+def _executable(path: Path, mode: int = 0o755) -> Path:
+    """A stand-in binary: a regular file with the given mode."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+@pytest.fixture
+def places(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """
+    Every place the lookup reads, as empty temp stand-ins.
+
+    The config store, the home directory, the checkout and PATH — so no case
+    reads this machine's real baud_bin, ~/.aipass, build or PATH.
+    """
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    home.mkdir()
+    repo.mkdir()
+    on_path: dict = {}
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(host_fleet, "repo_root", lambda: repo)
+    monkeypatch.setattr(host_fleet.shutil, "which", lambda name: on_path.get(name))
+
+    with patch(PATCH_SECRETS_BASE, tmp_path / "secrets"), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
+        with patch(PATCH_CONFIG_LOGGER), patch(PATCH_FLEET_LOGGER):
+            yield SimpleNamespace(home=home, repo=repo, on_path=on_path, elsewhere=tmp_path / "elsewhere")
+
+
 class TestBinaryResolution:
     """
-    Finding the binary, which is NOT on PATH.
+    FPLAN-0589: which baud binary the host lanes exec, first hit wins.
 
-    Patrick's launcher execs the built release path directly. Resolving to that
-    same file is the same argument @baud made when they refused to ship a second
-    artifact for C1: one binary, one version, no silent disagreement.
+    (1) the configured baud_bin, refused by name when unusable; (2) the installed
+    ~/.aipass/baud/bin/baud-cli; (3) the checkout's baud-cli; (4) the checkout's
+    desktop baud, the file Patrick's launcher execs; (5) baud-cli on PATH; (6)
+    baud on PATH. The desktop binary links GTK even for --snapshot, which is why
+    the headless one outranks it wherever both could be found.
     """
 
-    def test_built_release_path_is_preferred(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """The file the desktop launcher runs is the file the phone lane runs."""
-        built = tmp_path / host_fleet.DEFAULT_BINARY_RELATIVE
-        built.parent.mkdir(parents=True)
-        built.touch()
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-
-        assert host_fleet.snapshot_binary() == str(built)
-
-    def test_built_path_wins_over_path_lookup(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """A stale copy on PATH must not quietly outrank the deployed build."""
-        built = tmp_path / host_fleet.DEFAULT_BINARY_RELATIVE
-        built.parent.mkdir(parents=True)
-        built.touch()
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: "/usr/local/bin/baud")
-
-        assert host_fleet.snapshot_binary() == str(built)
-
-    def test_path_is_used_when_there_is_no_build(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """An installed baud is a legitimate deployment; it is second, not ignored."""
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: "/usr/local/bin/baud")
-
-        assert host_fleet.snapshot_binary() == "/usr/local/bin/baud"
-
-    def test_missing_everywhere_names_both_places_looked(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
+    def test_the_six_step_order(self, places: SimpleNamespace) -> None:
         """
-        'not found' without a location is a support ticket.
+        Each step answers only when every step above it is empty.
 
-        The error carries the exact path that was checked, so whoever reads it can
-        see whether the build is missing or the layout moved.
+        All six are filled, then emptied from the top one at a time, so any swap
+        in the order changes which binary answers at some rung.
         """
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: None)
+        configured = _executable(places.elsewhere / "baud-cli")
+        installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
+        headless = _executable(places.repo / host_fleet.CHECKOUT_HEADLESS_RELATIVE)
+        desktop = _executable(places.repo / host_fleet.DEFAULT_BINARY_RELATIVE)
+        places.on_path.update({"baud-cli": "/opt/bin/baud-cli", "baud": "/opt/bin/baud"})
+        host_config.set_baud_bin(configured)
+
+        empty_each_step = [
+            lambda: host_config.set_baud_bin(None),
+            installed.unlink,
+            headless.unlink,
+            desktop.unlink,
+            lambda: places.on_path.pop("baud-cli"),
+            lambda: places.on_path.pop("baud"),
+        ]
+        answered = []
+        for empty in empty_each_step:
+            location = host_fleet.locate_binary()
+            answered.append((location.path, location.source))
+            assert host_fleet.snapshot_binary() == location.path
+            empty()
+
+        assert answered == [
+            (str(configured), host_fleet.SOURCE_CONFIGURED),
+            (str(installed), host_fleet.SOURCE_INSTALLED),
+            (str(headless), host_fleet.SOURCE_CHECKOUT),
+            (str(desktop), host_fleet.SOURCE_CHECKOUT),
+            ("/opt/bin/baud-cli", host_fleet.SOURCE_PATH),
+            ("/opt/bin/baud", host_fleet.SOURCE_PATH),
+        ]
+        assert host_fleet.locate_binary().source == host_fleet.SOURCE_MISSING
+
+    def test_a_configured_binary_that_is_gone_is_refused_by_name(self, places: SimpleNamespace) -> None:
+        """
+        Never fallen past: the installed binary is right there and is still not used.
+
+        A setting somebody chose that silently stops mattering is how a host ends
+        up running a binary nobody picked.
+        """
+        configured = _executable(places.elsewhere / "baud-cli")
+        _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
+        host_config.set_baud_bin(configured)
+        configured.unlink()
 
         with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
             host_fleet.snapshot_binary()
 
-        assert str(tmp_path) in str(excinfo.value)
-        assert "PATH" in str(excinfo.value)
+        message = str(excinfo.value)
+        assert str(configured) in message
+        assert "set-config --baud-bin default" in message
 
-    def test_resolution_failure_surfaces_through_read_snapshot(
-        self,
-        ready: None,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
+    @posix_permissions
+    def test_a_configured_binary_that_lost_its_bit_is_refused_by_name(self, places: SimpleNamespace) -> None:
+        """Present is not enough: a file that cannot be exec'd refuses here, not as a 500 at the exec."""
+        configured = _executable(places.elsewhere / "baud-cli")
+        _executable(places.repo / host_fleet.DEFAULT_BINARY_RELATIVE)
+        host_config.set_baud_bin(configured)
+        configured.chmod(0o644)
+
+        with pytest.raises(host_fleet.FleetUnavailable, match="not executable") as excinfo:
+            host_fleet.snapshot_binary()
+
+        assert str(configured) in str(excinfo.value)
+
+    def test_not_found_names_every_place_in_order_and_ends_with_the_install(self, places: SimpleNamespace) -> None:
+        """'not found' without a location is a support ticket; without the cure, a second one."""
+        with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+            host_fleet.snapshot_binary()
+
+        message = str(excinfo.value)
+        # Each followed by its separator: the desktop path is a prefix of the headless one.
+        in_order = [
+            f"{places.home / host_fleet.INSTALLED_BINARY_RELATIVE};",
+            f"{places.repo / host_fleet.CHECKOUT_HEADLESS_RELATIVE};",
+            f"{places.repo / host_fleet.DEFAULT_BINARY_RELATIVE};",
+            "'baud-cli' on PATH;",
+            "'baud' on PATH.",
+        ]
+        positions = [message.find(place) for place in in_order]
+
+        assert -1 not in positions, message
+        assert positions == sorted(positions), message
+        assert message.endswith("Install it: aipass baud install.")
+
+    @posix_permissions
+    def test_an_automatic_file_without_the_bit_is_passed_and_named(self, places: SimpleNamespace) -> None:
+        """A download nobody chmodded is skipped for the next step, and still named when nothing answers."""
+        installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE, mode=0o644)
+        desktop = _executable(places.repo / host_fleet.DEFAULT_BINARY_RELATIVE)
+
+        assert host_fleet.snapshot_binary() == str(desktop)
+
+        desktop.unlink()
+        with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+            host_fleet.snapshot_binary()
+
+        assert f"{installed} (present, not an executable file)" in str(excinfo.value)
+
+    def test_resolution_is_per_request_so_an_install_needs_no_restart(self, places: SimpleNamespace) -> None:
+        """The install can land while the server runs; the very next request uses it."""
+        with pytest.raises(host_fleet.FleetUnavailable):
+            host_fleet.snapshot_binary()
+
+        installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
+
+        assert host_fleet.snapshot_binary() == str(installed)
+
+    def test_resolution_failure_surfaces_through_read_snapshot(self, ready: None, places: SimpleNamespace) -> None:
         """A missing binary is unavailable, not an empty fleet."""
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: None)
-
         with pytest.raises(host_fleet.FleetUnavailable):
             host_fleet.read_snapshot()
 
@@ -759,7 +858,7 @@ ROSTER = {
         {
             "name": "api",
             "project": "AIPASS",
-            "path": "/home/patrick/Projects/AIPass/src/aipass/api",
+            "path": "/srv/aipass/src/aipass/api",
             "is_citizen": True,
             "manager": False,
             "dispatched": True,
@@ -779,7 +878,7 @@ ROSTER = {
         {
             "name": "baud",
             "project": "BAUD",
-            "path": "/home/patrick/Projects/AIPass/projects/baud/src/baud/baud",
+            "path": "/srv/aipass/projects/baud/src/baud/baud",
             "is_citizen": True,
             "manager": False,
             "dispatched": True,

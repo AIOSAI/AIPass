@@ -270,7 +270,7 @@ drone @api stats
 | `host-api issue-token <label> [--scope read\|operate] [--out FILE]` | Mint a bearer token — raw value never printed, receipt defaults to `~/.secrets/aipass/host_api/<label>.token` |
 | `host-api list-tokens` | List tokens — values are never shown |
 | `host-api revoke-token <id>` | Revoke server-side, effective next request |
-| `host-api config` / `set-config [--host IP] [--port N] [--face-dir DIR\|default]` | Show / set the bind address and the phone face's directory — every value validated before anything is stored. `config` shows the effective face dir, its source (`configured` or `checkout`) and whether `phone.html` is there |
+| `host-api config` / `set-config [--host IP] [--port N] [--face-dir DIR\|default] [--baud-bin PATH\|default]` | Show / set the bind address, the phone face's directory and the baud binary — every value validated before anything is stored. `config` shows the effective face dir and its source (`configured` or `checkout`) with whether `phone.html` is there, and the binary a request would exec with its source (`configured`, `installed`, `checkout`, `path` or `missing`) and whether it is executable |
 
 ---
 
@@ -280,7 +280,7 @@ drone @api stats
 api/
 ├── apps/
 │   ├── api.py                         # Entry point — module discovery, command routing
-│   ├── modules/                       # Orchestration layer (10 modules)
+│   ├── modules/                       # Orchestration layer (11 modules)
 │   │   ├── api_key.py                 # Key retrieval, validation, provider listing
 │   │   ├── secrets.py                 # Cross-branch secrets door (in-process API)
 │   │   ├── openrouter_client.py       # OpenRouter client — calls, models, status
@@ -290,7 +290,8 @@ api/
 │   │   ├── bridge.py                  # Generic contract registry (register/resolve)
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
 │   │   ├── registry.py               # Driver auto-discovery (load_drivers)
-│   │   └── host_serve.py             # host_api sub-router — serve/--detach, status, stop
+│   │   ├── host_serve.py             # host_api sub-router — serve/--detach, status, stop
+│   │   └── host_config_cli.py        # host_api sub-router — config, set-config (bind, face dir, baud binary)
 │   ├── handlers/                      # Business logic (8 packages, 35 files)
 │   │   ├── module_root.py             # module_file() — the one guarded __file__ resolve (no import-time cwd read)
 │   │   ├── auth/env.py, keys.py, secrets.py
@@ -311,7 +312,7 @@ api/
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
-Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`. `host_serve.py` is a SUB-router: `host_api.py` offers it every `host-api` call first and owns everything it declines, so an unknown subcommand still reaches an error rather than a silent success.
+Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`. `host_serve.py` and `host_config_cli.py` are SUB-routers: `host_api.py` offers them every `host-api` call first and owns everything they decline, so an unknown subcommand still reaches an error rather than a silent success.
 
 
 ### No module needs a working directory to be imported (2026-08-31)
@@ -415,6 +416,7 @@ drone @api host-api autostart          # renders the boot unit + prints the inst
 drone @api host-api status             # pid, bind, owner, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
 drone @api host-api set-config --face-dir <dir>   # an installed phone face; 'default' clears it
+drone @api host-api set-config --baud-bin <path>  # the binary the fleet lanes exec; 'default' = automatic
 drone @api host-api revoke-token <id>  # effective next request, no restart
 ```
 
@@ -1070,9 +1072,30 @@ because a "name" can lie and a symlink can point out of the tree.
 state means, because a second answer to "is this agent alive" would eventually
 disagree with the desktop and neither would be trusted. `has_room` is filtered on,
 never derived, and `live_agent_sessions` is served raw rather than joined to the
-branch list. BAUD's binary is resolved to the same built release path the desktop
-launcher execs. `fleet.SNAPSHOT_READY` remains as a kill switch: switched off
-means **503 with a reason**, never a synthesised fleet.
+branch list. Which BAUD binary runs is below. `fleet.SNAPSHOT_READY` remains as a
+kill switch: switched off means **503 with a reason**, never a synthesised fleet.
+
+**Which baud binary the host lanes exec (FPLAN-0589).** The desktop `baud` links
+GTK and webkit even for `--snapshot`, so a headless host has nothing it can run;
+@baud's `baud-cli` is the same crate's six verbs with no GTK. Every fleet, census,
+roster and room exec resolves the binary **per request** — a config read and a few
+stats, so a binary installed while the server runs is used on the next request with
+no restart (the face, by contrast, is resolved once). First hit wins:
+
+1. `baud_bin` in the host config — `drone @api host-api set-config --baud-bin <path>`,
+   or `aipass baud install` in-process. Validated before it is stored: absolute,
+   exists, a regular file, executable. **If it is later gone or not executable the
+   lane refuses by name** with the cure (`--baud-bin default`), never falling past it.
+2. `~/.aipass/baud/bin/baud-cli`, where `aipass baud install` lands it.
+3. The checkout's `projects/baud/app/src-tauri/target/release/baud-cli`.
+4. The checkout's `.../release/baud`, the desktop binary the launcher execs.
+5. `baud-cli` on PATH, then 6. `baud` on PATH.
+
+An automatic location counts only when it holds an executable file. When nothing
+answers, the 503 names every place it looked, in order, and ends with
+`Install it: aipass baud install.` `host-api config` shows the line
+`binary: <path> (configured|installed|checkout|path|missing)` and whether it is
+executable.
 
 **Aliveness is `live_agent_sessions`, and only that.** The three fleet fields
 answer three different questions: `has_room` means a BAUD-named session *exists*
