@@ -1,12 +1,13 @@
 ---
 name: screen_lock
-description: Password-lock the machine's screen while every process keeps running
-version: 1.0.0
+description: Password-lock the machine's screen while every process keeps running, and read whether it is locked
+version: 1.1.0
 tags: [system, control, security]
 when_to_use:
   - "lock the screen"
   - "lock the machine"
   - "walking away from the desk, keep the agents running"
+  - "did I lock the laptop"
 requires:
   pip: []
   bins: [loginctl]
@@ -42,16 +43,40 @@ locked, does not require a desktop environment, and does not refuse when no
 graphical session can be resolved (it still tries the bare call). Callers that
 gate *other* verbs on screen state must leave this one ungated.
 
+## The read beside the lock
+
+`lock_state()` answers whether the screen **is** locked — the question "did I
+lock the laptop?" asked from away (FPLAN-0585). It reads through the same pair
+the lock writes through, in the same order, and changes nothing:
+
+1. `loginctl show-session <id> -p LockedHint` on the resolved graphical session
+   — the logind mechanism `lock-session` sets, so read and write agree.
+2. `gdbus` → `org.gnome.ScreenSaver.GetActive` when logind cannot answer.
+   (`org.freedesktop.ScreenSaver.GetActive` is not implemented on GNOME and is
+   never asked.)
+
+It is not gated either — the lock never is, so its read is not — and it never
+raises. **Unknown is never unlocked:** a read that cannot tell answers
+`ok: False, locked: None` with a reason code, never `locked: False`.
+
+| `reason`      | Meaning                                                          |
+|---------------|------------------------------------------------------------------|
+| `no_session`  | logind lists no active graphical session of ours, and D-Bus did not answer |
+| `no_reader`   | neither `loginctl` nor `gdbus` is installed                      |
+| `read_failed` | a reader ran and failed, or answered something other than yes/no |
+
 ## Available Actions
 
-| Action | Description                                        |
-|--------|----------------------------------------------------|
-| `lock` | Lock the screen now; agents keep running           |
+| Action  | Description                                        |
+|---------|----------------------------------------------------|
+| `lock`  | Lock the screen now; agents keep running           |
+| `state` | Read whether the screen is locked; locks nothing   |
 
 ## Usage
 
 ```bash
 drone @skills run screen_lock lock
+drone @skills run screen_lock state
 ```
 
 In-process (what the Telegram control bot and the host API verb lane use):
@@ -61,6 +86,10 @@ from aipass.skills.lib.screen_lock import handler as screen_lock
 
 result = screen_lock.lock_screen()
 # {"locked": True, "method": "loginctl", "session": "3", "error": None}
+
+state = screen_lock.lock_state()
+# {"ok": True, "locked": False, "method": "loginctl", "session": "3",
+#  "reason": None, "detail": "The screen is unlocked, per logind session 3."}
 ```
 
 ## When to Use
@@ -87,6 +116,22 @@ Do NOT use this skill when:
 ```python
 {"locked": bool, "method": "loginctl" | "dbus" | None, "session": str | None, "error": str | None}
 ```
+
+`lock_state()` returns the read, six keys every time:
+
+```python
+{
+    "ok": bool,                                   # True when a reader answered
+    "locked": bool | None,                        # None whenever ok is False
+    "method": "loginctl" | "dbus" | None,
+    "session": str | None,                        # the resolved logind session
+    "reason": "no_session" | "no_reader" | "read_failed" | None,
+    "detail": str,                                # the skill's own sentence
+}
+```
+
+`run("state")` puts `detail` in `output` when the read answered, and fails the
+envelope with `detail (reason=<code>)` when it cannot tell.
 
 ## Notes
 

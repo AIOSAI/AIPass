@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_machine_vitals.py - The machine_vitals() contract
 # Date: 2026-09-12
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: skills/tests
 # =============================================
 
@@ -12,7 +12,8 @@ The host API relays this dict verbatim and BAUD's phone draws it, so what is
 pinned here is the shape a consumer reads: the section set, the closed reason
 codes and their sentences, per-section absence, the whole-function refusal, the
 baseline the skill owns, the sensor allowlist, the read-only sysfs range read,
-a manufactured macOS, and the no_range branch.
+a manufactured macOS, the no_range branch, and the per-core cpu read
+(FPLAN-0586).
 
 Nothing here asks the live machine for a reading. psutil is a stand-in with
 numbers this host does not have, the clock is one the test moves, and the sysfs
@@ -39,6 +40,9 @@ _CpuTimes = namedtuple(
     "scputimes",
     ["user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal", "guest", "guest_nice"],
 )
+# Windows' cpu_times fields: no guest, no iowait.
+_WinCpuTimes = namedtuple("scputimes", ["user", "system", "idle", "interrupt", "dpc"])
+_Freq = namedtuple("scpufreq", ["current", "min", "max"])
 _NetIO = namedtuple(
     "snetio",
     ["bytes_sent", "bytes_recv", "packets_sent", "packets_recv", "errin", "errout", "dropin", "dropout"],
@@ -52,7 +56,7 @@ _Fan = namedtuple("sfan", ["label", "current"])
 # mirrors the module's own table can never disagree with it.
 BASE_KEYS = ["available", "reason", "sentence", "detail"]
 SECTION_KEYS = {
-    "cpu": ["percent", "window_s"],
+    "cpu": ["percent", "window_s", "cores", "logical", "physical", "mhz", "mhz_max"],
     "load": ["one", "five", "fifteen"],
     "memory": ["total_bytes", "used_bytes", "available_bytes", "percent"],
     "swap": ["total_bytes", "used_bytes", "free_bytes", "percent"],
@@ -117,6 +121,14 @@ DECOY_DEVICE = {
 }
 FAN_CONTROL_FILES = {"fan1_manual", "fan1_output"}
 
+# The laptop FPLAN-0586 was measured on: 4 threads on 2 cores, 800-3300 MHz.
+# Each logical CPU is busy from 0 on the clock until its own second here, idle
+# after it.
+CORE_BUSY_UNTIL = (1.5, 2.0, 0.0, 0.5)
+LAPTOP_FREQ = _Freq(current=1612.53, min=800.0, max=3300.0)
+CPU_FACTS = {"logical": 4, "physical": 2, "mhz": 1612.5, "mhz_max": 3300.0}
+CORES_OVER_0_TO_2 = [75.0, 100.0, 0.0, 25.0]
+
 RIGHT_SIDE_AT_ITS_FLOOR = {
     "chip": "applesmc",
     "label": "Right Side",
@@ -155,43 +167,71 @@ class _Clock:
 class _Machine:
     """psutil as a Mac has it: every portable call, and no sensors_* at all.
 
-    CPU is busy for the first second on the clock and idle after it, so a window
-    over [0, 2] is 50% busy and a window over [1, 2] is 0%. guest time is inside
-    user, as on Linux, so a reader that forgets to take it back out of the total
-    reads 60, not 50.
+    Four logical CPUs, each busy until its CORE_BUSY_UNTIL second and idle after,
+    so a window over [0, 2] reads 75, 100, 0 and 25 per core and 50% in total, and
+    a window over [1, 2] reads 37.5% in total. guest time is inside user, as on
+    Linux, so a reader that forgets to take it back out of the total reads 60,
+    not 50. CPU 2 spends half its idle time in iowait, so a reader that counts
+    iowait as busy reads that core at 50, not 0.
     """
 
     def __init__(self, clock):
         self._clock = clock
+        self.busy_until = list(CORE_BUSY_UNTIL)
         self.net_offset = 0
         self.cpu_percent_calls = 0
+        self.cpu_times_calls = []
+        self.logical = 4
+        self.physical = 2
+        self.freq = LAPTOP_FREQ
         # psutil seeds its shared cpu_percent baseline at import.
-        self._percent_last = self.cpu_times()
+        self._percent_last = self._aggregate()
 
-    def cpu_times(self):
+    def _per_cpu(self):
         now = self._clock()
-        user = min(now, 1.0)
-        return _CpuTimes(
-            user=user,
-            nice=0.0,
-            system=0.0,
-            idle=max(now - 1.0, 0.0),
-            iowait=0.0,
-            irq=0.0,
-            softirq=0.0,
-            steal=0.0,
-            guest=user / 2,
-            guest_nice=0.0,
-        )
+        cpus = []
+        for index, until in enumerate(self.busy_until):
+            user = min(now, until)
+            idle = max(now - until, 0.0)
+            iowait = idle / 2 if index == 2 else 0.0
+            cpus.append(
+                _CpuTimes(
+                    user=user,
+                    nice=0.0,
+                    system=0.0,
+                    idle=idle - iowait,
+                    iowait=iowait,
+                    irq=0.0,
+                    softirq=0.0,
+                    steal=0.0,
+                    guest=user / 2,
+                    guest_nice=0.0,
+                )
+            )
+        return cpus
+
+    def _aggregate(self):
+        """The aggregate tuple, as psutil sums it from the per-CPU lines."""
+        return _CpuTimes(*(sum(field) for field in zip(*self._per_cpu())))
+
+    def cpu_times(self, percpu=False):
+        self.cpu_times_calls.append(percpu)
+        return self._per_cpu() if percpu else self._aggregate()
 
     def cpu_percent(self, interval=None):
         """psutil's shape: the window is since whoever called last on this thread."""
         self.cpu_percent_calls += 1
-        last, now = self._percent_last, self.cpu_times()
+        last, now = self._percent_last, self._aggregate()
         self._percent_last = now
         busy = now.user - last.user
-        total = busy + (now.idle - last.idle)
+        total = busy + (now.idle - last.idle) + (now.iowait - last.iowait)
         return round(busy / total * 100, 1) if total else 0.0
+
+    def cpu_count(self, logical=True):
+        return self.logical if logical else self.physical
+
+    def cpu_freq(self, percpu=False):
+        return self.freq
 
     def net_io_counters(self):
         now = self._clock()
@@ -491,14 +531,14 @@ class TestTheSkillOwnsItsBaseline:
 
     def test_the_first_call_in_a_process_is_warming(self, machine):
         result = status.machine_vitals()
-        assert result["cpu"] == _expected("cpu", "warming")
+        assert result["cpu"] == _expected("cpu", "warming", **CPU_FACTS)
         assert result["network"] == _expected("network", "warming")
 
     def test_the_second_call_carries_the_number_and_its_window(self, machine, clock):
         status.machine_vitals()
         clock.now = 2.0
         result = status.machine_vitals()
-        assert result["cpu"] == _expected("cpu", percent=50.0, window_s=2.0)
+        assert result["cpu"] == _expected("cpu", percent=50.0, window_s=2.0, cores=CORES_OVER_0_TO_2, **CPU_FACTS)
         assert result["network"] == _expected("network", sent_bytes_per_s=1000.0, recv_bytes_per_s=4000.0, window_s=2.0)
 
     def test_a_cpu_percent_caller_between_the_reads_does_not_move_the_number(self, machine, clock):
@@ -513,8 +553,8 @@ class TestTheSkillOwnsItsBaseline:
         assert result["cpu"]["window_s"] == 2.0
         assert machine.cpu_percent_calls == 1
         # Control: the shared window the stand-in keeps really was moved - read
-        # through it, the same instant answers 0.0, not 50.0.
-        assert machine.cpu_percent(interval=None) == 0.0
+        # through it, the same instant answers 37.5, not 50.0.
+        assert machine.cpu_percent(interval=None) == 37.5
 
     def test_a_network_counter_that_went_backwards_restarts_the_window(self, machine, clock):
         machine.net_offset = 10**9
@@ -690,3 +730,125 @@ class TestNoRange:
         assert fan["current"] == rpm
         assert fan["range"] == {"min": 1299, "max": 6199}
         assert fan["percent_of_range"] == percent
+
+
+def _two_reads(clock):
+    """Warm the baseline at 0 on the clock, then read over the window [0, 2]."""
+    status.machine_vitals()
+    clock.now = 2.0
+    return status.machine_vitals()
+
+
+class TestTheCores:
+    """Pin 9: one percpu sample feeds the cores and the headline; counts and MHz are None, never zero."""
+
+    def test_one_percpu_sample_per_read_feeds_the_cores_and_the_headline(self, machine, clock):
+        cpu = _two_reads(clock)["cpu"]
+        assert machine.cpu_times_calls == [True, True]
+        assert cpu["cores"] == CORES_OVER_0_TO_2
+        assert cpu["percent"] == 50.0
+
+    def test_the_headline_is_summed_from_the_core_deltas_not_averaged(self, machine, clock, monkeypatch):
+        idle = _CpuTimes(*[0.0] * len(_CpuTimes._fields))
+        samples = iter(
+            [
+                [idle, idle],
+                # CPU 0 ticked 4 s, 3 of them busy; CPU 1 ticked 1 s, all idle.
+                [idle._replace(user=3.0, idle=1.0), idle._replace(idle=1.0)],
+            ]
+        )
+        monkeypatch.setattr(machine, "cpu_times", lambda percpu=False: next(samples))
+        cpu = _two_reads(clock)["cpu"]
+        assert cpu["cores"] == [75.0, 0.0]
+        # 3 busy of 5 ticked seconds. The mean of the two bars would say 37.5.
+        assert cpu["percent"] == 60.0
+
+    def test_a_change_in_the_cpu_count_between_samples_is_warming_not_a_crash(self, machine, clock):
+        status.machine_vitals()
+        clock.now = 2.0
+        # CPU 3 went offline between the two samples.
+        machine.busy_until = [3.0, 4.0, 0.0]
+        unplugged = status.machine_vitals()
+        clock.now = 4.0
+        after = status.machine_vitals()
+
+        assert unplugged["ok"] is True
+        assert unplugged["cpu"] == _expected("cpu", "warming", **CPU_FACTS)
+        assert after["cpu"] == _expected("cpu", percent=50.0, window_s=2.0, cores=[50.0, 100.0, 0.0], **CPU_FACTS)
+
+    def test_a_cpu_with_no_tick_between_the_samples_is_warming(self, machine, clock, monkeypatch):
+        idle = _CpuTimes(*[0.0] * len(_CpuTimes._fields))
+        samples = iter([[idle, idle], [idle._replace(user=1.0, idle=1.0), idle]])
+        monkeypatch.setattr(machine, "cpu_times", lambda percpu=False: next(samples))
+        assert _two_reads(clock)["cpu"] == _expected("cpu", "warming", **CPU_FACTS)
+
+    def test_a_zero_second_window_is_warming_even_when_the_counters_moved(self, machine, monkeypatch):
+        idle = _CpuTimes(*[0.0] * len(_CpuTimes._fields))
+        samples = iter([[idle], [idle._replace(user=1.0, idle=1.0)]])
+        monkeypatch.setattr(machine, "cpu_times", lambda percpu=False: next(samples))
+        status.machine_vitals()
+        # The clock never moved: a window of 0 s is no window, whatever the counters say.
+        assert status.machine_vitals()["cpu"] == _expected("cpu", "warming", **CPU_FACTS)
+
+    @pytest.mark.parametrize(
+        ("freq", "mhz", "mhz_max"),
+        [
+            # No cpufreq at all (some VMs): psutil answers None.
+            (None, None, None),
+            # psutil's /proc/cpuinfo fallback: a current, and 0.0 for a ceiling it does not know.
+            (_Freq(2704.96325, 0.0, 0.0), 2705.0, None),
+            # An offline policy psutil zeroes.
+            (_Freq(0.0, 0.0, 0.0), None, None),
+        ],
+    )
+    def test_a_frequency_the_host_does_not_give_is_none_never_zero(self, machine, clock, freq, mhz, mhz_max):
+        machine.freq = freq
+        cpu = _two_reads(clock)["cpu"]
+        assert cpu == _expected(
+            "cpu", percent=50.0, window_s=2.0, cores=CORES_OVER_0_TO_2, logical=4, physical=2, mhz=mhz, mhz_max=mhz_max
+        )
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            NotImplementedError("can't find current frequency file"),
+            FileNotFoundError(2, "No such file or directory"),
+        ],
+    )
+    def test_a_frequency_read_that_raises_costs_only_the_frequency(self, machine, clock, monkeypatch, error):
+        def _raise(percpu=False):
+            raise error
+
+        monkeypatch.setattr(machine, "cpu_freq", _raise)
+        cpu = _two_reads(clock)["cpu"]
+        assert cpu == _expected(
+            "cpu",
+            detail=f"cpu_freq: {type(error).__name__}: {error}",
+            percent=50.0,
+            window_s=2.0,
+            cores=CORES_OVER_0_TO_2,
+            logical=4,
+            physical=2,
+        )
+
+    def test_a_host_that_cannot_count_cores_or_has_no_cpu_freq_publishes_none(self, machine, monkeypatch):
+        machine.physical = None
+        monkeypatch.delattr(_Machine, "cpu_freq")
+        assert hasattr(machine, "cpu_freq") is False
+        assert status.machine_vitals()["cpu"] == _expected("cpu", "warming", logical=4, physical=None)
+
+    def test_windows_cpu_times_carry_no_guest_or_iowait_and_still_read(self, monkeypatch, clock, tmp_path):
+        stand_in = _manufacture(monkeypatch, clock, tmp_path, "win32")
+
+        def _windows_times(percpu=False):
+            now = clock()
+            cpus = [
+                _WinCpuTimes(user=min(now, 1.0), system=0.0, idle=max(now - 1.0, 0.0), interrupt=0.0, dpc=0.0),
+                _WinCpuTimes(user=0.0, system=now / 8, idle=now * 3 / 4, interrupt=now / 8, dpc=0.0),
+            ]
+            return cpus if percpu else _WinCpuTimes(*(sum(field) for field in zip(*cpus)))
+
+        monkeypatch.setattr(stand_in, "cpu_times", _windows_times)
+        result = _two_reads(clock)
+        assert result["cpu"] == _expected("cpu", percent=37.5, window_s=2.0, cores=[50.0, 25.0], **CPU_FACTS)
+        assert result["load"] == _expected("load", "platform")

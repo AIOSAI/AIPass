@@ -22,6 +22,7 @@ subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -30,10 +31,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.skills.lib.screen_lock import handler as screen_lock
 from aipass.skills.lib.system_status import handler as system_status
 
 
@@ -1246,6 +1249,274 @@ class TestTheMachineCache:
             "import sys\n"
             "import aipass.api.apps.handlers.host.machine\n"
             "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip().splitlines()[-1] == "False"
+
+
+# ============================================================================
+# The lock lane — GET /v1/lock, FPLAN-0585 row 2
+# ============================================================================
+
+PATCH_LOCK_LOGGER = "aipass.api.apps.handlers.host.lock.logger"
+PATCH_LOCK_JSON = "aipass.api.apps.handlers.host.lock.json_handler"
+
+# The door itself, patched where it lives. lock.py imports it inside the call,
+# so the stand-in is what every read in these cases reaches — never a loginctl.
+PATCH_LOCK_DOOR = "aipass.skills.lib.screen_lock.handler.lock_state"
+
+
+def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, session: Any = "3") -> dict:
+    """An answer in the skill's published shape. The unlocked default is this laptop's, read live 2026-09-13."""
+    source = f"logind session {session}" if method == screen_lock.METHOD_LOGINCTL else "GNOME ScreenSaver"
+    return {
+        "ok": True,
+        "locked": locked,
+        "method": method,
+        "session": session,
+        "reason": None,
+        "detail": f"The screen is {'locked' if locked else 'unlocked'}, per {source}.",
+    }
+
+
+def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
+    """The skill could not tell: ok False, locked None, its code and a sentence standing in for its own."""
+    return {
+        "ok": False,
+        "locked": None,
+        "method": None,
+        "session": None,
+        "reason": reason,
+        "detail": f"Cannot tell whether the screen is locked ({reason}).",
+    }
+
+
+@pytest.fixture
+def lock_door():
+    """A stand-in for @skills' door, with a cold cache on both sides of the case."""
+    with patch(PATCH_LOCK_LOGGER), patch(PATCH_LOCK_JSON), patch(PATCH_CACHE_JSON):
+        host_lock._state.clear()
+        with patch(PATCH_LOCK_DOOR, autospec=True) as door:
+            yield door
+        host_lock._state.clear()
+
+
+@fastapi_required
+class TestTheLockRoute:
+    """Every answer in the door's shape is a 200, cannot-tell included; 503 is the door itself failing."""
+
+    def test_the_route_requires_a_token(self, client, lock_door) -> None:
+        """Whether a laptop is locked says whether anyone is at it. Not public."""
+        response = client.get("/v1/lock")
+
+        assert response.status_code == 401
+        lock_door.assert_not_called()
+
+    def test_read_scope_is_enough(self, client, auth: dict, lock_door) -> None:
+        """A lock's position is observation; only the POST that locks sits under operate."""
+        lock_door.return_value = _lock_answer(locked=False)
+
+        assert client.get("/v1/lock", headers=auth).status_code == 200
+
+    @pytest.mark.parametrize(
+        "answer",
+        [_lock_answer(locked=False), _lock_answer(locked=True, method=screen_lock.METHOD_DBUS, session=None)],
+        ids=["unlocked_per_logind", "locked_per_gnome_screensaver"],
+    )
+    def test_both_answers_arrive_verbatim(self, client, auth: dict, lock_door, answer: dict) -> None:
+        """The whole body is compared, so an adapter anywhere in the request path goes red."""
+        lock_door.return_value = answer
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json() == answer
+        assert "cache-control" not in response.headers, "no cache header, matching /v1/machine"
+
+    @pytest.mark.parametrize(
+        "reason",
+        [screen_lock.REASON_NO_SESSION, screen_lock.REASON_NO_READER, screen_lock.REASON_READ_FAILED],
+    )
+    def test_cannot_tell_is_a_200_carrying_the_skills_answer(self, client, auth: dict, lock_door, reason: str) -> None:
+        """
+        ok False is a reading that says "cannot tell", not a failed owner.
+
+        It arrives whole — locked None, the code, the sentence — so the phone
+        draws unknown, and nothing in the path turns it into a 503 or an unlocked.
+        """
+        lock_door.return_value = _cannot_tell(reason)
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json() == _cannot_tell(reason)
+
+    def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, lock_door) -> None:
+        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        lock_door.side_effect = RuntimeError("boom inside the door")
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "lock_door_failed"
+        assert "RuntimeError: boom inside the door" in error["message"]
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            None,
+            [],
+            {"locked": False},
+            {"ok": "yes", "locked": False},
+            {"ok": True},
+            {"ok": True, "locked": "no"},
+            {"ok": True, "locked": 0},
+            {"ok": True, "locked": None},
+            {"ok": False, "locked": False},
+        ],
+        ids=[
+            "none",
+            "list",
+            "no_ok",
+            "string_ok",
+            "no_locked",
+            "string_locked",
+            "int_locked",
+            "an_answer_that_answers_nothing",
+            "cannot_tell_that_reads_unlocked",
+        ],
+    )
+    def test_an_answer_outside_the_published_shape_is_a_503(self, client, auth: dict, lock_door, answer: Any) -> None:
+        """
+        A boolean ok, a locked key, and the two agreeing — or nothing is served.
+
+        The last case is the one the chip exists to avoid: a cannot-tell carrying
+        locked False is exactly what a client could draw as unlocked.
+        """
+        lock_door.return_value = answer
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "lock_door_failed"
+        assert "published shape" in error["message"]
+
+    def test_a_parameter_is_refused_not_dropped(self, client, auth: dict, lock_door) -> None:
+        """A cache-buster the route ignored would read as a parameter that did something."""
+        response = client.get("/v1/lock?nocache=1757808000", headers=auth)
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "lock_parameters_refused"
+        assert "nocache" in error["message"]
+        lock_door.assert_not_called()
+
+
+class TestTheLockCache:
+    """At most one read per second, cannot-tell included, and never a cached door failure."""
+
+    def test_two_reads_inside_a_second_are_one_read(self, lock_door) -> None:
+        """The second read is the first one's answer."""
+        lock_door.return_value = _lock_answer(locked=False)
+
+        first = host_lock.read_lock()
+        second = host_lock.read_lock()
+
+        assert lock_door.call_count == 1
+        assert first == second == _lock_answer(locked=False)
+
+    def test_the_window_is_one_second(self, lock_door, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inside 1.0 s the stored answer; past it a fresh read. On a clock this case owns."""
+        clock = {"now": 100.0}
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        lock_door.side_effect = [_lock_answer(locked=False), _lock_answer(locked=True)]
+
+        assert host_lock.read_lock()["locked"] is False
+        clock["now"] = 100.9
+        assert host_lock.read_lock()["locked"] is False
+        clock["now"] = 101.1
+        assert host_lock.read_lock()["locked"] is True
+        assert lock_door.call_count == 2
+
+    def test_cannot_tell_is_served_for_its_window_like_any_reading(self, lock_door) -> None:
+        """ok False is an answer, not a refusal: stored for the window, not re-asked per request."""
+        lock_door.return_value = _cannot_tell()
+
+        assert host_lock.read_lock() == _cannot_tell()
+        assert host_lock.read_lock() == _cannot_tell()
+        assert lock_door.call_count == 1
+
+    def test_a_door_that_raised_is_never_cached(self, lock_door) -> None:
+        """A door that raised once is asked again, not refused for the rest of the second."""
+        lock_door.side_effect = [RuntimeError("once"), _lock_answer(locked=True)]
+
+        with pytest.raises(host_lock.LockDoorFailed):
+            host_lock.read_lock()
+
+        assert host_lock.read_lock()["locked"] is True
+        assert lock_door.call_count == 2
+
+    def test_a_malformed_answer_is_never_cached(self, lock_door) -> None:
+        """A shape fault is raised out of the producer, so the next request asks again."""
+        lock_door.side_effect = [{"ok": True, "locked": None}, _lock_answer(locked=True)]
+
+        with pytest.raises(host_lock.LockDoorFailed, match="published shape"):
+            host_lock.read_lock()
+
+        assert host_lock.read_lock()["locked"] is True
+        assert lock_door.call_count == 2
+
+    def test_a_hung_door_is_one_read_however_many_ask(self, lock_door) -> None:
+        """
+        The known limit's bound: the skill has no timeout, so a hung logind holds its flight.
+
+        A second caller arriving mid-flight waits on that flight and shares its
+        answer; it never starts a read of its own. Every wait is bounded, so a
+        regression fails here rather than hanging the suite.
+        """
+        entered = threading.Event()
+        release = threading.Event()
+
+        def hung_door() -> dict:
+            entered.set()
+            assert release.wait(timeout=10), "the case never released the door"
+            return _lock_answer(locked=True)
+
+        lock_door.side_effect = hung_door
+        answers: list = []
+        first = threading.Thread(target=lambda: answers.append(host_lock.read_lock()))
+        second = threading.Thread(target=lambda: answers.append(host_lock.read_lock()))
+
+        first.start()
+        assert entered.wait(timeout=10), "the first reader never reached the door"
+        second.start()
+        second.join(timeout=0.2)
+        assert second.is_alive(), "the second reader did not wait on the flight"
+        assert lock_door.call_count == 1
+
+        release.set()
+        first.join(timeout=10)
+        second.join(timeout=10)
+
+        assert not first.is_alive() and not second.is_alive()
+        assert lock_door.call_count == 1
+        assert answers == [_lock_answer(locked=True), _lock_answer(locked=True)]
+
+    def test_a_server_that_never_serves_the_route_imports_nothing_new(self) -> None:
+        """
+        The door is imported inside the call, so importing this lane loads no skill.
+
+        Asked of a fresh interpreter, because this one already imported the skill
+        at the top of this file.
+        """
+        probe = (
+            "import sys\n"
+            "import aipass.api.apps.handlers.host.lock\n"
+            "print('aipass.skills.lib.screen_lock.handler' in sys.modules)\n"
         )
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
 

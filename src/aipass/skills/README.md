@@ -5,7 +5,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-09-12
+**Last Updated:** 2026-09-13
 
 ---
 
@@ -227,17 +227,19 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 330 test functions in 14 files
-                           #   (pytest expands to 347 cases)
+  tests/                   # Branch suite: 339 test functions in 14 files
+                           #   (pytest expands to 359 cases)
 ```
 
-Counted 2026-09-12, after machine_vitals landed. That 330 is the branch suite
-alone — the figure the seedgo readme rule checks, `def test_` under `tests/`.
+Counted 2026-09-13, after the per-core cpu read landed. That 339 is the branch
+suite alone — the figure the seedgo readme rule checks, `def test_` under
+`tests/`.
 
 Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
 1103 `def test_` functions expanding to 1114 cases, and `lib/screen_lock/tests/`
-adds 22. All three together run 1483 passing, 0 skipped — the same number from
-the branch root (`pytest .`) and from the repo root.
+adds 42 (recounted 2026-09-13, after lock_state landed). All three together run
+1515 passing, 0 skipped — the same number from the branch root (`pytest .`) and
+from the repo root.
 
 ---
 
@@ -477,6 +479,24 @@ vitals = handler.machine_vitals()
 | `switched_off` | Refusal only |
 | `psutil_missing` | Refusal only |
 
+- **The cpu section carries the cores.** Beside `percent` and `window_s`:
+  `cores`, one busy percent per logical CPU in index order; `logical` and
+  `physical`, from `cpu_count()` and `cpu_count(logical=False)`; `mhz` and
+  `mhz_max`, the frequency now and its ceiling from `cpu_freq()` (FPLAN-0586).
+  One read takes **one** sample, `cpu_times(percpu=True)`, and the headline
+  percent is summed from the same per-CPU deltas as the cores — 3 busy seconds
+  of 5 ticked is 60, where the mean of the bars would say 37.5 — so the
+  headline and the bars agree by construction. Guest time comes back out of
+  each total and iowait is idle, the same accounting as before. `percent` and
+  `cores` are `None` while warming, and also when the CPU count changed between
+  the two samples (hotplug) or a CPU did not tick between them; the counts and
+  the frequency are instant readings, so they are published even then. psutil's
+  `/proc/cpuinfo` fallback reports the ceiling as `0.0` and an offline policy as
+  all zeros: both are `None`. A `cpu_freq()` that raises (psutil's Linux reader
+  raises `NotImplementedError` or `OSError` when a cpufreq file is missing)
+  costs the frequency only — `mhz` is `None` and `detail` names the error, while
+  the percent and the cores still answer. A host whose psutil has no
+  `cpu_freq` at all gets `None` too.
 - **The skill owns its baselines.** CPU percent and network rate come from
   `cpu_times()` and `net_io_counters()` samples held in this module, each with
   `window_s`. Never `psutil.cpu_percent(interval=None)`: its baseline is a psutil
@@ -499,14 +519,19 @@ vitals = handler.machine_vitals()
   clamped to 0–100 and the range is carried beside it, so a fan sitting at its
   floor (0%, as it does here at idle) is distinguishable from a fan with no scale.
 - **Cost, measured here:** about 19 ms warm, 12 ms of it psutil's own
-  temperature sweep; the fan range adds about 2 ms.
+  temperature sweep; the fan range adds about 2 ms, and the per-CPU sample,
+  the counts and the frequency add under 1 ms (0.85 ms, 2026-09-13).
 
-Pinned by `tests/test_machine_vitals.py`, 32 functions expanding to 45 cases,
+Pinned by `tests/test_machine_vitals.py`, 41 functions expanding to 57 cases,
 against stand-ins only: psutil, the monotonic clock and the hwmon tree are all
 manufactured, so the file is green on a host with no sensor chips. The
 read-only pin records every `open`, `io.open` and `os.open` under the tree and
 raises on a write mode or a fan control file, with a control proving the guard
-is armed and can still say yes. 20 mutants, one per clause, all go red. The text
+is armed and can still say yes. 20 mutants, one per clause, all go red; the
+per-core read added 17 more, all red, and 15 cases in the file fail against
+the handler that read one aggregate. The stand-in psutil is four logical CPUs with
+different loads, CPU 2 spending half its idle time in iowait, and the Windows
+field set (no guest, no iowait) is manufactured beside it. The text
 actions and their 29 `test_runner.py` functions are unchanged; making them
 renderings of this dict is a later row.
 
@@ -533,6 +558,9 @@ renderings of this dict is a later row.
 - **@api** — `machine_vitals()`, imported in-process from
   `aipass.skills.lib.system_status.handler` for the `/v1/machine` route
   (FPLAN-0561), the same way the lock verb imports `screen_lock`
+- **@api** — `lock_state()`, imported in-process from
+  `aipass.skills.lib.screen_lock.handler`: whether the screen is locked, for
+  the `/v1/lock` read beside the lock verb (FPLAN-0585 row 2, not built yet)
 - AI agents — discoverable capability units via `drone @skills`
 - Projects — local skill scaffolding via `drone @skills create`
 
@@ -546,7 +574,7 @@ branch could not exercise is marked unverified rather than left standing green.
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1483 passing (re-counted 2026-09-12), 0 skipped, identical from the
+stay masked. Suite 1515 passing (re-counted 2026-09-13), 0 skipped, identical from the
 branch root and the repo root. seedgo audit 100 on every CI-scored category.
 
 **Unverified — the telegram skill's runtime.** The skill is discovered, listed
@@ -589,7 +617,7 @@ headless session's.
 
 ---
 
-*Last Updated: 2026-09-12*
+*Last Updated: 2026-09-13*
 
 ---
 [← Back to AIPass](../../../README.md)

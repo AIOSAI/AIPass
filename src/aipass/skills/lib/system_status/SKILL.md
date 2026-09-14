@@ -1,7 +1,7 @@
 ---
 name: system_status
 description: Check system health -- disk usage, memory, running processes, uptime
-version: 2.1.0
+version: 2.2.0
 tags: [system, monitoring, health]
 requires:
   pip: [psutil]
@@ -44,6 +44,14 @@ vitals = handler.machine_vitals()
 - Reason codes (closed set, one sentence each in `REASONS`): `platform`,
   `no_sensor`, `no_allowlisted_sensor`, `read_failed`, `warming`, `no_range`,
   `switched_off`, `psutil_missing`.
+- `cpu` carries `percent` and `window_s`, plus `cores` (busy percent per
+  logical CPU, in index order), `logical` and `physical` (the counts) and `mhz`
+  / `mhz_max` (frequency now and its ceiling). One `cpu_times(percpu=True)`
+  sample per read: the headline is summed from the same per-CPU deltas as the
+  cores, so the two agree. `percent` and `cores` are `None` while warming (and
+  when the CPU count changed between samples); the counts and frequency are
+  instant readings and are published even then. No frequency on a host is
+  `None`, never `0`.
 - CPU temperature and fans come from allowlists keyed by chip and label
   (`coretemp` / `Package id 0`; `applesmc` fans). The fan range is a read-only
   Linux sysfs read of `fanN_min` / `fanN_max`.

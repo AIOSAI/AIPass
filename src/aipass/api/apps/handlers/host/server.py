@@ -80,6 +80,11 @@ FPLAN-0561 row 2 adds the monitor wheel's read (DPLAN-0341, see machine.py):
                       through a 1 s single-flight cache. An absent reading is
                       a 200; 503 only when the owner could not answer.
 
+FPLAN-0585 row 2 adds the lock chip's read (see lock.py):
+    GET /v1/lock    - read scope. @skills' lock_state(), relayed verbatim
+                      through a 1 s single-flight cache. Cannot-tell is a
+                      200; 503 only when the door raised or broke its shape.
+
 Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
     POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The
                                      admin keyword is UNREACHABLE through it,
@@ -114,6 +119,7 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import pump as host_pump
@@ -970,6 +976,25 @@ def create_app() -> Any:
             raise _deny(503, "machine_refused", e.detail, reason=e.reason) from e
         except host_machine.MachineDoorFailed as e:
             raise _deny(503, "machine_door_failed", str(e)) from e
+
+    @app.get("/v1/lock")
+    def lock_state(
+        request: Request,
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """Whether the screen is locked: @skills' lock_state(), verbatim. lock.py carries the argument."""
+        if request.query_params:
+            named = ", ".join(sorted(request.query_params.keys()))
+            raise _deny(
+                400,
+                "lock_parameters_refused",
+                f"/v1/lock takes no parameters and will not silently drop one — received: {named}.",
+            )
+
+        try:
+            return host_lock.read_lock()
+        except host_lock.LockDoorFailed as e:
+            raise _deny(503, "lock_door_failed", str(e)) from e
 
     @app.get("/v1/rooms")
     def rooms(
