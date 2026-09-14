@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runner.py
 # Description: Execute skills
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-03-08
+# Modified: 2026-09-14
 # =============================================
 
 """Skill runner module.
@@ -16,7 +16,7 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 from aipass.skills.apps.modules.loader import load_skill
 from aipass.skills.apps.handlers.runner_handler import run_handler, run_markdown
-from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled
+from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled, off_reason
 from aipass.skills.apps.handlers.json import json_handler
 
 
@@ -96,11 +96,16 @@ def run_skill(name, action=None, args=None, config=None):
     # before load_skill, which imports the skill's handler.
     try:
         if not is_enabled(name):
+            # The recorded reason rides in the refusal, so a retired skill says
+            # why it is dark in the one line a caller sees (telegram, 2026-09-14).
+            reason = off_reason(name)
+            why = f" ({reason})" if reason else ""
             return {
                 "success": False,
                 "output": "",
                 "error": (
-                    f"Skill '{name}' is switched OFF and will not run. Turn it back on with: drone @skills on {name}"
+                    f"Skill '{name}' is switched OFF and will not run{why}. "
+                    f"Turn it back on with: drone @skills on {name}"
                 ),
             }
     except SwitchStateUnreadable as exc:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: switch_handler.py
 # Description: Per-skill off-switch — state, declaration, systemd actuation
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -192,6 +192,24 @@ def is_enabled(skill_name: str) -> bool:
     if not isinstance(entry, dict):
         return True
     return bool(entry.get("enabled", True))
+
+
+def off_reason(skill_name: str) -> str | None:
+    """The reason recorded with a skill's switch entry.
+
+    Args:
+        skill_name: Skill to look up.
+
+    Returns:
+        str | None: The recorded reason, or None when there is none.
+
+    Raises:
+        SwitchStateUnreadable: The state document cannot be trusted.
+    """
+    entry = read_state().get(skill_name)
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("reason") or None
 
 
 def set_enabled(skill_name: str, enabled: bool, reason: str | None = None) -> bool:

@@ -2,10 +2,11 @@
 # META DATA HEADER
 # Name: test_switch.py - Skill off-switch tests
 # Date: 2026-08-18
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-09-14): Refusal line carries the recorded reason; notifier door gated (telegram retired)
 #   - v1.0.0 (2026-08-18): Initial creation - DPLAN-0306 per-skill off-switch
 #
 # CODE STANDARDS:
@@ -31,7 +32,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -426,7 +427,10 @@ class TestRunnerGate:
             result = runner.run_skill("telegram", action="start", args={"arg0": "base"})
 
         assert result["success"] is False
-        assert "off" in result["error"].lower()
+        assert result["error"] == (
+            "Skill 'telegram' is switched OFF and will not run (retired 08-18). "
+            "Turn it back on with: drone @skills on telegram"
+        )
         ran_handler.assert_not_called()
         ran_markdown.assert_not_called()
 
@@ -440,6 +444,10 @@ class TestRunnerGate:
             result = runner.run_skill("telegram", action="start")
 
         assert result["success"] is False
+        # No reason recorded, so no empty parentheses either.
+        assert result["error"] == (
+            "Skill 'telegram' is switched OFF and will not run. Turn it back on with: drone @skills on telegram"
+        )
         loader.assert_not_called()
 
     def test_an_unreadable_state_document_refuses_to_run_anything(self, state_dir):
@@ -556,3 +564,55 @@ class TestSwitchRows:
         row = next(r for r in sh.switch_rows() if r["name"] == "telegram")
         assert row["enabled"] is False
         assert row["live_units"] == ["fake-bot@one"]
+
+
+# =============================================
+# THE NOTIFIER DOOR
+# =============================================
+
+
+class TestTheNotifierDoor:
+    """A door imported in-process asks the switch itself.
+
+    @daemon's lifecycle pings import send_telegram_notification and never pass
+    the runner's gate, so with telegram switched off they were still delivered
+    (notifier log, 2026-09-13 and 2026-09-14). Telegram is retired (Patrick
+    ruling 2026-09-14): off means this door sends nothing.
+    """
+
+    BOT = {"bot_token": "123:not-a-token", "chat_id": "42"}
+
+    def _send(self):
+        from aipass.skills.lib.telegram.apps.handlers import notifier
+
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"ok": true}'
+        with (
+            patch.object(notifier, "load_bot_config", return_value=self.BOT) as loaded,
+            patch.object(notifier, "urlopen", return_value=response) as opened,
+        ):
+            sent = notifier.send_telegram_notification("job fired")
+        return sent, loaded, opened
+
+    def test_a_switched_off_telegram_sends_nothing(self, state_dir):
+        sh.set_enabled("telegram", False, reason="retired 09-14")
+        sent, loaded, opened = self._send()
+        assert sent is False
+        loaded.assert_not_called()
+        opened.assert_not_called()
+
+    def test_an_unreadable_state_document_sends_nothing(self, state_dir):
+        (state_dir / "switch_state.json").write_text("{corrupt", encoding="utf-8")
+        sent, loaded, opened = self._send()
+        assert sent is False
+        loaded.assert_not_called()
+        opened.assert_not_called()
+
+    def test_a_switched_on_telegram_still_reaches_the_send(self, state_dir):
+        """Control: the stubs can say yes, so the two refusals above are the gate's."""
+        sh.set_enabled("telegram", True)
+        sent, loaded, opened = self._send()
+        assert sent is True
+        loaded.assert_called_once_with("scheduler")
+        assert opened.call_count == 1
+        assert opened.call_args.args[0].full_url == "https://api.telegram.org/bot123:not-a-token/sendMessage"

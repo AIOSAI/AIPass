@@ -5,7 +5,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-09-13
+**Last Updated:** 2026-09-14
 
 ---
 
@@ -114,8 +114,8 @@ drone @skills on telegram                         # reconnect
 1. Every systemd user unit the skill declares is **stopped**.
 2. Those units are **disabled and masked**, so nothing can respawn them — not a
    manual `systemctl start`, not a dependency, not a script.
-3. `drone @skills run <name>` **refuses**, before the skill's handler is
-   imported. Stopping units only quiets the machine; this is what makes the
+3. `drone @skills run <name>` **refuses** in one line that carries the recorded
+   reason, before the skill's handler is imported. Stopping units only quiets the machine; this is what makes the
    skill dark.
 
 **ON** reverses all three: unmask, enable, start. A unit that does not come back
@@ -227,19 +227,20 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 339 test functions in 14 files
-                           #   (pytest expands to 359 cases)
+  tests/                   # Branch suite: 342 test functions in 14 files
+                           #   (pytest expands to 362 cases)
 ```
 
-Counted 2026-09-13, after the per-core cpu read landed. That 339 is the branch
+Counted 2026-09-14, after the telegram retirement. That 342 is the branch
 suite alone — the figure the seedgo readme rule checks, `def test_` under
 `tests/`.
 
 Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
 1103 `def test_` functions expanding to 1114 cases, and `lib/screen_lock/tests/`
-adds 42 (recounted 2026-09-13, after lock_state landed). All three together run
-1515 passing, 0 skipped — the same number from the branch root (`pytest .`) and
-from the repo root.
+adds 42 (recounted 2026-09-13, after lock_state landed). All three together
+collect 1518: 404 pass and the 1114 telegram cases are **skipped**, because
+Telegram is retired (see Status) — the same numbers from the branch root
+(`pytest .`) and from the repo root, recounted 2026-09-14.
 
 ---
 
@@ -433,7 +434,8 @@ Pinned by 13 cases across five existing telegram test files. All 13 fail against
 the pre-cure handlers, and 11 mutants — one per clause, plus the mirror session
 claiming success and the suspend message reverting to polkit — all go red.
 
-The skill is still switched **OFF** (since 2026-08-18), so nothing live changed.
+The skill is still switched **OFF** (since 2026-08-18, retired 2026-09-14), so
+nothing live changed.
 Its three `/proc` reads in `base_bot.py` are not scored: each sits inside
 `except OSError` and degrades honestly. One is still worth knowing as behaviour —
 the bot-lock check guards its `/proc/<pid>/cmdline` read with
@@ -574,15 +576,29 @@ branch could not exercise is marked unverified rather than left standing green.
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1515 passing (re-counted 2026-09-13), 0 skipped, identical from the
+stay masked. Suite 404 passing and 1114 telegram cases skipped (re-counted 2026-09-14), identical from the
 branch root and the repo root. seedgo audit 100 on every CI-scored category.
 
-**Unverified — the telegram skill's runtime.** The skill is discovered, listed
-and gated correctly, and its own 1114-case suite passes. Its *live* behaviour
-was not exercised: it has been switched OFF since 2026-08-18 (Patrick's ruling,
-DPLAN-0305 — five bots leaked ~2.3GB each), and `drone @skills validate
-telegram` reports its `telethon` dependency missing on this machine. Nothing in
-this README claims its runtime works today.
+**Retired — the telegram skill (Patrick ruling 2026-09-14).** Telegram is
+skipped and ignored by all. The work stays in place, disabled — nothing was
+deleted, moved or renamed — and it does nothing:
+
+- `drone @skills run telegram <anything>` refuses in one line: *Skill 'telegram'
+  is switched OFF and will not run (Telegram is retired - Patrick ruling
+  2026-09-14: ...)*. The reason is the off-switch's own record; it has been OFF
+  since 2026-08-18, and its five `telegram-bot@` units stay masked.
+- `lib/telegram/apps/handlers/notifier.py` asks the switch itself before it
+  sends. @daemon's scheduler lifecycle pings import it in-process and never
+  pass the runner's gate, so until 2026-09-14 they were still being delivered
+  with the skill switched off (its log shows two sends on each of 09-13 and
+  09-14). Off, or an unreadable switch state, now sends nothing.
+- Every test under `lib/telegram/tests/` is **skipped, never fixed**:
+  `pytest_collection_modifyitems` in that directory's existing `conftest.py`
+  marks each case skipped with the ruling as the reason. A skip marker rather
+  than `collect_ignore`, so all 1114 cases still show up as skipped. That
+  covers seedgo's runtime-probe finding (`test_log_streamer.py` wrote
+  `~/.aipass/telegram_bots/last_inbound.json`), which is not cured.
+- Lifting it is `drone @skills on telegram` plus deleting that hook.
 
 **Known issue — one bypass carried, not a clean 100.**
 `.seedgo/bypass.json` waives `json_structure` for
@@ -612,12 +628,11 @@ load and run, and warn by name on every load. `drone @skills run telegram
 migrate-config` reports what would move — measured 2026-09-07: api 6 keys, base
 6, devpulse 7, prax_monitor 5, scheduler 6, and `telethon_config` correctly
 untouched because api_id/api_hash are real secrets. `--apply` splits them for
-real. Not run here: rewriting a live credential store is Patrick's call, not a
-headless session's.
+real. Not run, and moot since the 2026-09-14 retirement.
 
 ---
 
-*Last Updated: 2026-09-13*
+*Last Updated: 2026-09-14*
 
 ---
 [← Back to AIPass](../../../README.md)
