@@ -13,6 +13,7 @@ aipass read drone                   # Full branch README, rendered in the termin
 aipass new myapp --template python  # Create a new project
 aipass adopt myapp --dry-run        # Preview adopting an existing projects/ dir
 aipass init run                     # Guided setup (10 stages, resumable)
+aipass baud install                 # The phone face, from a baud release
 ```
 
 ## Invoke
@@ -36,6 +37,7 @@ aipass/
 │   │   ├── help_chat.py                   # README-backed Q&A (reads via readme_map handler)
 │   │   ├── init_flow.py                   # 10-stage guided setup + update / scaffold / agent forms
 │   │   ├── install.py                     # aipass install — one-command bootstrap (clone + setup + chat)
+│   │   ├── baud.py                        # aipass baud — the phone face from a baud release, pointed at by @api
 │   │   ├── new_project.py                 # aipass new — create projects inside the installation
 │   │   ├── adopt.py                       # aipass adopt — bring an existing projects/ dir into AIPass
 │   │   ├── profile.py                     # User profile read/write
@@ -44,6 +46,7 @@ aipass/
 │   │   └── feedback.py                    # Feedback pulse toggle — aipass feedback on/off
 │   ├── handlers/
 │   │   ├── admin_lane.py                  # Admin-lane state for doctor — presence only, never a verdict
+│   │   ├── baud/                          # fetch, verify (SHA256SUMS), unpack (filter + swap), installer, point
 │   │   ├── cross_os/                      # Cross-OS pre-flight: gap_registry, preflight, run_record
 │   │   ├── handoff_platform/              # OS-dispatched CLI session launch — tmux, wt.exe, inline
 │   │   ├── init/                          # bootstrap.py, git_auth.py (re-exports shared/scaffold_content.py)
@@ -67,7 +70,7 @@ aipass/
 │                                          #   project_home, registry_discovery, scaffold_content. Four modules:
 │                                          #   json_handler retired to shared/.archive/ 2026-09-04 (DPLAN-0325)
 ├── docs/                                  # admin_setup, probe_hygiene, test-quality research
-├── tests/                                 # 1052 test functions -> 1081 cases
+├── tests/                                 # 1072 test functions -> 1101 cases
 ├── requirements.project.txt               # Project-specific Python dependencies
 ├── .trinity/                              # Identity + session history + observations
 └── README.md
@@ -98,12 +101,18 @@ aipass/
 | `aipass init update [target]` | Print the scaffold plan, then apply it + provision owner-tier repo auth |
 | `aipass init update --dry-run` | Print the plan and write nothing — exit 0 current, exit 2 pending (stamp-only plans say no go is needed) |
 | `aipass init update --json` | The same plan as a JSON document, for machines |
-| `aipass install` | One-command bootstrap — clone + setup.sh + hooks, then a concierge welcome chat |
+| `aipass install` | One-command bootstrap — clone + setup.sh + hooks, the phone face (best-effort), then a concierge welcome chat |
 | `aipass install --path DIR` / `--here` | Choose the install home |
 | `aipass install --non-interactive` / `--no-chat` / `--chat-only` | Headless, install-only, or chat-only |
 | `aipass install --no-symlink` / `--force-symlink` | Control the global CLI symlinks |
 | `aipass install --force-global-home` | Allow installing into `/tmp` — unsafe, absent from this table until 09-05 |
 | `aipass install --dry-run` | Walk the steps, no side effects |
+| `aipass install --no-baud` | Skip the Phone face step (step 4 of 5) |
+| `aipass baud install` | Fetch the latest baud release's phone bundle, verify it against `SHA256SUMS.txt`, unpack it to `~/.aipass/baud/phone/`, point @api's host server at it |
+| `aipass baud install --tag vX.Y.Z` | A named release instead of the latest |
+| `aipass baud install --from TAR [--sums SUMS]` | A tarball on disk, no network. Without `--sums`, `SHA256SUMS.txt` beside the tarball; no sums, no install |
+| `aipass baud install --dest DIR` / `--dry-run` | Install somewhere else / walk the steps and write nothing |
+| `aipass baud status [--dest DIR]` | Installed tag and sha256, whether `phone.html` is there, where @api's face dir points |
 | `aipass profile` | Show user profile |
 | `aipass profile set <field> <value>` | Update a profile field |
 | `aipass profile clear [--yes]` | Reset the profile |
@@ -123,6 +132,37 @@ aipass/
 | `aipass trust prune` | Drop registry entries whose project path no longer exists |
 | `aipass feedback on/off` | Toggle the feedback reminder pulse (delegates to @hooks). Bare `aipass feedback` prints module info, not the current state |
 | `aipass --version` | Version |
+
+## The phone face — `aipass baud`
+
+@api's host server serves @baud's phone bundle. A source checkout builds it with
+node; everyone else gets it from a baud release (FPLAN-0587). AIPass never
+vendors the bundle, so the two licences stay apart.
+
+- **Fetch.** The public release download first. `latest` resolves the tag before
+  downloading, because the asset name carries it, and both files come from that
+  one tag. On 403/404 with a token (`GITHUB_TOKEN`, else the gh CLI's login), the
+  GitHub API route with `Accept: application/octet-stream`; the token rides an
+  unredirected header, so it never reaches the storage host the API redirects
+  to. No token and a 404 says the repo may be private and names `--from`.
+- **Verify.** The tarball's line in `SHA256SUMS.txt` (sha256sum format). No line
+  means refused. A mismatch means refused, and a download is deleted; a `--from`
+  file stays, because it is yours.
+- **Unpack.** Every member is judged before anything is written: no absolute
+  names, `..`, links, devices or fifos, no directory but `assets/`, and
+  `phone.html` plus `assets/` required. Files are copied by this code, never
+  extracted with archive modes or owners.
+- **Swap.** Into `.phone.staging` beside the destination, marker
+  `.baud-phone.json` (tag, sha256, installed_at, source) written last, then
+  `phone` -> `phone.prev`, staging -> `phone`, prev dropped. If the swap fails,
+  the previous install goes back. A non-empty destination without the marker is
+  refused: it is not an install this command made.
+- **Point.** `set_face_dir(dest)` on @api's host config, called in-process so @api
+  validates the directory. aipass never writes api's config file. A running host
+  api only sees the new directory after a restart, and the command says so.
+
+`aipass install` runs this as step 4, best-effort: offline, a private repo or a
+missing token prints one line plus the retry command, and the install carries on.
 
 ## The ritual — updating a project's scaffold
 
@@ -312,5 +352,5 @@ Each verified against live code on 2026-09-05.
 
 ## Last Updated
 
-Last Updated: 2026-09-09 — DPLAN-0335 leg 3: the scaffold manifest, plan-then-apply
-`init update`, the conffile rule, and the doctor Scaffold group (FPLAN-0530).
+Last Updated: 2026-09-13 — FPLAN-0587 row 2: `aipass baud install` / `status` and the best-effort
+Phone face step in `aipass install` (TOTAL_STEPS 5, `--no-baud`).

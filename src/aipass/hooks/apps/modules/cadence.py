@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.3.0
+# Version: 2.4.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-09-10
+# Modified: 2026-09-14
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -478,6 +478,8 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
         fd.flush()
         _close_fd(fd)
         fd = None
+        window_id = (hook_data or {}).get("session_id", "") or session_id
+        _stamp_window(window_id, armed_at if isinstance(armed_at, (int, float)) else now, caller)
 
         if debounced:
             logger.info(
@@ -503,6 +505,48 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
         )
         if fd is not None:
             _close_fd(fd)
+
+
+def _window_path(session_id: str) -> Path:
+    return _GUARD_DIR / f"aipass-window-opened-{session_id}.json"
+
+
+def _stamp_window(session_id: str, opened_at: float, caller: str) -> None:
+    """Record when this session's context window opened, in a file of its own.
+
+    The turn counter's file cannot carry it: _load_and_increment truncates that
+    file to {turn, token} on every real turn. A debounced reset passes the SAME
+    armed_at, so two callers on one boundary open one window, not two.
+    """
+    try:
+        _window_path(session_id).write_text(json.dumps({"opened_at": opened_at, "caller": caller}), encoding="utf-8")
+    except OSError as exc:
+        logger.info("[HOOKS] cadence: window stamp write FAILED caller=%s session=%s: %s", caller, session_id[:8], exc)
+
+
+def window_opened_at(hook_data: dict | None = None) -> float | None:
+    """When the current context window opened (the last reset_counter), or None if never stamped.
+
+    State keyed by session id outlives every compaction. A consumer that stores
+    this value and later reads a different one knows a new window has opened
+    (FPLAN-0588: compass recall's per-session budget was spent by lunch). The
+    payload's session id comes first on both sides, as consumers key their own
+    state by it: reset_counter stamps it, this reads it.
+    """
+    session_id = (hook_data or {}).get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not session_id:
+        return None
+    path = _window_path(session_id)
+    if not path.exists():
+        return None
+    try:
+        opened_at = json.loads(path.read_text(encoding="utf-8") or "{}").get("opened_at")
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        logger.info("[HOOKS] cadence: window stamp unreadable: %s", exc)
+        return None
+    if isinstance(opened_at, bool) or not isinstance(opened_at, (int, float)):
+        return None
+    return opened_at
 
 
 def consume_regroup_pending(hook_data: dict | None = None) -> bool:

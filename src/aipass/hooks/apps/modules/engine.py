@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Hook engine — unified dispatcher for all hook events
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-09-10
+# Modified: 2026-09-14
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
@@ -25,6 +25,7 @@ from aipass.hooks.apps.handlers.cli.help_flags import wants_help
 from aipass.hooks.apps.handlers.config.diagnostics import log_entry as _log, tail_log
 from aipass.hooks.apps.handlers.config.output_merge import combine_outputs
 from aipass.hooks.apps.handlers.module_root import module_file
+from aipass.hooks.apps.modules import cadence
 
 CONSOLE = err_console
 BRANCH_ROOT = module_file(__file__).parent.parent.parent
@@ -191,8 +192,25 @@ def _save_budget_state(state: dict, session_id: str = "") -> None:
         logger.info("[HOOKS] budget: state write failed: %s", exc)
 
 
+def _open_budget_window(hook_name: str, hs: dict, hook_data: dict) -> None:
+    """Zero a handler's counts when a new context window has opened since it last counted.
+
+    The budget file is keyed by session id, and the session id survives every
+    compaction: a max_per_session spent in the morning held compass_recall
+    silent all day (FPLAN-0588). cadence.reset_counter() stamps the window on
+    PreCompact (compact.py) and on startup/clear (session_start.py). No stamp
+    means no signal, and the count stands.
+    """
+    window = cadence.window_opened_at(hook_data)
+    if window is None or hs.get("window") == window:
+        return
+    if hs.get("fire_count"):
+        logger.info("[HOOKS] budget: %s reopened for a new context window (%d fires)", hook_name, hs["fire_count"])
+    hs.update(fire_count=0, turns_since_fire=0, window=window)
+
+
 def _check_budget(hook_name: str, budget_cfg: dict, budget_state: dict) -> tuple[bool, str]:
-    """Check if handler is within its per-session budget."""
+    """Check if handler is within its per-window budget (see _open_budget_window)."""
     hs = budget_state.get(hook_name, {})
     fire_count = hs.get("fire_count", 0)
 
@@ -305,6 +323,7 @@ def dispatch(event_type: str, stdin_data: str, config: dict) -> tuple[str, int]:
             if budget_state is None:
                 budget_state = _load_budget_state(payload_session_id)
             hs = budget_state.setdefault(hook_name, {})
+            _open_budget_window(hook_name, hs, parsed)
             hs["turns_since_fire"] = hs.get("turns_since_fire", 0) + 1
             budget_dirty = True
             allowed, reason = _check_budget(hook_name, budget_cfg, budget_state)

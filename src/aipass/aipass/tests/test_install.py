@@ -11,7 +11,7 @@
 import os
 import subprocess as _sp
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -25,6 +25,7 @@ from aipass.aipass.apps.modules.install import (
     _clone_repo,
     _end_in_chat,
     _install_lock_path,
+    _install_phone_face,
     _looks_like_aipass_tree,
     _release_install_lock,
     _print_next_steps,
@@ -274,14 +275,15 @@ class TestRunSetup:
 
 
 class TestRunInstall:
-    """The four-step orchestrator."""
+    """The five-step orchestrator."""
 
     def test_dry_run_is_side_effect_free(self) -> None:
-        """Dry-run walks all steps and touches no subprocess."""
-        with patch(f"{_MOD}.subprocess.run") as run:
+        """Dry-run walks all steps, the phone face included, with no subprocess and no network."""
+        with patch(f"{_MOD}.subprocess.run") as run, patch("urllib.request.urlopen") as net:
             rc = run_install(non_interactive=True, dry_run=True)
         assert rc == 0
         run.assert_not_called()
+        net.assert_not_called()
 
     def test_aborts_when_clone_fails(self, tmp_path: Path) -> None:
         """A failed fetch aborts before the setup step runs."""
@@ -305,11 +307,40 @@ class TestRunInstall:
             patch(f"{_MOD}._run_setup", return_value=True),
             patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
             patch(f"{_MOD}._check_and_fix_owner"),
+            patch(f"{_MOD}._install_phone_face", return_value=True) as face,
             patch(f"{_MOD}._end_in_chat") as nxt,
         ):
             rc = run_install(non_interactive=True, dry_run=False)
         assert rc == 0
+        face.assert_called_once_with(False, False)
         nxt.assert_called_once()
+
+    def test_phone_face_sits_between_verify_and_welcome_and_never_fails_the_install(self, tmp_path: Path) -> None:
+        """Step 4 of 5 runs after the verified binaries and before the chat; a False result is not fatal.
+
+        FPLAN-0587: the step is best-effort, so offline / private repo / no token
+        must leave the install exiting 0 and still ending in the welcome chat.
+        """
+        home = tmp_path / "AIPass"
+        order = MagicMock()
+        with (
+            patch(f"{_MOD}._resolve_home", return_value=home),
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}._clone_repo", return_value=True),
+            patch(f"{_MOD}._run_setup", return_value=True),
+            patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}) as verify,
+            patch(f"{_MOD}._check_and_fix_owner"),
+            patch(f"{_MOD}._install_phone_face", return_value=False) as face,
+            patch(f"{_MOD}._end_in_chat") as chat,
+            patch(f"{_MOD}.render_step_header", return_value="") as header,
+        ):
+            order.attach_mock(verify, "verify")
+            order.attach_mock(face, "face")
+            order.attach_mock(chat, "chat")
+            rc = run_install(non_interactive=True, dry_run=False, no_baud=False)
+        assert rc == 0
+        assert [c[0] for c in order.mock_calls] == ["verify", "face", "chat"]
+        assert header.call_args_list[3:] == [call(4, 5, "Phone face"), call(5, 5, "Welcome")]
 
 
 class TestHandleCommand:
@@ -353,6 +384,13 @@ class TestHandleCommand:
         _, kwargs = run.call_args
         assert kwargs["no_chat"] is True
 
+    def test_passes_no_baud_flag(self) -> None:
+        """--no-baud is threaded into run_install (FPLAN-0587)."""
+        with patch(f"{_MOD}.run_install", return_value=0) as run:
+            with pytest.raises(SystemExit):
+                handle_command("install", ["--no-baud"])
+        assert run.call_args.kwargs["no_baud"] is True
+
     def test_chat_only_routes_to_run_chat_only(self) -> None:
         """--chat-only routes to run_chat_only instead of run_install."""
         with (
@@ -365,6 +403,22 @@ class TestHandleCommand:
         chat_only.assert_called_once()
         install.assert_not_called()
         assert chat_only.call_args.kwargs["here"] is True
+
+
+class TestInstallPhoneFaceStep:
+    """The Phone face step delegates to aipass baud and honours --no-baud (FPLAN-0587)."""
+
+    def test_no_baud_skips_without_touching_baud(self) -> None:
+        """--no-baud: skipped, reported as not installed, baud never called."""
+        with patch("aipass.aipass.apps.modules.baud.install_best_effort") as best:
+            assert _install_phone_face(dry_run=False, no_baud=True) is False
+        best.assert_not_called()
+
+    def test_delegates_to_the_best_effort_install(self) -> None:
+        """Without --no-baud the step is baud's best-effort install, dry-run threaded."""
+        with patch("aipass.aipass.apps.modules.baud.install_best_effort", return_value=True) as best:
+            assert _install_phone_face(dry_run=True, no_baud=False) is True
+        best.assert_called_once_with(dry_run=True)
 
 
 class TestBuildInstallPrompt:
@@ -678,7 +732,8 @@ class TestSmoke:
             print_help()
         printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
         assert "aipass install[/bold cyan] \u2014 one-command bootstrap of AIPass" in printed
-        assert "resolve home -> fetch -> setup.sh -> verify -> welcome chat" in printed
+        assert "resolve home -> fetch -> setup.sh -> verify -> phone face -> welcome chat" in printed
+        assert "--no-baud" in printed
         assert "aipass init run" in printed
 
     def test_print_introspection_runs(self) -> None:
@@ -691,8 +746,8 @@ class TestSmoke:
         assert REPO_URL in printed
 
     def test_total_steps_constant(self) -> None:
-        """The install flow advertises four steps."""
-        assert TOTAL_STEPS == 4
+        """The install flow advertises five steps (the phone face is step 4)."""
+        assert TOTAL_STEPS == 5
 
 
 # ---------------------------------------------------------------------------

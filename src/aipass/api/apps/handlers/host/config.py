@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
-# Description: Host API Config Handler — server config and bind-address validation
-# Version: 1.0.0
+# Description: Host API Config Handler — server config, bind-address and face-dir validation
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -27,15 +27,21 @@ exactly what makes them dangerous), a hostname is refused as ambiguous, and an
 address the machine does not actually hold is refused rather than quietly
 becoming something else.
 
-PHASE 1 RESERVATION: LOOPBACK_ONLY is True. Non-loopback binds — the tailnet
-100.x address Stage 0 is aimed at — are refused until the security review gate
-(FPLAN-0411 Phase 5) clears the first network-listening service in AIPass.
-Flipping this constant is the whole change; the machinery below already handles
-any address.
+THE LOOPBACK GATE IS OPEN: LOOPBACK_ONLY has been False since 2026-08-14, Patrick's
+ruling on the security review (FPLAN-0411 Phase 5). An address this machine holds
+is accepted, the tailnet one included; every other refusal above still stands.
+Read the flag's own comment before assuming more than that.
+
+THE FACE DIR (FPLAN-0587): where the phone face is served from, stored beside the
+bind under the key face_dir. The bind rule's doctrine applies: validated before it
+is stored, refused otherwise, nothing half-written. Unset means the checkout
+build. face.py makes that call; this file only stores the choice.
 
 Functions:
     load_config()   - Effective config, defaults merged under any stored values
     save_config()   - Persist config to the store
+    face_dir()      - The configured phone-face directory, or None
+    set_face_dir()  - Validate and store it, or clear it; raises FaceDirRefused
     validate_bind() - Enforce the bind rule; raises BindRefused
     pin_registry()  - Take drone's registry fast path once, at boot
 """
@@ -43,7 +49,7 @@ Functions:
 import ipaddress
 import socket
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
@@ -54,6 +60,14 @@ CONFIG_SLUG = "config"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
+
+# The phone face's directory, when one is configured. Deliberately absent from
+# DEFAULT_CONFIG: unset means the checkout build, and that is never stored.
+FACE_DIR_KEY = "face_dir"
+
+# @baud's entry document. Named here rather than in face.py because
+# set_face_dir() checks for it, and face.py imports this module, not the reverse.
+FACE_ENTRY = "phone.html"
 
 # OPENED 2026-08-14 by Patrick's ruling on the Phase 5 security review (C1 audit
 # shipped, C2 blast radius accepted in his words, C3 admission list verified by
@@ -75,6 +89,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 class BindRefused(Exception):
     """The configured bind address was refused. The server must not start."""
+
+
+class FaceDirRefused(ValueError):
+    """The face directory was refused. Nothing was stored."""
 
 
 # ==============================================
@@ -117,6 +135,76 @@ def save_config(config: Dict[str, Any]) -> str:
     path = secrets_store.set_secret(CONFIG_PROVIDER, CONFIG_SLUG, config, as_json=True)
     logger.info("[host_api] config saved to %s", path)
     return str(path)
+
+
+# ==============================================
+# FACE DIR
+# ==============================================
+
+
+def face_dir() -> Optional[Path]:
+    """
+    The configured phone-face directory.
+
+    Read as stored, never re-validated here: a directory that was valid when it
+    was stored and has emptied since is face.py's to report, naming the
+    configured source. Answering None for it would quietly hand the phone the
+    checkout build instead.
+
+    Returns:
+        The stored directory, or None when no face_dir is configured.
+    """
+    stored = load_config().get(FACE_DIR_KEY)
+    return None if stored is None else Path(str(stored))
+
+
+def set_face_dir(path: Optional[Path]) -> Optional[Path]:
+    """
+    Store the phone-face directory, or clear it.
+
+    Validated BEFORE anything is written, the bind rule's doctrine: a directory
+    that would not serve is refused while whoever named it is still there, not
+    at the first navigation after a restart. Either way a running server keeps
+    the directory it started with (face.py, KNOWN LIMIT).
+
+    "~" is not expanded here. A caller holding a shell-style path expands it
+    first; this layer only ever stores an absolute path.
+
+    Args:
+        path: An absolute directory holding phone.html, or None to clear.
+
+    Returns:
+        The stored directory, or None when cleared. Clearing when nothing is
+        configured writes nothing.
+
+    Raises:
+        FaceDirRefused: Not absolute, not a directory, or no phone.html in it.
+            Nothing is stored.
+    """
+    if path is None:
+        config = load_config()
+        if FACE_DIR_KEY in config:
+            del config[FACE_DIR_KEY]
+            save_config(config)
+            json_handler.log_operation("host_api_face_dir_cleared", {})
+            logger.info("[host_api] face dir cleared: the checkout build serves after a restart")
+        return None
+
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        raise FaceDirRefused(f"The face dir must be an absolute path, got: {str(path)!r}")
+    if not candidate.is_dir():
+        raise FaceDirRefused(f"The face dir is not a directory: {candidate}")
+    if not (candidate / FACE_ENTRY).is_file():
+        raise FaceDirRefused(f"The face dir has no {FACE_ENTRY}: {candidate} (point it at a built phone bundle)")
+
+    config = load_config()
+    config[FACE_DIR_KEY] = str(candidate)
+    save_config(config)
+
+    logger.info("[host_api] face dir set to %s: served after a restart", candidate)
+    json_handler.log_operation("host_api_face_dir_set", {"face_dir": str(candidate)})
+    return candidate
 
 
 # ==============================================

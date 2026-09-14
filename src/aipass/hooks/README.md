@@ -110,7 +110,7 @@ src/aipass/hooks/
 │   │   │   ├── tier0_kernel.py  #   Injects tier0 kernel prompt (every turn)
 │   │   │   ├── navmap.py        #   Injects tier1 navmap prompt (periodic)
 │   │   │   ├── identity.py      #   Injects passport identity block
-│   │   │   ├── compass_recall.py #  Governance recall injection (capped per session)
+│   │   │   ├── compass_recall.py #  Governance recall injection (hooks.json knobs, capped per context window)
 │   │   │   ├── feedback_pulse.py #  Periodic feedback ask (~10 turns, toggleable — disabled here)
 │   │   │   ├── context_gauge.py #   Nudges /prep before auto-compact fires (80%/95% of window)
 │   │   │   ├── temporal.py      #   Injects weekday/date/time/tz/part-of-day, every turn

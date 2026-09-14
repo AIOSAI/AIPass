@@ -166,6 +166,16 @@
       "file": "apps/handlers/json_flags.py",
       "standard": "json_structure",
       "reason": "Pure predicate — one question over a token list, no I/O and no state. The literal twin of help_flags.py, which carries this same rule for the same reason: it runs before every git read command, so a log_operation() here would record 'a --json flag was looked for' on every single invocation and drown the operations log in non-events. The callers that ACT on the answer (status, log, show, remote) already log their own outcomes. Adding json_handler to satisfy a checker that keys on the directory, not on whether the file touches JSON data, would be scaffolding rather than logging."
+    },
+    {
+      "file": "apps/handlers/git/repo_door.py",
+      "standard": "handlers",
+      "reason": "Lazy CROSS-branch import of @ai_mail's verified-caller rail (aipass.ai_mail.apps.handlers.users.verified_caller) inside admin_verdict(), named by @devpulse in the DPLAN-0344 brief: the external-repo git door is accepted only when is_verified_admin_caller() is True, the same 5-leg admin grant hooks' edit_gate and testwrite_gate trust. @ai_mail exposes the rail at handler level only - no modules/ entry point carries is_verified_admin_caller or resolve_verified_caller - and a mirrored copy is the drift the contract's one home exists to prevent (@ai_mail bypassed the same shape for devpulse's admin_grant, FPLAN-0401). Import failure is caught and refuses the door (lane dark), so the coupling can never open it."
+    },
+    {
+      "file": "apps/handlers/git/repo_door.py",
+      "standard": "encapsulation",
+      "reason": "Same cross-branch rail import as the handlers entry above - @ai_mail owns the verified-caller rail and the admin contract behind it; the door consumes it rather than mirroring it (DPLAN-0344)."
     }
   ],
   "notes": {

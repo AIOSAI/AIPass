@@ -189,8 +189,13 @@ class TestPrintHelp:
         # was satisfied by the examples alone -- measured: renaming the COMMANDS
         # row left that weaker pin green. The marker is what makes it a claim
         # about the command reference rather than about the whole page.
-        for verb in ("snapshot", "versioned", "all", "register", "status", "settings"):
+        for verb in ("snapshot", "versioned", "all", "register", "status", "settings", "restore"):
             assert f"[green]{verb}[/green]" in printed, f"COMMANDS block lost {verb}"
+
+        # modules/all.py runs drive_sync after versioned; the row used to say
+        # only "snapshot then versioned", so the verb that uploads read as local.
+        all_row = next(line for line in printed.splitlines() if "[green]all[/green]" in line)
+        assert "drive" in all_row.lower(), f"'all' row hides its drive stage: {all_row}"
 
     @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
     def test_print_introspection_exists(self, mod_path: str) -> None:

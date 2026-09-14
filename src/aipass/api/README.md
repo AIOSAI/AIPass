@@ -270,7 +270,7 @@ drone @api stats
 | `host-api issue-token <label> [--scope read\|operate] [--out FILE]` | Mint a bearer token — raw value never printed, receipt defaults to `~/.secrets/aipass/host_api/<label>.token` |
 | `host-api list-tokens` | List tokens — values are never shown |
 | `host-api revoke-token <id>` | Revoke server-side, effective next request |
-| `host-api config` / `set-config` | Show / set the bind address (validated first) |
+| `host-api config` / `set-config [--host IP] [--port N] [--face-dir DIR\|default]` | Show / set the bind address and the phone face's directory — every value validated before anything is stored. `config` shows the effective face dir, its source (`configured` or `checkout`) and whether `phone.html` is there |
 
 ---
 
@@ -414,6 +414,7 @@ drone @api host-api serve --detach     # survives drone's exec timeout; log in l
 drone @api host-api autostart          # renders the boot unit + prints the install steps
 drone @api host-api status             # pid, bind, owner, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
+drone @api host-api set-config --face-dir <dir>   # an installed phone face; 'default' clears it
 drone @api host-api revoke-token <id>  # effective next request, no restart
 ```
 
@@ -1037,6 +1038,21 @@ header, so gating it would mean a second, weaker auth system guarding a public
 bundle that renders a token door and nothing else. Every byte of data stays behind
 `/v1/*`. The bundle is served precisely — `/assets` mounted, each bundle-root file
 routed by name — never as a catch-all that could shadow the API.
+
+**Where the face comes from (FPLAN-0587).** An installed AIPass has no checkout to
+build the phone in, so the directory is a setting: `face_dir` in the host config,
+stored by `drone @api host-api set-config --face-dir <dir>` or by @aipass's
+`aipass baud install` through `config.set_face_dir()`. Unset, the server serves
+@baud's checkout build (`projects/baud/app/dist-phone`) as it always has, and
+`--face-dir default` clears it back. The bind rule's doctrine applies: the value is
+refused before anything is stored unless it is absolute, a directory, and holds
+`phone.html`. `host-api config` shows the effective dir, the source that named it
+(`configured` or `checkout`) and whether `phone.html` is there. A configured dir
+that has emptied since is a 503 naming that dir and its fixes, never a quiet fall
+back to the checkout build. **Known limit:** the face is resolved once, when the
+app is created, so a running server needs a restart to serve a new dir. That is
+deliberate: `/assets` is mounted from one bundle, and a `phone.html` re-resolved
+per request could name assets that mount does not hold.
 
 **Why the feed cursor is a timestamp:** `notifications.jsonl` is trimmed 400→200
 lines and the trim replaces the file, so a line or byte offset goes stale under

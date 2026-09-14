@@ -1415,6 +1415,9 @@ def create_app() -> Any:
             {"peer": getattr(client, "host", "") or "unknown", "reason": reason, "route": "/v1/room/attach"},
         )
 
+    # Resolved ONCE: a running server serves this bundle until restarted (face.py, KNOWN LIMIT).
+    face = host_face.face_location()
+
     @app.get("/", include_in_schema=False)
     async def face_entry(request: Request) -> Any:
         """
@@ -1426,29 +1429,29 @@ def create_app() -> Any:
         else. The data wall is on /v1/*, where the data is.
         """
         try:
-            return host_statics.bundle_response(host_face.entry_file(), request.headers)
+            return host_statics.bundle_response(face.entry_file(), request.headers)
         except host_face.FaceUnavailable as e:
             raise _deny(503, "face_unavailable", str(e)) from e
 
     # NOT a catch-all. The bundle's own files get their own routes, so nothing
     # registered on this app — now or by a later caller — can be shadowed. See
     # face.py: the first cut DID mount "/" and the existing scope tests caught it.
-    if host_face.is_face_available():
-        if host_face.assets_dir().is_dir():
-            app.mount("/assets", StaticFiles(directory=str(host_face.assets_dir())), name="face-assets")
+    if face.is_available():
+        if face.assets_dir().is_dir():
+            app.mount("/assets", StaticFiles(directory=str(face.assets_dir())), name="face-assets")
 
-        for filename in host_face.root_files():
+        for filename in face.root_files():
             app.add_api_route(
                 f"/{filename}",
-                host_statics.face_file_route(filename),
+                host_statics.face_file_route(face.root / filename),
                 methods=["GET"],
                 include_in_schema=False,
             )
 
-        logger.info("[host_api] phone face served from %s", host_face.face_root())
+        logger.info("[host_api] phone face served from %s (%s)", face.root, face.source)
     else:
         # Not fatal: the API is the product, the face is a client of it.
-        logger.warning("[host_api] phone face not built — / will report it. %s", host_face.BUILD_HINT)
+        logger.warning("[host_api] phone face unavailable — / will report it. %s", face.unavailable_message())
 
     # DERIVED FROM THE APP, never written down. The hand-kept list this
     # replaces named 18 doors while the app registered nearly forty — /v1/dir,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tag_handler.py
 # Description: Tag handler — create, push, and list release tags
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-02
-# Modified: 2026-08-12
+# Modified: 2026-09-13
 # =============================================
 
 """Tag handler — create, push, and list release tags.
@@ -112,13 +112,15 @@ def _tag_external(name: str, repo_root: Path) -> dict:
     return {"success": True, "message": f"Tagged {name} at {repo_root.name} HEAD ({sha}) and pushed to origin."}
 
 
-def tag_release(version: str) -> dict:
+def tag_release(version: str, repo_root: Path | None = None) -> dict:
     """Create and push an annotated release tag.
 
-    Routes to the external lane when the repo underfoot is not AIPass's own —
-    see the module docstring for what each lane guarantees.
+    Routes to the external lane when the repo it runs in is not AIPass's own —
+    see the module docstring for what each lane guarantees. *repo_root* defaults
+    to the standing repo; the external-repo door names another one.
     """
-    repo_root = find_repo_root()
+    if repo_root is None:
+        repo_root = find_repo_root()
     if not is_aipass_repo(repo_root):
         return _tag_external(version, repo_root)
 
@@ -272,9 +274,10 @@ def tag_release(version: str) -> dict:
     return {"success": True, "message": f"Tagged {version} on origin/main ({sha})."}
 
 
-def list_tags() -> dict:
-    """List all tags sorted newest-first."""
-    repo_root = find_repo_root()
+def list_tags(repo_root: Path | None = None) -> dict:
+    """List all tags sorted newest-first, in *repo_root* (default: the standing repo)."""
+    if repo_root is None:
+        repo_root = find_repo_root()
 
     try:
         result = subprocess.run(

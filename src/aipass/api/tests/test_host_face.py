@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_face.py
 # Description: Tests for serving @baud's phone face from the host API origin
@@ -29,6 +28,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
@@ -36,6 +36,7 @@ from aipass.api.apps.handlers.host import tokens as host_tokens
 PATCH_SECRETS_BASE = "aipass.api.apps.handlers.auth.secrets.SECRETS_BASE"
 PATCH_SECRETS_JSON = "aipass.api.apps.handlers.auth.secrets.json_handler"
 PATCH_SECRETS_LOGGER = "aipass.api.apps.handlers.auth.secrets.logger"
+PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
 PATCH_TOKENS_JSON = "aipass.api.apps.handlers.host.tokens.json_handler"
 PATCH_TOKENS_LOGGER = "aipass.api.apps.handlers.host.tokens.logger"
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
@@ -48,6 +49,33 @@ fastapi_required = pytest.mark.skipif(
     not host_server.is_available(),
     reason="the [host] extra is not installed",
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path: Path):
+    """
+    Every test here reads the host config, because locating the face does.
+
+    Without this the locating tests would read this machine's real config, and
+    a face_dir stored there for the live server would decide what they see.
+    """
+    with patch(PATCH_SECRETS_BASE, tmp_path / "secrets"), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
+        with patch(PATCH_CONFIG_LOGGER):
+            yield tmp_path / "secrets"
+
+
+def _bundle(directory: Path, marker: str) -> Path:
+    """A built phone bundle outside the checkout, whose files say which one it is."""
+    (directory / "assets").mkdir(parents=True)
+    (directory / host_face.FACE_ENTRY).write_text(f"<!doctype html><title>{marker}</title>", encoding="utf-8")
+    (directory / "assets" / "phone.js").write_text(f"export const bundle = '{marker}';", encoding="utf-8")
+    return directory
+
+
+def _rendered(mock_log_method) -> list:
+    """The face lines a patched logger method was handed, formatted as they would print."""
+    calls = mock_log_method.call_args_list
+    return [call.args[0] % call.args[1:] for call in calls if "phone face" in str(call.args[0])]
 
 
 @pytest.fixture
@@ -83,11 +111,11 @@ class TestLocatingTheBundle:
 
     def test_available_when_the_entry_exists(self, built_face: Path, quiet_face: None) -> None:
         """Presence is decided by the entry document, not the directory."""
-        assert host_face.is_face_available() is True
+        assert host_face.face_location().is_available() is True
 
     def test_not_available_when_unbuilt(self, unbuilt_face: Path, quiet_face: None) -> None:
         """An absent bundle is a real state, not an error to swallow."""
-        assert host_face.is_face_available() is False
+        assert host_face.face_location().is_available() is False
 
     def test_entry_is_phone_html_not_index(self, built_face: Path, quiet_face: None) -> None:
         """
@@ -130,6 +158,99 @@ class TestLocatingTheBundle:
     def test_assets_dir_sits_under_the_bundle(self, built_face: Path, quiet_face: None) -> None:
         """The only directory this server exposes wholesale."""
         assert host_face.assets_dir() == built_face / "assets"
+
+
+class TestWhereTheFaceLives:
+    """
+    FPLAN-0587: a configured face_dir wins, the checkout build is the default.
+
+    An installed AIPass has no checkout, so the bundle @aipass installs has to
+    be nameable. When the named one is unusable the message says it was the
+    CONFIGURED one, because its fixes are not the npm build's.
+    """
+
+    def test_the_checkout_build_when_nothing_is_configured(self, built_face: Path, quiet_face: None) -> None:
+        """No face_dir stored: what the checkout built, exactly as before."""
+        location = host_face.face_location()
+
+        assert location.root == built_face
+        assert location.source == host_face.SOURCE_CHECKOUT
+
+    def test_a_configured_dir_wins_over_the_checkout(self, built_face: Path, tmp_path: Path, quiet_face: None) -> None:
+        """Served from the installed bundle even where a checkout build also sits."""
+        installed = _bundle(tmp_path / "installed", "INSTALLED")
+        host_config.set_face_dir(installed)
+
+        location = host_face.face_location()
+
+        assert location.root == installed
+        assert location.source == host_face.SOURCE_CONFIGURED
+        assert host_face.face_root() == installed
+        assert host_face.entry_file() == installed / host_face.FACE_ENTRY
+
+    def test_clearing_returns_the_checkout_default(self, built_face: Path, tmp_path: Path, quiet_face: None) -> None:
+        """set_face_dir(None) hands the face back to the checkout build."""
+        host_config.set_face_dir(_bundle(tmp_path / "installed", "INSTALLED"))
+
+        assert host_config.set_face_dir(None) is None
+
+        location = host_face.face_location()
+        assert location.root == built_face
+        assert location.source == host_face.SOURCE_CHECKOUT
+
+    def test_a_configured_dir_that_lost_its_entry_names_the_configured_source(
+        self, built_face: Path, tmp_path: Path, quiet_face: None
+    ) -> None:
+        """
+        Valid when it was stored, emptied since: an uninstall, a moved directory.
+
+        The checkout build still sits there, and falling back to it would serve
+        a face nobody chose. The message names the configured dir and ITS fixes,
+        never the npm build, which would not help.
+        """
+        installed = _bundle(tmp_path / "installed", "INSTALLED")
+        host_config.set_face_dir(installed)
+        (installed / host_face.FACE_ENTRY).unlink()
+
+        assert host_face.face_location().is_available() is False
+        with pytest.raises(host_face.FaceUnavailable) as excinfo:
+            host_face.entry_file()
+
+        message = str(excinfo.value)
+        assert "configured face dir" in message
+        assert str(installed) in message
+        assert "aipass baud install" in message
+        assert "set-config --face-dir" in message
+        assert "build:phone" not in message
+
+    def test_an_unbuilt_checkout_names_the_checkout_source(self, unbuilt_face: Path, quiet_face: None) -> None:
+        """The default's fix is the npm build, as it was, and says it is the default."""
+        with pytest.raises(host_face.FaceUnavailable) as excinfo:
+            host_face.entry_file()
+
+        # The root is tmp_path, whose name carries this test's own words; read around it.
+        message = str(excinfo.value).replace(str(unbuilt_face), "<root>")
+        assert "checkout" in message
+        assert "npm run build:phone" in message
+        assert "aipass baud install" not in message
+
+    def test_a_relative_configured_dir_is_never_served(
+        self, unbuilt_face: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, quiet_face: None
+    ) -> None:
+        """
+        set_face_dir refuses a relative path; a hand-edited store can still hold one.
+
+        Resolved against the server's working directory, it would serve whatever
+        bundle happened to sit there. So it is unavailable, and still reported as
+        the configured source rather than quietly swapped for the checkout.
+        """
+        _bundle(tmp_path / "dist-phone", "WORKING-DIRECTORY")
+        monkeypatch.chdir(tmp_path)
+        host_config.save_config({"face_dir": "dist-phone"})
+
+        assert host_face.face_location().source == host_face.SOURCE_CONFIGURED
+        assert host_face.face_location().is_available() is False
+        assert host_face.root_files() == []
 
 
 @pytest.fixture
@@ -373,3 +494,80 @@ class TestUnbuiltFace:
         response = bare_client.get("/v1/ping")
 
         assert response.status_code == 204
+
+
+@fastapi_required
+class TestTheServerResolvesTheFaceOnce:
+    """
+    FPLAN-0587's stated limit, pinned: the face is resolved at create_app().
+
+    A running server serves the bundle it started with; a new face_dir needs a
+    restart. Resolving per request instead would pair a new phone.html with the
+    /assets mount built from the old bundle, an entry naming hashed files that
+    mount does not hold.
+    """
+
+    def test_the_origin_serves_a_configured_dir(self, built_face: Path, tmp_path: Path) -> None:
+        """Configured wins at the origin too, the assets mount included."""
+        from fastapi.testclient import TestClient
+
+        host_config.set_face_dir(_bundle(tmp_path / "installed", "INSTALLED"))
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
+            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            responses = [client.get(path) for path in ("/", "/phone.html", "/assets/phone.js")]
+
+        assert [response.status_code for response in responses] == [200, 200, 200]
+        assert all("INSTALLED" in response.text for response in responses)
+
+    def test_a_running_server_keeps_the_dir_it_started_with(self, built_face: Path, tmp_path: Path) -> None:
+        """A face_dir stored after start changes nothing until a restart, on every face route."""
+        from fastapi.testclient import TestClient
+
+        host_config.set_face_dir(_bundle(tmp_path / "first", "FIRST"))
+
+        with patch(PATCH_SERVER_LOGGER), patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
+            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            host_config.set_face_dir(_bundle(tmp_path / "second", "SECOND"))
+            responses = [client.get(path) for path in ("/", "/phone.html", "/assets/phone.js")]
+
+        assert [response.status_code for response in responses] == [200, 200, 200]
+        assert all("FIRST" in response.text for response in responses)
+
+    def test_the_startup_log_names_the_source(self, built_face: Path, tmp_path: Path) -> None:
+        """Which bundle a server is showing is answerable from its log alone."""
+        installed = _bundle(tmp_path / "installed", "INSTALLED")
+        host_config.set_face_dir(installed)
+
+        with patch(PATCH_SERVER_LOGGER) as server_logger, patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
+            host_server.create_app()
+
+        served = _rendered(server_logger.info)
+        assert len(served) == 1
+        assert str(installed) in served[0]
+        assert host_face.SOURCE_CONFIGURED in served[0]
+
+    def test_an_unservable_configured_dir_is_a_503_naming_it_not_the_checkout(
+        self, built_face: Path, tmp_path: Path
+    ) -> None:
+        """
+        The checkout build is right there, and is still not served.
+
+        A server that fell back to it would show a face nobody chose while its
+        log read as healthy.
+        """
+        from fastapi.testclient import TestClient
+
+        installed = _bundle(tmp_path / "installed", "INSTALLED")
+        host_config.set_face_dir(installed)
+        (installed / host_face.FACE_ENTRY).unlink()
+
+        with patch(PATCH_SERVER_LOGGER) as server_logger, patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
+            client = TestClient(host_server.create_app(), raise_server_exceptions=False)
+            response = client.get("/")
+
+        assert response.status_code == 503
+        assert "configured face dir" in response.json()["error"]["message"]
+        warned = _rendered(server_logger.warning)
+        assert len(warned) == 1
+        assert "configured face dir" in warned[0]

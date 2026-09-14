@@ -84,6 +84,12 @@ drone @git smart-sync            # Fetch + detect divergence + rebase
 drone @git prune-temp            # Delete merged citizen/* temp branches
 drone @git unlock --force        # Force-release the PR lock
 drone @git tag v2.6.1            # Create + push annotated release tag (see Tag lanes)
+
+# External-repo door — admin seat only (see External-repo door)
+drone @git status --repo projects/baud          # Read another repo's tree
+drone @git commit "msg" --all --repo projects/baud
+drone @git push --repo projects/baud            # Push that repo's checked-out branch
+drone @git tag v0.2.0 --repo projects/baud
 drone @git fix                   # Auto-fix stuck rebase / detached HEAD
 drone @git fix --dry-run         # Detect issues without fixing
 
@@ -511,6 +517,17 @@ The walk now answers portably, and keeps the property that made it worth having:
 - **The flags come from `os`, never from a written-down number.** `0o0400000` is `O_NOFOLLOW` on Linux and `O_NOCTTY` on macOS: the literal would have quietly traversed the symlinks it was there to block, which is a worse bug than the crash it sat behind.
 - **A host with neither `O_NOFOLLOW` nor `dir_fd` support is refused**, not served unverified.
 
+### External-repo door — `--repo <path>`
+
+Git in a repo that is not AIPass (`projects/baud` inside the tree, a clone outside it) goes through one door, held by @devpulse's admin grant (DPLAN-0344, Patrick 2026-09-13). `status`, `diff`, `log`, `commit`, `push` and `tag` take `--repo <path>` (or `--repo=<path>`) in any slot. `apps/handlers/git/repo_door.py` answers four questions in this order, and every exit writes one line to `.ai_central/git_repo_door.jsonl` beside the deletion log (caller, cwd, verb, args, repo, HEAD before and after, exit code), refusals included:
+
+1. **Who** — @ai_mail's verified-caller rail, `is_verified_admin_caller()`: the 5-leg grant, asked on every use, never cached. `@git` runs inside drone rather than as a routed child, so the door first stamps `AIPASS_CALLER_CWD`, `AIPASS_CALLER_BRANCH` and `AIPASS_CALLER_IDENTITY_SOURCE` the way the router stamps a child (fresh, same resolver) and restores them after. `verify_git_access()` is not consulted, because its owner tier answers for the repo you stand in. A project manager standing in its own repo is refused by name.
+2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the standing repo.
+3. **Which verb** — anything outside the six is refused. `issue`, `run` and `workflow` never reach the door: their `--repo OWNER/NAME` is gh's own flag.
+4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a directory, be a git top level, and not be AIPass: refused if `AIPASS_REGISTRY.json` sits at its top level, or if it is the caller's own root (a clean clone has no registry).
+
+No lock. The AIPass PR lock would stall AIPass's train for someone else's repo, and a lock file inside the target is an untracked file the next `commit --all` there would stage; git's own `index.lock` serialises the writes. `commit` never pushes. `push` pushes the checked-out branch to `origin` under the same name, never forced. `commit --all` runs the same lint and test gate it runs anywhere. The refusal texts are constants in `repo_door.py`, and `drone @git --help` renders those same constants. Pinned by `TestRepoDoorRefusals` and `TestRepoDoorHappyPath` in `tests/test_git_access.py`, the happy path against a real repo with a real bare origin.
+
 ### Tag lanes — AIPass vs an external repo
 
 `tag` is one verb with two release lanes, chosen by the repo the command will actually run in (`repo_context.is_aipass_repo()` — the root holds `AIPASS_REGISTRY.json` or it doesn't). The gate that used to refuse `tag` from a `projects/*` seat is gone: it now translates.
@@ -536,6 +553,8 @@ Both lanes are covered by `tests/test_tag_handler.py`, where `TestAipassSeatUnch
 gh's default view is a GraphQL query that requests `repository.issue.projectCards` — a Projects-classic field GitHub now rejects outright. The call returned the deprecation notice and **no issue at all** (exit 1), and `--comments` failed the same way.
 
 `_rewrite_issue_view()` in `git_module.py` renders the same view from pinned `--json` fields plus a `--template`, so the dead field is never requested. `--comments` becomes a requested field rather than a flag (it conflicts with `--json`). Callers who already chose a rendering — `--json`, `--jq`, `--template`, `--web` — keep their own invocation untouched; unrelated flags like `--repo` are preserved. No other issue subcommand is rewritten.
+
+`run view --log` and `--log-failed` have a fallback. gh 2.45 finds each step's log by file name inside the run's log archive, and GitHub's archive now holds job-level files only (run 34730939542: `0_seedgo-audit.txt`, `1_test (3.10).txt`, no step files), so gh printed nothing and exited 0. When `run view` with a log flag comes back empty with a clean exit, drone reads the jobs API through `gh api`: each job's full log (only the failed jobs for `--log-failed`), every line led by the job name and a tab, with a notice on stderr saying so. `-R/--repo`, `--job` and `--attempt` are honoured, and a job whose log the API refuses fails the command by name (`TestRunLogFallback` in `tests/test_git_module.py`).
 
 ### Dev Branch Model
 
@@ -642,12 +661,12 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 ## Testing
 
-**1339 tests pass, 0 skip on Linux**, across 31 test files — measured 2026-09-12 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1230 `def test_` functions**, which parametrization expands to **1339 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1339 (eleven of them carry `deletable_cwd`, which Windows skips and Linux runs):
+**1359 tests pass, 0 skip on Linux**, across 31 test files — measured 2026-09-13 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1244 `def test_` functions**, which parametrization expands to **1359 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1359 (eleven of them carry `deletable_cwd`, which Windows skips and Linux runs):
 
 | Area | Files | Tests |
 |------|-------|-------|
 | Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 188 |
-| Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 341 |
+| Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 361 |
 | Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 156 |
 | Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
 | Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 76 |
@@ -666,7 +685,7 @@ Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
 
 **What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — a sixth, `test_json_handler.py`, followed it on 09-07 when DPLAN-0323 consolidated the shim twins, which is where 14 of the old 1272 went — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
 
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1339 passed in 138s on 2026-09-12.
+Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1359 passed in 130s on 2026-09-13.
 
 ---
 
@@ -676,8 +695,8 @@ Measured 2026-09-08, all numbers from this tree tonight:
 
 | What | Measured | How |
 |---|---|---|
-| Tests | 1339 pass, 0 skip on Linux, 31 files (1230 `def test_` functions) — remeasured 2026-09-12 | `python -m pytest tests/ -q`, both rootdirs |
-| Seedgo audit | 100 on every CI-scored category; 100 on all eleven v5 pytest_quality rules | `drone @seedgo audit aipass @drone`, `drone @seedgo audit pytest_quality @drone` |
+| Tests | 1359 pass, 0 skip on Linux, 31 files (1244 `def test_` functions) — remeasured 2026-09-13 | `python -m pytest tests/ -q`, both rootdirs |
+| Seedgo audit | 100 on every CI-scored category (remeasured 2026-09-13); pytest_quality 99, its one row the `Self_Skip` capability probe in `test_rm.py`, ruled to stay by @devpulse on 2026-09-12 | `drone @seedgo audit aipass @drone`, `drone @seedgo audit pytest_quality @drone` |
 | Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
 | Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |
 | json handler | the fleet shim, sha256 `3456b766…`, 1724 bytes — bound to prax's service, byte-identical fleet-wide | `sha256sum` |
@@ -693,11 +712,12 @@ Measured 2026-09-08, all numbers from this tree tonight:
 - Pyright's `json` package-shadowing warning could **not** be reproduced again on 2026-09-05 (`pyright apps/handlers/json/json_handler.py` → 0 errors, 0 warnings, 0 informations), the same result as 2026-08-25 — and the subject has changed underneath it since: that file is now the 1724-byte fleet shim, not drone's own handler. It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced twice — no evidence it was never real
 - **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 943 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Patrick ruled on 2026-09-07: annotate, do not delete. The 211 rows stand exactly as written and one record-shaped annotation row was appended after them — same 12 keys, `lane` and `outcome` both `annotation`, `entry_count` 211 — so a reader who reaches the store finds the correction in the store's own language rather than in a document they would have to know to look for. A ledger someone edits to look right is worth less than one with a documented wrong patch in it. The annotation row has no writer and no test pinning it: it was appended by hand, once, with @devpulse's sanction, and nothing in the code path can produce another
 - **Fixed 2026-09-11 — the plain verb now fences above the branches.** `drone rm ..` and `drone rm ../..` from a branch passed containment and the sibling fence (which walks UP and finds no `.trinity/` above `src/aipass/`), and rmtree would have taken every branch. Found during DPLAN-0338 wave 1b by calling the guards directly; no delete was run. Cured in its follow-up: a project folder that contains another citizen is now refused, naming the first one (see *A folder that contains a citizen*)
+- `repo_door` is imported on its own line in `git_module.py`, outside the handler import block, on purpose. seedgo's `dead_code` rule matches imports with a single-line pattern (`[^#\n]*`), so a name that appears only inside a parenthesised multi-line import scored `repo_door.py` unreferenced: Dead_Code 98, Overall 99, and CI gates at 100. A dead_code bypass is whole-standard only, which would hide real dead code, so the line moved instead. Reported to @seedgo 2026-09-13; rejoin the block once the rule reads multi-line imports
 - Recurring sync errors when working tree is dirty — operational, not code bugs
 
 ---
 
-**Seedgo:** 100% | **Tests:** 1329 pass, 0 skip | **Last Updated:** 2026-09-11
+**Seedgo:** 100% | **Tests:** 1359 pass, 0 skip | **Last Updated:** 2026-09-13
 
 ---
 [← Back to AIPass](../../../README.md)

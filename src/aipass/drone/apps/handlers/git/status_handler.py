@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status_handler.py
 # Description: Scoped git status for branch directories
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-17
-# Modified: 2026-08-11
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -23,11 +23,13 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
 
-def get_branch_status(branch_dir: Path) -> dict:
+def get_branch_status(branch_dir: Path, repo_root: Path | None = None) -> dict:
     """Get git status filtered to files under branch_dir.
 
     Args:
         branch_dir: Absolute path to the branch directory.
+        repo_root: The repo to run in. Defaults to the one the caller stands in;
+            the external-repo door names another one outright.
 
     Returns:
         Dict with ok (bool — False when git itself failed), files (list of
@@ -45,7 +47,8 @@ def get_branch_status(branch_dir: Path) -> dict:
         split, because that split is what consumers actually branch on and
         re-slicing a padded string is where they get it wrong.
     """
-    repo_root = find_repo_root()
+    if repo_root is None:
+        repo_root = find_repo_root()
 
     try:
         result = subprocess.run(
