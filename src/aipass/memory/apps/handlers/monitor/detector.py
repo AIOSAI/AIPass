@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.4.0
+# Version: 0.4.1
 # Created: 2025-11-16
 # Modified: 2026-09-15
 # =============================================
@@ -320,11 +320,11 @@ def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str
         return None
 
     today = datetime.now().strftime("%Y-%m-%d")
-    upper_name = branch_name.upper()
+    lower_name = branch_name.lower()
 
     def _walk(val):
         if isinstance(val, str):
-            return val.replace("{{BRANCHNAME}}", upper_name).replace("{{DATE}}", today)
+            return val.replace("{{BRANCH}}", lower_name).replace("{{DATE}}", today)
         if isinstance(val, list):
             return [_walk(item) for item in val]
         if isinstance(val, dict):

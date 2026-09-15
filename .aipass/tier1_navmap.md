@@ -90,7 +90,7 @@ Plans carry context so you don't have to. Create only via `drone @flow create <p
 Save proactively — after milestones, decisions, topic switches.
 
  - `passport.json` — identity. Update only when it genuinely evolves.
- - `local.json` — session log, key learnings, todos.
+ - `local.json` — session log, key learnings, todos (a pad of 10 one-liners, no status; the oldest roll to `.backup/todo/<branch>/backlog.json`).
  - `observations.json` — what you learn about the user.
  - Overflow rolls to vectors, never trim by hand; `drone @memory search "query"` recalls it. Absent locally is not gone.
  - Caps are hook-enforced; live cap in each file's `*_meta` line. Over-cap edits are refused whole; the refusal shows the cut point: trim that tail.

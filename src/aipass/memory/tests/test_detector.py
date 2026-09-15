@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_detector.py
 # Description: Tests for rollover trigger detection handler
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-24
 # Modified: 2026-09-15
 # =============================================
@@ -580,7 +580,7 @@ class TestRecreateTrinityFile:
         template = {
             "document_metadata": {
                 "document_type": "session_history",
-                "document_name": "{{BRANCHNAME}}.LOCAL",
+                "document_name": "{{BRANCH}}.LOCAL",
                 "_usage": "Automated file.",
                 "status": {"health": "healthy"},
             },
@@ -603,7 +603,7 @@ class TestRecreateTrinityFile:
         assert result is not None
         assert result.exists()
         data = json.loads(result.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "TESTBRANCH.LOCAL"
+        assert data["document_metadata"]["document_name"] == "testbranch.LOCAL"
         assert "_usage" in data["document_metadata"]
         assert "limits" not in data["document_metadata"]
 
@@ -616,7 +616,7 @@ class TestRecreateTrinityFile:
         template = {
             "document_metadata": {
                 "document_type": "collaboration_patterns",
-                "document_name": "{{BRANCHNAME}}.OBSERVATIONS",
+                "document_name": "{{BRANCH}}.OBSERVATIONS",
                 "_usage": "Automated file.",
             },
             "observations": [],
@@ -636,7 +636,7 @@ class TestRecreateTrinityFile:
 
         assert result is not None
         data = json.loads(result.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "API.OBSERVATIONS"
+        assert data["document_metadata"]["document_name"] == "api.OBSERVATIONS"
         assert "limits" not in data["document_metadata"]
 
     def test_check_all_branches_recreates_missing(self, tmp_path: Path, monkeypatch):
@@ -658,7 +658,7 @@ class TestRecreateTrinityFile:
         local_template = {
             "document_metadata": {
                 "document_type": "session_history",
-                "document_name": "{{BRANCHNAME}}.LOCAL",
+                "document_name": "{{BRANCH}}.LOCAL",
                 "_usage": "Automated file.",
                 "status": {"health": "healthy"},
             },
@@ -690,7 +690,7 @@ class TestRecreateTrinityFile:
         recreated = trinity_dir / "local.json"
         assert recreated.exists()
         data = json.loads(recreated.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "MYBRANCH.LOCAL"
+        assert data["document_metadata"]["document_name"] == "mybranch.LOCAL"
         assert "limits" not in data["document_metadata"]
 
 

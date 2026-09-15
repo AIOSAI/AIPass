@@ -1,16 +1,16 @@
 {
   "document_metadata": {
     "document_type": "collaboration_patterns",
-    "document_name": "{{BRANCHNAME}}.OBSERVATIONS",
+    "document_name": "{{BRANCH}}.OBSERVATIONS",
     "version": "1.0.0",
     "schema_version": "3.0.0",
     "created": "{{DATE}}",
     "last_updated": "{{DATE}}",
-    "managed_by": "{{BRANCHNAME}}",
+    "managed_by": "{{BRANCH}}",
     "tags": [
       "collaboration",
       "patterns",
-      "{{BRANCHNAME}}"
+      "{{BRANCH}}"
     ],
     "_usage": "Your memory of the USER — nontechnical collaboration patterns: how THIS user works, decides, prefers to collaborate. Every user is different; capture this one. Not a technical log (that is local.json). No cadence duty — add only when a real pattern shows; sessions without a new observation are normal. Newest on top; rollover archives the oldest to @memory. Caps: @memory memory.config.json → entry_limits, rendered into observations_meta."
   },

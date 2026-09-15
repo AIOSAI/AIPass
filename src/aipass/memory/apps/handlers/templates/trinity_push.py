@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -485,9 +485,9 @@ def _today() -> str:
 
 
 def _template_tags(template: dict, branch_name: str) -> list[str]:
-    """The template's tag list with ``{{BRANCHNAME}}`` resolved."""
+    """The template's tag list with ``{{BRANCH}}`` resolved."""
     tags = template.get("document_metadata", {}).get("tags", [])
-    return [tag.replace("{{BRANCHNAME}}", branch_name) for tag in tags if isinstance(tag, str)]
+    return [tag.replace("{{BRANCH}}", branch_name) for tag in tags if isinstance(tag, str)]
 
 
 def build_doc_metadata(current: Any, file_key: str, branch_name: str) -> dict:

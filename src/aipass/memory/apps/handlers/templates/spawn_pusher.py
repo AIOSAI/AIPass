@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn_pusher.py
 # Description: Spawn Template Sync Handler
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2026-03-15
-# Modified: 2026-03-15
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -17,7 +17,7 @@ Purpose:
     Spawn has multiple template sets (birthright, builder, etc.) each containing
     a .trinity/ directory with local.json and observations.json. This handler
     auto-discovers spawn's template sets and propagates structural changes from
-    memory's canonical templates, preserving {{BRANCHNAME}} and {{DATE}} placeholders.
+    memory's canonical templates, preserving {{BRANCH}} and {{DATE}} placeholders.
 
 Independence:
     Self-contained handler. Reads/writes JSON files directly with pathlib.
@@ -150,7 +150,7 @@ def push_to_spawn_templates(dry_run: bool = False) -> dict:
     and OBSERVATIONS.template.json against each set's local.json and
     observations.json. Writes updates when structural differences are found.
 
-    Placeholders ({{BRANCHNAME}}, {{DATE}}) are preserved as-is since
+    Placeholders ({{BRANCH}}, {{DATE}}) are preserved as-is since
     spawn resolves them at branch-creation time.
 
     Args:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -467,6 +467,22 @@ class TestTheMachineFrame:
 
         assert any("status" in change and "prune" in change for change in changes)
         assert any("active_tasks" in change for change in changes)
+
+    def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):
+        """spawn renders {{BRANCH}} lowercase; gold must match or spawn-templates reverts spawn."""
+        from aipass.memory.apps.handlers.monitor import detector
+
+        assert sorted(path.name for path in detector._TEMPLATE_MAP.values()) == [
+            "LOCAL.template.json",
+            "OBSERVATIONS.template.json",
+        ]
+        for path in detector._TEMPLATE_MAP.values():
+            text = path.read_text(encoding="utf-8")
+            assert "{{BRANCHNAME}}" not in text, path.name
+            assert "{{BRANCH}}" in text, path.name
+            tags = tp._template_tags(json.loads(text), "guinea")
+            assert tags[-1] == "guinea", path.name
+            assert not [tag for tag in tags if "{{" in tag], path.name
 
 
 # =============================================================================

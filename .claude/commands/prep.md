@@ -15,7 +15,7 @@ Purpose: Button up everything at the end of a session — or before a /compact. 
 Each memory file plays a distinct role. Update based on what actually changed this session.
 
 - **`.trinity/passport.json`** — IDENTITY. Who you are: role, capabilities, principles. Only update if identity genuinely evolved this session.
-- **`.trinity/local.json`** — YOUR MEMORY. Add/update session entry with a summary of work done. Add key_learnings for anything learned. Update todos[] with current in-flight items.
+- **`.trinity/local.json`** — YOUR MEMORY. Add/update session entry with a summary of work done. Add key_learnings for anything learned. Update todos[] with current in-flight items — one line each, under 100 chars, no status.
 - **`.trinity/observations.json`** — YOUR MEMORY OF THE USER. Collaboration insights, preferences, friction points. Skip if nothing new about the user this session.
 
 ### Entry shape — one rule for all four types
@@ -24,16 +24,16 @@ Each memory file plays a distinct role. Update based on what actually changed th
 
 - **`number`** — a monotonic int per type (highest = newest, never reused). New entry's number = current max for that type **+ 1**.
 - **`date`** — ISO date/datetime.
-- Plus its text field + extras: key_learnings `{number, date, key, value}` · sessions `{number, date, summary, status, tags}` · todos `{number, date, task, priority, status}` · observations `{number, date, note, tags}`.
+- Plus its text field + extras: key_learnings `{number, date, key, value}` · sessions `{number, date, summary, status, tags}` · todos `{number, date, task, priority?}` (no `status` — the story lives in sessions and plans) · observations `{number, date, note, tags}`.
 
-**When adding:** stamp `number` + `date`, then **prepend** (newest on top). **Don't hand-trim** sessions/key_learnings/observations — rollover archives the oldest *by number* to @memory automatically. **Todos are the exception** — rollover never touches them, so you prune done ones by hand (see Reconcile below).
+**When adding:** stamp `number` + `date`, then **prepend** (newest on top). **Don't hand-trim** sessions/key_learnings/observations — rollover archives the oldest *by number* to @memory automatically. **Todos roll too** — the pad holds 10; the oldest *by number* roll to `.backup/todo/<branch>/backlog.json` (`drone @memory todo backlog` reads it, `todo restore <n>` brings one back). Rolling is not closing: delete done ones by hand (see Reconcile below).
 
 ### Reconcile todos — verify against reality, don't trust the label
 
-Stored status drifts: a todo finished in a past session often never gets closed. Before writing the session entry, **audit every open todo against the actual system** — check the real state, not the stored `status`:
+A todo finished in a past session often never gets deleted. Before writing the session entry, **audit every todo on the pad against the actual system** — the real state, not what you remember:
 
 - Does the file/dir still exist (or is it gone)? Is the code path in or out? Does the README/doc actually say what the todo claims? Does the audit pass?
-- **Close what's verifiably done** → note it in the session entry, then **DELETE the todo from the array**. Rollover never trims todos (they're operational — only sessions/key_learnings/observations roll), so done items left as `status: done` pile up and go stale across chats. Fail honestly — remove only on evidence, never just to tidy the list.
+- **Close what's verifiably done** → note it in the session entry, then **DELETE the todo from the array**. The roll only moves the oldest to the backlog, it never closes anything, so a done todo left on the pad pushes a live one off it. Fail honestly — remove only on evidence, never just to tidy the list.
 - **Re-scope what's partially done** → record which sub-items landed, keep the rest open.
 - **Leave deferred / pending-decision todos open** — but confirm they're still real.
 
@@ -65,7 +65,7 @@ Quick checks beat assumptions: `ls`/`find` for files, `git ls-files`/`grep` for 
 ## 6. Loose Ends
 
 - Flag anything in-flight: running background agents, dispatched branches waiting for replies, pending decisions
-- If anything can't survive compaction (e.g., agent IDs needed for resume), write it to local.json todos[]
+- If anything can't survive compaction (e.g., agent IDs needed for resume), write it to local.json todos[] (one line, under 100 chars)
 
 ## Confirm
 
