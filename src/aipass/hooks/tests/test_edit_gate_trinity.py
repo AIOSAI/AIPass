@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.3.0
+# Version: 1.5.0
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-08-27
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for edit_gate .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -81,6 +81,20 @@ def _hook_data(file_path, content=None, tool_name="Write", cwd=None, **extra_inp
     return data
 
 
+def _advisory_context(result):
+    """The todo-count advisory as the model receives it: PreToolUse additionalContext.
+
+    Plain stdout on a PreToolUse exit 0 never reaches the model (measured on
+    @canary, 2026-09-15). Never a decision: the advisory must not block, allow or ask.
+    """
+    assert result["exit_code"] == 0
+    doc = json.loads(result["stdout"])
+    assert set(doc) == {"hookSpecificOutput"}
+    assert set(doc["hookSpecificOutput"]) == {"hookEventName", "additionalContext"}
+    assert doc["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    return doc["hookSpecificOutput"]["additionalContext"]
+
+
 def _mock_entry_limits(limits):
     """Create a mock module with controlled limits and real changed_entries."""
     el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
@@ -145,6 +159,12 @@ def _mock_importlib_modules(limits, rollover_cfg=None):
     cfg = rollover_cfg if rollover_cfg is not None else _ROLLOVER_CONFIG_10
     config_loader_mock.load.return_value = cfg
     config_loader_mock.section.side_effect = lambda name: cfg.get(name, {})
+    # memory's real resolver over the test's rollover section: no I/O when the
+    # section is passed, so the pad count is exactly what memory's roll applies.
+    cl_real = _REAL_IMPORT_MODULE("aipass.memory.apps.handlers.json.config_loader")
+    config_loader_mock.get_todos_count.side_effect = lambda branch: cl_real.get_todos_count(
+        branch, cfg.get("rollover", {})
+    )
 
     def side_effect(name):
         if "entry_limits" in name:
@@ -1248,8 +1268,8 @@ class TestTrinityTodosCountAdvisory:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "todos over limit" in result["stdout"]
-        assert "11/10" in result["stdout"]
+        assert "todos over limit" in _advisory_context(result)
+        assert "11/10" in _advisory_context(result)
 
     def test_todos_under_limit_no_advisory(self, tmp_path):
         """Write with 5 todos (limit 10) -> exit_code 0, empty stdout."""
@@ -1304,8 +1324,8 @@ class TestTrinityTodosCountAdvisory:
             )
 
         assert result["exit_code"] == 0
-        assert "todos over limit" in result["stdout"]
-        assert "11/10" in result["stdout"]
+        assert "todos over limit" in _advisory_context(result)
+        assert "11/10" in _advisory_context(result)
 
     def test_todos_advisory_never_blocks(self, tmp_path):
         """Even with enforce=True, todos count advisory has exit_code 0."""
@@ -1322,8 +1342,8 @@ class TestTrinityTodosCountAdvisory:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "todos over limit" in result["stdout"]
-        assert "15/10" in result["stdout"]
+        assert "todos over limit" in _advisory_context(result)
+        assert "15/10" in _advisory_context(result)
 
     def test_todos_advisory_observations_json_skip(self, tmp_path):
         """observations.json never triggers todos advisory."""
@@ -1437,7 +1457,74 @@ class TestTrinityTodosCountAdvisory:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "6/5" in result["stdout"]
+        assert "6/5" in _advisory_context(result)
+
+    def test_the_advisory_names_the_roll_and_the_backlog(self, tmp_path):
+        """DPLAN-0345: over the pad is legal on disk; the oldest roll off, and it says where."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(13)]})
+
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        stdout = _advisory_context(result)
+        assert "13/10" in stdout
+        assert "the oldest 3 roll off at the next rollover" in stdout
+        assert "drone @memory rollover run --branch @hooks" in stdout
+        assert ".backup/todo/hooks/backlog.json" in stdout
+        assert "drone @memory todo backlog @hooks" in stdout
+        assert "do not auto-roll" not in stdout
+
+    def test_a_per_branch_block_without_todos_reads_memorys_default(self, tmp_path):
+        """The count is memory's resolver's, not a second reader's.
+
+        A per_branch local block that carries no todos count falls back to the
+        CONFIGURED default in memory (get_todos_count). The old read here took
+        the per_branch block and a hardcoded 10, so with a default of 8 it stayed
+        silent at 9 while memory's roll moved one.
+        """
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(9)]})
+        rollover_cfg = {
+            "rollover": {
+                "defaults": {"local": {"sessions": {"count": 15}, "todos": {"count": 8}}},
+                "per_branch": {"hooks": {"local": {"sessions": {"count": 15}}}},
+            },
+        }
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert "9/8" in _advisory_context(result)
+        assert "the oldest 1 roll off" in _advisory_context(result)
+
+    def test_no_usable_count_promises_no_roll(self, tmp_path):
+        """No usable count: memory rolls nothing, so the fallback 10 must not claim a roll."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(11)]})
+        rollover_cfg = {"rollover": {"defaults": {"local": {"todos": {"count": "ten"}}}, "per_branch": {}}}
+
+        with patch(
+            "importlib.import_module",
+            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
+        ):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+
+        assert "11/10" in _advisory_context(result)
+        assert "nothing rolls" in _advisory_context(result)
+        assert "roll off" not in _advisory_context(result)
 
     def test_no_todos_container_no_advisory(self, tmp_path):
         """local.json with no todos key -> no advisory."""
@@ -2236,11 +2323,12 @@ class TestSectionCountWording:
         assert "The @memory rollover hook archives the 3 oldest at the next PreCompact" in caplog.text
         assert "drone @memory search" in caplog.text
 
-    def test_todos_never_claim_a_rollover_trim(self, tmp_path, caplog):
-        """todos do not roll. Only the advisory speaks for them, and it says prune.
+    def test_todos_over_the_pad_name_the_backlog_not_vectors(self, tmp_path, caplog):
+        """todos roll now (DPLAN-0345) - to a backlog FILE, never to vectors.
 
-        A `count` under local.todos used to reach the generic loop and promise a
-        trim at the next PreCompact — a trim that has never existed for todos.
+        Until then they skipped this loop, because a trim claim was false. Now
+        the claim is true, so the note is logged, but the vector clause ("recall
+        them with drone @memory search") would be the false one for todos.
         """
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
@@ -2248,12 +2336,19 @@ class TestSectionCountWording:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"t{i}"} for i in range(11)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with (
+            caplog.at_level(logging.INFO),
+            patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)),
+        ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "todos do not auto-roll" in result["stdout"]
-        assert "over the rollover budget" not in caplog.text
+        notes = [r.getMessage() for r in caplog.records if "todos has 11 entries" in r.getMessage()]
+        assert len(notes) == 1
+        assert "1 over the pad of 10" in notes[0]
+        assert ".backup/todo/hooks/backlog.json" in notes[0]
+        assert "drone @memory todo backlog @hooks" in notes[0]
+        assert "drone @memory search" not in notes[0]
 
 
 class TestTodosAdvisoryIsThrottled:

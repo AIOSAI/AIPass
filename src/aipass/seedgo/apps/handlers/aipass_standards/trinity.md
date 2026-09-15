@@ -58,7 +58,7 @@ sessions_meta     sessions[]
 |---|---|---|---|
 | sessions | `{number, date, summary, status, tags?}` | summary ≤300 | keep 15, oldest → @memory |
 | key_learnings | `{number, date, key, value}` | value ≤200 | keep 15, oldest → @memory |
-| todos | `{number, date, task, priority, status}` | task ≤150 | **NEVER rolled** — delete by hand when done |
+| todos | `{number, date, task, priority?}` — no `status` | task ≤100 | a pad of 10; the oldest roll to `.backup/todo/<branch>/backlog.json` (a plain file, never vectors) — delete one when done |
 
 **Meta lines** — every section's `*_meta` value is `⟦ machine tab ⟧ + one-sentence semantics`, fully rendered, never hand-edited:
 
@@ -70,10 +70,18 @@ sessions_meta     sessions[]
 
 The ⟦⟧ tab carries the live numbers (rendered from config — a config change re-renders every file); the sentence after it carries the section's meaning (owned by the template). The agent reads the cap where it writes; it never has to know the config exists.
 
+The todos tab (DPLAN-0345) names the pad instead of a keep count:
+
+```
+⟦ pad of 10 · oldest roll to .backup/todo/memory/backlog.json · task ≤100 chars · draft to 80 · next #41 ⟧ One line of what to do: ...
+```
+
+The pad size is `rollover.defaults.local.todos.count` through @memory's resolver (a per-branch `local` block without a todos count falls back to the default); no usable count renders `⟦ no pad size configured — nothing rolls · task ≤… · next #N ⟧`. `next #N` is the highest number on the pad or in the backlog plus one, derived when the tab is RENDERED — adding a todo does not re-render, so the checker reads that slot by shape (a number or `?`), never by value. A render with no branch context (spawn birth) writes `<branch>` and `#?`, and that line is accepted whole.
+
 **Semantics — the one-line definitions:**
 - **sessions** = the chronicle — what happened and how it ended; one entry per session.
 - **key_learnings** = transferable technical lessons — what future-you needs to know again; the story itself lives in sessions[].
-- **todos** = operational sticky notes — user asides, oddities spotted mid-task; capture the note, stay on task. DELETE when done (never leave `status: done`); reconcile against reality on load.
+- **todos** = a sticky-note pad — one line of what to do ('Check on seedgo's errors in logs', 'fix drone help'). No status, no log: the story lives in plans and sessions. Delete it when done.
 
 **Where the full story goes** — the session entry is a headline, not a container:
 - `summary` holds the headline and nothing more. Extra fields bolted onto a session entry (`findings[]`, `verification`, …) are shape violations, however well-intentioned — the shape is closed.
@@ -127,10 +135,11 @@ Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, 
 3. **Entry shapes** — required fields present with required TYPES; renamed fields flagged by name; entries missing `number`/`date` flagged.
 4. **Ordering & numbering** — newest-first, numbers strictly descending, no reuse.
 5. **Char caps** — measured against the CONFIG (not the meta line), on the canonical field; an unmeasurable field is a violation.
-6. **Meta lines & `_usage`** — byte-match against what the renderer would produce from config + template.
+6. **Meta lines & `_usage`** — byte-match against what the renderer would produce from config + template (the todos tab's `next #N` slot is read by shape, see above).
 7. **Freshness** — `last_updated` ≥ newest entry date.
-8. **Todos hygiene** — entries with `status: done` flagged (delete, don't keep).
-9. **Receipt** — `.template_version.json` present, machine-shaped, `template_versions` matching the gold source.
+8. **Receipt** — `.template_version.json` present, machine-shaped, `template_versions` matching the gold source.
+
+**Retired 2026-09-15 — Todos hygiene** (was group 8, weight 5). It flagged a todo kept as `status: done`. Todos v2 (DPLAN-0345) has no `status` field, so that trophy can only be spelled as a key outside the closed shape, which Entry shapes flags by name; the 5 points moved there. A replacement was measured first and not built: a done-marker read of task text (`DONE`, `✅`, `[x]`, …) found 1 hit in 191 fleet todos, and it was not a trophy. Nor is a pad over its size a violation: the roll cures it, the same as sessions past their keep count.
 
 ---
 
@@ -145,7 +154,7 @@ Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, 
 // BAD — renamed field: invisible to the char gate
 {"number": 90, "date": "2026-04-11", "learning": "merged key+value into one 600-char blob"}
 
-// BAD — todo kept as a trophy
+// BAD — todo carrying status: the shape is closed, done means deleted
 {"number": 12, "date": "2026-03-02", "task": "fix the thing", "priority": "high", "status": "done"}
 ```
 
@@ -164,7 +173,7 @@ Read-only, per branch. Fails loud — a field it cannot measure is a VIOLATION, 
 ## Scoring
 
 - **Scope:** per-branch, the three in-scope `.trinity/` files
-- **Score 100:** all nine scan groups clean
+- **Score 100:** all eight scan groups clean
 - **Failure message:** names the file, the rule, and the offending entry numbers — up to 3 samples
 
 **Group weights** (set by @seedgo at build time, per the contract's proposal — shape/type
@@ -172,14 +181,13 @@ heaviest because it breaks the machinery, freshness lightest):
 
 | Group | Weight |
 |---|---|
-| Entry shapes | 25 |
+| Entry shapes | 30 |
 | Top-level keys | 15 |
 | Ordering & numbering | 12 |
 | Char caps | 12 |
 | File set | 10 |
 | Meta lines & `_usage` | 10 |
 | Receipt | 8 |
-| Todos hygiene | 5 |
 | Freshness | 3 |
 
 Final score = weighted sum of each group's own 0-100 subscore. Subscores are proportional
@@ -205,7 +213,7 @@ None for shape rules, by design — a bypassable memory standard recreates the d
 - **Numbers:** `memory/memory_json/custom_config/memory.config.json` → `entry_limits`, `rollover`
 - **Renderer:** `memory/apps/handlers/tracking/tab_renderer.py`
 - **Checker:** `seedgo/apps/handlers/aipass_standards/trinity_check.py`
-- **Tests:** `seedgo/tests/test_trinity_check.py` — 125 tests, including the live fleet
+- **Tests:** `seedgo/tests/test_trinity_check.py` — 170 test functions (2026-09-15), including the live fleet
   acceptance bar (exactly 6 of 18 citizens canonical on observations shape). That bar is
   deliberately coupled to fleet state: as branches migrate, UPDATE the expected set —
   never loosen or delete it.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-13
-# Modified: 2026-06-13
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -19,6 +19,7 @@ Covers:
   5. Full config                    -- passthrough of file values.
   6. section()                      -- returns named section or empty dict for unknown.
   7. deep_merge()                   -- nested merge, non-mutation, override precedence.
+  8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
 """
 
 import copy
@@ -681,3 +682,140 @@ class TestDeepMerge:
         result = mod.deep_merge(base, overrides)
 
         assert result["a"] == "flat_string"
+
+
+# ===========================================================================
+# 8. Todos count (DPLAN-0345) -- count only, display-only, carried into per_branch
+# ===========================================================================
+
+
+def _keys_anywhere(node):
+    """Every dict key anywhere in a JSON tree."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield key
+            yield from _keys_anywhere(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _keys_anywhere(item)
+
+
+def _rollover_section(mod, per_branch: dict | None = None) -> dict:
+    """The regeneration seed's rollover section with a chosen per_branch."""
+    rollover = copy.deepcopy(mod.DEFAULT_CONFIG["rollover"])
+    rollover["per_branch"] = per_branch or {}
+    return rollover
+
+
+class TestTodosCount:
+    """todos joins the resolver as a COUNT; it never becomes settable or a vector family."""
+
+    def test_the_regeneration_seed_carries_a_todos_count_of_10(self) -> None:
+        assert _get_module().DEFAULT_CONFIG["rollover"]["defaults"]["local"]["todos"] == {"count": 10}
+
+    def test_the_todos_task_cap_is_100_chars(self) -> None:
+        assert _get_module().DEFAULT_CONFIG["entry_limits"]["entry_types"]["todos"]["max_chars"] == 100
+
+    def test_no_max_entries_anywhere(self) -> None:
+        """A pad's size is ONE number, rollover.defaults.local.todos.count - never a second knob.
+
+        The seed ships; the operator file is gitignored, so it is walked where this machine has one.
+        """
+        mod = _get_module()
+        trees = [mod.DEFAULT_CONFIG]
+        if mod._CONFIG_PATH.exists():
+            trees.append(json.loads(mod._CONFIG_PATH.read_text(encoding="utf-8")))
+        for tree in trees:
+            assert "max_entries" not in set(_keys_anywhere(tree))
+
+    def test_todos_is_a_count_only_type(self) -> None:
+        mod = _get_module()
+        assert mod.ENTRY_TYPE_KEYS["todos"] == ("local", "todos")
+        assert "todos" in mod.COUNT_ONLY_ENTRY_TYPES
+        assert "todos" not in mod.SETTABLE_ENTRY_TYPES
+
+    def test_the_resolver_reports_the_todos_count(self) -> None:
+        mod = _get_module()
+        row = mod.resolve_limits(_rollover_section(mod), "Guinea")["todos"]
+        assert (row["count"], row["default_count"], row["source"], row["is_override"]) == (10, 10, "defaults", False)
+
+    def test_a_local_block_without_todos_falls_back_for_todos_only(self) -> None:
+        mod = _get_module()
+        limits = mod.resolve_limits(
+            _rollover_section(mod, {"guinea": {"local": {"sessions": {"count": 30}}}}), "guinea"
+        )
+        assert (limits["todos"]["count"], limits["todos"]["source"]) == (10, "defaults")
+        assert limits["key_learnings"]["count"] is None, "the per-file-key rule still holds for the vector families"
+
+    def test_a_per_branch_todos_count_wins(self) -> None:
+        mod = _get_module()
+        rollover = _rollover_section(mod, {"guinea": {"local": {"todos": {"count": 4}}}})
+        assert mod.get_todos_count("GUINEA", rollover) == 4
+
+    @pytest.mark.parametrize("unusable", [True, 0, -3, "10", 2.5, None])
+    def test_an_unusable_count_is_no_count(self, unusable) -> None:
+        mod = _get_module()
+        rollover = _rollover_section(mod)
+        rollover["defaults"]["local"]["todos"] = {"count": unusable}
+        assert mod.get_todos_count("guinea", rollover) is None
+
+    def test_get_todos_count_reads_the_config_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        mod = _get_module()
+        config = copy.deepcopy(mod.DEFAULT_CONFIG)
+        config["rollover"]["per_branch"] = {"guinea": {"local": {"todos": {"count": 6}}}}
+        monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, config))
+        assert mod.get_todos_count("guinea") == 6
+
+
+class TestTodosCountMaterializes:
+    """Every per_branch local block a write creates or touches carries the todos count."""
+
+    @staticmethod
+    def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod, config: dict) -> Path:
+        registry = {
+            "branches": [
+                {"name": "Guinea", "path": "src/aipass/guinea", "status": "active"},
+                {"name": "pig", "path": "src/aipass/pig", "status": "active"},
+            ]
+        }
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        path = _write_config(tmp_path, config)
+        monkeypatch.setattr(mod, "_CONFIG_PATH", path)
+        return path
+
+    def test_materialize_carries_the_configured_todos_count(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        config = copy.deepcopy(mod.DEFAULT_CONFIG)
+        config["rollover"]["defaults"]["local"]["todos"] = {"count": 7}
+        self._world(tmp_path, monkeypatch, mod, config)
+
+        per_branch = mod.materialize_per_branch()
+
+        assert set(per_branch) == {"guinea", "pig"}
+        assert all(entry["local"]["todos"] == {"count": 7} for entry in per_branch.values())
+
+    def test_a_set_on_an_existing_block_without_todos_writes_it(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        config = copy.deepcopy(mod.DEFAULT_CONFIG)
+        config["rollover"]["per_branch"] = {
+            "guinea": {"local": {"sessions": {"count": 30}, "key_learnings": {"count": 15}}}
+        }
+        path = self._world(tmp_path, monkeypatch, mod, config)
+
+        assert mod.set_branch_limit("guinea", "sessions", 20)["success"] is True
+
+        local = json.loads(path.read_text(encoding="utf-8"))["rollover"]["per_branch"]["guinea"]["local"]
+        assert local["sessions"] == {"count": 20}
+        assert local["todos"] == {"count": 10}
+
+    def test_todos_is_refused_by_both_writers_and_nothing_is_written(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        path = self._world(tmp_path, monkeypatch, mod, copy.deepcopy(mod.DEFAULT_CONFIG))
+        before = path.read_bytes()
+        display_only = {"success": False, "error": "'todos' count is display-only in v1 - not settable"}
+
+        assert mod.set_branch_limit("guinea", "todos", 5) == display_only
+        assert mod.set_default_limit("todos", 5) == display_only
+        assert mod.set_default_limit("wizard", 5) == {"success": False, "error": "Unknown entry type: 'wizard'"}
+        assert path.read_bytes() == before

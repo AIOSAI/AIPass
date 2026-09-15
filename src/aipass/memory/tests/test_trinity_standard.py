@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_standard.py
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-25
-# Modified: 2026-08-25
+# Modified: 2026-09-15
 # =============================================
 
 """Trinity standard machinery — the pins that were red before the build.
@@ -260,6 +260,19 @@ class TestRendererReadsTheTemplate:
         assert tab.endswith("⟧")
         assert "RULE: DELETE" not in tab
         assert "BAU" not in tab
+
+    def test_the_local_template_teaches_the_pad_not_the_log(self):
+        """DPLAN-0345: todos roll to a backlog, carry no status, and are one line of what to do."""
+        template = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
+        usage = template["document_metadata"]["_usage"]
+        prose = template["todos_meta"]
+
+        assert "NEVER rolled" not in usage
+        assert "backlog" in usage
+        assert "status:done" not in prose
+        assert prose.startswith("{{TODOS_META}} One line of what to do: ")
+        assert "No status, no log" in prose
+        assert template["todos"] == []
 
     def test_an_unreadable_template_refuses_rather_than_inventing_prose(self, tmp_path, monkeypatch):
         """No silent fallback to a hardcoded sentence — that is the constant again."""

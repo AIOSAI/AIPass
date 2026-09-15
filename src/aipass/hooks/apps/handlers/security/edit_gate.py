@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.10.0
+# Version: 1.12.0
 # Description: Cross-project (tool + scripted), cross-branch, inbox and shell-to-memory write protection
 #              (PreToolUse), plus the shell-memory tripwire (PreToolUse snapshot, PostToolUse report)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-13
+# Modified: 2026-09-15
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -42,9 +42,11 @@ _PROJECT_MARKER = "*_REGISTRY.json"
 _TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json"})
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 _NUMBER_KEYS = ("number", "session_number")
-# todos never roll — they are operational and pruned by hand. _todos_count_advisory
-# says so in the right words; the rollover-budget warning must not also claim a trim.
-_NON_ROLLING_SECTIONS = frozenset({"todos"})
+# todos roll (DPLAN-0345, Patrick 2026-09-14): over the pad count is legal on disk,
+# and the oldest roll off to the branch's backlog FILE at its next rollover, never
+# to vectors. The path is @memory's (todo_roll.backlog_path_for), spelled here.
+_TODOS_COUNT_FALLBACK = 10
+_TODO_BACKLOG = ".backup/todo/{branch}/backlog.json"
 # The shell-memory tripwire (DPLAN-0342 row 3). One snapshot file per session in
 # the temp dir, the home cadence's guard files already use. It holds the last few
 # calls, keyed by tool_use_id, because a call whose PostToolUse never fires (a later
@@ -609,12 +611,18 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
     """Return advisory text if todos exceed rollover count limit, else empty string.
 
     Throttled to roughly one reminder per 10 turns (Patrick's ruling,
-    2026-08-19). Being over the cap is a STANDING condition — it stays true for
-    days and re-asserts on every local.json edit — so firing per edit turned a
-    correct advisory into 209 identical log lines and tripped @trigger's
-    repeat-signature escalation. The log line throttles with the stdout line,
-    not separately: escalation feeds on log repetition, so a silenced advisory
-    that still writes a warning would fix nothing.
+    2026-08-19). Being over the cap is a STANDING condition — it stays true
+    until the next rollover and re-asserts on every local.json edit — so firing
+    per edit turned a correct advisory into 209 identical log lines and tripped
+    @trigger's repeat-signature escalation. The log line throttles with the
+    stdout line, not separately: escalation feeds on log repetition, so a
+    silenced advisory that still writes a warning would fix nothing.
+
+    The count is @memory's one resolver (config_loader.get_todos_count), the
+    number its roll applies. The old per_branch-or-defaults read said a hardcoded
+    10 for a per_branch local block without todos, where memory falls back to
+    the configured default. With no usable count configured memory rolls
+    nothing, and the text says so instead of promising a roll.
 
     Scope: only this count advisory softens. Hard entry-limit blocks and the
     newest-first checks are unchanged.
@@ -624,14 +632,22 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         if not isinstance(todos, list):
             return ""
         cl = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
-        cfg = cl.load()
-        roll = cfg.get("rollover", {})
-        branch_cfg = roll.get("per_branch", {}).get(branch) or roll.get("defaults", {})
-        limit = branch_cfg.get("local", {}).get("todos", {}).get("count", 10)
+        configured = cl.get_todos_count(branch)
+        limit = configured if configured is not None else _TODOS_COUNT_FALLBACK
         count = len(todos)
         if count <= limit:
             return ""
-        msg = f"todos over limit ({count}/{limit}) — todos do not auto-roll; prune completed ones."
+        if configured is None:
+            msg = (
+                f"todos over limit ({count}/{limit}) — no usable todos count in @memory's config "
+                "(rollover.defaults.local.todos.count), so nothing rolls; delete done ones by hand."
+            )
+        else:
+            msg = (
+                f"todos over limit ({count}/{limit}) — legal on disk; the oldest {count - limit} roll off at the "
+                f"next rollover (PreCompact, or drone @memory rollover run --branch @{branch}) to "
+                f"{_TODO_BACKLOG.format(branch=branch)}; drone @memory todo backlog @{branch} reads it."
+            )
         cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
         if not cadence.should_fire_advisory("todos_count"):
             # debug, not info: the condition is unchanged and already recorded
@@ -684,6 +700,30 @@ def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: 
     )
 
 
+def _note_todos_over_pad(branch: str, count: int, cap: int) -> None:
+    """The todos twin of _note_over_budget: the roll is real, its destination is a file.
+
+    Until DPLAN-0345 todos skipped this lane: they never rolled, so any trim claim
+    was false. They roll now, one branch per call, to the backlog file and never
+    to vectors, so "recall them with drone @memory search" would be the false
+    clause. INFO for the same reason as _note_over_budget.
+    """
+    logger.info(
+        "[HOOKS] edit_gate: @%s .trinity/local.json — todos has %d entries, %d over the pad of %d. "
+        "The %d oldest roll to %s at @%s's next PreCompact (or drone @memory rollover run --branch @%s); "
+        "nothing is lost — drone @memory todo backlog @%s lists them.",
+        branch,
+        count,
+        count - cap,
+        cap,
+        count - cap,
+        _TODO_BACKLOG.format(branch=branch),
+        branch,
+        branch,
+        branch,
+    )
+
+
 def _check_session_counts(branch: str, file_stem: str, entries: list, section_cfg: dict) -> None:
     """Warn on the sessions section, budgeting auto-compact snapshots separately.
 
@@ -718,8 +758,6 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
         for section_name, section_cfg in file_cfg.items():
             if not isinstance(section_cfg, dict):
                 continue
-            if section_name in _NON_ROLLING_SECTIONS:
-                continue
             entries = after.get(section_name)
             if not isinstance(entries, list):
                 continue
@@ -729,7 +767,11 @@ def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
                 continue
 
             cap = section_cfg.get("count")
-            if cap is not None and len(entries) > cap:
+            if cap is None or len(entries) <= cap:
+                continue
+            if section_name == "todos":
+                _note_todos_over_pad(branch, len(entries), cap)
+            else:
                 _note_over_budget(branch, file_stem, section_name, len(entries), cap)
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: section count check failed (skipping): %s", exc)
@@ -849,7 +891,12 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         if fp.name == "local.json":
             advisory = _todos_count_advisory(after, branch)
             if advisory:
-                return {"stdout": advisory, "exit_code": 0}
+                # Context, not plain stdout: on a PreToolUse exit 0 Claude Code shows
+                # plain stdout in the transcript view and never hands it to the model,
+                # and the model writing the 11th todo is the audience (@canary
+                # measured it, 2026-09-15). No permissionDecision: this never decides.
+                output = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": advisory}}
+                return {"stdout": json.dumps(output), "exit_code": 0}
 
         return None
     except Exception as exc:

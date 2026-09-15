@@ -1,13 +1,13 @@
 # =================== AIPass ====================
 # Name: trinity_groups.py
-# Description: Trinity standard - the nine group checkers and their shared helpers
-# Version: 1.0.0
+# Description: Trinity standard - the eight group checkers and their shared helpers
+# Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-15
 # =============================================
 
 """
-Trinity standard -- the nine group checkers.
+Trinity standard -- the eight group checkers.
 
 Split out of ``trinity_check.py`` on 2026-08-27, when that file crossed the
 1500-line architecture cap.  This is a RELOCATION: no rule, threshold or
@@ -31,9 +31,16 @@ entry denominator only decides how bad the score is.  A group holding any
 record can never score 100, even when the denominator is empty.
 
 Contents, in file order: shared type/path/config helpers, message formatting,
-the three check builders, section access, then the nine groups -- file set,
+the three check builders, section access, then the eight groups -- file set,
 top-level keys, entry shapes, ordering & numbering, char caps, meta lines &
-_usage, freshness, todos hygiene, receipt.
+_usage, freshness, receipt.
+
+Todos v2 (DPLAN-0345, 2026-09-15): a todo is ``{number, date, task,
+priority?}`` with no ``status``, and the todos tab names the pad size, the
+backlog file and the next number.  Group 8, Todos hygiene, is RETIRED: it
+flagged a todo kept as ``status: done``, and with no ``status`` field that
+trophy can only be spelled as a key outside the closed shape, which Entry
+shapes already flags by name.  Its weight moved with the defect.
 """
 
 import re
@@ -141,15 +148,11 @@ _ENTRY_RULES: dict[str, dict[str, dict[str, str]]] = {
         },
         "optional": {},
     },
+    # DPLAN-0345: no `status`. What is on the pad IS the status; done = deleted.
+    # Mirrors @memory's trinity_push.ENTRY_RULES["todos"].
     "todos": {
-        "required": {
-            "number": _TYPE_INT,
-            "date": _TYPE_STR,
-            "task": _TYPE_STR,
-            "priority": _TYPE_STR,
-            "status": _TYPE_STR,
-        },
-        "optional": {},
+        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "task": _TYPE_STR},
+        "optional": {"priority": _TYPE_STR},
     },
     "observations": {
         "required": {
@@ -187,6 +190,19 @@ _RENDERER_FALLBACK_FIELD = "value"
 # draft_target(): integer percent, floored, derived from the SAME resolved cap
 # (per_branch included) - 300/200/150 -> 240/160/120, 77 -> 61, never rounded.
 _DRAFT_PERCENT = 80
+
+# The todos pad tab (DPLAN-0345), mirroring @memory's tab_renderer._todos_tab
+# and todo_roll's BACKUP_DIR / TODO_DIR / BACKLOG_FILE. A caller without branch
+# context renders the honest unknowns, never a guessed directory or number.
+_TODO_BACKLOG_PARTS = (".backup", "todo")
+_TODO_BACKLOG_FILE = "backlog.json"
+_UNKNOWN_BRANCH_DIR = "<branch>"
+_UNKNOWN_NEXT = "?"
+
+# How str() writes an int: the only thing a rendered `next #N` can hold besides
+# the unknown. N is derived at RENDER time and adding a todo does not re-render
+# (contract section 3), so the checker reads the slot's shape, never its value.
+_RENDERED_INT_RE = re.compile(r"0|-?[1-9][0-9]*")
 
 _PLACEHOLDER_RE = re.compile(r"^\{\{[A-Z0-9_]+\}\} (?P<prose>.+)$", re.DOTALL)
 _DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -387,7 +403,47 @@ def _resolve_rollover_count(config: dict, section: str, branch_name: str) -> int
     return count if _is_int(count) else None
 
 
-def expected_meta_line(section: str, branch_name: str, config: dict, template_prose: str) -> str:
+def _resolve_todos_count(config: dict, branch_name: str) -> int | None:
+    """Resolve the todo pad size the way @memory's config_loader.get_todos_count does, or None.
+
+    Per file key like the other sections, with one exception @memory makes for
+    todos alone: a per_branch ``local`` block that carries no todos count falls
+    back to the default todos count instead of leaving the pad unsized.  A
+    bool, a non-int, zero or a negative number is not a pad size.
+    """
+    rollover = _as_dict(_as_dict(config).get("rollover"))
+    defaults_local = _as_dict(_as_dict(rollover.get("defaults")).get("local"))
+    branch_cfg = _as_dict(_lookup_case_insensitive(rollover.get("per_branch"), branch_name))
+    file_limits = _as_dict(branch_cfg.get("local")) or defaults_local
+    count = _as_dict(file_limits.get("todos")).get("count")
+    if count is None:
+        count = _as_dict(defaults_local.get("todos")).get("count")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        return None
+    return count
+
+
+def _todos_tab(config: dict, branch_name: str, max_chars: object, draft: object, todo_ctx: dict | None) -> str:
+    """The todos pad tab: pad size, backlog file, caps, next number -- @memory's _todos_tab, glyph for glyph."""
+    context = todo_ctx if isinstance(todo_ctx, dict) else {}
+    branch_dir = context.get("branch_dir") or _UNKNOWN_BRANCH_DIR
+    number = context.get("next_number")
+    next_label = number if _is_int(number) else _UNKNOWN_NEXT
+    tail = f"task ≤{max_chars} chars · draft to {draft} · next #{next_label}"
+    count = _resolve_todos_count(config, branch_name)
+    if count is None:
+        return f"⟦ no pad size configured — nothing rolls · {tail} ⟧"
+    backlog = "/".join((*_TODO_BACKLOG_PARTS, str(branch_dir), _TODO_BACKLOG_FILE))
+    return f"⟦ pad of {count} · oldest roll to {backlog} · {tail} ⟧"
+
+
+def expected_meta_line(
+    section: str,
+    branch_name: str,
+    config: dict,
+    template_prose: str,
+    todo_ctx: dict | None = None,
+) -> str:
     """Compose the ``*_meta`` line the renderer would produce for *section*.
 
     The result is ``<rendered machine tab> + " " + <template prose>``: the tab
@@ -401,6 +457,10 @@ def expected_meta_line(section: str, branch_name: str, config: dict, template_pr
             case-insensitively.
         config: The parsed memory.config.json.
         template_prose: The prose this section's template owns.
+        todo_ctx: ``{"branch_dir", "next_number"}`` for the todos tab, the
+            shape of @memory's ``tab_renderer.todo_context``; None renders
+            ``<branch>`` and ``next #?`` exactly as @memory does without it.
+            Ignored for every other section.
 
     Returns:
         The expected meta line as one string.
@@ -414,11 +474,7 @@ def expected_meta_line(section: str, branch_name: str, config: dict, template_pr
     draft = max_chars * _DRAFT_PERCENT // 100 if _is_int(max_chars) else max_chars
 
     if section == "todos":
-        tab = (
-            f"⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤{max_chars} chars"
-            f" · draft to {draft} ⟧"
-        )
-        return f"{tab} {template_prose}"
+        return f"{_todos_tab(_as_dict(config), branch_name, max_chars, draft, todo_ctx)} {template_prose}"
 
     count = _resolve_rollover_count(_as_dict(config), section, branch_name)
     if count is None:
@@ -970,6 +1026,30 @@ def _preview(text: str) -> str:
     return text[:_EXPECTED_PREVIEW_CHARS] + "..."
 
 
+def _todos_meta_matches(actual: str, ctx: dict) -> bool:
+    """True when *actual* is a todos line @memory's renderer can write for this branch.
+
+    A byte-match everywhere but the ``next #N`` slot.  N is derived when the
+    tab is RENDERED, and adding or deleting a todo does not re-render, so a
+    correctly rendered file disagrees with an N recomputed from today's pad
+    until the next render (the shape contract, section 3).  With the branch
+    directory in the tab the slot may hold any rendered int or ``?``; the
+    no-context rendering (``<branch>`` and ``#?``, what spawn birth writes)
+    matches whole.
+    """
+    branch, config, prose = ctx["branch"], ctx["config"], ctx["prose"]["todos"]
+    known = expected_meta_line("todos", branch, config, prose, {"branch_dir": branch, "next_number": None})
+    if actual in (known, expected_meta_line("todos", branch, config, prose)):
+        return True
+    head, slot, tail = known.partition(f"next #{_UNKNOWN_NEXT} ⟧")
+    prefix, suffix = f"{head}next #", f" ⟧{tail}"
+    if not slot or len(actual) <= len(prefix) + len(suffix):
+        return False
+    if not (actual.startswith(prefix) and actual.endswith(suffix)):
+        return False
+    return _RENDERED_INT_RE.fullmatch(actual[len(prefix) : len(actual) - len(suffix)]) is not None
+
+
 def _meta_item(ctx: dict, section: str) -> tuple:
     """Item: one ``*_meta`` line byte-matches config plus template prose."""
     file_key, meta_key = _META_SOURCE[section]
@@ -982,11 +1062,17 @@ def _meta_item(ctx: dict, section: str) -> tuple:
     if not isinstance(spec.get("field"), str) or not _is_int(spec.get("max_chars")):
         return (False, f"{name}: cannot compose {meta_key} -- config has no entry_types.{section}")
 
-    expected = expected_meta_line(section, ctx["branch"], ctx["config"], ctx["prose"][section])
     actual = fileref["data"].get(meta_key)
     if not isinstance(actual, str):
         return (False, f"{name}: {meta_key} must be str, found {_found(fileref['data'], meta_key)}")
-    if actual != expected:
+    if section == "todos":
+        todo_ctx = {"branch_dir": ctx["branch"], "next_number": None}
+        expected = expected_meta_line(section, ctx["branch"], ctx["config"], ctx["prose"][section], todo_ctx)
+        matched = _todos_meta_matches(actual, ctx)
+    else:
+        expected = expected_meta_line(section, ctx["branch"], ctx["config"], ctx["prose"][section])
+        matched = actual == expected
+    if not matched:
         return (
             False,
             f"{name}: {meta_key} does not byte-match the rendered tab + template prose: {_preview(expected)}",
@@ -1130,35 +1216,7 @@ def _group_freshness(ctx: dict) -> dict:
 
 
 # =============================================================================
-# GROUP 8 -- TODOS HYGIENE
-# =============================================================================
-
-
-def _todo_problem(entry: object) -> str | None:
-    """Return why a todo breaks hygiene, or None."""
-    if not isinstance(entry, dict):
-        return f"entry must be an object, found {type(entry).__name__} -- status unmeasurable"
-    status = entry.get("status")
-    if not isinstance(status, str):
-        return f"'status' unmeasurable: must be str, found {_found(entry, 'status')}"
-    if status.strip().lower() == "done":
-        return "todo kept with status done -- delete it, do not keep it"
-    return None
-
-
-def _todo_probe(section: str, entries: list) -> tuple[int, list]:
-    """Check every todo for the done-trophy pattern."""
-    return _run_probe(section, entries, _todo_problem)
-
-
-def _group_todos_hygiene(ctx: dict) -> dict:
-    """Group 8: no todo survives as status done."""
-    ok, total, records = _entry_scan(ctx, ("todos",), _todo_probe)
-    return _records_check("Todos hygiene", ok, total, records, f"All {total} todos are open -- none kept as done")
-
-
-# =============================================================================
-# GROUP 9 -- RECEIPT
+# GROUP 8 -- RECEIPT
 # =============================================================================
 
 
@@ -1198,7 +1256,7 @@ def _receipt_string_items(data: dict) -> list:
 
 
 def _group_receipt(ctx: dict) -> dict:
-    """Group 9: the machine-written template version receipt."""
+    """Group 8: the machine-written template version receipt."""
     fileref = ctx["receipt"]
     if fileref["error"] is not None:
         message = f"{_RECEIPT_NAME}: {fileref['error']} -- no receipt means no lookup for who carries the standard"
@@ -1216,17 +1274,17 @@ def _group_receipt(ctx: dict) -> dict:
 
 
 def all_groups(ctx: dict) -> list:
-    """Run the nine group checkers against one branch context.
+    """Run the eight group checkers against one branch context.
 
     The order is the reporting order the audit renders, and it is fixed here
     rather than at the call site so the engine cannot silently drop a group by
-    forgetting one in its list -- the failure mode a nine-name import invites.
+    forgetting one in its list -- the failure mode a many-name import invites.
 
     Args:
         ctx: The context dict from trinity_check._build_context.
 
     Returns:
-        Nine check dicts, each ``{"name", "passed", "score", "message"}``.
+        Eight check dicts, each ``{"name", "passed", "score", "message"}``.
     """
     checks = [
         _group_entry_shapes(ctx),
@@ -1236,7 +1294,6 @@ def all_groups(ctx: dict) -> list:
         _group_file_set(ctx),
         _group_meta_lines(ctx),
         _group_receipt(ctx),
-        _group_todos_hygiene(ctx),
         _group_freshness(ctx),
     ]
     json_handler.log_operation(

@@ -1,20 +1,20 @@
 {
   "document_metadata": {
     "document_type": "session_history",
-    "document_name": "{{BRANCHNAME}}.LOCAL",
+    "document_name": "{{BRANCH}}.LOCAL",
     "version": "2.0.0",
     "schema_version": "3.0.0",
     "created": "{{DATE}}",
     "last_updated": "{{DATE}}",
-    "managed_by": "{{BRANCHNAME}}",
+    "managed_by": "{{BRANCH}}",
     "tags": [
       "session_tracking",
       "work_log",
-      "{{BRANCHNAME}}"
+      "{{BRANCH}}"
     ],
-    "_usage": "Your working draft — the context that keeps you YOU across sessions; updated freely, often several times a session. sessions = what happened (the chronicle) · key_learnings = what you'd want to know again (transferable technical lessons) · todos = operational sticky notes, NEVER rolled — prune done ones by hand at /prep. Newest on top; rollover archives oldest sessions/key_learnings to @memory. Caps: @memory memory.config.json → entry_limits, rendered into each *_meta line."
+    "_usage": "Your working draft — the context that keeps you YOU across sessions; updated freely, often several times a session. sessions = what happened (the chronicle) · key_learnings = what you'd want to know again (transferable technical lessons) · todos = a sticky-note pad, one line of what to do, no status, no log — delete one when done; the oldest roll to your backlog. Newest on top; rollover archives oldest sessions/key_learnings to @memory. Caps and pad size: @memory memory.config.json, rendered into each *_meta line."
   },
-  "todos_meta": "{{TODOS_META}} Sticky notes — user asides, oddities spotted mid-task, quick reminders: capture the note, stay on task. DELETE each todo when done (never leave status:done); reconcile against reality on load.",
+  "todos_meta": "{{TODOS_META}} One line of what to do: 'Check on seedgo's errors in logs', 'fix drone help'. No status, no log — the story lives in plans and sessions. Delete it when done.",
   "todos": [],
   "key_learnings_meta": "{{KEY_LEARNINGS_META}} Transferable technical lessons — what future-you needs to know again; the story itself lives in sessions[].",
   "key_learnings": [],
@@ -23,7 +23,7 @@
     {
       "number": 1,
       "date": "{{DATE}}",
-      "summary": "Branch initialized - {{BRANCHNAME}} created by aipass init.",
+      "summary": "Branch initialized - {{BRANCH}} created by aipass init.",
       "status": "completed",
       "tags": []
     }

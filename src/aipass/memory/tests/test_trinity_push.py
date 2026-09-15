@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-15
 # =============================================
 
 """Trinity push — the pins that make the prune lane safe to run.
@@ -30,10 +30,22 @@ from pathlib import Path
 
 import pytest
 
+from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.templates import trinity_push as tp
 
 
 _MEMORY_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _backlogs_stay_in_tmp(tmp_path, monkeypatch):
+    """No pin in this file may reach the repo's real .backup/todo/: an unrouted backlog lands under tmp_path."""
+    real = todo_roll.backlog_path_for
+
+    def scratch(branch_dir, backup_root=None):
+        return real(branch_dir, tmp_path / ".backup" if backup_root is None else backup_root)
+
+    monkeypatch.setattr(todo_roll, "backlog_path_for", scratch)
 
 
 # =============================================================================
@@ -103,12 +115,16 @@ def _entry(number: int, **fields) -> dict:
     return base
 
 
-def _config(max_chars: int = 300) -> dict:
-    """Minimal config with the four entry types the standard names."""
+def _config(max_chars: int = 300, todos_count: int = 10) -> dict:
+    """Minimal config with the four entry types the standard names and the todo pad size."""
     return {
         "rollover": {
             "defaults": {
-                "local": {"sessions": {"count": 15, "auto_compact_cap": 3}, "key_learnings": {"count": 15}},
+                "local": {
+                    "sessions": {"count": 15, "auto_compact_cap": 3},
+                    "key_learnings": {"count": 15},
+                    "todos": {"count": todos_count},
+                },
                 "observations": {"observations": {"count": 15}},
             },
             "per_branch": {},
@@ -117,12 +133,26 @@ def _config(max_chars: int = 300) -> dict:
             "entry_types": {
                 "sessions": {"container": "sessions", "field": "summary", "max_chars": max_chars, "kind": "list"},
                 "key_learnings": {"container": "key_learnings", "field": "value", "max_chars": 200, "kind": "list"},
-                "todos": {"container": "todos", "field": "task", "max_chars": 150, "kind": "list"},
+                "todos": {"container": "todos", "field": "task", "max_chars": 100, "kind": "list"},
                 "observations": {"container": "observations", "field": "note", "max_chars": 300, "kind": "list"},
             },
             "per_branch": {},
         },
     }
+
+
+def _seedgo_renders_the_retired_todos_tab() -> bool:
+    """True while seedgo's trinity checker still expects the pre-DPLAN-0345 todos tab.
+
+    A changed mirror signature counts as landed: the checker pin then runs strict.
+    """
+    from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
+
+    try:
+        line = trinity_groups.expected_meta_line("todos", "guinea", _config(), "prose")
+    except TypeError:
+        return False
+    return "rollover OFF" in line
 
 
 def _scope(root: Path) -> dict:
@@ -438,6 +468,22 @@ class TestTheMachineFrame:
         assert any("status" in change and "prune" in change for change in changes)
         assert any("active_tasks" in change for change in changes)
 
+    def test_the_gold_templates_spell_the_branch_placeholder_as_spawn_does(self):
+        """spawn renders {{BRANCH}} lowercase; gold must match or spawn-templates reverts spawn."""
+        from aipass.memory.apps.handlers.monitor import detector
+
+        assert sorted(path.name for path in detector._TEMPLATE_MAP.values()) == [
+            "LOCAL.template.json",
+            "OBSERVATIONS.template.json",
+        ]
+        for path in detector._TEMPLATE_MAP.values():
+            text = path.read_text(encoding="utf-8")
+            assert "{{BRANCHNAME}}" not in text, path.name
+            assert "{{BRANCH}}" in text, path.name
+            tags = tp._template_tags(json.loads(text), "guinea")
+            assert tags[-1] == "guinea", path.name
+            assert not [tag for tag in tags if "{{" in tag], path.name
+
 
 # =============================================================================
 # THE NOTE
@@ -742,7 +788,15 @@ class TestThePushedFileIsCanonical:
 
         result = trinity_check.check_branch(str(root))
         failing = [check["name"] for check in result["checks"] if check["score"] < 100]
-        assert failing == [], f"{failing}: {[c.get('message') for c in result['checks'] if c['score'] < 100]}"
+        messages = [str(check.get("message")) for check in result["checks"] if check["score"] < 100]
+        if failing == ["Meta lines & _usage"] and _seedgo_renders_the_retired_todos_tab():
+            # DPLAN-0345 landing order: memory rows 3-4 and seedgo row 6 go in ONE
+            # commit. Until seedgo's mirror renders the pad tab, the ONLY allowed
+            # miss is the todos_meta byte-match; anything else stays red, and the
+            # moment the mirror lands this pin runs strict again on its own.
+            assert all("todos_meta" in message and "_usage does not" not in message for message in messages), messages
+            pytest.xfail("seedgo's todos tab mirror (DPLAN-0345 row 6) not landed - docs/todos_v2_shape_contract.md")
+        assert failing == [], f"{failing}: {messages}"
 
     def test_canonical_entries_carry_over_byte_identical(self, tmp_path):
         keeper = _entry(2, tags=["a"])
@@ -891,257 +945,396 @@ class TestTheFleetGate:
 
 
 # =============================================================================
-# THE ONE SPECIES THAT IS NEVER ARCHIVED
+# TODOS GO TO THE BACKLOG FILE, NEVER TO VECTORS (DPLAN-0345)
 # =============================================================================
 
 
-class TestTodosAreReportedNeverArchived:
-    """A todo is OPEN WORK, and archiving open work IS losing it.
+class TestTodosMoveToTheBacklog:
+    """A todo that leaves the pad lands in .backup/todo/<branch>/backlog.json as it was.
 
-    Sessions and key_learnings and observations are RECORDS — a record in a
-    vector is still a record, recallable by search whenever it is wanted.  A
-    todo is a debt, and a debt only works if it resurfaces unbidden on the
-    next load.  Vectorized, it never does: the agent opens a clean file, sees
-    nothing owed, and silently forgets what it promised.  @spawn's three open
-    todos went that way in the fleet push before anyone noticed the shape rule
-    had quietly outranked the standard's own "todos NEVER roll".
+    The canonical todo is ``{number, date, task, priority?}`` with ``task``
+    inside its entry_limits cap. Anything else moves with reason
+    ``non-canonical``; past the pad size the oldest canonical ones move with
+    reason ``overflow``. The pad is written only after the backlog append read
+    back json-equal. Every pin runs on a scratch fleet under ``tmp_path``.
 
-    So the prune lane is closed to ``todos``: a non-canonical todo is REPORTED
-    for reshape-in-place — named in the report and in the in-file note — and
-    left byte-identical in the file.  Reshaping it mechanically is not on the
-    table either, for the reason the module already gives about everything
-    else: the canonical shape needs ``priority`` and ``status``, and a machine
-    that invents someone else's priority has transformed their open work, not
-    preserved it.
-
-    Mutation notes — each pin dies against a specific wrong implementation:
-    routing todos back into ``prunes`` (1, 2, 4, 6), dropping them from the
-    file while still reporting them (3), counting them as clean carry-over
-    (5), letting the enumeration bust the note's own cap (8), or leaving the
-    report silent about them (9, 10).
+    Mutation notes - each pin dies against a specific wrong implementation:
+    ``status`` kept in ENTRY_RULES (shape, status move), the task shortened on
+    the way (over-cap), a canonical todo moved (within count), the newest
+    rolled instead of the oldest (overflow), the pad written before or despite
+    the read-back (mismatch), a dry run that appends (dry run), a second push
+    that moves again (idempotence), a todo sent to vectors (vectors).
     """
 
+    BRANCH = "guinea"
+
     @staticmethod
-    def _drifted_todo(task: str = "restore the fleet") -> dict:
-        """@spawn's real shape: task + added, no number/date/priority/status."""
-        return {"task": task, "added": "2026-08-20"}
+    def _legacy(number: int, task: str = "fix drone help") -> dict:
+        """A pre-DPLAN-0345 todo: canonical then, carries status now."""
+        return {"number": number, "date": "2026-09-01", "task": task, "priority": "high", "status": "open"}
 
-    def test_a_non_canonical_todo_is_reported_for_reshape_not_pruned(self, tmp_path):
-        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()]})
+    @staticmethod
+    def _todo(number: int, task: str = "Check on seedgo's errors in logs") -> dict:
+        return {"number": number, "date": "2026-09-15", "task": task, "priority": "medium"}
 
-        plan = tp.plan_branch("guinea", root, _config())
+    def _backlog(self, tmp_path: Path) -> Path:
+        return tmp_path / ".backup" / "todo" / self.BRANCH / "backlog.json"
 
-        assert plan["prunes"] == []
-        assert len(plan["reshapes"]) == 1
-        assert plan["reshapes"][0]["container"] == "todos"
-
-    def test_a_non_canonical_session_still_prunes_in_the_very_same_file(self, tmp_path):
-        """The exemption is one container wide, not a hole in the prune lane."""
-        root = _branch(
-            tmp_path,
-            "guinea",
-            {"todos": [self._drifted_todo()], "sessions": [_entry(1, findings=["drift"])]},
+    def _push(self, monkeypatch, tmp_path, root, dry_run, todos_count=10, store=None):
+        monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
+        monkeypatch.setattr(tp.config_loader, "load", lambda: _config(todos_count=todos_count))
+        monkeypatch.setattr(tp, "_destinations", lambda name: [("global", None)])
+        return tp.push(
+            branch=self.BRANCH,
+            dry_run=dry_run,
+            store_client=store or FakeStore("honest"),
+            backup_root=tmp_path / ".backup",
         )
 
-        plan = tp.plan_branch("guinea", root, _config())
+    @staticmethod
+    def _pad(root: Path) -> list:
+        return json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["todos"]
 
-        assert [prune["container"] for prune in plan["prunes"]] == ["sessions"]
-        assert [item["container"] for item in plan["reshapes"]] == ["todos"]
+    def _records(self, tmp_path: Path) -> list:
+        return json.loads(self._backlog(tmp_path).read_text(encoding="utf-8"))["entries"]
 
-    def test_the_todo_is_still_in_the_file_byte_identical_after_the_push(self, tmp_path):
-        todo = self._drifted_todo()
-        root = _branch(tmp_path, "guinea", {"todos": [todo], "sessions": [_entry(1, findings=["drift"])]})
-        plan = tp.plan_branch("guinea", root, _config())
+    @staticmethod
+    def _same(left, right) -> bool:
+        return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
 
-        tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+    # -- the shape ---------------------------------------------------------------
 
-        on_disk = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))
-        assert on_disk["todos"] == [copy.deepcopy(todo)]
-
-    def test_the_todo_never_reaches_the_vector_store(self, tmp_path):
-        """Reported, not archived — nothing about it is sent to be embedded."""
-        root = _branch(
-            tmp_path,
-            "guinea",
-            {"todos": [self._drifted_todo("do not archive me")], "sessions": [_entry(1, findings=["drift"])]},
-        )
-        plan = tp.plan_branch("guinea", root, _config())
-        store = FakeStore("honest")
-
-        tp.apply_plan(plan, store, [("global", None)])
-
-        sent = [text for call in store.store_calls for text in call["texts"]]
-        assert sent, "the drifted session should still have been archived"
-        assert all("do not archive me" not in text for text in sent)
-
-    def test_a_todo_awaiting_reshape_is_not_counted_as_clean_carry_over(self, tmp_path):
-        """`carried` means canonical. Counting a debt as carried hides it."""
-        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()], "sessions": [_entry(1)]})
-
-        plan = tp.plan_branch("guinea", root, _config())
-
-        assert plan["carried"] == 1
-        assert len(plan["reshapes"]) == 1
-
-    def test_an_over_cap_todo_is_also_reshape_not_prune(self, tmp_path):
-        """Size is the other scan group, and it prunes everything BUT todos."""
-        long_todo = {
-            "number": 1,
-            "date": "2026-08-27",
-            "task": "x" * 400,
-            "priority": "high",
-            "status": "open",
+    def test_the_canonical_todo_shape_has_no_status(self):
+        assert tp.ENTRY_RULES["todos"] == {
+            "required": {"number": "int", "date": "str", "task": "str"},
+            "optional": {"priority": "str"},
         }
-        root = _branch(tmp_path, "guinea", {"todos": [long_todo]})
+        assert tp.is_canonical("todos", self._todo(1), {"field": "task", "max_chars": 100})
+        assert tp.is_canonical("todos", {"number": 1, "date": "2026-09-15", "task": "fix drone help"})
+        assert not tp.is_canonical("todos", self._legacy(1))
 
-        plan = tp.plan_branch("guinea", root, _config())
-
-        assert plan["prunes"] == []
-        assert len(plan["reshapes"]) == 1
-        assert "over its 150-char cap" in plan["reshapes"][0]["reason"]
-
-    def test_a_todo_that_is_not_even_an_object_is_still_kept(self, tmp_path):
-        """Unparseable open work is still open work — never quietly deleted."""
-        root = _branch(tmp_path, "guinea", {"todos": ["remember the milk"]})
-        plan = tp.plan_branch("guinea", root, _config())
-
-        tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
-
-        on_disk = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))
-        assert on_disk["todos"] == ["remember the milk"]
-
-    def test_a_canonical_todo_carries_over_and_is_never_reported(self, tmp_path):
-        todo = {"number": 1, "date": "2026-08-27", "task": "ship it", "priority": "high", "status": "open"}
-        root = _branch(tmp_path, "guinea", {"todos": [todo]})
-
-        plan = tp.plan_branch("guinea", root, _config())
-
-        assert plan["reshapes"] == []
-        assert plan["carried"] == 1
-
-    def test_the_note_names_the_todos_that_stayed(self):
-        reshapes = [
-            {"container": "todos", "index": 0, "number": 7, "reason": "missing 'priority'"},
-            {"container": "todos", "index": 1, "number": None, "reason": "missing 'number'"},
+    def test_a_todo_with_several_defects_counts_once_under_the_stated_order(self):
+        cap = {"field": "task", "max_chars": 100}
+        raw = [
+            {"number": 1, "date": "d", "task": "x" * 150, "status": "open", "extra": 1},
+            {"number": 2, "date": "d", "task": "y" * 150, "extra": 1},
+            {"number": 3, "task": "z", "extra": 1},
+            {"number": 4, "date": "d", "task": "w", "extra": 1},
+            {"number": "5", "date": "d", "task": "v"},
+            "remember the milk",
         ]
-        summary = tp.build_note(3, [], reshapes=reshapes, max_chars=300)["summary"]
+        split = tp.plan_todos(raw, cap, 10)
 
-        assert "todo" in summary
-        assert "#7" in summary
-        assert "[1]" in summary
-
-    def test_the_note_drops_the_names_before_it_busts_its_own_cap(self):
-        """40 named todos will not fit 300 chars; the count still must."""
-        reshapes = [
-            {"container": "todos", "index": index, "number": index, "reason": "missing 'priority'"}
-            for index in range(40)
+        assert [move["defect"] for move in split["moves"]] == [
+            tp.DEFECT_STATUS,
+            tp.DEFECT_OVER_CAP,
+            tp.DEFECT_MISSING,
+            tp.DEFECT_UNKNOWN,
+            tp.DEFECT_TYPE,
+            tp.DEFECT_NOT_OBJECT,
         ]
-        cap = {"field": "summary", "max_chars": 300}
+        assert split["reasons"] == {
+            "status present": 1,
+            "task over 100": 1,
+            "missing field": 1,
+            "unknown field": 1,
+            "wrong type": 1,
+            "not an object": 1,
+        }
+        # The stated order is the checked order: a string is "not an object", never "missing field".
+        assert tp.DEFECT_ORDER[0] == tp.DEFECT_NOT_OBJECT
+        assert list(split["reasons"]) == [
+            "not an object",
+            "status present",
+            "task over 100",
+            "missing field",
+            "unknown field",
+            "wrong type",
+        ]
+        assert split["kept"] == []
 
-        note = tp.build_note(12, [], reshapes=reshapes, max_chars=300)
+    def test_no_pin_here_reaches_the_real_backlog(self, tmp_path):
+        """An earlier run of these pins wrote .backup/todo/guinea/ at the repo root; the autouse guard stops it."""
+        assert todo_roll.backlog_path_for(self.BRANCH).is_relative_to(tmp_path)
+        assert tp.plan_branch(self.BRANCH, tmp_path / "absent", _config())["backlog"].is_relative_to(tmp_path)
 
-        assert tp.is_canonical("sessions", note, cap)
-        assert "40 todo" in note["summary"]
+    # -- the push, for real, on a scratch fleet ------------------------------------
 
-    def test_the_dry_run_report_names_every_todo_awaiting_reshape(self, tmp_path):
-        from aipass.memory.apps.handlers.templates import push_report
+    def test_a_status_bearing_todo_moves_json_equal_and_the_pad_empties(self, tmp_path, monkeypatch):
+        todos = [self._legacy(2, "open - 23:19 wake-back log " * 3), self._legacy(1)]
+        root = _branch(tmp_path, self.BRANCH, {"todos": copy.deepcopy(todos)})
 
-        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()]})
-        plan = tp.plan_branch("guinea", root, _config())
-        rendered = "\n".join(
-            push_report.render(
-                {"dry_run": True, "scope": 1, "errors": [], "branches": [tp._dry_entry(plan)]}, "@guinea"
-            )
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert result["success"], result["errors"]
+        assert self._pad(root) == []
+        records = self._records(tmp_path)
+        assert [record["reason"] for record in records] == ["non-canonical", "non-canonical"]
+        assert all(self._same(record["entry"], todo) for record, todo in zip(records, todos, strict=True))
+        document = json.loads(self._backlog(tmp_path).read_text(encoding="utf-8"))
+        assert document["document_metadata"] == {"managed_by": "memory", "branch": self.BRANCH, "high_water": 2}
+
+    def test_an_over_cap_task_lands_in_the_backlog_unshortened(self, tmp_path, monkeypatch):
+        long_task = {"number": 1, "date": "2026-09-15", "task": "t" * 101, "priority": "low"}
+        root = _branch(tmp_path, self.BRANCH, {"todos": [copy.deepcopy(long_task)]})
+
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert self._pad(root) == []
+        [record] = self._records(tmp_path)
+        assert len(record["entry"]["task"]) == 101
+        assert self._same(record["entry"], long_task)
+
+    def test_a_todo_missing_a_field_moves(self, tmp_path, monkeypatch):
+        """canary's real shape on 2026-09-15: a task and nothing else."""
+        root = _branch(tmp_path, self.BRANCH, {"todos": [{"task": "fix drone help"}]})
+
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert result["branches"][0]["todo_reasons"] == {"missing field": 1}
+        assert self._pad(root) == []
+        assert self._records(tmp_path)[0]["entry"] == {"task": "fix drone help"}
+
+    def test_a_todo_that_is_not_even_an_object_moves_rather_than_vanishing(self, tmp_path, monkeypatch):
+        root = _branch(tmp_path, self.BRANCH, {"todos": ["remember the milk"]})
+
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert self._pad(root) == []
+        assert self._records(tmp_path)[0]["entry"] == "remember the milk"
+
+    def test_canonical_todos_within_the_count_stay_byte_identical(self, tmp_path, monkeypatch):
+        todos = [self._todo(3), self._todo(2), self._todo(1)]
+        root = _branch(tmp_path, self.BRANCH, {"todos": copy.deepcopy(todos)})
+
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False, todos_count=3)
+
+        assert result["branches"][0]["todos_moved"] == 0
+        assert self._pad(root) == todos
+        assert not self._backlog(tmp_path).exists()
+
+    def test_canonical_overflow_rolls_the_oldest_by_number(self, tmp_path, monkeypatch):
+        todos = [self._todo(5), self._todo(1), self._todo(4), self._todo(2), self._todo(3)]
+        root = _branch(tmp_path, self.BRANCH, {"todos": copy.deepcopy(todos)})
+
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False, todos_count=3)
+
+        assert [todo["number"] for todo in self._pad(root)] == [5, 4, 3]
+        records = self._records(tmp_path)
+        assert [(record["reason"], record["entry"]["number"]) for record in records] == [
+            ("overflow", 1),
+            ("overflow", 2),
+        ]
+        assert result["branches"][0]["todo_reasons"] == {"overflow": 2}
+
+    def test_a_backlog_that_does_not_read_back_refuses_the_branch_and_leaves_local_json(self, tmp_path, monkeypatch):
+        from aipass.memory.apps.handlers.rollover import todo_roll
+
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1)], "sessions": [_entry(1)]})
+        before = (root / ".trinity" / "local.json").read_bytes()
+        real_write = todo_roll.write_memory_file
+
+        def tampering_write(path, document):
+            altered = copy.deepcopy(document)
+            altered["entries"][-1]["entry"]["task"] = "shortened"
+            return real_write(path, altered)
+
+        monkeypatch.setattr(todo_roll, "write_memory_file", tampering_write)
+
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        entry = result["branches"][0]
+        assert entry["refused"] is True
+        assert entry["todos_moved"] == 0
+        assert any("not verified" in message for message in entry["errors"])
+        assert (root / ".trinity" / "local.json").read_bytes() == before
+        assert not (root / ".trinity" / ".template_version.json").exists()
+
+    def test_the_backlog_is_appended_never_overwritten(self, tmp_path, monkeypatch):
+        backlog = self._backlog(tmp_path)
+        backlog.parent.mkdir(parents=True)
+        earlier = {"rolled": "2026-09-14T23:00:00+00:00", "reason": "overflow", "entry": self._todo(7)}
+        backlog.write_text(
+            json.dumps({"document_metadata": {"managed_by": "memory", "branch": self.BRANCH}, "entries": [earlier]}),
+            encoding="utf-8",
+        )
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1)]})
+
+        dry = self._push(monkeypatch, tmp_path, root, dry_run=True)
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert dry["branches"][0]["backlog_exists"] is True
+        records = self._records(tmp_path)
+        assert records[0] == earlier
+        assert [record["entry"]["number"] for record in records] == [7, 1]
+
+    def test_the_rendered_tab_derives_next_number_from_pad_and_backlog(self, tmp_path, monkeypatch):
+        backlog = self._backlog(tmp_path)
+        backlog.parent.mkdir(parents=True)
+        backlog.write_text(
+            json.dumps(
+                {
+                    "document_metadata": {"managed_by": "memory", "branch": self.BRANCH},
+                    "entries": [{"rolled": "r", "reason": "overflow", "entry": self._todo(40)}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(12), self._todo(3)]})
+
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        meta = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["todos_meta"]
+        assert meta.startswith(
+            f"⟦ pad of 10 · oldest roll to .backup/todo/{self.BRANCH}/backlog.json · task ≤100 chars"
+            " · draft to 80 · next #41 ⟧ "
         )
 
-        assert "reshape" in rendered.lower()
-        assert "todos[0]" in rendered
+    _TAB = (
+        "⟦ pad of 10 · oldest roll to .backup/todo/guinea/backlog.json · task ≤100 chars · draft to 80"
+        " · next #{} ⟧ One line of what to do."
+    )
 
-    def test_the_executed_report_names_them_too(self, tmp_path):
+    def test_the_push_raises_high_water_to_the_pad_as_found_and_reads_it_back(self, tmp_path, monkeypatch):
+        """The kept #9 reaches high_water, not only the moved #4: delete #9 later and 9 stays spent."""
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._todo(9), self._legacy(4)]})
+
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert result["success"], result["errors"]
+        assert [todo["number"] for todo in self._pad(root)] == [9]
+        back = todo_roll.read_backlog(self._backlog(tmp_path))
+        assert [record["entry"]["number"] for record in back["entries"]] == [4]
+        assert todo_roll.high_water_of(back["document"]) == 9
+
+    def test_the_tab_the_branch_last_rendered_is_a_floor_the_push_keeps(self, tmp_path, monkeypatch):
+        """A tab that said next #30, then #29 deleted by hand: the push renders #30 again, never #4."""
+        local = {"todos_meta": self._TAB.format(30), "todos": [self._legacy(2), self._todo(3)]}
+        root = _branch(tmp_path, self.BRANCH, local)
+
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        meta = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["todos_meta"]
+        assert "· draft to 80 · next #30 ⟧ " in meta, meta
+
+    def test_a_frame_built_without_context_keeps_the_tab_floor(self):
+        """The normalizer's door: build_frame derives the context itself and reads the old tab too."""
+        before = {"todos_meta": self._TAB.format(30), "todos": [self._todo(3)], "sessions": [], "key_learnings": []}
+        entries = {"todos": [self._todo(3)]}
+
+        assert "· next #30 ⟧ " in tp.build_frame(before, "local", self.BRANCH, entries, _config())["todos_meta"]
+        del before["todos_meta"]
+        assert "· next #4 ⟧ " in tp.build_frame(before, "local", self.BRANCH, entries, _config())["todos_meta"]
+
+    def test_overflow_survivors_keep_their_order_on_the_pad(self):
+        """Only the oldest leave; what stays is never re-sorted - the push reshapes nothing."""
+        split = tp.plan_todos([self._todo(n) for n in (3, 5, 1, 4, 2)], {"field": "task", "max_chars": 100}, 3)
+
+        assert [todo["number"] for todo in split["kept"]] == [3, 5, 4]
+        assert [move["entry"]["number"] for move in split["moves"]] == [1, 2]
+
+    # -- the dry run and the second push ------------------------------------------
+
+    def test_a_dry_run_writes_nothing_and_prints_the_branch_and_fleet_lines(self, tmp_path, monkeypatch):
         from aipass.memory.apps.handlers.templates import push_report
 
-        root = _branch(tmp_path, "guinea", {"todos": [self._drifted_todo()]})
-        plan = tp.plan_branch("guinea", root, _config())
-        applied = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
-        rendered = "\n".join(
-            push_report.render({"dry_run": False, "scope": 1, "errors": [], "branches": [applied]}, "@guinea")
-        )
+        todos = [self._legacy(2), {"task": "fix drone help"}]
+        root = _branch(tmp_path, self.BRANCH, {"todos": todos})
+        local_before = (root / ".trinity" / "local.json").read_bytes()
+        obs_before = (root / ".trinity" / "observations.json").read_bytes()
+        chars = len(json.dumps(todos, ensure_ascii=False))
 
-        assert "reshape" in rendered.lower()
-        assert "todos[0]" in rendered
+        result = self._push(monkeypatch, tmp_path, root, dry_run=True)
+        lines = push_report.render(result, "@guinea")
 
-    # -- @ai_mail's catch: silence about todos is the shape the defect wore ---
+        assert (root / ".trinity" / "local.json").read_bytes() == local_before
+        assert (root / ".trinity" / "observations.json").read_bytes() == obs_before
+        assert not (tmp_path / ".backup").exists()
+        assert f"   todos 2 seen · 2 to backlog ({chars:,} chars) · 0 stay on the pad of 10" in lines
+        assert "     reasons: status present 1, missing field 1" in lines
+        assert any(line.startswith("     backlog ") and "does not exist yet" in line for line in lines)
+        assert f"TODOS TO BACKLOG: 2 across 1 branches, {chars:,} chars" in lines
 
-    @staticmethod
-    def _canonical_todo(number: int) -> dict:
-        return {"number": number, "date": "2026-08-27", "task": "ship it", "priority": "high", "status": "open"}
-
-    def test_the_plan_counts_every_todo_it_saw_not_only_the_drifted_ones(self, tmp_path):
-        root = _branch(tmp_path, "guinea", {"todos": [self._canonical_todo(1), self._drifted_todo()]})
-
-        plan = tp.plan_branch("guinea", root, _config())
-
-        assert plan["todos_seen"] == 2
-        assert len(plan["reshapes"]) == 1
-
-    def test_a_clean_desk_and_an_emptied_one_do_not_render_the_same(self, tmp_path):
-        """@ai_mail, 2026-08-27: 'an empty todos[] reads as a clean desk'.
-
-        That is exactly how the archived-todos defect stayed invisible for a
-        morning — the branch saw a zero and had no way to tell "I owe nothing"
-        from "something took what I owed". The report states the count it saw
-        EVERY run, so the two answers can never render identically again.
-        """
+    def test_a_second_push_after_the_migration_moves_nothing(self, tmp_path, monkeypatch):
         from aipass.memory.apps.handlers.templates import push_report
 
-        def rendered(todos):
-            root = _branch(tmp_path / str(len(todos)), "guinea", {"todos": todos})
-            plan = tp.plan_branch("guinea", root, _config())
-            return "\n".join(
-                push_report.render(
-                    {"dry_run": True, "scope": 1, "errors": [], "branches": [tp._dry_entry(plan)]}, "@guinea"
-                )
-            )
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(2), self._legacy(1)]})
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+        after_first = self._backlog(tmp_path).read_bytes()
+        sessions_after_first = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["sessions"]
 
-        empty = rendered([])
-        clean = rendered([self._canonical_todo(1), self._canonical_todo(2)])
+        again = self._push(monkeypatch, tmp_path, root, dry_run=True)
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert again["branches"][0]["todos_to_backlog"] == 0
+        assert "TODOS TO BACKLOG: 0 across 0 branches, 0 chars" in push_report.render(again, "FLEET")
+        assert self._backlog(tmp_path).read_bytes() == after_first
+        sessions = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["sessions"]
+        assert len(sessions) == len(sessions_after_first)
+
+    def test_the_executed_report_counts_what_moved(self, tmp_path, monkeypatch):
+        from aipass.memory.apps.handlers.templates import push_report
+
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(1), self._todo(2)]})
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
+        rendered = push_report.render(result, "@guinea")
+
+        assert any(line.startswith("   todos 2 seen · 1 of 1 moved to backlog") for line in rendered)
+        assert any(line.startswith("TODOS TO BACKLOG: 1 across 1 branches, ") for line in rendered)
+
+    def test_a_clean_desk_and_an_emptied_one_do_not_render_the_same(self, tmp_path, monkeypatch):
+        """@ai_mail, 2026-08-27: 'an empty todos[] reads as a clean desk'."""
+        from aipass.memory.apps.handlers.templates import push_report
+
+        def rendered(sub: str, todos: list) -> str:
+            root = _branch(tmp_path / sub, self.BRANCH, {"todos": todos})
+            plan = tp.plan_branch(self.BRANCH, root, _config(), backlog_path=tmp_path / sub / "backlog.json")
+            entry = tp._dry_entry(plan)
+            return "\n".join(push_report.render({"dry_run": True, "scope": 1, "errors": [], "branches": [entry]}, "@g"))
+
+        empty = rendered("empty", [])
+        clean = rendered("clean", [self._todo(1), self._todo(2)])
 
         assert empty != clean
-        assert "todos 0" in empty
-        assert "todos 2" in clean
+        assert "todos 0 seen" in empty
+        assert "todos 2 seen · 0 to backlog" in clean
 
-    def test_the_executed_report_states_the_count_with_nothing_to_reshape(self, tmp_path):
-        """Nothing to reshape is a MEASUREMENT, and it has to be spoken."""
-        from aipass.memory.apps.handlers.templates import push_report
+    # -- what stays the same ---------------------------------------------------------
 
-        contents = {"todos": [self._canonical_todo(1)], "sessions": [_entry(1, findings=["d"])]}
-        root = _branch(tmp_path, "guinea", contents)
-        plan = tp.plan_branch("guinea", root, _config())
-        applied = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
-        rendered = "\n".join(
-            push_report.render({"dry_run": False, "scope": 1, "errors": [], "branches": [applied]}, "@guinea")
+    def test_a_moved_todo_never_reaches_vectors_while_sessions_still_prune(self, tmp_path, monkeypatch):
+        root = _branch(
+            tmp_path,
+            self.BRANCH,
+            {"todos": [self._legacy(1, "do not archive me")], "sessions": [_entry(1, findings=["drift"])]},
         )
+        store = FakeStore("honest")
 
-        assert "todos 1" in rendered
-        assert "0 left to reshape" in rendered
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False, store=store)
 
-    def test_the_written_note_fits_the_branchs_own_cap_end_to_end(self, tmp_path):
-        """The cap must reach build_note through apply_plan, not just in unit calls.
+        entry = result["branches"][0]
+        assert entry["pruned"] == 1
+        assert entry["todos_moved"] == 1
+        sent = [text for call in store.store_calls for text in call["texts"]]
+        assert sent and all("do not archive me" not in text for text in sent)
+        assert all(meta["array_field"] == "sessions" for call in store.store_calls for meta in call["metadatas"])
 
-        Written after a surviving mutation: cutting the resolved cap on the
-        wire (``build_note(..., None)``) left every direct-call pin green,
-        because they hand build_note a cap themselves. The damage only shows
-        end to end — an un-stepped-down enumeration busts 300 chars, the
-        canonical-note guard refuses it, and the branch is told NOTHING about
-        entries that really did move. A note refused is a promise unkept.
-        """
-        todos = [self._drifted_todo(f"task {index}") for index in range(30)]
-        root = _branch(tmp_path, "guinea", {"todos": todos, "sessions": [_entry(1, findings=["drift"])]})
-        plan = tp.plan_branch("guinea", root, _config())
+    def test_the_note_names_the_backlog_and_stays_canonical(self, tmp_path, monkeypatch):
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._legacy(9)], "sessions": [_entry(1)]})
 
-        result = tp.apply_plan(plan, FakeStore("honest"), [("global", None)])
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
 
-        assert result["noted"] is True, result["errors"]
-        written = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["sessions"][0]
-        assert tp.is_canonical("sessions", written, {"field": "summary", "max_chars": 300})
-        assert "30 todo" in written["summary"]
+        assert result["branches"][0]["noted"] is True
+        note = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["sessions"][0]
+        assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
+        assert "1 todo(s) #9 moved to " in note["summary"]
+        assert f"todo/{self.BRANCH}/backlog.json" in note["summary"]
+        assert "nothing reshaped" in note["summary"]
+
+    def test_the_note_drops_the_names_before_it_busts_its_own_cap(self):
+        moves = [{"index": index, "number": index, "reason": "non-canonical"} for index in range(40)]
+        backlog = ".backup/todo/ai_mail/backlog.json"
+
+        note = tp.build_note(12, [], moved=moves, max_chars=300, backlog=backlog)
+
+        assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
+        assert f"40 todo(s) moved to {backlog}" in note["summary"]

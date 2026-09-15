@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_detector.py
 # Description: Tests for rollover trigger detection handler
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-06-14
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for the rollover trigger detection module (apps/handlers/monitor/detector).
@@ -580,7 +580,7 @@ class TestRecreateTrinityFile:
         template = {
             "document_metadata": {
                 "document_type": "session_history",
-                "document_name": "{{BRANCHNAME}}.LOCAL",
+                "document_name": "{{BRANCH}}.LOCAL",
                 "_usage": "Automated file.",
                 "status": {"health": "healthy"},
             },
@@ -603,7 +603,7 @@ class TestRecreateTrinityFile:
         assert result is not None
         assert result.exists()
         data = json.loads(result.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "TESTBRANCH.LOCAL"
+        assert data["document_metadata"]["document_name"] == "testbranch.LOCAL"
         assert "_usage" in data["document_metadata"]
         assert "limits" not in data["document_metadata"]
 
@@ -616,7 +616,7 @@ class TestRecreateTrinityFile:
         template = {
             "document_metadata": {
                 "document_type": "collaboration_patterns",
-                "document_name": "{{BRANCHNAME}}.OBSERVATIONS",
+                "document_name": "{{BRANCH}}.OBSERVATIONS",
                 "_usage": "Automated file.",
             },
             "observations": [],
@@ -636,7 +636,7 @@ class TestRecreateTrinityFile:
 
         assert result is not None
         data = json.loads(result.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "API.OBSERVATIONS"
+        assert data["document_metadata"]["document_name"] == "api.OBSERVATIONS"
         assert "limits" not in data["document_metadata"]
 
     def test_check_all_branches_recreates_missing(self, tmp_path: Path, monkeypatch):
@@ -658,7 +658,7 @@ class TestRecreateTrinityFile:
         local_template = {
             "document_metadata": {
                 "document_type": "session_history",
-                "document_name": "{{BRANCHNAME}}.LOCAL",
+                "document_name": "{{BRANCH}}.LOCAL",
                 "_usage": "Automated file.",
                 "status": {"health": "healthy"},
             },
@@ -690,8 +690,105 @@ class TestRecreateTrinityFile:
         recreated = trinity_dir / "local.json"
         assert recreated.exists()
         data = json.loads(recreated.read_text(encoding="utf-8"))
-        assert data["document_metadata"]["document_name"] == "MYBRANCH.LOCAL"
+        assert data["document_metadata"]["document_name"] == "mybranch.LOCAL"
         assert "limits" not in data["document_metadata"]
+
+
+# ===========================================================================
+# Todos -- COUNT ONLY, never on the fleet walk (DPLAN-0345)
+# ===========================================================================
+
+_ROLLOVER_WITH_TODOS = {
+    "defaults": {
+        "local": {"sessions": {"count": 15}, "key_learnings": {"count": 15}, "todos": {"count": 10}},
+        "observations": {"observations": {"count": 15}},
+    },
+    "per_branch": {},
+}
+
+
+def _todo_pad(tmp_path: Path, count: int, name: str = "mybranch") -> Path:
+    """A branch whose local memory file holds *count* todos and nothing a vector family counts."""
+    trinity = tmp_path / name / ".trinity"
+    trinity.mkdir(parents=True, exist_ok=True)
+    local = trinity / "local.json"
+    todos = [
+        {"number": n, "task": f"task {n}", "date": "2026-09-01", "priority": "normal"} for n in range(1, count + 1)
+    ]
+    document = {"document_metadata": {"schema_version": "3.0.0"}, "sessions": [], "key_learnings": [], "todos": todos}
+    local.write_text(json.dumps(document), encoding="utf-8")
+    return local
+
+
+class TestTodosAreCountOnly:
+    """check_todos counts ONE pad; _should_rollover and check_all_branches never see todos."""
+
+    def test_check_todos_reports_a_pad_over_its_count(self, tmp_path: Path, monkeypatch):
+        from aipass.memory.apps.handlers.monitor import detector
+
+        counter = MagicMock(return_value=10)
+        monkeypatch.setattr(detector.config_loader, "get_todos_count", counter)
+        result = detector.check_todos(_todo_pad(tmp_path, 12))
+
+        assert result == {"success": True, "branch": "mybranch", "pad": 12, "count": 10, "over": True, "excess": 2}
+        counter.assert_called_once_with("mybranch")
+
+    def test_a_pad_at_its_count_is_not_over(self, tmp_path: Path, monkeypatch):
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector.config_loader, "get_todos_count", MagicMock(return_value=10))
+        result = detector.check_todos(_todo_pad(tmp_path, 10), "Named")
+
+        assert (result["branch"], result["over"], result["excess"]) == ("Named", False, 0)
+
+    def test_no_usable_count_is_never_over(self, tmp_path: Path, monkeypatch):
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector.config_loader, "get_todos_count", MagicMock(return_value=None))
+        result = detector.check_todos(_todo_pad(tmp_path, 40))
+
+        assert result["success"] is True
+        assert (result["count"], result["over"]) == (None, False)
+
+    def test_todos_that_are_not_a_list_are_refused(self, tmp_path: Path):
+        from aipass.memory.apps.handlers.monitor import detector
+
+        local = _todo_pad(tmp_path, 0)
+        local.write_text(json.dumps({"todos": {"1": "not a pad"}}), encoding="utf-8")
+
+        assert detector.check_todos(local)["success"] is False
+
+    def test_should_rollover_never_triggers_on_todos(self, tmp_path: Path, monkeypatch):
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector.config_loader, "section", lambda name: _ROLLOVER_WITH_TODOS)
+        should, _lines, _schema, reason = detector._should_rollover(_todo_pad(tmp_path, 12))
+
+        assert should is False
+        assert "todo" not in reason
+
+    def test_check_all_branches_leaves_an_over_count_pad_alone(self, tmp_path: Path, monkeypatch):
+        """The detached fleet walk rolls whatever this reports - a pad over its count must not be in it."""
+        from aipass.memory.apps.handlers.monitor import detector
+
+        local = _todo_pad(tmp_path, 12)
+        observations = {"document_metadata": {"schema_version": "3.0.0"}, "observations": []}
+        (local.parent / "observations.json").write_text(json.dumps(observations), encoding="utf-8")
+        before = local.read_bytes()
+        registry = {"branches": [{"name": "mybranch", "path": str(tmp_path / "mybranch"), "status": "active"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+        monkeypatch.setattr(detector.config_loader, "section", lambda name: _ROLLOVER_WITH_TODOS)
+        counter = MagicMock(return_value=10)
+        monkeypatch.setattr(detector.config_loader, "get_todos_count", counter)
+
+        result = detector.check_all_branches()
+
+        assert result["success"] is True
+        assert result["triggers"] == []
+        assert local.read_bytes() == before
+        counter.assert_not_called()
 
 
 # ===========================================================================

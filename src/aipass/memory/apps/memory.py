@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -136,6 +136,10 @@ def print_help():
     table.add_row("pool status", "Show pool file count, config, vector stats")
     table.add_row("verify <plan_label>", "Check if a plan is vectorized in ChromaDB")
     table.add_row("lint [@branch]", "Audit .trinity entries for over-limit violations (read-only)")
+    # `\\[` because Rich reads `[@name]` as a markup tag and prints nothing.
+    table.add_row("todo \\[@branch]", "One line: the todo pad against its count, and the backlog count")
+    table.add_row("todo backlog \\[@branch]", "List a branch's todo backlog (.backup/todo/<branch>/backlog.json)")
+    table.add_row("todo restore <number>", "Move one backlog todo back onto your own pad, re-numbered")
     table.add_row("watch", "Start memory watcher (auto-rollover on changes)")
 
     console.print(table)
@@ -184,7 +188,7 @@ def print_help():
     console.print(
         "Commands: search, push, rollover \\[run|status|check|report-lines|push],"
         " config \\[get|set|set-default], lint,"
-        " pool \\[process|status], templates, verify, watch"
+        " pool \\[process|status], templates, todo \\[backlog|restore], verify, watch"
     )
     console.print("[dim]--json: machine output on config get|set|set-default and rollover push[/dim]")
     console.print("[dim]Parked: symbolic (2026-08-14) — see drone @devpulse compass[/dim]")

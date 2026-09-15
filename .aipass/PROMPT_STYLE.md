@@ -46,7 +46,7 @@ These are not currently enforced by seedgo — per @seedgo's Track 5 recommendat
 
 # Reference files
 
- - `.aipass/tier0_kernel.md` + `.aipass/tier1_navmap.md` — the live injected prompts (Tier 0 every turn, Tier 1 periodic); canonical examples of the format
+ - `.aipass/tier0_kernel.md` + `.aipass/tier1_navmap.md` — the live injected prompts (both on cadence 5 plus every fresh context; `hooks/hooks_json/custom_config/cadence_config.json` is the source); canonical examples of the format
  - `.aipass/aipass_global_prompt.md` — superseded by the tiers (FPLAN-0284), kept as a reference snapshot
  - Branch `.aipass/aipass_local_prompt.md` files — should follow the same rules
  - This file — reference for authoring new prompts or auditing existing ones

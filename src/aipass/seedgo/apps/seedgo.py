@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: seedgo.py
 # Description: SEEDGO - Standards Platform for AIPass
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-03-05
-# Modified: 2026-09-06
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -206,7 +206,7 @@ def print_help() -> None:
     console.print("  [green]drone @seedgo standards_audit aipass @flow[/green]   [dim]# Same verb, long name[/dim]")
     console.print(
         "  [green]drone @seedgo audit pytest_quality @flow[/green]     "
-        "[dim]# 11 AST rules over a branch's tests (shadow: scores, gates nothing)[/dim]"
+        "[dim]# 15 AST rules over a branch's tests (shadow: scores, gates nothing)[/dim]"
     )
     console.print(
         "  [green]drone @seedgo audit pytest_quality[/green]           [dim]# The same over every citizen[/dim]"

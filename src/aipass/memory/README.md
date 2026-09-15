@@ -16,6 +16,7 @@ drone @memory search "query"            # Search archived memories across all br
 drone @memory rollover status           # Show what needs archiving per branch
 drone @memory rollover check            # Dry run — preview pending rollovers
 drone @memory lint run                  # Audit .trinity entries for limit violations
+drone @memory todo                      # Your todo pad against its count, and your backlog count
 drone @memory watch                     # Auto-rollover watcher (Ctrl+C to stop)
 ```
 
@@ -24,9 +25,11 @@ drone @memory watch                     # Auto-rollover watcher (Ctrl+C to stop)
 ## Commands
 
 ```bash
-drone @memory rollover run                 # Execute rollover for files over limits
+drone @memory rollover run                 # Execute rollover for files over limits, plus ONE todo pad
+                                           #   (--branch @name, else the branch your cwd sits in)
 drone @memory rollover status              # Show per-branch rollover statistics
-drone @memory rollover check               # Dry run — what needs rollover
+drone @memory rollover check               # Dry run — what needs rollover, plus ONE todo pad
+                                           #   ('ready for rollover' when it is over its count)
 drone @memory rollover report-lines        # Report line counts per memory file — READ-ONLY, writes
                                            #   nothing (see Line counts are reported, not stored)
 drone @memory rollover sync-lines          # The old name — still routes: prints a notice naming
@@ -37,6 +40,12 @@ drone @memory push --dry-run               # Trinity push, FLEET dry-run — the
 drone @memory push --branch @canary        # Trinity push, one branch
 drone @memory push --branch @canary --dry-run
 drone @memory push --confirm               # FLEET push — refused without the flag
+
+drone @memory todo                         # ONE line: your pad against its count, and your backlog count
+drone @memory todo @devpulse               # …the same line for a named branch (--branch @devpulse too)
+drone @memory todo backlog [@branch]       # The backlog, one record per line — the task, never status
+drone @memory todo restore <number>        # One backlog todo back onto YOUR pad, re-numbered
+drone @memory todo --help                  # Which branch, where the count comes from, every refusal
 
 drone @memory config                       # Introspection — the three config verbs
 drone @memory config --help                # Full contract: types, bounds, semantics
@@ -100,7 +109,7 @@ drone @memory watch                        # Auto-rollover watcher daemon (Ctrl+
 memory/
 ├── apps/
 │   ├── memory.py                # Entry point — auto-discovers modules
-│   ├── modules/                 # 13 modules
+│   ├── modules/                 # 14 modules
 │   │   ├── fleet.py             # The fleet definition — library module, no CLI verb
 │   │   ├── governance.py        # Surfacing governance — re-exports from handlers
 │   │   ├── health.py            # Branch health wrapper (entry-count + entry-size, read-only)
@@ -112,17 +121,20 @@ memory/
 │   │   ├── search.py            # Semantic query routing
 │   │   ├── symbolic.py          # PARKED 2026-08-14 — refusal stub (impl in tests/parked/)
 │   │   ├── templates.py         # Gold templates — spawn scaffolds, receipt status, bump
+│   │   ├── todo.py              # The todo pad and its backlog — count, list, restore (CLI routing only)
 │   │   ├── verify.py            # Plan vectorization check
 │   │   └── watch.py             # Auto-rollover watcher (CLI routing only)
 │   └── handlers/                # 14 handler groups
 │       ├── archive/             # indexer.py
 │       ├── cli/                 # help_flags.py — help-flag detection; json_flag.py — --json detection
+│       │                        #   branch_flag.py — @name / --branch @name (rollover run|check, todo)
 │       ├── governance/          # engine.py — surfacing decision logic
 │       ├── intake/              # plans_processor.py, pool_processor.py, auto_process.py
 │       ├── json/                # json_handler.py (the fleet shim — see below), memory_files.py,
 │       │                        #   entry_limits.py, lint_handler.py, config_loader.py
 │       ├── monitor/             # detector.py, memory_watcher.py, watch_runner.py, registry_scope.py
-│       ├── rollover/            # extractor.py, orchestrator.py, normalizer.py
+│       ├── rollover/            # extractor.py, orchestrator.py, normalizer.py,
+│       │                        #   todo_roll.py (pad → backlog file), todo_report.py
 │       ├── schema/              # normalize.py
 │       ├── search/              # query_executor.py
 │       ├── storage/             # chroma_subprocess.py
@@ -133,9 +145,9 @@ memory/
 │       ├── vector/              # embed_subprocess.py (embedder.py PARKED 2026-08-14)
 │       └── central_writer.py
 ├── templates/                   # LOCAL.template.json, OBSERVATIONS.template.json
-├── tests/                       # 1437 test functions on disk across 42 files — 1573 collected,
-│                                #   1573 pass, 2 skip (measured 2026-09-08). 91 of the 1437
-│                                #   are the dormant symbolic suite, skipped at module level.
+├── tests/                       # 1532 test functions on disk across 42 files — 1685 pass,
+│                                #   1 xfail, 2 module-level skips (measured 2026-09-15). 91 of
+│                                #   the 1532 are the dormant symbolic suite, skipped at module level.
 │   └── parked/                  # 172 more test functions that pytest never collects — the
 │                                #   collection barrier is tests/parked/conftest.py; see its README
 ├── .chroma/                     # ChromaDB vector store
@@ -171,6 +183,8 @@ detector.check_all_branches()        # scan AIPASS_REGISTRY.json + external regi
 ```
 
 Rollover writes safety copies (`rollover_backup_*.json`) into `<branch>/.backup/` — a shared runtime namespace (see `@backup`'s README for all writers).
+
+**Todos are not in this pipeline.** `detector.check_all_branches()` never counts them, so the fleet walk never rolls a pad. `rollover run` rolls ONE branch's pad before the walk (file only, no embedding) and `rollover check` counts it after — see [Todos — the pad and the backlog](#todos--the-pad-and-the-backlog-dplan-0345-2026-09-15).
 
 ### A rollover normalizes the branch it touched (2026-08-27)
 
@@ -251,7 +265,7 @@ The **date** half is off for the snapshot lane (`date_guard=False`). Snapshots a
 - **Per-entry tolerance.** An entry whose `number` cannot be read as an int keeps its exact index; the readable entries beside it are still ordered among the slots they occupy. One bad row no longer forfeits protection for the whole container.
 - **Loud skip.** Every unreadable row is reported — `result["warnings"]` names the container and the offending indices, a prax `WARNING` is logged, and `normalize_all_memory_files()` returns `files_with_warnings` (also printed by the CLI). Warnings are *not* mutations, so a file with nothing to change is left byte-identical.
 - **Type repair.** A `number` stored as a numeric string (`"171"`) or integral float is coerced to `int`, recorded in `changes`, and persisted — the half-repaired container that used to raise `TypeError` inside `sorted()` now heals itself.
-- A container with **no** numbers at all (the normal `todos` shape) is skipped silently — that is a legitimate shape, not corruption.
+- A container with **no** numbers at all is skipped silently — that is a legitimate shape, not corruption.
 
 ### A correct refusal must not become a runaway log (2026-08-16)
 
@@ -453,8 +467,8 @@ Every `.trinity/local.json` and `.trinity/observations.json` carries inline `*_m
 ```
 
 **The draft target (2026-09-13, DPLAN-0342).** Every cap renders with `draft to N` beside it:
-`DRAFT_PERCENT` (80) of the cap, floored, from `entry_limits.draft_target()` — 300/200/150 read
-240/160/120, and a `per_branch` cap of 500 reads 400. It is derived, not a config key: a second stored
+`DRAFT_PERCENT` (80) of the cap, floored, from `entry_limits.draft_target()` — 300/200/100 read
+240/160/80, and a `per_branch` cap of 500 reads 400. It is derived, not a config key: a second stored
 number per entry type would go stale the first time an override moved only the cap. The write gate
 never reads it; the cap and `enforce` are unchanged. Why it is in the line: @devpulse's fleet miner
 found 226 of 2280 `.trinity` edits refused (9.9%), median overage 7% of the cap, and a field replica
@@ -466,7 +480,11 @@ mailed there before files are re-rendered.
 
 **Source of truth:** `memory_json/custom_config/memory.config.json` — the operator-edited file *is* the runtime authority for rollover counts and entry char limits. `config_loader.DEFAULT_CONFIG` in code is the **regeneration seed**: when the file is genuinely *missing*, `load()` rebuilds it in full from those defaults so there is always a real file to edit. A file that *exists* but cannot be read — for **any** reason: bad syntax, bad bytes, bad permissions — is never written over (DPLAN-0206 red flag, `json_structure` v3.0.0) and never raises at the caller. `load()` logs an ERROR, serves defaults in memory, and leaves the bytes alone for the operator to fix; healing a stray comma must not cost them their per-branch tuning. `rollover push` refuses on the same condition rather than rebuilding from the seed. A file that parses is never rewritten either, so operator edits persist, and anything it omits is deep-merged from the defaults. Tab strings are *generated* from the effective config, never hand-written.
 
-**Sections:** `todos_meta` (rollover OFF — operational, never trimmed), `key_learnings_meta`, `sessions_meta`, `observations_meta` (all rollover ON).
+**Sections:** `todos_meta` (a pad of `rollover.defaults.local.todos.count` todos; the oldest roll to a backlog file, never to vectors), `key_learnings_meta`, `sessions_meta`, `observations_meta` (all rollover ON). The todos tab carries the pad size, the backlog path, the task cap and `next #N`, derived at render time as max(pad ∪ backlog) + 1. This branch's, as rendered on its own `local.json`:
+
+```
+"todos_meta": "⟦ pad of 10 · oldest roll to .backup/todo/memory/backlog.json · task ≤100 chars · draft to 80 · next #13 ⟧ One line of what to do: …"
+```
 
 ### One resolver, because the tab is an instruction
 
@@ -497,10 +515,13 @@ fallback is ever reintroduced into this file.
 from aipass.memory.apps.handlers.tracking.tab_renderer import render_all_meta_tabs
 
 tabs = render_all_meta_tabs()
-# → {"TODOS_META": "⟦ rollover OFF ...", "KEY_LEARNINGS_META": "⟦ rollover ON ...", ...}
+# → {"TODOS_META": "⟦ pad of 10 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤100 chars · draft to 80 · next #? ⟧", "KEY_LEARNINGS_META": "⟦ rollover ON ...", ...}
+
+tabs = render_all_meta_tabs(branch_dir="canary")
+# → the todos tab names .backup/todo/canary/backlog.json; next #N from an empty pad + that backlog
 ```
 
-Returns defaults (not per-branch overrides) — appropriate for template resolution at branch creation.
+Returns defaults (not per-branch overrides) — appropriate for template resolution at branch creation. With no `branch_dir` the todos tab renders `<branch>` and `next #?` rather than guess a number.
 
 ---
 
@@ -589,10 +610,11 @@ and drift detection sits where it belongs, in the lane that reads disk:
 drone @memory lint            # scans every branch's entries, read-only, owes nothing to write order
 ```
 
-`todos` are no longer a special case here — the rule is one rule. `RESHAPE_ONLY_SECTIONS` remains
-`("todos",)` for the question it actually answers: the containers **no machine may prune**. The push
-re-exports it for its prune lane and @hooks reads it for the missing-canonical-field refusal, one
-list so the two cannot disagree within a release.
+`todos` are no longer a special case here — the rule is one rule. `RESHAPE_ONLY_SECTIONS`, which
+named `todos` as the one container no machine may prune, is **retired** (DPLAN-0345, 2026-09-15): no
+code under `src/aipass/` outside the test trees names it. A non-canonical todo is no longer left in place
+for its agent to reshape; it moves, json-equal, to its branch's backlog file — see
+[Todos go to the backlog, never to vectors](#todos-go-to-the-backlog-never-to-vectors-120-2026-09-15).
 
 Touch an entry and you own it: the exemption covers byte-identical text only, so editing a fat entry
 into a slightly less fat one is authorship and is refused. Identity in a list is the **text**, never
@@ -693,11 +715,11 @@ standard. Per branch it does exactly three things:
    **directory** name (what @seedgo's checker compares against — the registry's own `name` field
    disagrees in casing for six citizens); `_usage` and the `guidelines` block come **verbatim** from
    the gold-source templates; all four `*_meta` lines are re-composed from config + template prose.
-2. **Prunes every non-canonical entry — except a todo.** See the law below, and *Todos are never
-   archived* under it.
-3. **Writes one canonical session note** in the pruned branch's own `sessions[]` saying where its
-   entries went, how to get them back, and which todos were left behind for it to reshape. Skipped
-   entirely when nothing was pruned.
+2. **Prunes every non-canonical entry — and moves todos to a file, never to vectors.** See the law
+   below, and *Todos go to the backlog, never to vectors* under it.
+3. **Writes one canonical session note** in the branch's own `sessions[]` saying where its entries
+   went, how to get them back, and which todos moved to the backlog. Skipped entirely when nothing
+   was archived and no todo moved.
 
 Then it stamps `.template_version.json` via `receipt.py` with `stamped_by: "memory push"` — the
 push-lane wiring the receipt build left pending.
@@ -736,49 +758,49 @@ The note the push writes is itself measured against that same gate before it is 
 left behind a note the standard would refuse would have re-introduced, in its own hand, the exact
 violation it came to remove.
 
-### Todos are never archived (1.1.0, 2026-08-27)
+### Todos go to the backlog, never to vectors (1.2.0, 2026-09-15)
 
-`todos` are **exempt from the prune lane**, and the exemption is not a softening of the standard — it
-*is* the standard, which says in its own words that todos never roll.
+*Supersedes "Todos are never archived" (1.1.0, 2026-08-27), which kept a non-canonical todo in the file
+for its own agent to reshape. With nothing moving them, `status` grew into a log: 190 todos across 18
+branches, 106,408 chars of todo JSON, devpulse alone 69,680 (DPLAN-0345, measured 2026-09-15).*
 
-Sessions, key_learnings and observations are **records**, and a record in a vector is still a record:
-`drone @memory search` returns it the moment anyone wants it. A todo is a **debt**, and a debt only
-works if it resurfaces **unbidden** on the next load. Vectorized, it never does — the agent opens a
-clean file, sees nothing owed, and silently forgets what it promised. For this one container,
-archiving *is* losing.
+The half of the old rule that stands: **a todo never goes to vectors.** Sessions, key_learnings and
+observations are records, and a record in a vector is still a record. A todo is a debt, and a debt
+only works if it resurfaces unbidden on the next load; vectorized, it never does. A restored then
+re-rolled vector copy would also land a second copy with nothing linking the two (the CPLAN-0002
+duplicate).
 
-Found by @spawn after the fleet push: its three open todos were `{task, added}` shaped, so the shape
-rule archived them like everything else. The archive half worked perfectly — @spawn verified verbatim
-recall before restoring them by hand — which is exactly what made it dangerous: an agent that had not
-gone looking would never have known.
+What changed is where a todo goes when it cannot stay on the pad. The canonical todo is
+`{number, date, task, priority?}` — `status` is gone — with `task` held to its entry_limits cap.
+`plan_todos` sorts the pad:
 
-So a non-canonical todo is **REPORTED for reshape-in-place**:
+- a todo that is not canonical leaves with reason `non-canonical`, in file order. `todo_defect` names
+  ONE defect per todo, the first in `DEFECT_ORDER`: not an object > status present > task over cap >
+  missing field > unknown field > wrong type;
+- then, when the canonical todos left exceed the pad count, the oldest by number leave with reason
+  `overflow`.
 
-- kept in the file **byte-identical**, never vectorized, never removed;
-- named **per entry, uncapped** in the push report (`~ todos[0] #? : missing 'priority'; …`) — unlike
-  prune samples, which are capped at 6 because the vector store holds the full entry; this is the only
-  place the left-behind work is named;
-- **counted on every branch, every run.** Each branch line carries `todos N seen, M to reshape in
-  place` (`push_report._todo_clause`) even when nothing needs reshaping. Silence used to be the
-  report's answer for a clean branch, which made "this agent owes nothing" and "this agent's open work
-  is gone" render identically — the exact blindness the morning of 2026-08-27 ran into;
-- **counted in the in-file note**, with the entry numbers enumerated when they fit the note's own cap
-  and stepped down to a bare count when they do not;
-- rolled up in the report totals as `TODOS LEFT TO RESHAPE: N across M branch(es)`.
+They land in `.backup/todo/<branch_dir>/backlog.json` json-equal — never reshaped, never shortened.
+`move_todos` makes one verified append per reason (append, replace atomically, read back, compare
+every record) **before** the pad is written; a failed or mismatched append refuses the branch whole
+and leaves its `local.json` untouched. Reshaping by machine is still refused: a machine that rewrites
+a 150-char task into 100 has rewritten someone's open work.
 
-**Reshaping it mechanically was considered and refused.** The canonical shape needs `priority` and
-`status`, and a machine that invents someone else's priority has not preserved their open work — it has
-rewritten it. That is the same rule this module already applies to everything it archives.
+There is no migration code. Without `status` in the shape every legacy todo is non-canonical, so the
+first push empties those pads into their backlogs and every later push finds nothing to move.
 
-**The note is minted only when something was actually archived.** A branch whose only finding is a
-drifted todo lost nothing and had nothing moved — and since that todo stays non-canonical until its
-agent reshapes it, noting it on every run would stack a fresh session entry on every push and break the
-idempotency the canary proved. The report says it every time; the file says it once, alongside the
-entries that did move.
+**The report states it on every branch, every run** (`push_report._todo_lines`):
 
-**The cost is stated, not hidden:** a branch carrying a drifted todo does not reach trinity 100 until
-its own agent reshapes it. That is the correct trade — a debt visible and non-canonical beats a debt
-canonical and gone.
+```
+   todos N seen · M to backlog (C chars) · K stay on the pad of 10
+     reasons: <defect> <count>, …
+     backlog .backup/todo/<branch>/backlog.json (exists, appended to | does not exist yet, created by the push; never overwritten)
+```
+
+and the fleet totals carry `TODOS TO BACKLOG: N across M branches, C chars`, how the chars are
+measured, and the defect order. The in-file session note names the moved numbers and the backlog
+(`NOTE_TODOS_NAMED`), stepping down to a bare count (`NOTE_TODOS_COUNTED`) when the names would
+bust the session cap it is measured against.
 
 ### Scope
 
@@ -817,6 +839,9 @@ Projected by applying the push into a temp copy of each branch's real `.trinity/
 
 ### Measured again, 2026-08-27 (the todo exemption)
 
+*The record of the retired reshape-in-place rule; the lane these numbers measured was replaced on
+2026-09-15 — see [Todos go to the backlog, never to vectors](#todos-go-to-the-backlog-never-to-vectors-120-2026-09-15).*
+
 The exemption was proven by replaying @spawn's real incident: its three archived todos recovered
 **verbatim from the vectors they were pruned into**, re-inserted into a temp copy of @spawn's live
 `.trinity/`, plus one drifted session so the archive lane fired in the same run. Through the real
@@ -844,6 +869,90 @@ re-run tonight and is carried forward from the 08-27 build.
 
 ---
 
+## Todos — the pad and the backlog (DPLAN-0345, 2026-09-15)
+
+A todo is a sticky note: one line of what to do — "Check on seedgo's errors in logs", "fix drone
+help". The pad holds a few; the ones that roll off wait in a plain file.
+
+| | |
+|---|---|
+| **Shape** | `{number, date, task, priority?}` — no `status`. What is on the pad is the status; done = deleted. |
+| **Pad count** | `rollover.defaults.local.todos.count` — **10** — resolved per branch by `config_loader.get_todos_count` (a `per_branch.<b>.local` block without a todos count falls back to the default). `config get` shows it; `config set` refuses `todos` in v1. No verb reads it as a literal. |
+| **Task cap** | `entry_limits.entry_types.todos.max_chars` — **100**, draft to 80. |
+| **Backlog** | `<repo_root>/.backup/todo/<branch_dir>/backlog.json`, keyed by the branch DIRECTORY name. Two in-scope branches sharing a directory name are refused by name. |
+| **Vectors** | Never. File only — no embedding, no ChromaDB, no subprocess. |
+
+**When the oldest roll:**
+
+- **`drone @memory rollover run`**, for ONE branch: `--branch @name`, or the branch the caller's working
+  directory sits in. From the repo root nothing rolls, and one line says so. Past the count, the oldest
+  by `number` move with reason `overflow`: append to the backlog, replace atomically, read back and
+  compare every record json-equal, and only then write the pruned pad. A mismatch refuses and leaves
+  the pad untouched — a todo may end up in both places, never in neither. `rollover check` counts the
+  same pad and prints `ready for rollover` when it is over.
+- **`drone @memory push`**, the trinity push: every non-canonical todo, then any canonical overflow,
+  moves to the same file, nothing reshaped (see [Todos go to the backlog, never to vectors](#todos-go-to-the-backlog-never-to-vectors-120-2026-09-15)).
+- Nowhere else. The fleet walk (`detector.check_all_branches`, which `rollover run` and `check` also
+  run) never counts todos. Its file list is fleet-wide whatever `--branch` names, and `check` labels
+  it so: `Found N files ready for rollover (fleet-wide):`, then one line saying `--branch` scopes only
+  the todo pad line.
+
+**The verbs**, as they answer on this machine tonight:
+
+```
+$ drone @memory todo                     # from src/aipass/memory
+memory: pad 6 of 10 · backlog 0 (no backlog yet: .backup/todo/memory/backlog.json)
+
+$ drone @memory todo                     # from the repo root
+Todos: no branch resolved (…/AIPass is not inside a registered branch directory) - no todo pad counted; pass --branch @name
+
+$ drone @memory todo backlog
+memory: no backlog - .backup/todo/memory/backlog.json does not exist. Nothing has rolled off this pad on this machine (.backup/ is gitignored, so a fresh clone starts without one)
+```
+
+A backlog with records prints a header, then one line per record — original number · date · priority
+(when set) · rolled · reason · task (from the scratch proof below):
+
+```
+memory backlog: 3 record(s), oldest roll first (.backup/todo/memory/backlog.json)
+  #2 · 2026-09-15 · priority medium · rolled 2026-09-15T02:32:49-07:00 · overflow · fix drone help
+```
+
+`status` is never printed: the records the first push moves carry the old `status` text verbatim —
+about 65k characters of it on devpulse's pad alone (DPLAN-0345).
+
+- **`.backup/` is gitignored**, so a fresh clone has no backlog. "No backlog" is a state (exit 0), not
+  an error. An unreadable or misshapen backlog is refused (exit 2) and never written over.
+- **`todo restore <number>`** puts one backlog todo back on the CALLER's own pad. It writes
+  `.trinity/local.json`, so a `--branch` naming another branch is refused, and so is a caller standing
+  in no branch. It is refused when the pad already holds its count (read from config), when no record
+  carries the number, and when several do (the candidates are named by rolled time and task). The todo
+  returns **on top of the pad** (lists are newest-first) under the next number (below) with task, date
+  and priority identical. The same pad write re-renders `todos_meta` through the tab renderer, so the
+  tab's `next #N` is the restored number + 1 the moment the verb returns (a tab that cannot be rendered
+  refuses the restore, nothing written). The pad is written and read back first; only then is the record removed from
+  the backlog. It re-numbers because an emptied pad restarts at 1 while the backlog already holds 1..N,
+  and a restored todo keeping its low number would be the first to roll again.
+- **Numbers are never re-issued on purpose.** The next number is one past the highest of: the pad, the
+  backlog's original numbers, the backlog's `document_metadata.high_water`, and N − 1 from the `next #N`
+  the branch's own tab last rendered. `high_water` is raised (never lowered) on every memory backlog
+  write — roll, push move, restore — and read back; a backlog without it has no floor, never an error.
+  The tab floor is why a re-render after deleting the top todo still says the same `next #N`. `#?` or an
+  unrecognised tab is no floor; a bool is not a number. seedgo's check masks the `next #N` slot, so it
+  needs nothing. **Residual:** a todo added by hand and deleted by hand with no memory write or tab
+  render in between leaves no trace, so its number can be issued again once.
+- **Every refusal exits non-zero** (2: routed, refused); a refused argument also names the valid forms.
+  There is no `--json` on these verbs — nothing reads them by machine — and the flag is refused like
+  any other unknown argument rather than silently ignored.
+
+**Measured on a copy** of this branch's `local.json` (2026-09-15, scratch paths, the real file's sha256
+unchanged, no `.backup/todo/` created): 12 canonical todos → roll → pad 10, backlog #1, #2; restore on
+the full pad refused `pad is full (10/10)`, both files byte-identical; #7 deleted, restore #1 → **#13**
+with task, date and priority identical, backlog down to #2; #14 and #15 added, re-roll → pad 10,
+backlog #2, #3, #4.
+
+---
+
 ## Rollover limit config verbs
 
 `drone @memory config` is the verb surface over the rollover entry-count limits in
@@ -867,7 +976,9 @@ drone @memory rollover push --json
 ```
 
 **Settable types — exactly three:** `sessions`, `key_learnings`, `observations`. `auto_compact_cap`
-is displayed read-only and preserved across writes, but is not settable in v1.
+is displayed read-only and preserved across writes, but is not settable in v1. The todos count is the
+same: `config get` shows it (`read_only: true` under `--json`), and `set` / `set-default` refuse it —
+`'todos' is display-only in v1: config get shows its count, config set cannot change it`.
 
 **Bounds:** `1 <= count <= 100`. Zero would roll over every entry immediately; past 100 rollover
 stops being rollover. Unknown branches are refused against the registry — registry is truth.
@@ -995,7 +1106,7 @@ enforcement that does not happen. `auto_compact_cap` appears only where one is s
 
 ## Quality
 
-- **Tests:** **1583 passed, 0 failures, 2 skipped, 37.6s** — re-measured 2026-09-13 in the CI shape below. It was 1578 before tonight; the +5 are the draft-target floor rows (DPLAN-0342). `test_trinity_push.py::TestThePushedFileIsCanonical::test_a_pushed_branch_satisfies_the_trinity_checker` scores a push with @seedgo's own trinity checker, so it is green only with seedgo's byte-match mirror of the `draft to N` tab: it read red on this tree before that mirror landed, and green after. On disk: 1443 test functions across 42 files. *The 09-07 reading follows as the record:* **1573 passed, 0 failures, 2 skipped, 33.6s** — re-measured 2026-09-07 (FPLAN-0492 wave 6) from the repo root in the CI shape (`python -m pytest src/aipass/memory -c pyproject.toml --rootdir=. -q`). This supersedes the 1578/5-skip reading of 2026-09-05 (itself over the 1222/21.8s of 2026-08-27): the DPLAN-0323 seal archived the three parked symbolic test files and `tests/test_json_handler.py` that night, which is the whole difference. The 2 skips are what is left of the parked symbolic-fragments tier — `test_symbolic_extras.py` and its embedder `test_vector.py`, see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout"). *Not re-measured tonight and carried forward from the 08-27 build, marked so rather than restated as fresh:* the 69 push tests in `tests/test_trinity_push.py` and the 10 mutations run against that lane (all 10 bit).
+- **Tests:** **1685 passed, 0 failures, 2 skipped, 1 xfailed** — re-measured 2026-09-15 (FPLAN-0590 row 5), the same from the repo root (`python -m pytest src/aipass/memory/tests --rootdir=. -n auto --dist loadscope`) and from this directory (`python -m pytest tests -n auto`). The xfail is deliberate: `test_trinity_push.py::TestThePushedFileIsCanonical::test_a_pushed_branch_satisfies_the_trinity_checker` scores a push with @seedgo's checker, whose todos-tab mirror (DPLAN-0345 row 6) has not landed, and asserts strictly once it does (`docs/todos_v2_shape_contract.md` §8). On disk: 1532 test functions across 42 files. *The 09-13 reading follows as the record:* **1583 passed, 0 failures, 2 skipped, 37.6s** — re-measured 2026-09-13 in the CI shape below. It was 1578 before tonight; the +5 are the draft-target floor rows (DPLAN-0342). `test_trinity_push.py::TestThePushedFileIsCanonical::test_a_pushed_branch_satisfies_the_trinity_checker` scores a push with @seedgo's own trinity checker, so it is green only with seedgo's byte-match mirror of the `draft to N` tab: it read red on this tree before that mirror landed, and green after. On disk: 1443 test functions across 42 files. *The 09-07 reading follows as the record:* **1573 passed, 0 failures, 2 skipped, 33.6s** — re-measured 2026-09-07 (FPLAN-0492 wave 6) from the repo root in the CI shape (`python -m pytest src/aipass/memory -c pyproject.toml --rootdir=. -q`). This supersedes the 1578/5-skip reading of 2026-09-05 (itself over the 1222/21.8s of 2026-08-27): the DPLAN-0323 seal archived the three parked symbolic test files and `tests/test_json_handler.py` that night, which is the whole difference. The 2 skips are what is left of the parked symbolic-fragments tier — `test_symbolic_extras.py` and its embedder `test_vector.py`, see `tests/parked/symbolic_20260814/` — and each names its reason in the skip message. A sixth skip appears on a fresh clone: the health test that reads this branch's real `.trinity/` files, which are gitignored (`tests/test_health.py:404`, "no live .trinity files in this checkout"). *Not re-measured tonight and carried forward from the 08-27 build, marked so rather than restated as fresh:* the 69 push tests in `tests/test_trinity_push.py` and the 10 mutations run against that lane (all 10 bit).
   *Two different numbers, deliberately, both re-measured 2026-09-07 after the DPLAN-0323 seal:* `grep -c 'def test_'` over `tests/test_*.py` finds **1437 test functions** on disk across **42 files**. Of those, **91 live in the 2 modules** that call `pytest.skip(allow_module_level=True)` at import (`test_symbolic_extras.py`, `test_vector.py`), so pytest never collects them individually — they surface as the 2 skips. The remaining **1346** expand through `@pytest.mark.parametrize` into **1573** collected cases, and all 1573 pass. Both numbers are true and neither substitutes for the other — seedgo's `readme` rule counts the 1437 on disk, a green board counts the 1573 that execute. The +6 over the 09-07 seal reading (1431) is wave 6: four exit-code pins in `test_contracts.py` and two known-migration-backup pins in `test_trinity_push.py`. The drop from the 09-05 reading (1580 across 46 files) is four files leaving the tree on Patrick's 2026-09-07 ruling: the three parked symbolic files (below) and `tests/test_json_handler.py`, whose six shim-pin tests now run once for every branch inside seedgo's `test_json_handler_contract.py`.
 - **Seedgo:** **100% on all 47 scored categories, 0 type errors** — re-run 2026-09-13 after the DPLAN-0342 draft-target change (`drone @seedgo audit aipass @memory`, apps/ only). That is 46 standards plus diagnostics, matching CI's `EXPECTED_STANDARDS = 47`: seedgo's `host_portability` landed 2026-09-12 (FPLAN-0554). The 2026-09-07 reading was 46, one fewer than 09-05's 47 because `test_quality` (v4) retired from the pack that night. The count drift this README carried for an hour after the tests moved (`Readme` 90) was cleared by re-measuring the tests block above, not by bypass. `Readme` and `Readme_Quality` are both green as this document stands. The historical detail below is from the 08-27 marker-7 run and is kept as the record of how those findings were cleared, not as a fresh measurement. Two findings that build itself introduced were fixed, not bypassed: extracting `_handle_rollover_verb()` out of `rollover.handle_command()` moved the no-args gate behind a delegation (`introspection` 85%, and the checker was right — the entry seam should say for itself that a bare `rollover` introspects), and adding the renamed verb to the top-level `elif` chain pushed it to depth 5 (`deep_nesting`); the chain is now flat `if`/`return`, one arm per command. The four findings the first audit raised on the new files were fixed rather than bypassed: report rendering moved out of the module into `handlers/templates/push_report.py` (modules do no direct file I/O), `json_handler` logging added to both new handlers, and the `unused_function` hit on `is_canonical()` was cleared by giving it a real caller — the guard that measures the push's own session note against the same gate everything else was pruned against. The `--json` lane added exactly one rule (`json_flag.py` / `json_structure`), a verbatim mirror of the `help_flags.py` rule for its sibling predicate. The `cli` bypass it first appeared to need was **not** taken: `console.print(payload, markup=False, soft_wrap=True, highlight=False)` emits byte-exact JSON through the shared console, so no Rich bypass is required to serve a machine.
 - **Bypass registry:** **114** rules across **40 distinct files** in `.seedgo/bypass.json` (`last_updated: 2026-08-31`). Re-counted 2026-09-05: **41 of the 114 point at 12 files that are no longer in the tree** — parked on 08-14 / 08-18 (`symbolic/*.py` ×6, `vector/embedder.py`, `storage/chroma.py`, `search/vector_search.py`, `learnings/manager.py`) and on 08-27 with the retired template lane (`templates/differ.py`, `templates/pusher.py`). One duplicate `(file, standard)` pair as well — `learnings/manager.py` / `architecture`, twice. This supersedes the 08-25 reading of 37 rules across 10 files, which was correct when taken and drifted with the template-lane retirement. The rules are inert — a bypass for an absent file suppresses nothing — but the registry is a record of a tree that stopped existing. Cleanup is an open item, not fixed tonight.
@@ -1112,6 +1223,13 @@ unreferenced". See that directory's README for the full method.
 ## Known Issues
 
 - `search` requires `fastembed` in the venv `_get_memory_python()` resolves to — fails without it
+- **PreCompact cannot roll a todo pad as wired today** (measured 2026-09-15; @hooks' lane, FPLAN-0590
+  row 7). @hooks' `handlers/lifecycle/rollover.py` runs `drone @memory rollover check` and `rollover run`
+  with `cwd=<repo root>` and no `--branch`. Drone stamps its own working directory into
+  `AIPASS_CALLER_CWD`, overriding an inherited one (`AIPASS_CALLER_CWD=<memory dir> drone @memory todo`
+  run from the repo root prints the no-branch line), so that check resolves no branch and never says
+  `ready for rollover` for a pad. Until the hook names the branch, a pad rolls on
+  `rollover run --branch @name`, a `rollover run` from inside the branch, or the trinity push.
 - **`.seedgo/bypass.json` holds 41 rules for 12 files that no longer exist** (parked 08-14 / 08-18, plus `templates/differ.py` and `templates/pusher.py` retired 08-27) plus one duplicate `(file, standard)` pair. Re-counted 2026-09-05. Inert, but the registry no longer describes the tree.
 - **The receipt writer's `spawn birth` lane is still unwired.** `handlers/templates/receipt.py` now stamps for real from the trinity push (`stamped_by: "memory push"`, verified live on @canary), and a tab refresh bumps `config_rendered`. `spawn birth` adopts the writer separately — not built here.
 - **22 branches carry stray files in `.trinity/`, 56 files in total** — File set group, and outside the push's mandate: it reports them per branch in the dry-run and never touches them. Needs a ruling. Re-measured 2026-09-05 by walking `registry_scope.fleet_branches()`, which now returns **28** branches (up from 22 as external roots joined): 22 of the 28 carry leftovers, almost all `*.pre_v2_backup` / `*.pre_v3_backup` migration files, plus devpulse's older `*.pre-aipl` pair. This supersedes the 08-27 reading of 16 — the count rose with the fleet, not with new litter. The README half of this item stays closed.
@@ -1129,7 +1247,9 @@ unreferenced". See that directory's README for the full method.
 
 ---
 
-*Last Updated: 2026-09-07 (FPLAN-0492 wave 6 — code changed: the entry point's exit codes, the
+*Last Updated: 2026-09-15 (FPLAN-0590 row 5 — code changed: the `todo` verbs — `modules/todo.py`, `todo_report.py`, `branch_flag.read_branch_arg`, the entry point's help rows. The todos v2 pad and backlog are documented at their own sites above, and every line that still said todos never roll, `RESHAPE_ONLY_SECTIONS`, reshape-in-place, `rollover OFF` or the 150 cap was corrected against the code. Measured tonight: 1532 functions / 42 files, 1685 pass / 2 skip / 1 xfail from both rootdirs.)*
+
+*Previously: 2026-09-07 (FPLAN-0492 wave 6 — code changed: the entry point's exit codes, the
 known-migration-backup stray rule, and the first real fleet ledger, each documented at its own site above and
 measured tonight: 1437 functions / 42 files / 1573 collected, 1573 pass / 2 skip, audit 100 on every scored
 category, 0 type errors. The 09-05 pass below is kept as the record of that build.)*

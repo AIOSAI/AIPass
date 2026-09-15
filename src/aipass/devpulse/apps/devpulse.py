@@ -36,9 +36,12 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import err_console, error, resolve_exit, reset_command_state
+from aipass.cli.apps.modules import console, err_console, error, resolve_exit, reset_command_state
 
-console = err_console
+# console is stdout, err_console is stderr. Until 2026-09-15 this file aliased
+# console = err_console (a 2026-03 compliance sweep, no reason recorded), so the
+# bare self-map and --help went to stderr: every other branch prints them to
+# stdout, and a fleet measurement of self-map sizes read devpulse as 0 chars.
 
 # The one version string. --version printed a hardcoded "1.0.0" while the header
 # above said 1.0.1 (FPLAN-0490, found 2026-09-06); keep this constant and the

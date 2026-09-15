@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-15
 # =============================================
 
 """Marker 7 — the memory lane, and the rulings that came with it.
@@ -527,9 +527,9 @@ class TestGrandfatherNarrowedToTodos:
     errors were the receipt.
 
     So the rule is one rule now: a write is refused for what it AUTHORS.
-    todos are no longer a special case at the cap gate; they remain the one
-    container the PUSH may not prune, which is a different question and keeps
-    its own constant.
+    todos are no longer a special case at the cap gate. Since DPLAN-0345 they
+    are no exception at the push either: a todo leaves the pad for its backlog
+    file, so the push's exemption constant has zero consumers and is retired.
 
     Mutation notes: refusing carried entries (deadlocks rollover), skipping
     carried entries silently (the 08-27 objection, still valid), or matching
@@ -587,9 +587,14 @@ class TestGrandfatherNarrowedToTodos:
 
         assert [hit["entry_type"] for hit in hits] == ["todos"]
 
-    def test_the_exemption_is_keyed_on_the_pushs_own_constant(self):
-        """Two lists of exempt containers would drift apart in a week."""
-        assert entry_limits.RESHAPE_ONLY_SECTIONS == trinity_push.RESHAPE_ONLY_SECTIONS
+    def test_the_reshape_only_constant_is_retired_from_both_modules(self):
+        """DPLAN-0345: zero consumers, so it goes, as its own comment said it should.
+
+        A copy re-introduced in either module is the old never-move exemption
+        coming back beside the backlog rule.
+        """
+        assert not hasattr(entry_limits, "RESHAPE_ONLY_SECTIONS")
+        assert not hasattr(trinity_push, "RESHAPE_ONLY_SECTIONS")
 
 
 # =============================================================================

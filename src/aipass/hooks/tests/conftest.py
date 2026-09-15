@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-03
+# Modified: 2026-09-15
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -59,6 +59,25 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
+    return sandbox
+
+
+@pytest.fixture(autouse=True)
+def isolated_trust_registry(tmp_path_factory, monkeypatch) -> Path:
+    """Keep the trust registry out of the LIVE ~/.aipass/trusted_projects.json.
+
+    REGISTRY_PATH is bound to Path.home() at import. A test that walks into a
+    .aipass/hooks.json while that file is absent runs bootstrap(), which WRITES
+    it: seedgo's runtime probe (HOME pointed at a throwaway, 2026-09-14) caught
+    test_engine's TestErrorResilience creating it. On a dev seat that file is
+    the live registry. Tests that exercise the registry patch it on top.
+
+    Returns:
+        The sandbox registry path (absent until something writes it).
+    """
+    trust_registry = importlib.import_module("aipass.hooks.apps.handlers.config.trust_registry")
+    sandbox = tmp_path_factory.mktemp("trust_registry") / "trusted_projects.json"
+    monkeypatch.setattr(trust_registry, "REGISTRY_PATH", sandbox)
     return sandbox
 
 

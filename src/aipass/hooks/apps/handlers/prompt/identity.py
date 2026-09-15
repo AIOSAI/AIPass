@@ -1,14 +1,19 @@
 # =================== AIPass ====================
 # Name: identity.py
-# Version: 1.0.0
-# Description: Injects branch identity from passport.json (UserPromptSubmit)
+# Version: 1.1.0
+# Description: Injects branch identity from passport.json (UserPromptSubmit), cadence-gated
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-09-15
 # =============================================
 
-"""Reads .trinity/passport.json and outputs formatted identity for prompt injection."""
+"""Reads .trinity/passport.json and outputs formatted identity for prompt injection.
+
+Cadence-gated like the kernel and navmap: fires on turn 0 and every Nth turn
+(loader "identity" in cadence_config.json, default period 5, offset 0), so the
+four grounding parts land together on one beat instead of identity every turn.
+"""
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -22,7 +27,16 @@ def load_content(hook_data: dict) -> str:
 
 
 def handle(hook_data: dict) -> dict:
-    """Inject branch identity from passport.json into prompt context."""
+    """Inject branch identity — cadence-gated (period from cadence_config.json, default 5)."""
+    try:
+        import importlib
+
+        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        if not cadence.should_fire("identity", hook_data):
+            return {"stdout": "", "exit_code": 0}
+    except Exception as exc:
+        logger.info("[HOOKS] identity: cadence check failed, firing anyway: %s", exc)
+
     try:
         content = load_content(hook_data)
         if not content:

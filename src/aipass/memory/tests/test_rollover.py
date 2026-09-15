@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_rollover.py
 # Date: 2026-03-24
-# Version: 1.0.0
+# Version: 1.1.2
+# Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
 
@@ -14,8 +15,11 @@ Tests command routing, handler discovery, and the SUBCOMMANDS dict.
 All tests use mocks or tmp_path — no live filesystem or infrastructure access.
 """
 
+import importlib
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +100,19 @@ def _prepare_rollover_mocks(monkeypatch):
 
     real_help_flags = importlib.import_module("aipass.memory.apps.handlers.cli.help_flags")
     real_json_flag = importlib.import_module("aipass.memory.apps.handlers.cli.json_flag")
+    real_branch_flag = importlib.import_module("aipass.memory.apps.handlers.cli.branch_flag")
     cli_pkg = MagicMock()
     cli_pkg.help_flags = real_help_flags
     cli_pkg.json_flag = real_json_flag
+    cli_pkg.branch_flag = real_branch_flag
+
+    # The todo-pad reports resolve a branch and read a pad: stubbed to the
+    # honest "nothing resolved" line so routing tests never touch a real pad.
+    mock_todo_report = MagicMock()
+    no_branch = {"level": "line", "text": "Todos: no branch resolved (harness) - no todo pad checked"}
+    mock_todo_report.check_pad = MagicMock(return_value=no_branch)
+    mock_todo_report.roll_pad = MagicMock(return_value=no_branch)
+    rollover_pkg.todo_report = mock_todo_report
 
     handlers_pkg = MagicMock()
 
@@ -113,6 +127,8 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli", cli_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.help_flags", real_help_flags)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.json_flag", real_json_flag)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.branch_flag", real_branch_flag)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.todo_report", mock_todo_report)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers", handlers_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
@@ -138,24 +154,38 @@ def _prepare_rollover_mocks(monkeypatch):
         "orchestrator": mock_orchestrator,
         "memory_watcher": mock_memory_watcher,
         "plans_processor": mock_plans_processor,
+        "todo_report": mock_todo_report,
     }
+
+
+_ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
 
 
 def _import_rollover(monkeypatch):
     """Prepare mocks and import (or reimport) the rollover module.
 
+    The re-import binds rollover to the MagicMock cli, so its error() marks
+    nothing. Both evictions go through monkeypatch, which records what stood
+    there - the real module, or nothing - and teardown puts exactly that back.
+    A bare pop left the mock-bound module cached after teardown: the next
+    in-process memory.main() on that xdist worker routed `rollover <bogus>`
+    through the mock error() and exited 0 (test_contracts, macOS red on
+    02610e3b and 561678fd).
+
     Returns (rollover_module, mocks_dict).
     """
     mocks = _prepare_rollover_mocks(monkeypatch)
 
-    # Remove cached module so it re-imports with our mocks
-    sys.modules.pop("aipass.memory.apps.modules.rollover", None)
+    # setitem first so teardown knows the prior state, then evict so the
+    # import below re-executes the module against the mocks.
+    monkeypatch.setitem(sys.modules, _ROLLOVER_MODULE, None)
+    del sys.modules[_ROLLOVER_MODULE]
 
-    # Also clear the parent package's cached attribute so Python
-    # re-executes the module code with fresh mocks.
-    parent = sys.modules.get("aipass.memory.apps.modules")
-    if parent is not None and hasattr(parent, "rollover"):
-        delattr(parent, "rollover")
+    # The parent package's cached attribute, the same way: `from package
+    # import rollover` would otherwise hand back the cached module unexecuted.
+    parent = importlib.import_module("aipass.memory.apps.modules")
+    monkeypatch.setattr(parent, "rollover", None, raising=False)
+    delattr(parent, "rollover")
 
     from aipass.memory.apps.modules import rollover
 
@@ -194,7 +224,7 @@ class TestMockedCliPackageIsComplete:
     def test_every_imported_submodule_is_registered_real(self, monkeypatch):
         _import_rollover(monkeypatch)
         imported = self._imported_cli_submodules()
-        assert imported == {"help_flags", "json_flag"}, (
+        assert imported == {"help_flags", "json_flag", "branch_flag"}, (
             f"rollover.py's cli submodule imports moved to {sorted(imported)} — an empty or "
             "shrunken set would make the loop below register nothing and still read green"
         )
@@ -207,19 +237,80 @@ class TestMockedCliPackageIsComplete:
         """Drop every cli submodule from the cache first -- the CI condition.
 
         Without the fixture registering them, this is the exact
-        ModuleNotFoundError the runner reported.
+        ModuleNotFoundError the runner reported. The drop is recorded first,
+        the way _import_rollover evicts: the fixture re-imports each one, and
+        a bare pop left those new help_flags / json_flag / branch_flag objects
+        cached and named by the cli package after teardown.
         """
-        for name in self._imported_cli_submodules():
-            sys.modules.pop(f"aipass.memory.apps.handlers.cli.{name}", None)
+        cli = importlib.import_module("aipass.memory.apps.handlers.cli")
+        for name in sorted(self._imported_cli_submodules()):
+            key = f"aipass.memory.apps.handlers.cli.{name}"
+            monkeypatch.setitem(sys.modules, key, None)
+            del sys.modules[key]
+            monkeypatch.setattr(cli, name, None, raising=False)
+            delattr(cli, name)
         rollover, _mocks = _import_rollover(monkeypatch)
         assert rollover.handle_command("rollover", ["check"]) is True
 
 
-def rollover_module_path():
+class TestMockedReimportIsUndoneAtTeardown:
+    """The rollover module this file binds to a MagicMock cli must not outlive the test that made it.
+
+    It did, through a bare sys.modules.pop: test_contracts' in-process
+    memory.main() later on the same xdist worker discovered the cached module,
+    its mock error() marked no failure, and `rollover <bogus>` exited 0
+    instead of 2 - red on macOS only, where loadscope's size-ordered queue
+    ran this file's classes first on that worker.
+    """
+
+    def test_sys_modules_and_the_parent_attribute_are_restored(self) -> None:
+        parent = importlib.import_module("aipass.memory.apps.modules")
+        module_before = sys.modules.get(_ROLLOVER_MODULE)
+        attr_before = getattr(parent, "rollover", None)
+
+        with pytest.MonkeyPatch.context() as mp:
+            rollover, mocks = _import_rollover(mp)
+            # Guard the guard: the re-import really is bound to the mock.
+            assert rollover.error is mocks["error"]
+            assert rollover is not module_before
+
+        assert sys.modules.get(_ROLLOVER_MODULE) is module_before, "the mock-bound rollover outlived its test"
+        assert getattr(parent, "rollover", None) is attr_before, (
+            "the parent package still names the mock-bound rollover"
+        )
+
+    def test_the_cold_cache_test_puts_the_cli_submodules_back(self) -> None:
+        """The cold-cache test re-imports help_flags, json_flag and branch_flag; teardown must undo it.
+
+        A bare sys.modules.pop there left the re-imported objects cached and on
+        the cli package after teardown (seedgo's runtime plugin, 2026-09-15).
+        """
+        cold = TestMockedCliPackageIsComplete()
+        names = sorted(cold._imported_cli_submodules())
+        assert names == ["branch_flag", "help_flags", "json_flag"], names
+        keys = {name: f"aipass.memory.apps.handlers.cli.{name}" for name in names}
+        cli = importlib.import_module("aipass.memory.apps.handlers.cli")
+        modules_before = {name: importlib.import_module(key) for name, key in keys.items()}
+        attrs_before = {name: getattr(cli, name, None) for name in names}
+
+        with pytest.MonkeyPatch.context() as mp:
+            cold.test_reimport_survives_a_cold_submodule_cache(mp)
+            # Guard the guard: the body really minted new module objects.
+            reimported = [name for name, key in keys.items() if sys.modules[key] is not modules_before[name]]
+            assert reimported == names, f"only {reimported} were re-imported"
+
+        leaked = [name for name, key in keys.items() if sys.modules.get(key) is not modules_before[name]]
+        renamed = [name for name in names if getattr(cli, name, None) is not attrs_before[name]]
+        assert leaked == [], f"the re-imported {leaked} outlived the cold-cache test in sys.modules"
+        assert renamed == [], f"the cli package still names the re-imported {renamed}"
+
+
+def rollover_module_path() -> str:
     """Path to the rollover module's source, without importing it."""
     import importlib.util
 
     spec = importlib.util.find_spec("aipass.memory.apps.modules.rollover")
+    assert spec is not None and spec.origin is not None, "aipass.memory.apps.modules.rollover has no source"
     return spec.origin
 
 

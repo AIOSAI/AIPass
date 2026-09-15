@@ -1,16 +1,18 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-06
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for handlers/lifecycle/rollover.py."""
 
 from unittest.mock import patch, MagicMock
 import subprocess
+
+from aipass.memory.apps.handlers.rollover import todo_report
 
 
 MOD = "aipass.hooks.apps.handlers.lifecycle.rollover"
@@ -82,7 +84,7 @@ class TestRolloverHandler:
 
         mock_result = _mock_run(stdout=CHECK_OVERDUE_OUTPUT)
         with patch("subprocess.run", return_value=mock_result):
-            has_overdue, summary = _run_check(MagicMock())
+            has_overdue, summary = _run_check(MagicMock(), None)
 
         assert has_overdue
         assert "ready for rollover" in summary.lower()
@@ -92,7 +94,7 @@ class TestRolloverHandler:
 
         mock_result = _mock_run(stdout=CHECK_CLEAN_OUTPUT)
         with patch("subprocess.run", return_value=mock_result):
-            has_overdue, _ = _run_check(MagicMock())
+            has_overdue, _ = _run_check(MagicMock(), None)
 
         assert not has_overdue
 
@@ -100,7 +102,7 @@ class TestRolloverHandler:
         from aipass.hooks.apps.handlers.lifecycle.rollover import _run_check
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 30)):
-            has_overdue, _ = _run_check(MagicMock())
+            has_overdue, _ = _run_check(MagicMock(), None)
 
         assert not has_overdue
 
@@ -109,7 +111,7 @@ class TestRolloverHandler:
 
         mock_result = _mock_run(stdout="done", returncode=0)
         with patch("subprocess.run", return_value=mock_result):
-            success, _ = _run_rollover(MagicMock())
+            success, _ = _run_rollover(MagicMock(), None)
 
         assert success
 
@@ -118,7 +120,7 @@ class TestRolloverHandler:
 
         mock_result = _mock_run(stdout="error", returncode=1)
         with patch("subprocess.run", return_value=mock_result):
-            success, _ = _run_rollover(MagicMock())
+            success, _ = _run_rollover(MagicMock(), None)
 
         assert not success
 
@@ -126,10 +128,83 @@ class TestRolloverHandler:
         from aipass.hooks.apps.handlers.lifecycle.rollover import _run_rollover
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 110)):
-            success, msg = _run_rollover(MagicMock())
+            success, msg = _run_rollover(MagicMock(), None)
 
         assert not success
         assert "timed out" in msg
+
+
+class TestTheCompactingBranchIsNamed:
+    """DPLAN-0345 / FPLAN-0590 row 7: @memory rolls ONE branch's todo pad per call.
+
+    drone runs this handler's commands with cwd = repo root and re-stamps
+    AIPASS_CALLER_CWD with that, so memory resolves no branch and rolls no pad
+    unless the hook names one (memory measured it, 2026-09-15). The branch is
+    the compacting session's, read from the PreCompact payload's cwd.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch, check_stdout=CHECK_OVERDUE_OUTPUT):
+        from aipass.hooks.apps.handlers.lifecycle import rollover
+
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs.get("cwd")))
+            return _mock_run(stdout=check_stdout if "check" in argv else "done")
+
+        monkeypatch.setattr(rollover.subprocess, "run", fake_run)
+        monkeypatch.delenv("AIPASS_HOOK_PROBE", raising=False)
+        return rollover, calls
+
+    def test_check_names_the_branch(self, monkeypatch, tmp_path):
+        rollover, calls = self._spy(monkeypatch)
+        rollover._run_check(tmp_path, "hooks")
+        assert calls == [(["drone", "@memory", "rollover", "check", "--branch", "@hooks"], str(tmp_path))]
+
+    def test_run_names_the_branch(self, monkeypatch, tmp_path):
+        rollover, calls = self._spy(monkeypatch)
+        rollover._run_rollover(tmp_path, "hooks")
+        assert calls == [(["drone", "@memory", "rollover", "run", "--branch", "@hooks"], str(tmp_path))]
+
+    def test_handle_reads_the_branch_from_the_payload_cwd(self, monkeypatch, tmp_path):
+        """Not the process cwd: the hook runs wherever CC launched the bridge."""
+        rollover, calls = self._spy(monkeypatch)
+        branch_dir = tmp_path / "src" / "aipass" / "compacting_one"
+        (branch_dir / "apps").mkdir(parents=True)
+        monkeypatch.setattr(rollover, "_find_repo_root", lambda: tmp_path)
+
+        rollover.handle({"cwd": str(branch_dir / "apps"), "trigger": "auto"})
+
+        assert [argv for argv, _ in calls] == [
+            ["drone", "@memory", "rollover", "check", "--branch", "@compacting_one"],
+            ["drone", "@memory", "rollover", "run", "--branch", "@compacting_one"],
+        ]
+
+    def test_no_branch_still_runs_the_fleet_rollover(self, monkeypatch, tmp_path):
+        """A seat in no branch still owes the fleet its sessions roll: bare call, no flag."""
+        rollover, calls = self._spy(monkeypatch)
+        monkeypatch.setattr(rollover, "_find_repo_root", lambda: tmp_path)
+
+        rollover.handle({"cwd": str(tmp_path)})
+
+        assert [argv for argv, _ in calls] == [
+            ["drone", "@memory", "rollover", "check"],
+            ["drone", "@memory", "rollover", "run"],
+        ]
+
+    def test_memorys_todos_line_alone_reads_as_overdue(self, monkeypatch, tmp_path):
+        """The contract: memory keeps its phrase on the todos line for this grep.
+
+        Built from memory's own constant, so a rename there turns this red here.
+        """
+        todos_line = (
+            f"No files need rollover\n@hooks todos: pad 12/10 - 2 {todo_report.READY_PHRASE} "
+            "(oldest by number -> .backup/todo/hooks/backlog.json)"
+        )
+        rollover, _ = self._spy(monkeypatch, check_stdout=todos_line)
+        has_overdue, _ = rollover._run_check(tmp_path, "hooks")
+        assert has_overdue
 
 
 class TestFindRepoRootFailLoud:
@@ -182,8 +257,9 @@ class TestProbeSuppression:
 
         ran = []
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
-        monkeypatch.setattr(rollover, "_run_check", lambda root: (True, CHECK_OVERDUE_OUTPUT))
-        monkeypatch.setattr(rollover, "_run_rollover", lambda root: (ran.append("ran"), (True, ""))[1])
+        monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: "hooks")
+        monkeypatch.setattr(rollover, "_run_check", lambda root, branch: (True, CHECK_OVERDUE_OUTPUT))
+        monkeypatch.setattr(rollover, "_run_rollover", lambda root, branch: (ran.append("ran"), (True, ""))[1])
         return rollover, ran
 
     def test_probe_run_suppresses_the_fleet_rollover(self, monkeypatch):
@@ -206,12 +282,13 @@ class TestProbeSuppression:
 
         checked = []
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
+        monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: "hooks")
         monkeypatch.setattr(
             rollover,
             "_run_check",
-            lambda root: (checked.append("checked"), (True, CHECK_OVERDUE_OUTPUT))[1],
+            lambda root, branch: (checked.append("checked"), (True, CHECK_OVERDUE_OUTPUT))[1],
         )
-        monkeypatch.setattr(rollover, "_run_rollover", lambda root: (True, ""))
+        monkeypatch.setattr(rollover, "_run_rollover", lambda root, branch: (True, ""))
         monkeypatch.setenv("AIPASS_HOOK_PROBE", "1")
         rollover.handle({})
         assert checked == ["checked"]

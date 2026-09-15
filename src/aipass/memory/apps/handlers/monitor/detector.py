@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.3.0
+# Version: 0.4.1
 # Created: 2025-11-16
-# Modified: 2026-03-06
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -17,6 +17,12 @@ Purpose:
     rollover module to check all branches for files needing rollover.
     All branches use v2 entry-count limits from memory.config.json
     (per_branch with defaults fallback). No line-count fallbacks.
+
+Todos (DPLAN-0345):
+    COUNT ONLY, through check_todos() for ONE branch. They are deliberately
+    absent from _should_rollover and check_all_branches: those feed the
+    detached fleet walk (auto_process -> execute_rollover), which would roll an
+    awake agent's pad mid-session. The roll itself is rollover/todo_roll.py.
 
 Independence:
     No module imports - pure handler, transportable
@@ -314,11 +320,11 @@ def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str
         return None
 
     today = datetime.now().strftime("%Y-%m-%d")
-    upper_name = branch_name.upper()
+    lower_name = branch_name.lower()
 
     def _walk(val):
         if isinstance(val, str):
-            return val.replace("{{BRANCHNAME}}", upper_name).replace("{{DATE}}", today)
+            return val.replace("{{BRANCH}}", lower_name).replace("{{DATE}}", today)
         if isinstance(val, list):
             return [_walk(item) for item in val]
         if isinstance(val, dict):
@@ -544,6 +550,53 @@ def check_single_file(file_path: Path) -> Dict[str, Any]:
             "schema_version": schema_ver,
             "v2_reason": v2_reason,
         }
+
+
+def check_todos(file_path: Path, branch_name: str | None = None) -> Dict[str, Any]:
+    """
+    Count ONE branch's todo pad against its configured count. COUNT ONLY.
+
+    Not part of ``_should_rollover`` or ``check_all_branches``, on purpose: the
+    fleet walk rolls whatever those report, and todos roll for the own branch
+    only (``rollover check`` / ``rollover run`` with ``--branch`` or the
+    caller's cwd). The count comes from ``config_loader.get_todos_count`` - the
+    same resolver the roll uses - so the check and the roll cannot disagree.
+
+    Args:
+        file_path: The branch's local memory file (the one carrying ``todos``).
+        branch_name: Branch directory name; derived from the path when None.
+
+    Returns:
+        ``{"success", "branch", "pad", "count", "over", "excess"}`` or
+        ``{"success": False, "error"}``. ``count`` is None when no usable
+        count is configured, and then nothing is ever over.
+    """
+    name = branch_name or file_path.parents[1].name
+    if not file_path.exists():
+        return {"success": False, "error": f"File not found: {file_path}"}
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        logger.warning(f"[detector] Cannot read todos from {file_path}: {e}")
+        return {"success": False, "error": f"cannot read {file_path.name}: {e}"}
+
+    todos = data.get("todos", []) if isinstance(data, dict) else None
+    if not isinstance(todos, list):
+        return {"success": False, "error": f"'todos' in {file_path.name} is not a list"}
+
+    count = config_loader.get_todos_count(name)
+    pad = len(todos)
+    over = count is not None and pad > count
+    return {
+        "success": True,
+        "branch": name,
+        "pad": pad,
+        "count": count,
+        "over": over,
+        "excess": pad - count if count is not None and over else 0,
+    }
 
 
 # =============================================================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-25
-# Modified: 2026-08-25
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for trinity_check -- the trinity memory file standards checker.
@@ -68,7 +68,11 @@ _PROSE = {
 
 # The three pinned tab formats, byte-for-byte, at the pinned config numbers.
 _TABS = {
-    "todos": "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars · draft to 120 ⟧",
+    # DPLAN-0345: the pad tab. The fixture branch directory is _BRANCH and its
+    # pad holds numbers 2 and 1, so a render with branch context writes next #3.
+    "todos": (
+        "⟦ pad of 10 · oldest roll to .backup/todo/testbranch/backlog.json · task ≤150 chars · draft to 120 · next #3 ⟧"
+    ),
     "key_learnings": ("⟦ rollover ON → oldest archived to @memory · keep 15 · value ≤200 chars · draft to 160 ⟧"),
     "sessions": ("⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars · draft to 240 ⟧"),
     "observations": ("⟦ rollover ON → oldest archived to @memory · keep 15 · note ≤300 chars · draft to 240 ⟧"),
@@ -84,7 +88,6 @@ _GROUP_NAMES = (
     "File set",
     "Meta lines & _usage",
     "Receipt",
-    "Todos hygiene",
     "Freshness",
 )
 
@@ -129,6 +132,7 @@ _CONFIG = {
             "local": {
                 "sessions": {"count": 15, "auto_compact_cap": 3},
                 "key_learnings": {"count": 15},
+                "todos": {"count": 10},
             },
             "observations": {"observations": {"count": 15}},
         },
@@ -233,14 +237,11 @@ def _canonical_local() -> dict:
                 "date": "2026-08-24",
                 "task": "ask about the receipt lane",
                 "priority": "medium",
-                "status": "open",
             },
             {
                 "number": 1,
                 "date": "2026-08-20",
                 "task": "read the trinity contract",
-                "priority": "low",
-                "status": "open",
             },
         ],
         "key_learnings_meta": _meta_line("key_learnings"),
@@ -463,7 +464,6 @@ class TestTheOneLaw:
         _assert_failed(_group(result, "Entry shapes"), "local.json")
         _assert_failed(_group(result, "Char caps"), "local.json")
         _assert_failed(_group(result, "Freshness"), "local.json")
-        _assert_failed(_group(result, "Todos hygiene"), "local.json")
         _assert_failed(_group(result, "Meta lines & _usage"), "local.json")
 
     def test_corrupt_observations_json_fails_and_never_passes(self, trinity, tmp_path):
@@ -559,7 +559,6 @@ class TestTheOneLaw:
         _assert_failed(_group(result, "Entry shapes"), "entry must be an object", "str")
         _assert_failed(_group(result, "Ordering & numbering"), "no usable number")
         _assert_failed(_group(result, "Char caps"), "entry must be an object")
-        _assert_failed(_group(result, "Todos hygiene"), "entry must be an object")
 
     def test_container_that_is_not_a_list_is_flagged(self, trinity, tmp_path):
         local = _canonical_local()
@@ -1455,15 +1454,43 @@ class TestVersionedBackupsAreLegalResidents:
 
         _assert_failed(_group(result, "Top-level keys"), "document_metadata missing created")
 
-    def test_todos_kept_as_done_are_flagged(self, trinity, tmp_path):
-        """Contract: delete a finished todo, never keep it as a trophy."""
+    def test_a_todo_carrying_status_is_flagged_by_entry_shapes(self, trinity, tmp_path):
+        """DPLAN-0345: todos have no status -- done means deleted, and the key is outside the closed shape."""
         local = _canonical_local()
         local["todos"][0]["status"] = "Done"
         branch = _write_branch(tmp_path, local=local)
 
         result = trinity.check_branch(str(branch))
 
-        _assert_failed(_group(result, "Todos hygiene"), "status done", "delete it")
+        _assert_failed(_group(result, "Entry shapes"), "unexpected field 'status'")
+
+    def test_a_todo_without_priority_is_canonical(self, trinity, tmp_path):
+        """priority is optional in the v2 shape; number, date and task are the whole requirement."""
+        local = _canonical_local()
+        local["todos"] = [{"number": 1, "date": "2026-08-20", "task": "fix drone help"}]
+        branch = _write_branch(tmp_path, local=local)
+
+        result = trinity.check_branch(str(branch))
+
+        assert _group(result, "Entry shapes")["passed"] is True, _group(result, "Entry shapes")["message"]
+
+    def test_a_todo_priority_of_the_wrong_type_is_flagged(self, trinity, tmp_path):
+        local = _canonical_local()
+        local["todos"][0]["priority"] = 1
+        branch = _write_branch(tmp_path, local=local)
+
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "priority must be str, found int")
+
+    def test_a_todo_missing_its_task_is_flagged(self, trinity, tmp_path):
+        local = _canonical_local()
+        del local["todos"][1]["task"]
+        branch = _write_branch(tmp_path, local=local)
+
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "missing required field 'task'")
 
 
 # ===========================================================================
@@ -1747,19 +1774,19 @@ class TestScoringMechanics:
     def test_group_weights_sum_to_one_hundred(self, trinity):
         assert sum(trinity.GROUP_WEIGHTS.values()) == 100
 
-    def test_group_weights_hold_the_nine_pinned_names(self, trinity):
+    def test_group_weights_hold_the_eight_pinned_names(self, trinity):
         assert set(trinity.GROUP_WEIGHTS) == set(_GROUP_NAMES)
 
     def test_group_weights_are_the_pinned_numbers(self, trinity):
+        """Todos hygiene retired 2026-09-15 (DPLAN-0345); its 5 moved to Entry shapes with the defect."""
         assert trinity.GROUP_WEIGHTS == {
-            "Entry shapes": 25,
+            "Entry shapes": 30,
             "Top-level keys": 15,
             "Ordering & numbering": 12,
             "Char caps": 12,
             "File set": 10,
             "Meta lines & _usage": 10,
             "Receipt": 8,
-            "Todos hygiene": 5,
             "Freshness": 3,
         }
 
@@ -1779,12 +1806,12 @@ class TestScoringMechanics:
         assert isinstance(result["passed"], bool)
         assert isinstance(result["checks"], list)
 
-    def test_check_branch_returns_exactly_nine_named_checks(self, trinity, tmp_path):
+    def test_check_branch_returns_exactly_eight_named_checks(self, trinity, tmp_path):
         branch = _write_branch(tmp_path)
 
         result = trinity.check_branch(str(branch))
 
-        assert len(result["checks"]) == 9
+        assert len(result["checks"]) == 8
         assert [check["name"] for check in result["checks"]] == list(_GROUP_NAMES)
 
     def test_every_check_carries_the_four_pinned_keys(self, trinity, tmp_path):
@@ -1792,10 +1819,10 @@ class TestScoringMechanics:
 
         result = trinity.check_branch(str(branch))
 
-        # Floor, measured: nine groups are always reported, even for a branch
+        # Floor, measured: eight groups are always reported, even for a branch
         # whose local.json will not parse. Without it an empty checks list would
         # walk this row green having read no key at all.
-        assert len(result["checks"]) == 9
+        assert len(result["checks"]) == 8
         for check in result["checks"]:
             assert set(check) == {"name", "passed", "message", "score"}
             assert isinstance(check["score"], int)
@@ -1854,10 +1881,10 @@ class TestScoringMechanics:
 
         # The failing groups are selected first and counted, because the guard
         # this replaces asserted nothing at all if every group happened to pass.
-        # Measured on this fixture: 7 of the 9 groups fail on an unparseable
+        # Measured on this fixture: 6 of the 8 groups fail on an unparseable
         # local.json; File set and Receipt are the two that survive it.
         failing = [check for check in result["checks"] if not check["passed"]]
-        assert len(failing) == 7, f"expected 7 failing groups, got {[c['name'] for c in failing]}"
+        assert len(failing) == 6, f"expected 6 failing groups, got {[c['name'] for c in failing]}"
         for check in failing:
             assert check["score"] < 100
 
@@ -1904,12 +1931,68 @@ class TestMetaComposition:
     """expected_meta_line reproduces the renderer, byte for byte."""
 
     def test_todos_tab_format_is_pinned(self, trinity):
-        line = trinity.expected_meta_line("todos", _BRANCH, _CONFIG, _PROSE["todos"])
+        todo_ctx = {"branch_dir": _BRANCH, "next_number": 3}
+
+        line = trinity.expected_meta_line("todos", _BRANCH, _CONFIG, _PROSE["todos"], todo_ctx)
 
         assert line == (
-            "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars · draft to 120 ⟧ "
-            + _PROSE["todos"]
+            "⟦ pad of 10 · oldest roll to .backup/todo/testbranch/backlog.json · task ≤150 chars · draft to 120"
+            " · next #3 ⟧ " + _PROSE["todos"]
         )
+
+    def test_todos_tab_without_branch_context_renders_the_honest_unknowns(self, trinity):
+        """@memory's render with no branch (spawn birth): never a guessed directory or number."""
+        line = trinity.expected_meta_line("todos", _BRANCH, _CONFIG, _PROSE["todos"])
+
+        assert line.startswith(
+            "⟦ pad of 10 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤150 chars · draft to 120"
+            " · next #? ⟧"
+        )
+
+    def test_todos_pad_size_is_the_config_count_not_a_constant(self, trinity):
+        resized = copy.deepcopy(_CONFIG)
+        resized["rollover"]["defaults"]["local"]["todos"]["count"] = 7
+
+        line = trinity.expected_meta_line("todos", _BRANCH, resized, _PROSE["todos"])
+
+        assert line.startswith("⟦ pad of 7 · ")
+
+    def test_a_per_branch_todos_count_wins_over_the_default(self, trinity):
+        overridden = copy.deepcopy(_CONFIG)
+        overridden["rollover"]["per_branch"] = {_BRANCH: {"local": {"todos": {"count": 4}}}}
+
+        line = trinity.expected_meta_line("todos", _BRANCH, overridden, _PROSE["todos"])
+
+        assert line.startswith("⟦ pad of 4 · ")
+
+    def test_a_per_branch_local_block_without_a_todos_count_falls_back_to_the_default(self, trinity):
+        """@memory's one exception to the per-file-key rule: a sessions override never unsizes the pad."""
+        overridden = copy.deepcopy(_CONFIG)
+        overridden["rollover"]["per_branch"] = {_BRANCH: {"local": {"sessions": {"count": 5}}}}
+
+        line = trinity.expected_meta_line("todos", _BRANCH, overridden, _PROSE["todos"])
+
+        assert line.startswith("⟦ pad of 10 · ")
+
+    @pytest.mark.parametrize("count", [0, -1, True, "10", None])
+    def test_an_unusable_todos_count_renders_no_pad_size(self, trinity, count):
+        unsized = copy.deepcopy(_CONFIG)
+        unsized["rollover"]["defaults"]["local"]["todos"]["count"] = count
+        todo_ctx = {"branch_dir": _BRANCH, "next_number": 3}
+
+        line = trinity.expected_meta_line("todos", _BRANCH, unsized, _PROSE["todos"], todo_ctx)
+
+        assert line == (
+            "⟦ no pad size configured — nothing rolls · task ≤150 chars · draft to 120 · next #3 ⟧ " + _PROSE["todos"]
+        )
+
+    @pytest.mark.parametrize("number", [True, "3", 3.0])
+    def test_a_next_number_that_is_not_an_int_renders_as_unknown(self, trinity, number):
+        todo_ctx = {"branch_dir": _BRANCH, "next_number": number}
+
+        line = trinity.expected_meta_line("todos", _BRANCH, _CONFIG, _PROSE["todos"], todo_ctx)
+
+        assert "· next #? ⟧" in line
 
     def test_rollover_tab_with_a_count_is_pinned(self, trinity):
         line = trinity.expected_meta_line("sessions", _BRANCH, _CONFIG, _PROSE["sessions"])
@@ -1936,7 +2019,7 @@ class TestMetaComposition:
 
         line = trinity.expected_meta_line("todos", _BRANCH, overridden, _PROSE["todos"])
 
-        assert "task ≤125 chars · draft to 100 ⟧" in line
+        assert "task ≤125 chars · draft to 100 · next #" in line
 
     def test_rollover_tab_without_a_count_is_pinned(self, trinity):
         countless = copy.deepcopy(_CONFIG)
@@ -2017,6 +2100,50 @@ class TestMetaComposition:
 
         assert mine == theirs
 
+    @pytest.mark.parametrize(
+        "todo_ctx",
+        [
+            {"branch_dir": "memory", "next_number": 41},
+            {"branch_dir": "memory", "next_number": None},
+            {"branch_dir": None, "next_number": None},
+            {"branch_dir": "seedgo", "next_number": 1},
+        ],
+    )
+    def test_the_todos_tab_with_branch_context_is_byte_identical_to_the_renderer(self, checker, todo_ctx):
+        """DPLAN-0345: the pad tab carries the backlog directory and next number -- same ctx, one string."""
+        compose, config, prose = _both_composers(checker)
+
+        mine = checker.expected_meta_line("todos", "memory", config, prose["todos"], todo_ctx)
+        theirs = compose("todos", config.get("rollover", {}), config.get("entry_limits", {}), "memory", todo_ctx)
+
+        assert mine == theirs
+
+    @pytest.mark.parametrize(
+        "rollover_edit",
+        [
+            pytest.param(lambda r: r["defaults"]["local"].pop("todos", None), id="no-default-count"),
+            pytest.param(lambda r: r["defaults"]["local"]["todos"].update(count=0), id="zero-count"),
+            pytest.param(
+                lambda r: r.setdefault("per_branch", {}).update(memory={"local": {"sessions": {"count": 5}}}),
+                id="per-branch-local-without-todos",
+            ),
+            pytest.param(
+                lambda r: r.setdefault("per_branch", {}).update(memory={"local": {"todos": {"count": 3}}}),
+                id="per-branch-todos-count",
+            ),
+        ],
+    )
+    def test_the_todos_pad_size_resolves_like_the_renderer(self, checker, rollover_edit):
+        compose, config, prose = _both_composers(checker)
+        edited = copy.deepcopy(config)
+        rollover_edit(edited.setdefault("rollover", {}))
+        todo_ctx = {"branch_dir": "memory", "next_number": 7}
+
+        mine = checker.expected_meta_line("todos", "memory", edited, prose["todos"], todo_ctx)
+        theirs = compose("todos", edited.get("rollover", {}), edited.get("entry_limits", {}), "memory", todo_ctx)
+
+        assert mine == theirs
+
     def test_per_branch_char_cap_override_survives_the_renderer(self, checker):
         compose, config, prose = _both_composers(checker)
         overridden = copy.deepcopy(config)
@@ -2033,6 +2160,137 @@ class TestMetaComposition:
         )
 
         assert mine == theirs
+
+
+class TestTheTodosTabIsReadByShape:
+    """DPLAN-0345: the todos tab's ``next #N`` is derived when the tab is RENDERED.
+
+    Adding or deleting a todo does not re-render, so a correctly rendered file
+    disagrees with an N recomputed from today's pad until the next render
+    (@memory's shape contract, section 3). The Meta lines group reads that one
+    slot by shape -- a rendered int, or ``?`` -- and byte-matches everything
+    else, including the branch directory in the backlog path.
+    """
+
+    _PAD_HEAD = "⟦ pad of 10 · oldest roll to .backup/todo/testbranch/backlog.json · task ≤150 chars · draft to 120"
+
+    def _meta_with(self, trinity, tmp_path, todos_meta: str) -> dict:
+        local = _canonical_local()
+        local["todos_meta"] = todos_meta
+        result = trinity.check_branch(str(_write_branch(tmp_path, local=local)))
+        return _group(result, "Meta lines & _usage")
+
+    @pytest.mark.parametrize("label", ["41", "3", "1", "0", "?"])
+    def test_any_rendered_next_number_passes(self, trinity, tmp_path, label):
+        """#41 on a pad whose numbers say #3 is a stale render, not a defect."""
+        check = self._meta_with(trinity, tmp_path, f"{self._PAD_HEAD} · next #{label} ⟧ {_PROSE['todos']}")
+
+        assert check["passed"] is True, check["message"]
+
+    def test_the_no_context_rendering_passes_whole(self, trinity, tmp_path):
+        """What spawn birth writes: <branch> and #?, byte-identical to @memory's render without a branch."""
+        line = trinity.expected_meta_line("todos", _BRANCH, _CONFIG, _PROSE["todos"])
+
+        check = self._meta_with(trinity, tmp_path, line)
+
+        assert "<branch>" in line
+        assert check["passed"] is True, check["message"]
+
+    @pytest.mark.parametrize("label", ["", "abc", "041", "3.0", " 3", "3 ", "-0", "#3", "3?"])
+    def test_a_slot_no_renderer_writes_fails(self, trinity, tmp_path, label):
+        check = self._meta_with(trinity, tmp_path, f"{self._PAD_HEAD} · next #{label} ⟧ {_PROSE['todos']}")
+
+        _assert_failed(check, "todos_meta does not byte-match")
+
+    def test_the_no_context_directory_with_a_number_fails(self, trinity, tmp_path):
+        """No renderer writes <branch> beside a number: without a branch there is no backlog to count."""
+        head = self._PAD_HEAD.replace("/testbranch/", "/<branch>/")
+
+        check = self._meta_with(trinity, tmp_path, f"{head} · next #3 ⟧ {_PROSE['todos']}")
+
+        _assert_failed(check, "todos_meta does not byte-match")
+
+    def test_another_branch_directory_fails(self, trinity, tmp_path):
+        head = self._PAD_HEAD.replace("/testbranch/", "/seedgo/")
+
+        check = self._meta_with(trinity, tmp_path, f"{head} · next #3 ⟧ {_PROSE['todos']}")
+
+        _assert_failed(check, "todos_meta does not byte-match", ".backup/todo/testbranch/")
+
+    def test_the_retired_todos_tab_fails(self, trinity, tmp_path):
+        retired = "⟦ rollover OFF — operational, never trimmed · cap ~10 entries · task ≤150 chars · draft to 120 ⟧"
+
+        check = self._meta_with(trinity, tmp_path, f"{retired} {_PROSE['todos']}")
+
+        _assert_failed(check, "todos_meta does not byte-match", "pad of 10")
+
+    def test_drifted_prose_after_a_good_tab_fails(self, trinity, tmp_path):
+        """Same length as the gold prose, so only the suffix comparison can see the edit."""
+        check = self._meta_with(trinity, tmp_path, f"{self._PAD_HEAD} · next #3 ⟧ {_PROSE['todos'].upper()}")
+
+        _assert_failed(check, "todos_meta does not byte-match")
+
+    def test_a_drifted_pad_size_fails(self, trinity, tmp_path):
+        head = self._PAD_HEAD.replace("pad of 10", "pad of 12")
+
+        check = self._meta_with(trinity, tmp_path, f"{head} · next #3 ⟧ {_PROSE['todos']}")
+
+        _assert_failed(check, "todos_meta does not byte-match")
+
+
+class TestTheCacheWatchesMemorysFiles:
+    """external_inputs() names what the incremental audit cache must watch outside the branch.
+
+    2026-09-15: a memory.config.json or template edit left cached Trinity rows
+    scored from before it. The paths come from the same helpers the loaders
+    read, so the cache and the checker cannot name different files.
+    """
+
+    @staticmethod
+    def _memory(tmp_path, *templates: str) -> Path:
+        memory_dir = tmp_path / "memory"
+        config = memory_dir / "memory_json" / "custom_config" / "memory.config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text('{"marker": "config"}', encoding="utf-8")
+        (memory_dir / "templates").mkdir()
+        for name in templates:
+            (memory_dir / "templates" / name).write_text(json.dumps({"marker": name}), encoding="utf-8")
+        return memory_dir
+
+    def test_the_inputs_are_the_files_the_loaders_read(self, checker, tmp_path, monkeypatch):
+        memory_dir = self._memory(tmp_path, "LOCAL.template.json", "OBSERVATIONS.template.json")
+        monkeypatch.setattr(checker, "_memory_dir", lambda: memory_dir)
+
+        paths = checker.external_inputs()
+
+        assert paths == [
+            memory_dir / "memory_json" / "custom_config" / "memory.config.json",
+            memory_dir / "templates" / "LOCAL.template.json",
+            memory_dir / "templates" / "OBSERVATIONS.template.json",
+        ]
+        assert checker.load_memory_config() == {"marker": "config"}
+        assert checker._load_templates() == {
+            "local": {"marker": "LOCAL.template.json"},
+            "observations": {"marker": "OBSERVATIONS.template.json"},
+        }
+
+    def test_an_absent_file_is_left_out(self, checker, tmp_path, monkeypatch):
+        memory_dir = self._memory(tmp_path, "LOCAL.template.json")
+        monkeypatch.setattr(checker, "_memory_dir", lambda: memory_dir)
+
+        names = [path.name for path in checker.external_inputs()]
+
+        assert names == ["memory.config.json", "LOCAL.template.json"]
+
+    def test_no_memory_branch_watches_nothing(self, checker, monkeypatch):
+        monkeypatch.setattr(checker, "_memory_dir", lambda: None)
+
+        assert checker.external_inputs() == []
+
+    def test_the_live_checker_names_memorys_real_files(self, checker):
+        names = sorted(path.name for path in checker.external_inputs())
+
+        assert names == ["LOCAL.template.json", "OBSERVATIONS.template.json", "memory.config.json"]
 
 
 # ===========================================================================
@@ -2194,7 +2452,7 @@ class TestARelativeBranchPathStillNamesTheBranch:
 # ===========================================================================
 
 
-class TestTheGroupSplitKeepsTheNine:
+class TestTheGroupSplitKeepsEveryGroup:
     """trinity_check.py crossed the 1500-line architecture cap during the
     marker-7 work, so the group checkers moved to trinity_groups.py on
     2026-08-27. A relocation, not a redesign -- but the one regression a split
@@ -2220,12 +2478,11 @@ class TestTheGroupSplitKeepsTheNine:
             "File set",
             "Meta lines & _usage",
             "Receipt",
-            "Todos hygiene",
             "Freshness",
         ]
         assert set(names) == set(trinity.GROUP_WEIGHTS), "a group is weighted but never run, or run but never weighted"
 
-    def test_check_branch_reports_the_same_nine(self, trinity, tmp_path):
+    def test_check_branch_reports_the_same_eight(self, trinity, tmp_path):
         branch = _write_branch(tmp_path)
 
         result = trinity.check_branch(str(branch))

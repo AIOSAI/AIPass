@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_birth_receipt.py
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-27
 # Modified: 2026-08-27
 # =============================================
@@ -153,9 +153,10 @@ def test_trinity_seed_matches_gold_template(seed_name, gold_name):
     """A seed that drifts from gold mints a citizen that fails the meta-line group."""
     seed = (CITIZEN_TRINITY / seed_name).read_text(encoding="utf-8")
     gold = (GOLD_DIR / gold_name).read_text(encoding="utf-8")
-    # spawn's engine maps BRANCHNAME->UPPER and BRANCH->lower; gold renders lowercase
-    normalized = seed.replace("{{BRANCH}}", "{{BRANCHNAME}}")
-    assert normalized == gold
+    # Gold spells the placeholder as spawn does ({{BRANCH}} -> lower) since
+    # memory's 2026-09-15 fix, so the seed is a byte copy of gold: no
+    # normalisation, a drift of one character fails here.
+    assert seed == gold
 
 
 @pytest.mark.parametrize("seed_name", ["local.json", "observations.json"])

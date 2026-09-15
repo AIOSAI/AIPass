@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_unified_schema.py
 # Date: 2026-06-13
-# Version: 1.0.0
+# Version: 1.0.1
+# Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
 
@@ -823,4 +824,4 @@ class TestEntryLimitsCasingAndCaps:
 
         # Named, not counted: a section that disappears takes its own pin with
         # it, and an empty defaults block would make the loop above prove nothing.
-        assert checked == ["local.sessions", "local.key_learnings", "observations.observations"], checked
+        assert checked == ["local.sessions", "local.key_learnings", "local.todos", "observations.observations"], checked

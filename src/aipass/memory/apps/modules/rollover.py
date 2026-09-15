@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.6.0
+# Version: 0.7.1
 # Created: 2025-11-16
-# Modified: 2026-03-15
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -14,6 +14,8 @@ Coordinates the memory rollover workflow by calling handlers in sequence:
 2. Extract oldest memories (rollover/extractor)
 3. Generate embeddings (vector/embedder)
 4. Store in Chroma (storage/chroma)
+5. Roll ONE branch's todo pad to its backlog file (rollover/todo_roll) - own
+   branch only, never the fleet walk, never vectors
 
 Purpose:
     Thin orchestration layer - no business logic implementation.
@@ -40,6 +42,7 @@ from aipass.cli.apps.modules import console, error, warning
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
+from aipass.memory.apps.handlers.cli.branch_flag import read_branch_flag
 
 # =============================================================================
 # INFRASTRUCTURE SETUP
@@ -51,6 +54,7 @@ from aipass.memory.apps.handlers.rollover.orchestrator import (
     execute_rollover as _handler_execute_rollover,
     sync_line_counts as _handler_sync_line_counts,
 )
+from aipass.memory.apps.handlers.rollover import todo_report
 from aipass.memory.apps.handlers.repo_root import module_file
 
 
@@ -59,15 +63,20 @@ from aipass.memory.apps.handlers.repo_root import module_file
 # =============================================================================
 
 _SUBCOMMANDS = {
-    "run": "Execute rollover for files exceeding limits",
+    "run": "Execute rollover for files exceeding limits, plus one branch's todo pad",
     "status": "Show rollover statistics for all branches",
-    "check": "Check which files need rollover (dry run)",
+    "check": "Check which files need rollover (dry run, fleet-wide), plus one branch's todo pad",
     "report-lines": "Report physical line counts per memory file (read-only)",
     "push": "Overwrite all per_branch limits to defaults (system-wide reset)",
 }
 
 # Public alias — the introspection surface and the tests read this name.
 SUBCOMMANDS = _SUBCOMMANDS
+
+# `rollover check` prints this under its classic file list. That list is the
+# fleet walk (detector.check_all_branches) whatever --branch names; the pad
+# line alone is scoped. The scope is unchanged on purpose - this says it.
+FLEET_WIDE_NOTE = "The file list is fleet-wide: --branch scopes only the todo pad line below."
 
 # `sync-lines` stopped writing anything when the health stamp was deleted from
 # the standard on 2026-08-25: its one write was a `status.last_health_check`
@@ -90,8 +99,13 @@ _CONFIG_SUBCOMMANDS = {
     "set-default": "Set a global default limit: set-default <type> <count>",
 }
 
-# The only three entry types that map onto a rollover limit. Display order.
+# The only three entry types `config set` writes. Display order.
 _ENTRY_TYPES = ("sessions", "key_learnings", "observations")
+
+# Shown by `config get`, never written by `config set` in v1 (like
+# auto_compact_cap). The todo roll reads this count for one branch at a time.
+_READ_ONLY_TYPES = ("todos",)
+_DISPLAY_TYPES = _ENTRY_TYPES + _READ_ONLY_TYPES
 
 # A limit of 0 rolls over every entry immediately; past 100 rollover is moot.
 _MIN_COUNT = 1
@@ -136,7 +150,9 @@ def _handle_rollover_verb(args: List[str]) -> bool:
     sub = args[0]
 
     if sub == "run":
-        run_rollover()
+        branch, refused = _branch_flag(args[1:], "run")
+        if not refused:
+            run_rollover(branch)
         return True
 
     if sub == "status":
@@ -144,7 +160,9 @@ def _handle_rollover_verb(args: List[str]) -> bool:
         return True
 
     if sub == "check":
-        check_triggers()
+        branch, refused = _branch_flag(args[1:], "check")
+        if not refused:
+            check_triggers(branch)
         return True
 
     if sub in RENAMED_VERBS:
@@ -175,9 +193,9 @@ def handle_command(command: str, args: List[str]) -> bool:
     Routing:
         rollover (no args)        -> print_introspection()
         rollover --help/-h/help   -> print_help()
-        rollover run              -> execute rollover
-        rollover status           -> show rollover status
-        rollover check            -> dry-run check
+        rollover run [--branch @b]   -> execute rollover (+ one todo pad)
+        rollover status              -> show rollover status
+        rollover check [--branch @b] -> dry-run check (+ one todo pad)
         rollover report-lines     -> report line counts (read-only)
         rollover push [--json]    -> reset every per_branch entry
 
@@ -231,7 +249,9 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
 
     if command == "check":
-        check_triggers()
+        branch, refused = _branch_flag(args, "check")
+        if not refused:
+            check_triggers(branch)
         return True
 
     if command in RENAMED_VERBS:
@@ -263,22 +283,35 @@ def print_help() -> None:
     console.print()
     console.print("[bold]USAGE:[/bold]")
     console.print("  drone @memory rollover <command>")
+    console.print("  drone @memory rollover run [--branch @name]")
+    console.print("  drone @memory rollover check [--branch @name]")
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
-    console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits")
+    console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits, plus ONE branch's todo pad")
     console.print("  [cyan]status[/cyan]      Show rollover statistics for all branches")
-    console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run)")
+    console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run), plus ONE branch's todo pad")
+    console.print("              The file list is fleet-wide; only the todo pad follows --branch.")
     console.print("  [cyan]report-lines[/cyan] Report line counts per memory file (read-only)")
     console.print("  [cyan]push[/cyan]        Reset ALL per_branch limits to defaults (system-wide, use with caution)")
     console.print("  [cyan]help[/cyan]        Show this help message")
     console.print()
     console.print("[bold]FLAGS:[/bold]")
+    console.print("  [cyan]--branch @name[/cyan]  run / check: the ONE branch whose todo pad is rolled / checked.")
+    console.print("              Absent: the branch your working directory sits in (drone's caller cwd).")
+    console.print("              At the repo root or outside every branch, no pad is touched and one line says so.")
+    console.print("              The sessions / key_learnings / observations file list stays fleet-wide.")
     console.print("  [cyan]--json[/cyan]      Machine output for [cyan]push[/cyan] — one JSON document, no Rich")
     console.print('              {"ok": true, "verb": "rollover push", "branches": 17}')
     console.print("              Rides in any slot. A help flag still outranks it.")
     console.print()
     console.print("[bold]LIMITS:[/bold]")
     console.print("  v2 entry-count based (sessions, key_learnings, observations) from config")
+    console.print("  todos: count only (rollover.defaults.local.todos.count) — own branch, never the fleet walk")
+    console.print()
+    console.print("[bold]TODO ROLL (one branch, file only, never vectors):[/bold]")
+    console.print("  Over its count, the OLDEST todos by number move to .backup/todo/<branch>/backlog.json.")
+    console.print("  The backlog is appended, replaced atomically and read back; the pad is pruned only")
+    console.print("  after every rolled todo reads back json-equal. check says 'ready for rollover' when over.")
     console.print()
     console.print("[bold]WORKFLOW:[/bold]")
     console.print("  1. Detect files exceeding v2 entry-count limits")
@@ -356,7 +389,7 @@ def _refuse(ctx: _Json, message: str, suggestion: str | None = None) -> None:
     error(message, suggestion=suggestion)
 
 
-def _project_row(row: dict, with_cap: bool = False) -> dict:
+def _project_row(row: dict, with_cap: bool = False, read_only: bool = False) -> dict:
     """Project one resolved limit row from ``config_loader`` for a payload.
 
     A thin projection on purpose: the resolution rules live in
@@ -366,6 +399,7 @@ def _project_row(row: dict, with_cap: bool = False) -> dict:
     Args:
         row: One entry from ``get_effective_limits``.
         with_cap: Include ``auto_compact_cap`` when the row carries one.
+        read_only: Mark a type ``config set`` cannot write (todos in v1).
 
     Returns:
         The published per-entry-type shape.
@@ -379,15 +413,19 @@ def _project_row(row: dict, with_cap: bool = False) -> dict:
     cap = row.get("auto_compact_cap")
     if with_cap and cap is not None:
         projected["auto_compact_cap"] = cap
+    if read_only:
+        projected["read_only"] = True
     return projected
 
 
-def _project_default(row: dict) -> dict:
-    """Project one global default limit — count, plus a cap when set."""
+def _project_default(row: dict, read_only: bool = False) -> dict:
+    """Project one global default limit — count, plus a cap when set, plus a read-only mark."""
     projected: dict = {"count": row.get("count")}
     cap = row.get("auto_compact_cap")
     if cap is not None:
         projected["auto_compact_cap"] = cap
+    if read_only:
+        projected["read_only"] = True
     return projected
 
 
@@ -398,8 +436,8 @@ def _project_overrides(limits: dict) -> dict:
     the same rows rather than two different notions of "override".
     """
     return {
-        entry_type: _project_row(limits.get(entry_type, {}))
-        for entry_type in _ENTRY_TYPES
+        entry_type: _project_row(limits.get(entry_type, {}), read_only=entry_type in _READ_ONLY_TYPES)
+        for entry_type in _DISPLAY_TYPES
         if limits.get(entry_type, {}).get("is_override")
     }
 
@@ -504,9 +542,17 @@ def _resolve_branch(raw: str, ctx: _Json) -> str | None:
 
 
 def _validate_type(entry_type: str, ctx: _Json) -> bool:
-    """Refuse an entry type the rollover engine has no limit key for."""
+    """Refuse an entry type `config set` cannot write — unknown, or display-only in v1."""
     if entry_type in _ENTRY_TYPES:
         return True
+
+    if entry_type in _READ_ONLY_TYPES:
+        _refuse(
+            ctx,
+            f"'{entry_type}' is display-only in v1: config get shows its count, config set cannot change it",
+            suggestion="Settable types: " + ", ".join(_ENTRY_TYPES),
+        )
+        return False
 
     _refuse(
         ctx,
@@ -569,10 +615,12 @@ def _fmt_count(value: object) -> str:
 def _show_defaults(defaults: dict) -> None:
     """Print the global default limits block."""
     console.print("[bold]DEFAULTS[/bold] [dim](drone @memory config set-default <type> <count>)[/dim]")
-    for entry_type in _ENTRY_TYPES:
+    for entry_type in _DISPLAY_TYPES:
         row = defaults.get(entry_type, {})
         cap = row.get("auto_compact_cap")
         suffix = "" if cap is None else f"  [dim]auto_compact_cap {cap} (read-only)[/dim]"
+        if entry_type in _READ_ONLY_TYPES:
+            suffix = "  [dim](read-only in v1)[/dim]"
         console.print(f"  [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count'))}{suffix}")
     console.print()
 
@@ -587,7 +635,7 @@ def _show_overrides(overrides: dict) -> None:
     console.print(f"[bold]OVERRIDES[/bold] [dim]({len(overrides)} branch(es) deviating from defaults)[/dim]")
     for branch, limits in overrides.items():
         console.print(f"  [bold]@{branch}[/bold]")
-        for entry_type in _ENTRY_TYPES:
+        for entry_type in _DISPLAY_TYPES:
             row = limits.get(entry_type, {})
             if not row.get("is_override"):
                 continue
@@ -608,7 +656,7 @@ def _show_branch_limits(branch: str, limits: dict) -> None:
     console.print(f"[bold]@{branch}[/bold] [dim](effective limits — what the rollover engine applies)[/dim]")
     console.print()
 
-    for entry_type in _ENTRY_TYPES:
+    for entry_type in _DISPLAY_TYPES:
         row = limits.get(entry_type, {})
         marker = "[yellow][OVERRIDE][/yellow]" if row.get("is_override") else "[green][DEFAULT][/green]"
         console.print(
@@ -618,6 +666,8 @@ def _show_branch_limits(branch: str, limits: dict) -> None:
         cap = row.get("auto_compact_cap")
         if cap is not None:
             console.print(f"                 [dim]auto_compact_cap {cap} — read-only in v1[/dim]")
+        if entry_type in _READ_ONLY_TYPES:
+            console.print("                 [dim]read-only in v1 — the todo roll reads it, config set does not[/dim]")
 
     console.print()
     console.print("[dim]Change with: drone @memory config set @" + branch + " sessions <count>[/dim]")
@@ -657,8 +707,10 @@ def config_get(args: List[str], ctx: _Json) -> None:
                     "verb": ctx.verb,
                     "branch": branch,
                     "limits": {
-                        entry_type: _project_row(limits.get(entry_type, {}), with_cap=True)
-                        for entry_type in _ENTRY_TYPES
+                        entry_type: _project_row(
+                            limits.get(entry_type, {}), with_cap=True, read_only=entry_type in _READ_ONLY_TYPES
+                        )
+                        for entry_type in _DISPLAY_TYPES
                     },
                 }
             )
@@ -675,7 +727,10 @@ def config_get(args: List[str], ctx: _Json) -> None:
             {
                 "ok": True,
                 "verb": ctx.verb,
-                "defaults": {entry_type: _project_default(defaults.get(entry_type, {})) for entry_type in _ENTRY_TYPES},
+                "defaults": {
+                    entry_type: _project_default(defaults.get(entry_type, {}), read_only=entry_type in _READ_ONLY_TYPES)
+                    for entry_type in _DISPLAY_TYPES
+                },
                 "overrides": {name: _project_overrides(limits) for name, limits in overrides.items()},
             }
         )
@@ -862,6 +917,9 @@ def print_config_help() -> None:
     console.print("  [cyan]sessions[/cyan]        local.json -> sessions")
     console.print("  [cyan]key_learnings[/cyan]   local.json -> key_learnings")
     console.print("  [cyan]observations[/cyan]    observations.json -> observations")
+    console.print(
+        "  [cyan]todos[/cyan]           local.json -> todos  [dim](count shown by get, read-only in v1)[/dim]"
+    )
     console.print()
     console.print(f"[bold]BOUNDS:[/bold] a whole number, {_MIN_COUNT}-{_MAX_COUNT} inclusive")
     console.print(
@@ -879,7 +937,7 @@ def print_config_help() -> None:
     console.print("  set-default writes defaults only and leaves per_branch untouched.")
     console.print("  drone @memory rollover push stays the one explicit fleet-wide reset.")
     console.print()
-    console.print("[bold]READ-ONLY:[/bold] auto_compact_cap is displayed but not settable in v1.")
+    console.print("[bold]READ-ONLY:[/bold] auto_compact_cap and the todos count are displayed but not settable in v1.")
     console.print()
 
 
@@ -888,15 +946,52 @@ def print_config_help() -> None:
 # =============================================================================
 
 
-def run_rollover() -> bool:
-    """
-    Execute rollover workflow for all triggered branches.
+def _branch_flag(tokens: List[str], verb: str) -> tuple[str | None, bool]:
+    """`--branch @name` for `rollover run` / `rollover check` -> ``(branch, refused)``; a refusal is printed."""
+    branch, problem = read_branch_flag(tokens)
+    if problem:
+        error(f"{problem} (rollover {verb})", suggestion=f"Usage: drone @memory rollover {verb} [--branch @name]")
+        return None, True
+    return branch, False
 
-    Delegates to handler and renders results with Rich.
+
+def _todo_report(report: dict) -> None:
+    """Print one todo-pad report from handlers/rollover/todo_report.
+
+    ``soft_wrap`` because the console is 80 wide on a pipe, and a hard wrap
+    inside "ready for rollover" would hide it from @hooks' PreCompact grep;
+    ``markup`` and ``highlight`` off so a path or a number prints as written.
+    """
+    text = str(report.get("text"))
+    if report.get("level") == "error":
+        error(text)
+        return
+    if report.get("level") == "warning":
+        warning(text)
+        return
+    console.print(text, markup=False, highlight=False, soft_wrap=True)
+
+
+def run_rollover(branch: str | None = None) -> bool:
+    """
+    Execute rollover: ONE branch's todo pad first, then the fleet vector rollover.
+
+    The todo roll is file-only and takes milliseconds, so it runs before the
+    model load a vector rollover may wait on. Delegates to handlers and
+    renders results with Rich.
+
+    Args:
+        branch: `@name` from --branch, or None to resolve the caller's branch
+            from its working directory (nothing is rolled at the repo root).
+
+    Returns:
+        The vector rollover's outcome, exactly as before the todo roll existed.
     """
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Rollover Execution[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
+
+    _todo_report(todo_report.roll_pad(branch))
 
     console.print("[cyan]Checking for rollover triggers... (first run may take 30s for model loading)[/cyan]")
 
@@ -1234,16 +1329,26 @@ def show_status() -> None:
     )
 
 
-def check_triggers() -> None:
+def check_triggers(branch: str | None = None) -> None:
     """
-    Check which branches need rollover (without executing)
+    Check which branches need rollover (without executing), then ONE branch's todo pad.
 
     Displays list of files that hit rollover threshold
+
+    Args:
+        branch: `@name` from --branch, or None to resolve the caller's branch
+            from its working directory (no pad is checked at the repo root).
     """
     console.print()
     console.print(Panel.fit("[bold cyan]Memory - Rollover Check[/bold cyan]", border_style="cyan", box=box.ROUNDED))
     console.print()
 
+    _check_fleet_triggers()
+    _todo_report(todo_report.check_pad(branch))
+
+
+def _check_fleet_triggers() -> None:
+    """The fleet walk for sessions, key_learnings and observations — never todos, never scoped by --branch."""
     triggers_result = detector.check_all_branches()
 
     if not triggers_result["success"]:
@@ -1258,7 +1363,12 @@ def check_triggers() -> None:
         json_handler.log_operation("rollover_check", {"files_needing_rollover": 0})
         return
 
-    console.print(f"[bold cyan]Found {len(triggers)} files ready for rollover:[/bold cyan]")
+    # The file list is the fleet walk's, whatever --branch named: --branch scopes
+    # only the todo pad line. "ready for rollover" stays literal and unwrapped on
+    # the first line - @hooks' PreCompact greps this output for it.
+    header = f"Found {len(triggers)} files ready for rollover (fleet-wide):"
+    console.print(f"[bold cyan]{header}[/bold cyan]", soft_wrap=True)
+    console.print(f"[dim]{FLEET_WIDE_NOTE}[/dim]", soft_wrap=True)
     console.print()
 
     for trigger in triggers:
@@ -1331,6 +1441,7 @@ def print_introspection() -> None:
     console.print("  [green]drone @memory rollover run[/green]          [dim]# Execute rollover[/dim]")
     console.print("  [green]drone @memory rollover status[/green]       [dim]# View rollover stats[/dim]")
     console.print("  [green]drone @memory rollover check[/green]        [dim]# Dry-run check[/dim]")
+    console.print("  [green]drone @memory rollover check --branch @devpulse[/green] [dim]# One branch's todo pad[/dim]")
     console.print("  [green]drone @memory rollover --help[/green]       [dim]# Full usage guide[/dim]")
     console.print()
 

@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_auto_process.py
 # Date: 2026-06-06
-# Version: 1.0.0
+# Version: 1.1.0
+# Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
 
@@ -412,6 +413,48 @@ class TestRunRolloverCheck:
 
         assert result["success"] is False
         assert "registry missing" in result["error"]
+
+
+class TestTodosNeverRideTheFleetWalk:
+    """DPLAN-0345: todos roll for the OWN branch only - an over-count pad is not a fleet trigger."""
+
+    def test_a_twelve_todo_pad_does_not_reach_execute_rollover(self, monkeypatch, tmp_path):
+        mod = _import_auto_process(monkeypatch)
+        loader = sys.modules["aipass.memory.apps.handlers.json.config_loader"]
+        config = json.loads(json.dumps(loader.DEFAULT_CONFIG))
+        config["rollover"]["per_branch"] = {}
+        config_path = tmp_path / "memory.config.json"
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector, "config_loader", loader)
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+
+        trinity = tmp_path / "guinea" / ".trinity"
+        trinity.mkdir(parents=True)
+        todos = [{"number": n, "task": f"task {n}", "date": "2026-09-01", "priority": "normal"} for n in range(1, 13)]
+        local = {"document_metadata": {"schema_version": "3.0.0"}, "sessions": [], "key_learnings": [], "todos": todos}
+        (trinity / "local.json").write_text(json.dumps(local), encoding="utf-8")
+        observations = {"document_metadata": {"schema_version": "3.0.0"}, "observations": []}
+        (trinity / "observations.json").write_text(json.dumps(observations), encoding="utf-8")
+        before = (trinity / "local.json").read_bytes()
+        registry = {"branches": [{"name": "guinea", "path": str(tmp_path / "guinea"), "status": "active"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+
+        execute = MagicMock(return_value={"success": True, "triggers_count": 1, "success_count": 1})
+        orchestrator = MagicMock()
+        orchestrator.execute_rollover = execute
+        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", orchestrator)
+
+        assert loader.get_todos_count("guinea") == 10, "the pad must really be over a configured count"
+        result = mod._run_rollover_check()
+
+        assert result == {"skipped": True, "reason": "no rollover triggers"}
+        execute.assert_not_called()
+        assert (trinity / "local.json").read_bytes() == before
 
 
 # ===========================================================================

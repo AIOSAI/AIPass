@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-09
+# Modified: 2026-09-15
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -127,6 +127,32 @@ def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, at
     return sorted(found)
 
 
+def _external_input_files(checkers: Dict[str, Any] | None) -> List[Path]:
+    """Files OUTSIDE the branch that a checker scores, from its ``external_inputs()``.
+
+    A glob relative to the branch root cannot name them, and the checker is the
+    one that knows where they live, so it answers with the paths its own
+    loaders read. trinity is the first: it scores every branch against
+    @memory's memory.config.json and gold templates, and with only
+    ``.trinity/*`` watched a config or template edit served each branch's
+    cached Trinity row from before the edit (CANARY, aipass and drone on
+    2026-09-15, drone's 100 included) until someone ran --full.
+
+    Args:
+        checkers: Discovered checker modules, or None.
+
+    Returns:
+        The declared paths, deduplicated and sorted.
+    """
+    if not checkers:
+        return []
+    found: set[Path] = set()
+    for module in checkers.values():
+        if hasattr(module, "external_inputs"):
+            found.update(Path(path) for path in module.external_inputs())
+    return sorted(found)
+
+
 def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = None) -> List[Dict[str, str]]:
     """Union of every file whose content can change audit output.
 
@@ -152,6 +178,10 @@ def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = No
         files include the checkers' own ``*_log.json``, written DURING the
         audit -- fingerprinting their content would mark every branch dirty on
         every run and quietly disable the cache. Add and delete still bust it.
+      * ``external_inputs()`` -- CONTENT matters, OUTSIDE the branch. trinity
+        scores against @memory's config and gold templates; the checker
+        returns the paths it reads. Keyed by resolved absolute path, which
+        can never collide with a branch-relative key.
 
     Also fingerprints {branch}_json/custom_config/ entries: the audit's
     custom_config info line names those files, so an operator adding or
@@ -188,6 +218,11 @@ def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = No
         if rel not in seen:
             seen.add(rel)
             files.append({"file": str(f), "name": f.name, "rel": rel, "presence_only": "1"})
+    for f in _external_input_files(checkers):
+        key = f.resolve().as_posix()
+        if key not in seen:
+            seen.add(key)
+            files.append({"file": str(f), "name": f.name, "rel": key})
     return files
 
 

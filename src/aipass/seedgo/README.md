@@ -4,7 +4,7 @@
 
 **Purpose:** Standards compliance platform for AIPass. Audits all 18 citizen branches against 46 code standards + diagnostics, manages bypass rules, runs proof certification, and provides per-file checklist validation consumed by the PostToolUse auto-fix gate.
 **Module:** `aipass.seedgo`
-**Version:** 2.0.1
+**Version:** 2.0.2
 **Created:** 2026-03-05
 
 ---
@@ -79,7 +79,7 @@ drone @seedgo audit-tests <directory>                  # Any directory with pyte
 drone @seedgo audit-tests aipass                       # Every citizen
 
 # Test quality v5 (generic pack — weekly cadence + on demand, scores, gates nothing)
-drone @seedgo audit pytest_quality @branch             # 11 AST rules over a project's tests
+drone @seedgo audit pytest_quality @branch             # 15 AST rules over a project's tests
 drone @seedgo audit pytest_quality                     # Every citizen
 
 # Static test inventory + the weekly cadence
@@ -182,11 +182,11 @@ seedgo/
 │       ├── readme/                  # README generator + branch resolution
 │       ├── audit_tests/             # audit-tests execution lane (write-gated suite run)
 │       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
-│       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 11 AST rules, weekly + on demand
+│       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 15 AST rules, weekly + on demand
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 62 test files, 3374 test functions (pytest expands to 4100 cases)
+├── tests/                           # 62 test files, 3446 test functions (pytest expands to 4178 cases)
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -290,7 +290,7 @@ manufactured tests instead of measuring them, and the json sweep had to add four
 `test_cli_routing.py` files purely to keep its items covered. The checker, its content
 module and its `.md` are in `apps/handlers/aipass_standards/.archive/`; the table above
 is 45 rows because of it, and no checker declares `APPLIES_TO = tests` any more. What
-replaces it is not another gate: `pytest_quality` (v5, 11 AST rules) runs weekly and on
+replaces it is not another gate: `pytest_quality` (v5, 15 AST rules) runs weekly and on
 demand and scores without gating, and the json-handler claims v4 approximated are pinned
 by execution over all 18 shims in `tests/test_json_handler_contract.py`.
 
@@ -343,10 +343,10 @@ restate them here. Read the directory, or ask @hooks.
 
 Counted 2026-09-07, both ways, because the two numbers answer different questions:
 
-- **62 test files, 3374 test functions** — the `def test_` count, the way seedgo's own
-  `readme_check._count_test_functions()` counts it. **pytest expands to 4100 cases** once
-  parametrisation is applied (both re-counted 2026-09-14, after the calendar_bound pins, the
-  posix_literal arm-4 widening and the dead_code import-block pins; the prose below is the
+- **62 test files, 3446 test functions** — the `def test_` count, the way seedgo's own
+  `readme_check._count_test_functions()` counts it. **pytest expands to 4178 cases** once
+  parametrisation is applied (both re-counted 2026-09-15, after the audit-cache external inputs
+  and module_eviction pins; the prose below is the
   2026-09-07 measurement). Re-measured
   2026-09-07 after FPLAN-0496: six merged rows out of
   `test_coverage_audit.py`, three mutation pins into the json contract, and the contract's
@@ -505,7 +505,7 @@ Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
   trips it.
 - **Tests:** 3843 passed, 53 skipped, 1 failed — the failure is another branch's live trinity
   drift, not seedgo's code (see the run result above). 3028 test functions across 62 files then;
-  3374 across 62 on 2026-09-14, expanding to 4100 cases (4047 passed, 53 skipped).
+  3446 across 62 on 2026-09-15, expanding to 4178 cases (4125 passed, 53 skipped).
 - **Coverage:** 451 public functions tested of 588 (77%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)

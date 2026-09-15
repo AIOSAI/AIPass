@@ -10,9 +10,9 @@ must never mean approximate.
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + unit tests for incremental_cache.py / audit_branch_incremental
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-31
-# Modified: 2026-07-31
+# Modified: 2026-09-15
 # =============================================
 
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
@@ -1476,3 +1476,114 @@ class TestAFailedSaveLeavesNoStagingFile:
 
         assert cache_file.is_file()
         assert list(tmp_path.glob("*.tmp")) == []
+
+
+_EXTERNAL_CHECKER_TEMPLATE = """
+import os
+
+EXTERNAL = "__EXTERNAL__"
+AUDIT_SCOPE = "branch_level"
+
+
+def external_inputs():
+    return [EXTERNAL] if os.path.isfile(EXTERNAL) else []
+
+
+def check_branch(branch_path, bypass_rules=None):
+    return {"standard": "EXTERNAL", "score": 100, "passed": True, "checks": []}
+"""
+
+
+class TestExternalInputsInvalidateTheCache:
+    """@seedgo's finding, 2026-09-15: trinity scores every branch against
+    @memory's memory.config.json and gold templates, but the watch set held
+    only ``.trinity/*`` and the pack stamp hashes seedgo's own checkers. In the
+    fleet audit before the todos v2 landing, CANARY, aipass and drone were cache
+    hits scored from before memory's template change -- drone's 100 included.
+
+    The cure is a third declaration channel: a checker's ``external_inputs()``
+    names the files outside the branch it reads, and they are content-watched
+    under their resolved absolute path.
+    """
+
+    @staticmethod
+    def _fps(branch_path, checkers):
+        from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
+
+        return incremental_cache.collect_fingerprints(branch_audit._collect_watch_files(branch_path, checkers))
+
+    @staticmethod
+    def _checkers(*paths):
+        return {"trinity": types.SimpleNamespace(external_inputs=lambda: [p for p in paths if p.is_file()])}
+
+    @staticmethod
+    def _external(tmp_path) -> Path:
+        config = tmp_path / "memory" / "memory.config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text('{"todos": 10}\n', encoding="utf-8")
+        return config
+
+    def test_an_external_input_is_watched_under_its_absolute_path(self, tmp_path, monkeypatch):
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        config = self._external(tmp_path)
+
+        assert config.resolve().as_posix() in self._fps(branch_path, self._checkers(config))
+
+    def test_editing_an_external_input_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        config = self._external(tmp_path)
+
+        before = self._fps(branch_path, self._checkers(config))
+        config.write_text('{"todos": 12, "grew": "zzzzzzzz"}\n', encoding="utf-8")
+        _, changed, _, _ = incremental_cache.diff_fileset(before, self._fps(branch_path, self._checkers(config)))
+
+        assert config.resolve().as_posix() in changed
+
+    def test_removing_an_external_input_makes_the_branch_dirty(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.audit import incremental_cache
+
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        config = self._external(tmp_path)
+
+        before = self._fps(branch_path, self._checkers(config))
+        config.unlink()
+        _, _, deleted, _ = incremental_cache.diff_fileset(before, self._fps(branch_path, self._checkers(config)))
+
+        assert config.resolve().as_posix() in deleted
+
+    def test_a_checker_without_external_inputs_adds_nothing(self, tmp_path, monkeypatch):
+        _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
+        self._external(tmp_path)
+
+        bare = {"other": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
+
+        assert set(self._fps(branch_path, bare)) == set(self._fps(branch_path, {}))
+
+    def test_an_external_input_edit_busts_a_cached_audit(self, tmp_path, monkeypatch):
+        """End to end through audit_branch_incremental: hit while untouched, re-run once edited."""
+        branch_audit, _cache, branch, _path, pack_dir, _log = _prepare(tmp_path, monkeypatch, {})
+        config = self._external(tmp_path)
+        escaped = str(config).replace("\\", "\\\\")
+        (pack_dir / "external_check.py").write_text(
+            _EXTERNAL_CHECKER_TEMPLATE.replace("__EXTERNAL__", escaped), encoding="utf-8"
+        )
+
+        first = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        second = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        config.write_text('{"todos": 12, "grew": "zzzzzzzz"}\n', encoding="utf-8")
+        third = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        assert [first["_cache_hit"], second["_cache_hit"], third["_cache_hit"]] == [False, True, False]
+
+    def test_trinity_check_defines_external_inputs(self):
+        """The shipped declaration, read from SOURCE for the same reason as the BRANCH_INPUTS pin above."""
+        import ast
+
+        source = (
+            Path(__file__).resolve().parent.parent / "apps" / "handlers" / "aipass_standards" / "trinity_check.py"
+        ).read_text(encoding="utf-8")
+        names = {node.name for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+
+        assert "external_inputs" in names

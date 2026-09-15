@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
-# Description: The trinity push — frame rebuild, vectorize-verify-prune, todos reported not archived
-# Version: 1.1.0
+# Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
+# Version: 1.3.1
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-15
 # =============================================
 
 """Trinity Push Handler
@@ -16,36 +16,35 @@ standard.  A full push does three things per branch, in this order:
    them — ``managed_by`` takes the exact branch directory name, ``_usage`` and
    the ``guidelines`` block come verbatim from the gold-source templates, and
    all four ``*_meta`` lines are re-composed from config + template prose.
-2. **Prune every non-canonical entry — except a todo.**  Pruning is a safety
-   feature, not a deletion: the entry is vectorized VERBATIM to this branch's
-   store first, the ingestion is VERIFIED by reading it back, and only then is
-   it removed from the live file.  Nothing is ever transformed or summarized —
-   a machine that cannot faithfully transform must not transform.  Canonical
-   entries carry over untouched.
-3. **Write one canonical session note** in the pruned branch's own
-   ``sessions[]`` saying where its entries went and how to recall them.
+2. **Prune every non-canonical entry.**  Pruning is a safety feature, not a
+   deletion: the entry is vectorized VERBATIM to this branch's store first,
+   the ingestion is VERIFIED by reading it back, and only then is it removed
+   from the live file.  Nothing is ever transformed or summarized — a machine
+   that cannot faithfully transform must not transform.  Canonical entries
+   carry over untouched.  A todo never goes to vectors: see below.
+3. **Write one canonical session note** in the branch's own ``sessions[]``
+   saying where its entries and todos went and how to get them back.
 
-THE ONE SPECIES THAT IS NEVER ARCHIVED
---------------------------------------
-``todos`` are exempt from the prune lane, and the exemption is not a softening
-of the standard — it is the standard.  Sessions, key_learnings and
-observations are RECORDS, and a record in a vector is still a record: it is
-recallable by ``drone @memory search`` the moment anyone wants it.  A todo is
-a DEBT, and a debt only works if it resurfaces UNBIDDEN on the next load.
-Vectorized, it never does — the agent opens a clean file, sees nothing owed,
-and silently forgets what it promised.  For this one container, archiving IS
-losing, and the trinity standard says so in its own words: todos never roll.
+TODOS GO TO A FILE, NEVER TO VECTORS (DPLAN-0345)
+-------------------------------------------------
+A todo is a sticky note on a pad: canonical shape ``{number, date, task,
+priority?}`` with ``task`` inside its entry_limits cap, and at most
+``rollover.defaults.local.todos.count`` of them.  A todo that is not canonical
+(``status`` present, a required field missing, the task over its cap, a wrong
+type, any key outside the shape) leaves the pad for
+``.backup/todo/<branch_dir>/backlog.json`` with reason ``non-canonical``.
+After that, when the canonical todos left exceed the count, the oldest by
+number follow with reason ``overflow``.
 
-So a non-canonical todo is REPORTED for reshape-in-place — named per entry in
-the push report and counted in the in-file note — and left in the file
-byte-identical.  Reshaping it mechanically was considered and refused for the
-same reason the rest of this module refuses to transform: the canonical shape
-needs ``priority`` and ``status``, and a machine that invents someone else's
-priority has not preserved their open work, it has rewritten it.
+The todo lands in the backlog json-equal: never reshaped, never shortened,
+never vectorized (a restored then re-rolled vector copy is the CPLAN-0002
+duplicate).  ``todo_roll.append_to_backlog`` appends, replaces atomically and
+reads back BEFORE the pad is written; a failed or mismatched append refuses
+the branch whole and leaves its local.json untouched.
 
-The cost is stated rather than hidden: a branch carrying a drifted todo does
-not reach trinity 100 until its own agent reshapes it.  That is the correct
-trade — a debt visible and non-canonical beats a debt canonical and gone.
+There is no migration code.  Without ``status`` in the shape every legacy todo
+is non-canonical, so the first push empties those pads into their backlogs and
+every later push finds nothing to move.
 
 THE ONE LAW, wearing a new hat
 ------------------------------
@@ -86,6 +85,7 @@ from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
 from aipass.memory.apps.handlers.templates import receipt
+from aipass.memory.apps.handlers.rollover import todo_roll
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.handlers.repo_root import module_file
 
@@ -170,11 +170,7 @@ _KEY_ORDER = {
 
 _SECTIONS = {"local": ("todos", "key_learnings", "sessions"), "observations": ("observations",)}
 
-# The containers the prune lane may not touch. See the module docstring: for
-# open work, archiving IS losing, so these are reported for reshape-in-place
-# and left in the file exactly as found. Defined in entry_limits — the write
-# gate grandfathers exactly these same containers, and two lists would drift.
-RESHAPE_ONLY_SECTIONS = entry_limits.RESHAPE_ONLY_SECTIONS
+TODO_SECTION = "todos"
 
 _TYPE_INT = "int"
 _TYPE_STR = "str"
@@ -189,15 +185,10 @@ ENTRY_RULES: dict[str, dict[str, dict[str, str]]] = {
         "required": {"number": _TYPE_INT, "date": _TYPE_STR, "key": _TYPE_STR, "value": _TYPE_STR},
         "optional": {},
     },
+    # DPLAN-0345: no `status`. What is on the pad IS the status; done = deleted.
     "todos": {
-        "required": {
-            "number": _TYPE_INT,
-            "date": _TYPE_STR,
-            "task": _TYPE_STR,
-            "priority": _TYPE_STR,
-            "status": _TYPE_STR,
-        },
-        "optional": {},
+        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "task": _TYPE_STR},
+        "optional": {"priority": _TYPE_STR},
     },
     "observations": {
         "required": {"number": _TYPE_INT, "date": _TYPE_STR, "note": _TYPE_STR, "tags": _TYPE_STR_LIST},
@@ -288,6 +279,162 @@ def is_canonical(section: str, entry: Any, cap_spec: Any = None) -> bool:
 
 
 # =============================================================================
+# THE PAD RULE (todos, DPLAN-0345)
+# =============================================================================
+
+DEFECT_STATUS = "status present"
+DEFECT_OVER_CAP = "task over cap"
+DEFECT_MISSING = "missing field"
+DEFECT_UNKNOWN = "unknown field"
+DEFECT_TYPE = "wrong type"
+DEFECT_NOT_OBJECT = "not an object"
+DEFECT_OVERFLOW = "overflow"
+
+# A todo with several defects is counted ONCE, under its first match here.
+# This is the order todo_defect checks in; the report prints it as stated.
+DEFECT_ORDER = (
+    DEFECT_NOT_OBJECT,
+    DEFECT_STATUS,
+    DEFECT_OVER_CAP,
+    DEFECT_MISSING,
+    DEFECT_UNKNOWN,
+    DEFECT_TYPE,
+    DEFECT_OVERFLOW,
+)
+
+
+def todo_defect(entry: Any, cap_spec: Any = None) -> str | None:
+    """The first reason, in :data:`DEFECT_ORDER`, that *entry* is not a canonical todo.
+
+    Args:
+        entry: The todo as it sits on the pad.
+        cap_spec: The branch's resolved todos ``{field, max_chars}``.
+
+    Returns:
+        One ``DEFECT_*`` label, or None when the todo is canonical.
+    """
+    if not isinstance(entry, dict):
+        return DEFECT_NOT_OBJECT
+    rules = ENTRY_RULES[TODO_SECTION]
+    allowed = set(rules["required"]) | set(rules["optional"])
+    if "status" in entry:
+        return DEFECT_STATUS
+    if _cap_problem(entry, cap_spec):
+        return DEFECT_OVER_CAP
+    if any(field not in entry for field in rules["required"]):
+        return DEFECT_MISSING
+    if any(key not in allowed for key in entry):
+        return DEFECT_UNKNOWN
+    if entry_problems(TODO_SECTION, entry, cap_spec):
+        return DEFECT_TYPE
+    return None
+
+
+def _defect_label(defect: str, cap_spec: Any) -> str:
+    """A defect as the report prints it: the over-cap label names the configured cap."""
+    max_chars = cap_spec.get("max_chars") if isinstance(cap_spec, dict) else None
+    if defect == DEFECT_OVER_CAP and isinstance(max_chars, int) and not isinstance(max_chars, bool):
+        return f"task over {max_chars}"
+    return defect
+
+
+def _todo_move(index: int, entry: Any, reason: str, defect: str) -> dict:
+    """One todo leaving the pad: where it sat, why, and the entry itself (never copied into a new shape)."""
+    return {
+        "index": index,
+        "number": entry.get("number") if isinstance(entry, dict) else None,
+        "reason": reason,
+        "defect": defect,
+        "entry": entry,
+    }
+
+
+def plan_todos(raw: list, cap_spec: Any, count: int | None) -> dict:
+    """Split one pad into what stays and what moves to the backlog. Pure, no I/O.
+
+    Non-canonical todos move first (reason ``non-canonical``, file order). Then,
+    when the canonical todos left exceed *count*, the oldest by number move
+    (reason ``overflow``, oldest first). A None *count* rolls nothing.
+
+    Args:
+        raw: The todos list from local.json.
+        cap_spec: The branch's resolved todos ``{field, max_chars}``.
+        count: The pad size from ``config_loader.get_todos_count``.
+
+    Returns:
+        ``{"kept": [...], "moves": [...], "reasons": {label: count}}`` with the
+        reasons in :data:`DEFECT_ORDER`.
+    """
+    kept: list[int] = []
+    moves: list[dict] = []
+    for index, entry in enumerate(raw):
+        defect = todo_defect(entry, cap_spec)
+        if defect is None:
+            kept.append(index)
+        else:
+            moves.append(_todo_move(index, entry, todo_roll.REASON_NON_CANONICAL, defect))
+
+    if count is not None and len(kept) > count:
+        oldest = sorted(kept, key=lambda index: (raw[index]["number"], index))[: len(kept) - count]
+        moves.extend(_todo_move(index, raw[index], todo_roll.REASON_OVERFLOW, DEFECT_OVERFLOW) for index in oldest)
+        kept = [index for index in kept if index not in set(oldest)]
+
+    tally = {defect: sum(1 for move in moves if move["defect"] == defect) for defect in DEFECT_ORDER}
+    reasons = {_defect_label(defect, cap_spec): number for defect, number in tally.items() if number}
+    return {"kept": [raw[index] for index in kept], "moves": moves, "reasons": reasons}
+
+
+def todos_chars(moves: list[dict]) -> int:
+    """How big the moving todos are: ``len(json.dumps(<entries as one list>, ensure_ascii=False))``.
+
+    The measure behind DPLAN-0345's "Todo JSON is 106,408 chars".
+    """
+    if not moves:
+        return 0
+    return len(json.dumps([move["entry"] for move in moves], ensure_ascii=False))
+
+
+def _pad_as_found(plan: dict) -> list:
+    """The todos list of the plan's local file as read, so its numbers reach the backlog's ``high_water``."""
+    for file_plan in plan.get("files", []):
+        before = file_plan.get("before")
+        if file_plan.get("file_key") == "local" and isinstance(before, dict):
+            pad = before.get(TODO_SECTION)
+            return pad if isinstance(pad, list) else []
+    return []
+
+
+def move_todos(plan: dict) -> dict:
+    """Append a plan's todo moves to its backlog: one verified append per reason, in plan order.
+
+    Args:
+        plan: A plan from :func:`plan_branch`.
+
+    Returns:
+        ``{"moved": int, "error": str | None}``. Any error means the pad must
+        not be written.
+    """
+    outcome: dict[str, Any] = {"moved": 0, "error": None}
+    moves = plan.get("todo_moves", [])
+    pad = _pad_as_found(plan)
+    for reason in (todo_roll.REASON_NON_CANONICAL, todo_roll.REASON_OVERFLOW):
+        group = [move["entry"] for move in moves if move["reason"] == reason]
+        if not group:
+            continue
+        appended = todo_roll.append_to_backlog(plan["backlog"], plan["branch"], group, reason, pad=pad)
+        if not appended["success"]:
+            both = outcome["moved"]
+            doubled = f"; the {both} appended before it sit in the backlog AND on the pad" if both else ""
+            outcome["error"] = (
+                f"backlog append of {len(group)} {reason} todo(s) not verified ({appended['error']}){doubled}"
+                " — local.json untouched"
+            )
+            return outcome
+        outcome["moved"] += appended["appended"]
+    return outcome
+
+
+# =============================================================================
 # SCOPE
 # =============================================================================
 
@@ -349,9 +496,9 @@ def _today() -> str:
 
 
 def _template_tags(template: dict, branch_name: str) -> list[str]:
-    """The template's tag list with ``{{BRANCHNAME}}`` resolved."""
+    """The template's tag list with ``{{BRANCH}}`` resolved."""
     tags = template.get("document_metadata", {}).get("tags", [])
-    return [tag.replace("{{BRANCHNAME}}", branch_name) for tag in tags if isinstance(tag, str)]
+    return [tag.replace("{{BRANCH}}", branch_name) for tag in tags if isinstance(tag, str)]
 
 
 def build_doc_metadata(current: Any, file_key: str, branch_name: str) -> dict:
@@ -421,7 +568,9 @@ def _frame_changes(before: dict, after: dict, file_key: str) -> list[str]:
     return changes
 
 
-def build_frame(before: dict, file_key: str, branch_name: str, entries: dict, config: dict) -> dict:
+def build_frame(
+    before: dict, file_key: str, branch_name: str, entries: dict, config: dict, todo_ctx: dict | None = None
+) -> dict:
     """Assemble the canonical file: machine frame around the surviving entries.
 
     Args:
@@ -430,6 +579,9 @@ def build_frame(before: dict, file_key: str, branch_name: str, entries: dict, co
         branch_name: The branch directory name.
         entries: ``{section: [surviving entries]}``.
         config: The parsed memory.config.json.
+        todo_ctx: ``tab_renderer.todo_context`` for the todos tab. When None
+            for a local file it is derived here from the pad as found and the
+            branch's backlog at its default path.
 
     Returns:
         A new dict with exactly the canonical top-level keys, in order.
@@ -442,9 +594,16 @@ def build_frame(before: dict, file_key: str, branch_name: str, entries: dict, co
 
     if file_key == "observations":
         data["guidelines"] = copy.deepcopy(_load_template("observations").get("guidelines", {}))
+    elif todo_ctx is None:
+        pad = before.get(TODO_SECTION)
+        todo_ctx = tab_renderer.todo_context(
+            branch_name, [] if pad is None else pad, todos_meta=before.get("todos_meta")
+        )
 
     for section in _SECTIONS[file_key]:
-        data[f"{section}_meta"] = tab_renderer.compose_meta(section, rollover_cfg, entry_limits_cfg, branch_name)
+        data[f"{section}_meta"] = tab_renderer.compose_meta(
+            section, rollover_cfg, entry_limits_cfg, branch_name, todo_ctx if section == TODO_SECTION else None
+        )
         data[section] = entries.get(section, [])
 
     return {key: data[key] for key in _KEY_ORDER[file_key] if key in data}
@@ -465,12 +624,16 @@ def resolve_caps(config: dict, branch_name: str) -> dict:
     return entry_limits.resolve_entry_types(config.get("entry_limits", {}), branch_name)
 
 
-def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> dict:
-    """Plan one file: what gets pruned, what carries over, what the frame changes.
+def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict, backlog: dict | None = None) -> dict:
+    """Plan one file: what gets pruned, what moves to the backlog, what carries over, what the frame changes.
 
     Returns a plan dict, or one carrying ``error`` when the file cannot be
     read. A file that cannot be read is never treated as empty — rebuilding a
     frame around no entries would delete a branch's whole memory.
+
+    *backlog* is the branch's ``todo_roll.read_backlog`` state, used to derive
+    the todos tab's ``next #N`` from the pad as found plus the backlog as found
+    (the same number set the pad and backlog hold after the move).
     """
     path = trinity / _FILE_NAMES[file_key]
     plan: dict[str, Any] = {
@@ -478,7 +641,9 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
         "path": path,
         "error": None,
         "prunes": [],
-        "reshapes": [],
+        "todo_moves": [],
+        "todo_reasons": {},
+        "todos_count": None,
         "carried": 0,
         "todos_seen": 0,
         "frame_changes": [],
@@ -505,13 +670,17 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
         if not isinstance(raw, list):
             plan["error"] = f"{_FILE_NAMES[file_key]}: '{section}' must be a list, found {type(raw).__name__}"
             return plan
-        if section in RESHAPE_ONLY_SECTIONS:
-            # Counted whether or not any of them drifted. A branch that owes
-            # nothing and a branch whose debts vanished both show zero
-            # reshapes; only the count SEEN tells those two apart, and the
-            # push that archived 67 todos is the reason that distinction is
-            # load-bearing rather than decorative (@ai_mail, 2026-08-27).
+        if section == TODO_SECTION:
+            # Counted whether or not any of them move. A branch that owes
+            # nothing and a branch whose pad was emptied both keep zero; only
+            # the count SEEN tells those two apart (@ai_mail, 2026-08-27).
+            count = config_loader.get_todos_count(branch_name, config.get("rollover", {}))
+            split = plan_todos(raw, caps.get(section), count)
+            plan.update(todos_count=count, todo_moves=split["moves"], todo_reasons=split["reasons"])
             plan["todos_seen"] += len(raw)
+            plan["carried"] += len(split["kept"])
+            survivors[section] = split["kept"]
+            continue
         kept = []
         for index, entry in enumerate(raw):
             problems = entry_problems(section, entry, caps.get(section))
@@ -527,38 +696,50 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict) -> 
                 "reason": "; ".join(problems),
                 "entry": entry,
             }
-            if section in RESHAPE_ONLY_SECTIONS:
-                # Open work never leaves the file — it is kept exactly as
-                # found and reported so its own agent can reshape it. It is
-                # deliberately NOT counted as carry-over: "carried" means
-                # canonical, and calling a debt clean is how it goes unseen.
-                kept.append(entry)
-                plan["reshapes"].append(record)
-            else:
-                plan["prunes"].append(record)
+            plan["prunes"].append(record)
         survivors[section] = kept
 
-    after = build_frame(before, file_key, branch_name, survivors, config)
+    todo_ctx = None
+    if file_key == "local":
+        pad = before.get(TODO_SECTION)
+        todo_ctx = tab_renderer.todo_context(
+            branch_name, [] if pad is None else pad, backlog, todos_meta=before.get("todos_meta")
+        )
+    after = build_frame(before, file_key, branch_name, survivors, config, todo_ctx=todo_ctx)
     plan["before"] = before
     plan["after"] = after
     plan["frame_changes"] = _frame_changes(before, after, file_key)
     return plan
 
 
-def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
+def _backlog_display(path: Path) -> str:
+    """The backlog path relative to the repo root when it sits inside it, else in full - posix separators either way."""
+    try:
+        return Path(path).relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        logger.debug(f"[trinity_push] {path} sits outside the repo root - shown in full")
+        return Path(path).as_posix()
+
+
+def plan_branch(branch_name: str, branch_path: Path, config: dict, backlog_path: Path | None = None) -> dict:
     """Plan a whole branch — pure and read-only, the dry-run's only source.
 
     Args:
         branch_name: Branch directory name.
         branch_path: Branch root (the directory holding ``.trinity/``).
         config: The parsed memory.config.json.
+        backlog_path: This branch's todo backlog file; defaults to
+            ``todo_roll.backlog_path_for(branch_name)``.
 
     Returns:
         ``{"branch", "path", "files": [file plans], "errors": [...],
-        "prunes": [...], "reshapes": [...], "carried": int, "strays": [...]}``.
-        ``reshapes`` are the non-canonical todos left IN the file.
+        "prunes": [...], "todo_moves": [...], "todo_reasons": {...},
+        "todos_count", "backlog", "backlog_display", "backlog_exists",
+        "carried": int, "strays": [...]}``. ``todo_moves`` are the todos that
+        leave the pad for the backlog.
     """
     trinity = Path(branch_path) / TRINITY_DIR
+    backlog = Path(backlog_path) if backlog_path is not None else todo_roll.backlog_path_for(branch_name)
     plan: dict[str, Any] = {
         "branch": branch_name,
         "config": config,
@@ -567,7 +748,12 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
         "files": [],
         "errors": [],
         "prunes": [],
-        "reshapes": [],
+        "todo_moves": [],
+        "todo_reasons": {},
+        "todos_count": None,
+        "backlog": backlog,
+        "backlog_display": _backlog_display(backlog),
+        "backlog_exists": False,
         "carried": 0,
         "todos_seen": 0,
         "strays": [],
@@ -578,18 +764,28 @@ def plan_branch(branch_name: str, branch_path: Path, config: dict) -> dict:
         return plan
 
     plan["strays"] = _trinity_strays(trinity)
+    state = todo_roll.read_backlog(backlog)
+    plan["backlog_exists"] = state["exists"]
 
     for file_key in ("local", "observations"):
-        file_plan = _plan_file(branch_name, trinity, file_key, config)
+        file_plan = _plan_file(branch_name, trinity, file_key, config, state)
         plan["files"].append(file_plan)
         if file_plan["error"]:
             plan["errors"].append(f"{branch_name}: {file_plan['error']}")
             continue
         plan["prunes"].extend(file_plan["prunes"])
-        plan["reshapes"].extend(file_plan["reshapes"])
         plan["carried"] += file_plan["carried"]
         plan["todos_seen"] += file_plan["todos_seen"]
+        if file_key == "local":
+            plan.update(
+                todo_moves=file_plan["todo_moves"],
+                todo_reasons=file_plan["todo_reasons"],
+                todos_count=file_plan["todos_count"],
+            )
 
+    if plan["todo_moves"] and state["error"]:
+        # The pad may only shrink into a backlog that can be appended to.
+        plan["errors"].append(f"{branch_name}: {len(plan['todo_moves'])} todo(s) cannot move — {state['error']}")
     return plan
 
 
@@ -778,16 +974,19 @@ NOTE_ARCHIVED = (
     "trinity push, then pruned from these files — recall any of them anytime with "
     "drone @memory search."
 )
-NOTE_TODOS_NAMED = "{count} todo(s) {labels} were LEFT here — open work is never archived; reshape them in place."
-NOTE_TODOS_COUNTED = "{count} todo(s) were LEFT here — open work is never archived; reshape them in place."
+NOTE_TODOS_NAMED = (
+    "{count} todo(s) {labels} moved to {backlog} — nothing reshaped; pull back what you still need by hand."
+)
+NOTE_TODOS_COUNTED = "{count} todo(s) moved to {backlog} — nothing reshaped; pull back what you still need by hand."
+NOTE_BACKLOG_FALLBACK = "this branch's todo backlog"
 
 
-def _reshape_label(record: dict) -> str:
-    """How one left-behind todo is named in the note.
+def _move_label(record: dict) -> str:
+    """How one todo that moved to the backlog is named in the note.
 
-    Its entry ``number`` when it has one, otherwise its position — because the
-    commonest drifted shape is missing ``number`` entirely, and "the third one
-    down" is still an address its agent can act on.
+    Its entry ``number`` when it has one, otherwise its position on the pad —
+    a legacy todo can lack ``number`` entirely, and "the third one down" is
+    still an address.
     """
     number = record.get("number")
     if isinstance(number, int) and not isinstance(number, bool):
@@ -814,24 +1013,31 @@ def _fitting(candidates: list, max_chars: Any) -> str:
     return min(usable, key=len)
 
 
-def build_note(prune_count: int, sessions: list, reshapes: list | None = None, max_chars: Any = None) -> dict:
+def build_note(
+    prune_count: int,
+    sessions: list,
+    moved: list | None = None,
+    max_chars: Any = None,
+    backlog: str | None = None,
+) -> dict:
     """Compose the canonical session entry recording what the push did.
 
-    The note is written in the pruned branch's OWN sessions[] because that is
-    where its agent will look. It is a canonical entry like any other — same
-    four fields, same cap — so the note announcing the standard cannot itself
+    The note is written in the branch's OWN sessions[] because that is where
+    its agent will look. It is a canonical entry like any other — same four
+    fields, same cap — so the note announcing the standard cannot itself
     violate it.
 
     It carries two independent facts. What was ARCHIVED (and how to get it
-    back), and what was LEFT — the todos the push refused to archive, named
-    so their owner knows exactly which lines it still owes a reshape.
+    back), and what MOVED — the todos that left the pad for the backlog file,
+    named so their owner knows which lines went and where.
 
     Args:
         prune_count: How many entries were vectorized and removed.
         sessions: The surviving sessions, used only to continue the numbering.
-        reshapes: The non-canonical todos left in the file, if any.
+        moved: The todo moves written to the backlog, if any.
         max_chars: This branch's session-summary cap, so the enumeration can
             step down to a count instead of busting the cap it announces.
+        backlog: The backlog path as displayed (repo-relative).
 
     Returns:
         A canonical session entry.
@@ -841,11 +1047,12 @@ def build_note(prune_count: int, sessions: list, reshapes: list | None = None, m
     ]
     archived = NOTE_ARCHIVED.format(count=prune_count) if prune_count else ""
 
-    left = list(reshapes or [])
+    left = list(moved or [])
     if left:
-        labels = ", ".join(_reshape_label(record) for record in left)
-        named = NOTE_TODOS_NAMED.format(count=len(left), labels=labels)
-        counted = NOTE_TODOS_COUNTED.format(count=len(left))
+        where = backlog or NOTE_BACKLOG_FALLBACK
+        labels = ", ".join(_move_label(record) for record in left)
+        named = NOTE_TODOS_NAMED.format(count=len(left), labels=labels, backlog=where)
+        counted = NOTE_TODOS_COUNTED.format(count=len(left), backlog=where)
         candidates = [
             " ".join(part for part in (archived, named) if part),
             " ".join(part for part in (archived, counted) if part),
@@ -899,15 +1106,15 @@ def apply_plan(plan: dict, store_client, destinations: list) -> dict:
         destinations: ``[(label, db_path)]`` for the archive.
 
     Returns:
-        ``{"branch", "pruned", "carried", "reshapes", "written", "noted",
-        "receipt", "errors", "refused"}``.
+        ``{"branch", "pruned", "carried", <todo summary keys>, "todos_moved",
+        "written", "noted", "receipt", "errors", "refused"}``.
     """
     result = {
         "branch": plan["branch"],
         "pruned": 0,
         "carried": plan["carried"],
-        "todos_seen": plan.get("todos_seen", 0),
-        "reshapes": list(plan.get("reshapes", [])),
+        **todo_summary(plan),
+        "todos_moved": 0,
         "written": 0,
         "noted": False,
         "receipt": False,
@@ -930,19 +1137,27 @@ def apply_plan(plan: dict, store_client, destinations: list) -> dict:
         logger.error(f"[trinity_push] {result['errors'][-1]}")
         return result
 
+    # The pad is written only after the backlog took its todos and read back
+    # json-equal. Archived vectors, if any, are already verified above; a push
+    # re-run dedupes those, while a backlog append is never retried blind.
+    moved = move_todos(plan)
+    if moved["error"]:
+        result["refused"] = True
+        result["errors"].append(f"{plan['branch']}: NOTHING WRITTEN — {moved['error']}")
+        logger.error(f"[trinity_push] {result['errors'][-1]}")
+        return result
+    result["todos_moved"] = moved["moved"]
+
     note = None
-    # The note is minted only when something was actually ARCHIVED. A branch
-    # whose only finding is a drifted todo lost nothing and had nothing moved
-    # — and since that todo stays non-canonical until its agent reshapes it,
-    # noting it on every run would stack a fresh session entry each push and
-    # break the idempotency the canary proved. The report says it every time;
-    # the file says it once, alongside the entries that did move.
-    if plan["prunes"]:
+    # The note is minted only when something actually LEFT the files: entries
+    # archived to vectors, or todos moved to the backlog. A second push finds
+    # neither, so notes never stack and the push stays idempotent.
+    if plan["prunes"] or plan.get("todo_moves"):
         local_plan = next((item for item in plan["files"] if item["file_key"] == "local"), None)
         sessions = local_plan["after"].get("sessions", []) if local_plan and not local_plan["error"] else []
         note_cap = resolve_caps(plan["config"], plan["branch"]).get("sessions")
         cap_chars = note_cap.get("max_chars") if isinstance(note_cap, dict) else None
-        note = build_note(len(plan["prunes"]), sessions, plan.get("reshapes"), cap_chars)
+        note = build_note(len(plan["prunes"]), sessions, plan.get("todo_moves"), cap_chars, plan.get("backlog_display"))
         # The note is measured by the same gate everything else was pruned
         # against. A push that leaves behind a note the standard would refuse
         # has re-introduced, in its own hand, the exact violation it came to
@@ -974,15 +1189,17 @@ def apply_plan(plan: dict, store_client, destinations: list) -> dict:
 # =============================================================================
 
 
-def push(branch: str | None = None, dry_run: bool = True, store_client=None) -> dict:
+def push(branch: str | None = None, dry_run: bool = True, store_client=None, backup_root: Path | None = None) -> dict:
     """Run the trinity push over one branch or the whole DPLAN scope.
 
     Args:
         branch: A single branch directory name, or None for fleet mode.
         dry_run: When True nothing is written anywhere — not the memory
-            files, not the vector store, not the receipts.
+            files, not the vector store, not the receipts, not a backlog.
         store_client: Injected vector-store client; defaults to
             ``push_store``. Tests pass a double.
+        backup_root: The ``.backup`` directory the todo backlogs live under;
+            defaults to ``<repo_root>/.backup``. Tests pass a scratch one.
 
     Returns:
         ``{"success", "dry_run", "scope", "branches": [...], "errors": [...]}``
@@ -1007,8 +1224,14 @@ def push(branch: str | None = None, dry_run: bool = True, store_client=None) -> 
         "errors": [],
     }
 
+    # The backlog is keyed by directory name, so a name shared anywhere in scope
+    # would merge two branches' backlogs: resolved against the WHOLE scope.
+    fleet = scope["branches"] if branch is None else resolve_scope()["branches"]
     for item in scope["branches"]:
-        plan = plan_branch(item["name"], item["path"], config)
+        target = todo_roll.resolve_target(item["name"], fleet=fleet, backup_root=backup_root)
+        plan = plan_branch(item["name"], item["path"], config, backlog_path=target["backlog"])
+        if target["error"]:
+            plan["errors"].append(f"{item['name']}: todos not movable — {target['error']}")
         if dry_run:
             out["branches"].append(_dry_entry(plan))
             out["errors"].extend(plan["errors"])
@@ -1028,7 +1251,9 @@ def push(branch: str | None = None, dry_run: bool = True, store_client=None) -> 
             "scope": out["scope"],
             "branch": branch or "fleet",
             "pruned": sum(entry.get("pruned", 0) for entry in out["branches"]),
-            "todos_left_to_reshape": sum(len(entry.get("reshapes", [])) for entry in out["branches"]),
+            "todos_to_backlog": sum(
+                entry.get("todos_to_backlog" if dry_run else "todos_moved", 0) for entry in out["branches"]
+            ),
             "errors": len(out["errors"]),
         },
         module_name="trinity_push",
@@ -1053,15 +1278,37 @@ def _destinations(branch_name: str) -> list:
     return destinations
 
 
+def todo_summary(plan: dict) -> dict:
+    """The todo half of a branch's report entry, shared by the dry run and the real push.
+
+    Args:
+        plan: A plan from :func:`plan_branch`.
+
+    Returns:
+        ``{"todos_seen", "todos_count", "todos_to_backlog", "todos_chars",
+        "todo_reasons", "todo_moves", "backlog_display", "backlog_exists"}``.
+    """
+    moves = list(plan.get("todo_moves", []))
+    return {
+        "todos_seen": plan.get("todos_seen", 0),
+        "todos_count": plan.get("todos_count"),
+        "todos_to_backlog": len(moves),
+        "todos_chars": todos_chars(moves),
+        "todo_reasons": dict(plan.get("todo_reasons", {})),
+        "todo_moves": moves,
+        "backlog_display": plan.get("backlog_display"),
+        "backlog_exists": bool(plan.get("backlog_exists")),
+    }
+
+
 def _dry_entry(plan: dict) -> dict:
     """Shape one branch's dry-run report entry."""
     return {
         "branch": plan["branch"],
         "pruned": len(plan["prunes"]),
         "carried": plan["carried"],
-        "todos_seen": plan["todos_seen"],
+        **todo_summary(plan),
         "prunes": plan["prunes"],
-        "reshapes": plan["reshapes"],
         "frame_changes": {item["file_key"]: item["frame_changes"] for item in plan["files"] if not item["error"]},
         "strays": plan["strays"],
         "errors": plan["errors"],
