@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.4.0
+# Version: 1.5.0
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
@@ -79,6 +79,20 @@ def _hook_data(file_path, content=None, tool_name="Write", cwd=None, **extra_inp
     if cwd:
         data["cwd"] = cwd
     return data
+
+
+def _advisory_context(result):
+    """The todo-count advisory as the model receives it: PreToolUse additionalContext.
+
+    Plain stdout on a PreToolUse exit 0 never reaches the model (measured on
+    @canary, 2026-09-15). Never a decision: the advisory must not block, allow or ask.
+    """
+    assert result["exit_code"] == 0
+    doc = json.loads(result["stdout"])
+    assert set(doc) == {"hookSpecificOutput"}
+    assert set(doc["hookSpecificOutput"]) == {"hookEventName", "additionalContext"}
+    assert doc["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    return doc["hookSpecificOutput"]["additionalContext"]
 
 
 def _mock_entry_limits(limits):
@@ -1254,8 +1268,8 @@ class TestTrinityTodosCountAdvisory:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "todos over limit" in result["stdout"]
-        assert "11/10" in result["stdout"]
+        assert "todos over limit" in _advisory_context(result)
+        assert "11/10" in _advisory_context(result)
 
     def test_todos_under_limit_no_advisory(self, tmp_path):
         """Write with 5 todos (limit 10) -> exit_code 0, empty stdout."""
@@ -1310,8 +1324,8 @@ class TestTrinityTodosCountAdvisory:
             )
 
         assert result["exit_code"] == 0
-        assert "todos over limit" in result["stdout"]
-        assert "11/10" in result["stdout"]
+        assert "todos over limit" in _advisory_context(result)
+        assert "11/10" in _advisory_context(result)
 
     def test_todos_advisory_never_blocks(self, tmp_path):
         """Even with enforce=True, todos count advisory has exit_code 0."""
@@ -1328,8 +1342,8 @@ class TestTrinityTodosCountAdvisory:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "todos over limit" in result["stdout"]
-        assert "15/10" in result["stdout"]
+        assert "todos over limit" in _advisory_context(result)
+        assert "15/10" in _advisory_context(result)
 
     def test_todos_advisory_observations_json_skip(self, tmp_path):
         """observations.json never triggers todos advisory."""
@@ -1443,7 +1457,7 @@ class TestTrinityTodosCountAdvisory:
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
-        assert "6/5" in result["stdout"]
+        assert "6/5" in _advisory_context(result)
 
     def test_the_advisory_names_the_roll_and_the_backlog(self, tmp_path):
         """DPLAN-0345: over the pad is legal on disk; the oldest roll off, and it says where."""
@@ -1456,7 +1470,7 @@ class TestTrinityTodosCountAdvisory:
         with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        stdout = result["stdout"]
+        stdout = _advisory_context(result)
         assert "13/10" in stdout
         assert "the oldest 3 roll off at the next rollover" in stdout
         assert "drone @memory rollover run --branch @hooks" in stdout
@@ -1490,8 +1504,8 @@ class TestTrinityTodosCountAdvisory:
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        assert "9/8" in result["stdout"]
-        assert "the oldest 1 roll off" in result["stdout"]
+        assert "9/8" in _advisory_context(result)
+        assert "the oldest 1 roll off" in _advisory_context(result)
 
     def test_no_usable_count_promises_no_roll(self, tmp_path):
         """No usable count: memory rolls nothing, so the fallback 10 must not claim a roll."""
@@ -1508,9 +1522,9 @@ class TestTrinityTodosCountAdvisory:
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
-        assert "11/10" in result["stdout"]
-        assert "nothing rolls" in result["stdout"]
-        assert "roll off" not in result["stdout"]
+        assert "11/10" in _advisory_context(result)
+        assert "nothing rolls" in _advisory_context(result)
+        assert "roll off" not in _advisory_context(result)
 
     def test_no_todos_container_no_advisory(self, tmp_path):
         """local.json with no todos key -> no advisory."""

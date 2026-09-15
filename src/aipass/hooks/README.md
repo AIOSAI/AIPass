@@ -646,6 +646,19 @@ diff would call the whole file newly authored on exactly the write that authored
 Carrying a drifted entry does not license adding another in the same shape: a NEW entry with a
 missing canonical field is authored, and refused.
 
+**The todo pad count is advised, never refused** (DPLAN-0345). An 11th todo is legal on disk: the
+oldest roll off to `.backup/todo/<branch>/backlog.json` at that branch's next PreCompact or
+`drone @memory rollover run --branch @<branch>`. The pad size is @memory's own resolver
+(`config_loader.get_todos_count`), the number its roll applies. A write that leaves the pad over it
+gets an advisory as PreToolUse `hookSpecificOutput.additionalContext`, because the model writing the
+todo is its audience. Until 2026-09-15 it went out as plain stdout, which Claude Code shows in the
+transcript view on a PreToolUse exit 0 and never hands to the model (@canary measured it: 227 bytes
+logged, nothing in the Edit result). **The advisory fires at most once per cadence window per
+session** (`cadence.should_fire_advisory("todos_count")`: 10 turns, or 600 s when the turn counter
+cannot be read). An over-count pad is a standing condition, and per-write firing once wrote 209
+identical lines. So a second over-count write in the same window is silent by design, its log line
+drops to DEBUG, and the per-write INFO note that names the backlog still lands in `edit_gate.log`.
+
 ### The diagnostics block
 
 After an edit leaves type errors behind, `auto_fix` records them in `.diagnostics_state.json` and `edit_gate` stops you editing *other* files in that branch until they are fixed. Two rules keep that block honest (both reported by @seedgo with a live repro, 2026-08-13):

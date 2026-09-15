@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.11.0
+# Version: 1.12.0
 # Description: Cross-project (tool + scripted), cross-branch, inbox and shell-to-memory write protection
 #              (PreToolUse), plus the shell-memory tripwire (PreToolUse snapshot, PostToolUse report)
 # Branch: hooks
@@ -891,7 +891,12 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         if fp.name == "local.json":
             advisory = _todos_count_advisory(after, branch)
             if advisory:
-                return {"stdout": advisory, "exit_code": 0}
+                # Context, not plain stdout: on a PreToolUse exit 0 Claude Code shows
+                # plain stdout in the transcript view and never hands it to the model,
+                # and the model writing the 11th todo is the audience (@canary
+                # measured it, 2026-09-15). No permissionDecision: this never decides.
+                output = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": advisory}}
+                return {"stdout": json.dumps(output), "exit_code": 0}
 
         return None
     except Exception as exc:
