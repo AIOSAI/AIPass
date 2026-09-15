@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_rollover.py
 # Date: 2026-03-24
-# Version: 1.1.0
+# Version: 1.1.1
 # Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
@@ -15,8 +15,11 @@ Tests command routing, handler discovery, and the SUBCOMMANDS dict.
 All tests use mocks or tmp_path — no live filesystem or infrastructure access.
 """
 
+import importlib
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -155,21 +158,34 @@ def _prepare_rollover_mocks(monkeypatch):
     }
 
 
+_ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
+
+
 def _import_rollover(monkeypatch):
     """Prepare mocks and import (or reimport) the rollover module.
+
+    The re-import binds rollover to the MagicMock cli, so its error() marks
+    nothing. Both evictions go through monkeypatch, which records what stood
+    there - the real module, or nothing - and teardown puts exactly that back.
+    A bare pop left the mock-bound module cached after teardown: the next
+    in-process memory.main() on that xdist worker routed `rollover <bogus>`
+    through the mock error() and exited 0 (test_contracts, macOS red on
+    02610e3b and 561678fd).
 
     Returns (rollover_module, mocks_dict).
     """
     mocks = _prepare_rollover_mocks(monkeypatch)
 
-    # Remove cached module so it re-imports with our mocks
-    sys.modules.pop("aipass.memory.apps.modules.rollover", None)
+    # setitem first so teardown knows the prior state, then evict so the
+    # import below re-executes the module against the mocks.
+    monkeypatch.setitem(sys.modules, _ROLLOVER_MODULE, None)
+    del sys.modules[_ROLLOVER_MODULE]
 
-    # Also clear the parent package's cached attribute so Python
-    # re-executes the module code with fresh mocks.
-    parent = sys.modules.get("aipass.memory.apps.modules")
-    if parent is not None and hasattr(parent, "rollover"):
-        delattr(parent, "rollover")
+    # The parent package's cached attribute, the same way: `from package
+    # import rollover` would otherwise hand back the cached module unexecuted.
+    parent = importlib.import_module("aipass.memory.apps.modules")
+    monkeypatch.setattr(parent, "rollover", None, raising=False)
+    delattr(parent, "rollover")
 
     from aipass.memory.apps.modules import rollover
 
@@ -227,6 +243,33 @@ class TestMockedCliPackageIsComplete:
             sys.modules.pop(f"aipass.memory.apps.handlers.cli.{name}", None)
         rollover, _mocks = _import_rollover(monkeypatch)
         assert rollover.handle_command("rollover", ["check"]) is True
+
+
+class TestMockedReimportIsUndoneAtTeardown:
+    """The rollover module this file binds to a MagicMock cli must not outlive the test that made it.
+
+    It did, through a bare sys.modules.pop: test_contracts' in-process
+    memory.main() later on the same xdist worker discovered the cached module,
+    its mock error() marked no failure, and `rollover <bogus>` exited 0
+    instead of 2 - red on macOS only, where loadscope's size-ordered queue
+    ran this file's classes first on that worker.
+    """
+
+    def test_sys_modules_and_the_parent_attribute_are_restored(self) -> None:
+        parent = importlib.import_module("aipass.memory.apps.modules")
+        module_before = sys.modules.get(_ROLLOVER_MODULE)
+        attr_before = getattr(parent, "rollover", None)
+
+        with pytest.MonkeyPatch.context() as mp:
+            rollover, mocks = _import_rollover(mp)
+            # Guard the guard: the re-import really is bound to the mock.
+            assert rollover.error is mocks["error"]
+            assert rollover is not module_before
+
+        assert sys.modules.get(_ROLLOVER_MODULE) is module_before, "the mock-bound rollover outlived its test"
+        assert getattr(parent, "rollover", None) is attr_before, (
+            "the parent package still names the mock-bound rollover"
+        )
 
 
 def rollover_module_path() -> str:

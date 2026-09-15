@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-15
 # Modified: 2026-09-15
 # =============================================
@@ -41,14 +41,24 @@ REFUSED by name: their backlogs would merge.
 
 Backlog document (nested, so the todo itself stays closed and json-comparable)::
 
-    {"document_metadata": {"managed_by": "memory", "branch": "<dir>"},
+    {"document_metadata": {"managed_by": "memory", "branch": "<dir>", "high_water": <int>},
      "entries": [{"rolled": "<iso>", "reason": "overflow|non-canonical|migration",
                   "entry": {<the todo, json-equal to the pad's copy>}}]}
+
+NUMBERS ARE NEVER RE-ISSUED ON PURPOSE. ``high_water`` is the highest todo
+number memory has seen for the branch, raised (never lowered) on every
+backlog write; a backlog written before it existed has no floor, never an
+error. The next number is one past the highest of the pad, the backlog's
+original numbers, ``high_water`` and the ``next #N`` the branch's own tab last
+rendered (N - 1). Residual: a todo added by hand and deleted by hand with no
+memory write or tab render in between leaves no trace, so its number can be
+issued again once.
 """
 
 import copy
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -73,6 +83,13 @@ REASON_OVERFLOW = "overflow"
 REASON_NON_CANONICAL = "non-canonical"
 REASON_MIGRATION = "migration"
 REASONS = (REASON_OVERFLOW, REASON_NON_CANONICAL, REASON_MIGRATION)
+
+# document_metadata key: the highest todo number memory has seen for the branch.
+HIGH_WATER_KEY = "high_water"
+
+# memory's own todos tab (tab_renderer._todos_tab) ends its first ⟦ ⟧ with
+# "· next #N ⟧". Only that shape is read; "#?", another tab or free text is no floor.
+_TAB_NEXT_RE = re.compile(r"⟦ [^⟧]* · next #([1-9][0-9]*) ⟧")
 
 # Drone stamps both on every branch it invokes. CALLER_CWD is EVIDENCE of where
 # the caller stood. BRANCH_NAME without CALLER_CWD means this process's working
@@ -99,14 +116,18 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
+def _as_number(value: Any) -> int | None:
+    """*value* when it is a real integer, else None (a bool is not a number)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
 def _number_of(todo: Any) -> int | None:
     """A todo's number when it is a real integer, else None (a bool is not a number)."""
     if not isinstance(todo, dict):
         return None
-    number = todo.get("number")
-    if isinstance(number, bool) or not isinstance(number, int):
-        return None
-    return number
+    return _as_number(todo.get("number"))
 
 
 def _age(todo: Any, index: int) -> tuple[int, int, int]:
@@ -117,23 +138,62 @@ def _age(todo: Any, index: int) -> tuple[int, int, int]:
     return (1, number, index)
 
 
-def next_number(pad: list[Any], backlog_entries: list[Any]) -> int:
-    """The next todo number: max(numbers on the pad and original numbers in the backlog) + 1.
+def high_water_of(document: Any) -> int | None:
+    """The ``document_metadata.high_water`` a backlog document carries, or None.
 
-    Args:
-        pad: The live todos list.
-        backlog_entries: The backlog's ``entries`` records.
-
-    Returns:
-        One more than the highest number seen, or 1 when neither holds one.
+    A backlog without the key (every one written before it existed) or with a
+    value that is not a real integer has no floor - never an error.
     """
+    metadata = document.get("document_metadata") if isinstance(document, dict) else None
+    return _as_number(metadata.get(HIGH_WATER_KEY)) if isinstance(metadata, dict) else None
+
+
+def floor_from_tab(todos_meta: Any) -> int | None:
+    """N - 1 from the ``next #N`` in the todos tab memory last rendered, or None for ``#?`` or any other text."""
+    match = _TAB_NEXT_RE.match(todos_meta) if isinstance(todos_meta, str) else None
+    return int(match.group(1)) - 1 if match else None
+
+
+def _highest(pad: list[Any], backlog_entries: list[Any], *floors: Any) -> int | None:
+    """The highest real integer among pad numbers, backlog original numbers and *floors*, or None."""
     numbers = [n for n in (_number_of(todo) for todo in pad) if n is not None]
     for record in backlog_entries:
         if isinstance(record, dict):
             number = _number_of(record.get("entry"))
             if number is not None:
                 numbers.append(number)
-    return max(numbers) + 1 if numbers else 1
+    numbers.extend(n for n in (_as_number(floor) for floor in floors) if n is not None)
+    return max(numbers) if numbers else None
+
+
+def next_number(
+    pad: list[Any],
+    backlog_entries: list[Any],
+    *,
+    high_water: int | None = None,
+    tab_floor: int | None = None,
+) -> int:
+    """The next todo number: one past the highest number memory can see for the branch.
+
+    Args:
+        pad: The live todos list.
+        backlog_entries: The backlog's ``entries`` records.
+        high_water: The backlog's :func:`high_water_of`, or None.
+        tab_floor: :func:`floor_from_tab` of the branch's current ``todos_meta``, or None.
+
+    Returns:
+        max(pad numbers, backlog original numbers, high_water, tab_floor) + 1,
+        or 1 when none holds a real integer.
+    """
+    highest = _highest(pad, backlog_entries, high_water, tab_floor)
+    return highest + 1 if highest is not None else 1
+
+
+def _stamp_high_water(document: dict[str, Any], pad: list[Any], *issued: int) -> None:
+    """Raise *document*'s ``high_water`` to the highest number on *pad*, in its entries, or *issued*; never lower it."""
+    highest = _highest(pad, document["entries"], high_water_of(document), *issued)
+    if highest is not None:
+        document["document_metadata"][HIGH_WATER_KEY] = highest
 
 
 def _valid_dir_name(name: str) -> bool:
@@ -463,11 +523,15 @@ def read_backlog(backlog_path: Path) -> dict[str, Any]:
     return state
 
 
-def _verify_backlog(path: Path, expected: list[Any], originals: list[Any]) -> str | None:
-    """Read the backlog back: every record as written, every appended ``entry`` json-equal to its original."""
+def _verify_backlog(
+    path: Path, expected: list[Any], originals: list[Any], metadata: dict[str, Any] | None = None
+) -> str | None:
+    """Read the backlog back: *metadata* (``high_water`` with it), every record, every appended ``entry``."""
     back = read_backlog(path)
     if back["error"] or not back["exists"]:
         return back["error"] or "the file is gone"
+    if metadata is not None and _canonical(back["document"]["document_metadata"]) != _canonical(metadata):
+        return "document_metadata (high_water) does not read back as written"
     entries = back["entries"]
     if len(entries) != len(expected):
         return f"expected {len(expected)} records, read back {len(entries)}"
@@ -482,8 +546,10 @@ def _verify_backlog(path: Path, expected: list[Any], originals: list[Any]) -> st
     return None
 
 
-def append_to_backlog(backlog_path: Path, branch_dir: str, todos: list[Any], reason: str) -> dict[str, Any]:
-    """Append todos to a backlog: append, replace atomically, read back, compare every record.
+def append_to_backlog(
+    backlog_path: Path, branch_dir: str, todos: list[Any], reason: str, *, pad: list[Any] | None = None
+) -> dict[str, Any]:
+    """Append todos to a backlog: append, raise ``high_water``, replace atomically, read back, compare.
 
     The push rule (row 3) and :func:`roll_todos` both go through here, and
     both prune the pad only after this returns ``success``.
@@ -493,6 +559,7 @@ def append_to_backlog(backlog_path: Path, branch_dir: str, todos: list[Any], rea
         branch_dir: The branch directory name stamped into a new backlog.
         todos: The todos to append, in order. Each is stored json-equal under ``entry``.
         reason: One of :data:`REASONS`.
+        pad: The whole pad as it stands before the prune; its numbers reach ``high_water``.
 
     Returns:
         ``{"success", "appended", "path", "error"}``. On failure the pad must
@@ -528,12 +595,13 @@ def append_to_backlog(backlog_path: Path, branch_dir: str, todos: list[Any], rea
     records = [{"rolled": rolled, "reason": reason, "entry": copy.deepcopy(todo)} for todo in todos]
     expected = document["entries"] + records
     document["entries"] = expected
+    _stamp_high_water(document, todos if pad is None else pad)
 
     failure = _ensure_parent(path) or _write_document(path, document)
     if failure:
         result["error"] = f"backlog NOT written at {path}: {failure}"
         return result
-    mismatch = _verify_backlog(path, expected, todos)
+    mismatch = _verify_backlog(path, expected, todos, document["document_metadata"])
     if mismatch:
         logger.error(f"[todo_roll] Backlog read-back failed at {path}: {mismatch}")
         result["error"] = f"backlog read-back failed at {path}: {mismatch}"
@@ -606,7 +674,7 @@ def roll_todos(
     rolled = [todos[index] for index in rolled_indices]
     kept = [todo for index, todo in enumerate(todos) if index not in set(rolled_indices)]
 
-    appended = append_to_backlog(target["backlog"], target["name"], rolled, REASON_OVERFLOW)
+    appended = append_to_backlog(target["backlog"], target["name"], rolled, REASON_OVERFLOW, pad=todos)
     if not appended["success"]:
         result["error"] = f"NOTHING PRUNED - {appended['error']}"
         return result
@@ -663,13 +731,16 @@ def restore_todo(
     backup_root: Path | None = None,
     fleet: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Move ONE todo from the backlog back onto the pad under a fresh number.
+    """Move ONE todo from the backlog back onto the TOP of the pad under a fresh number.
 
     Refused when the pad already holds its configured count, when no record
     carries *number*, or when more than one does (the candidates are named).
-    The pad is written first (atomic, read back, verified); only then is that
-    one record removed from the backlog (atomic, read back). Every field but
-    ``number`` is carried json-equal.
+    The fresh number is :func:`next_number` with both floors (the backlog's
+    ``high_water`` and the pad's rendered ``next #N``), so it is the highest on
+    the pad and lands at index 0: lists are newest-first. The pad is written
+    first (atomic, read back, verified); only then is that one record removed
+    from the backlog and ``high_water`` raised to the fresh number (atomic,
+    read back). Every field but ``number`` is carried json-equal.
 
     Args:
         branch: Branch directory name (``@`` optional).
@@ -722,19 +793,27 @@ def restore_todo(
         return result
 
     record = backlog["entries"][index]
-    fresh = next_number(todos, backlog["entries"])
+    fresh = next_number(
+        todos,
+        backlog["entries"],
+        high_water=high_water_of(backlog["document"]),
+        tab_floor=floor_from_tab(data.get("todos_meta")),
+    )
     restored = {key: (fresh if key == "number" else copy.deepcopy(value)) for key, value in record["entry"].items()}
     pad = dict(data)
-    pad["todos"] = list(todos) + [restored]
+    pad["todos"] = [restored] + list(todos)
     failure = _write_document(target["local"], pad) or _verify_document(target["local"], pad)
     if failure:
         result["error"] = f"NOTHING RESTORED - the pad was not verified ({failure}); the backlog is untouched"
         return result
 
     remaining = backlog["entries"][:index] + backlog["entries"][index + 1 :]
-    document = dict(backlog["document"])
+    document = copy.deepcopy(backlog["document"])
     document["entries"] = remaining
-    failure = _write_document(target["backlog"], document) or _verify_backlog(target["backlog"], remaining, [])
+    _stamp_high_water(document, pad["todos"], fresh)
+    failure = _write_document(target["backlog"], document) or _verify_backlog(
+        target["backlog"], remaining, [], document["document_metadata"]
+    )
     if failure:
         logger.error(f"[todo_roll] @{target['name']} #{fresh} restored but backlog record kept: {failure}")
         result["error"] = (

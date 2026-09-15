@@ -893,7 +893,9 @@ help". The pad holds a few; the ones that roll off wait in a plain file.
 - **`drone @memory push`**, the trinity push: every non-canonical todo, then any canonical overflow,
   moves to the same file, nothing reshaped (see [Todos go to the backlog, never to vectors](#todos-go-to-the-backlog-never-to-vectors-120-2026-09-15)).
 - Nowhere else. The fleet walk (`detector.check_all_branches`, which `rollover run` and `check` also
-  run) never counts todos.
+  run) never counts todos. Its file list is fleet-wide whatever `--branch` names, and `check` labels
+  it so: `Found N files ready for rollover (fleet-wide):`, then one line saying `--branch` scopes only
+  the todo pad line.
 
 **The verbs**, as they answer on this machine tonight:
 
@@ -925,10 +927,18 @@ about 65k characters of it on devpulse's pad alone (DPLAN-0345).
   `.trinity/local.json`, so a `--branch` naming another branch is refused, and so is a caller standing
   in no branch. It is refused when the pad already holds its count (read from config), when no record
   carries the number, and when several do (the candidates are named by rolled time and task). The todo
-  returns as **max(pad ∪ backlog) + 1** with task, date and priority identical. The pad is written and
-  read back first; only then is the record removed from the backlog. It re-numbers because an emptied
-  pad restarts at 1 while the backlog already holds 1..N, and a restored todo keeping its low number
-  would be the first to roll again.
+  returns **on top of the pad** (lists are newest-first) under the next number (below) with task, date
+  and priority identical. The pad is written and read back first; only then is the record removed from
+  the backlog. It re-numbers because an emptied pad restarts at 1 while the backlog already holds 1..N,
+  and a restored todo keeping its low number would be the first to roll again.
+- **Numbers are never re-issued on purpose.** The next number is one past the highest of: the pad, the
+  backlog's original numbers, the backlog's `document_metadata.high_water`, and N − 1 from the `next #N`
+  the branch's own tab last rendered. `high_water` is raised (never lowered) on every memory backlog
+  write — roll, push move, restore — and read back; a backlog without it has no floor, never an error.
+  The tab floor is why a re-render after deleting the top todo still says the same `next #N`. `#?` or an
+  unrecognised tab is no floor; a bool is not a number. seedgo's check masks the `next #N` slot, so it
+  needs nothing. **Residual:** a todo added by hand and deleted by hand with no memory write or tab
+  render in between leaves no trace, so its number can be issued again once.
 - **Every refusal exits non-zero** (2: routed, refused); a refused argument also names the valid forms.
   There is no `--json` on these verbs — nothing reads them by machine — and the flag is refused like
   any other unknown argument rather than silently ignored.

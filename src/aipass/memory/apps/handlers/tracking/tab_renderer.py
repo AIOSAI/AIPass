@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-25
 # Modified: 2026-09-15
 # =============================================
@@ -20,10 +20,11 @@ Purpose:
     they never drift.
 
     The todos tab (DPLAN-0345) also names the branch's backlog file and the
-    ``next #N`` a new todo takes, derived at render time from the pad plus the
-    backlog (``todo_roll.next_number``), never stored. It needs branch context
-    (:func:`todo_context`); a caller without it renders ``<branch>`` and
-    ``next #?`` rather than a number that may be wrong.
+    ``next #N`` a new todo takes, derived at render time from the pad, the
+    backlog, the backlog's ``high_water`` and the N this tab last rendered
+    (``todo_roll.next_number``), so a deletion never walks it backwards. It
+    needs branch context (:func:`todo_context`); a caller without it renders
+    ``<branch>`` and ``next #?`` rather than a number that may be wrong.
 
 Independence:
     Uses config_loader for config, detector helpers for branch discovery,
@@ -139,7 +140,9 @@ UNKNOWN_BRANCH_DIR = "<branch>"
 UNKNOWN_NEXT = "?"
 
 
-def todo_context(branch_dir: str | None, pad: Any, backlog: dict | None = None) -> dict[str, Any]:
+def todo_context(
+    branch_dir: str | None, pad: Any, backlog: dict | None = None, todos_meta: Any = None
+) -> dict[str, Any]:
     """The branch context the todos tab needs, derived now: backlog directory and next number.
 
     Args:
@@ -147,11 +150,14 @@ def todo_context(branch_dir: str | None, pad: Any, backlog: dict | None = None) 
         pad: The todos list as it sits on the pad.
         backlog: A ``todo_roll.read_backlog`` result; read from
             ``todo_roll.backlog_path_for(branch_dir)`` when None.
+        todos_meta: The branch's current ``todos_meta`` line; its ``next #N``
+            is a floor (N - 1) so the rendered number never goes backwards.
 
     Returns:
         ``{"branch_dir", "next_number"}``. ``next_number`` is None when the pad
         is not a list or the backlog is unusable (a missing backlog is not
-        unusable; it holds no numbers).
+        unusable; it holds no numbers). A backlog without ``high_water`` and a
+        ``#?`` or unrecognised tab simply give no floor.
     """
     if not branch_dir:
         return {"branch_dir": None, "next_number": None}
@@ -161,7 +167,13 @@ def todo_context(branch_dir: str | None, pad: Any, backlog: dict | None = None) 
             f"[tab_renderer] @{branch_dir} todos tab: next number unknown ({state.get('error') or 'pad not a list'})"
         )
         return {"branch_dir": branch_dir, "next_number": None}
-    return {"branch_dir": branch_dir, "next_number": todo_roll.next_number(pad, state.get("entries", []))}
+    number = todo_roll.next_number(
+        pad,
+        state.get("entries", []),
+        high_water=todo_roll.high_water_of(state.get("document")),
+        tab_floor=todo_roll.floor_from_tab(todos_meta),
+    )
+    return {"branch_dir": branch_dir, "next_number": number}
 
 
 def _todos_tab(rollover_cfg: dict, branch_name: str, max_chars: Any, draft: Any, todo_ctx: dict | None) -> str:
@@ -306,7 +318,7 @@ def _refresh_local(branch_name, local_path, rollover_cfg, entry_limits_cfg):
     local = Path(local_path)
     branch_dir = local.parent.parent.name if local.parent.name == ".trinity" else None
     pad = data.get("todos")
-    todo_ctx = todo_context(branch_dir, [] if pad is None else pad)
+    todo_ctx = todo_context(branch_dir, [] if pad is None else pad, todos_meta=data.get("todos_meta"))
     for section in ("todos", "key_learnings", "sessions"):
         context = todo_ctx if section == "todos" else None
         data[f"{section}_meta"] = compose_meta(section, rollover_cfg, entry_limits_cfg, branch_name, context)

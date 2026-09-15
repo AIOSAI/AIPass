@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_rollover_pipeline.py
 # Date: 2026-04-25
-# Version: 1.1.0
+# Version: 1.2.0
 # Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
@@ -2180,8 +2180,31 @@ def _point_todos_count(monkeypatch, tmp_path: Path, tr, count: int) -> None:
     monkeypatch.setattr(tr, "config_loader", loader)
 
 
+def _scratch_backlogs(tmp_path: Path, monkeypatch) -> None:
+    """No pin may reach the repo's real .backup/todo/: an unrouted backlog lands under tmp_path."""
+    tr = _todo_roll()
+    real = tr.backlog_path_for
+
+    def scratch(branch_dir, backup_root=None):
+        return real(branch_dir, tmp_path / ".backup" if backup_root is None else backup_root)
+
+    monkeypatch.setattr(tr, "backlog_path_for", scratch)
+
+
+def _tab(next_label) -> str:
+    """A todos_meta line exactly as memory's renderer writes it for @guinea (count 10, task cap 100)."""
+    return (
+        "⟦ pad of 10 · oldest roll to .backup/todo/guinea/backlog.json · task ≤100 chars · draft to 80"
+        f" · next #{next_label} ⟧ One line of what to do."
+    )
+
+
 class TestTodoRoll:
     """roll_todos: append -> atomic replace -> read back -> only then prune the pad."""
+
+    @pytest.fixture(autouse=True)
+    def _backlogs_stay_in_tmp(self, tmp_path, monkeypatch):
+        _scratch_backlogs(tmp_path, monkeypatch)
 
     @pytest.fixture
     def tr(self, tmp_path, monkeypatch):
@@ -2213,7 +2236,9 @@ class TestTodoRoll:
 
         document = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))
         assert set(document) == {"document_metadata", "entries"}
-        assert document["document_metadata"] == {"managed_by": "memory", "branch": "guinea"}
+        assert document["document_metadata"] == {"managed_by": "memory", "branch": "guinea", "high_water": 12}, (
+            "high_water is the highest number on the WHOLE pad as found (the kept #12), not only the rolled #1, #2"
+        )
         assert len(document["entries"]) == 2
         for record in document["entries"]:
             assert set(record) == {"rolled", "reason", "entry"}
@@ -2315,6 +2340,56 @@ class TestTodoRoll:
         assert result["count"] == 4
         assert result["numbers"] == [1, 2]
 
+    def test_high_water_is_raised_never_lowered_and_an_old_backlog_still_takes_a_roll(self, tr, tmp_path):
+        """A backlog written before high_water existed has no floor, never an error; the roll stamps one."""
+        backlog = _backlog_file(tmp_path)
+        backlog.parent.mkdir(parents=True)
+        earlier = {"rolled": "2026-09-14T23:00:00+00:00", "reason": "overflow", "entry": _todo(1)}
+        backlog.write_text(
+            json.dumps({"document_metadata": {"managed_by": "memory", "branch": "guinea"}, "entries": [earlier]}),
+            encoding="utf-8",
+        )
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(13, 1, -1)])
+
+        first = self._roll(tr, local, tmp_path)
+
+        assert first["success"] is True, first["error"]
+        assert tr.high_water_of(tr.read_backlog(backlog)["document"]) == 13
+
+        document = json.loads(backlog.read_text(encoding="utf-8"))
+        document["document_metadata"]["high_water"] = 99
+        backlog.write_text(json.dumps(document), encoding="utf-8")
+        pad = json.loads(local.read_text(encoding="utf-8"))
+        pad["todos"] = [_todo(n) for n in (16, 15, 14)] + pad["todos"]
+        local.write_text(json.dumps(pad), encoding="utf-8")
+
+        second = self._roll(tr, local, tmp_path)
+
+        assert second["success"] is True, second["error"]
+        back = tr.read_backlog(backlog)
+        assert tr.high_water_of(back["document"]) == 99, "a roll never lowers high_water"
+        assert [record["entry"]["number"] for record in back["entries"]] == [1, 2, 3, 4, 5, 6]
+
+    def test_a_high_water_that_reads_back_wrong_leaves_the_pad_untouched(self, tr, tmp_path, monkeypatch):
+        """high_water is read back like every record: a drifted floor prunes nothing."""
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(12, 0, -1)])
+        before = local.read_bytes()
+        real_write = tr._write_document
+
+        def tampering_write(path, document):
+            if Path(path).name == "backlog.json":
+                document = json.loads(json.dumps(document))
+                document["document_metadata"]["high_water"] = 3
+            return real_write(path, document)
+
+        monkeypatch.setattr(tr, "_write_document", tampering_write)
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is False
+        assert result["error"].startswith("NOTHING PRUNED - backlog read-back failed"), result["error"]
+        assert "document_metadata (high_water) does not read back as written" in result["error"]
+        assert local.read_bytes() == before
+
 
 class TestTodoTarget:
     """ONE branch, keyed by directory name, from --branch or where the caller stood."""
@@ -2386,6 +2461,10 @@ class TestTodoTarget:
 class TestTodoRestore:
     """restore_todo: pad first, then the backlog - never in neither place."""
 
+    @pytest.fixture(autouse=True)
+    def _backlogs_stay_in_tmp(self, tmp_path, monkeypatch):
+        _scratch_backlogs(tmp_path, monkeypatch)
+
     @pytest.fixture
     def tr(self, tmp_path, monkeypatch):
         module = _todo_roll()
@@ -2419,7 +2498,7 @@ class TestTodoRestore:
 
         assert result["success"] is True, result["error"]
         assert result["number"] == 15, "max(pad 9, backlog originals 14) + 1"
-        assert json.loads(local.read_text(encoding="utf-8"))["todos"][-1] == {**original, "number": 15}
+        assert json.loads(local.read_text(encoding="utf-8"))["todos"][0] == {**original, "number": 15}
         remaining = json.loads(backlog.read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in remaining] == [1, 14]
 
@@ -2522,3 +2601,92 @@ class TestTodoRestore:
 
         backlog = self._backlog_with(tmp_path, [self._record(_todo(11))])
         assert tr.next_number([_todo(2)], tr.read_backlog(backlog)["entries"]) == 12
+
+    def test_the_restored_todo_lands_on_top_and_the_pad_stays_newest_first(self, tr, tmp_path):
+        """@canary's audit went 99: a restore appended at the tail - 'number 12 is not below the entry above it'."""
+        local = _mint_pad(tmp_path, [_todo(n) for n in (9, 5, 3)])
+        self._backlog_with(tmp_path, [self._record(_todo(2, task="bring it back"))])
+
+        result = self._restore(tr, 2, local, tmp_path)
+
+        assert result["success"] is True, result["error"]
+        pad = json.loads(local.read_text(encoding="utf-8"))["todos"]
+        assert pad[0] == _todo(10, task="bring it back")
+        numbers = [todo["number"] for todo in pad]
+        assert numbers == sorted(set(numbers), reverse=True) == [10, 9, 5, 3], "strictly descending"
+
+    def test_a_restored_then_deleted_number_is_never_issued_again(self, tr, tmp_path):
+        """restore -> delete the restored todo by hand -> the next restore skips its number (high_water)."""
+        local = _mint_pad(tmp_path, [_todo(3)])
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(1)), self._record(_todo(2))])
+        assert tr.high_water_of(tr.read_backlog(backlog)["document"]) is None, "a backlog from before: no floor"
+
+        first = self._restore(tr, 1, local, tmp_path)
+
+        assert first["success"] is True and first["number"] == 4, first
+        assert tr.high_water_of(tr.read_backlog(backlog)["document"]) == 4, "restore stamps high_water"
+
+        document = json.loads(local.read_text(encoding="utf-8"))
+        document["todos"] = [todo for todo in document["todos"] if todo["number"] != 4]
+        local.write_text(json.dumps(document, indent=2), encoding="utf-8")
+
+        second = self._restore(tr, 2, local, tmp_path)
+
+        assert second["success"] is True, second["error"]
+        assert second["number"] == 5, "#4 was issued and deleted: it is never handed out again"
+        assert [todo["number"] for todo in json.loads(local.read_text(encoding="utf-8"))["todos"]] == [5, 3]
+        assert tr.high_water_of(tr.read_backlog(backlog)["document"]) == 5
+
+    def test_the_tab_the_pad_last_rendered_lifts_the_restored_number(self, tr, tmp_path):
+        """The pad's own next #20 is a floor: #3..#19 were issued and deleted by hand before this backlog knew."""
+        local = _mint_pad(tmp_path, [_todo(3)])
+        document = json.loads(local.read_text(encoding="utf-8"))
+        document["todos_meta"] = _tab(20)
+        local.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(1)), self._record(_todo(2))])
+
+        result = self._restore(tr, 1, local, tmp_path)
+
+        assert result["success"] is True and result["number"] == 20, result
+        assert tr.high_water_of(tr.read_backlog(backlog)["document"]) == 20
+
+    def test_a_high_water_that_reads_back_wrong_is_reported_not_silent(self, tr, tmp_path, monkeypatch):
+        local = _mint_pad(tmp_path, [_todo(3)])
+        self._backlog_with(tmp_path, [self._record(_todo(1))])
+        real_write = tr._write_document
+
+        def tampering_write(path, document):
+            if Path(path).name == "backlog.json":
+                document = json.loads(json.dumps(document))
+                document["document_metadata"]["high_water"] = 1
+            return real_write(path, document)
+
+        monkeypatch.setattr(tr, "_write_document", tampering_write)
+        result = self._restore(tr, 1, local, tmp_path)
+
+        assert result["success"] is False
+        assert "document_metadata (high_water) does not read back as written" in result["error"], result["error"]
+        assert result["error"].endswith("it is in both places, never in neither")
+
+    def test_the_floors_lift_the_number_and_garbage_is_no_floor(self, tr):
+        """high_water and the tab's N - 1 lift next_number; a bool, a string, #? or foreign text do not."""
+        assert tr.next_number([_todo(3)], [], high_water=40) == 41
+        assert tr.next_number([_todo(3)], [], tab_floor=40) == 41
+        assert tr.next_number([_todo(50)], [], high_water=40, tab_floor=12) == 51, "a floor never lowers"
+        assert tr.next_number([], [], high_water=True, tab_floor=False) == 1, "a bool is not a number"
+
+        assert tr.high_water_of({"document_metadata": {"managed_by": "memory", "high_water": 7}}) == 7
+        for document in (
+            {"document_metadata": {"managed_by": "memory"}},
+            {"document_metadata": {"high_water": True}},
+            {"document_metadata": {"high_water": "7"}},
+            {"document_metadata": {"high_water": 7.0}},
+            {"document_metadata": "high_water"},
+            None,
+        ):
+            assert tr.high_water_of(document) is None, document
+
+        assert tr.floor_from_tab(_tab(20)) == 19
+        assert tr.floor_from_tab("⟦ no pad size configured — nothing rolls · task ≤100 chars · next #3 ⟧ x") == 2
+        for garbage in (_tab("?"), _tab(0), _tab(-4), _tab("2x"), "next #20", "see ⟦ a · next #20 ⟧", None, 20):
+            assert tr.floor_from_tab(garbage) is None, garbage

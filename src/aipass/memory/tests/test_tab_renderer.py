@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-25
 # Modified: 2026-09-15
 # =============================================
@@ -307,6 +307,66 @@ class TestTodoContext:
             "⟦ pad of 7 · oldest roll to .backup/todo/backup_dir/backlog.json · task ≤150 chars"
             " · draft to 120 · next #10 ⟧ "
         )
+
+    def test_the_backlogs_high_water_lifts_the_number_and_a_bool_does_not(self, tmp_path):
+        mod = _get_module()
+        path = _backlog_file(tmp_path / "backlog.json", [9])
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["document_metadata"]["high_water"] = 50
+        path.write_text(json.dumps(document), encoding="utf-8")
+        assert mod.todo_context("memory", [{"number": 4}], mod.todo_roll.read_backlog(path))["next_number"] == 51
+
+        document["document_metadata"]["high_water"] = True
+        path.write_text(json.dumps(document), encoding="utf-8")
+        assert mod.todo_context("memory", [{"number": 4}], mod.todo_roll.read_backlog(path))["next_number"] == 10
+
+    def test_the_tab_this_renderer_wrote_is_a_floor_and_hash_question_is_not(self, tmp_path):
+        """floor_from_tab reads compose_meta's own output glyph for glyph; #? and foreign text give no floor."""
+        mod = _get_module()
+        state = mod.todo_roll.read_backlog(tmp_path / "absent.json")
+        rendered = mod.compose_meta(
+            "todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 30}
+        )
+        no_pad = mod.compose_meta(
+            "todos", SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 8}
+        )
+        unknown = mod.compose_meta("todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", None)
+
+        assert mod.todo_context("memory", [{"number": 4}], state, todos_meta=rendered)["next_number"] == 30
+        assert mod.todo_context("memory", [{"number": 4}], state, todos_meta=no_pad)["next_number"] == 8
+        assert "· next #? ⟧" in unknown
+        for no_floor in (unknown, "next #30", "⟦ rollover OFF — operational · next #30", None, 30):
+            assert mod.todo_context("memory", [{"number": 4}], state, todos_meta=no_floor)["next_number"] == 5
+
+    def test_the_rendered_tab_never_walks_backwards_after_a_deletion(self, tmp_path, monkeypatch):
+        """Delete the highest todo by hand and re-render: next #N holds, because the old tab is the floor."""
+        mod = _get_module()
+        monkeypatch.setattr(
+            mod.todo_roll, "backlog_path_for", lambda branch_dir, backup_root=None: tmp_path / "absent.json"
+        )
+        trinity = tmp_path / "memory" / ".trinity"
+        trinity.mkdir(parents=True)
+        local = trinity / "local.json"
+        local.write_text(
+            json.dumps({"todos": [{"number": 12}, {"number": 7}], "key_learnings": [], "sessions": []}),
+            encoding="utf-8",
+        )
+
+        def rendered_next() -> str:
+            ok, err = mod._refresh_local("memory", local, PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG)
+            assert ok, err
+            tab = json.loads(local.read_text(encoding="utf-8"))["todos_meta"].split(" ⟧", 1)[0]
+            return tab.rsplit(" · ", 1)[1]
+
+        assert rendered_next() == "next #13"
+        data = json.loads(local.read_text(encoding="utf-8"))
+        data["todos"] = [{"number": 7}]
+        local.write_text(json.dumps(data), encoding="utf-8")
+        assert rendered_next() == "next #13", "the deleted #12 must not be offered again"
+
+        del data["todos_meta"]
+        local.write_text(json.dumps(data), encoding="utf-8")
+        assert rendered_next() == "next #8", "with no tab there is no floor - so the #13 above came from the tab"
 
 
 # ===========================================================================

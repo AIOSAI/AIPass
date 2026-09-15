@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -1072,7 +1072,7 @@ class TestTodosMoveToTheBacklog:
         assert [record["reason"] for record in records] == ["non-canonical", "non-canonical"]
         assert all(self._same(record["entry"], todo) for record, todo in zip(records, todos, strict=True))
         document = json.loads(self._backlog(tmp_path).read_text(encoding="utf-8"))
-        assert document["document_metadata"] == {"managed_by": "memory", "branch": self.BRANCH}
+        assert document["document_metadata"] == {"managed_by": "memory", "branch": self.BRANCH, "high_water": 2}
 
     def test_an_over_cap_task_lands_in_the_backlog_unshortened(self, tmp_path, monkeypatch):
         long_task = {"number": 1, "date": "2026-09-15", "task": "t" * 101, "priority": "low"}
@@ -1189,6 +1189,49 @@ class TestTodosMoveToTheBacklog:
             f"⟦ pad of 10 · oldest roll to .backup/todo/{self.BRANCH}/backlog.json · task ≤100 chars"
             " · draft to 80 · next #41 ⟧ "
         )
+
+    _TAB = (
+        "⟦ pad of 10 · oldest roll to .backup/todo/guinea/backlog.json · task ≤100 chars · draft to 80"
+        " · next #{} ⟧ One line of what to do."
+    )
+
+    def test_the_push_raises_high_water_to_the_pad_as_found_and_reads_it_back(self, tmp_path, monkeypatch):
+        """The kept #9 reaches high_water, not only the moved #4: delete #9 later and 9 stays spent."""
+        root = _branch(tmp_path, self.BRANCH, {"todos": [self._todo(9), self._legacy(4)]})
+
+        result = self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        assert result["success"], result["errors"]
+        assert [todo["number"] for todo in self._pad(root)] == [9]
+        back = todo_roll.read_backlog(self._backlog(tmp_path))
+        assert [record["entry"]["number"] for record in back["entries"]] == [4]
+        assert todo_roll.high_water_of(back["document"]) == 9
+
+    def test_the_tab_the_branch_last_rendered_is_a_floor_the_push_keeps(self, tmp_path, monkeypatch):
+        """A tab that said next #30, then #29 deleted by hand: the push renders #30 again, never #4."""
+        local = {"todos_meta": self._TAB.format(30), "todos": [self._legacy(2), self._todo(3)]}
+        root = _branch(tmp_path, self.BRANCH, local)
+
+        self._push(monkeypatch, tmp_path, root, dry_run=False)
+
+        meta = json.loads((root / ".trinity" / "local.json").read_text(encoding="utf-8"))["todos_meta"]
+        assert "· draft to 80 · next #30 ⟧ " in meta, meta
+
+    def test_a_frame_built_without_context_keeps_the_tab_floor(self):
+        """The normalizer's door: build_frame derives the context itself and reads the old tab too."""
+        before = {"todos_meta": self._TAB.format(30), "todos": [self._todo(3)], "sessions": [], "key_learnings": []}
+        entries = {"todos": [self._todo(3)]}
+
+        assert "· next #30 ⟧ " in tp.build_frame(before, "local", self.BRANCH, entries, _config())["todos_meta"]
+        del before["todos_meta"]
+        assert "· next #4 ⟧ " in tp.build_frame(before, "local", self.BRANCH, entries, _config())["todos_meta"]
+
+    def test_overflow_survivors_keep_their_order_on_the_pad(self):
+        """Only the oldest leave; what stays is never re-sorted - the push reshapes nothing."""
+        split = tp.plan_todos([self._todo(n) for n in (3, 5, 1, 4, 2)], {"field": "task", "max_chars": 100}, 3)
+
+        assert [todo["number"] for todo in split["kept"]] == [3, 5, 4]
+        assert [move["entry"]["number"] for move in split["moves"]] == [1, 2]
 
     # -- the dry run and the second push ------------------------------------------
 

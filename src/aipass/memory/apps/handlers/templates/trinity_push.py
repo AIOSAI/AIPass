@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -394,6 +394,16 @@ def todos_chars(moves: list[dict]) -> int:
     return len(json.dumps([move["entry"] for move in moves], ensure_ascii=False))
 
 
+def _pad_as_found(plan: dict) -> list:
+    """The todos list of the plan's local file as read, so its numbers reach the backlog's ``high_water``."""
+    for file_plan in plan.get("files", []):
+        before = file_plan.get("before")
+        if file_plan.get("file_key") == "local" and isinstance(before, dict):
+            pad = before.get(TODO_SECTION)
+            return pad if isinstance(pad, list) else []
+    return []
+
+
 def move_todos(plan: dict) -> dict:
     """Append a plan's todo moves to its backlog: one verified append per reason, in plan order.
 
@@ -406,11 +416,12 @@ def move_todos(plan: dict) -> dict:
     """
     outcome: dict[str, Any] = {"moved": 0, "error": None}
     moves = plan.get("todo_moves", [])
+    pad = _pad_as_found(plan)
     for reason in (todo_roll.REASON_NON_CANONICAL, todo_roll.REASON_OVERFLOW):
         group = [move["entry"] for move in moves if move["reason"] == reason]
         if not group:
             continue
-        appended = todo_roll.append_to_backlog(plan["backlog"], plan["branch"], group, reason)
+        appended = todo_roll.append_to_backlog(plan["backlog"], plan["branch"], group, reason, pad=pad)
         if not appended["success"]:
             both = outcome["moved"]
             doubled = f"; the {both} appended before it sit in the backlog AND on the pad" if both else ""
@@ -585,7 +596,9 @@ def build_frame(
         data["guidelines"] = copy.deepcopy(_load_template("observations").get("guidelines", {}))
     elif todo_ctx is None:
         pad = before.get(TODO_SECTION)
-        todo_ctx = tab_renderer.todo_context(branch_name, [] if pad is None else pad)
+        todo_ctx = tab_renderer.todo_context(
+            branch_name, [] if pad is None else pad, todos_meta=before.get("todos_meta")
+        )
 
     for section in _SECTIONS[file_key]:
         data[f"{section}_meta"] = tab_renderer.compose_meta(
@@ -689,7 +702,9 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict, bac
     todo_ctx = None
     if file_key == "local":
         pad = before.get(TODO_SECTION)
-        todo_ctx = tab_renderer.todo_context(branch_name, [] if pad is None else pad, backlog)
+        todo_ctx = tab_renderer.todo_context(
+            branch_name, [] if pad is None else pad, backlog, todos_meta=before.get("todos_meta")
+        )
     after = build_frame(before, file_key, branch_name, survivors, config, todo_ctx=todo_ctx)
     plan["before"] = before
     plan["after"] = after

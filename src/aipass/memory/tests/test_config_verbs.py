@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-16
 # Modified: 2026-09-15
 # =============================================
@@ -1123,6 +1123,27 @@ class TestRolloverTodoPad:
         _run_rollover(verbs, "check", "--branch", "@memory")
         assert "ready for rollover" in _stdout(capsys)
 
+    def test_check_labels_the_classic_file_list_fleet_wide(self, verbs, pad, capsys, monkeypatch) -> None:
+        """--branch scopes the pad line only. The classic list is the fleet walk (scope unchanged) and says so,
+        with "ready for rollover" whole on its first line even on a 40-column pipe (@hooks greps it)."""
+        display = importlib.import_module("aipass.cli.apps.modules.display")
+        monkeypatch.setattr(display.CONSOLE, "_width", 40)
+        triggers = ["CANARY.local 16/15", "memory.local 16/15"]
+        monkeypatch.setattr(
+            verbs.rollover.detector, "check_all_branches", lambda: {"success": True, "triggers": triggers}
+        )
+        within = pad.write(10)
+        capsys.readouterr()
+        _run_rollover(verbs, "check", "--branch", "@memory")
+        lines = _stdout(capsys).splitlines()
+        assert "Found 2 files ready for rollover (fleet-wide):" in lines, lines
+        assert verbs.rollover.FLEET_WIDE_NOTE in lines, lines
+        assert "--branch" in verbs.rollover.FLEET_WIDE_NOTE and "fleet-wide" in verbs.rollover.FLEET_WIDE_NOTE
+        assert [line for line in lines if line.startswith("  * ")] == [f"  * {trigger}" for trigger in triggers]
+        assert any("@memory todos: pad 10/10 - within count" in line for line in lines), lines
+        assert pad.local.read_bytes() == within, "check writes nothing"
+        assert not pad.backlog.exists()
+
     def test_a_pad_at_its_count_is_within_count(self, verbs, pad, capsys) -> None:
         pad.write(10)
         capsys.readouterr()
@@ -1354,7 +1375,7 @@ class TestTodoVerbs:
         assert todo.backlog.read_text(encoding="utf-8") == "{not json"
 
     def test_restore_renumbers_to_max_of_pad_and_backlog_plus_one(self, todo, capsys) -> None:
-        _todo_pad(todo, range(3, 10))
+        _todo_pad(todo, range(9, 2, -1))
         _todo_backlog(
             todo, [_todo_record(1, "Check on seedgo's errors in logs", priority="high"), _todo_record(2, "b")]
         )
@@ -1365,12 +1386,13 @@ class TestTodoVerbs:
             "@memory todo restored: #1 -> #10 · Check on seedgo's errors in logs · pad now 8/10"
         ]
         pad = json.loads(todo.local.read_text(encoding="utf-8"))["todos"]
-        assert pad[-1] == {
+        assert pad[0] == {
             "number": 10,
             "date": "2026-09-01",
             "task": "Check on seedgo's errors in logs",
             "priority": "high",
-        }
+        }, "lists are newest-first: the restored todo carries the highest number, so it goes on top"
+        assert [t["number"] for t in pad] == [10, 9, 8, 7, 6, 5, 4, 3]
         entries = json.loads(todo.backlog.read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in entries] == [2]
 
@@ -1410,7 +1432,7 @@ class TestTodoVerbs:
         assert todo.backlog.read_bytes() == backlog_before
 
     def test_restore_acts_on_the_callers_own_branch_only(self, todo, capsys, monkeypatch) -> None:
-        pad_before = _todo_pad(todo, range(3, 6))
+        pad_before = _todo_pad(todo, range(5, 2, -1))
         backlog_before = _todo_backlog(todo, [_todo_record(1, "fix drone help")])
         capsys.readouterr()
         assert _todo_exit(todo, "restore", "1", "--branch", "@devpulse") == 2
@@ -1428,7 +1450,7 @@ class TestTodoVerbs:
 
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(todo.branch))
         assert _todo_exit(todo, "restore", "1", "@memory") == 0
-        assert [t["number"] for t in json.loads(todo.local.read_text(encoding="utf-8"))["todos"]] == [3, 4, 5, 6]
+        assert [t["number"] for t in json.loads(todo.local.read_text(encoding="utf-8"))["todos"]] == [6, 5, 4, 3]
 
     @pytest.mark.parametrize(
         ("args", "sentence"),

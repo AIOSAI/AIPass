@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.7.0
+# Version: 0.7.1
 # Created: 2025-11-16
 # Modified: 2026-09-15
 # =============================================
@@ -65,13 +65,18 @@ from aipass.memory.apps.handlers.repo_root import module_file
 _SUBCOMMANDS = {
     "run": "Execute rollover for files exceeding limits, plus one branch's todo pad",
     "status": "Show rollover statistics for all branches",
-    "check": "Check which files need rollover (dry run), plus one branch's todo pad",
+    "check": "Check which files need rollover (dry run, fleet-wide), plus one branch's todo pad",
     "report-lines": "Report physical line counts per memory file (read-only)",
     "push": "Overwrite all per_branch limits to defaults (system-wide reset)",
 }
 
 # Public alias — the introspection surface and the tests read this name.
 SUBCOMMANDS = _SUBCOMMANDS
+
+# `rollover check` prints this under its classic file list. That list is the
+# fleet walk (detector.check_all_branches) whatever --branch names; the pad
+# line alone is scoped. The scope is unchanged on purpose - this says it.
+FLEET_WIDE_NOTE = "The file list is fleet-wide: --branch scopes only the todo pad line below."
 
 # `sync-lines` stopped writing anything when the health stamp was deleted from
 # the standard on 2026-08-25: its one write was a `status.last_health_check`
@@ -285,6 +290,7 @@ def print_help() -> None:
     console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits, plus ONE branch's todo pad")
     console.print("  [cyan]status[/cyan]      Show rollover statistics for all branches")
     console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run), plus ONE branch's todo pad")
+    console.print("              The file list is fleet-wide; only the todo pad follows --branch.")
     console.print("  [cyan]report-lines[/cyan] Report line counts per memory file (read-only)")
     console.print("  [cyan]push[/cyan]        Reset ALL per_branch limits to defaults (system-wide, use with caution)")
     console.print("  [cyan]help[/cyan]        Show this help message")
@@ -293,6 +299,7 @@ def print_help() -> None:
     console.print("  [cyan]--branch @name[/cyan]  run / check: the ONE branch whose todo pad is rolled / checked.")
     console.print("              Absent: the branch your working directory sits in (drone's caller cwd).")
     console.print("              At the repo root or outside every branch, no pad is touched and one line says so.")
+    console.print("              The sessions / key_learnings / observations file list stays fleet-wide.")
     console.print("  [cyan]--json[/cyan]      Machine output for [cyan]push[/cyan] — one JSON document, no Rich")
     console.print('              {"ok": true, "verb": "rollover push", "branches": 17}')
     console.print("              Rides in any slot. A help flag still outranks it.")
@@ -1341,7 +1348,7 @@ def check_triggers(branch: str | None = None) -> None:
 
 
 def _check_fleet_triggers() -> None:
-    """The fleet walk for sessions, key_learnings and observations — never todos."""
+    """The fleet walk for sessions, key_learnings and observations — never todos, never scoped by --branch."""
     triggers_result = detector.check_all_branches()
 
     if not triggers_result["success"]:
@@ -1356,7 +1363,12 @@ def _check_fleet_triggers() -> None:
         json_handler.log_operation("rollover_check", {"files_needing_rollover": 0})
         return
 
-    console.print(f"[bold cyan]Found {len(triggers)} files ready for rollover:[/bold cyan]")
+    # The file list is the fleet walk's, whatever --branch named: --branch scopes
+    # only the todo pad line. "ready for rollover" stays literal and unwrapped on
+    # the first line - @hooks' PreCompact greps this output for it.
+    header = f"Found {len(triggers)} files ready for rollover (fleet-wide):"
+    console.print(f"[bold cyan]{header}[/bold cyan]", soft_wrap=True)
+    console.print(f"[dim]{FLEET_WIDE_NOTE}[/dim]", soft_wrap=True)
     console.print()
 
     for trigger in triggers:

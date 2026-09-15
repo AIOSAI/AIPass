@@ -65,51 +65,47 @@ The tab in the other cases:
 
 Where each renderer gets its branch context:
 
-- **Trinity push and normalizer.** `trinity_push._plan_file` and `build_frame` use the push's branch name, which is the directory name. The pad is the `todos` list as read before the push. Every todo the push moves is appended to the backlog, so N matches what the pad and backlog would give after the push.
-- **`refresh_all_tabs`, called by `rollover run`.** `_refresh_local` uses the name of the directory that holds `.trinity/`, and the `todos` list as read from `local.json`.
-- **`render_all_meta_tabs(branch_dir=None)`.** It uses an empty pad plus that branch's backlog. With no argument it renders `<branch>` and `#?`.
+- **Trinity push and normalizer.** `trinity_push._plan_file` and `build_frame` use the push's branch name, which is the directory name. The pad is the `todos` list as read before the push, and the file's current `todos_meta` is passed as the tab floor (section 3). Every todo the push moves is appended to the backlog, so N matches what the pad and backlog would give after the push.
+- **`refresh_all_tabs`, called by `rollover run`.** `_refresh_local` uses the name of the directory that holds `.trinity/`, the `todos` list as read from `local.json`, and that file's current `todos_meta` as the tab floor.
+- **`render_all_meta_tabs(branch_dir=None)`.** It uses an empty pad plus that branch's backlog, and no tab floor: it is the birth path, and a branch being born has no tab yet. With no argument it renders `<branch>` and `#?`.
 
 ## 3. How `next #N` is derived
 
-From `apps/handlers/rollover/todo_roll.py:102-136`:
+From `apps/handlers/rollover/todo_roll.py` (`_as_number` :119, `high_water_of` :141, `floor_from_tab` :151, `_highest` :157, `next_number` :169, `_stamp_high_water` :192; the tab pattern `_TAB_NEXT_RE` :92):
 
 ```python
-def _number_of(todo: Any) -> int | None:
-    """A todo's number when it is a real integer, else None (a bool is not a number)."""
-    if not isinstance(todo, dict):
-        return None
-    number = todo.get("number")
-    if isinstance(number, bool) or not isinstance(number, int):
-        return None
-    return number
+_TAB_NEXT_RE = re.compile(r"⟦ [^⟧]* · next #([1-9][0-9]*) ⟧")
 
+def high_water_of(document: Any) -> int | None:
+    metadata = document.get("document_metadata") if isinstance(document, dict) else None
+    return _as_number(metadata.get(HIGH_WATER_KEY)) if isinstance(metadata, dict) else None
 
-def next_number(pad: list[Any], backlog_entries: list[Any]) -> int:
-    """The next todo number: max(numbers on the pad and original numbers in the backlog) + 1.
+def floor_from_tab(todos_meta: Any) -> int | None:
+    match = _TAB_NEXT_RE.match(todos_meta) if isinstance(todos_meta, str) else None
+    return int(match.group(1)) - 1 if match else None
 
-    Args:
-        pad: The live todos list.
-        backlog_entries: The backlog's ``entries`` records.
-
-    Returns:
-        One more than the highest number seen, or 1 when neither holds one.
-    """
-    numbers = [n for n in (_number_of(todo) for todo in pad) if n is not None]
-    for record in backlog_entries:
-        if isinstance(record, dict):
-            number = _number_of(record.get("entry"))
-            if number is not None:
-                numbers.append(number)
-    return max(numbers) + 1 if numbers else 1
+def next_number(pad, backlog_entries, *, high_water=None, tab_floor=None) -> int:
+    highest = _highest(pad, backlog_entries, high_water, tab_floor)
+    return highest + 1 if highest is not None else 1
 ```
 
-- N is the highest number on the pad or in the backlog, plus 1. If neither holds a number, N is 1.
-- Only an `int` that is not a `bool` counts. Strings like `"31"`, floats, `None` and `true` are ignored, as are pad items that are not objects.
-- From the backlog, only `record["entry"]["number"]` counts.
-- The tab shows `#?` in three cases. The pad is not a list. The backlog is unusable (`read_backlog` returned an error: the file cannot be read, has no `document_metadata` object, or has no `entries` list). There is no branch. `todo_context` is at `tab_renderer.py:142-164`.
-- A missing backlog is not unusable. It just adds no numbers.
+**NUMBERS ARE NEVER RE-ISSUED ON PURPOSE.** N is one past the highest of four things, or 1 when none holds a number:
+
+1. every number on the pad;
+2. every original number in the backlog (`record["entry"]["number"]`);
+3. the backlog's `document_metadata.high_water` (section 5);
+4. the tab floor: N − 1 from the `next #N` in the branch's current `todos_meta`.
+
+- Only an `int` that is not a `bool` counts, everywhere. Strings like `"31"`, floats, `None` and `true` are ignored, as are pad items that are not objects. A `high_water` of `true` or `"7"` is no floor.
+- **`high_water`** is raised, never lowered, on every memory backlog write: a roll (`roll_todos` passes the whole pad as found, so a kept todo's number reaches it), a push move (`trinity_push.move_todos` passes the pad as found), and a restore (the fresh number and the pad as written). Each write reads `document_metadata` back and refuses on a mismatch, like every record. A backlog without the key (every one written before it existed) has no floor, never an error; its first memory write stamps it.
+- **The tab floor** is read only from memory's own tab shape — `⟦ … · next #N ⟧` at the start of the line, N a positive integer. `#?`, `#0`, a retired tab, free text or a non-string is no floor. It is how a number survives a hand deletion between renders: the tab that offered #13 still says #13 after #12 is deleted, so the next render says #13 again rather than walking back to #12. Callers: `tab_renderer.todo_context(..., todos_meta=)` (`tab_renderer.py:143`) from `_refresh_local` (`:321`), `trinity_push.build_frame` (`:600`) and `_plan_file` (`:706`); `todo_roll.restore_todo` reads the pad's own `todos_meta`. `render_all_meta_tabs` passes none (birth, no tab yet).
+- The tab shows `#?` in three cases. The pad is not a list. The backlog is unusable (`read_backlog` returned an error: the file cannot be read, has no `document_metadata` object, or has no `entries` list). There is no branch.
+- A missing backlog is not unusable. It just adds no numbers and no `high_water`.
+- **A restore lands on top.** Its fresh number is `next_number` with both floors, so it is the highest on the pad and goes to index 0: lists are newest-first (seedgo refuses "number N is not below the entry above it").
 - **N only changes when the tab is rendered.** The renderers are: push, `rollover run` (only for branches whose sessions, key_learnings or observations rolled), the normalizer, `templates bump --confirm`, and spawn birth. Adding or deleting a todo does not re-render. So after an agent adds a todo, a checker that recomputes N from the live pad will disagree with a correctly rendered file until the next render.
-- Deleted todos never enter the backlog. Deleting the highest-numbered todo therefore lowers the N of the next render, and that number can be handed out twice.
+- **Residual (stated, not cured):** a todo added by hand and deleted by hand with no memory write or tab render in between leaves no trace, so its number can be issued again once.
+
+**seedgo needs nothing for the floors.** `trinity_groups.py` never derives N. `_meta_item` (`:1053`) sends the todos line to `_todos_meta_matches` (`:1029-1050`), which byte-matches the whole line except the `next #N` slot: it renders the expected line with `next_number: None`, accepts that `#?` line whole, and otherwise requires the text before `next #` and after ` ⟧` to match while the slot holds any rendered int (`_RENDERED_INT_RE`, `:205`). A higher N from either floor is still a match. seedgo need not read `high_water`.
 
 ## 4. Where count, max_chars and draft come from
 
@@ -135,10 +131,12 @@ How the count resolves:
 - **Schema** (`todo_roll.py:42-46`):
 
 ```
-{"document_metadata": {"managed_by": "memory", "branch": "<dir>"},
+{"document_metadata": {"managed_by": "memory", "branch": "<dir>", "high_water": <int>},
  "entries": [{"rolled": "<iso>", "reason": "overflow|non-canonical|migration",
               "entry": {<the todo, json-equal to the pad's copy>}}]}
 ```
+
+- **`document_metadata.high_water`** (optional int, memory-owned): the highest todo number memory has seen for the branch — on the pad, in the entries, or issued by a restore. Raised, never lowered, on every memory backlog write (roll, push move, restore) and verified on read-back. Absent (every backlog written before 2026-09-15) means no floor, never an error. It is a floor for `next #N` (section 3) and nothing else; seedgo need not read it. Residual: a todo added by hand and deleted by hand with no memory write or tab render in between leaves no trace, so its number can be issued again once.
 
 - **Reasons:** `overflow`, `non-canonical` and `migration` (`todo_roll.py:72-75`). The push writes `non-canonical` first, then `overflow`, with one verified append per reason.
 - **Appending** (`append_to_backlog`, `todo_roll.py:485-544`): read the file, add the records, replace it atomically, then read it back. Every record must match what was written, and every appended `entry` must be json-equal to the pad's copy. Equality is `json.dumps(sort_keys=True, ensure_ascii=False, separators=(",", ":"))`. The file is only ever appended to, never overwritten.
