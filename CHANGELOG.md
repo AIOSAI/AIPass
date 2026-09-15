@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-09-14] — the baud-cli day: the headless baud binary ships beside the phone face and `aipass baud install` lands both from one release, the api's `face_dir` and `baud_bin` settings point the host server at them, the admin git door writes into external repos (`drone @git --repo`), the phone's lock chip and per-core cpu page, seedgo's `calendar_bound` checker plus two checker widenings, compass recall that survives a long day, and Telegram retired in place (DPLAN-0343 / DPLAN-0344 / FPLAN-0585–0589, merged as PR #768, v2.8.9)
 
 ### Added
 

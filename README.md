@@ -65,9 +65,9 @@ Come back tomorrow, say "hi", and it picks up exactly where you left off. That's
 <!-- GIF SLOT 2 — memory payoff (~15s): close the terminal, reopen, "hi", the agent recalls yesterday.
      ![memory](assets/memory.gif) -->
 
-Options: `--no-chat` skips the welcome chat — and with it the doctor preflight, which runs as part of the chat handoff. Non-interactive shells (CI, or stdin not a terminal) complete with defaults and exit 0 — no prompts, no spawned sessions; the handoff prints as a next-step command instead. The installer wires Claude Code hooks automatically — merging with any hooks you've already configured, never overwriting them. `./aipass` is a thin repo-root launcher over `setup.sh`; after setup it forwards to the installed `aipass` binary.
+Options: `--no-chat` skips the welcome chat — and with it the doctor preflight, which runs as part of the chat handoff. `--no-baud` skips the phone face and baud-cli step (`aipass baud install` lands it later). Non-interactive shells (CI, or stdin not a terminal) complete with defaults and exit 0 — no prompts, no spawned sessions; the handoff prints as a next-step command instead. The installer wires Claude Code hooks automatically — merging with any hooks you've already configured, never overwriting them. `./aipass` is a thin repo-root launcher over `setup.sh`; after setup it forwards to the installed `aipass` binary.
 
-Install also changes things outside the repo, and you should know what: it adds AIPass deny rules to your user-level Claude Code settings (no raw `git commit`/`push`/`reset`/`rebase`/`config`, no reading `~/.secrets/`) — these apply to every Claude Code project on the machine, not only AIPass; it appends a `claude` shell function to your `.bashrc`/`.zshrc` that, inside an agent directory, resumes that agent's seat instead of starting a blank session (everywhere else it passes straight through); it sets `git config --global pull.rebase true` when it sets your git identity; and it installs the `@anthropic-ai/sandbox-runtime` npm package globally if it is missing. Re-running install on Linux or macOS deletes and rebuilds `.venv`. The Uninstall section lists every file it touches.
+Install also changes things outside the repo, and you should know what: it adds AIPass deny rules to your user-level Claude Code settings (no raw `git commit`/`push`/`reset`/`rebase`/`config`, no reading `~/.secrets/`) — these apply to every Claude Code project on the machine, not only AIPass; it appends a `claude` shell function to your `.bashrc`/`.zshrc` that, inside an agent directory, resumes that agent's seat instead of starting a blank session (everywhere else it passes straight through); it sets `git config --global pull.rebase true` when it sets your git identity; and it installs the `@anthropic-ai/sandbox-runtime` npm package globally if it is missing. It also fetches the BAUD phone face and, on linux-x86_64, the `baud-cli` binary from a GitHub release, verifies them against the release's checksums, and lands them under `~/.aipass/baud/` — best-effort, so a missing or unreachable release is reported and the install continues. Re-running install on Linux or macOS deletes and rebuilds `.venv`. The Uninstall section lists every file it touches.
 
 ### 2. Your own project
 
@@ -216,7 +216,7 @@ devpulse (orchestrator)
 | Quality | Automated standards, gated in CI across every agent |
 | Tests | Every agent ships its own suite; the whole fleet runs on Linux for Python 3.10–3.13, and on Windows and macOS for 3.12 |
 
-Most agents (11 of 18) document their own operational status in their branch README — what works, what doesn't, and why.
+Most agents (14 of 18) document their own operational status in their branch README — what works, what doesn't, and why.
 
 ## Requirements
 
@@ -252,15 +252,15 @@ rm -rf .backup/ && rm -f .backupignore
 
 The installer also writes a layer outside the project. Remove all of it to erase AIPass completely:
 
-- `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and two `ask` rules; each time doctor re-wires the hooks it leaves a dated `settings.json.bak.*` copy beside it. Also `~/.claude/commands/memo.md`.
+- `~/.claude/settings.json` — hook wiring, plus `env.AIPASS_HOME`, `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `env.CLAUDE_CODE_DISABLE_AGENT_VIEW`, the AIPass deny rules (git write verbs, `~/.secrets` reads) and one `ask` rule (edits under `~/.claude/`); each time doctor re-wires the hooks it leaves a dated `settings.json.bak.*` copy beside it. Also `~/.claude/commands/memo.md`.
 - `aipass`/`drone` symlinks in `/usr/local/bin` or `~/.local/bin`.
 - Your shell rc (`.bashrc`/`.zshrc`/`.bash_profile`): a PATH line, `AIPASS_HOME` and `PYTHONUTF8` exports, and the `claude()` boot-shim function between the `AIPass boot shim` markers. On Windows, a `drone` wrapper in your PowerShell profile.
-- `~/.aipass/` — cross-project state: the fleet registry, trust registry, commons database, admin key, skills, Telegram bot state.
+- `~/.aipass/` — cross-project state: the fleet registry, trust registry, commons database, admin key, skills, the BAUD phone face and `baud-cli` under `baud/`, Telegram bot state (the Telegram skill is retired and switched off, but its state lands here if you turn it on).
 - `~/.secrets/aipass/` if seeded.
 - `git config --global pull.rebase true`, set only if install also set your identity.
 - Only if a `codex` binary was on PATH at install: `~/.codex/config.toml` is rewritten.
 - Only if you ran `drone @daemon install-timer`: a systemd user timer, removed by `drone @daemon uninstall-timer`.
-- Only on the no-sudo path with no usable system Python: a `uv`-managed interpreter under `~/.local/`.
+- macOS only, when no Python 3.10+ is found and an existing Homebrew cannot provide one: a `uv`-managed interpreter under `~/.local/`. Linux with no Python 3.10+ stops the install and says so.
 
 No cloud accounts, no external services — everything to clean up is on your machine.
 
