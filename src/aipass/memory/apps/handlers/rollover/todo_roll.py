@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-15
 # Modified: 2026-09-15
 # =============================================
@@ -202,12 +202,12 @@ def _valid_dir_name(name: str) -> bool:
 
 
 def _display(path: Path) -> str:
-    """The path relative to the repo root when it sits inside it, else as given."""
+    """The path relative to the repo root when it sits inside it, else in full - posix separators either way."""
     try:
         return Path(path).relative_to(_find_repo_root()).as_posix()
     except ValueError:
         logger.debug(f"[todo_roll] {path} sits outside the repo root - shown in full")
-        return str(path)
+        return Path(path).as_posix()
 
 
 # =============================================================================

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -713,12 +713,12 @@ def _plan_file(branch_name: str, trinity: Path, file_key: str, config: dict, bac
 
 
 def _backlog_display(path: Path) -> str:
-    """The backlog path relative to the repo root when it sits inside it, else in full."""
+    """The backlog path relative to the repo root when it sits inside it, else in full - posix separators either way."""
     try:
         return Path(path).relative_to(_REPO_ROOT).as_posix()
     except ValueError:
         logger.debug(f"[trinity_push] {path} sits outside the repo root - shown in full")
-        return str(path)
+        return Path(path).as_posix()
 
 
 def plan_branch(branch_name: str, branch_path: Path, config: dict, backlog_path: Path | None = None) -> dict:
