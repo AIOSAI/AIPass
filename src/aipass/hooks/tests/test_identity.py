@@ -1,17 +1,84 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.0.0
-# Description: Tests for identity prompt handler
+# Version: 1.1.0
+# Description: Tests for identity prompt handler (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-09-15
 # =============================================
 
-"""Tests for handlers/prompt/identity.py."""
+"""Tests for handlers/prompt/identity.py.
+
+handle() is cadence-gated (loader "identity", period 5). The render tests below
+pin the passport formatting, so the gate is held open for every test in this
+module; TestCadenceGate pins the gate itself.
+"""
 
 import json
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+
+_CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
+
+
+@pytest.fixture(autouse=True)
+def _cadence_fires(monkeypatch):
+    """Hold the cadence gate open so render tests never depend on the live turn counter."""
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: True)
+
+
+class TestCadenceGate:
+    """handle() honours the cadence gate exactly like the kernel and navmap loaders."""
+
+    @staticmethod
+    def _write_passport(tmp_path: Path) -> None:
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(json.dumps(SAMPLE_PASSPORT), encoding="utf-8")
+
+    def test_skips_on_cadence_skip(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.identity import handle
+
+        self._write_passport(tmp_path)
+        seen: list[str] = []
+
+        def _skip(loader_name, _hook_data=None):
+            seen.append(loader_name)
+            return False
+
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", _skip)
+
+        result = handle({"cwd": str(tmp_path)})
+
+        assert seen == ["identity"]
+        assert result == {"stdout": "", "exit_code": 0}
+
+    def test_fires_on_cadence_fire(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt.identity import handle
+
+        self._write_passport(tmp_path)
+
+        result = handle({"cwd": str(tmp_path)})
+
+        assert "devpulse Identity" in result["stdout"]
+        assert result["sound"] == "identity"
+
+    def test_fires_anyway_when_cadence_check_raises(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.identity import handle
+
+        self._write_passport(tmp_path)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("cadence state unreadable")
+
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", _boom)
+
+        result = handle({"cwd": str(tmp_path)})
+
+        assert "devpulse Identity" in result["stdout"]
+        assert result["exit_code"] == 0
 
 
 # Schema 1.0.0 shape — principles live at the TOP LEVEL. Live on every passport
@@ -126,10 +193,10 @@ class TestIdentityHandler:
         assert "test Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_empty_hook_data(self):
+    def test_empty_hook_data(self, tmp_path):
         from aipass.hooks.apps.handlers.prompt.identity import handle
 
-        with patch("pathlib.Path.cwd", return_value=Path("/tmp/nonexistent")):
+        with patch("pathlib.Path.cwd", return_value=tmp_path / "nonexistent"):
             result = handle({})
 
         assert result["exit_code"] == 0

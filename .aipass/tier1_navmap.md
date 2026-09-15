@@ -1,6 +1,6 @@
 # AIPass — Navigation map
 
-<!-- Tier 1 — injected on cadence 5, at session start, and post-compaction. Kernel = tier0_kernel.md, every turn. Cap: ~8,000 chars per fire (hook truncates near 10k). Format: .aipass/PROMPT_STYLE.md, read before editing. -->
+<!-- Tier 1 — injected on cadence 5, at session start, and post-compaction, on the same beat as the kernel (tier0_kernel.md, also cadence 5; hooks/hooks_json/custom_config/cadence_config.json is the source). Cap: ~8,000 chars per fire (hook truncates near 10k). Format: .aipass/PROMPT_STYLE.md, read before editing. -->
 
 AIPass: autonomous agents (citizens) with identity, memory, and a mailbox, serving each other and external projects. Each lives in a branch, its home and address. Everything routes through `drone`. Open source, public repo on GitHub: strangers read and scan this code; treat external findings as contributions.
 

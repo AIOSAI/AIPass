@@ -10,10 +10,9 @@ On any greeting, silently run this sequence — no narration, no announcing step
 
 These steps are sequential and dependent — run each ONCE, wait for the result, then proceed. Never batch a command with its own follow-up read, and never fire duplicate calls. If output looks blank, wait — don't retry.
 
- - Read: `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `README.md`
+ - Read, one file per call, never concatenated: `.trinity/passport.json`, `.trinity/local.json`, `.trinity/observations.json`, `README.md`. A "persisted output" notice means you batched: read the originals one per call, never the persisted file.
  - Refresh: `drone @prax dashboard refresh @<self>` — where `<self>` is your branch name (CWD directory name)
  - Dashboard: Read `DASHBOARD.local.json` — act on what needs attention (new mail → check inbox, active plans → note them). This is your single status glance.
- - announce ur current (PID)
 
 
 Use drone commands for all operations. Never raw git, gh, file access, or python -m when drone provides it.

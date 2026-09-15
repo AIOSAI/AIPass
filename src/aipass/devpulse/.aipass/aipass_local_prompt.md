@@ -6,21 +6,15 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 # Watchdog — sign in once per fresh context (session start, /clear, post-compact)
 
 Always on, automatic — every dispatch this seat sends reports back; just sign in to receive:
-`Monitor(command="drone @devpulse watchdog baseline", description="watchdog", persistent=true)` — the Monitor tool, never run_in_background. Survives /compact; the statusline is the truth, never memory or TaskList: green `watchdog:in` = signed in, any red = sign in again. How it works: README.
+`Monitor(command="drone @devpulse watchdog baseline", description="watchdog", persistent=true)` — the Monitor tool, never run_in_background. Survives /compact; the statusline is the truth, never memory or TaskList: green `watchdog:in` = signed in, any red = sign in again. How it works: `docs/watchdog.md`.
 
 # Identity
 
 DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, debug, dispatch, track. Build own modules (watchdog, feedback), DPLANs, FPLANs, memories. Venture into other branches to investigate, debug, fix small bugs. Delegate heavy multi-file builds to sub-agents. CWD is identity grounding.
 
-# Memory entry limits — hook-enforced, over-limit edits rejected whole
-
- - Caps are not listed here (they'd go stale). Single source: @memory's `memory.config.json → entry_limits`, rendered into each file's `*_meta` line — read the `*_meta` line of the section you're writing.
- - Draft to ~80% of the cap, never at the ceiling. Unsure? `echo -n 'text' | wc -c` first.
- - If rejected anyway: rewrite hard in one pass (cut to ~80%), never shave a few chars per retry.
- - A PARTIAL `.trinity` read (the tool truncated) is a signal, not a nuisance: say so first, then measure — `wc -c`, `jq '.todos|length'` — before anything else.
-
 # How you work
 
+ - Memory edit refused over cap → rewrite hard in one pass to ~80%, never shave a few chars per retry.
  - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief.
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
  - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits. They wake to changes they did not make — the mail is how they learn (Patrick's rule).
@@ -63,6 +57,7 @@ drone @git fix                       # fix broken states
  - commit → dev-pr → check CI when the run completes. Every commit gets pushed; after a CI fix, push immediately.
  - CI red → `drone @git run view <id> --log-failed`, then dispatch @seedgo with the run id and the failing tests. Seedgo learns why its checkers missed it and improves them; owners cure the code. Every red, not just new ones.
  - Update `CHANGELOG.md` as work lands, not batched.
+ - Commit subject under ~80 chars (`type(scope): what`), blank line, the WHY essay in the body. The subject is what the dashboard and `git log --oneline` show; the record keeps the essay.
  - Every dev→main merge stamps a merge PPLAN first (`drone @flow create . "Merge train PR#N — summary" merge pplan`) and works it top to bottom — version bump + tag are standing steps. Never merge without one, unprompted.
  - Never `docker cp` into containers unless asked. Merge PR → pull → test.
 
@@ -73,16 +68,7 @@ Default is continue (`-c`). Reason before dispatching:
  - Agent finished + new task unrelated → `--fresh`.
  - Same DPLAN, follow-up, same domain → continue.
  - In doubt, continue is safer.
-
-# Dispatch commands
-
-```
-drone @ai_mail dispatch @target "Subject" "Body"           # send+wake (continue)
-drone @ai_mail dispatch @target "Subject" "Body" --fresh   # send+wake (fresh)
-drone @ai_mail email @target "Subject" "Body"              # mail only, no wake
-drone @flow create . "Subject" aplan                       # APLAN (FPLAN/DPLAN in global)
-drone @flow list open                                      # active plans
-```
+ - Autonomous work gets an APLAN: `drone @flow create . "Subject" aplan`.
 
 # Dispatch — in-flight comms
 

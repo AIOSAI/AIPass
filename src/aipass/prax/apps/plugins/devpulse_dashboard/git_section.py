@@ -1,15 +1,18 @@
 # =================== AIPass ====================
 # Name: git_section.py
 # Description: Git status section builder for devpulse dashboard
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-16
-# Modified: 2026-05-16
+# Modified: 2026-09-15
 # =============================================
 
 """Git section builder for devpulse dashboard plugin.
 
 Gathers current git state (branch, changes, commits ahead of main)
 and writes to devpulse's DASHBOARD.local.json via write_section().
+
+last_commit_msg is the subject's first line, capped at SUBJECT_CAP chars: the
+dashboard is a glance, and the full message is one ``git log -1`` away.
 """
 
 from pathlib import Path
@@ -18,6 +21,19 @@ import subprocess
 
 from aipass.prax.apps.modules.dashboard import write_section
 from aipass.prax.apps.modules.logger import system_logger as logger
+
+SUBJECT_CAP = 120
+
+
+def _subject_line(message: str) -> str:
+    """First line of a commit subject, capped — an essay subject stays one glance here."""
+    stripped = message.strip()
+    if not stripped:
+        return ""
+    first = stripped.splitlines()[0].strip()
+    if len(first) <= SUBJECT_CAP:
+        return first
+    return first[: SUBJECT_CAP - 3].rstrip() + "..."
 
 
 def _find_git_root(start: Path) -> Path:
@@ -87,7 +103,7 @@ def build_git_section(branch_path: Path) -> bool:
         ahead_of_main = 0
 
     # Last commit message and date
-    last_commit_msg = _run_git(repo_root, "log", "-1", "--format=%s") or ""
+    last_commit_msg = _subject_line(_run_git(repo_root, "log", "-1", "--format=%s") or "")
     last_commit_date = _run_git(repo_root, "log", "-1", "--format=%cs") or ""
 
     section_data: Dict = {

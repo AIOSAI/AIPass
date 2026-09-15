@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_dashboard_plugin.py
 # Description: Tests for devpulse dashboard plugin
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-16
-# Modified: 2026-05-16
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for devpulse dashboard plugin (git, session, dispatch sections + refresh)."""
@@ -92,6 +92,36 @@ class TestGitSection:
         assert git["ahead_of_main"] == 5
         assert git["last_commit_msg"] == "feat: add dashboard plugin"
         assert git["last_commit_date"] == "2026-05-16"
+
+    @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
+    def test_essay_subject_is_capped_to_one_glance(self, mock_run, branch_with_git):
+        """A 3 KB one-line subject (the essay era) lands as its first SUBJECT_CAP chars."""
+        from aipass.prax.apps.plugins.devpulse_dashboard import git_section
+
+        essay = "fix(memory): " + "why " * 800
+
+        def _responses(cmd, **kwargs):
+            result = _git_subprocess_responses(cmd, **kwargs)
+            if tuple(cmd[1:]) == ("log", "-1", "--format=%s"):
+                result.stdout = essay + "\n"
+            return result
+
+        mock_run.side_effect = _responses
+        assert git_section.build_git_section(branch_with_git) is True
+
+        dash = json.loads((branch_with_git / "DASHBOARD.local.json").read_text())
+        msg = dash["sections"]["git"]["last_commit_msg"]
+        assert git_section.SUBJECT_CAP - 4 < len(msg) <= git_section.SUBJECT_CAP
+        assert msg.startswith("fix(memory): why")
+        assert msg.endswith("...")
+
+    def test_subject_line_keeps_short_subjects_and_drops_the_body(self):
+        """Short subjects pass through untouched; a body under the subject never reaches the glance."""
+        from aipass.prax.apps.plugins.devpulse_dashboard.git_section import _subject_line
+
+        assert _subject_line("feat(x): short\n") == "feat(x): short"
+        assert _subject_line("feat(x): short\n\nWHY: the essay lives here\n") == "feat(x): short"
+        assert _subject_line("   \n") == ""
 
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
     def test_build_git_section_subprocess_failure(self, mock_run, branch_with_git):
