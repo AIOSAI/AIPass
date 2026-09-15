@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_rollover.py
 # Date: 2026-03-24
-# Version: 1.1.1
+# Version: 1.1.2
 # Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
@@ -237,10 +237,18 @@ class TestMockedCliPackageIsComplete:
         """Drop every cli submodule from the cache first -- the CI condition.
 
         Without the fixture registering them, this is the exact
-        ModuleNotFoundError the runner reported.
+        ModuleNotFoundError the runner reported. The drop is recorded first,
+        the way _import_rollover evicts: the fixture re-imports each one, and
+        a bare pop left those new help_flags / json_flag / branch_flag objects
+        cached and named by the cli package after teardown.
         """
-        for name in self._imported_cli_submodules():
-            sys.modules.pop(f"aipass.memory.apps.handlers.cli.{name}", None)
+        cli = importlib.import_module("aipass.memory.apps.handlers.cli")
+        for name in sorted(self._imported_cli_submodules()):
+            key = f"aipass.memory.apps.handlers.cli.{name}"
+            monkeypatch.setitem(sys.modules, key, None)
+            del sys.modules[key]
+            monkeypatch.setattr(cli, name, None, raising=False)
+            delattr(cli, name)
         rollover, _mocks = _import_rollover(monkeypatch)
         assert rollover.handle_command("rollover", ["check"]) is True
 
@@ -270,6 +278,31 @@ class TestMockedReimportIsUndoneAtTeardown:
         assert getattr(parent, "rollover", None) is attr_before, (
             "the parent package still names the mock-bound rollover"
         )
+
+    def test_the_cold_cache_test_puts_the_cli_submodules_back(self) -> None:
+        """The cold-cache test re-imports help_flags, json_flag and branch_flag; teardown must undo it.
+
+        A bare sys.modules.pop there left the re-imported objects cached and on
+        the cli package after teardown (seedgo's runtime plugin, 2026-09-15).
+        """
+        cold = TestMockedCliPackageIsComplete()
+        names = sorted(cold._imported_cli_submodules())
+        assert names == ["branch_flag", "help_flags", "json_flag"], names
+        keys = {name: f"aipass.memory.apps.handlers.cli.{name}" for name in names}
+        cli = importlib.import_module("aipass.memory.apps.handlers.cli")
+        modules_before = {name: importlib.import_module(key) for name, key in keys.items()}
+        attrs_before = {name: getattr(cli, name, None) for name in names}
+
+        with pytest.MonkeyPatch.context() as mp:
+            cold.test_reimport_survives_a_cold_submodule_cache(mp)
+            # Guard the guard: the body really minted new module objects.
+            reimported = [name for name, key in keys.items() if sys.modules[key] is not modules_before[name]]
+            assert reimported == names, f"only {reimported} were re-imported"
+
+        leaked = [name for name, key in keys.items() if sys.modules.get(key) is not modules_before[name]]
+        renamed = [name for name in names if getattr(cli, name, None) is not attrs_before[name]]
+        assert leaked == [], f"the re-imported {leaked} outlived the cold-cache test in sys.modules"
+        assert renamed == [], f"the cli package still names the re-imported {renamed}"
 
 
 def rollover_module_path() -> str:

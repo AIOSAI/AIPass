@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_rollover_pipeline.py
 # Date: 2026-04-25
-# Version: 1.2.0
+# Version: 1.2.1
 # Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
@@ -209,9 +209,15 @@ def _import_rollover_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.todo_report", mock_todo_report)
 
-    sys.modules.pop("aipass.memory.apps.modules.rollover", None)
+    # Recorded first, the way test_rollover.py's _import_rollover evicts. This re-import binds rollover
+    # to the MagicMock cli; a bare pop and a bare delattr left that module cached AND named by the
+    # modules package after teardown, so test_contracts' in-process `rollover <bogus>` on the same
+    # worker exited 0 instead of 2 (-n 3 --dist loadscope, 2026-09-15).
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.modules.rollover", None)
+    del sys.modules["aipass.memory.apps.modules.rollover"]
     parent = sys.modules.get("aipass.memory.apps.modules")
-    if parent is not None and hasattr(parent, "rollover"):
+    if parent is not None:
+        monkeypatch.setattr(parent, "rollover", None, raising=False)
         delattr(parent, "rollover")
 
     from aipass.memory.apps.modules import rollover
@@ -224,6 +230,33 @@ def _import_rollover_module(monkeypatch):
         "orchestrator": mock_orchestrator,
         "todo_report": mock_todo_report,
     }
+
+
+class TestPipelineRolloverImportIsUndoneAtTeardown:
+    """The rollover module _import_rollover_module binds to a MagicMock cli must not outlive its test.
+
+    It did: under -n 3 --dist loadscope a worker ran TestRunRollover, then test_contracts'
+    in-process `rollover <bogus>` routed through the mock error() and exited 0 instead of 2.
+    """
+
+    def test_sys_modules_and_the_parent_attribute_are_restored(self) -> None:
+        import importlib
+
+        name = "aipass.memory.apps.modules.rollover"
+        parent = importlib.import_module("aipass.memory.apps.modules")
+        module_before = sys.modules.get(name)
+        attr_before = getattr(parent, "rollover", None)
+
+        with pytest.MonkeyPatch.context() as mp:
+            rollover, mocks = _import_rollover_module(mp)
+            # Guard the guard: the re-import really is bound to the mock.
+            assert rollover.error is mocks["error"]
+            assert rollover is not module_before
+
+        assert sys.modules.get(name) is module_before, "the mock-bound rollover outlived its test"
+        assert getattr(parent, "rollover", None) is attr_before, (
+            "the modules package still names the mock-bound rollover"
+        )
 
 
 def _import_normalize(monkeypatch):
@@ -2649,6 +2682,27 @@ class TestTodoRestore:
 
         assert result["success"] is True and result["number"] == 20, result
         assert tr.high_water_of(tr.read_backlog(backlog)["document"]) == 20
+
+    def test_the_restore_re_renders_the_tab_to_the_number_after_the_fresh_one(self, tr, tmp_path):
+        """@canary: restore 3 -> #15 left the tab at next #15 with #15 on the pad - a hand copy would collide."""
+        import importlib
+
+        local = _mint_pad(tmp_path, [_todo(n) for n in (14, 11, 4)])
+        document = json.loads(local.read_text(encoding="utf-8"))
+        document["todos_meta"] = _tab(15)
+        local.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(3))])
+
+        result = self._restore(tr, 3, local, tmp_path)
+
+        assert result["success"] is True and result["number"] == 15, result
+        after = json.loads(local.read_text(encoding="utf-8"))
+        assert " · next #16 ⟧ " in after["todos_meta"], after["todos_meta"]
+        renderer = importlib.import_module("aipass.memory.apps.handlers.tracking.tab_renderer")
+        config = tr.config_loader.load()
+        context = renderer.todo_context("guinea", after["todos"], tr.read_backlog(backlog))
+        expected = renderer.compose_meta("todos", config["rollover"], config["entry_limits"], "guinea", context)
+        assert after["todos_meta"].encode("utf-8") == expected.encode("utf-8")
 
     def test_a_high_water_that_reads_back_wrong_is_reported_not_silent(self, tr, tmp_path, monkeypatch):
         local = _mint_pad(tmp_path, [_todo(3)])

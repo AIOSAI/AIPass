@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-09-15
 # Modified: 2026-09-15
 # =============================================
@@ -53,6 +53,11 @@ original numbers, ``high_water`` and the ``next #N`` the branch's own tab last
 rendered (N - 1). Residual: a todo added by hand and deleted by hand with no
 memory write or tab render in between leaves no trace, so its number can be
 issued again once.
+
+A RESTORE RE-RENDERS THE TAB. The pad write that lands a restored todo carries
+a fresh ``todos_meta`` from ``tracking/tab_renderer`` (the push and refresh
+renderer, never a second one), so its ``next #N`` names the number after the
+one just issued the moment the verb returns.
 """
 
 import copy
@@ -722,6 +727,31 @@ def _candidate(record: dict[str, Any]) -> str:
     return f"rolled {record.get('rolled', '?')}: {task if isinstance(task, str) else '(no task)'}"
 
 
+def _rendered_todos_meta(
+    branch_dir: str, pad: list[Any], backlog: dict[str, Any], todos_meta: Any
+) -> tuple[str | None, str | None]:
+    """The ``todos_meta`` line memory's renderer writes for *pad*, or ``(None, refusal)``.
+
+    The renderer is ``tracking/tab_renderer`` - the one the push and the tab
+    refresh use (``todo_context`` then ``compose_meta``), numbers from config
+    and prose from the gold template. Imported here rather than at the top:
+    tab_renderer imports this module at ITS top, and by the time a restore
+    runs both are fully loaded, so the call-time import cannot cycle.
+    """
+    from aipass.memory.apps.handlers.tracking import tab_renderer
+
+    config = config_loader.load()
+    context = tab_renderer.todo_context(branch_dir, pad, backlog, todos_meta=todos_meta)
+    try:
+        meta = tab_renderer.compose_meta(
+            "todos", config.get("rollover", {}), config.get("entry_limits", {}), branch_dir, context
+        )
+    except (OSError, ValueError) as exc:
+        logger.error(f"[todo_roll] @{branch_dir} todos tab not rendered: {type(exc).__name__}: {exc}")
+        return None, f"the todos tab could not be rendered ({type(exc).__name__}: {exc})"
+    return meta, None
+
+
 def restore_todo(
     branch: str,
     number: int,
@@ -737,7 +767,10 @@ def restore_todo(
     carries *number*, or when more than one does (the candidates are named).
     The fresh number is :func:`next_number` with both floors (the backlog's
     ``high_water`` and the pad's rendered ``next #N``), so it is the highest on
-    the pad and lands at index 0: lists are newest-first. The pad is written
+    the pad and lands at index 0: lists are newest-first. The same pad write
+    carries ``todos_meta`` re-rendered for the new pad, so the tab's ``next #N``
+    is the fresh number + 1 (a tab that cannot be rendered refuses the restore
+    with nothing written). The pad is written
     first (atomic, read back, verified); only then is that one record removed
     from the backlog and ``high_water`` raised to the fresh number (atomic,
     read back). Every field but ``number`` is carried json-equal.
@@ -802,6 +835,11 @@ def restore_todo(
     restored = {key: (fresh if key == "number" else copy.deepcopy(value)) for key, value in record["entry"].items()}
     pad = dict(data)
     pad["todos"] = [restored] + list(todos)
+    meta, problem = _rendered_todos_meta(target["name"], pad["todos"], backlog, data.get("todos_meta"))
+    if meta is None:
+        result["error"] = f"NOTHING RESTORED - {problem}; the pad and the backlog are untouched"
+        return result
+    pad["todos_meta"] = meta
     failure = _write_document(target["local"], pad) or _verify_document(target["local"], pad)
     if failure:
         result["error"] = f"NOTHING RESTORED - the pad was not verified ({failure}); the backlog is untouched"

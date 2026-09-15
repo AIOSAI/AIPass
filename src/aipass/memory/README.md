@@ -928,7 +928,9 @@ about 65k characters of it on devpulse's pad alone (DPLAN-0345).
   in no branch. It is refused when the pad already holds its count (read from config), when no record
   carries the number, and when several do (the candidates are named by rolled time and task). The todo
   returns **on top of the pad** (lists are newest-first) under the next number (below) with task, date
-  and priority identical. The pad is written and read back first; only then is the record removed from
+  and priority identical. The same pad write re-renders `todos_meta` through the tab renderer, so the
+  tab's `next #N` is the restored number + 1 the moment the verb returns (a tab that cannot be rendered
+  refuses the restore, nothing written). The pad is written and read back first; only then is the record removed from
   the backlog. It re-numbers because an emptied pad restarts at 1 while the backlog already holds 1..N,
   and a restored todo keeping its low number would be the first to roll again.
 - **Numbers are never re-issued on purpose.** The next number is one past the highest of: the pad, the

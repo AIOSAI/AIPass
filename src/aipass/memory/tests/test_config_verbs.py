@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-08-16
 # Modified: 2026-09-15
 # =============================================
@@ -71,6 +71,8 @@ _HANDLER_MODULES = (
     "aipass.memory.apps.handlers.json.config_loader",
 )
 
+_ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
+
 
 # ---------------------------------------------------------------------------
 # Fixture: real modules, throwaway config
@@ -100,8 +102,31 @@ def _pin_console_width(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(console_obj, "_width", _CONSOLE_WIDTH)
 
 
+def _evict(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """Drop *name* from the import cache, recorded first so teardown puts back exactly what stood there.
+
+    The parent package's attribute goes the same way while the parent is still
+    cached, because the re-import rebinds it. A bare pop left the fixture's
+    re-imported json package, config_loader and rollover cached after teardown
+    (seedgo module_eviction, 2026-09-15) - the species test_rollover.py's
+    _import_rollover cured the same morning.
+    """
+    monkeypatch.setitem(sys.modules, name, None)
+    del sys.modules[name]
+    parent_name, _, leaf = name.rpartition(".")
+    parent = sys.modules.get(parent_name)
+    if parent is not None:
+        monkeypatch.setattr(parent, leaf, None, raising=False)
+        delattr(parent, leaf)
+
+
 @pytest.fixture
 def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Real config_loader + rollover module wired to a MINTED config and registry (see :func:`_real_verbs`)."""
+    return _real_verbs(tmp_path, monkeypatch)
+
+
+def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Real config_loader + rollover module wired to a MINTED config and registry.
 
     Hermetic on purpose: nothing here reads state that exists only on a machine
@@ -122,10 +147,11 @@ def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     conftest replaces the handlers.json package with a MagicMock, which would
     make the lazy `from ... import config_loader` inside the module return a
-    mock instead of the code under test. Popping it forces a real import.
+    mock instead of the code under test. Evicting it forces a real import;
+    :func:`_evict` records each eviction, so teardown restores what stood there.
     """
     for name in _HANDLER_MODULES:
-        sys.modules.pop(name, None)
+        _evict(monkeypatch, name)
     config_loader = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
 
     # Captured BEFORE the repoint: the guard in TestOperatorConfigIsolation
@@ -150,8 +176,8 @@ def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     config["rollover"]["per_branch"] = config_loader.materialize_per_branch()
     assert config_loader._write_config_file(config), "fixture could not write its own config"
 
-    sys.modules.pop("aipass.memory.apps.modules.rollover", None)
-    rollover = importlib.import_module("aipass.memory.apps.modules.rollover")
+    _evict(monkeypatch, _ROLLOVER_MODULE)
+    rollover = importlib.import_module(_ROLLOVER_MODULE)
     monkeypatch.setattr(rollover, "json_handler", MagicMock())
 
     _pin_console_width(monkeypatch)
@@ -163,6 +189,40 @@ def verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         path=config_path,
         operator_path=operator_config_path,
     )
+
+
+class TestVerbsFixtureIsUndoneAtTeardown:
+    """What the verbs fixture re-imports must not outlive the test that re-imported it."""
+
+    def test_every_evicted_module_and_its_parent_attribute_is_restored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        names = (*_HANDLER_MODULES, _ROLLOVER_MODULE)
+        # A known object in each parent slot the fixture evicts, so the parent-attribute half is read on
+        # every worker: run alone, neither parent package is imported yet and there is nothing to restore.
+        # This test's own monkeypatch takes the stand-ins away again.
+        for name in (_HANDLER_MODULES[0], _ROLLOVER_MODULE):
+            parent_name, _, leaf = name.rpartition(".")
+            stand_in = SimpleNamespace(stand_in=name)
+            monkeypatch.setattr(importlib.import_module(parent_name), leaf, stand_in, raising=False)
+        missing = object()
+        parents = {name: sys.modules.get(name.rpartition(".")[0]) for name in names}
+        modules_before = {name: sys.modules.get(name) for name in names}
+        attrs_before = {name: getattr(parents[name], name.rpartition(".")[2], missing) for name in names}
+
+        with pytest.MonkeyPatch.context() as mp:
+            fixture = _real_verbs(tmp_path, mp)
+            # Guard the guard: the fixture really re-imported config_loader and rollover.
+            assert fixture.loader is sys.modules[_HANDLER_MODULES[-1]]
+            assert fixture.loader is not modules_before[_HANDLER_MODULES[-1]]
+            assert fixture.rollover is not modules_before[_ROLLOVER_MODULE]
+
+        leaked = [name for name in names if sys.modules.get(name) is not modules_before[name]]
+        renamed = [
+            name for name in names if getattr(parents[name], name.rpartition(".")[2], missing) is not attrs_before[name]
+        ]
+        assert leaked == [], f"the fixture's {leaked} outlived its test in sys.modules"
+        assert renamed == [], f"a parent package still names the fixture's {renamed}"
 
 
 # ---------------------------------------------------------------------------
