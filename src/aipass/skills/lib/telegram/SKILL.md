@@ -20,6 +20,16 @@ has_handler: true
 
 # Telegram Bridge
 
+> **Status: switched off, left in place, no longer maintained (Patrick's ruling, 2026-09-14).**
+> AIPass development does not use Telegram any more — BAUD, the phone face, is the
+> notification and control surface now. The skill stays here, switched off, for anyone
+> who wants a Telegram integration of their own: `drone @skills on telegram` lifts the
+> switch and the code below is as it last ran (v1.7.0). Nothing in this directory is
+> maintained from here on: its tests are skipped at collection (`tests/conftest.py`), a
+> test that fails is disabled rather than fixed, and no new work lands here. With the
+> switch off, `drone @skills run telegram …` refuses in one line and the daemon's
+> notifier door sends nothing.
+
 Multi-bot personal-assistant bridge: long-polling listener routes user Telegram messages into Claude tmux sessions. The base reply flow is Claude's Stop hook writing a pending file, which the bot picks up and sends back to Telegram; bots opting into streaming (below) also live-edit a "Processing..." placeholder while the reply is still being generated. A control-center bot exposes /start, /kill, /lock, /suspend to wake, kill, and lock or sleep terminal sessions by branch, and a separate hook mirrors terminal-typed messages into the same TG chat so the conversation reads as one continuous thread regardless of which door you type in.
 
 ## Architecture

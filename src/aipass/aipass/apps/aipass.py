@@ -55,6 +55,7 @@ except ModuleNotFoundError:  # pragma: no cover — Python 3.10
 
 _PUBLIC_COMMANDS = {
     "adopt": "Turn an existing projects/ directory into a full project",
+    "baud": "Install the baud phone face from a release",
     "doctor": "System health — structure, registry, hooks, tests",
     "handoff": "Launch your CLI in a new session",
     "help": "README-backed Q&A — ask about any branch",
@@ -194,6 +195,8 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")
+    console.print("  [green]baud install[/green]                 [dim]Install the baud phone face from a release[/dim]")
+    console.print("  [green]baud status[/green]                  [dim]Installed phone face, where @api points[/dim]")
     console.print(
         "  [green]doctor[/green]                       [dim]System health — structure, registry, hooks, tests[/dim]"
     )

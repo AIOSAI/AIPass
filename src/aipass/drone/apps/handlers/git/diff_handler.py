@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: diff_handler.py
 # Description: Scoped git diff for branch directories
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-08-11
+# Modified: 2026-09-13
 # =============================================
 
 """Scoped git diff for branch directories."""
@@ -18,9 +18,10 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
 
-def get_branch_diff(branch_dir: Path, staged: bool = False) -> dict:
-    """Get git diff filtered to files under branch_dir."""
-    repo_root = find_repo_root()
+def get_branch_diff(branch_dir: Path, staged: bool = False, repo_root: Path | None = None) -> dict:
+    """Get git diff filtered to files under branch_dir, in *repo_root* (default: the standing repo)."""
+    if repo_root is None:
+        repo_root = find_repo_root()
 
     cmd = ["git", "diff"]
     if staged:

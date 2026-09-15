@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_fleet.py
 # Description: Tests for the host API fleet lane — baud --snapshot contract
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -22,6 +21,7 @@ subprocess; the real binary is exercised by a live probe, recorded in FPLAN-0411
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,18 +29,21 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import read_cache as host_read_cache
 from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
+from aipass.skills.lib.screen_lock import handler as screen_lock
 from aipass.skills.lib.system_status import handler as system_status
 
 
 # A real card, trimmed from @baud's verified run.
 SNAPSHOT = {
     "project": "AIPASS",
-    "root": "/home/patrick/Projects/AIPass",
+    "root": "/srv/aipass",
     "generated_at": "2026-08-14T20:04:40Z",
     "error": None,
     "live_agent_sessions": ["baud-devpulse"],
@@ -48,7 +51,7 @@ SNAPSHOT = {
         {
             "name": "devpulse",
             "project": "AIPASS",
-            "path": "/home/patrick/Projects/AIPass/src/aipass/devpulse",
+            "path": "/srv/aipass/src/aipass/devpulse",
             "is_citizen": True,
             "manager": True,
             "dispatched": False,
@@ -68,7 +71,7 @@ SNAPSHOT = {
         {
             "name": "api",
             "project": "AIPASS",
-            "path": "/home/patrick/Projects/AIPass/src/aipass/api",
+            "path": "/srv/aipass/src/aipass/api",
             "is_citizen": True,
             "manager": False,
             "dispatched": True,
@@ -154,71 +157,170 @@ class TestTheGate:
         run.assert_not_called()
 
 
+PATCH_CONFIG_LOGGER = "aipass.api.apps.handlers.host.config.logger"
+PATCH_FLEET_LOGGER = "aipass.api.apps.handlers.host.fleet.logger"
+
+posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
+
+
+def _executable(path: Path, mode: int = 0o755) -> Path:
+    """A stand-in binary: a regular file with the given mode."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+@pytest.fixture
+def places(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """
+    Every place the lookup reads, as empty temp stand-ins.
+
+    The config store, the home directory, the checkout and PATH — so no case
+    reads this machine's real baud_bin, ~/.aipass, build or PATH.
+    """
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    home.mkdir()
+    repo.mkdir()
+    on_path: dict = {}
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(host_fleet, "repo_root", lambda: repo)
+    monkeypatch.setattr(host_fleet.shutil, "which", lambda name: on_path.get(name))
+
+    with patch(PATCH_SECRETS_BASE, tmp_path / "secrets"), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
+        with patch(PATCH_CONFIG_LOGGER), patch(PATCH_FLEET_LOGGER):
+            yield SimpleNamespace(home=home, repo=repo, on_path=on_path, elsewhere=tmp_path / "elsewhere")
+
+
 class TestBinaryResolution:
     """
-    Finding the binary, which is NOT on PATH.
+    FPLAN-0589: which baud binary the host lanes exec, first hit wins.
 
-    Patrick's launcher execs the built release path directly. Resolving to that
-    same file is the same argument @baud made when they refused to ship a second
-    artifact for C1: one binary, one version, no silent disagreement.
+    (1) the configured baud_bin, refused by name when unusable; (2) the installed
+    ~/.aipass/baud/bin/baud-cli; (3) the checkout's baud-cli; (4) the checkout's
+    desktop baud, the file Patrick's launcher execs; (5) baud-cli on PATH; (6)
+    baud on PATH. The desktop binary links GTK even for --snapshot, which is why
+    the headless one outranks it wherever both could be found.
     """
 
-    def test_built_release_path_is_preferred(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """The file the desktop launcher runs is the file the phone lane runs."""
-        built = tmp_path / host_fleet.DEFAULT_BINARY_RELATIVE
-        built.parent.mkdir(parents=True)
-        built.touch()
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-
-        assert host_fleet.snapshot_binary() == str(built)
-
-    def test_built_path_wins_over_path_lookup(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """A stale copy on PATH must not quietly outrank the deployed build."""
-        built = tmp_path / host_fleet.DEFAULT_BINARY_RELATIVE
-        built.parent.mkdir(parents=True)
-        built.touch()
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: "/usr/local/bin/baud")
-
-        assert host_fleet.snapshot_binary() == str(built)
-
-    def test_path_is_used_when_there_is_no_build(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """An installed baud is a legitimate deployment; it is second, not ignored."""
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: "/usr/local/bin/baud")
-
-        assert host_fleet.snapshot_binary() == "/usr/local/bin/baud"
-
-    def test_missing_everywhere_names_both_places_looked(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
+    def test_the_six_step_order(self, places: SimpleNamespace) -> None:
         """
-        'not found' without a location is a support ticket.
+        Each step answers only when every step above it is empty.
 
-        The error carries the exact path that was checked, so whoever reads it can
-        see whether the build is missing or the layout moved.
+        All six are filled, then emptied from the top one at a time, so any swap
+        in the order changes which binary answers at some rung.
         """
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: None)
+        configured = _executable(places.elsewhere / "baud-cli")
+        installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
+        headless = _executable(places.repo / host_fleet.CHECKOUT_HEADLESS_RELATIVE)
+        desktop = _executable(places.repo / host_fleet.DEFAULT_BINARY_RELATIVE)
+        places.on_path.update({"baud-cli": "/opt/bin/baud-cli", "baud": "/opt/bin/baud"})
+        host_config.set_baud_bin(configured)
+
+        empty_each_step = [
+            lambda: host_config.set_baud_bin(None),
+            installed.unlink,
+            headless.unlink,
+            desktop.unlink,
+            lambda: places.on_path.pop("baud-cli"),
+            lambda: places.on_path.pop("baud"),
+        ]
+        answered = []
+        for empty in empty_each_step:
+            location = host_fleet.locate_binary()
+            answered.append((location.path, location.source))
+            assert host_fleet.snapshot_binary() == location.path
+            empty()
+
+        assert answered == [
+            (str(configured), host_fleet.SOURCE_CONFIGURED),
+            (str(installed), host_fleet.SOURCE_INSTALLED),
+            (str(headless), host_fleet.SOURCE_CHECKOUT),
+            (str(desktop), host_fleet.SOURCE_CHECKOUT),
+            ("/opt/bin/baud-cli", host_fleet.SOURCE_PATH),
+            ("/opt/bin/baud", host_fleet.SOURCE_PATH),
+        ]
+        assert host_fleet.locate_binary().source == host_fleet.SOURCE_MISSING
+
+    def test_a_configured_binary_that_is_gone_is_refused_by_name(self, places: SimpleNamespace) -> None:
+        """
+        Never fallen past: the installed binary is right there and is still not used.
+
+        A setting somebody chose that silently stops mattering is how a host ends
+        up running a binary nobody picked.
+        """
+        configured = _executable(places.elsewhere / "baud-cli")
+        _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
+        host_config.set_baud_bin(configured)
+        configured.unlink()
 
         with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
             host_fleet.snapshot_binary()
 
-        assert str(tmp_path) in str(excinfo.value)
-        assert "PATH" in str(excinfo.value)
+        message = str(excinfo.value)
+        assert str(configured) in message
+        assert "set-config --baud-bin default" in message
 
-    def test_resolution_failure_surfaces_through_read_snapshot(
-        self,
-        ready: None,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-    ) -> None:
+    @posix_permissions
+    def test_a_configured_binary_that_lost_its_bit_is_refused_by_name(self, places: SimpleNamespace) -> None:
+        """Present is not enough: a file that cannot be exec'd refuses here, not as a 500 at the exec."""
+        configured = _executable(places.elsewhere / "baud-cli")
+        _executable(places.repo / host_fleet.DEFAULT_BINARY_RELATIVE)
+        host_config.set_baud_bin(configured)
+        configured.chmod(0o644)
+
+        with pytest.raises(host_fleet.FleetUnavailable, match="not executable") as excinfo:
+            host_fleet.snapshot_binary()
+
+        assert str(configured) in str(excinfo.value)
+
+    def test_not_found_names_every_place_in_order_and_ends_with_the_install(self, places: SimpleNamespace) -> None:
+        """'not found' without a location is a support ticket; without the cure, a second one."""
+        with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+            host_fleet.snapshot_binary()
+
+        message = str(excinfo.value)
+        # Each followed by its separator: the desktop path is a prefix of the headless one.
+        in_order = [
+            f"{places.home / host_fleet.INSTALLED_BINARY_RELATIVE};",
+            f"{places.repo / host_fleet.CHECKOUT_HEADLESS_RELATIVE};",
+            f"{places.repo / host_fleet.DEFAULT_BINARY_RELATIVE};",
+            "'baud-cli' on PATH;",
+            "'baud' on PATH.",
+        ]
+        positions = [message.find(place) for place in in_order]
+
+        assert -1 not in positions, message
+        assert positions == sorted(positions), message
+        assert message.endswith("Install it: aipass baud install.")
+
+    @posix_permissions
+    def test_an_automatic_file_without_the_bit_is_passed_and_named(self, places: SimpleNamespace) -> None:
+        """A download nobody chmodded is skipped for the next step, and still named when nothing answers."""
+        installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE, mode=0o644)
+        desktop = _executable(places.repo / host_fleet.DEFAULT_BINARY_RELATIVE)
+
+        assert host_fleet.snapshot_binary() == str(desktop)
+
+        desktop.unlink()
+        with pytest.raises(host_fleet.FleetUnavailable) as excinfo:
+            host_fleet.snapshot_binary()
+
+        assert f"{installed} (present, not an executable file)" in str(excinfo.value)
+
+    def test_resolution_is_per_request_so_an_install_needs_no_restart(self, places: SimpleNamespace) -> None:
+        """The install can land while the server runs; the very next request uses it."""
+        with pytest.raises(host_fleet.FleetUnavailable):
+            host_fleet.snapshot_binary()
+
+        installed = _executable(places.home / host_fleet.INSTALLED_BINARY_RELATIVE)
+
+        assert host_fleet.snapshot_binary() == str(installed)
+
+    def test_resolution_failure_surfaces_through_read_snapshot(self, ready: None, places: SimpleNamespace) -> None:
         """A missing binary is unavailable, not an empty fleet."""
-        monkeypatch.setattr(host_fleet, "repo_root", lambda: tmp_path)
-        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: None)
-
         with pytest.raises(host_fleet.FleetUnavailable):
             host_fleet.read_snapshot()
 
@@ -756,7 +858,7 @@ ROSTER = {
         {
             "name": "api",
             "project": "AIPASS",
-            "path": "/home/patrick/Projects/AIPass/src/aipass/api",
+            "path": "/srv/aipass/src/aipass/api",
             "is_citizen": True,
             "manager": False,
             "dispatched": True,
@@ -776,7 +878,7 @@ ROSTER = {
         {
             "name": "baud",
             "project": "BAUD",
-            "path": "/home/patrick/Projects/AIPass/projects/baud/src/baud/baud",
+            "path": "/srv/aipass/projects/baud/src/baud/baud",
             "is_citizen": True,
             "manager": False,
             "dispatched": True,
@@ -1246,6 +1348,274 @@ class TestTheMachineCache:
             "import sys\n"
             "import aipass.api.apps.handlers.host.machine\n"
             "print('aipass.skills.lib.system_status.handler' in sys.modules)\n"
+        )
+        result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip().splitlines()[-1] == "False"
+
+
+# ============================================================================
+# The lock lane — GET /v1/lock, FPLAN-0585 row 2
+# ============================================================================
+
+PATCH_LOCK_LOGGER = "aipass.api.apps.handlers.host.lock.logger"
+PATCH_LOCK_JSON = "aipass.api.apps.handlers.host.lock.json_handler"
+
+# The door itself, patched where it lives. lock.py imports it inside the call,
+# so the stand-in is what every read in these cases reaches — never a loginctl.
+PATCH_LOCK_DOOR = "aipass.skills.lib.screen_lock.handler.lock_state"
+
+
+def _lock_answer(locked: bool, method: str = screen_lock.METHOD_LOGINCTL, session: Any = "3") -> dict:
+    """An answer in the skill's published shape. The unlocked default is this laptop's, read live 2026-09-13."""
+    source = f"logind session {session}" if method == screen_lock.METHOD_LOGINCTL else "GNOME ScreenSaver"
+    return {
+        "ok": True,
+        "locked": locked,
+        "method": method,
+        "session": session,
+        "reason": None,
+        "detail": f"The screen is {'locked' if locked else 'unlocked'}, per {source}.",
+    }
+
+
+def _cannot_tell(reason: str = screen_lock.REASON_NO_SESSION) -> dict:
+    """The skill could not tell: ok False, locked None, its code and a sentence standing in for its own."""
+    return {
+        "ok": False,
+        "locked": None,
+        "method": None,
+        "session": None,
+        "reason": reason,
+        "detail": f"Cannot tell whether the screen is locked ({reason}).",
+    }
+
+
+@pytest.fixture
+def lock_door():
+    """A stand-in for @skills' door, with a cold cache on both sides of the case."""
+    with patch(PATCH_LOCK_LOGGER), patch(PATCH_LOCK_JSON), patch(PATCH_CACHE_JSON):
+        host_lock._state.clear()
+        with patch(PATCH_LOCK_DOOR, autospec=True) as door:
+            yield door
+        host_lock._state.clear()
+
+
+@fastapi_required
+class TestTheLockRoute:
+    """Every answer in the door's shape is a 200, cannot-tell included; 503 is the door itself failing."""
+
+    def test_the_route_requires_a_token(self, client, lock_door) -> None:
+        """Whether a laptop is locked says whether anyone is at it. Not public."""
+        response = client.get("/v1/lock")
+
+        assert response.status_code == 401
+        lock_door.assert_not_called()
+
+    def test_read_scope_is_enough(self, client, auth: dict, lock_door) -> None:
+        """A lock's position is observation; only the POST that locks sits under operate."""
+        lock_door.return_value = _lock_answer(locked=False)
+
+        assert client.get("/v1/lock", headers=auth).status_code == 200
+
+    @pytest.mark.parametrize(
+        "answer",
+        [_lock_answer(locked=False), _lock_answer(locked=True, method=screen_lock.METHOD_DBUS, session=None)],
+        ids=["unlocked_per_logind", "locked_per_gnome_screensaver"],
+    )
+    def test_both_answers_arrive_verbatim(self, client, auth: dict, lock_door, answer: dict) -> None:
+        """The whole body is compared, so an adapter anywhere in the request path goes red."""
+        lock_door.return_value = answer
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json() == answer
+        assert "cache-control" not in response.headers, "no cache header, matching /v1/machine"
+
+    @pytest.mark.parametrize(
+        "reason",
+        [screen_lock.REASON_NO_SESSION, screen_lock.REASON_NO_READER, screen_lock.REASON_READ_FAILED],
+    )
+    def test_cannot_tell_is_a_200_carrying_the_skills_answer(self, client, auth: dict, lock_door, reason: str) -> None:
+        """
+        ok False is a reading that says "cannot tell", not a failed owner.
+
+        It arrives whole — locked None, the code, the sentence — so the phone
+        draws unknown, and nothing in the path turns it into a 503 or an unlocked.
+        """
+        lock_door.return_value = _cannot_tell(reason)
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 200
+        assert response.json() == _cannot_tell(reason)
+
+    def test_a_door_that_raises_is_a_503_naming_it_not_a_500(self, client, auth: dict, lock_door) -> None:
+        """The skill never raises for a reading, so a raise is a defect in the door — named."""
+        lock_door.side_effect = RuntimeError("boom inside the door")
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "lock_door_failed"
+        assert "RuntimeError: boom inside the door" in error["message"]
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            None,
+            [],
+            {"locked": False},
+            {"ok": "yes", "locked": False},
+            {"ok": True},
+            {"ok": True, "locked": "no"},
+            {"ok": True, "locked": 0},
+            {"ok": True, "locked": None},
+            {"ok": False, "locked": False},
+        ],
+        ids=[
+            "none",
+            "list",
+            "no_ok",
+            "string_ok",
+            "no_locked",
+            "string_locked",
+            "int_locked",
+            "an_answer_that_answers_nothing",
+            "cannot_tell_that_reads_unlocked",
+        ],
+    )
+    def test_an_answer_outside_the_published_shape_is_a_503(self, client, auth: dict, lock_door, answer: Any) -> None:
+        """
+        A boolean ok, a locked key, and the two agreeing — or nothing is served.
+
+        The last case is the one the chip exists to avoid: a cannot-tell carrying
+        locked False is exactly what a client could draw as unlocked.
+        """
+        lock_door.return_value = answer
+
+        response = client.get("/v1/lock", headers=auth)
+
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "lock_door_failed"
+        assert "published shape" in error["message"]
+
+    def test_a_parameter_is_refused_not_dropped(self, client, auth: dict, lock_door) -> None:
+        """A cache-buster the route ignored would read as a parameter that did something."""
+        response = client.get("/v1/lock?nocache=1757808000", headers=auth)
+
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "lock_parameters_refused"
+        assert "nocache" in error["message"]
+        lock_door.assert_not_called()
+
+
+class TestTheLockCache:
+    """At most one read per second, cannot-tell included, and never a cached door failure."""
+
+    def test_two_reads_inside_a_second_are_one_read(self, lock_door) -> None:
+        """The second read is the first one's answer."""
+        lock_door.return_value = _lock_answer(locked=False)
+
+        first = host_lock.read_lock()
+        second = host_lock.read_lock()
+
+        assert lock_door.call_count == 1
+        assert first == second == _lock_answer(locked=False)
+
+    def test_the_window_is_one_second(self, lock_door, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Inside 1.0 s the stored answer; past it a fresh read. On a clock this case owns."""
+        clock = {"now": 100.0}
+        monkeypatch.setattr(host_read_cache, "time", SimpleNamespace(monotonic=lambda: clock["now"]))
+        lock_door.side_effect = [_lock_answer(locked=False), _lock_answer(locked=True)]
+
+        assert host_lock.read_lock()["locked"] is False
+        clock["now"] = 100.9
+        assert host_lock.read_lock()["locked"] is False
+        clock["now"] = 101.1
+        assert host_lock.read_lock()["locked"] is True
+        assert lock_door.call_count == 2
+
+    def test_cannot_tell_is_served_for_its_window_like_any_reading(self, lock_door) -> None:
+        """ok False is an answer, not a refusal: stored for the window, not re-asked per request."""
+        lock_door.return_value = _cannot_tell()
+
+        assert host_lock.read_lock() == _cannot_tell()
+        assert host_lock.read_lock() == _cannot_tell()
+        assert lock_door.call_count == 1
+
+    def test_a_door_that_raised_is_never_cached(self, lock_door) -> None:
+        """A door that raised once is asked again, not refused for the rest of the second."""
+        lock_door.side_effect = [RuntimeError("once"), _lock_answer(locked=True)]
+
+        with pytest.raises(host_lock.LockDoorFailed):
+            host_lock.read_lock()
+
+        assert host_lock.read_lock()["locked"] is True
+        assert lock_door.call_count == 2
+
+    def test_a_malformed_answer_is_never_cached(self, lock_door) -> None:
+        """A shape fault is raised out of the producer, so the next request asks again."""
+        lock_door.side_effect = [{"ok": True, "locked": None}, _lock_answer(locked=True)]
+
+        with pytest.raises(host_lock.LockDoorFailed, match="published shape"):
+            host_lock.read_lock()
+
+        assert host_lock.read_lock()["locked"] is True
+        assert lock_door.call_count == 2
+
+    def test_a_hung_door_is_one_read_however_many_ask(self, lock_door) -> None:
+        """
+        The known limit's bound: the skill has no timeout, so a hung logind holds its flight.
+
+        A second caller arriving mid-flight waits on that flight and shares its
+        answer; it never starts a read of its own. Every wait is bounded, so a
+        regression fails here rather than hanging the suite.
+        """
+        entered = threading.Event()
+        release = threading.Event()
+
+        def hung_door() -> dict:
+            entered.set()
+            assert release.wait(timeout=10), "the case never released the door"
+            return _lock_answer(locked=True)
+
+        lock_door.side_effect = hung_door
+        answers: list = []
+        first = threading.Thread(target=lambda: answers.append(host_lock.read_lock()))
+        second = threading.Thread(target=lambda: answers.append(host_lock.read_lock()))
+
+        first.start()
+        assert entered.wait(timeout=10), "the first reader never reached the door"
+        second.start()
+        second.join(timeout=0.2)
+        assert second.is_alive(), "the second reader did not wait on the flight"
+        assert lock_door.call_count == 1
+
+        release.set()
+        first.join(timeout=10)
+        second.join(timeout=10)
+
+        assert not first.is_alive() and not second.is_alive()
+        assert lock_door.call_count == 1
+        assert answers == [_lock_answer(locked=True), _lock_answer(locked=True)]
+
+    def test_a_server_that_never_serves_the_route_imports_nothing_new(self) -> None:
+        """
+        The door is imported inside the call, so importing this lane loads no skill.
+
+        Asked of a fresh interpreter, because this one already imported the skill
+        at the top of this file.
+        """
+        probe = (
+            "import sys\n"
+            "import aipass.api.apps.handlers.host.lock\n"
+            "print('aipass.skills.lib.screen_lock.handler' in sys.modules)\n"
         )
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False)
 

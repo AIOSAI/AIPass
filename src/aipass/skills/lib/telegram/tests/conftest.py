@@ -1,13 +1,16 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Telegram skill test configuration — path setup and shared fixtures
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-06-29
+# Modified: 2026-09-14
 # =============================================
 
 """
 Telegram skill test configuration.
+
+Telegram is retired (Patrick ruling 2026-09-14): every test under this
+directory is skipped at collection by pytest_collection_modifyitems below.
 
 Sets up sys.path so that aipass.* (installed package) is importable from tests
 without a full pip install. Also stubs the optional telethon dependency and
@@ -68,6 +71,26 @@ if "telethon" not in sys.modules:
 
     sys.modules["telethon"] = _telethon_stub
     sys.modules["telethon.errors"] = _telethon_errors
+
+
+# Telegram is retired (Patrick ruling 2026-09-14): skipped and ignored by all.
+# The work stays in place, disabled, and its tests are skipped - never fixed. A
+# skip marker, not collect_ignore, so every case still shows up as skipped.
+_TELEGRAM_RETIRED = "Telegram is retired - Patrick ruling 2026-09-14: its tests are skipped, never fixed"
+_TELEGRAM_TESTS = Path(__file__).resolve().parent
+
+
+def pytest_collection_modifyitems(items):
+    """Skip every test under this directory.
+
+    The hook is handed the whole session's items, not only this directory's, so
+    it filters by path. A skip marker is evaluated before any fixture is set up,
+    so none of this file's fixtures run for a skipped case either.
+    """
+    retired = pytest.mark.skip(reason=_TELEGRAM_RETIRED)
+    for item in items:
+        if _TELEGRAM_TESTS in Path(item.path).resolve().parents:
+            item.add_marker(retired)
 
 
 @pytest.fixture(autouse=True, scope="session")

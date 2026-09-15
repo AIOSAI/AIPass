@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dead_code_check.py
 # Description: Dead Code Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -119,6 +119,28 @@ def _build_import_path(py_file: Path, branch_path: Path, branch_name: str) -> st
     return f"{branch_name}.{'.'.join(parts)}"
 
 
+#: A parenthesised import, which may span lines: `from pkg import (\n    a,\n    b,\n)`.
+#: Group 1 is everything between the parentheses.
+_PARENTHESISED_IMPORT = re.compile(r"from\s+\S+\s+import\s*\(([^)]*)\)")
+
+
+def _imported_in_parenthesised_block(stem: str, source_text: str) -> bool:
+    """
+    True when the stem is a name inside a parenthesised, possibly multi-line, import.
+
+    Rule 5's line pattern reads `[^#\\n]*` after `import` and stops at the newline
+    after `(`, so a module imported only as `from pkg import (\\n    repo_door,\\n)`
+    scored unreferenced (@drone, 2026-09-13: repo_door.py took drone to 99 under
+    CI's 100). Comments are stripped from the block first, so a `# repo_door moved`
+    note inside it is not an import.
+    """
+    name = re.compile(rf"\b{re.escape(stem)}\b")
+    for block in _PARENTHESISED_IMPORT.finditer(source_text):
+        if name.search(re.sub(r"#[^\n]*", "", block.group(1))):
+            return True
+    return False
+
+
 def _check_file_used(
     py_file: Path,
     branch_path: Path,
@@ -134,7 +156,8 @@ def _check_file_used(
     2. Entry point (apps/{branch}.py) -- always used
     3. Glob/discovery convention (*_check.py, *_content.py) -- always used
     4. Import by dotted path or relative path found in corpus
-    5. Stem appears in an import statement in corpus
+    5. Stem appears in an import statement in corpus, on one line or inside a
+       parenthesised multi-line block
     6. Filename string reference in corpus
     """
     stem = py_file.stem
@@ -178,6 +201,8 @@ def _check_file_used(
     for pat in import_patterns:
         if re.search(pat, source_text):
             return True
+    if _imported_in_parenthesised_block(stem, source_text):
+        return True
 
     # importlib.import_module with the stem
     if re.search(

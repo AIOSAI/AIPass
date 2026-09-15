@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-17
-# Modified: 2026-08-31
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -38,6 +38,12 @@ from aipass.drone.apps.handlers.git import (
     tag_handler,
     remote_handler,
 )
+
+# On its own line, not in the block above: seedgo's dead_code rule matches an import
+# with a single-line pattern and cannot read a name inside a parenthesised multi-line
+# import, so in the block it scored repo_door.py unreferenced (reported to @seedgo
+# 2026-09-13). Rejoin the block once the rule reads multi-line imports.
+from aipass.drone.apps.handlers.git import repo_door
 from aipass.drone.apps.handlers.help_flags import wants_help
 from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
@@ -97,6 +103,17 @@ _ISSUE_VIEW_TEMPLATE = (
 _ISSUE_VIEW_COMMENTS_TEMPLATE = _ISSUE_VIEW_TEMPLATE + (
     "{{range .comments}}\n--- {{.author.login}} · {{.createdAt}}\n\n{{.body}}\n{{end}}"
 )
+
+# `run view --log` / `--log-failed` in gh 2.45 (this machine's packaged gh) finds
+# each step's log by file name inside the run's log archive. GitHub's archive now
+# holds job-level files only — measured on run 34730939542: `0_seedgo-audit.txt`,
+# `1_test (3.10).txt` and no per-step files — so gh matches nothing, prints nothing
+# and exits 0. An empty answer with a clean exit is read from the jobs API instead.
+_RUN_LOG_FLAGS = ("--log", "--log-failed")
+_FAILED_CONCLUSIONS = ("failure", "timed_out")
+_RUN_VIEW_VALUE_FLAGS = ("-R", "--repo", "-j", "--job", "-a", "--attempt", "-q", "--jq", "-t", "--template", "--json")
+_JOB_ROW_JQ = '"\\(.id)\\t\\(.conclusion)\\t\\(.name)"'
+_GH_TIMEOUT = 60
 
 # Count flags whose value lives in the following arg — skipped, not warned about
 _LOG_COUNT_FLAGS = ("-n", "--count", "--max-count")
@@ -165,6 +182,16 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         print_introspection()
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
+    # The external-repo door is decided BEFORE the tier gate. Its question is not
+    # "does this caller own the repo it stands in" but "does this caller hold the
+    # admin grant", and a flag aimed at another repo must never fall through and
+    # run the verb in the standing one. The gh passthroughs are not door verbs:
+    # their --repo OWNER/NAME is gh's own flag and reaches gh untouched, as ever.
+    if command not in _GH_PASSTHROUGH_COMMANDS:
+        repo_flag = repo_door.extract_repo_flag(args)
+        if repo_flag.present:
+            return _handle_repo_door(command, repo_flag)
+
     cmd: str = command
     if cmd == "tag" and (not args or args[0] == "--list"):
         cmd = "tag-list"
@@ -232,18 +259,91 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
     }
 
 
-def _handle_tag(args: list[str]) -> dict:
+def _handle_tag(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the tag subcommand — create/push release tags or list them."""
     if not args or args[0] == "--list":
-        result = tag_handler.list_tags()
+        result = tag_handler.list_tags(repo_root=repo_root)
         if not result["tags"]:
             return {"stdout": result["message"], "stderr": "", "exit_code": 0}
         return {"stdout": "\n".join(result["tags"]), "stderr": "", "exit_code": 0}
 
-    result = tag_handler.tag_release(args[0])
+    result = tag_handler.tag_release(args[0], repo_root=repo_root)
     if result["success"]:
         return {"stdout": result["message"], "stderr": "", "exit_code": 0}
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
+
+
+def _refuse_repo_door(verdict: repo_door.AdminVerdict, flag: repo_door.RepoFlag, verb: str, reason: str) -> dict:
+    """Record a refused door use and return the refusal, printed exactly."""
+    logger.warning("git repo door refused '%s' --repo %s: %s", verb, flag.path, reason)
+    repo_door.record_use(
+        caller=verdict.caller,
+        verb=verb,
+        args=flag.args,
+        requested=flag.path,
+        repo=flag.path,
+        head_before="",
+        head_after="",
+        exit_code=1,
+        outcome=repo_door.OUTCOME_REFUSED,
+        reason=reason,
+    )
+    return {"stdout": "", "stderr": reason, "exit_code": 1}
+
+
+def _handle_repo_door(command: str, flag: repo_door.RepoFlag) -> dict:
+    """Run one verb in another repo through the admin seat's door (DPLAN-0344).
+
+    The order is the contract. WHO first, so a seat without the grant learns
+    nothing about the path it named; then the flag's own shape; then WHICH verb;
+    then WHICH repo. ``verify_git_access`` is not consulted: its owner tier
+    answers for the repo the caller stands in, and the admin grant is the
+    stronger check for a repo they do not. Every exit writes one record.
+    """
+    verb = "tag-list" if command == "tag" and (not flag.args or flag.args[0] == "--list") else command
+    verdict = repo_door.admin_verdict()
+    if not verdict.granted:
+        return _refuse_repo_door(verdict, flag, verb, verdict.refusal)
+    if flag.error:
+        return _refuse_repo_door(verdict, flag, verb, flag.error)
+    if command not in repo_door.DOOR_VERBS:
+        return _refuse_repo_door(verdict, flag, verb, repo_door.REFUSE_VERB.format(verb=command))
+    target = repo_door.resolve_repo(flag.path, lock_handler.find_repo_root())
+    if target.root is None:
+        return _refuse_repo_door(verdict, flag, verb, target.refusal)
+
+    head_before = repo_door.head_sha(target.root)
+    result = _run_door_verb(command, flag.args, target.root)
+    repo_door.record_use(
+        caller=verdict.caller,
+        verb=verb,
+        args=flag.args,
+        requested=flag.path,
+        repo=target.root,
+        head_before=head_before,
+        head_after=repo_door.head_sha(target.root),
+        exit_code=result["exit_code"],
+        outcome=repo_door.OUTCOME_RAN,
+        reason="",
+    )
+    return result
+
+
+def _run_door_verb(command: str, args: list[str], repo_root: Path) -> dict:
+    """Run a door verb through the same handler it uses at home, pointed at *repo_root*."""
+    if command == "status":
+        return _handle_status(args, repo_root=repo_root)
+    if command == "diff":
+        return _handle_diff(args, repo_root=repo_root)
+    if command == "log":
+        return _handle_log(args, repo_root=repo_root)
+    if command == "commit":
+        return _handle_commit(args, repo_root=repo_root)
+    if command == "tag":
+        return _handle_tag(args, repo_root=repo_root)
+    if args:
+        return {"stdout": "", "stderr": repo_door.REFUSE_PUSH_ARGS, "exit_code": 1}
+    return repo_door.push_current_branch(repo_root)
 
 
 def _rewrite_issue_view(args: list[str]) -> list[str]:
@@ -265,6 +365,93 @@ def _rewrite_issue_view(args: list[str]) -> list[str]:
     return kept + ["--json", fields, "--template", template]
 
 
+def _flag_value(args: list[str], names: tuple[str, ...]) -> str | None:
+    """The value of the first of *names* in *args*, written `--name value` or `--name=value`."""
+    for index, arg in enumerate(args):
+        if arg in names and index + 1 < len(args):
+            return args[index + 1]
+        for name in names:
+            if name.startswith("--") and arg.startswith(name + "="):
+                return arg[len(name) + 1 :]
+    return None
+
+
+def _run_view_id(args: list[str]) -> str | None:
+    """The run id in ``run view`` args: the first bare number that is not a flag's value."""
+    skip_next = False
+    for arg in args[1:]:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in _RUN_VIEW_VALUE_FLAGS:
+            skip_next = True
+            continue
+        if arg.isdigit():
+            return arg
+    return None
+
+
+def _run_log_via_job_api(args: list[str]) -> dict:
+    """Answer ``run view --log`` / ``--log-failed`` from the jobs API after gh printed nothing.
+
+    The API has no per-step slice, so each job's log comes back whole, every line
+    led by its job name and a tab — the column gh's own rendering leads with. For
+    --log-failed that is the full log of each failed job, and the notice on stderr
+    says so rather than letting it pass for gh's step-filtered view.
+    """
+    failed_only = "--log-failed" in args
+    named_repo = _flag_value(args, ("-R", "--repo"))
+    api = f"repos/{named_repo}" if named_repo else "repos/{owner}/{repo}"
+    job_id = _flag_value(args, ("-j", "--job"))
+    run_id = _run_view_id(args)
+    attempt = _flag_value(args, ("-a", "--attempt"))
+
+    if job_id:
+        listing_argv = ["gh", "api", f"{api}/actions/jobs/{job_id}", "--jq", _JOB_ROW_JQ]
+    elif run_id:
+        runs = f"{api}/actions/runs/{run_id}" + (f"/attempts/{attempt}" if attempt else "")
+        listing_argv = ["gh", "api", "--paginate", f"{runs}/jobs", "--jq", f".jobs[] | {_JOB_ROW_JQ}"]
+    else:
+        return {
+            "stdout": "",
+            "stderr": "gh printed no log, and no run or job id was given to read one.",
+            "exit_code": 1,
+        }
+
+    shown = "the full log of each failed job" if failed_only else "each job's full log"
+    notice = (
+        "gh printed no log: this run's log archive holds job-level files only, so gh's per-step "
+        f"matching finds nothing. Showing {shown} from the jobs API instead."
+    )
+    lines: list[str] = []
+    errors: list[str] = []
+    try:
+        listing = subprocess.run(listing_argv, capture_output=True, text=True, timeout=_GH_TIMEOUT)
+        if listing.returncode != 0:
+            return {"stdout": "", "stderr": f"{notice}\nThe jobs API refused: {listing.stderr.strip()}", "exit_code": 1}
+        jobs = [row.split("\t", 2) for row in listing.stdout.splitlines() if row.count("\t") >= 2]
+        if failed_only:
+            jobs = [job for job in jobs if job[1] in _FAILED_CONCLUSIONS]
+        for number, _conclusion, name in jobs:
+            log = subprocess.run(
+                ["gh", "api", f"{api}/actions/jobs/{number}/logs"],
+                capture_output=True,
+                text=True,
+                timeout=_GH_TIMEOUT,
+            )
+            if log.returncode != 0:
+                errors.append(f"job {number} ({name}): {log.stderr.strip()}")
+                continue
+            lines.extend(f"{name}\t{line}" for line in log.stdout.splitlines())
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("run log fallback through the jobs API failed: %s", exc)
+        return {"stdout": "", "stderr": f"{notice}\nThe jobs API call failed: {exc}", "exit_code": 1}
+
+    if not jobs:
+        notice += " No failed job in this run." if failed_only else " The run lists no jobs."
+    return {"stdout": "\n".join(lines), "stderr": "\n".join([notice, *errors]), "exit_code": 1 if errors else 0}
+
+
 def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
     """Pass through to gh CLI for issue, run, and workflow subcommands."""
     if subcommand == "issue":
@@ -277,6 +464,14 @@ def _handle_gh_passthrough(subcommand: str, args: list[str]) -> dict:
             text=True,
             timeout=60,
         )
+        if (
+            subcommand == "run"
+            and args[:1] == ["view"]
+            and any(arg in _RUN_LOG_FLAGS for arg in args)
+            and result.returncode == 0
+            and not result.stdout.strip()
+        ):
+            return _run_log_via_job_api(args)
         return {
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -499,37 +694,46 @@ def _json_document(payload: dict, *, ok: bool) -> dict:
     }
 
 
-def _handle_status(args: list[str] | None = None) -> dict:
-    """Handle the status subcommand (global tier). --all for repo-wide, --json for machines."""
+def _handle_status(args: list[str] | None = None, repo_root: Path | None = None) -> dict:
+    """Handle the status subcommand (global tier). --all for repo-wide, --json for machines.
+
+    *repo_root* is set only by the external-repo door, which names the repo
+    outright: there is no branch to detect and nothing narrower than the whole
+    repo to scope to.
+    """
     args = args or []
     as_json = wants_json(args)
     args = strip_json_flag(args)
-    show_all = "--all" in args
+    show_all = "--all" in args or repo_root is not None
 
-    detected = _detect_branch_dir()
-    if detected is None:
-        message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
-        if as_json:
-            # This refusal fires BEFORE the branch is known, which is how a
-            # machine caller ends up parsing a bare sentence. Every exit from a
-            # --json call is a document, early ones included.
-            return _json_document(
-                {"branch": "", "scope": "branch", "files": [], "total": 0, "message": message}, ok=False
-            )
-        return {"stdout": "", "stderr": message, "exit_code": 1}
-
-    _, branch_dir = detected
-
-    branch_name = detected[0]
-
-    if show_all:
-        repo_root = lock_handler.find_repo_root()
-        result = status_handler.get_branch_status(repo_root)
+    if repo_root is not None:
+        branch_name = repo_root.name
+        result = status_handler.get_branch_status(repo_root, repo_root=repo_root)
         if result.get("ok", True):
-            # only reword the success message — an error message must survive verbatim
-            result["message"] = f"{result['total']} file(s) changed in repo"
+            result["message"] = f"{result['total']} file(s) changed in {repo_root}"
     else:
-        result = status_handler.get_branch_status(branch_dir)
+        detected = _detect_branch_dir()
+        if detected is None:
+            message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+            if as_json:
+                # This refusal fires BEFORE the branch is known, which is how a
+                # machine caller ends up parsing a bare sentence. Every exit from a
+                # --json call is a document, early ones included.
+                return _json_document(
+                    {"branch": "", "scope": "branch", "files": [], "total": 0, "message": message}, ok=False
+                )
+            return {"stdout": "", "stderr": message, "exit_code": 1}
+
+        branch_name, branch_dir = detected
+
+        if show_all:
+            standing_root = lock_handler.find_repo_root()
+            result = status_handler.get_branch_status(standing_root)
+            if result.get("ok", True):
+                # only reword the success message — an error message must survive verbatim
+                result["message"] = f"{result['total']} file(s) changed in repo"
+        else:
+            result = status_handler.get_branch_status(branch_dir)
 
     if as_json:
         # The scope footer and the header sentence are prose. A machine caller
@@ -569,32 +773,37 @@ def _handle_status(args: list[str] | None = None) -> dict:
     }
 
 
-def _handle_diff(args: list[str]) -> dict:
-    """Handle the diff subcommand (global tier). --staged, --all supported."""
-    detected = _detect_branch_dir()
-    if detected is None:
-        return {
-            "stdout": "",
-            "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
-            "exit_code": 1,
-        }
+def _handle_diff(args: list[str], repo_root: Path | None = None) -> dict:
+    """Handle the diff subcommand (global tier). --staged, --all supported.
 
-    branch_name, branch_dir = detected
+    *repo_root* is set only by the external-repo door: the whole named repo.
+    """
     staged = "--staged" in args
-    show_all = "--all" in args
+    scope_note = ""
+    if repo_root is not None:
+        result = diff_handler.get_branch_diff(repo_root, staged=staged, repo_root=repo_root)
+    else:
+        detected = _detect_branch_dir()
+        if detected is None:
+            return {
+                "stdout": "",
+                "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
+                "exit_code": 1,
+            }
 
-    target_dir = lock_handler.find_repo_root() if show_all else branch_dir
-    result = diff_handler.get_branch_diff(target_dir, staged=staged)
+        branch_name, branch_dir = detected
+        show_all = "--all" in args
+        target_dir = lock_handler.find_repo_root() if show_all else branch_dir
+        result = diff_handler.get_branch_diff(target_dir, staged=staged)
+        if not show_all:
+            scope_note = f"\n(showing {branch_name} scope — use --all for full repo)"
 
     if not result.get("ok", True):
         # same false-green trap as _handle_status — a git failure must exit non-zero
         return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
     output = result["diff"] if result["diff"] else result["message"]
-    if not show_all:
-        output += f"\n(showing {branch_name} scope — use --all for full repo)"
-
-    return {"stdout": output, "stderr": "", "exit_code": 0}
+    return {"stdout": output + scope_note, "stderr": "", "exit_code": 0}
 
 
 def _split_log_entry(entry: str) -> dict:
@@ -613,10 +822,11 @@ def _split_log_entry(entry: str) -> dict:
     return {"sha": sha, "subject": subject.strip()}
 
 
-def _handle_log(args: list[str]) -> dict:
+def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
     """Handle the log subcommand (global tier).
 
-    Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`.
+    Accepts the git idioms: `log 20`, `log -n 20`, and `log -20`. *repo_root* is
+    set only by the external-repo door.
     """
     as_json = wants_json(args)
     # Stripped BEFORE the count scan below: left in, `--json` reaches int(),
@@ -650,7 +860,7 @@ def _handle_log(args: list[str]) -> dict:
             return _json_document({"commits": [], "count": 0, "message": message}, ok=False)
         return {"stdout": "", "stderr": message, "exit_code": 1}
 
-    result = log_handler.get_git_log(count=count)
+    result = log_handler.get_git_log(count=count, repo_root=repo_root)
 
     if as_json:
         return _json_document(
@@ -740,8 +950,8 @@ def _handle_remote(args: list[str]) -> dict:
     return {"stdout": "\n".join(lines), "stderr": "", "exit_code": 0}
 
 
-def _handle_commit(args: list[str]) -> dict:
-    """Handle the commit subcommand (owner tier)."""
+def _handle_commit(args: list[str], repo_root: Path | None = None) -> dict:
+    """Handle the commit subcommand (owner tier). *repo_root* is set only by the external-repo door."""
     if not args:
         return {
             "stdout": "",
@@ -769,7 +979,7 @@ def _handle_commit(args: list[str]) -> dict:
             "exit_code": 1,
         }
 
-    return commit_handler.commit_changes(message, all_files=all_files, files=files)
+    return commit_handler.commit_changes(message, all_files=all_files, files=files, repo_root=repo_root)
 
 
 def _handle_checkout(args: list[str]) -> dict:
@@ -935,6 +1145,12 @@ def get_help(command: str | None = None) -> str:
             "Options:\n"
             "  --dry-run   Report without executing fixes.\n"
         )
+    if command == "push":
+        return (
+            "git push --repo <path> — Push an external repo's checked-out branch to its origin [admin seat]\n"
+            "  Same branch name on origin, never forced; git's own refusal comes back untouched.\n"
+            "  Only through the external-repo door — AIPass pushes through dev-pr.\n"
+        )
     if command == "tag":
         return (
             "git tag <vX.Y.Z> — Create and push an annotated release tag [owner]\n"
@@ -981,7 +1197,8 @@ def get_help(command: str | None = None) -> str:
         "  unlock --force         Force-release the PR lock\n"
         "  tag <vX.Y.Z>           Create and push release tag\n"
         "  fix [--dry-run]        Fix broken git states\n"
-        "\n"
+        "  push --repo <path>     Push an external repo's branch (the door below only)\n"
+        "\n" + _repo_door_help() + "\n"
         "--json — THE MACHINE SURFACE:\n"
         "  status, log, show and remote take --json in ANY slot; it is stripped\n"
         "  before positional parsing, so `log --json 20` parses like `log 20`.\n"
@@ -990,6 +1207,40 @@ def get_help(command: str | None = None) -> str:
         "  A help flag OUTRANKS it: `status --help --json` prints this page.\n"
         "  status --json reports git's TWO porcelain columns ('M ' staged vs\n"
         "  ' M' unstaged) which the rendered view collapses to one letter.\n"
+    )
+
+
+def _repo_door_help() -> str:
+    """The external-repo door's block of the help page, refusals rendered from the door's own constants."""
+    placeholders = {"caller": "<caller>", "path": "<path>", "verb": "<verb>", "toplevel": "<toplevel>"}
+    refusals = (
+        repo_door.REFUSE_NOT_ADMIN,
+        repo_door.REFUSE_LANE_DARK.replace("{reason}", "<reason>"),
+        repo_door.REFUSE_VERB,
+        repo_door.REFUSE_NO_VALUE,
+        repo_door.REFUSE_TWICE,
+        repo_door.REFUSE_MISSING,
+        repo_door.REFUSE_NOT_DIR,
+        repo_door.REFUSE_NOT_REPO,
+        repo_door.REFUSE_NOT_TOP,
+        repo_door.REFUSE_AIPASS,
+    )
+    lines = "".join(f"    {text.format(**placeholders)}\n" for text in refusals)
+    return (
+        "External-repo door — admin seat only (DPLAN-0344):\n"
+        "  status | diff [--staged] | log [count] | commit <msg> [--all | files] | push | tag <name>  --repo <path>\n"
+        "  Runs the verb in another git repo (projects/baud, a clone outside the tree).\n"
+        "  <path> is absolute, or relative to the AIPass root (not your cwd), and must be\n"
+        "  that repo's top level. --repo=<path> works too, in any slot.\n"
+        "  Checked on EVERY use against @ai_mail's verified-caller rail — the 5-leg admin\n"
+        "  grant, never cached. Project managers keep their own CWD-bound owner tier;\n"
+        "  --repo is not theirs. No AIPass PR lock is taken (git's index.lock serialises).\n"
+        "  commit never pushes, as at home: push is its own verb. commit --all runs the\n"
+        "  same lint and test gate there it runs anywhere; file paths are repo-relative.\n"
+        "  issue, run and workflow are not door verbs: their --repo OWNER/NAME is gh's own.\n"
+        "  Every use, refusals included, is one line in .ai_central/git_repo_door.jsonl:\n"
+        "  caller, cwd, verb, args, repo, HEAD before and after, exit code.\n"
+        "  Refusals, exactly as printed:\n" + lines
     )
 
 
@@ -1002,6 +1253,7 @@ def get_introspective() -> str:
         "    - lock_handler.py, status_handler.py, diff_handler.py, log_handler.py, show_handler.py\n"
         "    - remote_handler.py, commit_handler.py, checkout_handler.py, sync_handler.py\n"
         "    - dev_pr_handler.py, branches_handler.py, delete_branch_handler.py, close_pr_handler.py\n"
+        "    - repo_door.py (--repo <path>, admin seat only)\n"
         "  plugins/devpulse_ops/\n"
         "    - auth.py, merge_plugin.py, sync_plugin.py, fix_plugin.py\n"
         "  gh passthrough: issue, run, workflow\n"
@@ -1061,6 +1313,7 @@ def print_introspection() -> None:
         " [cyan]delete_branch_handler.py[/cyan], [cyan]close_pr_handler.py[/cyan],"
         " [cyan]tag_handler.py[/cyan]"
     )
+    c.print("    - [cyan]repo_door.py[/cyan] [dim](--repo <path>, admin seat only)[/dim]")
     c.print("  [cyan]plugins/devpulse_ops/[/cyan]")
     c.print(
         "    - [cyan]auth.py[/cyan], [cyan]merge_plugin.py[/cyan],"

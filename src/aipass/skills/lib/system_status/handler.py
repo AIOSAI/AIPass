@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handler.py
 # Description: System Status skill handler - disk, memory, uptime, processes, machine_vitals()
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-12
+# Modified: 2026-09-13
 # =============================================
 
 """
@@ -263,7 +263,7 @@ VITALS_SCHEMA = 1
 # Every section's values, beside the available/reason/sentence/detail every
 # section carries. A value the host cannot give is None, never a zero.
 _SECTION_VALUES = {
-    "cpu": ("percent", "window_s"),
+    "cpu": ("percent", "window_s", "cores", "logical", "physical", "mhz", "mhz_max"),
     "load": ("one", "five", "fifteen"),
     "memory": ("total_bytes", "used_bytes", "available_bytes", "percent"),
     "swap": ("total_bytes", "used_bytes", "free_bytes", "percent"),
@@ -451,7 +451,7 @@ def _swap_baseline(key, sample):
 
 
 def _cpu_busy_and_total(times):
-    """Split a cpu_times() sample into busy and total seconds.
+    """Split one CPU's cpu_times() tuple into busy and total seconds.
 
     Guest time is already counted inside user and nice on Linux, so it comes
     back out of the total; iowait is idle. The same accounting psutil's own
@@ -463,21 +463,71 @@ def _cpu_busy_and_total(times):
 
 
 def _read_cpu(ps):
-    """CPU busy percent over the window since this skill's last sample."""
-    sample = ps.cpu_times()
+    """CPU busy percent, per logical CPU and in total, over the window since this skill's last sample.
+
+    One sample per read - cpu_times(percpu=True) - and the headline percent is
+    summed from the same per-CPU deltas the cores are, so the headline and the
+    bars agree by construction (FPLAN-0586). The counts and the frequency are
+    instant readings, so they are published even while the rate is warming.
+    """
+    sample = ps.cpu_times(percpu=True)
+    facts, detail = _cpu_facts(ps)
     previous, window_s = _swap_baseline("cpu", sample)
-    if previous is None:
-        return _section("cpu", "warming")
+    if previous is None or len(previous) != len(sample) or window_s <= 0:
+        # The first sample in this process, or the CPU set changed between the
+        # two (hotplug): the held sample measures nothing now, and this one has
+        # replaced it.
+        return _section("cpu", "warming", detail=detail, **facts)
 
-    busy_now, total_now = _cpu_busy_and_total(sample)
-    busy_then, total_then = _cpu_busy_and_total(previous)
-    total_delta = total_now - total_then
-    if total_delta <= 0 or window_s <= 0:
-        # No clock tick between the two samples - there is no window to divide by.
-        return _section("cpu", "warming")
+    deltas = []
+    for now, then in zip(sample, previous):
+        busy_now, total_now = _cpu_busy_and_total(now)
+        busy_then, total_then = _cpu_busy_and_total(then)
+        deltas.append((busy_now - busy_then, total_now - total_then))
+    if any(total <= 0 for _, total in deltas):
+        # A CPU with no clock tick between the two samples has no window to divide by.
+        return _section("cpu", "warming", detail=detail, **facts)
 
-    percent = (busy_now - busy_then) / total_delta * 100
-    return _section("cpu", percent=_clamp_percent(percent), window_s=round(window_s, 3))
+    percent = sum(busy for busy, _ in deltas) / sum(total for _, total in deltas) * 100
+    return _section(
+        "cpu",
+        detail=detail,
+        percent=_clamp_percent(percent),
+        window_s=round(window_s, 3),
+        cores=[_clamp_percent(busy / total * 100) for busy, total in deltas],
+        **facts,
+    )
+
+
+def _cpu_facts(ps):
+    """The CPU counts and frequency - instant readings, None where the host gives none.
+
+    Returns:
+        tuple: (dict of logical, physical, mhz and mhz_max; detail naming a
+            frequency read that raised, or None).
+    """
+    facts = {
+        "logical": ps.cpu_count(),
+        "physical": ps.cpu_count(logical=False),
+        "mhz": None,
+        "mhz_max": None,
+    }
+    if not hasattr(ps, "cpu_freq"):
+        return facts, None
+
+    try:
+        freq = ps.cpu_freq()
+    except (OSError, NotImplementedError) as exc:
+        # psutil's Linux reader raises both when a cpufreq file is missing. The
+        # frequency is lost; the percent and the cores are not.
+        logger.warning("machine_vitals: the cpu frequency read failed: %s", exc)
+        return facts, f"cpu_freq: {_describe(exc)}"
+
+    if freq is not None:
+        # psutil's /proc/cpuinfo fallback reports max as 0.0 - that is no ceiling, not a zero.
+        facts["mhz"] = round(freq.current, 1) if freq.current else None
+        facts["mhz_max"] = round(freq.max, 1) if freq.max else None
+    return facts, None
 
 
 def _read_network(ps):

@@ -82,6 +82,7 @@ import pytest
 
 from aipass.api.apps.modules.host_api import handle_command
 from aipass.api.apps.handlers.host import config as host_config
+from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import lifetime as host_lifetime
 from aipass.api.apps.handlers.host import fleet as host_fleet
 from aipass.api.apps.handlers.host import server as host_server
@@ -126,6 +127,14 @@ PATCH_SRV_SUCCESS = "aipass.api.apps.modules.host_serve.success"
 PATCH_SRV_WARNING = "aipass.api.apps.modules.host_serve.warning"
 PATCH_SRV_JSON = "aipass.api.apps.modules.host_serve.json_handler"
 
+# host_config_cli.py — config and set-config, split from host_api.py (FPLAN-0589).
+PATCH_CFG_CONSOLE = "aipass.api.apps.modules.host_config_cli.console"
+PATCH_CFG_HEADER = "aipass.api.apps.modules.host_config_cli.header"
+PATCH_CFG_ERROR = "aipass.api.apps.modules.host_config_cli.error"
+PATCH_CFG_SUCCESS = "aipass.api.apps.modules.host_config_cli.success"
+PATCH_CFG_WARNING = "aipass.api.apps.modules.host_config_cli.warning"
+PATCH_CFG_JSON = "aipass.api.apps.modules.host_config_cli.json_handler"
+
 # An address in TEST-NET-3 (RFC 5737). Guaranteed not to be a real interface.
 UNHELD_ADDRESS = "203.0.113.7"
 # Shaped like the tailnet address Stage 0 is ultimately aimed at.
@@ -138,6 +147,18 @@ def store(tmp_path: Path):
     with patch(PATCH_SECRETS_BASE, tmp_path), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
         with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER):
             yield tmp_path
+
+
+def _printed(*mocks: Any) -> str:
+    """
+    What the mocked output calls were given, as one plain string.
+
+    Joined from the call arguments, never from the repr of the calls: a repr
+    doubles every backslash, so a Windows path is never found in it (seedgo
+    posix_literal REPR-HAYSTACK, Windows CI run 34882199024).
+    """
+    given = (value for mock in mocks for call in mock.call_args_list for value in (*call.args, *call.kwargs.values()))
+    return " ".join(str(value) for value in given)
 
 
 @pytest.fixture
@@ -156,6 +177,12 @@ def quiet_module():
         patch(PATCH_SRV_SUCCESS, new=mock_success),
         patch(PATCH_SRV_WARNING, new=mock_warning),
         patch(PATCH_SRV_JSON),
+        patch(PATCH_CFG_CONSOLE, new=mock_console),
+        patch(PATCH_CFG_HEADER),
+        patch(PATCH_CFG_ERROR, new=mock_error),
+        patch(PATCH_CFG_SUCCESS, new=mock_success),
+        patch(PATCH_CFG_WARNING, new=mock_warning),
+        patch(PATCH_CFG_JSON),
     ):
         # `console` is handed back so a test can read what was PRINTED, not
         # just what was refused — the S49 check needs the actual output.
@@ -343,6 +370,224 @@ class TestConfig:
             config = host_config.load_config()
 
         assert config == {"host": "127.0.0.1", "port": 8080}
+
+
+def _face_bundle(directory: Path) -> Path:
+    """A directory shaped like @baud's built phone bundle: phone.html at its root."""
+    directory.mkdir(parents=True)
+    (directory / host_config.FACE_ENTRY).write_text("<!doctype html>", encoding="utf-8")
+    return directory
+
+
+class TestFaceDir:
+    """
+    FPLAN-0587 row 1: where the phone face is served from, stored beside the bind.
+
+    The bind rule's doctrine: a value that would not serve is refused at write
+    time, where whoever supplied it is still there, and nothing is stored.
+    """
+
+    def test_unset_by_default(self, store: Path) -> None:
+        """No face_dir stored is None — the checkout default is face.py's call."""
+        assert host_config.face_dir() is None
+
+    def test_a_built_bundle_is_stored_and_read_back(self, store: Path, tmp_path: Path) -> None:
+        """Stored as a plain string in the existing config, returned as a Path."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            stored = host_config.set_face_dir(bundle)
+
+        assert stored == bundle
+        assert host_config.face_dir() == bundle
+        assert host_config.load_config()["face_dir"] == str(bundle)
+
+    def test_a_relative_path_is_refused(self, store: Path) -> None:
+        """Relative to what? The server's working directory is nobody's decision."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="absolute"):
+            host_config.set_face_dir(Path("projects") / "baud" / "app" / "dist-phone")
+
+        assert host_config.face_dir() is None
+
+    def test_a_missing_directory_is_refused(self, store: Path, tmp_path: Path) -> None:
+        """A path that does not exist yet stores nothing — no config file at all."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="not a directory"):
+            host_config.set_face_dir(tmp_path / "never-built")
+
+        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+
+    def test_the_entry_file_itself_is_refused(self, store: Path, tmp_path: Path) -> None:
+        """Naming phone.html instead of the directory holding it is an easy slip."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="not a directory"):
+            host_config.set_face_dir(bundle / host_config.FACE_ENTRY)
+
+        assert host_config.face_dir() is None
+
+    def test_a_directory_without_phone_html_is_refused(self, store: Path, tmp_path: Path) -> None:
+        """An unbuilt or wrong directory would answer every navigation with a 503."""
+        empty = tmp_path / "empty"
+        empty.mkdir()
+
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.FaceDirRefused, match="phone.html"):
+            host_config.set_face_dir(empty)
+
+        assert host_config.face_dir() is None
+
+    def test_the_refusal_is_a_value_error(self) -> None:
+        """Callers outside this branch (@aipass's installer) may catch ValueError."""
+        assert issubclass(host_config.FaceDirRefused, ValueError)
+
+    def test_a_refusal_leaves_the_stored_dir_alone(self, store: Path, tmp_path: Path) -> None:
+        """Refused means nothing was written — not that the old value was dropped."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_face_dir(bundle)
+            with pytest.raises(host_config.FaceDirRefused):
+                host_config.set_face_dir(tmp_path / "never-built")
+
+        assert host_config.face_dir() == bundle
+
+    def test_clearing_removes_the_key(self, store: Path, tmp_path: Path) -> None:
+        """None clears: the key is gone, not stored as null."""
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_face_dir(_face_bundle(tmp_path / "face"))
+            cleared = host_config.set_face_dir(None)
+
+        assert cleared is None
+        assert host_config.face_dir() is None
+        assert "face_dir" not in host_config.load_config()
+
+    def test_clearing_when_unset_writes_nothing(self, store: Path) -> None:
+        """A clear with nothing to clear must not create a config file nobody asked for."""
+        with patch(PATCH_CONFIG_LOGGER):
+            assert host_config.set_face_dir(None) is None
+
+        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+
+    def test_the_bind_survives_a_face_dir_write(self, store: Path, tmp_path: Path) -> None:
+        """One store, two settings: writing one keeps the other."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.save_config({"host": "127.0.0.1", "port": 9100})
+            host_config.set_face_dir(bundle)
+            config = host_config.load_config()
+
+        assert config == {"host": "127.0.0.1", "port": 9100, "face_dir": str(bundle)}
+
+
+def _baud_binary(path: Path, mode: int = 0o755) -> Path:
+    """A stand-in baud binary: a regular file with the given mode."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    path.chmod(mode)
+    return path
+
+
+posix_permissions = pytest.mark.skipif(sys.platform == "win32", reason="os.access X_OK is always true on Windows")
+
+
+class TestBaudBin:
+    """
+    FPLAN-0589 row 2: the baud binary the host lanes exec, stored beside face_dir.
+
+    Four legs, validated before any write, each refusal naming its own:
+    absolute, exists, a regular file, executable.
+    """
+
+    def test_unset_by_default(self, store: Path) -> None:
+        """No baud_bin stored is None — the automatic lookup is fleet.py's call."""
+        assert host_config.baud_bin() is None
+
+    def test_an_executable_file_is_stored_and_read_back(self, store: Path, tmp_path: Path) -> None:
+        """Stored as a plain string in the existing config, returned as a Path."""
+        binary = _baud_binary(tmp_path / "bin" / "baud-cli")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            stored = host_config.set_baud_bin(binary)
+
+        assert stored == binary
+        assert host_config.baud_bin() == binary
+        assert host_config.load_config()["baud_bin"] == str(binary)
+
+    def test_a_relative_path_is_refused(self, store: Path) -> None:
+        """Leg one: relative to the server's working directory is nobody's decision."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="absolute"):
+            host_config.set_baud_bin(Path("bin") / "baud-cli")
+
+        assert host_config.baud_bin() is None
+
+    def test_a_missing_file_is_refused(self, store: Path, tmp_path: Path) -> None:
+        """Leg two: nothing is there — and no config file is created either."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="does not exist"):
+            host_config.set_baud_bin(tmp_path / "never-installed")
+
+        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+
+    def test_a_directory_is_refused(self, store: Path, tmp_path: Path) -> None:
+        """Leg three: a directory exists and carries the x bit, and is still not a binary."""
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="not a regular file"):
+            host_config.set_baud_bin(tmp_path)
+
+        assert host_config.baud_bin() is None
+
+    @posix_permissions
+    def test_a_file_without_the_executable_bit_is_refused(self, store: Path, tmp_path: Path) -> None:
+        """Leg four: a download nobody chmodded would fail at every exec instead."""
+        binary = _baud_binary(tmp_path / "baud-cli", mode=0o644)
+
+        with patch(PATCH_CONFIG_LOGGER), pytest.raises(host_config.BaudBinRefused, match="not executable"):
+            host_config.set_baud_bin(binary)
+
+        assert host_config.baud_bin() is None
+
+    def test_the_refusal_is_a_value_error(self) -> None:
+        """@aipass's installer may catch ValueError, as it does for the face dir."""
+        assert issubclass(host_config.BaudBinRefused, ValueError)
+
+    def test_a_refusal_leaves_the_stored_binary_alone(self, store: Path, tmp_path: Path) -> None:
+        """Refused means nothing was written — not that the old value was dropped."""
+        binary = _baud_binary(tmp_path / "baud-cli")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_baud_bin(binary)
+            with pytest.raises(host_config.BaudBinRefused):
+                host_config.set_baud_bin(tmp_path / "never-installed")
+
+        assert host_config.baud_bin() == binary
+
+    def test_clearing_removes_the_key(self, store: Path, tmp_path: Path) -> None:
+        """None clears: the key is gone, not stored as null."""
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_baud_bin(_baud_binary(tmp_path / "baud-cli"))
+            cleared = host_config.set_baud_bin(None)
+
+        assert cleared is None
+        assert host_config.baud_bin() is None
+        assert "baud_bin" not in host_config.load_config()
+
+    def test_clearing_when_unset_writes_nothing(self, store: Path) -> None:
+        """A clear with nothing to clear must not create a config file nobody asked for."""
+        with patch(PATCH_CONFIG_LOGGER):
+            assert host_config.set_baud_bin(None) is None
+
+        assert not (store / host_config.CONFIG_PROVIDER / f"{host_config.CONFIG_SLUG}.json").exists()
+
+    def test_the_face_dir_survives_a_baud_bin_write_and_clear(self, store: Path, tmp_path: Path) -> None:
+        """One store, three settings: writing or clearing one keeps the others."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_face_dir(bundle)
+            host_config.set_baud_bin(_baud_binary(tmp_path / "baud-cli"))
+            host_config.set_baud_bin(None)
+            config = host_config.load_config()
+
+        assert config["face_dir"] == str(bundle)
+        assert "baud_bin" not in config
 
 
 # =============================================
@@ -1009,8 +1254,8 @@ class TestIssueTokenCommand:
         handle_command("host-api", ["issue-token", "pixel-8"])
 
         raw = (store / "host_api" / "pixel-8.token").read_text(encoding="utf-8")
-        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
-        printed += " ".join(str(call) for call in quiet_module["success"].call_args_list)
+        printed = _printed(quiet_module["console"].print)
+        printed += _printed(quiet_module["success"])
 
         assert raw not in printed, "the raw token reached the console"
 
@@ -1282,7 +1527,7 @@ class TestDetachStatusAndStop:
 
         handle_command("host-api", ["status"])
 
-        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+        printed = _printed(quiet_module["console"].print)
 
         assert "host_api_serve.log" in printed
         quiet_module["error"].assert_not_called()
@@ -1303,8 +1548,8 @@ class TestDetachStatusAndStop:
 
         handle_command("host-api", ["status"])
 
-        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
-        printed += " ".join(str(call) for call in quiet_module["success"].call_args_list)
+        printed = _printed(quiet_module["console"].print)
+        printed += _printed(quiet_module["success"])
 
         assert "4242" in printed
         assert "8790" in printed
@@ -1329,8 +1574,8 @@ class TestDetachStatusAndStop:
 
         handle_command("host-api", ["status"])
 
-        printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
-        printed += " ".join(str(call) for call in quiet_module["error"].call_args_list)
+        printed = _printed(quiet_module["console"].print)
+        printed += _printed(quiet_module["error"])
 
         quiet_module["error"].assert_called()
         assert "did not answer" in printed
@@ -1496,6 +1741,149 @@ class TestSetConfigCommand:
         quiet_module["error"].assert_called_once()
         assert host_config.load_config()["port"] == host_config.DEFAULT_PORT
 
+    def test_face_dir_is_validated_and_stored(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """The CLI door @aipass's installer names when it cannot call in-process."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--face-dir", str(bundle)])
+
+        quiet_module["error"].assert_not_called()
+        assert host_config.face_dir() == bundle
+
+    def test_face_dir_default_clears_it(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """'default' is the spelling for 'serve the checkout build again'."""
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_face_dir(_face_bundle(tmp_path / "face"))
+            handle_command("host-api", ["set-config", "--face-dir", "default"])
+
+        quiet_module["error"].assert_not_called()
+        assert host_config.face_dir() is None
+
+    def test_a_refused_face_dir_is_an_error_that_says_why(
+        self, store: Path, quiet_module: dict, tmp_path: Path
+    ) -> None:
+        """The refusal's own sentence reaches the operator, and nothing is stored."""
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--face-dir", str(tmp_path / "never-built")])
+
+        quiet_module["error"].assert_called_once()
+        assert "not a directory" in str(quiet_module["error"].call_args)
+        assert host_config.face_dir() is None
+
+    def test_a_refused_face_dir_stores_no_bind_either(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """One command, one outcome: half of a refused command is not stored."""
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--port", "9100", "--face-dir", str(tmp_path / "never-built")])
+
+        quiet_module["error"].assert_called_once()
+        assert host_config.load_config()["port"] == host_config.DEFAULT_PORT
+
+    def test_a_refused_bind_stores_no_face_dir_either(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """The other half of the same promise."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--host", "0.0.0.0", "--face-dir", str(bundle)])
+
+        quiet_module["error"].assert_called_once()
+        assert host_config.face_dir() is None
+
+    def test_bind_and_face_dir_together_keep_both(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """The bind write must not overwrite the face_dir stored a moment before it."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--port", "9100", "--face-dir", str(bundle)])
+            config = host_config.load_config()
+
+        quiet_module["error"].assert_not_called()
+        assert config["port"] == 9100
+        assert config["face_dir"] == str(bundle)
+
+    def test_face_dir_alone_does_not_revalidate_a_stored_bind(
+        self, store: Path, quiet_module: dict, tmp_path: Path
+    ) -> None:
+        """
+        The installer points the face while the stored address may be down.
+
+        A face_dir write that re-ran the bind check would refuse for a reason
+        its caller never touched.
+        """
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.save_config({"host": UNHELD_ADDRESS, "port": 8787})
+            handle_command("host-api", ["set-config", "--face-dir", str(bundle)])
+
+        quiet_module["error"].assert_not_called()
+        assert host_config.face_dir() == bundle
+
+    def test_a_home_relative_face_dir_is_expanded(
+        self, store: Path, quiet_module: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A quoted ~ reaches this command unexpanded; the store only ever holds absolute paths."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--face-dir", "~/face"])
+
+        quiet_module["error"].assert_not_called()
+        assert host_config.face_dir() == bundle
+
+    def test_baud_bin_is_validated_and_stored(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """The CLI door beside the installer's in-process one."""
+        binary = _baud_binary(tmp_path / "bin" / "baud-cli")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--baud-bin", str(binary)])
+
+        quiet_module["error"].assert_not_called()
+        assert host_config.baud_bin() == binary
+
+    def test_baud_bin_default_clears_it(self, store: Path, quiet_module: dict, tmp_path: Path) -> None:
+        """'default' hands the lanes back to the automatic lookup."""
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_baud_bin(_baud_binary(tmp_path / "baud-cli"))
+            handle_command("host-api", ["set-config", "--baud-bin", "default"])
+
+        quiet_module["error"].assert_not_called()
+        assert host_config.baud_bin() is None
+
+    def test_a_refused_baud_bin_is_an_error_that_says_why(
+        self, store: Path, quiet_module: dict, tmp_path: Path
+    ) -> None:
+        """The failing leg's own sentence reaches the operator, and nothing is stored."""
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["set-config", "--baud-bin", str(tmp_path / "never-installed")])
+
+        quiet_module["error"].assert_called_once()
+        assert "does not exist" in str(quiet_module["error"].call_args)
+        assert host_config.baud_bin() is None
+
+    def test_a_refused_baud_bin_stores_no_face_dir_either(
+        self, store: Path, quiet_module: dict, tmp_path: Path
+    ) -> None:
+        """
+        Every path is validated before any is stored.
+
+        The face dir is written first when both pass, so storing as each one
+        validated would leave the face dir behind a refused binary.
+        """
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command(
+                "host-api",
+                ["set-config", "--face-dir", str(bundle), "--baud-bin", str(tmp_path / "never-installed")],
+            )
+
+        quiet_module["error"].assert_called_once()
+        assert host_config.face_dir() is None
+        assert host_config.baud_bin() is None
+
 
 class TestFlagParsing:
     """The small helper every command reads its options through."""
@@ -1531,7 +1919,7 @@ class TestIntrospection:
         with patch(PATCH_MOD_CONSOLE) as mock_console, patch(PATCH_MOD_HEADER), patch(PATCH_CONFIG_LOGGER):
             host_api_module.print_introspection()
 
-        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        printed = _printed(mock_console.print)
         assert "serve" in printed
 
     def test_help_names_every_subcommand_it_routes(self) -> None:
@@ -1546,7 +1934,7 @@ class TestIntrospection:
         with patch(PATCH_MOD_CONSOLE) as mock_console:
             host_api_module.print_help()
 
-        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        printed = _printed(mock_console.print)
         missing = [verb for verb in host_serve_module.SUBCOMMANDS if verb not in printed]
 
         assert missing == [], f"help does not name these routed verbs: {missing}"
@@ -1558,6 +1946,146 @@ class TestIntrospection:
             handle_command("host-api", ["config"])
 
         quiet_module["warning"].assert_called_once()
+
+    def test_help_does_not_claim_loopback_only_while_the_gate_is_open(self) -> None:
+        """
+        It did until 2026-09-13: 'Phase 1 is loopback-only' a month after the
+        gate opened, found by @baud checking their SECURITY.md against it. The
+        sentence is read from LOOPBACK_ONLY now, so it cannot outlive the flag.
+        """
+        with patch(PATCH_MOD_CONSOLE) as mock_console, patch.object(host_config, "LOOPBACK_ONLY", False):
+            host_api_module.print_help()
+
+        printed = _printed(mock_console.print).lower()
+        assert "loopback-only" not in printed
+        assert "loopback only" not in printed
+
+    def test_help_says_loopback_only_when_the_gate_is_closed(self) -> None:
+        """The same sentence, read the other way: closing the gate changes the help too."""
+        with patch(PATCH_MOD_CONSOLE) as mock_console, patch.object(host_config, "LOOPBACK_ONLY", True):
+            host_api_module.print_help()
+
+        printed = _printed(mock_console.print).lower()
+        assert "loopback-only" in printed
+
+    def test_help_names_the_face_dir_flag(self) -> None:
+        """A setting the help never mentions is a setting nobody finds."""
+        with patch(PATCH_MOD_CONSOLE) as mock_console:
+            host_api_module.print_help()
+
+        printed = _printed(mock_console.print)
+        assert "--face-dir" in printed
+
+    def test_config_shows_a_configured_face_dir_and_its_entry(
+        self, store: Path, quiet_module: dict, tmp_path: Path
+    ) -> None:
+        """The effective face dir, the source that named it, and whether phone.html is there."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_face_dir(bundle)
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert str(bundle) in printed
+        assert f"({host_face.SOURCE_CONFIGURED})" in printed
+        assert "present" in printed
+
+    def test_config_says_when_the_configured_entry_is_missing(
+        self, store: Path, quiet_module: dict, tmp_path: Path
+    ) -> None:
+        """Stored while valid, emptied since: the preview says so before a restart does."""
+        bundle = _face_bundle(tmp_path / "face")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_face_dir(bundle)
+            (bundle / host_config.FACE_ENTRY).unlink()
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert "missing" in printed
+        assert "present" not in printed
+
+    def test_config_names_the_checkout_default_when_unset(self, store: Path, quiet_module: dict) -> None:
+        """Unset is not blank: the preview names the checkout build it falls to."""
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert f"({host_face.SOURCE_CHECKOUT})" in printed
+        assert str(host_face.face_root()) in printed
+
+    @pytest.fixture
+    def lookups(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+        """Empty stand-ins for the home, checkout and PATH the binary lookup reads. Returns the checkout."""
+        home = tmp_path / "home"
+        repo = tmp_path / "repo"
+        home.mkdir()
+        repo.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setattr(host_fleet, "repo_root", lambda: repo)
+        monkeypatch.setattr(host_fleet.shutil, "which", lambda _name: None)
+        return repo
+
+    def test_help_names_the_baud_bin_flag(self) -> None:
+        """A setting the help never mentions is a setting nobody finds."""
+        with patch(PATCH_MOD_CONSOLE) as mock_console:
+            host_api_module.print_help()
+
+        printed = _printed(mock_console.print)
+        assert "--baud-bin" in printed
+
+    def test_config_names_a_configured_binary_and_that_it_runs(
+        self, store: Path, quiet_module: dict, tmp_path: Path, lookups: Path
+    ) -> None:
+        """The binary line: the path, the source word, and whether it is executable."""
+        binary = _baud_binary(tmp_path / "bin" / "baud-cli")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_baud_bin(binary)
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert f"{binary} [dim]({host_fleet.SOURCE_CONFIGURED})" in printed
+        assert "[green]yes[/green]" in printed
+
+    def test_config_says_a_gone_configured_binary_will_be_refused(
+        self, store: Path, quiet_module: dict, tmp_path: Path, lookups: Path
+    ) -> None:
+        """Still named as configured, marked not runnable, with the cure — before a phone finds out."""
+        binary = _baud_binary(tmp_path / "bin" / "baud-cli")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            host_config.set_baud_bin(binary)
+            binary.unlink()
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert f"{binary} [dim]({host_fleet.SOURCE_CONFIGURED})" in printed
+        assert "[yellow]no[/yellow]" in printed
+        assert "--baud-bin default" in printed
+
+    def test_config_names_the_checkout_binary_when_nothing_is_configured(
+        self, store: Path, quiet_module: dict, lookups: Path
+    ) -> None:
+        """Unset is not blank: the line names the step of the lookup that answers."""
+        desktop = _baud_binary(lookups / host_fleet.DEFAULT_BINARY_RELATIVE)
+
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert f"{desktop} [dim]({host_fleet.SOURCE_CHECKOUT})" in printed
+
+    def test_config_says_missing_and_how_to_install(self, store: Path, quiet_module: dict, lookups: Path) -> None:
+        """Nothing anywhere: the source word is missing and the cure is on the next line."""
+        with patch(PATCH_CONFIG_LOGGER):
+            handle_command("host-api", ["config"])
+
+        printed = _printed(quiet_module["console"].print)
+        assert f"not found [dim]({host_fleet.SOURCE_MISSING})" in printed
+        assert "Install it: aipass baud install." in printed
 
 
 class TestCrossBranchApi:
@@ -1577,3 +2105,41 @@ class TestCrossBranchApi:
             host_api_module.serve(host="127.0.0.1", port=9000)
 
         mock_serve.assert_called_once_with(host="127.0.0.1", port=9000)
+
+    def test_the_path_settings_door_stores_and_clears_through_the_handler(self, store: Path, tmp_path: Path) -> None:
+        """
+        @aipass sets the face dir and the baud binary through the module, not the handler.
+
+        Same validation, same store: what the door writes, the handler reads back.
+        """
+        bundle = _face_bundle(tmp_path / "face")
+        binary = _baud_binary(tmp_path / "bin" / "baud-cli")
+
+        with patch(PATCH_CONFIG_LOGGER):
+            assert host_api_module.set_face_dir(bundle) == bundle
+            assert host_api_module.set_baud_bin(binary) == binary
+
+            assert host_api_module.face_dir() == host_config.face_dir() == bundle
+            assert host_api_module.baud_bin() == host_config.baud_bin() == binary
+            assert host_api_module.load_config()[host_config.BAUD_BIN_KEY] == str(binary)
+
+            assert host_api_module.set_baud_bin(None) is None
+            assert host_api_module.set_face_dir(None) is None
+
+        assert host_config.baud_bin() is None
+        assert host_config.face_dir() is None
+
+    def test_the_door_refuses_with_the_handler_exceptions(self, store: Path, tmp_path: Path) -> None:
+        """A caller catching the module's names catches exactly what the handler raises."""
+        assert host_api_module.BaudBinRefused is host_config.BaudBinRefused
+        assert host_api_module.FaceDirRefused is host_config.FaceDirRefused
+
+        with patch(PATCH_CONFIG_LOGGER):
+            with pytest.raises(host_api_module.BaudBinRefused, match="does not exist"):
+                host_api_module.set_baud_bin(tmp_path / "no-such-baud-cli")
+            with pytest.raises(host_api_module.FaceDirRefused, match="is not a directory"):
+                host_api_module.set_face_dir(tmp_path / "no-such-face")
+
+        stored = host_config.load_config()
+        assert host_config.BAUD_BIN_KEY not in stored
+        assert host_config.FACE_DIR_KEY not in stored

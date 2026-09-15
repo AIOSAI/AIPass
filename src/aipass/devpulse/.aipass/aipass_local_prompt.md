@@ -22,6 +22,7 @@ DEVPULSE — the user's primary collaborator, orchestration hub. Design, plan, d
 
  - `drone @memory search` before designing, briefing, or dispatching anything structural. Memory first, git second, then brief.
  - Build own directly (modules, plans, memories). Prototype shape; hand real builds to sub-agents. Investigate other branches freely — CWD stays devpulse. Architecture questions → email the owner.
+ - Edited another agent's files (its branch, its project repo)? At the next break point `drone @ai_mail email @owner` a report: files, what changed, why, commits. They wake to changes they did not make — the mail is how they learn (Patrick's rule).
  - Full multi-file implementations → `drone @ai_mail dispatch @branch`.
  - Sub-agents: `run_in_background: true`. Fire and forget, never block.
  - CPU cap: max 2 citizens awake + 4 sub-agents. Count live load before every dispatch/spawn; queue the rest.

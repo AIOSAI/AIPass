@@ -329,6 +329,32 @@ class TestRestoreModule:
             assert folder.name == "config.py"
             assert (folder / "config.py").is_file()
 
+    def test_find_file_folder_path_shaped(self, tmp_path: Path):
+        """A relative path finds its file-folder, and picks the right one of two same-named files.
+
+        The documented form is 'restore @myapp list src/main.py'. The lookup
+        used to join the WHOLE argument onto the matched folder, so it looked
+        for <store>/src/main.py/src/main.py and never found anything - only a
+        bare basename worked, and a basename cannot tell two main.py apart.
+        """
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
+            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+
+            project = tmp_path / "project"
+            for sub in ("src", "tools"):
+                (project / sub).mkdir(parents=True)
+                (project / sub / "main.py").write_text(f"where = {sub!r}", encoding="utf-8")
+            pairs = [(str(project / sub / "main.py"), f"{sub}/main.py") for sub in ("src", "tools")]
+            copy_versioned(pairs, str(project))
+
+        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
+            from aipass.backup.apps.modules.restore import _find_file_folder
+
+            folder = _find_file_folder(str(project), "tools/main.py")
+            assert folder is not None
+            assert folder.parent.name == "tools"
+            assert (folder / "main.py").read_text(encoding="utf-8") == "where = 'tools'"
+
     def test_find_file_folder_missing(self, tmp_path: Path):
         """_find_file_folder returns None for missing file."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):

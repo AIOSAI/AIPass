@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-13
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -132,6 +132,7 @@ def commit_changes(
     branch_dir: Path | None = None,
     all_files: bool = False,
     files: list[str] | None = None,
+    repo_root: Path | None = None,
 ) -> dict:
     """Commit changes. With --all, stages the entire repo (not CWD-scoped).
 
@@ -140,8 +141,13 @@ def commit_changes(
     multiple branch directories.
 
     With file paths, stages only those specific files (selective commit).
+
+    *repo_root* defaults to the repo the caller stands in. The external-repo door
+    names another one, and gets exactly the commit that repo's own seat gets —
+    same staging, same lint and test gate on --all. Commit never pushes.
     """
-    repo_root = find_repo_root()
+    if repo_root is None:
+        repo_root = find_repo_root()
 
     if files:
         add_result = subprocess.run(

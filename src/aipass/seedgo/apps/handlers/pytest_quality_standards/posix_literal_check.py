@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: posix_literal_check.py
 # Description: v5 - a path claim that is only true on the platform it was written on
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-01
-# Modified: 2026-09-08
+# Modified: 2026-09-14
 # =============================================
 
 r"""Does this test hardcode one platform's path shape?
@@ -210,6 +210,30 @@ AND THE NEW ARMS' OWN LIMITS, in the same direction:
     and no further. A haystack built in a helper, or reassigned twice, is not
     seen. It also reads only `in` / `not in`: a rendered repr compared with `==`
     is a different and much rarer mistake.
+
+ARM 4 WIDENED ON 2026-09-14, BECAUSE BOTH OF ITS READINGS MISSED THE SAME RED.
+Windows CI 34882199024 failed on two rows in api's test_host_api.py, written the
+day before with this arm in the pack:
+
+    printed = " ".join(str(call) for call in quiet_module["console"].print.call_args_list)
+    assert str(bundle) in printed                    # bundle = _face_bundle(tmp_path / "face")
+    assert str(host_face.face_root()) in printed
+
+The haystack's `str()` sat inside a join, over a comprehension variable, and the
+old reading only looked at the outermost expression. The needles named no path
+by spelling - `bundle`, `face_root()` - and the old reading never followed a
+name or read a call's own name. Measured on those two rows, each widening alone
+catches neither; together they catch both. Over 18 branches the widened
+haystack reading sees 112 comparisons against 34 before, and not one outside
+the two rows carries a path-ish needle - 0 rows before, 0 after in the working
+tree (api cured them), 2 after at 9594a1a8. `pathish_expression` is untouched,
+so arms 1-3 read exactly what they read before.
+
+The comprehension reading is deliberately exact: a variable iterating a call
+RECORD is a call object, and `str()` of one renders through `repr()`. A variable
+iterating `call.args` is an argument, and `str()` of a Path argument spells one
+backslash - which is the cure, so it stays clean. The call-name reading is
+spelling (`load_profile()` holds `file`), used on the needle only.
   - arm 4 nominates a rendered repr even when the argument was a plain string
     all along. trigger/tests/test_log_watcher.py:1080 sets `event.src_path` to a
     string and would pass on either host; it is the same shape as the row three
@@ -366,6 +390,11 @@ STRING_COMPARISON_METHODS: frozenset = frozenset({"startswith", "endswith"})
 MOCK_CALL_RECORDS: frozenset = frozenset(
     {"call_args", "call_args_list", "mock_calls", "await_args", "await_args_list", "method_calls"}
 )
+
+#: The records that hold MANY calls. The cure for one of these indexes a call
+#: before it reads the arguments - `call_args_list[i].args[n]` - because the
+#: list itself has no `.args`.
+MOCK_CALL_LISTS: frozenset = frozenset({"call_args_list", "mock_calls", "await_args_list", "method_calls"})
 
 #: How many flagged units to name in the result. The full list lives in the
 #: report artifact; a check message that prints hundreds of lines is unreadable.
@@ -850,17 +879,52 @@ def _render_targets(node: ast.AST) -> List[ast.expr]:
     return []
 
 
+def _iterated_records(node: ast.AST) -> Dict[str, str]:
+    """Comprehension variables that iterate a call record directly, and the record.
+
+    `for call in console.print.call_args_list` binds `call` to one call object,
+    and `str(call)` renders its arguments through `repr()` exactly as
+    `str(console.print.call_args)` does. `for arg in call.args` is NOT in here:
+    its elements are the arguments themselves, and `str()` of a Path argument
+    spells a single backslash - the cure, which has to stay clean.
+    """
+    records: Dict[str, str] = {}
+    for sub in ast.walk(node):
+        if not isinstance(sub, ast.comprehension) or not isinstance(sub.target, ast.Name):
+            continue
+        if isinstance(sub.iter, ast.Attribute) and sub.iter.attr in MOCK_CALL_RECORDS:
+            records[sub.target.id] = ast.unparse(sub.iter)
+    return records
+
+
+def _record_in_target(target: ast.expr, iterated: Dict[str, str]) -> str:
+    """The call record one rendered expression holds, or ""."""
+    if isinstance(target, ast.Name) and target.id in iterated:
+        return iterated[target.id]
+    for sub in ast.walk(target):
+        if isinstance(sub, ast.Attribute) and sub.attr in MOCK_CALL_RECORDS:
+            return ast.unparse(sub)
+    return ""
+
+
 def _renders_a_call_record(node: ast.AST) -> str:
-    """The mock call record this expression renders, by dotted spelling, or "".
+    """The mock call record this expression renders, by source spelling, or "".
 
     `str(warned.call_args)` answers `warned.call_args`. The record is what makes
     the site wrong: rendering it runs every argument through `repr()`, and a
     Windows path comes back with its separators doubled.
+
+    ANYWHERE IN THE EXPRESSION, since 2026-09-14. Until then only the outermost
+    node was asked, and `" ".join(str(call) for call in m.call_args_list)` - a
+    join around the rendering, over a comprehension variable - read as clean.
+    That is the haystack of both rows in Windows CI red 34882199024.
     """
-    for target in _render_targets(node):
-        for sub in ast.walk(target):
-            if isinstance(sub, ast.Attribute) and sub.attr in MOCK_CALL_RECORDS:
-                return corpus.dotted_name(sub)
+    iterated = _iterated_records(node)
+    for render in ast.walk(node):
+        for target in _render_targets(render):
+            record = _record_in_target(target, iterated)
+            if record:
+                return record
     return ""
 
 
@@ -889,23 +953,40 @@ def _bound_name(node: ast.AST) -> str:
     return ""
 
 
-def _pathish_needle(node: ast.AST) -> bool:
+def _pathish_needle(node: ast.AST, bindings: Dict[str, ast.expr]) -> bool:
     """Is the thing being searched for a path?
 
     A literal is read as text and may be ROOTED here - unlike arm 3, where a
     rooted literal belongs to arms 1-2. Inside a rendered repr the root is not
     the hazard; the separator is, and `/some/core.log` carries one.
+
+    TWO MORE READINGS SINCE 2026-09-14, on the needle only, so arms 1-3 do not
+    move: a local bound to a path-ish value one hop back (`str(bundle)` where
+    `bundle = _face_bundle(tmp_path / "face")`), and a call whose own name
+    carries a path word (`str(host_face.face_root())`). Both needles of Windows
+    CI red 34882199024 read as not-a-path without them.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return path_run(node.value, allow_rooted=True) is not None
-    return pathish_expression(node)
+    if pathish_expression(node):
+        return True
+    return any(_names_a_path(target, bindings) for target in _render_targets(node) or [node])
+
+
+def _names_a_path(node: ast.AST, bindings: Dict[str, ast.expr]) -> bool:
+    """A local bound to a path-ish value, or a call whose own name says path."""
+    if isinstance(node, ast.Name):
+        return node.id in bindings and pathish_expression(bindings[node.id])
+    if isinstance(node, ast.Call):
+        return _is_pathish_name(corpus.dotted_name(node.func).rsplit(".", 1)[-1])
+    return False
 
 
 def _haystack_rows(node: ast.Compare, bindings: Dict[str, ast.expr]) -> List[Tuple[str, int, str]]:
     """Every repr-haystack row in one `in` / `not in` comparison."""
     if not any(isinstance(op, (ast.In, ast.NotIn)) for op in node.ops):
         return []
-    if not _pathish_needle(node.left):
+    if not _pathish_needle(node.left, bindings):
         return []
     needle = ast.unparse(node.left)
     rows: List[Tuple[str, int, str]] = []
@@ -990,7 +1071,13 @@ def _rendered_finding(unit: corpus.TestUnit, line: int, text: str, rendering: st
 
 
 def _haystack_finding(unit: corpus.TestUnit, line: int, needle: str, record: str) -> Dict:
-    """One arm-4 row: a path searched for inside a rendered call record."""
+    """One arm-4 row: a path searched for inside a rendered call record.
+
+    The cure names an index first when the record is a LIST of calls - a
+    `call_args_list` has no `.args`, and a reason that says it does sends the
+    owner to a line that raises.
+    """
+    index = "[i]" if record.rsplit(".", 1)[-1] in MOCK_CALL_LISTS else ""
     return {
         "nodeid": unit.nodeid,
         "line": line,
@@ -1001,7 +1088,7 @@ def _haystack_finding(unit: corpus.TestUnit, line: int, needle: str, record: str
             f"{needle} is searched for inside a rendered {record} - str() of a mock call "
             f"record runs its arguments through repr(), which DOUBLES a backslash separator, "
             f"so even a correctly built expected string is not in there. Assert on "
-            f"{record}.args[n] or .kwargs instead, never on a rendered repr"
+            f"{record}{index}.args[n] or .kwargs instead, never on a rendered repr"
         ),
     }
 

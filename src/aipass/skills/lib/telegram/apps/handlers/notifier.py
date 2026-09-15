@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notifier.py
 # Description: Telegram Push Notifications via scheduler bot
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-17
-# Modified: 2026-02-18
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -53,6 +53,22 @@ def send_telegram_notification(
     Returns:
         True if sent successfully, False otherwise
     """
+    # Telegram is retired (Patrick ruling 2026-09-14) and switched off. This door
+    # is imported directly - @daemon's lifecycle pings call it in-process and
+    # never pass the runner's gate, and they were still being delivered - so it
+    # asks the switch itself, as machine_vitals does. Off, or a switch state that
+    # cannot be read, sends nothing.
+    from aipass.skills.apps.handlers.switch_handler import SwitchStateUnreadable, is_enabled
+
+    try:
+        enabled = is_enabled("telegram")
+    except SwitchStateUnreadable as exc:
+        logger.warning("Telegram notification not sent - switch state unreadable: %s", exc)
+        return False
+    if not enabled:
+        logger.info("Telegram notification not sent - the telegram skill is switched off")
+        return False
+
     # Merged loader, not the raw secret: chat_id is ordinary config and lives
     # in the plain file, only the token comes out of the secret store.
     config = load_bot_config("scheduler")

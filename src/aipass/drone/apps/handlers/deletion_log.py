@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-09-11
+# Modified: 2026-09-13
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -262,6 +262,23 @@ def _append_record(record: dict, log_path: Path) -> None:
     _rotate_if_needed(log_path)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+
+def ledger_beside(name: str, project_root: Path | None = None) -> Path:
+    """Path for another of drone's ledgers, kept in the same folder as this one.
+
+    ``.ai_central`` is the one place Patrick looks for who did a consequential
+    thing, so a second ledger (the external-repo git door, DPLAN-0344) sits
+    beside this one rather than inventing a home — and follows it wherever
+    ``AIPASS_DELETION_LOG`` points, which keeps a test run out of the live store
+    through the same one variable.
+    """
+    return deletion_log_path(project_root).parent / name
+
+
+def append_ledger_line(record: dict, log_path: Path) -> None:
+    """Append one JSON line to a ledger, with the same bound this store keeps."""
+    _append_record(record, log_path)
 
 
 def record_deletion(

@@ -3,7 +3,7 @@
 # Description: Restore module — version discovery and file restoration
 # Version: 1.0.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-14
 # =============================================
 
 """Restore Module — list versions and restore files from versioned store."""
@@ -48,13 +48,16 @@ def print_help():
 
 
 def _find_file_folder(project_root: str, filename: str) -> Path | None:
-    """Find a file-folder in the versioned store by filename."""
+    """Find a file-folder in the versioned store by bare filename or relative path."""
     store = build_versioned_store(project_root)
     if not store.exists():
         return None
 
+    # The folder holds the file under its basename (<parent>/<name>/<name>),
+    # so a path-shaped argument matches the folder but not the file inside.
+    name = Path(filename).name
     for candidate in store.rglob(filename):
-        if candidate.is_dir() and (candidate / filename).is_file():
+        if candidate.is_dir() and (candidate / name).is_file():
             return candidate
 
     return None

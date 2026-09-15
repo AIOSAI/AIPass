@@ -3,7 +3,7 @@
 # Description: BACKUP Branch — main orchestrator with auto-discovery
 # Version: 1.0.0
 # Created: 2026-04-16
-# Modified: 2026-04-23
+# Modified: 2026-09-14
 # =============================================
 
 """BACKUP Branch - Main Orchestrator
@@ -73,9 +73,10 @@ def print_help() -> None:
     console.print()
     console.print("  [green]snapshot[/green]     Full mirror backup of a project")
     console.print("  [green]versioned[/green]    Incremental timestamped backup")
-    console.print("  [green]all[/green]          Run snapshot then versioned in sequence")
+    console.print("  [green]all[/green]          Run snapshot, versioned, then drive_sync in sequence")
     console.print("  [green]register[/green]     Register a project + scaffold its .backup/")
     console.print("  [green]status[/green]       Show backup info and recent history")
+    console.print("  [green]restore[/green]      List a file's versions, or restore its current version")
     console.print("  [green]settings[/green]     [dim]Not implemented — settings UI deferred[/dim]")
     console.print("  [green]drive_sync[/green]   Sync backups to the remote drive")
     console.print("  [green]drive_check[/green]  Test the remote drive connection")

@@ -5,7 +5,7 @@
 **Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-09-12
+**Last Updated:** 2026-09-14
 
 ---
 
@@ -114,8 +114,8 @@ drone @skills on telegram                         # reconnect
 1. Every systemd user unit the skill declares is **stopped**.
 2. Those units are **disabled and masked**, so nothing can respawn them — not a
    manual `systemctl start`, not a dependency, not a script.
-3. `drone @skills run <name>` **refuses**, before the skill's handler is
-   imported. Stopping units only quiets the machine; this is what makes the
+3. `drone @skills run <name>` **refuses** in one line that carries the recorded
+   reason, before the skill's handler is imported. Stopping units only quiets the machine; this is what makes the
    skill dark.
 
 **ON** reverses all three: unmask, enable, start. A unit that does not come back
@@ -227,17 +227,20 @@ src/aipass/skills/
   artifacts/               # Birth certificate and branch artifacts
   logs/                    # prax log output
   .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 330 test functions in 14 files
-                           #   (pytest expands to 347 cases)
+  tests/                   # Branch suite: 342 test functions in 14 files
+                           #   (pytest expands to 362 cases)
 ```
 
-Counted 2026-09-12, after machine_vitals landed. That 330 is the branch suite
-alone — the figure the seedgo readme rule checks, `def test_` under `tests/`.
+Counted 2026-09-14, after the telegram retirement. That 342 is the branch
+suite alone — the figure the seedgo readme rule checks, `def test_` under
+`tests/`.
 
 Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
 1103 `def test_` functions expanding to 1114 cases, and `lib/screen_lock/tests/`
-adds 22. All three together run 1483 passing, 0 skipped — the same number from
-the branch root (`pytest .`) and from the repo root.
+adds 42 (recounted 2026-09-13, after lock_state landed). All three together
+collect 1518: 404 pass and the 1114 telegram cases are **skipped**, because
+Telegram is retired (see Status) — the same numbers from the branch root
+(`pytest .`) and from the repo root, recounted 2026-09-14.
 
 ---
 
@@ -431,7 +434,8 @@ Pinned by 13 cases across five existing telegram test files. All 13 fail against
 the pre-cure handlers, and 11 mutants — one per clause, plus the mirror session
 claiming success and the suspend message reverting to polkit — all go red.
 
-The skill is still switched **OFF** (since 2026-08-18), so nothing live changed.
+The skill is still switched **OFF** (since 2026-08-18, retired 2026-09-14), so
+nothing live changed.
 Its three `/proc` reads in `base_bot.py` are not scored: each sits inside
 `except OSError` and degrades honestly. One is still worth knowing as behaviour —
 the bot-lock check guards its `/proc/<pid>/cmdline` read with
@@ -477,6 +481,24 @@ vitals = handler.machine_vitals()
 | `switched_off` | Refusal only |
 | `psutil_missing` | Refusal only |
 
+- **The cpu section carries the cores.** Beside `percent` and `window_s`:
+  `cores`, one busy percent per logical CPU in index order; `logical` and
+  `physical`, from `cpu_count()` and `cpu_count(logical=False)`; `mhz` and
+  `mhz_max`, the frequency now and its ceiling from `cpu_freq()` (FPLAN-0586).
+  One read takes **one** sample, `cpu_times(percpu=True)`, and the headline
+  percent is summed from the same per-CPU deltas as the cores — 3 busy seconds
+  of 5 ticked is 60, where the mean of the bars would say 37.5 — so the
+  headline and the bars agree by construction. Guest time comes back out of
+  each total and iowait is idle, the same accounting as before. `percent` and
+  `cores` are `None` while warming, and also when the CPU count changed between
+  the two samples (hotplug) or a CPU did not tick between them; the counts and
+  the frequency are instant readings, so they are published even then. psutil's
+  `/proc/cpuinfo` fallback reports the ceiling as `0.0` and an offline policy as
+  all zeros: both are `None`. A `cpu_freq()` that raises (psutil's Linux reader
+  raises `NotImplementedError` or `OSError` when a cpufreq file is missing)
+  costs the frequency only — `mhz` is `None` and `detail` names the error, while
+  the percent and the cores still answer. A host whose psutil has no
+  `cpu_freq` at all gets `None` too.
 - **The skill owns its baselines.** CPU percent and network rate come from
   `cpu_times()` and `net_io_counters()` samples held in this module, each with
   `window_s`. Never `psutil.cpu_percent(interval=None)`: its baseline is a psutil
@@ -499,14 +521,19 @@ vitals = handler.machine_vitals()
   clamped to 0–100 and the range is carried beside it, so a fan sitting at its
   floor (0%, as it does here at idle) is distinguishable from a fan with no scale.
 - **Cost, measured here:** about 19 ms warm, 12 ms of it psutil's own
-  temperature sweep; the fan range adds about 2 ms.
+  temperature sweep; the fan range adds about 2 ms, and the per-CPU sample,
+  the counts and the frequency add under 1 ms (0.85 ms, 2026-09-13).
 
-Pinned by `tests/test_machine_vitals.py`, 32 functions expanding to 45 cases,
+Pinned by `tests/test_machine_vitals.py`, 41 functions expanding to 57 cases,
 against stand-ins only: psutil, the monotonic clock and the hwmon tree are all
 manufactured, so the file is green on a host with no sensor chips. The
 read-only pin records every `open`, `io.open` and `os.open` under the tree and
 raises on a write mode or a fan control file, with a control proving the guard
-is armed and can still say yes. 20 mutants, one per clause, all go red. The text
+is armed and can still say yes. 20 mutants, one per clause, all go red; the
+per-core read added 17 more, all red, and 15 cases in the file fail against
+the handler that read one aggregate. The stand-in psutil is four logical CPUs with
+different loads, CPU 2 spending half its idle time in iowait, and the Windows
+field set (no guest, no iowait) is manufactured beside it. The text
 actions and their 29 `test_runner.py` functions are unchanged; making them
 renderings of this dict is a later row.
 
@@ -533,6 +560,9 @@ renderings of this dict is a later row.
 - **@api** — `machine_vitals()`, imported in-process from
   `aipass.skills.lib.system_status.handler` for the `/v1/machine` route
   (FPLAN-0561), the same way the lock verb imports `screen_lock`
+- **@api** — `lock_state()`, imported in-process from
+  `aipass.skills.lib.screen_lock.handler`: whether the screen is locked, for
+  the `/v1/lock` read beside the lock verb (FPLAN-0585 row 2, not built yet)
 - AI agents — discoverable capability units via `drone @skills`
 - Projects — local skill scaffolding via `drone @skills create`
 
@@ -546,15 +576,29 @@ branch could not exercise is marked unverified rather than left standing green.
 **Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
 `--help`, `--version`. The off-switch's three doors were exercised, not just
 read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 1483 passing (re-counted 2026-09-12), 0 skipped, identical from the
+stay masked. Suite 404 passing and 1114 telegram cases skipped (re-counted 2026-09-14), identical from the
 branch root and the repo root. seedgo audit 100 on every CI-scored category.
 
-**Unverified — the telegram skill's runtime.** The skill is discovered, listed
-and gated correctly, and its own 1114-case suite passes. Its *live* behaviour
-was not exercised: it has been switched OFF since 2026-08-18 (Patrick's ruling,
-DPLAN-0305 — five bots leaked ~2.3GB each), and `drone @skills validate
-telegram` reports its `telethon` dependency missing on this machine. Nothing in
-this README claims its runtime works today.
+**Retired — the telegram skill (Patrick ruling 2026-09-14).** Telegram is
+skipped and ignored by all. The work stays in place, disabled — nothing was
+deleted, moved or renamed — and it does nothing:
+
+- `drone @skills run telegram <anything>` refuses in one line: *Skill 'telegram'
+  is switched OFF and will not run (Telegram is retired - Patrick ruling
+  2026-09-14: ...)*. The reason is the off-switch's own record; it has been OFF
+  since 2026-08-18, and its five `telegram-bot@` units stay masked.
+- `lib/telegram/apps/handlers/notifier.py` asks the switch itself before it
+  sends. @daemon's scheduler lifecycle pings import it in-process and never
+  pass the runner's gate, so until 2026-09-14 they were still being delivered
+  with the skill switched off (its log shows two sends on each of 09-13 and
+  09-14). Off, or an unreadable switch state, now sends nothing.
+- Every test under `lib/telegram/tests/` is **skipped, never fixed**:
+  `pytest_collection_modifyitems` in that directory's existing `conftest.py`
+  marks each case skipped with the ruling as the reason. A skip marker rather
+  than `collect_ignore`, so all 1114 cases still show up as skipped. That
+  covers seedgo's runtime-probe finding (`test_log_streamer.py` wrote
+  `~/.aipass/telegram_bots/last_inbound.json`), which is not cured.
+- Lifting it is `drone @skills on telegram` plus deleting that hook.
 
 **Known issue — one bypass carried, not a clean 100.**
 `.seedgo/bypass.json` waives `json_structure` for
@@ -584,12 +628,11 @@ load and run, and warn by name on every load. `drone @skills run telegram
 migrate-config` reports what would move — measured 2026-09-07: api 6 keys, base
 6, devpulse 7, prax_monitor 5, scheduler 6, and `telethon_config` correctly
 untouched because api_id/api_hash are real secrets. `--apply` splits them for
-real. Not run here: rewriting a live credential store is Patrick's call, not a
-headless session's.
+real. Not run, and moot since the 2026-09-14 retirement.
 
 ---
 
-*Last Updated: 2026-09-12*
+*Last Updated: 2026-09-14*
 
 ---
 [← Back to AIPass](../../../README.md)

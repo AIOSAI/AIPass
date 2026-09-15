@@ -80,6 +80,11 @@ FPLAN-0561 row 2 adds the monitor wheel's read (DPLAN-0341, see machine.py):
                       through a 1 s single-flight cache. An absent reading is
                       a 200; 503 only when the owner could not answer.
 
+FPLAN-0585 row 2 adds the lock chip's read (see lock.py):
+    GET /v1/lock    - read scope. @skills' lock_state(), relayed verbatim
+                      through a 1 s single-flight cache. Cannot-tell is a
+                      200; 503 only when the door raised or broke its shape.
+
 Phase 3 adds the verb lane — POST only, operate scope only (see verbs.py):
     POST /v1/verbs/wake            - Proxied to @ai_mail's dispatch door. The
                                      admin keyword is UNREACHABLE through it,
@@ -114,6 +119,7 @@ from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import face as host_face
 from aipass.api.apps.handlers.host import feed as host_feed
 from aipass.api.apps.handlers.host import fleet as host_fleet
+from aipass.api.apps.handlers.host import lock as host_lock
 from aipass.api.apps.handlers.host import machine as host_machine
 from aipass.api.apps.handlers.host import memory_config as host_memory_config
 from aipass.api.apps.handlers.host import pump as host_pump
@@ -971,6 +977,25 @@ def create_app() -> Any:
         except host_machine.MachineDoorFailed as e:
             raise _deny(503, "machine_door_failed", str(e)) from e
 
+    @app.get("/v1/lock")
+    def lock_state(
+        request: Request,
+        record: dict = Depends(require_scope("read")),
+    ) -> dict:
+        """Whether the screen is locked: @skills' lock_state(), verbatim. lock.py carries the argument."""
+        if request.query_params:
+            named = ", ".join(sorted(request.query_params.keys()))
+            raise _deny(
+                400,
+                "lock_parameters_refused",
+                f"/v1/lock takes no parameters and will not silently drop one — received: {named}.",
+            )
+
+        try:
+            return host_lock.read_lock()
+        except host_lock.LockDoorFailed as e:
+            raise _deny(503, "lock_door_failed", str(e)) from e
+
     @app.get("/v1/rooms")
     def rooms(
         project: str = "",
@@ -1390,6 +1415,9 @@ def create_app() -> Any:
             {"peer": getattr(client, "host", "") or "unknown", "reason": reason, "route": "/v1/room/attach"},
         )
 
+    # Resolved ONCE: a running server serves this bundle until restarted (face.py, KNOWN LIMIT).
+    face = host_face.face_location()
+
     @app.get("/", include_in_schema=False)
     async def face_entry(request: Request) -> Any:
         """
@@ -1401,29 +1429,29 @@ def create_app() -> Any:
         else. The data wall is on /v1/*, where the data is.
         """
         try:
-            return host_statics.bundle_response(host_face.entry_file(), request.headers)
+            return host_statics.bundle_response(face.entry_file(), request.headers)
         except host_face.FaceUnavailable as e:
             raise _deny(503, "face_unavailable", str(e)) from e
 
     # NOT a catch-all. The bundle's own files get their own routes, so nothing
     # registered on this app — now or by a later caller — can be shadowed. See
     # face.py: the first cut DID mount "/" and the existing scope tests caught it.
-    if host_face.is_face_available():
-        if host_face.assets_dir().is_dir():
-            app.mount("/assets", StaticFiles(directory=str(host_face.assets_dir())), name="face-assets")
+    if face.is_available():
+        if face.assets_dir().is_dir():
+            app.mount("/assets", StaticFiles(directory=str(face.assets_dir())), name="face-assets")
 
-        for filename in host_face.root_files():
+        for filename in face.root_files():
             app.add_api_route(
                 f"/{filename}",
-                host_statics.face_file_route(filename),
+                host_statics.face_file_route(face.root / filename),
                 methods=["GET"],
                 include_in_schema=False,
             )
 
-        logger.info("[host_api] phone face served from %s", host_face.face_root())
+        logger.info("[host_api] phone face served from %s (%s)", face.root, face.source)
     else:
         # Not fatal: the API is the product, the face is a client of it.
-        logger.warning("[host_api] phone face not built — / will report it. %s", host_face.BUILD_HINT)
+        logger.warning("[host_api] phone face unavailable — / will report it. %s", face.unavailable_message())
 
     # DERIVED FROM THE APP, never written down. The hand-kept list this
     # replaces named 18 doors while the app registered nearly forty — /v1/dir,

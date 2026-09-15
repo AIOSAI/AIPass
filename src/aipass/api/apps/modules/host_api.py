@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: host_api.py
 # Description: Host API Module — server lifecycle and token administration
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -17,8 +17,9 @@ Per FPLAN-0411's D0 line, this branch owns the pipe and never the meaning: the
 server carries transport, auth and protocol, and every future read or verb is a
 pass-through to the branch that owns the data or the machinery.
 
-PHASE 1 ONLY. Serving is loopback-gated until the security review (Phase 5) —
-this would be the first network-listening service in AIPass.
+The loopback gate has been open since 2026-08-14, Patrick's ruling on the Phase 5
+security review: the server binds one address this machine holds, never a
+wildcard. What the help says about it is read from LOOPBACK_ONLY, not written here.
 
 Commands (via drone @api):
     host-api serve [--host H] [--port P]        Run the server
@@ -26,6 +27,10 @@ Commands (via drone @api):
     host-api list-tokens                        Show tokens (never the values)
     host-api revoke-token <id>                  Revoke, effective next request
     host-api config                             Show the effective config
+    host-api set-config [--host H] [--port P] [--face-dir DIR|default] [--baud-bin PATH|default]
+
+config and set-config live in host_config_cli.py, serve/status/stop/autostart in
+host_serve.py; this module offers them every call and owns the tokens.
 """
 
 import os
@@ -47,6 +52,7 @@ from aipass.api.apps.handlers.json import json_handler
 from aipass.prax import logger  # noqa: F401
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host import server as host_server
+from aipass.api.apps.modules import host_config_cli
 from aipass.api.apps.modules import host_serve
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
@@ -102,7 +108,7 @@ def print_help() -> None:
     console.print("[bold cyan]HOST_API — Stage 0 host API for the BAUD phone face[/bold cyan]")
     console.print()
     console.print("[yellow]COMMANDS:[/yellow]  [dim](via drone @api)[/dim]")
-    console.print("  [cyan]host-api serve[/cyan]                 [dim]Run the server (loopback only in Phase 1)[/dim]")
+    console.print("  [cyan]host-api serve[/cyan]                 [dim]Run the server on the configured bind[/dim]")
     console.print(
         "  [cyan]host-api status[/cyan]                [dim]Is a server running, who holds it, and where[/dim]"
     )
@@ -112,11 +118,17 @@ def print_help() -> None:
     console.print("  [cyan]host-api list-tokens[/cyan]           [dim]List tokens — values are never shown[/dim]")
     console.print("  [cyan]host-api revoke-token <id>[/cyan]     [dim]Revoke, effective on the next request[/dim]")
     console.print("  [cyan]host-api config[/cyan]                [dim]Show the effective server config[/dim]")
-    console.print("  [cyan]host-api set-config[/cyan]            [dim]Set the bind address (validated first)[/dim]")
+    console.print(
+        "  [cyan]host-api set-config[/cyan]            [dim]Set bind, face dir or baud binary (validated first)[/dim]"
+    )
     console.print()
     console.print("[yellow]OPTIONS:[/yellow]")
     console.print("  [cyan]--host <ip>[/cyan]      [dim]Bind address override (literal IP, never a hostname)[/dim]")
     console.print("  [cyan]--port <n>[/cyan]       [dim]Port override[/dim]")
+    console.print("  [cyan]--face-dir <dir>[/cyan] [dim]set-config: the phone face's built bundle, absolute[/dim]")
+    console.print("  [dim]                'default' clears it back to the checkout build; restart to serve[/dim]")
+    console.print("  [cyan]--baud-bin <path>[/cyan] [dim]set-config: the binary the fleet lanes exec, absolute[/dim]")
+    console.print("  [dim]                'default' clears it back to the automatic lookup; no restart[/dim]")
     console.print("  [cyan]--detach[/cyan]         [dim]serve: run in its own session, output to a log file[/dim]")
     console.print("  [dim]                a serve under drone dies on drone's exec timeout[/dim]")
     console.print("  [dim]                and a detached one dies with the machine — see autostart[/dim]")
@@ -133,8 +145,14 @@ def print_help() -> None:
     console.print("  [cyan]drone @api host-api list-tokens[/cyan]")
     console.print("  [cyan]drone @api host-api revoke-token a1b2c3d4e5f6[/cyan]")
     console.print()
-    console.print("  [dim]# Check what the server would bind[/dim]")
+    console.print("  [dim]# Check what the server would bind, and which face it would serve[/dim]")
     console.print("  [cyan]drone @api host-api config[/cyan]")
+    console.print()
+    console.print("  [dim]# Serve an installed phone face instead of the checkout build[/dim]")
+    console.print("  [cyan]drone @api host-api set-config --face-dir <dir>[/cyan]")
+    console.print()
+    console.print("  [dim]# Exec a headless baud-cli for the fleet lanes, from the next request[/dim]")
+    console.print("  [cyan]drone @api host-api set-config --baud-bin <path>[/cyan]")
     console.print()
     console.print("  [dim]# A server that outlives the shell that started it[/dim]")
     console.print("  [cyan]drone @api host-api serve --detach[/cyan]")
@@ -144,7 +162,12 @@ def print_help() -> None:
     console.print("  [dim]Raw token values are never printed — they land in a 0600 receipt file.[/dim]")
     console.print("  [dim]An existing receipt is never overwritten: its token is still live.[/dim]")
     console.print("  [dim]Bind refuses wildcards, hostnames, and addresses this machine lacks.[/dim]")
-    console.print("  [dim]Phase 1 is loopback-only, pending the security review gate.[/dim]")
+    # Read from the flag, never written down: the sentence that said loopback-only
+    # outlived the gate by a month (found by @baud, 2026-09-13).
+    if host_config.LOOPBACK_ONLY:
+        console.print("  [dim]Loopback-only: every non-loopback bind is refused.[/dim]")
+    else:
+        console.print("  [dim]Non-loopback binds are open since the 2026-08-14 security review.[/dim]")
     console.print("  [dim]--detach validates the bind BEFORE spawning — a refusal never reaches a child.[/dim]")
     console.print()
 
@@ -167,6 +190,37 @@ def revoke_token(token_id: str) -> bool:
 def serve(host: Optional[str] = None, port: Optional[int] = None) -> None:
     """Validate the configured bind address, then run the server."""
     host_server.serve(host=host, port=port)
+
+
+# The door for other branches' in-process calls (@aipass's installer), so none
+# reaches into handlers/host/config.py. Same functions, same refusals.
+FaceDirRefused = host_config.FaceDirRefused
+BaudBinRefused = host_config.BaudBinRefused
+
+
+def load_config() -> dict:
+    """The effective host config: defaults merged under the stored values."""
+    return host_config.load_config()
+
+
+def face_dir() -> Optional[Path]:
+    """The configured phone-face directory, or None: the checkout build serves."""
+    return host_config.face_dir()
+
+
+def set_face_dir(path: Optional[Path]) -> Optional[Path]:
+    """Validate and store the face dir, or clear it with None. Raises FaceDirRefused."""
+    return host_config.set_face_dir(path)
+
+
+def baud_bin() -> Optional[Path]:
+    """The configured baud binary, or None: the automatic lookup answers."""
+    return host_config.baud_bin()
+
+
+def set_baud_bin(path: Optional[Path]) -> Optional[Path]:
+    """Validate and store the baud binary, or clear it with None. Raises BaudBinRefused."""
+    return host_config.set_baud_bin(path)
 
 
 # =============================================
@@ -218,6 +272,8 @@ def handle_command(command: str, args: List[str]) -> bool:
     # rather than disappearing into a silent True.
     if host_serve.handle_command(command, args):
         return True
+    if host_config_cli.handle_command(command, args):
+        return True
 
     if subcommand == "issue-token":
         _cmd_issue_token(rest)
@@ -227,12 +283,6 @@ def handle_command(command: str, args: List[str]) -> bool:
         return True
     if subcommand == "revoke-token":
         _cmd_revoke_token(rest)
-        return True
-    if subcommand == "config":
-        _cmd_config()
-        return True
-    if subcommand == "set-config":
-        _cmd_set_config(rest)
         return True
 
     error(
@@ -322,6 +372,8 @@ def _cmd_issue_token(args: List[str]) -> None:
         # The token is already in the store. Say so — a caller who thinks the
         # write failed cleanly would issue a second one and leave a live orphan.
         logger.error("[host_api] token %s issued but its file write failed: %s", record["id"], e)
+        # The handler logged the issuance; only this module knows the receipt never landed.
+        json_handler.log_operation("host_api_token_receipt_unwritten", {"id": record["id"], "error": str(e)})
         error(
             f"Token was issued but could not be written to {target}: {e}",
             suggestion=f"Revoke it: drone @api host-api revoke-token {record['id']}",
@@ -428,79 +480,6 @@ def _cmd_revoke_token(args: List[str]) -> None:
         # seam, the same channel its sibling refusal above already uses.
         error(f"No active token with id: {token_id}")
     console.print()
-
-
-def _cmd_config() -> None:
-    """Show the effective server configuration."""
-    header("Host API Config")
-    console.print()
-
-    config = host_config.load_config()
-    console.print(f"  [cyan]host:[/cyan] {config['host']}")
-    console.print(f"  [cyan]port:[/cyan] {config['port']}")
-    console.print()
-
-    try:
-        host_config.validate_bind(config["host"], int(config["port"]))
-        success("Bind address would be accepted")
-    except host_config.BindRefused as e:
-        logger.info("[host_api] config preview: bind would be refused (%s)", e)
-        warning("Bind address would be REFUSED")
-        console.print(f"  [dim]{e}[/dim]")
-    console.print()
-
-
-def _cmd_set_config(args: List[str]) -> None:
-    """
-    Write the server config.
-
-    The bind address is a security control, so it gets a real command rather
-    than leaving the operator to hand-edit JSON in the secrets store. The value
-    is validated BEFORE it is stored — a config that would be refused at startup
-    is refused at write time, where the person who typed it is still watching.
-    """
-    header("Set Host API Config")
-    console.print()
-
-    host = host_serve.flag_value(args, "--host")
-    port_raw = host_serve.flag_value(args, "--port")
-
-    if host is None and port_raw is None:
-        error(
-            "Nothing to set",
-            suggestion="drone @api host-api set-config --host 127.0.0.1 --port 8787",
-        )
-        return
-
-    config = host_config.load_config()
-    if host is not None:
-        config["host"] = host
-    if port_raw is not None:
-        try:
-            config["port"] = int(port_raw)
-        except ValueError:
-            logger.warning("[host_api] non-numeric port rejected at set-config: %s", port_raw)
-            error(f"Port must be a number, got: {port_raw}")
-            return
-
-    try:
-        host_config.validate_bind(config["host"], int(config["port"]))
-    except host_config.BindRefused as e:
-        logger.warning("[host_api] set-config refused: %s", e)
-        error("Refusing to store a bind that would not start", suggestion=str(e))
-        return
-
-    path = host_config.save_config(config)
-    json_handler.log_operation("host_api_config_saved", {"host": config["host"], "port": config["port"]})
-
-    success(f"Config saved: {config['host']}:{config['port']}")
-    console.print(f"  [dim]{path}[/dim]")
-    console.print()
-
-
-# =============================================
-# PRIVATE HELPERS
-# =============================================
 
 
 # =============================================

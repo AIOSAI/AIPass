@@ -102,13 +102,13 @@ else) and is intentionally undocumented as a command.
 **A `--help` anywhere in the arguments prints help and runs nothing** — `drone
 @backup snapshot @myapp --help` is a safe probe, not a backup.
 
-**`restore` takes a BARE FILENAME, not a relative path.** `restore @myapp list
-main.py` works; `restore @myapp list src/main.py` always answers *No versioned
-file found*, because the store is keyed by file-folder name. This is a real
-limitation, not a typo in the docs: two files with the same basename in
-different directories are indistinguishable to `restore`. Verified live
-2026-09-05 — see "Status / Known issues", where the code side is logged as a
-defect for its owner.
+**`restore` takes a bare filename or a path from the project root.** `restore
+@myapp list src/main.py` names exactly one file; `restore @myapp list main.py`
+takes the first `main.py` the store walk meets, so use the path when two files
+share a basename. Until 2026-09-14 only the bare form worked: the lookup joined
+the whole argument onto the matched folder and looked for
+`<store>/src/main.py/src/main.py`. Pinned by
+`test_versioned_engine.py::TestRestoreModule::test_find_file_folder_path_shaped`.
 
 **Drive commands need credentials.** They authenticate through the @api gateway;
 without Google API libraries or credentials they fail loudly rather than
@@ -144,8 +144,8 @@ drone @backup versioned @myapp
 # Check backup status
 drone @backup status @myapp
 
-# List available versions of a file (bare filename, not a path)
-drone @backup restore @myapp list main.py
+# List available versions of a file (path from the project root, or bare filename)
+drone @backup restore @myapp list src/main.py
 ```
 
 ---
@@ -392,13 +392,16 @@ from where the caller's shell happened to be standing.
 
 ## Tests
 
-**305 test functions across 13 files in `tests/`; pytest expands them to 378
-cases.** Both numbers re-measured 2026-09-11 — the first by counting `def test_`
+**306 test functions across 13 files in `tests/`; pytest expands them to 379
+cases.** Both numbers re-measured 2026-09-14 — the first by counting `def test_`
 lines the way the seedgo readme rule counts them, the second from a full run:
 
 ```
-python -m pytest src/aipass/backup/tests -q     # 378 passed
+python -m pytest src/aipass/backup/tests -q     # 379 passed
 ```
+
+The +1 over 2026-09-11 (305 / 378) is `test_find_file_folder_path_shaped`
+(`test_versioned_engine.py`), the restore path-lookup pin.
 
 The +7 over the 2026-09-08 figures (298 defs / 371 cases) are the `*.tmp`
 floor's pins (DPLAN-0338): six in `TestBuiltinTmpFloor`
@@ -418,16 +421,23 @@ the branch directory the local `aipass/` tree shadows the installed package.
 
 ## Status / Known issues
 
-Everything below was reproduced live on 2026-09-05. These are **code** defects
-found during a docs verification pass; none were fixed in that pass, and each is
-logged here rather than silently corrected in prose.
+A 2026-09-05 docs verification pass reproduced four **code** defects live and
+logged them here rather than correcting them in prose. Three were fixed
+2026-09-14, each with a test that failed before the fix:
+
+- **Was #1:** `restore` was missing from the `--help` COMMANDS block. It has a
+  row now, pinned in `test_cli_routing.py::TestPrintHelp`.
+- **Was #2:** `restore.py` `_find_file_folder` could not find a file from a path
+  like `src/main.py`. Fixed; see the `restore` note under Commands.
+- **Was #4:** the `--help` row for `all` said "snapshot then versioned" and left
+  out the `drive_sync` stage in `modules/all.py`. The row names all three now,
+  pinned in the same unit.
+
+Still open:
 
 | # | Where | What |
 |---|---|---|
-| 1 | `apps/backup.py` `print_help()` | `restore` is missing from the COMMANDS block although it appears in EXAMPLES and `modules/restore.py` sets `PRIMARY_COMMAND = "restore"`. Reported by @devpulse, confirmed here. |
-| 2 | `apps/modules/restore.py:56` | `_find_file_folder` tests `(candidate / filename).is_file()`, so a path-shaped argument looks for `<store>/src/main.py/src/main.py` and never matches. Only a bare basename works. Both `--help` EXAMPLES lines spell the failing form. |
-| 3 | `apps/handlers/state/backup_timestamps.py:22` | `TIMESTAMPS_FILE` is a branch-global module constant, so the "Backups now:" panel (`modules/display.py:176`) reports @backup's last run **anywhere** as if it were this project's. A project registered 30 seconds earlier displayed *"Versioned: 2 mins ago · Drive sync: 7 days ago"*. Same root cause makes the file unpatchable in tests, which is why the suite still rewrites the live one. |
-| 4 | `apps/backup.py` `print_help()` | `all` is described as "Run snapshot then versioned in sequence", but `modules/all.py:117` also runs `drive_sync`. The help understates what the verb does. |
+| 3 | `apps/handlers/state/backup_timestamps.py:22` | `TIMESTAMPS_FILE` is a branch-global module constant, so the "Backups now:" panel (`modules/display.py:176`) reports @backup's last run **anywhere** as if it were this project's. A project registered 30 seconds earlier displayed *"Versioned: 2 mins ago · Drive sync: 7 days ago"*. Same root cause makes the file unpatchable in tests, which is why the suite still rewrites the live one (re-observed 2026-09-14: a full run moved its mtime). |
 
 **Unverified in this pass:** the Drive **upload** path (`drive_sync`, `share`).
 Authentication and connectivity were verified; uploading publishes to a real

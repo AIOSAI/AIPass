@@ -270,7 +270,7 @@ drone @api stats
 | `host-api issue-token <label> [--scope read\|operate] [--out FILE]` | Mint a bearer token — raw value never printed, receipt defaults to `~/.secrets/aipass/host_api/<label>.token` |
 | `host-api list-tokens` | List tokens — values are never shown |
 | `host-api revoke-token <id>` | Revoke server-side, effective next request |
-| `host-api config` / `set-config` | Show / set the bind address (validated first) |
+| `host-api config` / `set-config [--host IP] [--port N] [--face-dir DIR\|default] [--baud-bin PATH\|default]` | Show / set the bind address, the phone face's directory and the baud binary — every value validated before anything is stored. `config` shows the effective face dir and its source (`configured` or `checkout`) with whether `phone.html` is there, and the binary a request would exec with its source (`configured`, `installed`, `checkout`, `path` or `missing`) and whether it is executable |
 
 ---
 
@@ -280,7 +280,7 @@ drone @api stats
 api/
 ├── apps/
 │   ├── api.py                         # Entry point — module discovery, command routing
-│   ├── modules/                       # Orchestration layer (10 modules)
+│   ├── modules/                       # Orchestration layer (11 modules)
 │   │   ├── api_key.py                 # Key retrieval, validation, provider listing
 │   │   ├── secrets.py                 # Cross-branch secrets door (in-process API)
 │   │   ├── openrouter_client.py       # OpenRouter client — calls, models, status
@@ -290,7 +290,8 @@ api/
 │   │   ├── bridge.py                  # Generic contract registry (register/resolve)
 │   │   ├── integrations_manager.py    # Contract dispatch — integrations list/call
 │   │   ├── registry.py               # Driver auto-discovery (load_drivers)
-│   │   └── host_serve.py             # host_api sub-router — serve/--detach, status, stop
+│   │   ├── host_serve.py             # host_api sub-router — serve/--detach, status, stop
+│   │   └── host_config_cli.py        # host_api sub-router — config, set-config (bind, face dir, baud binary)
 │   ├── handlers/                      # Business logic (8 packages, 35 files)
 │   │   ├── module_root.py             # module_file() — the one guarded __file__ resolve (no import-time cwd read)
 │   │   ├── auth/env.py, keys.py, secrets.py
@@ -311,7 +312,7 @@ api/
     └── conformance/settings/       # 39 shared goldens both runtimes must satisfy
 ```
 
-Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`. `host_serve.py` is a SUB-router: `host_api.py` offers it every `host-api` call first and owns everything it declines, so an unknown subcommand still reaches an error rather than a silent success.
+Three-tier: entry point routes to modules (orchestration), modules delegate to handlers (business logic). Modules auto-discovered from `apps/modules/*.py` via `handle_command()`. `host_serve.py` and `host_config_cli.py` are SUB-routers: `host_api.py` offers them every `host-api` call first and owns everything they decline, so an unknown subcommand still reaches an error rather than a silent success.
 
 
 ### No module needs a working directory to be imported (2026-08-31)
@@ -414,6 +415,8 @@ drone @api host-api serve --detach     # survives drone's exec timeout; log in l
 drone @api host-api autostart          # renders the boot unit + prints the install steps
 drone @api host-api status             # pid, bind, owner, and where to read it
 drone @api host-api set-config --host <ip>   # validated before it is stored
+drone @api host-api set-config --face-dir <dir>   # an installed phone face; 'default' clears it
+drone @api host-api set-config --baud-bin <path>  # the binary the fleet lanes exec; 'default' = automatic
 drone @api host-api revoke-token <id>  # effective next request, no restart
 ```
 
@@ -478,6 +481,7 @@ which this server does not have (confidentiality on the wire is WireGuard's).
 | `GET /v1/projects` | read | @baud's project census — the switcher menu's rows, unchanged |
 | `GET /v1/roster` | read | Every working agent in **every** project. Takes no parameters — any is a 400, never a silent drop |
 | `GET /v1/machine` | read | @skills' `machine_vitals()`, **verbatim**: `ok`, `schema`, `sampled_at` and eight sections (cpu, load, memory, swap, temp, fan, network, processes), each carrying `available`/`reason`/`sentence`/`detail`. 1 s single-flight cache — the first read after a server start shows cpu and network `warming`. An absent reading is a **200** with the skill's section, never a zero; **503** only when the skill refused (`psutil_missing`, `switched_off`: the code in `error.reason`, its detail as the message) or its door failed (`machine_door_failed`). Takes no parameters — any is a 400 |
+| `GET /v1/lock` | read | @skills' `lock_state()`, **verbatim**: `ok`, `locked`, `method`, `session`, `reason`, `detail`. 1 s single-flight cache. Cannot tell (`ok: false`, `locked: null`, the skill's code and sentence) is a **200** — the phone draws it unknown, never unlocked; **503** `lock_door_failed` only when the door raised or broke its shape (a boolean `ok`, a `locked` key, the two agreeing). Takes no parameters — any is a 400. Locking stays `POST /v1/verbs/lock`, operate scope |
 | `GET /v1/memory-config?branch=` | read | @memory's limits. No branch = the fleet view; a branch = that one |
 | `POST /v1/memory-config/set` | operate | `{branch, type, count}` — one branch's override. 1–100 |
 | `POST /v1/memory-config/set-default` | operate | `{type, count}` — the default only. **Does not reach any branch** |
@@ -1037,6 +1041,21 @@ bundle that renders a token door and nothing else. Every byte of data stays behi
 `/v1/*`. The bundle is served precisely — `/assets` mounted, each bundle-root file
 routed by name — never as a catch-all that could shadow the API.
 
+**Where the face comes from (FPLAN-0587).** An installed AIPass has no checkout to
+build the phone in, so the directory is a setting: `face_dir` in the host config,
+stored by `drone @api host-api set-config --face-dir <dir>` or by @aipass's
+`aipass baud install` through `config.set_face_dir()`. Unset, the server serves
+@baud's checkout build (`projects/baud/app/dist-phone`) as it always has, and
+`--face-dir default` clears it back. The bind rule's doctrine applies: the value is
+refused before anything is stored unless it is absolute, a directory, and holds
+`phone.html`. `host-api config` shows the effective dir, the source that named it
+(`configured` or `checkout`) and whether `phone.html` is there. A configured dir
+that has emptied since is a 503 naming that dir and its fixes, never a quiet fall
+back to the checkout build. **Known limit:** the face is resolved once, when the
+app is created, so a running server needs a restart to serve a new dir. That is
+deliberate: `/assets` is mounted from one bundle, and a `phone.html` re-resolved
+per request could name assets that mount does not hold.
+
 **Why the feed cursor is a timestamp:** `notifications.jsonl` is trimmed 400→200
 lines and the trim replaces the file, so a line or byte offset goes stale under
 any reader — the same shape as the 10-hour Telegram outage. The cursor clamps at
@@ -1053,9 +1072,30 @@ because a "name" can lie and a symlink can point out of the tree.
 state means, because a second answer to "is this agent alive" would eventually
 disagree with the desktop and neither would be trusted. `has_room` is filtered on,
 never derived, and `live_agent_sessions` is served raw rather than joined to the
-branch list. BAUD's binary is resolved to the same built release path the desktop
-launcher execs. `fleet.SNAPSHOT_READY` remains as a kill switch: switched off
-means **503 with a reason**, never a synthesised fleet.
+branch list. Which BAUD binary runs is below. `fleet.SNAPSHOT_READY` remains as a
+kill switch: switched off means **503 with a reason**, never a synthesised fleet.
+
+**Which baud binary the host lanes exec (FPLAN-0589).** The desktop `baud` links
+GTK and webkit even for `--snapshot`, so a headless host has nothing it can run;
+@baud's `baud-cli` is the same crate's six verbs with no GTK. Every fleet, census,
+roster and room exec resolves the binary **per request** — a config read and a few
+stats, so a binary installed while the server runs is used on the next request with
+no restart (the face, by contrast, is resolved once). First hit wins:
+
+1. `baud_bin` in the host config — `drone @api host-api set-config --baud-bin <path>`,
+   or `aipass baud install` in-process. Validated before it is stored: absolute,
+   exists, a regular file, executable. **If it is later gone or not executable the
+   lane refuses by name** with the cure (`--baud-bin default`), never falling past it.
+2. `~/.aipass/baud/bin/baud-cli`, where `aipass baud install` lands it.
+3. The checkout's `projects/baud/app/src-tauri/target/release/baud-cli`.
+4. The checkout's `.../release/baud`, the desktop binary the launcher execs.
+5. `baud-cli` on PATH, then 6. `baud` on PATH.
+
+An automatic location counts only when it holds an executable file. When nothing
+answers, the 503 names every place it looked, in order, and ends with
+`Install it: aipass baud install.` `host-api config` shows the line
+`binary: <path> (configured|installed|checkout|path|missing)` and whether it is
+executable.
 
 **Aliveness is `live_agent_sessions`, and only that.** The three fleet fields
 answer three different questions: `has_room` means a BAUD-named session *exists*

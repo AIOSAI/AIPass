@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-07-05
-# Modified: 2026-07-05
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -15,7 +15,12 @@ this command materializes a working, writable AIPass home and wires it up:
     1. Resolve where AIPass should live (default ~/AIPass; --here / --path to steer).
     2. Fetch the framework there (git clone of the public repo) if not already present.
     3. Run the canonical setup.sh (venv, editable install, provider-hook wiring, binaries).
-    4. End in a conversation: the @aipass concierge opens in this terminal with the
+    4. Install the phone face and baud-cli: @baud's phone bundle and headless binary
+       from a release, pointed at by @api's host server (``aipass baud install``).
+       BEST-EFFORT: offline, a private repo or no token is one honest line plus the
+       retry command, and the install carries on (FPLAN-0587, FPLAN-0589). No
+       baud-cli build for this platform lands the face alone. --no-baud skips it.
+    5. End in a conversation: the @aipass concierge opens in this terminal with the
        install report in hand (interactive default; --no-chat to skip). Project
        creation is NOT part of install — the concierge points users at
        `aipass init run` for that, whenever they're ready.
@@ -28,6 +33,7 @@ Usage:
     aipass install                       # interactive, ends in a welcome chat
     aipass install --non-interactive     # CI/headless (~/AIPass), no chat
     aipass install --no-chat             # install the engine only, skip the chat
+    aipass install --no-baud             # skip the phone face + baud-cli step
     aipass install --path ~/tools/aipass # explicit home
     aipass install --here                # install into the current directory
     aipass install --chat-only           # skip the build, just the welcome chat
@@ -55,7 +61,7 @@ from aipass.aipass.apps.handlers.ui.progress import render_step_header
 from aipass.aipass.shared.registry_discovery import registries_in
 
 COMMAND = "install"
-TOTAL_STEPS = 4
+TOTAL_STEPS = 5
 REPO_URL = "https://github.com/AIOSAI/AIPass.git"
 DEFAULT_HOME = Path.home() / "AIPass"
 
@@ -489,6 +495,20 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     launch_inline("claude", prompt, aipass_branch, flag_variant)
 
 
+def _install_phone_face(dry_run: bool, no_baud: bool) -> bool:
+    """The Phone face step: best-effort, so its outcome never fails the install.
+
+    Returns:
+        True when the face was installed and pointed (or the dry-run walked it).
+    """
+    if no_baud:
+        console.print("[dim]Skipped the phone face and baud-cli (--no-baud). Install later: aipass baud install[/dim]")
+        return False
+    from aipass.aipass.apps.modules.baud import install_best_effort
+
+    return install_best_effort(dry_run=dry_run)
+
+
 def _check_and_fix_owner(home: Path) -> None:
     """Run sync-registry --check; if issues found, auto-heal with --fix."""
     try:
@@ -555,8 +575,9 @@ def run_install(
     no_chat: bool = False,
     no_symlink: bool = False,
     force_symlink: bool = False,
+    no_baud: bool = False,
 ) -> int:
-    """Run the 4-step one-command install. Returns 0 on success, 1 on failure."""
+    """Run the 5-step one-command install. Returns 0 on success, 1 on failure."""
     console.print()
     console.print("[bold cyan]AIPass — one-command install[/bold cyan]")
     if dry_run:
@@ -619,15 +640,26 @@ def run_install(
     finally:
         _release_install_lock(install_lock)
 
-    # Step 4 — end in a welcome chat (no project creation — see module docstring)
+    # Step 4 — the phone face, best-effort: its result is reported, never fatal
     console.print()
-    console.print(render_step_header(4, TOTAL_STEPS, "Welcome"))
+    console.print(render_step_header(4, TOTAL_STEPS, "Phone face + baud-cli"))
+    face_installed = _install_phone_face(dry_run, no_baud)
+
+    # Step 5 — end in a welcome chat (no project creation — see module docstring)
+    console.print()
+    console.print(render_step_header(5, TOTAL_STEPS, "Welcome"))
 
     # Log BEFORE exec — launch_inline (inside _end_in_chat) replaces the process
     # and never returns when it fires.
     json_handler.log_operation(
         "aipass_install",
-        {"home": str(home), "non_interactive": non_interactive, "dry_run": dry_run, "chat": not no_chat},
+        {
+            "home": str(home),
+            "non_interactive": non_interactive,
+            "dry_run": dry_run,
+            "chat": not no_chat,
+            "phone_face": face_installed,
+        },
     )
 
     _end_in_chat(home, bins, dry_run, no_chat)
@@ -645,13 +677,16 @@ def print_help() -> None:
     console.print("  [green]aipass install --path DIR[/green]           [dim]# explicit home[/dim]")
     console.print("  [green]aipass install --here[/green]               [dim]# install into current dir[/dim]")
     console.print("  [green]aipass install --no-chat[/green]            [dim]# install only, skip the chat[/dim]")
+    console.print("  [green]aipass install --no-baud[/green]            [dim]# skip phone face + baud-cli[/dim]")
     console.print("  [green]aipass install --no-symlink[/green]         [dim]# skip global CLI symlinks[/dim]")
     console.print("  [green]aipass install --force-symlink[/green]      [dim]# repoint from another install[/dim]")
     console.print("  [green]aipass install --chat-only[/green]          [dim]# skip the build, just the chat[/dim]")
     console.print("  [green]aipass install --force-global-home[/green]  [dim]# allow install into /tmp (unsafe)[/dim]")
     console.print("  [green]aipass install --dry-run[/green]            [dim]# walk steps, no side effects[/dim]")
     console.print()
-    console.print("[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> welcome chat")
+    console.print(
+        "[yellow]STEPS:[/yellow] resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> welcome chat"
+    )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
     console.print()
@@ -697,6 +732,7 @@ def handle_command(command: str, args: list[str]) -> bool:
     chat_only = "--chat-only" in run_args
     no_symlink = "--no-symlink" in run_args
     force_symlink = "--force-symlink" in run_args
+    no_baud = "--no-baud" in run_args
     path = _flag_value("--path")
 
     if chat_only:
@@ -716,6 +752,7 @@ def handle_command(command: str, args: list[str]) -> bool:
             no_chat=no_chat,
             no_symlink=no_symlink,
             force_symlink=force_symlink,
+            no_baud=no_baud,
         )
     json_handler.log_operation(
         "install_run",

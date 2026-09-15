@@ -1775,3 +1775,113 @@ class TestIssueViewRewrite:
             handle_command("run", ["view", "123"])
 
         assert mock_run.call_args[0][0] == ["gh", "run", "view", "123"]
+
+
+# ===========================================================================
+# run view --log — gh prints nothing for a job-level log archive
+# ===========================================================================
+
+_RUN_JOBS_JQ = '.jobs[] | "\\(.id)\\t\\(.conclusion)\\t\\(.name)"'
+_ONE_JOB_JQ = '"\\(.id)\\t\\(.conclusion)\\t\\(.name)"'
+
+
+def _gh_answers(routes: dict[tuple[str, ...], MagicMock]):
+    """A subprocess.run stand-in that answers by exact argv and fails the test on any other call."""
+
+    def _run(argv: list[str], **_kwargs: object) -> MagicMock:
+        if tuple(argv) not in routes:
+            raise AssertionError(f"unexpected call: {argv}")
+        return routes[tuple(argv)]
+
+    return _run
+
+
+def _done(stdout: str = "", returncode: int = 0, stderr: str = "") -> MagicMock:
+    return MagicMock(stdout=stdout, stderr=stderr, returncode=returncode)
+
+
+class TestRunLogFallback:
+    """gh 2.45 matches per-step files in a run's log archive, and GitHub now ships job-level
+    files only, so `run view --log-failed` printed nothing and exited 0 (runs 34730939542 and
+    34745763695, @devpulse 2026-09-13). An empty clean answer is read from the jobs API."""
+
+    @patch(_AUTH, return_value="drone")
+    def test_log_failed_reads_each_failed_job_from_the_api(self, _mock_auth: MagicMock) -> None:
+        routes = {
+            ("gh", "run", "view", "34730939542", "--log-failed"): _done(),
+            (
+                "gh",
+                "api",
+                "--paginate",
+                "repos/{owner}/{repo}/actions/runs/34730939542/jobs",
+                "--jq",
+                _RUN_JOBS_JQ,
+            ): _done("103653482487\tsuccess\tlint\n103653482575\tfailure\ttest (3.10)\n"),
+            ("gh", "api", "repos/{owner}/{repo}/actions/jobs/103653482575/logs"): _done(
+                "FAILED tests/test_x.py::test_y\n1 failed, 40 passed\n"
+            ),
+        }
+        with patch(f"{_GIT_MOD}.subprocess.run", side_effect=_gh_answers(routes)) as mock_run:
+            result = handle_command("run", ["view", "34730939542", "--log-failed"])
+
+        assert result["stdout"] == "test (3.10)\tFAILED tests/test_x.py::test_y\ntest (3.10)\t1 failed, 40 passed"
+        assert result["exit_code"] == 0
+        assert "Showing the full log of each failed job from the jobs API instead." in result["stderr"]
+        assert mock_run.call_count == 3
+
+    @patch(_AUTH, return_value="drone")
+    def test_a_job_log_reads_the_named_repo_and_job(self, _mock_auth: MagicMock) -> None:
+        routes = {
+            ("gh", "run", "view", "--job", "103693306440", "--log", "-R", "AIOSAI/baud"): _done(),
+            ("gh", "api", "repos/AIOSAI/baud/actions/jobs/103693306440", "--jq", _ONE_JOB_JQ): _done(
+                "103693306440\tsuccess\tbuild\n"
+            ),
+            ("gh", "api", "repos/AIOSAI/baud/actions/jobs/103693306440/logs"): _done("step one\nstep two\n"),
+        }
+        with patch(f"{_GIT_MOD}.subprocess.run", side_effect=_gh_answers(routes)):
+            result = handle_command("run", ["view", "--job", "103693306440", "--log", "-R", "AIOSAI/baud"])
+
+        assert result["stdout"] == "build\tstep one\nbuild\tstep two"
+        assert result["exit_code"] == 0
+
+    @patch(_AUTH, return_value="drone")
+    def test_a_log_gh_did_print_is_returned_untouched(self, _mock_auth: MagicMock) -> None:
+        routes = {("gh", "run", "view", "123", "--log"): _done("lint\tRun ruff\tAll checks passed!\n")}
+        with patch(f"{_GIT_MOD}.subprocess.run", side_effect=_gh_answers(routes)) as mock_run:
+            result = handle_command("run", ["view", "123", "--log"])
+
+        assert result == {"stdout": "lint\tRun ruff\tAll checks passed!\n", "stderr": "", "exit_code": 0}
+        assert mock_run.call_count == 1
+
+    @patch(_AUTH, return_value="drone")
+    def test_a_job_log_the_api_refuses_fails_the_command_by_name(self, _mock_auth: MagicMock) -> None:
+        routes = {
+            ("gh", "run", "view", "77", "--log-failed"): _done(),
+            ("gh", "api", "--paginate", "repos/{owner}/{repo}/actions/runs/77/jobs", "--jq", _RUN_JOBS_JQ): _done(
+                "9\tfailure\ttest (3.12)\n"
+            ),
+            ("gh", "api", "repos/{owner}/{repo}/actions/jobs/9/logs"): _done(returncode=1, stderr="HTTP 410: Gone"),
+        }
+        with patch(f"{_GIT_MOD}.subprocess.run", side_effect=_gh_answers(routes)):
+            result = handle_command("run", ["view", "77", "--log-failed"])
+
+        assert result["exit_code"] == 1
+        assert result["stdout"] == ""
+        assert result["stderr"].splitlines()[-1] == "job 9 (test (3.12)): HTTP 410: Gone"
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["run", "list", "--repo", "AIOSAI/baud"],
+            ["issue", "list", "--repo=AIOSAI/baud"],
+            ["workflow", "list", "--repo", "AIOSAI/baud"],
+        ],
+    )
+    @patch(_AUTH, return_value="drone")
+    def test_gh_keeps_its_own_repo_flag(self, _mock_auth: MagicMock, argv: list[str]) -> None:
+        """--repo OWNER/NAME on a passthrough is gh's flag, never the external-repo door's."""
+        with patch(f"{_GIT_MOD}.subprocess.run", return_value=_done("ok\n")) as mock_run:
+            result = handle_command(argv[0], argv[1:])
+
+        assert mock_run.call_args[0][0] == ["gh", *argv]
+        assert result == {"stdout": "ok\n", "stderr": "", "exit_code": 0}

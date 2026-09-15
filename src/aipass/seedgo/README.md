@@ -186,7 +186,7 @@ seedgo/
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 62 test files, 3028 test functions (pytest expands to 3897 cases)
+├── tests/                           # 62 test files, 3374 test functions (pytest expands to 4100 cases)
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -216,7 +216,7 @@ every log line in the branch.
 
 ---
 
-## The 45 Standards
+## The 47 Standards
 
 `Scope` is the checker's own `AUDIT_SCOPE` (where a result is REPORTED); `Applies to`
 is its `APPLIES_TO` (which files are ELIGIBLE, default `everywhere`). These are two
@@ -230,6 +230,7 @@ by accident while the table was wrong.
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
 | architecture | all_files | production | Module/handler separation, entry point structure |
+| calendar_bound | branch_level | everywhere | A test that asserts a date literal against code that computes with the clock, and does not own the clock — true only while the calendar agrees (corpus: tests/ and lib/*/tests/) |
 | cli | all_files | production | Rich console usage, no bare print() |
 | cli_flags | entry_point | everywhere | --help, --version flag handling |
 | cli_ux | entry_point | everywhere | CLI navigation + output quality (Nav/Output scoring) |
@@ -276,10 +277,11 @@ by accident while the table was wrong.
 | unused_function | branch_level | everywhere | No unreferenced public functions |
 | windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs) |
 
-The audit consults **47** entries for a branch — these 46 plus `diagnostics` (pyright), which has
-no `_check.py` of its own. That 47 is what CI's `EXPECTED_STANDARDS` pins.
-`host_portability` landed 2026-09-12 and is the 46th checker; `.github/scripts/seedgo_audit.py`
-must carry `EXPECTED_STANDARDS = 47` or every branch trips the tripwire.
+The audit consults **48** entries for a branch — these 47 plus `diagnostics` (pyright), which has
+no `_check.py` of its own. That 48 is what CI's `EXPECTED_STANDARDS` pins.
+`host_portability` landed 2026-09-12 as the 46th checker and `calendar_bound` 2026-09-13 as the
+47th; `.github/scripts/seedgo_audit.py` must carry `EXPECTED_STANDARDS = 48` or every branch trips
+the tripwire.
 
 **`test_quality` (v4) left this table on 2026-09-07.** It was the pack's only
 `APPLIES_TO = tests` checker: a per-branch TEXT scan that awarded an item for finding a
@@ -341,9 +343,12 @@ restate them here. Read the directory, or ask @hooks.
 
 Counted 2026-09-07, both ways, because the two numbers answer different questions:
 
-- **62 test files, 3028 test functions** — the `def test_` count, the way seedgo's own
-  `readme_check._count_test_functions()` counts it. **pytest expands to 3897 cases** once
-  parametrisation is applied. Re-measured 2026-09-07 after FPLAN-0496: six merged rows out of
+- **62 test files, 3374 test functions** — the `def test_` count, the way seedgo's own
+  `readme_check._count_test_functions()` counts it. **pytest expands to 4100 cases** once
+  parametrisation is applied (both re-counted 2026-09-14, after the calendar_bound pins, the
+  posix_literal arm-4 widening and the dead_code import-block pins; the prose below is the
+  2026-09-07 measurement). Re-measured
+  2026-09-07 after FPLAN-0496: six merged rows out of
   `test_coverage_audit.py`, three mutation pins into the json contract, and the contract's
   discovery widening from 18 branches to 22 — which is most of the case growth, since every
   parametrised contract now runs on four resident citizens as well.
@@ -499,8 +504,8 @@ Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
   `.github/scripts/seedgo_audit.py` moved 46 → 47 in the same change — it must, or every branch
   trips it.
 - **Tests:** 3843 passed, 53 skipped, 1 failed — the failure is another branch's live trinity
-  drift, not seedgo's code (see the run result above). 3028 test functions across 62 files; pytest
-  expands them to 3897 cases.
+  drift, not seedgo's code (see the run result above). 3028 test functions across 62 files then;
+  3374 across 62 on 2026-09-14, expanding to 4100 cases (4047 passed, 53 skipped).
 - **Coverage:** 451 public functions tested of 588 (77%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)

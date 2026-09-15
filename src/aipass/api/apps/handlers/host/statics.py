@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: statics.py
 # Description: Host API Statics Handler — how @baud's bundle files reach a browser
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-19
-# Modified: 2026-08-21
+# Modified: 2026-09-13
 # =============================================
 # pyright: reportMissingImports=false
 # The suppression covers the [host] extra's own libraries. Every import below
@@ -165,28 +165,31 @@ def bundle_response(path: Path, request_headers: Any) -> Any:
     return response
 
 
-def face_file_route(filename: str) -> Any:
+def face_file_route(path: Path) -> Any:
     """
     Build a route handler serving one file from the bundle root.
 
-    The name is bound at app-creation time from a directory listing, never
+    The path is bound at app-creation time from a directory listing, never
     taken from the request, so there is no caller-supplied path here to fence.
+    Nor is it re-resolved per request: it sits in the bundle create_app()
+    resolved once, the same one the /assets mount was built from, so a
+    face_dir changed under a running server cannot pair this file with
+    another bundle's assets (face.py, KNOWN LIMIT).
 
     Lives here rather than in server.py because the two are the same decision:
     what this returns is entirely a question of cache policy, and the file that
     owns the policy should own the handler that applies it.
 
     Args:
-        filename: File name at the bundle root.
+        path: The bundle-root file, its directory already resolved.
 
     Returns:
         An async route handler returning that file, revalidating rather than
         letting a browser guess a freshness lifetime. Every name here is STABLE
         across builds, which is the whole reason.
     """
-    from aipass.api.apps.handlers.host import face as host_face
 
     async def _serve_file(request: Request) -> Any:
-        return bundle_response(host_face.face_root() / filename, request.headers)
+        return bundle_response(path, request.headers)
 
     return _serve_file

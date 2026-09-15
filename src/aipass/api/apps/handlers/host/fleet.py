@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: fleet.py
 # Description: Host API Fleet Handler — reads @baud's headless fleet snapshot
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-14
 # =============================================
 
 """
@@ -57,14 +57,29 @@ SNAPSHOT_READY stays in the code as an operational kill switch. Closed means 503
 with a reason — never a synthesised fleet. That distinction is the point of the
 constant, and it outlives the hazard that introduced it.
 
-FINDING THE BINARY
-------------------
-`baud` is NOT on PATH. Patrick's launcher execs the built release path directly,
-so this resolves to that same file first — which is exactly the argument @baud
-made when they refused to ship a second artifact for C1: one binary, one version,
-nothing that can silently disagree. An installed `baud` on PATH is honoured
-second, and if neither exists the error names both places it looked, because
-"not found" with no location is a support ticket.
+FINDING THE BINARY (FPLAN-0589)
+-------------------------------
+The desktop `baud` links GTK and webkit even for `--snapshot`, so a headless host
+or a fresh install has nothing it can run. @baud ships `baud-cli` from the same
+crate: the same six verbs, the same stdout and exit codes, no GTK. The order,
+first hit wins:
+    1. the configured baud_bin (host-api set-config --baud-bin)
+    2. ~/.aipass/baud/bin/baud-cli, where `aipass baud install` lands it
+    3. the checkout's built baud-cli
+    4. the checkout's built desktop baud, the file Patrick's launcher execs
+    5. baud-cli on PATH
+    6. baud on PATH
+A configured binary that is gone or not executable is REFUSED by name, never
+fallen past: a setting somebody chose must not silently stop mattering. An
+automatic location counts only when it holds an executable file; one that exists
+without the bit is passed and named. If nothing answers, the error names every
+place it looked, in order, because "not found" with no location is a support
+ticket.
+
+RESOLVED PER REQUEST, UNLIKE THE FACE. A lookup is a config read and a few stats,
+cheap beside the exec it precedes, and the install can land while the server
+runs — so a new binary is used on the next request, with no restart. The face is
+resolved once because its /assets mount is built with the app; nothing here is.
 
 @baud's exit-code contract, implemented below verbatim:
     0  real read. `error` is null and `branches` is the truth.
@@ -102,8 +117,12 @@ successes and they are different facts, so this module passes the distinction
 through rather than flattening it. @baud asked for exactly that, and they are
 right: "ended it" and "it was already gone" are different sentences on a phone.
 
+Classes:
+    BinaryLocation         - Which baud binary a request would exec, and which step found it
+
 Functions:
-    snapshot_binary()      - Locate the baud binary this host should exec
+    locate_binary()        - Walk the lookup order once and report what answered
+    snapshot_binary()      - The baud binary to exec, refused by name when there is none
     read_snapshot()        - The fleet envelope, exactly as BAUD produced it,
                              coalesced and cached for SNAPSHOT_TTL_SECONDS
     reset_snapshot_cache() - Forget it, after a verb that changed the fleet
@@ -113,27 +132,49 @@ Functions:
 
 import copy
 import json
+import os
 import shutil
 import subprocess
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.api.apps.handlers.json import json_handler
+from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host.reads import repo_root
 
 # Opened 2026-08-14 on Patrick's rebuild, re-verified from this branch. Kept as an
 # operational kill switch: set False to refuse honestly, never to fake a fleet.
 SNAPSHOT_READY = True
 
+# The desktop binary's name on PATH, and the name the exec failures below report.
 SNAPSHOT_BINARY = "baud"
+
+# @baud's headless target (FPLAN-0589): the same crate and six verbs, no GTK.
+HEADLESS_BINARY = "baud-cli"
+
+# Where `aipass baud install` lands the headless binary, under the home directory.
+INSTALLED_BINARY_RELATIVE = Path(".aipass") / "baud" / "bin" / HEADLESS_BINARY
 
 # The path Patrick's launcher execs. Coupled to @baud's build layout on purpose —
 # running a DIFFERENT file than the desktop is the failure this avoids — and it
 # fails loudly rather than drifting if they ever move it.
 DEFAULT_BINARY_RELATIVE = Path("projects") / "baud" / "app" / "src-tauri" / "target" / "release" / "baud"
+
+# The checkout's headless build, beside the desktop one.
+CHECKOUT_HEADLESS_RELATIVE = DEFAULT_BINARY_RELATIVE.with_name(HEADLESS_BINARY)
+
+# Which step of the lookup order answered. `host-api config` prints the word.
+SOURCE_CONFIGURED = "configured"
+SOURCE_INSTALLED = "installed"
+SOURCE_CHECKOUT = "checkout"
+SOURCE_PATH = "path"
+SOURCE_MISSING = "missing"
+
+INSTALL_BINARY_HINT = "Install it: aipass baud install."
 
 # Generous: BAUD walks a 17-branch census off disk. Short enough that a wedged
 # binary cannot park a phone request indefinitely.
@@ -182,29 +223,131 @@ class FleetMisuse(Exception):
     """
 
 
-def snapshot_binary() -> str:
+@dataclass(frozen=True)
+class BinaryLocation:
     """
-    Locate the baud binary to exec.
+    Which baud binary a request would exec, and which step of the order found it.
+
+    Attributes:
+        path: The binary, or "" when nothing answered.
+        source: One of the SOURCE_* words.
+        looked: Every place checked, in order, as the not-found text names them.
+    """
+
+    path: str
+    source: str
+    looked: Tuple[str, ...]
+
+    def runnable(self) -> bool:
+        """
+        Whether the path is an executable regular file right now.
+
+        Returns:
+            False when nothing answered, or the file is gone or lost its bit.
+        """
+        return bool(self.path) and _is_runnable(Path(self.path))
+
+    def problem(self) -> str:
+        """
+        Why a request could not exec this, or "" when it can.
+
+        Returns:
+            The configured-but-unusable refusal with its cure, the not-found text
+            naming every place looked and ending with the install command, or "".
+        """
+        if self.source == SOURCE_MISSING:
+            places = "; ".join(self.looked)
+            return f"The baud binary was not found. Looked, in order, at: {places}. {INSTALL_BINARY_HINT}"
+
+        if self.source == SOURCE_CONFIGURED and not self.runnable():
+            return (
+                f"The configured baud binary {self.path} is gone or not executable, and a configured binary is "
+                "never fallen past. Name another with drone @api host-api set-config --baud-bin <path>, or return "
+                "to the automatic lookup: drone @api host-api set-config --baud-bin default"
+            )
+
+        return ""
+
+
+def _is_runnable(path: Path) -> bool:
+    """
+    Whether a path is an executable regular file.
+
+    Args:
+        path: The candidate.
 
     Returns:
-        Absolute path to the built release binary, or a PATH-resolved 'baud'.
+        True when it is a file this process may execute.
+    """
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def locate_binary() -> BinaryLocation:
+    """
+    Walk the lookup order once, afresh, and report what answered.
+
+    Never raises for an absent binary. A configured one is reported as configured
+    whatever state it is in, and nothing found is SOURCE_MISSING; whether either
+    can run is snapshot_binary()'s refusal and host-api config's line.
+
+    Returns:
+        The first step that answered, with every place looked up to and including it.
+    """
+    configured = host_config.baud_bin()
+    if configured is not None:
+        return BinaryLocation(str(configured), SOURCE_CONFIGURED, (f"{configured} (configured)",))
+
+    looked: List[str] = []
+
+    # Lazy, so a machine with no checkout still reaches the home and PATH steps.
+    for place, source in (
+        (lambda: Path.home() / INSTALLED_BINARY_RELATIVE, SOURCE_INSTALLED),
+        (lambda: repo_root() / CHECKOUT_HEADLESS_RELATIVE, SOURCE_CHECKOUT),
+        (lambda: repo_root() / DEFAULT_BINARY_RELATIVE, SOURCE_CHECKOUT),
+    ):
+        candidate = place()
+        if _is_runnable(candidate):
+            return BinaryLocation(str(candidate), source, tuple(looked + [str(candidate)]))
+        # Present but not runnable is a different fix from absent, so it is named.
+        looked.append(f"{candidate} (present, not an executable file)" if candidate.exists() else str(candidate))
+
+    for name in (HEADLESS_BINARY, SNAPSHOT_BINARY):
+        found = shutil.which(name)
+        if found:
+            return BinaryLocation(found, SOURCE_PATH, tuple(looked + [f"{name!r} on PATH"]))
+        looked.append(f"{name!r} on PATH")
+
+    return BinaryLocation("", SOURCE_MISSING, tuple(looked))
+
+
+def snapshot_binary() -> str:
+    """
+    The baud binary to exec, resolved afresh on every call.
+
+    Per request on purpose (see FINDING THE BINARY): a binary installed while the
+    server runs is used on the next request, with no restart.
+
+    Returns:
+        The path the first answering step of the lookup order named.
 
     Raises:
-        FleetUnavailable: Neither location has it.
+        FleetUnavailable: The configured baud_bin is gone or not executable —
+            named, never fallen past — or no step found one, with every place
+            looked, in order, and the install command.
     """
-    built = repo_root() / DEFAULT_BINARY_RELATIVE
-    if built.is_file():
-        return str(built)
+    location = locate_binary()
 
-    found = shutil.which(SNAPSHOT_BINARY)
-    if found:
-        # Legitimate, just second: the built path is what the desktop runs.
-        logger.info("[host_api] baud resolved from PATH at %s (no built release found)", found)
-        return found
+    problem = location.problem()
+    if problem:
+        raise FleetUnavailable(problem)
 
-    raise FleetUnavailable(
-        f"The baud binary was not found. Looked for the built release at {built}, then for {SNAPSHOT_BINARY!r} on PATH."
-    )
+    if location.source == SOURCE_PATH:
+        # Legitimate, just last: a configured, installed or built binary is what a host deploys.
+        logger.info(
+            "[host_api] baud resolved from PATH at %s (no configured, installed or built binary)", location.path
+        )
+
+    return location.path
 
 
 def reset_snapshot_cache() -> None:

@@ -39,6 +39,7 @@ def get_dead_code_standards() -> str:
         "     [green]a)[/green] Full dotted import path [dim](aipass.branch.apps.handlers.foo)[/dim]",
         "     [green]b)[/green] Relative dotted path [dim](handlers.foo)[/dim]",
         "     [green]c)[/green] Import statement containing the module stem",
+        "        [dim](one line, or inside a parenthesised multi-line block)[/dim]",
         "     [green]d)[/green] importlib.import_module reference",
         '     [green]e)[/green] Glob-based auto-discovery [dim](glob("*_check.py"), glob("*.py"))[/dim]',
         '     [green]f)[/green] Filename string literal [dim]("my_handler.py")[/dim]',
