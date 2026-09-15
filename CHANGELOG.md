@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **memory: `search --branch @x` no longer matches by bare prefix** — `@aipass` reached `aipass_site_local` and `@ai` reached `ai_mail_email_sent`, because both halves of `<branch>_<type>` can carry underscores, so neither a bare prefix nor a `<branch>_` boundary is the cut (the fix memory first proposed on 09-13 would have kept the exact bug; measured against the 48 collections in `.chroma`). `chroma_subprocess._branch_collections()` 1.6.0 bounds the match by the owners the store itself names: every `<name>_local` / `<name>_observations` collection names an owner, and a collection is dropped when a longer owner that extends the branch name also prefixes it. Six pins in the existing `test_chroma_source_match.py` 1.1.0 (aipass does not reach aipass_site, aipass_site finds itself, `ai` reaches nothing, ai_mail keeps email_sent, flow keeps flow_plans, memory keeps memory_pool_docs); 4/4 mutants red. Residual, stated: a future owner with neither collection whose name extends another branch's still shows in that branch's results — visible (every hit prints its collection), not silent. The `--type` filter is the same species, untouched. Found by Vera Studio's read of the module; memory owning, devpulse landing.
+
 ## [2026-09-14] — the baud-cli day: the headless baud binary ships beside the phone face and `aipass baud install` lands both from one release, the api's `face_dir` and `baud_bin` settings point the host server at them, the admin git door writes into external repos (`drone @git --repo`), the phone's lock chip and per-core cpu page, seedgo's `calendar_bound` checker plus two checker widenings, compass recall that survives a long day, and Telegram retired in place (DPLAN-0343 / DPLAN-0344 / FPLAN-0585–0589, merged as PR #768, v2.8.9)
 
 ### Added

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: chroma_subprocess.py
 # Description: ChromaDB Subprocess Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-27
-# Modified: 2026-08-23
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -374,6 +374,36 @@ def _get_by_ids(collection_name, ids, db_path=None):
     return {"success": True, "documents": documents, "count": len(documents)}
 
 
+# Every archive that rolls over owns a "<name>_local" or "<name>_observations"
+# collection, so these two suffixes name the owners the store itself knows about.
+_OWNER_SUFFIXES = ("_local", "_observations")
+
+
+def _branch_collections(collection_names, branch):
+    """The collections a --branch filter owns, bounded by the owners in the store.
+
+    Collections are named "<branch>_<type>" and either half may hold an
+    underscore (ai_mail_email_sent, aipass_site_local), so "<branch>_" is not a
+    boundary: aipass_site_local starts with "aipass_". A name is dropped when a
+    longer owner that extends the branch (aipass_site) also prefixes it.
+
+    Args:
+        collection_names: Every collection name in the store
+        branch: The branch to scope to, any case
+
+    Returns:
+        The names owned by the branch, in store order
+    """
+    prefix = f"{branch.lower()}_"
+    owners = {name[: -len(suffix)] for name in collection_names for suffix in _OWNER_SUFFIXES if name.endswith(suffix)}
+    longer = [owner for owner in owners if owner.startswith(prefix)]
+    return [
+        name
+        for name in collection_names
+        if name.startswith(prefix) and not any(name.startswith(f"{owner}_") for owner in longer)
+    ]
+
+
 def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5, db_path=None):
     """Search for similar vectors."""
     client = _get_client(db_path)
@@ -385,7 +415,7 @@ def _search_vectors(query_embedding, branch=None, memory_type=None, n_results=5,
         all_collections = client.list_collections()
         collection_names = [col.name for col in all_collections]
         if branch:
-            collection_names = [c for c in collection_names if c.startswith(branch.lower())]
+            collection_names = _branch_collections(collection_names, branch)
         if memory_type:
             collection_names = [c for c in collection_names if c.endswith(memory_type.lower())]
 

@@ -1,19 +1,21 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: tests/test_chroma_source_match.py
-# Date: 2026-08-23
-# Version: 1.0.0
+# Date: 2026-09-15
+# Version: 1.1.0
 # Category: memory/tests
 # =============================================
 
 """Tests for source_file matching in the ChromaDB subprocess handler.
 
-Covers: _source_matches, _check_plan, _get_by_source, _delete_by_source
+Covers: _source_matches, _check_plan, _get_by_source, _delete_by_source,
+_search_vectors' --branch scope
 
 The defect these pin: `plan_label in source_file` is an unanchored substring
 test, so DPLAN-0012 matches a TDPLAN-0012 filename and the exact-match pin
 promotes the wrong plan. A label only counts when the character before it is
-not alphanumeric.
+not alphanumeric. The same species in the search filter: `startswith(branch)`
+sent --branch aipass into aipass_site_local.
 
 All tests use a fake collection -- no live ChromaDB.
 """
@@ -258,3 +260,97 @@ class TestPinComposition:
 
         assert pinned == existing
         assert not any(r.get("similarity") == 1.0 for r in pinned)
+
+
+# ---------------------------------------------------------------------------
+# 6. _search_vectors(branch=...) -- the collection-owner boundary
+# ---------------------------------------------------------------------------
+
+# Names as the live store holds them (memory/.chroma, measured 2026-09-15). Both
+# halves of "<branch>_<type>" may carry an underscore, so "<branch>_" alone is
+# no boundary: aipass_site_local starts with "aipass_".
+_STORE = [
+    "ai_mail_email_sent",
+    "ai_mail_local",
+    "ai_mail_observations",
+    "aipass_local",
+    "aipass_observations",
+    "aipass_site_local",
+    "flow_local",
+    "flow_plans",
+    "memory_pool_docs",
+]
+
+
+class _SearchCollection:
+    def __init__(self, name):
+        self.name = name
+
+    def query(self, query_embeddings=None, n_results=5):
+        return {
+            "documents": [[f"doc in {self.name}"]],
+            "metadatas": [[{}]],
+            "distances": [[0.5]],
+            "ids": [[f"id_{self.name}"]],
+        }
+
+
+class _SearchClient:
+    """A store that records which collections a search actually opened."""
+
+    def __init__(self, names):
+        self._collections = [_SearchCollection(name) for name in names]
+        self.queried = []
+
+    def list_collections(self):
+        return self._collections
+
+    def get_collection(self, name, embedding_function=None):
+        self.queried.append(name)
+        return next(c for c in self._collections if c.name == name)
+
+
+@pytest.fixture
+def store(monkeypatch):
+    client = _SearchClient(_STORE)
+    monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: client)
+    return client
+
+
+class TestSearchBranchScope:
+    """--branch aipass also searched aipass_site_local: a prefix with no owner boundary."""
+
+    def test_branch_does_not_reach_a_longer_owner(self, store):
+        result = chroma_subprocess._search_vectors([0.1], branch="aipass")
+
+        assert store.queried == ["aipass_local", "aipass_observations"]
+        assert result["collections_searched"] == 2
+        assert [r["collection"] for r in result["results"]] == ["aipass_local", "aipass_observations"]
+
+    def test_the_longer_owner_still_finds_itself(self, store):
+        chroma_subprocess._search_vectors([0.1], branch="aipass_site")
+
+        assert store.queried == ["aipass_site_local"]
+
+    def test_a_word_that_only_prefixes_a_branch_reaches_nothing(self, store):
+        """'ai' is no branch: ai_mail_* belongs to ai_mail, whose name merely extends it."""
+        result = chroma_subprocess._search_vectors([0.1], branch="ai")
+
+        assert store.queried == []
+        assert result["results"] == []
+
+    def test_an_underscored_branch_keeps_every_type(self, store):
+        chroma_subprocess._search_vectors([0.1], branch="AI_MAIL")
+
+        assert store.queried == ["ai_mail_email_sent", "ai_mail_local", "ai_mail_observations"]
+
+    def test_a_type_beyond_local_and_observations_stays_with_its_owner(self, store):
+        chroma_subprocess._search_vectors([0.1], branch="flow")
+
+        assert store.queried == ["flow_local", "flow_plans"]
+
+    def test_a_branch_the_store_names_no_owner_for_still_finds_its_collections(self, store):
+        """memory_pool_docs has no memory_local beside it in this store; it is still memory's."""
+        chroma_subprocess._search_vectors([0.1], branch="memory")
+
+        assert store.queried == ["memory_pool_docs"]
