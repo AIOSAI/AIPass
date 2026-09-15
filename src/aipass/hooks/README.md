@@ -131,7 +131,7 @@ src/aipass/hooks/
 │   │   │   ├── session_boot.py  #   Boot wrapper (main() CLI, not a hook — no handle())
 │   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction, in budgeted parts (PostToolUse, DPLAN-0276, #752)
 │   │   │   ├── pre_compact_prep.py # Mechanical AUTO-COMPACT SNAPSHOT stamp (fill %, git, locks, plans)
-│   │   │   ├── rollover.py      #   Pre-compact memory rollover
+│   │   │   ├── rollover.py      #   Pre-compact memory rollover — fleet files + the compacting branch's todo pad (--branch, DPLAN-0345)
 │   │   │   └── session_start.py #   Cadence reset on new chat / clear (SessionStart)
 │   │   └── notification/        # Sound/alert hooks
 │   │       ├── announce.py      #   Announcement tone on notification
@@ -154,7 +154,7 @@ src/aipass/hooks/
 │   └── engine.jsonl             # JSONL diagnostics (every hook execution)
 ├── tools/
 │   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1851 test functions across 51 files; pytest expands to 1936 cases (1934 pass, 2 skipped — 1 env, 1 win32-only)
+└── tests/                       # 1911 test functions across 51 files; pytest expands to 2009 cases (2007 pass, 2 skipped — 1 env, 1 win32-only)
     └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
 ```
 

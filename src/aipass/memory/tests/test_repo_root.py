@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: test_repo_root.py
+# Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
+# Version: 1.1.0
+# Created: 2026-09-15
+# Modified: 2026-09-15
+# =============================================
+
 """Pins for ``handlers/repo_root.py`` — one repo-root answer, never the cwd.
 
 WHY A WHOLE MODULE FOR ONE FUNCTION
@@ -54,6 +62,10 @@ _SOURCES = sorted(
 _CALLER_CWD_SITES = {
     "detector.py",
     "memory_watcher.py",
+    # DPLAN-0345: `rollover run` / `check` roll the todo pad of the branch the
+    # CALLER stands in - drone's AIPASS_CALLER_CWD, the process cwd only when
+    # no launcher stamped one. A question about the caller, never the root.
+    "todo_roll.py",
 }
 
 

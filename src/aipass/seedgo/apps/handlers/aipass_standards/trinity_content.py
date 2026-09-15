@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_content.py
 # Description: Trinity Memory-File Standards Content
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-25
-# Modified: 2026-08-25
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -47,7 +47,7 @@ def get_trinity_standards() -> str:
         "",
         "─" * 70,
         "",
-        "[bold cyan]WHAT IS CHECKED — nine groups:[/bold cyan]",
+        "[bold cyan]WHAT IS CHECKED — eight groups:[/bold cyan]",
         "",
         "  [bold]1. File set[/bold] (10) — exactly passport.json, local.json,",
         "     observations.json, README.md, .template_version.json.",
@@ -55,19 +55,19 @@ def get_trinity_standards() -> str:
         "  [bold]2. Top-level keys[/bold] (15) — exact set AND order; duplicate",
         "     keys; document_metadata fields. A [dim]status[/dim] block is a",
         "     violation — health is computed, never stored.",
-        "  [bold]3. Entry shapes[/bold] (25) — required fields with required",
-        "     TYPES, no extras. Heaviest: shape breaks the machinery.",
+        "  [bold]3. Entry shapes[/bold] (30) — required fields with required",
+        "     TYPES, no extras. Heaviest: shape breaks the machinery. A",
+        "     todo carrying [dim]status[/dim] is an extra — done means deleted.",
         "  [bold]4. Ordering & numbering[/bold] (12) — newest-first, strictly",
         "     descending, no reuse. Unnumbered entries are flagged, not",
         "     skipped.",
         "  [bold]5. Char caps[/bold] (12) — measured against the CONFIG, never",
         "     the meta line. An unmeasurable field is a violation.",
         "  [bold]6. Meta lines & _usage[/bold] (10) — byte-match against",
-        "     rendered tab + template prose.",
+        "     rendered tab + template prose. The todos tab's next #N is",
+        "     read by shape: it is stale by design once a todo is added.",
         "  [bold]7. Freshness[/bold] (3) — last_updated ≥ newest entry date.",
-        "  [bold]8. Todos hygiene[/bold] (5) — status:done is a violation;",
-        "     delete, do not keep.",
-        "  [bold]9. Receipt[/bold] (8) — .template_version.json present,",
+        "  [bold]8. Receipt[/bold] (8) — .template_version.json present,",
         "     machine-shaped, versions matching the gold source.",
         "",
         "  Score = weighted sum of per-group subscores. A group holding any",
@@ -80,8 +80,8 @@ def get_trinity_standards() -> str:
         "  [dim]sessions[/dim]       {number:int, date:str, summary:str,",
         "                  status:str} + optional tags:list[str]",
         "  [dim]key_learnings[/dim]  {number:int, date:str, key:str, value:str}",
-        "  [dim]todos[/dim]          {number:int, date:str, task:str,",
-        "                  priority:str, status:str}",
+        "  [dim]todos[/dim]          {number:int, date:str, task:str}",
+        "                  + optional priority:str — no status",
         "  [dim]observations[/dim]   {number:int, date:str, note:str,",
         "                  tags:list[str]}",
         "",

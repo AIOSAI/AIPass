@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "created": "2026-03-07T23:23:54.979418",
     "description": "Standards bypass configuration for this branch",
-    "last_updated": "2026-08-31"
+    "last_updated": "2026-09-15"
   },
   "bypass": [
     {
@@ -581,6 +581,11 @@
         "changed_entries"
       ],
       "reason": "Cross-branch entry point the branch-local scan cannot see: @hooks calls it by name via importlib in apps/handlers/security/edit_gate.py (the entry-cap half of the write gate for the whole fleet). Deleting it to satisfy the checker disables that gate. Narrowed to this one function, and the claim is pinned by tests/test_changed_entries.py::TestTheBypassClaimIsMeasuredNotAsserted so the bypass goes red the day @hooks stops calling it."
+    },
+    {
+      "file": "apps/modules/todo.py",
+      "standard": "introspection",
+      "reason": "Bare `todo` IS the verb, by ruling (DPLAN-0345 @memory review section 4, FPLAN-0590 row 5): `drone @memory todo` prints ONE line - pad N of COUNT and the backlog count - so handle_command() deliberately has no no-args gate calling print_introspection(); a gate there would replace that line with the module page. The module still defines print_introspection() (printed after a refused argument) and print_help() (--help/-h/help in any slot). The bare behaviour is pinned by tests/test_config_verbs.py::TestTodoVerbs::test_bare_is_one_line_the_pad_of_the_configured_count_and_the_backlog. Same class as @ai_mail's apps/modules/email.py introspection rule (inbox works without args). Added 2026-09-15; DELETE this rule if bare `todo` ever becomes the introspection page."
     }
   ],
   "notes": {

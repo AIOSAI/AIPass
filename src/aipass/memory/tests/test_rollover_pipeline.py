@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_rollover_pipeline.py
 # Date: 2026-04-25
-# Version: 1.0.0
+# Version: 1.1.0
+# Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
 
@@ -179,6 +180,14 @@ def _import_rollover_module(monkeypatch):
     rollover_pkg = MagicMock()
     rollover_pkg.orchestrator = mock_orchestrator
 
+    # The todo-pad reports resolve a branch and read a pad: stubbed to the
+    # honest "nothing resolved" line so these tests never touch a real pad.
+    mock_todo_report = MagicMock()
+    no_branch = {"level": "line", "text": "Todos: no branch resolved (harness) - no todo pad checked"}
+    mock_todo_report.check_pad = MagicMock(return_value=no_branch)
+    mock_todo_report.roll_pad = MagicMock(return_value=no_branch)
+    rollover_pkg.todo_report = mock_todo_report
+
     # A real ModuleType, not a MagicMock: the stand-in has to survive being
     # treated as a package by the import machinery, and a MagicMock raises
     # AttributeError for __spec__ the moment importlib asks.
@@ -190,14 +199,15 @@ def _import_rollover_module(monkeypatch):
     # stand in for, so without this line the whole file only passes when some
     # earlier test file happens to have imported handlers for real.
     handlers_pkg.__path__ = [str(Path(__file__).resolve().parents[1] / "apps" / "handlers")]
-    handlers_pkg.monitor = monitor_pkg
-    handlers_pkg.rollover = rollover_pkg
+    setattr(handlers_pkg, "monitor", monitor_pkg)
+    setattr(handlers_pkg, "rollover", rollover_pkg)
 
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers", handlers_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover", rollover_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.todo_report", mock_todo_report)
 
     sys.modules.pop("aipass.memory.apps.modules.rollover", None)
     parent = sys.modules.get("aipass.memory.apps.modules")
@@ -212,6 +222,7 @@ def _import_rollover_module(monkeypatch):
         "warning": mock_warning,
         "detector": mock_detector,
         "orchestrator": mock_orchestrator,
+        "todo_report": mock_todo_report,
     }
 
 
@@ -1882,7 +1893,7 @@ class TestASkippedTriggerIsNotSilentlyDropped:
     @staticmethod
     def _trigger(name="guinea.local"):
         trigger = MagicMock()
-        trigger.__str__ = lambda self: name
+        setattr(trigger, "__str__", lambda self: name)
         trigger.file_path = Path(tempfile.gettempdir()) / "does-not-matter" / "local.json"
         trigger.branch = "guinea"
         trigger.memory_type = "local"
@@ -2109,3 +2120,405 @@ class TestRolloverSurvivesCarriedDebt:
         assert second.get("extracted_count", 0) < first["extracted_count"], (
             "the second run extracted as much as the first — the file did not shrink"
         )
+
+
+# ===========================================================================
+# Tests: rollover/todo_roll -- the todo pad rolls to a FILE (DPLAN-0345 row 1)
+# ===========================================================================
+#
+# Behavioural, on tmp_path copies: a minted pad, a throwaway config naming the
+# count, and a .backup root under tmp_path. The live tree's pads and the real
+# .backup/todo/ are never reachable from here.
+
+
+def _todo_roll():
+    """The real todo_roll handler (the harnesses above stand mocks in per test only)."""
+    import importlib
+
+    return importlib.import_module("aipass.memory.apps.handlers.rollover.todo_roll")
+
+
+def _canon(value) -> str:
+    """JSON equality as text: key order ignored, 1 / 1.0 / true kept distinct."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _todo(number, task=None, **extra) -> dict:
+    """One todo in the pad's shape."""
+    todo = {"number": number, "task": task or f"task {number}", "date": "2026-09-01", "priority": "normal"}
+    todo.update(extra)
+    return todo
+
+
+def _mint_pad(root: Path, todos: list, name: str = "guinea") -> Path:
+    """A branch directory under *root* whose local memory file holds *todos*; returns that file."""
+    local = root / name / ".trinity" / "local.json"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    document = {"document_metadata": {"document_type": "session_history"}, "sessions": [], "todos": todos}
+    local.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    return local
+
+
+def _backlog_file(tmp_path: Path, name: str = "guinea") -> Path:
+    """Where the backlog lands under the tmp .backup root."""
+    return tmp_path / ".backup" / "todo" / name / "backlog.json"
+
+
+def _point_todos_count(monkeypatch, tmp_path: Path, tr, count: int) -> None:
+    """Give the handler a throwaway config whose todos count is *count*."""
+    import copy
+    import importlib
+
+    loader = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
+    config = copy.deepcopy(loader.DEFAULT_CONFIG)
+    config["rollover"]["defaults"]["local"]["todos"] = {"count": count}
+    config["rollover"]["per_branch"] = {}
+    path = tmp_path / "custom_config" / "memory.config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    monkeypatch.setattr(loader, "_CONFIG_PATH", path)
+    monkeypatch.setattr(tr, "config_loader", loader)
+
+
+class TestTodoRoll:
+    """roll_todos: append -> atomic replace -> read back -> only then prune the pad."""
+
+    @pytest.fixture
+    def tr(self, tmp_path, monkeypatch):
+        module = _todo_roll()
+        _point_todos_count(monkeypatch, tmp_path, module, 10)
+        return module
+
+    @staticmethod
+    def _roll(tr, local: Path, tmp_path: Path) -> dict:
+        return tr.roll_todos("guinea", local_path=local, backup_root=tmp_path / ".backup")
+
+    def test_the_oldest_by_number_roll_off_and_the_rest_keep_their_order(self, tr, tmp_path):
+        order = [7, 1, 12, 3, 9, 2, 11, 5, 10, 4, 8, 6]
+        local = _mint_pad(tmp_path, [_todo(n) for n in order])
+
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is True, result["error"]
+        assert result["numbers"] == [1, 2]
+        assert [t["number"] for t in json.loads(local.read_text(encoding="utf-8"))["todos"]] == [
+            n for n in order if n not in (1, 2)
+        ]
+        entries = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
+        assert [record["entry"]["number"] for record in entries] == [1, 2]
+
+    def test_the_backlog_is_the_nested_document(self, tr, tmp_path):
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])
+        self._roll(tr, local, tmp_path)
+
+        document = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))
+        assert set(document) == {"document_metadata", "entries"}
+        assert document["document_metadata"] == {"managed_by": "memory", "branch": "guinea"}
+        assert len(document["entries"]) == 2
+        for record in document["entries"]:
+            assert set(record) == {"rolled", "reason", "entry"}
+            assert record["reason"] == "overflow"
+            assert datetime.fromisoformat(record["rolled"]).tzinfo is not None
+
+    def test_a_rolled_todo_is_json_identical_to_the_pad_copy(self, tr, tmp_path):
+        odd = _todo(
+            1, task="café ≤ naïve — “quoted”", tags=["a", "b"], meta={"weight": 1.0, "flag": True, "gone": None}
+        )
+        local = _mint_pad(tmp_path, [odd] + [_todo(n) for n in range(2, 13)])
+        on_the_pad = json.loads(local.read_text(encoding="utf-8"))["todos"][0]
+
+        self._roll(tr, local, tmp_path)
+
+        entry = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"][0]["entry"]
+        assert _canon(entry) == _canon(on_the_pad)
+
+    def test_a_second_roll_appends_and_never_overwrites(self, tr, tmp_path):
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])
+        self._roll(tr, local, tmp_path)
+        first = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
+
+        document = json.loads(local.read_text(encoding="utf-8"))
+        document["todos"] += [_todo(n) for n in (13, 14, 15)]
+        local.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        result = self._roll(tr, local, tmp_path)
+
+        entries = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
+        assert result["numbers"] == [3, 4, 5]
+        assert entries[:2] == first, "the records already in the backlog were rewritten"
+        assert [record["entry"]["number"] for record in entries] == [1, 2, 3, 4, 5]
+
+    def test_a_backlog_that_reads_back_wrong_leaves_the_pad_untouched(self, tr, tmp_path, monkeypatch):
+        """THE ORDER: the pad is pruned only after the backlog reads back json-equal."""
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])
+        before = local.read_bytes()
+        real_write = tr._write_document
+
+        def tampering_write(path, document):
+            if Path(path).name == "backlog.json":
+                document = json.loads(json.dumps(document))
+                document["entries"][-1]["entry"]["task"] = "silently changed on the way to disk"
+            return real_write(path, document)
+
+        monkeypatch.setattr(tr, "_write_document", tampering_write)
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is False
+        assert result["error"].startswith("NOTHING PRUNED - backlog read-back failed"), result["error"]
+        assert local.read_bytes() == before
+
+    def test_a_refused_backlog_write_leaves_the_pad_untouched(self, tr, tmp_path, monkeypatch):
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])
+        before = local.read_bytes()
+        real_write = tr._write_document
+        monkeypatch.setattr(
+            tr,
+            "_write_document",
+            lambda path, document: "disk full" if Path(path).name == "backlog.json" else real_write(path, document),
+        )
+
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is False
+        assert "NOTHING PRUNED" in result["error"] and "disk full" in result["error"]
+        assert local.read_bytes() == before
+
+    def test_an_unreadable_backlog_is_refused_and_never_written_over(self, tr, tmp_path):
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])
+        before = local.read_bytes()
+        backlog = _backlog_file(tmp_path)
+        backlog.parent.mkdir(parents=True)
+        backlog.write_text("{not json", encoding="utf-8")
+
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is False
+        assert "never written over" in result["error"]
+        assert backlog.read_text(encoding="utf-8") == "{not json"
+        assert local.read_bytes() == before
+
+    def test_a_pad_within_its_count_writes_nothing(self, tr, tmp_path):
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 11)])
+        before = local.read_bytes()
+
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["success"] is True and result["rolled"] == 0
+        assert local.read_bytes() == before
+        assert not (tmp_path / ".backup").exists()
+
+    def test_the_count_comes_from_config(self, tr, tmp_path, monkeypatch):
+        _point_todos_count(monkeypatch, tmp_path, tr, 4)
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 7)])
+
+        result = self._roll(tr, local, tmp_path)
+
+        assert result["count"] == 4
+        assert result["numbers"] == [1, 2]
+
+
+class TestTodoTarget:
+    """ONE branch, keyed by directory name, from --branch or where the caller stood."""
+
+    @staticmethod
+    def _fleet(tmp_path: Path) -> list:
+        return [
+            {"name": "guinea", "path": str(tmp_path / "src" / "aipass" / "guinea"), "residency": "core"},
+            {"name": "pig", "path": str(tmp_path / "projects" / "farm" / "pig"), "residency": "resident"},
+        ]
+
+    def test_a_directory_name_shared_by_core_and_resident_is_refused_by_name(self, tmp_path):
+        tr = _todo_roll()
+        twin = tmp_path / "projects" / "guinea" / "guinea"
+        fleet = self._fleet(tmp_path) + [{"name": "guinea", "path": str(twin), "residency": "resident"}]
+        local = _mint_pad(tmp_path / "src" / "aipass", [_todo(n) for n in range(1, 13)])
+        before = local.read_bytes()
+
+        target = tr.resolve_target("@guinea", fleet=fleet, backup_root=tmp_path / ".backup")
+        result = tr.roll_todos("guinea", fleet=fleet, backup_root=tmp_path / ".backup")
+
+        assert target["name"] is None
+        assert "REFUSED: directory name 'guinea' is shared by 2 branches" in target["error"]
+        assert f"core at {tmp_path / 'src' / 'aipass' / 'guinea'}" in target["error"]
+        assert f"resident at {twin}" in target["error"]
+        assert result["success"] is False and "REFUSED" in result["error"]
+        assert local.read_bytes() == before
+        assert not (tmp_path / ".backup").exists()
+
+    def test_the_backlog_is_keyed_by_directory_name(self, tmp_path):
+        tr = _todo_roll()
+        target = tr.resolve_target("@GUINEA", fleet=self._fleet(tmp_path), backup_root=tmp_path / ".backup")
+
+        assert target["name"] == "guinea"
+        assert target["backlog"] == _backlog_file(tmp_path, "guinea")
+        assert target["local"] == tmp_path / "src" / "aipass" / "guinea" / ".trinity" / "local.json"
+
+    def test_the_caller_cwd_resolves_the_branch_it_stands_in(self, tmp_path):
+        tr = _todo_roll()
+        where = tmp_path / "projects" / "farm" / "pig" / "apps" / "modules"
+
+        target = tr.resolve_target(fleet=self._fleet(tmp_path), environ={"AIPASS_CALLER_CWD": str(where)})
+
+        assert target["name"] == "pig"
+
+    def test_the_repo_root_resolves_no_branch(self, tmp_path):
+        tr = _todo_roll()
+
+        target = tr.resolve_target(fleet=self._fleet(tmp_path), environ={"AIPASS_CALLER_CWD": str(tmp_path)})
+
+        assert target["name"] is None and target["error"] is None
+        assert "is not inside a registered branch directory" in target["reason"]
+
+    def test_a_branch_name_without_a_caller_cwd_is_no_evidence(self, tmp_path, monkeypatch):
+        """Drone runs @memory from memory's own directory: that cwd says nothing about the caller."""
+        tr = _todo_roll()
+        branch = tmp_path / "src" / "aipass" / "guinea"
+        branch.mkdir(parents=True)
+        monkeypatch.chdir(branch)
+
+        launched = tr.resolve_target(fleet=self._fleet(tmp_path), environ={"AIPASS_BRANCH_NAME": "memory"})
+        bare = tr.resolve_target(fleet=self._fleet(tmp_path), environ={})
+
+        assert launched["name"] is None
+        assert "AIPASS_BRANCH_NAME is set without AIPASS_CALLER_CWD" in launched["reason"]
+        assert bare["name"] == "guinea", "with no launcher at all, the process cwd is the caller's"
+
+
+class TestTodoRestore:
+    """restore_todo: pad first, then the backlog - never in neither place."""
+
+    @pytest.fixture
+    def tr(self, tmp_path, monkeypatch):
+        module = _todo_roll()
+        _point_todos_count(monkeypatch, tmp_path, module, 10)
+        return module
+
+    @staticmethod
+    def _backlog_with(tmp_path: Path, records: list) -> Path:
+        path = _backlog_file(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        document = {"document_metadata": {"managed_by": "memory", "branch": "guinea"}, "entries": records}
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _record(todo: dict, rolled: str = "2026-09-01T10:00:00+00:00") -> dict:
+        return {"rolled": rolled, "reason": "overflow", "entry": todo}
+
+    @staticmethod
+    def _restore(tr, number, local: Path, tmp_path: Path) -> dict:
+        return tr.restore_todo("guinea", number, local_path=local, backup_root=tmp_path / ".backup")
+
+    def test_restore_reissues_the_next_number_and_carries_every_other_field(self, tr, tmp_path):
+        original = _todo(2, task="bring it back", priority="high", tags=["x"])
+        local = _mint_pad(tmp_path, [_todo(n) for n in (5, 9, 3)])
+        backlog = self._backlog_with(
+            tmp_path, [self._record(_todo(1)), self._record(original), self._record(_todo(14))]
+        )
+
+        result = self._restore(tr, 2, local, tmp_path)
+
+        assert result["success"] is True, result["error"]
+        assert result["number"] == 15, "max(pad 9, backlog originals 14) + 1"
+        assert json.loads(local.read_text(encoding="utf-8"))["todos"][-1] == {**original, "number": 15}
+        remaining = json.loads(backlog.read_text(encoding="utf-8"))["entries"]
+        assert [record["entry"]["number"] for record in remaining] == [1, 14]
+
+    def test_the_pad_is_written_before_the_backlog_is_touched(self, tr, tmp_path, monkeypatch):
+        local = _mint_pad(tmp_path, [_todo(3)])
+        self._backlog_with(tmp_path, [self._record(_todo(1))])
+        real_write = tr._write_document
+        writes = []
+
+        def recording_write(path, document):
+            writes.append(Path(path).name)
+            return real_write(path, document)
+
+        monkeypatch.setattr(tr, "_write_document", recording_write)
+
+        assert self._restore(tr, 1, local, tmp_path)["success"] is True
+        assert writes == ["local.json", "backlog.json"]
+
+    def test_a_pad_that_does_not_land_leaves_the_backlog_untouched(self, tr, tmp_path, monkeypatch):
+        local = _mint_pad(tmp_path, [_todo(3)])
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(1))])
+        pad_before, backlog_before = local.read_bytes(), backlog.read_bytes()
+        real_write = tr._write_document
+        monkeypatch.setattr(
+            tr,
+            "_write_document",
+            lambda path, document: "disk full" if Path(path).name == "local.json" else real_write(path, document),
+        )
+
+        result = self._restore(tr, 1, local, tmp_path)
+
+        assert result["success"] is False
+        assert result["error"].startswith("NOTHING RESTORED"), result["error"]
+        assert backlog.read_bytes() == backlog_before
+        assert local.read_bytes() == pad_before
+
+    def test_an_ambiguous_number_is_refused_naming_every_candidate(self, tr, tmp_path):
+        local = _mint_pad(tmp_path, [_todo(8)])
+        backlog = self._backlog_with(
+            tmp_path,
+            [
+                self._record(_todo(4, task="first four"), rolled="2026-09-01T10:00:00+00:00"),
+                self._record(_todo(6)),
+                self._record(_todo(4, task="second four"), rolled="2026-09-10T08:30:00+00:00"),
+            ],
+        )
+        pad_before, backlog_before = local.read_bytes(), backlog.read_bytes()
+
+        result = self._restore(tr, 4, local, tmp_path)
+
+        assert result["success"] is False
+        assert "todo #4 is ambiguous - 2 backlog records carry it" in result["error"]
+        assert "rolled 2026-09-01T10:00:00+00:00: first four" in result["error"]
+        assert "rolled 2026-09-10T08:30:00+00:00: second four" in result["error"]
+        assert local.read_bytes() == pad_before and backlog.read_bytes() == backlog_before
+
+    def test_a_full_pad_is_refused_at_the_count_config_names(self, tr, tmp_path, monkeypatch):
+        _point_todos_count(monkeypatch, tmp_path, tr, 3)
+        local = _mint_pad(tmp_path, [_todo(n) for n in (2, 3, 4)])
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(1))])
+        pad_before, backlog_before = local.read_bytes(), backlog.read_bytes()
+
+        refused = self._restore(tr, 1, local, tmp_path)
+
+        assert refused["success"] is False
+        assert refused["error"] == "pad is full (3/3) - finish or delete one before restoring #1"
+        assert local.read_bytes() == pad_before and backlog.read_bytes() == backlog_before
+
+        _point_todos_count(monkeypatch, tmp_path, tr, 4)
+        assert self._restore(tr, 1, local, tmp_path)["success"] is True, "the count is config's, not a literal"
+
+    def test_an_unknown_number_is_refused(self, tr, tmp_path):
+        local = _mint_pad(tmp_path, [_todo(3)])
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(1))])
+
+        result = self._restore(tr, 99, local, tmp_path)
+
+        assert result["success"] is False
+        assert result["error"] == f"no todo #99 in the backlog at {backlog}"
+
+    def test_no_backlog_is_an_honest_answer_not_an_error(self, tr, tmp_path):
+        missing = _backlog_file(tmp_path)
+        state = tr.read_backlog(missing)
+
+        assert state["exists"] is False
+        assert state["error"] is None
+        assert state["entries"] == []
+        assert state["message"].startswith(f"no backlog at {missing} - nothing has rolled off this pad")
+
+        local = _mint_pad(tmp_path, [_todo(4)])
+        result = self._restore(tr, 1, local, tmp_path)
+        assert result["success"] is False and result["error"] == state["message"]
+        assert tr.next_number([_todo(4)], state["entries"]) == 5
+        assert not (tmp_path / ".backup").exists()
+
+    def test_the_next_number_spans_pad_and_backlog(self, tr, tmp_path):
+        assert tr.next_number([], []) == 1
+        assert tr.next_number([{"number": 3}], [{"entry": {"number": 9}}]) == 10
+        assert tr.next_number([{"number": True}], [{"entry": {"number": "7"}}]) == 1
+
+        backlog = self._backlog_with(tmp_path, [self._record(_todo(11))])
+        assert tr.next_number([_todo(2)], tr.read_backlog(backlog)["entries"]) == 12

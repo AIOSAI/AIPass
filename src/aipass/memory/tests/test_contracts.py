@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_contracts.py
 # Date: 2026-03-28
-# Version: 1.0.0
+# Version: 1.1.0
+# Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
 
@@ -219,6 +220,11 @@ class TestUnknownArgumentExitsNonZero:
         assert self._run_main(["--help"]) == 0
         assert self._run_main(["--version"]) == 0
         assert self._run_main([]) == 0
+
+    def test_a_todo_subverb_nothing_routes_exits_non_zero(self) -> None:
+        """`todo` is routed by the auto-discovered todo module; an unknown sub-verb is refused, 2 (FPLAN-0590 row 5)."""
+        assert self._run_main(["todo", "not_a_real_subverb_xyz"]) == 2
+        assert self._run_main(["todo", "--help"]) == 0
 
 
 class TestWatchRunnerImportContract:

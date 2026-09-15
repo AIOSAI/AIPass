@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_check.py
 # Description: Trinity Memory File Standards Checker
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-25
-# Modified: 2026-08-27
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -18,7 +18,7 @@ with their own rules, so nothing inside a passport is read or judged.
 This module is the ENGINE: the module contract the audit reads
 (``AUDIT_SCOPE``, ``BRANCH_INPUTS``, ``GROUP_WEIGHTS``), the inputs every
 group shares (config, gold templates, the three files), the applicability
-decision, and the weighted roll-up.  The nine group checkers themselves live
+decision, and the weighted roll-up.  The eight group checkers themselves live
 in ``trinity_groups.py`` -- they were split out on 2026-08-27 when this file
 crossed the 1500-line architecture cap, a relocation that changed no rule.
 
@@ -48,8 +48,8 @@ honest answer.  The detection needs BOTH signals absent -- no registry
 anywhere up the tree AND no citizen ``.trinity/`` beside this branch -- so a
 live installation that has genuinely lost a branch's memories still fails.
 
-The nine groups and their weights (GROUP_WEIGHTS, sums to 100)
---------------------------------------------------------------
+The eight groups and their weights (GROUP_WEIGHTS, sums to 100)
+---------------------------------------------------------------
 Shape and type weigh heaviest -- they break the machinery that caps, rolls and
 archives these files; freshness weighs lightest.  Each group reports its own
 0-100 subscore; the standard's score is the weighted mean, rounded, and never
@@ -58,9 +58,12 @@ rounded up into a pass.
 Per-group subscore rule (proportional where a natural denominator exists,
 binary 0/100 otherwise):
 
-* Entry shapes (25) -- proportional over every entry in the four containers.
+* Entry shapes (30) -- proportional over every entry in the four containers.
   A container that is missing, is not a list, or lives in an unreadable file
-  counts as one failed unit rather than being skipped.
+  counts as one failed unit rather than being skipped.  Carries the 5 points
+  of the retired Todos hygiene group (DPLAN-0345, 2026-09-15): todos have no
+  ``status`` field now, so a todo kept as done can only be spelled as a key
+  outside the closed shape, and this group already flags that by name.
 * Top-level keys (15) -- proportional over 17 fixed sub-rules: eight per file
   (file parses, key set, key order, duplicate keys, document_metadata fields,
   no ``status`` block, document_name, managed_by) plus one cross-file
@@ -79,10 +82,11 @@ binary 0/100 otherwise):
 * Meta lines & _usage (10) -- proportional over seven byte-match units: four
   ``*_meta`` lines, two ``_usage`` strings, and the ``guidelines`` block of
   observations.json, which is compared byte-for-byte against the gold
-  template.  Binary 0 when config or the gold templates cannot be read.
+  template.  One slot is read by shape, not value: the todos tab's
+  ``next #N``, derived when the tab is rendered and stale by design once a
+  todo is added.  Binary 0 when config or the gold templates cannot be read.
 * Receipt (8) -- proportional over six units: file parses, template_versions
   shape, template_versions values, and the three timestamp/actor strings.
-* Todos hygiene (5) -- proportional over every todo entry.
 * Freshness (3) -- proportional over two units, one per file.
 
 Bypass
@@ -138,14 +142,13 @@ AUDIT_SCOPE = "branch_level"
 BRANCH_INPUTS = (".trinity/*",)
 
 GROUP_WEIGHTS: dict[str, int] = {
-    "Entry shapes": 25,
+    "Entry shapes": 30,
     "Top-level keys": 15,
     "Ordering & numbering": 12,
     "Char caps": 12,
     "File set": 10,
     "Meta lines & _usage": 10,
     "Receipt": 8,
-    "Todos hygiene": 5,
     "Freshness": 3,
 }
 _REGISTRY_NAME = "AIPASS_REGISTRY.json"
@@ -375,7 +378,7 @@ def _build_context(branch_path: Path) -> dict:
 
 
 def _weighted_score(checks: list) -> int:
-    """Weighted mean of the nine group subscores, never rounded up to a pass."""
+    """Weighted mean of the eight group subscores, never rounded up to a pass."""
     total = sum(check["score"] * GROUP_WEIGHTS[check["name"]] / 100 for check in checks)
     score = round(total)
     if score >= 100 and any(check["score"] < 100 for check in checks):
@@ -386,9 +389,9 @@ def _weighted_score(checks: list) -> int:
 def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
     """Check one branch's .trinity/ memory files against the trinity standard.
 
-    Nine groups are measured -- file set, top-level keys, entry shapes,
-    ordering and numbering, char caps, meta lines and _usage, freshness, todos
-    hygiene, and the template version receipt.  Every group reports its own
+    Eight groups are measured -- file set, top-level keys, entry shapes,
+    ordering and numbering, char caps, meta lines and _usage, freshness, and
+    the template version receipt.  Every group reports its own
     0-100 subscore and the standard's score is their weighted mean.
 
     Nothing here is skipped for being unreadable: a missing file, a broken
@@ -406,7 +409,7 @@ def check_branch(branch_path: str, bypass_rules: list | None = None) -> dict:
 
     Returns:
         ``{"standard": "TRINITY", "score": int, "passed": bool,
-        "checks": [nine group dicts]}``.
+        "checks": [eight group dicts]}``.
     """
     if is_clean_checkout(Path(branch_path)):
         logger.info("trinity_check: %s -- clean checkout, standard not applicable", branch_path)

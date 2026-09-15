@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: entry_limits.py
 # Description: Entry limits config reader, validator, and diff helper for memory files
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-06-13
-# Modified: 2026-09-13
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -104,26 +104,6 @@ from aipass.memory.apps.handlers.repo_root import module_file
 
 # Resolve paths relative to handler location (same pattern as memory_files.py)
 _MEMORY_ROOT = module_file(__file__).parents[3]
-
-# Containers no machine may PRUNE. Today: todos — open work is never archived,
-# so only the branch's own agent can cure a drifted one.
-#
-# This is no longer the cap-exemption discriminator. From 2026-08-30 every
-# container is exempt from being refused for text it did not author, so a list
-# of "containers we may not prune" answers a question the cap gate stopped
-# asking.
-#
-# ONE consumer remains: ``trinity_push`` re-exports it for its prune lane.
-# @hooks read it at call time until 2026-08-30, then deleted their seam the
-# same evening — with the rule universal it suppressed nothing on their side,
-# and their own reasoning is worth keeping: a rule that has stopped
-# suppressing anything is indistinguishable from a load-bearing one. Should
-# this fall to zero consumers it should go too, by that same argument.
-#
-# It lives HERE rather than beside the push only because ``trinity_push``
-# already imports this module: defining it there and importing it back would
-# close a cycle (entry_limits -> trinity_push -> memory_files -> entry_limits).
-RESHAPE_ONLY_SECTIONS = ("todos",)
 
 
 # How close to the cap earns a line. 0.9 puts a 200-char cap's warning at 180,

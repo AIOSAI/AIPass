@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-06-13
-# Modified: 2026-08-08
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -63,6 +63,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "monitor/detector.py",
                 "monitor/memory_watcher.py",
                 "rollover/extractor.py",
+                "rollover/todo_roll.py",
                 "templates/pusher.py",
             ],
             "purpose": "Entry-count thresholds that trigger .trinity rollover",
@@ -105,7 +106,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "container": "todos",
                 "kind": "list",
                 "field": "task",
-                "max_chars": 150,
+                "max_chars": 100,
             },
             "observations": {
                 "file": "observations.json",
@@ -128,6 +129,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "local": {
                 "sessions": {"count": 15, "auto_compact_cap": 3},
                 "key_learnings": {"count": 15},
+                "todos": {"count": 10},
             },
             "observations": {
                 "observations": {"count": 15},
@@ -140,15 +142,25 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-# Entry type -> (file key, leaf key) inside the rollover limits tree. These
-# three are the ONLY settable rollover limits. The FILE key is the unit the
-# rollover engine resolves per branch (see _resolve_limits); the leaf key is
-# the entry family inside it.
+# Entry type -> (file key, leaf key) inside the rollover limits tree. The FILE
+# key is the unit the rollover engine resolves per branch (see _resolve_limits);
+# the leaf key is the entry family inside it.
 ENTRY_TYPE_KEYS: dict[str, tuple[str, str]] = {
     "sessions": ("local", "sessions"),
     "key_learnings": ("local", "key_learnings"),
     "observations": ("observations", "observations"),
+    "todos": ("local", "todos"),
 }
+
+# The three the vector rollover engine enforces, and the only ones `config set` writes.
+SETTABLE_ENTRY_TYPES: tuple[str, ...] = ("sessions", "key_learnings", "observations")
+
+# COUNT ONLY (DPLAN-0345). todos resolve a count here so every surface reads one
+# number, but nothing on the vector lane acts on it: detector._should_rollover,
+# the extractor and the orchestrator name their three families explicitly and
+# never read this key. The one consumer that acts is rollover/todo_roll.py, for
+# ONE branch at a time. Display-only in v1, like auto_compact_cap.
+COUNT_ONLY_ENTRY_TYPES: tuple[str, ...] = ("todos",)
 
 
 def deep_merge(base: dict, overrides: dict) -> dict:
@@ -341,6 +353,7 @@ def materialize_per_branch() -> dict[str, Any]:
         if not name:
             continue
         entry = copy.deepcopy(limits_only)
+        _materialize_todos(entry, defaults)
         entry["_note"] = f"Limits for @{name}. Manual edits persist until next push."
         per_branch[name] = entry
 
@@ -421,7 +434,7 @@ def _resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]
 
     Returns:
         ``{entry_type: {"count", "default_count", "auto_compact_cap",
-        "source", "is_override"}}`` for each of the three entry types.
+        "source", "is_override"}}`` for each of ``ENTRY_TYPE_KEYS``.
         ``count`` is None when neither per_branch nor defaults set one.
     """
     per_branch = _as_dict(rollover_cfg.get("per_branch"))
@@ -440,6 +453,12 @@ def _resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]
         default_leaf = _as_dict(_as_dict(defaults.get(file_key)).get(leaf_key))
         count = leaf.get("count")
         default_count = default_leaf.get("count")
+        if count is None and entry_type in COUNT_ONLY_ENTRY_TYPES:
+            # A per_branch `local` block written without a todos count must not
+            # silently stop that branch's roll. The per-file-key rule above
+            # stays exact for the three vector families.
+            count = default_count
+            source = "defaults"
 
         resolved[entry_type] = {
             "count": count,
@@ -502,6 +521,24 @@ def get_effective_limits(branch: str) -> dict[str, Any]:
         See ``_resolve_limits`` — one entry per settable entry type.
     """
     return _resolve_limits(section("rollover"), branch)
+
+
+def get_todos_count(branch: str, rollover_cfg: dict[str, Any] | None = None) -> int | None:
+    """The todo pad size for *branch*, through the one resolver.
+
+    Args:
+        branch: Branch directory name, matched case-insensitively.
+        rollover_cfg: An already-loaded ``rollover`` section; loaded when None.
+
+    Returns:
+        A whole number >= 1, or None when no usable count is configured (a
+        bool, a string, zero or a negative number is not a pad size).
+    """
+    cfg = rollover_cfg if rollover_cfg is not None else section("rollover")
+    count = _resolve_limits(cfg, branch)["todos"]["count"]
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        return None
+    return count
 
 
 def get_branches_with_overrides() -> dict[str, Any]:
@@ -589,6 +626,40 @@ def _seed_branch_entry(defaults: dict[str, Any], branch: str) -> dict[str, Any]:
     return entry
 
 
+def _materialize_todos(entry: dict[str, Any], defaults: dict[str, Any]) -> None:
+    """Carry the todos count into a per_branch ``local`` block that lacks one, in place.
+
+    Limits resolve per FILE key as a whole block, so a ``local`` block written
+    by ``config set @b sessions 25`` without ``todos`` reads as "no todo count"
+    to any reader following that rule (hooks' count advisory does). The
+    resolver falls back anyway; this keeps the file saying the same thing.
+
+    Args:
+        entry: One per_branch entry, edited in place.
+        defaults: The ``rollover.defaults`` tree to take the count from.
+    """
+    local = entry.get("local")
+    if not isinstance(local, dict):
+        return
+    todos = _as_dict(local.get("todos"))
+    if todos.get("count") is not None:
+        return
+    default_count = _as_dict(_as_dict(defaults.get("local")).get("todos")).get("count")
+    if default_count is None:
+        default_count = DEFAULT_CONFIG["rollover"]["defaults"]["local"]["todos"]["count"]
+    todos["count"] = default_count
+    local["todos"] = todos
+
+
+def _refuse_unsettable(entry_type: str) -> dict[str, Any] | None:
+    """The refusal for a type ``config set`` may not write, or None when it may."""
+    if entry_type in COUNT_ONLY_ENTRY_TYPES:
+        return {"success": False, "error": f"'{entry_type}' count is display-only in v1 - not settable"}
+    if entry_type not in SETTABLE_ENTRY_TYPES:
+        return {"success": False, "error": f"Unknown entry type: '{entry_type}'"}
+    return None
+
+
 def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]:
     """Write one per-branch rollover limit override.
 
@@ -596,7 +667,7 @@ def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]
 
     Args:
         branch: Branch name — the lowercase form is always what gets written.
-        entry_type: One of ``ENTRY_TYPE_KEYS``.
+        entry_type: One of ``SETTABLE_ENTRY_TYPES``.
         count: The new limit (bounds are the module layer's contract).
 
     Returns:
@@ -606,8 +677,9 @@ def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]
         push.  It is reported rather than assumed so the machine surface
         states the delivery semantics in data instead of in prose.
     """
-    if entry_type not in ENTRY_TYPE_KEYS:
-        return {"success": False, "error": f"Unknown entry type: '{entry_type}'"}
+    refused = _refuse_unsettable(entry_type)
+    if refused:
+        return refused
 
     current, refusal = _read_config_for_write()
     if current is None:
@@ -622,6 +694,7 @@ def set_branch_limit(branch: str, entry_type: str, count: int) -> dict[str, Any]
 
     entry = _as_dict(per_branch.get(key)) or _seed_branch_entry(defaults, key)
     _apply_limit(entry, file_key, leaf_key, count)
+    _materialize_todos(entry, defaults)
 
     per_branch[key] = entry
     rollover_cfg["per_branch"] = per_branch
@@ -646,7 +719,7 @@ def set_default_limit(entry_type: str, count: int) -> dict[str, Any]:
     seventeen branches an operator may have tuned by hand.
 
     Args:
-        entry_type: One of ``ENTRY_TYPE_KEYS``.
+        entry_type: One of ``SETTABLE_ENTRY_TYPES``.
         count: The new default limit.
 
     Returns:
@@ -655,8 +728,9 @@ def set_default_limit(entry_type: str, count: int) -> dict[str, Any]:
         False and says the load-bearing thing about this verb: the new
         default reached NO branch.  ``rollover push`` is what delivers it.
     """
-    if entry_type not in ENTRY_TYPE_KEYS:
-        return {"success": False, "error": f"Unknown entry type: '{entry_type}'"}
+    refused = _refuse_unsettable(entry_type)
+    if refused:
+        return refused
 
     current, refusal = _read_config_for_write()
     if current is None:

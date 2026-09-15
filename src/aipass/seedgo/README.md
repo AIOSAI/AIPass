@@ -186,7 +186,7 @@ seedgo/
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 62 test files, 3374 test functions (pytest expands to 4100 cases)
+├── tests/                           # 62 test files, 3393 test functions (pytest expands to 4143 cases)
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -343,10 +343,10 @@ restate them here. Read the directory, or ask @hooks.
 
 Counted 2026-09-07, both ways, because the two numbers answer different questions:
 
-- **62 test files, 3374 test functions** — the `def test_` count, the way seedgo's own
-  `readme_check._count_test_functions()` counts it. **pytest expands to 4100 cases** once
-  parametrisation is applied (both re-counted 2026-09-14, after the calendar_bound pins, the
-  posix_literal arm-4 widening and the dead_code import-block pins; the prose below is the
+- **62 test files, 3393 test functions** — the `def test_` count, the way seedgo's own
+  `readme_check._count_test_functions()` counts it. **pytest expands to 4143 cases** once
+  parametrisation is applied (both re-counted 2026-09-15, after the todos v2 trinity mirror
+  pins, DPLAN-0345; the prose below is the
   2026-09-07 measurement). Re-measured
   2026-09-07 after FPLAN-0496: six merged rows out of
   `test_coverage_audit.py`, three mutation pins into the json contract, and the contract's
@@ -505,7 +505,7 @@ Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
   trips it.
 - **Tests:** 3843 passed, 53 skipped, 1 failed — the failure is another branch's live trinity
   drift, not seedgo's code (see the run result above). 3028 test functions across 62 files then;
-  3374 across 62 on 2026-09-14, expanding to 4100 cases (4047 passed, 53 skipped).
+  3393 across 62 on 2026-09-15, expanding to 4143 cases (4090 passed, 53 skipped).
 - **Coverage:** 451 public functions tested of 588 (77%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)

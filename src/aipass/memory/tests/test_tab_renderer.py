@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -16,6 +16,7 @@ Covers:
   4. _reorder_keys() — canonical key ordering.
   5. refresh_all_tabs() — reads config and writes tabs (mocked I/O).
   6. Key ordering verification after tab insertion.
+  7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
 """
 
 import importlib
@@ -190,39 +191,122 @@ class TestRenderTabObservations:
 
 
 # ===========================================================================
-# 4. render_tab — todos (rollover OFF, static shape)
+# 4. render_tab — todos (a pad that rolls to a backlog FILE, DPLAN-0345)
 # ===========================================================================
+
+PAD_ROLLOVER_CFG = {
+    "defaults": {"local": {"todos": {"count": 7}}},
+    "per_branch": {"devpulse": {"local": {"todos": {"count": 4}}}},
+}
+
+
+def _backlog_file(path: Path, numbers: list) -> Path:
+    """A backlog document holding one record per original number."""
+    entries = [{"rolled": "r", "reason": "overflow", "entry": {"number": number}} for number in numbers]
+    path.write_text(
+        json.dumps({"document_metadata": {"managed_by": "memory", "branch": "memory"}, "entries": entries}),
+        encoding="utf-8",
+    )
+    return path
 
 
 class TestRenderTabTodos:
-    def test_todos_static(self):
+    def test_the_pad_size_and_caps_come_from_config(self):
         mod = _get_module()
         tab = mod.render_tab(
-            "todos",
-            SAMPLE_ROLLOVER_CFG,
-            SAMPLE_ENTRY_LIMITS_CFG,
-            "memory",
+            "todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 12}
         )
-        assert "rollover OFF" in tab
-        assert "cap ~10 entries" in tab
-        assert "task ≤15" in tab  # ≤150
-        assert "task ≤150 chars · draft to 120 ⟧" in tab
-        # The RULE sentence moved to LOCAL.template.json on 2026-08-25: the tab
-        # carries numbers, the template carries prose, and compose_meta joins
-        # them. Pinned there by test_trinity_standard.py.
+        assert tab == (
+            "⟦ pad of 7 · oldest roll to .backup/todo/memory/backlog.json · task ≤150 chars · draft to 120 · next #12 ⟧"
+        )
+
+    def test_the_pad_size_honours_per_branch(self):
+        mod = _get_module()
+        tab = mod.render_tab(
+            "todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "devpulse", {"branch_dir": "devpulse", "next_number": 1}
+        )
+        assert tab.startswith("⟦ pad of 4 · oldest roll to .backup/todo/devpulse/backlog.json · ")
+
+    def test_without_branch_context_the_tab_says_unknown_not_a_number(self):
+        mod = _get_module()
+        tab = mod.render_tab("todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory")
+        assert tab == (
+            "⟦ pad of 7 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤150 chars · draft to 120 · next #? ⟧"
+        )
+
+    def test_no_configured_pad_size_says_nothing_rolls(self):
+        mod = _get_module()
+        tab = mod.render_tab(
+            "todos", SAMPLE_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory", {"branch_dir": "memory", "next_number": 3}
+        )
+        assert tab == "⟦ no pad size configured — nothing rolls · task ≤150 chars · draft to 120 · next #3 ⟧"
+
+    def test_the_tab_carries_numbers_only(self):
+        """Prose is the template's; the RULE sentence and the old literal never come back."""
+        mod = _get_module()
+        tab = mod.render_tab("todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory")
         assert "RULE: DELETE" not in tab
+        assert "cap ~10" not in tab
+        assert "rollover OFF" not in tab
         assert tab.endswith("⟧")
 
-    def test_todos_ignores_per_branch_rollover(self):
-        """Todos are always rollover OFF regardless of per_branch config."""
+
+class TestTodoContext:
+    def test_next_number_is_the_highest_on_pad_or_in_backlog_plus_one(self, tmp_path):
         mod = _get_module()
-        tab = mod.render_tab(
-            "todos",
-            SAMPLE_ROLLOVER_CFG,
-            SAMPLE_ENTRY_LIMITS_CFG,
-            "devpulse",
+        state = mod.todo_roll.read_backlog(_backlog_file(tmp_path / "backlog.json", [30, "31"]))
+
+        ctx = mod.todo_context("memory", [{"number": 4}, {"number": True}, "note"], state)
+
+        assert ctx == {"branch_dir": "memory", "next_number": 31}
+
+    def test_an_empty_pad_and_no_backlog_start_at_one(self, tmp_path):
+        mod = _get_module()
+        state = mod.todo_roll.read_backlog(tmp_path / "absent.json")
+        assert mod.todo_context("memory", [], state) == {"branch_dir": "memory", "next_number": 1}
+
+    def test_an_unusable_backlog_gives_no_number(self, tmp_path):
+        mod = _get_module()
+        bad = tmp_path / "backlog.json"
+        bad.write_text("[1, 2]", encoding="utf-8")
+        assert mod.todo_context("memory", [], mod.todo_roll.read_backlog(bad))["next_number"] is None
+
+    def test_a_pad_that_is_not_a_list_gives_no_number(self, tmp_path):
+        mod = _get_module()
+        state = mod.todo_roll.read_backlog(tmp_path / "absent.json")
+        assert mod.todo_context("memory", {"a": 1}, state)["next_number"] is None
+
+    def test_no_branch_gives_no_context(self):
+        mod = _get_module()
+        assert mod.todo_context(None, []) == {"branch_dir": None, "next_number": None}
+
+    def test_refresh_names_the_branch_directory_and_derives_the_number(self, tmp_path, monkeypatch):
+        """The registry name (backup) is not the directory (backup_dir); the backlog follows the directory."""
+        mod = _get_module()
+        seen = []
+
+        def backlog_for(branch_dir, backup_root=None):
+            seen.append(branch_dir)
+            return _backlog_file(tmp_path / "backlog.json", [9])
+
+        monkeypatch.setattr(mod.todo_roll, "backlog_path_for", backlog_for)
+        trinity = tmp_path / "backup_dir" / ".trinity"
+        trinity.mkdir(parents=True)
+        local = trinity / "local.json"
+        local.write_text(
+            json.dumps({"todos": [{"number": 6}], "key_learnings": [], "sessions": []}),
+            encoding="utf-8",
         )
-        assert "rollover OFF" in tab
+
+        ok, err = mod._refresh_local("backup", local, PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG)
+
+        assert ok, err
+        assert seen == ["backup_dir"]
+        meta = json.loads(local.read_text(encoding="utf-8"))["todos_meta"]
+        assert meta.startswith(
+            "⟦ pad of 7 · oldest roll to .backup/todo/backup_dir/backlog.json · task ≤150 chars"
+            " · draft to 120 · next #10 ⟧ "
+        )
 
 
 # ===========================================================================
@@ -369,7 +453,9 @@ class TestRefreshAllTabs:
         assert "todos_meta" in local_data
         assert "key_learnings_meta" in local_data
         assert "sessions_meta" in local_data
-        assert "rollover OFF" in local_data["todos_meta"]
+        assert local_data["todos_meta"].startswith(
+            "⟦ no pad size configured — nothing rolls · task ≤150 chars · draft to 120 · next #"
+        )
         assert "rollover ON" in local_data["key_learnings_meta"]
         assert "rollover ON" in local_data["sessions_meta"]
 
@@ -564,11 +650,24 @@ class TestRenderAllMetaTabs:
         ):
             tabs = mod.render_all_meta_tabs()
 
-        assert "rollover OFF" in tabs["TODOS_META"]
+        assert tabs["TODOS_META"].endswith("· next #? ⟧")
         assert "rollover ON" in tabs["KEY_LEARNINGS_META"]
         assert "rollover ON" in tabs["SESSIONS_META"]
         assert "rollover ON" in tabs["OBSERVATIONS_META"]
         assert "{{" not in tabs["TODOS_META"]
+
+    def test_a_named_branch_directory_reaches_the_todos_tab(self, tmp_path, monkeypatch):
+        mod = _get_module()
+        monkeypatch.setattr(
+            mod.todo_roll, "backlog_path_for", lambda branch_dir, backup_root=None: tmp_path / "no.json"
+        )
+        mock_config = {"rollover": PAD_ROLLOVER_CFG, "entry_limits": SAMPLE_ENTRY_LIMITS_CFG}
+        with patch("aipass.memory.apps.handlers.json.config_loader.load", return_value=mock_config):
+            tabs = mod.render_all_meta_tabs(branch_dir="newborn")
+
+        assert tabs["TODOS_META"] == (
+            "⟦ pad of 7 · oldest roll to .backup/todo/newborn/backlog.json · task ≤150 chars · draft to 120 · next #1 ⟧"
+        )
 
     def test_uses_defaults_not_per_branch(self):
         mod = _get_module()

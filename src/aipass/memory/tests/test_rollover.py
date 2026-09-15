@@ -2,7 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_rollover.py
 # Date: 2026-03-24
-# Version: 1.0.0
+# Version: 1.1.0
+# Modified: 2026-09-15
 # Category: memory/tests
 # =============================================
 
@@ -96,9 +97,19 @@ def _prepare_rollover_mocks(monkeypatch):
 
     real_help_flags = importlib.import_module("aipass.memory.apps.handlers.cli.help_flags")
     real_json_flag = importlib.import_module("aipass.memory.apps.handlers.cli.json_flag")
+    real_branch_flag = importlib.import_module("aipass.memory.apps.handlers.cli.branch_flag")
     cli_pkg = MagicMock()
     cli_pkg.help_flags = real_help_flags
     cli_pkg.json_flag = real_json_flag
+    cli_pkg.branch_flag = real_branch_flag
+
+    # The todo-pad reports resolve a branch and read a pad: stubbed to the
+    # honest "nothing resolved" line so routing tests never touch a real pad.
+    mock_todo_report = MagicMock()
+    no_branch = {"level": "line", "text": "Todos: no branch resolved (harness) - no todo pad checked"}
+    mock_todo_report.check_pad = MagicMock(return_value=no_branch)
+    mock_todo_report.roll_pad = MagicMock(return_value=no_branch)
+    rollover_pkg.todo_report = mock_todo_report
 
     handlers_pkg = MagicMock()
 
@@ -113,6 +124,8 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli", cli_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.help_flags", real_help_flags)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.json_flag", real_json_flag)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.cli.branch_flag", real_branch_flag)
+    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.todo_report", mock_todo_report)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers", handlers_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
@@ -138,6 +151,7 @@ def _prepare_rollover_mocks(monkeypatch):
         "orchestrator": mock_orchestrator,
         "memory_watcher": mock_memory_watcher,
         "plans_processor": mock_plans_processor,
+        "todo_report": mock_todo_report,
     }
 
 
@@ -194,7 +208,7 @@ class TestMockedCliPackageIsComplete:
     def test_every_imported_submodule_is_registered_real(self, monkeypatch):
         _import_rollover(monkeypatch)
         imported = self._imported_cli_submodules()
-        assert imported == {"help_flags", "json_flag"}, (
+        assert imported == {"help_flags", "json_flag", "branch_flag"}, (
             f"rollover.py's cli submodule imports moved to {sorted(imported)} — an empty or "
             "shrunken set would make the loop below register nothing and still read green"
         )
@@ -215,11 +229,12 @@ class TestMockedCliPackageIsComplete:
         assert rollover.handle_command("rollover", ["check"]) is True
 
 
-def rollover_module_path():
+def rollover_module_path() -> str:
     """Path to the rollover module's source, without importing it."""
     import importlib.util
 
     spec = importlib.util.find_spec("aipass.memory.apps.modules.rollover")
+    assert spec is not None and spec.origin is not None, "aipass.memory.apps.modules.rollover has no source"
     return spec.origin
 
 

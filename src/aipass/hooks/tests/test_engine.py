@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tests for hook engine dispatch logic
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-05-18
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for hook engine dispatch logic."""
@@ -773,21 +773,60 @@ class TestErrorResilience:
                 config = find_project_config()
         assert config is None
 
+    # Both enrol the project first: unenrolled, find_project_config returns None
+    # at the trust check and never reads the file, so these passed without ever
+    # reaching the parse they are named for. The enrolment lands in conftest's
+    # sandbox registry (isolated_trust_registry).
     def test_corrupt_hooks_json(self, temp_test_dir, mock_logger):
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
         (config_dir / "hooks.json").write_text("{invalid json!!!")
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
+        enroll(str(temp_test_dir))
+        with (
+            patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir),
+            patch("aipass.hooks.apps.handlers.config.loader.logger") as loader_logger,
+        ):
             config = find_project_config()
         assert config is None
+        assert "bad config" in loader_logger.error.call_args[0][0]
 
     def test_empty_hooks_json(self, temp_test_dir, mock_logger):
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
         (config_dir / "hooks.json").write_text("")
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
+        enroll(str(temp_test_dir))
+        with (
+            patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir),
+            patch("aipass.hooks.apps.handlers.config.loader.logger") as loader_logger,
+        ):
             config = find_project_config()
         assert config is None
+        assert "bad config" in loader_logger.error.call_args[0][0]
+
+    def test_a_registry_bootstrap_lands_in_the_sandbox(self, temp_test_dir, tmp_path, monkeypatch, mock_logger):
+        """seedgo's runtime probe, 2026-09-14: this class created ~/.aipass/trusted_projects.json.
+
+        find_project_config bootstraps the registry when it is absent, and
+        REGISTRY_PATH is bound to Path.home() at import. The sandbox is checked
+        BEFORE the call, so a run without the guard fails without touching the
+        live file.
+        """
+        from aipass.hooks.apps.handlers.config import trust_registry
+
+        registry = trust_registry.REGISTRY_PATH
+        assert registry != Path.home() / ".aipass" / "trusted_projects.json"
+        assert not registry.exists()
+        install = tmp_path / "install"
+        (install / ".aipass").mkdir(parents=True)
+        (install / ".aipass" / "hooks.json").write_text("{}")
+        monkeypatch.setenv("AIPASS_HOME", str(install))
+        (temp_test_dir / ".aipass").mkdir()
+        (temp_test_dir / ".aipass" / "hooks.json").write_text("{invalid json!!!")
+
+        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
+            find_project_config()
+
+        assert list(json.loads(registry.read_text(encoding="utf-8"))["projects"]) == [str(install.resolve())]
 
     def test_log_write_failure_does_not_crash(self, tmp_path, mock_logger):
         """A failed log write is reported and swallowed, never raised.
