@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-25
 # Modified: 2026-09-15
 # =============================================
@@ -2236,6 +2236,61 @@ class TestTheTodosTabIsReadByShape:
         check = self._meta_with(trinity, tmp_path, f"{head} · next #3 ⟧ {_PROSE['todos']}")
 
         _assert_failed(check, "todos_meta does not byte-match")
+
+
+class TestTheCacheWatchesMemorysFiles:
+    """external_inputs() names what the incremental audit cache must watch outside the branch.
+
+    2026-09-15: a memory.config.json or template edit left cached Trinity rows
+    scored from before it. The paths come from the same helpers the loaders
+    read, so the cache and the checker cannot name different files.
+    """
+
+    @staticmethod
+    def _memory(tmp_path, *templates: str) -> Path:
+        memory_dir = tmp_path / "memory"
+        config = memory_dir / "memory_json" / "custom_config" / "memory.config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text('{"marker": "config"}', encoding="utf-8")
+        (memory_dir / "templates").mkdir()
+        for name in templates:
+            (memory_dir / "templates" / name).write_text(json.dumps({"marker": name}), encoding="utf-8")
+        return memory_dir
+
+    def test_the_inputs_are_the_files_the_loaders_read(self, checker, tmp_path, monkeypatch):
+        memory_dir = self._memory(tmp_path, "LOCAL.template.json", "OBSERVATIONS.template.json")
+        monkeypatch.setattr(checker, "_memory_dir", lambda: memory_dir)
+
+        paths = checker.external_inputs()
+
+        assert paths == [
+            memory_dir / "memory_json" / "custom_config" / "memory.config.json",
+            memory_dir / "templates" / "LOCAL.template.json",
+            memory_dir / "templates" / "OBSERVATIONS.template.json",
+        ]
+        assert checker.load_memory_config() == {"marker": "config"}
+        assert checker._load_templates() == {
+            "local": {"marker": "LOCAL.template.json"},
+            "observations": {"marker": "OBSERVATIONS.template.json"},
+        }
+
+    def test_an_absent_file_is_left_out(self, checker, tmp_path, monkeypatch):
+        memory_dir = self._memory(tmp_path, "LOCAL.template.json")
+        monkeypatch.setattr(checker, "_memory_dir", lambda: memory_dir)
+
+        names = [path.name for path in checker.external_inputs()]
+
+        assert names == ["memory.config.json", "LOCAL.template.json"]
+
+    def test_no_memory_branch_watches_nothing(self, checker, monkeypatch):
+        monkeypatch.setattr(checker, "_memory_dir", lambda: None)
+
+        assert checker.external_inputs() == []
+
+    def test_the_live_checker_names_memorys_real_files(self, checker):
+        names = sorted(path.name for path in checker.external_inputs())
+
+        assert names == ["LOCAL.template.json", "OBSERVATIONS.template.json", "memory.config.json"]
 
 
 # ===========================================================================

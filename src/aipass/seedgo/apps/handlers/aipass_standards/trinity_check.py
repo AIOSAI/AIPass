@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_check.py
 # Description: Trinity Memory File Standards Checker
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-25
 # Modified: 2026-09-15
 # =============================================
@@ -16,7 +16,7 @@ matters here for EXISTENCE only -- passports and compass are separate systems
 with their own rules, so nothing inside a passport is read or judged.
 
 This module is the ENGINE: the module contract the audit reads
-(``AUDIT_SCOPE``, ``BRANCH_INPUTS``, ``GROUP_WEIGHTS``), the inputs every
+(``AUDIT_SCOPE``, ``BRANCH_INPUTS``, ``external_inputs()``, ``GROUP_WEIGHTS``), the inputs every
 group shares (config, gold templates, the three files), the applicability
 decision, and the weighted roll-up.  The eight group checkers themselves live
 in ``trinity_groups.py`` -- they were split out on 2026-08-27 when this file
@@ -128,6 +128,7 @@ __all__ = [
     "check_branch",
     "check_branch_info",
     "expected_meta_line",
+    "external_inputs",
     "is_clean_checkout",
     "is_versioned_backup",
     "load_memory_config",
@@ -210,12 +211,45 @@ def _read_json_file(path: Path) -> dict:
     return {"data": data, "duplicates": duplicates, "error": None}
 
 
+def _templates_dir(memory_dir: Path) -> Path:
+    """Where @memory keeps the gold templates -- the one spelling the loader and the cache share."""
+    return memory_dir / "templates"
+
+
+def _config_path(memory_dir: Path) -> Path:
+    """Where @memory keeps memory.config.json -- the one spelling the loader and the cache share."""
+    return memory_dir / "memory_json" / "custom_config" / "memory.config.json"
+
+
+def external_inputs() -> list[Path]:
+    """The files OUTSIDE this branch whose content decides the score.
+
+    ``BRANCH_INPUTS`` covers ``.trinity/*``; every branch is also scored
+    against @memory's config (caps, pad size) and gold templates (prose,
+    ``_usage``, guidelines, versions).  The incremental audit cache watches
+    what this returns, so a config or template edit re-scores every branch
+    instead of serving the Trinity row from before it.  Built from the same
+    helpers the loaders read, so the cache and the checker cannot name
+    different files.
+
+    Returns:
+        The config and both gold templates that exist now.  A file that is
+        absent is left out, and its later arrival or removal changes the
+        watch set, which busts the cache on its own.
+    """
+    memory_dir = _memory_dir()
+    if memory_dir is None:
+        return []
+    candidates = [_config_path(memory_dir), *(_templates_dir(memory_dir) / name for _key, name in _TEMPLATE_FILES)]
+    return [path for path in candidates if path.is_file()]
+
+
 def _load_templates() -> dict | None:
     """Load both gold templates keyed 'local' / 'observations', or None."""
     memory_dir = _memory_dir()
     if memory_dir is None:
         return None
-    base = memory_dir / "templates"
+    base = _templates_dir(memory_dir)
     loaded: dict[str, dict] = {}
     for key, filename in _TEMPLATE_FILES:
         result = _read_json_file(base / filename)
@@ -242,7 +276,7 @@ def load_memory_config() -> dict | None:
     memory_dir = _memory_dir()
     if memory_dir is None:
         return None
-    path = memory_dir / "memory_json" / "custom_config" / "memory.config.json"
+    path = _config_path(memory_dir)
     result = _read_json_file(path)
     if result["error"] is not None:
         logger.warning("trinity_check: memory.config.json %s", result["error"])

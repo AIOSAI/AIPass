@@ -9,7 +9,7 @@ Standards compliance platform. Audits branches, queries standard content, manage
 ```
 seedgo audit aipass                              # Audit all 18 citizens against 46 consulted entries
 seedgo audit aipass @flow                        # Single branch
-seedgo audit pytest_quality [@branch]            # v5 pack — 11 AST rules over tests/ (scores, gates nothing)
+seedgo audit pytest_quality [@branch]            # v5 pack — 15 AST rules over tests/ (scores, gates nothing)
 seedgo audit-tests @branch                       # Execution lane — a suite under the write gate, advisory
 seedgo standard cli                              # Show standard content (short form)
 seedgo standards_query aipass_standards cli      # Show standard content (explicit pack)
@@ -41,7 +41,7 @@ apps/
 ├── modules/                     # 13 CLI verbs; __init__.py holds CommandRefused
 └── handlers/                    # 15 directories
     ├── aipass_standards/        # v4 checker pack (*_check.py + *_content.py + *.md triplets)
-    ├── pytest_quality_standards/ # v5 SCORING pack, generic, 11 branch-level AST rules
+    ├── pytest_quality_standards/ # v5 SCORING pack, generic, 15 branch-level AST rules
     ├── tests_pytest_standards/  # EXECUTION pack — nominators, not checkers; never scored
     ├── aipass_proof/            # Proof certification
     ├── audit/                   # branch_audit, discovery, audit_display, artifact, incremental_cache
