@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: flow.py
 # Description: Entry point CLI for drone @flow — plan lifecycle management
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -158,7 +158,7 @@ def _main_impl():
 
     # Show version
     if args[0] in ["--version", "-V"]:
-        console.print("FLOW v2.2.1")
+        console.print(f"FLOW v{BRANCH_VERSION}")
         return 0
 
     # Show help for explicit help flags
@@ -216,6 +216,36 @@ def print_introspection(modules: List[Any]):
     console.print()
 
 
+# The branch version --version prints. It lived as a literal inside the print
+# call and drifted from the README header (2.2.1 printed against 2.6.0
+# documented) because nothing could read it. One name, one place.
+BRANCH_VERSION = "2.7.0"
+
+
+def module_verbs(module: Any) -> str:
+    """
+    Render the verbs a module actually answers to, for the help table.
+
+    A module owning ONE verb is named by the first segment of its filename
+    (`create_plan` -> `create`). That derivation is wrong for a module owning
+    several: `template_manager` answers to `templates`, `register`, `unregister`
+    and `scan`, and never to `template`, so the derived name published a verb
+    that does not exist. A module owning more than one declares them in
+    COMMAND_VERBS and that list wins.
+
+    Args:
+        module: A discovered command module
+
+    Returns:
+        Comma-separated verbs, the string the help table prints
+    """
+    declared = getattr(module, "COMMAND_VERBS", None)
+    if declared:
+        return ", ".join(declared)
+    module_name = module.__name__.split(".")[-1]
+    return module_name.split("_")[0] if "_" in module_name else module_name
+
+
 def print_help(modules: List[Any]):
     """Display Rich-formatted help (run with --help)"""
     console.print()
@@ -237,25 +267,21 @@ def print_help(modules: List[Any]):
 
     console.print("[bold cyan]AVAILABLE COMMANDS:[/bold cyan]")
     console.print()
-    console.print("[dim]Commands can be called by short name (e.g., 'create') or full name (e.g., 'create_plan')[/dim]")
+    console.print("[dim]Call a command by the verb shown. The module's full name is not a command.[/dim]")
     console.print()
 
     if modules:
-        for module in modules:
-            module_name = module.__name__.split(".")[-1]
-            # Extract short form (before underscore if present)
-            short_name = module_name.split("_")[0] if "_" in module_name else module_name
-
+        # Width follows the longest verb list, so a module owning four verbs
+        # does not push every description out of its column.
+        verbs = {module: module_verbs(module) for module in modules}
+        width = max((len(v) for v in verbs.values()), default=20)
+        for module, verb_list in verbs.items():
             # Get first line of docstring
             description = "No description"
             if module.__doc__:
                 description = module.__doc__.strip().split("\n")[0]
 
-            # Display both forms
-            if short_name != module_name:
-                console.print(f"  [green]{short_name}, {module_name:18}[/green] [dim]{description}[/dim]")
-            else:
-                console.print(f"  [green]{module_name:20}[/green] [dim]{description}[/dim]")
+            console.print(f"  [green]{verb_list:{width}}[/green] [dim]{description}[/dim]")
     else:
         console.print("  [dim]No modules discovered[/dim]")
 
@@ -276,6 +302,10 @@ def print_help(modules: List[Any]):
     console.print("    [dim]drone @flow close FPLAN-0042[/dim]")
     console.print("    [dim]drone @flow close DPLAN-0005[/dim]")
     console.print("    [dim]drone @flow close --all[/dim]")
+    console.print("    [dim]drone @flow close --all --dry-run[/dim]              [dim]# Preview, change nothing[/dim]")
+    console.print(
+        "    [dim]drone @flow close --all --exclude-type APLAN[/dim]   [dim]# Hold a type back (repeatable)[/dim]"
+    )
     console.print()
     console.print("  [yellow]List plans:[/yellow]")
     console.print("    [dim]drone @flow list open[/dim]                             [dim]# Open plans[/dim]")
@@ -294,6 +324,7 @@ def print_help(modules: List[Any]):
 
     console.print("[bold]TIP:[/bold] For module-specific help:")
     console.print("  [dim]drone @flow <command> --help[/dim]")
+    console.print("  [dim]drone @flow --version[/dim]                              [dim]# Branch version[/dim]")
     console.print()
 
 

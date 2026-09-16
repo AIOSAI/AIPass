@@ -562,7 +562,7 @@ class TestPrintHelp:
         printed = _printed(mock_console)
         assert "USAGE:" in printed
         assert "AVAILABLE COMMANDS:" in printed
-        assert "create_plan" in printed
+        assert "create" in printed
         assert "Create a new plan" in printed
 
     def test_with_empty_modules(self) -> None:
@@ -577,20 +577,18 @@ class TestPrintHelp:
         assert "No modules discovered" in printed
 
     @pytest.mark.parametrize(
-        ("module_name", "expected_short"),
-        [("create_plan", "create"), ("templates", None)],
+        ("module_name", "expected_verb"),
+        [("create_plan", "create"), ("templates", "templates")],
     )
-    def test_a_short_form_is_shown_only_when_the_name_has_one(self, module_name, expected_short) -> None:
-        """An underscored name prints 'short, full'; a single word prints once.
+    def test_the_help_table_prints_the_verb_that_executes(self, module_name, expected_verb) -> None:
+        """Only the verb the dispatcher accepts is printed, never the filename.
 
-        MERGED (DPLAN-0323 contested band, 2026-09-07) from
-        ``test_module_with_underscore`` and ``test_module_without_underscore``,
-        which made the identical call as their sibling with a different name
-        string and asserted nothing — the 'no short form' and 'shows short and
-        full name' claims were never read. Kept as a PARAMETRISED pair rather
-        than deleted, because unlike the introspection twins these two DO
-        straddle a real branch (``if short_name != module_name`` in flow.py),
-        and each row now carries the oracle its own claim needs.
+        REWRITTEN 2026-09-15 (FPLAN-0612). The old rows asserted the table
+        printed 'short, full' for an underscored name, which pinned a claim the
+        dispatcher does not honour: `drone @flow list_plans` is refused, exit 1.
+        The help screen said the opposite in prose, so the pin certified the
+        lie rather than catching it. The contract now is the measured one -
+        the table prints what executes and nothing else.
         """
         from aipass.flow.apps.flow import print_help
 
@@ -598,11 +596,27 @@ class TestPrintHelp:
             print_help([_make_module(module_name, doc="Any description")])
 
         printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
-        assert module_name in printed
-        if expected_short:
-            assert f"{expected_short}," in printed
-        else:
-            assert f"{module_name}," not in printed
+        assert expected_verb in printed
+        if module_name != expected_verb:
+            assert module_name not in printed
+
+    def test_a_module_owning_several_verbs_declares_them(self) -> None:
+        """COMMAND_VERBS wins over the filename-derived short name.
+
+        template_manager owns templates/register/unregister/scan and answers to
+        none of them under the derived name 'template', which the help table
+        published as a command until 2026-09-15.
+        """
+        from aipass.flow.apps.flow import print_help
+
+        mod = _make_module("template_manager", doc="Template Manager Module")
+        mod.COMMAND_VERBS = ("templates", "register", "unregister", "scan")
+        with patch(f"{_FLOW}.console") as mock_console:
+            print_help([mod])
+
+        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        assert "templates, register, unregister, scan" in printed
+        assert "template_manager" not in printed
 
     def test_module_without_docstring(self) -> None:
         """Uses 'No description' for undocumented modules."""
