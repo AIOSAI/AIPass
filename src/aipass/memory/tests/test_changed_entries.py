@@ -1269,7 +1269,7 @@ class TestTheRefusalTextTheAgentReads:
 
     @staticmethod
     def _line(violation):
-        return _get_memory_files()._violation_line(violation)
+        return _get_memory_files().violation_line(violation)
 
     def test_an_unknown_field_does_not_print_zero_over_a_zero_cap(self):
         line = self._line(

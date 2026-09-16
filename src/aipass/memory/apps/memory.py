@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """
@@ -144,6 +144,9 @@ def print_help():
     table.add_row("health [@branch]", "Read-only branch health: rollover state + cap violations")
     table.add_row("roots", "Declared repo roots on this machine: list, init, add, remove, heal")
     table.add_row("fleet", "The fleet definition — who counts as a citizen, answered once")
+    table.add_row("limits", "The entry shape, the char caps and the file budgets — one door")
+    table.add_row("rollover_config", "Describes the config verb — its implementation after the split")
+    table.add_row("rollover_json", "Describes the shared --json emitter the config verbs answer through")
     table.add_row("governance", "Pure surfacing governance — state-in/state-out decisions")
     # `\\[` because Rich reads `[@name]` as a markup tag and prints nothing.
     table.add_row("todo \\[@branch]", "One line: the todo pad against its count, and the backlog count")

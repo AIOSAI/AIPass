@@ -78,8 +78,10 @@ heard of. The generated surface is the one above under **Live Inventory**, and i
 
 Three layers. `apps/memory.py` is a thin entry point: it auto-discovers modules, dispatches to the
 first one that claims a command, and turns a refusal into an exit code. `apps/modules/` holds one
-business-logic module per verb — fleet, governance, health, lint, pool, push, rollover, roots,
-search, symbolic, templates, todo, verify and watch. `apps/handlers/` holds the implementation,
+business-logic module per verb — fleet, governance, health, limits, lint, pool, push, rollover,
+roots, search, symbolic, templates, todo, verify and watch — alongside `rollover_config` and
+`rollover_json`, which carry the `config` verb's implementation and the shared `--json` emitter for
+a `rollover` module that outgrew one file. `apps/handlers/` holds the implementation,
 grouped one directory per concern: `json/` (the fleet's json shim, the write gate, the caps and the
 closed shape), `rollover/` (the extractor, the normalizer, the todo roll), `templates/` (the trinity
 push and the gold templates), `tracking/` (line counts and the `*_meta` state tabs), `monitor/`

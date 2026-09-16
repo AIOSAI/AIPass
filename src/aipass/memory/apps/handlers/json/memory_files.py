@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: memory_files.py
 # Description: Memory File Safe I/O Handler
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-17
 # Modified: 2026-09-15
 # =============================================
@@ -57,7 +57,7 @@ _TRACKED_TRINITY_FILES = {"local.json", "observations.json"}
 # =============================================================================
 
 
-def _violation_line(violation: Dict[str, Any]) -> str:
+def violation_line(violation: Dict[str, Any]) -> str:
     """Render one violation the way the agent who must fix it needs to read it.
 
     The over-cap line — ``sessions[0] 312/300 (+12 over)`` — was the only
@@ -166,7 +166,7 @@ def _validate_entry_limits(
     for debt in split["carried"]:
         logger.warning(
             f"[entry_limits] CARRIED {branch} {file_path.name} "
-            f"{_violation_line(debt)} — "
+            f"{violation_line(debt)} — "
             f"not written by this write, not refused; only @{branch} can cure it"
         )
 
@@ -193,11 +193,11 @@ def _validate_entry_limits(
 
     if not enforce:
         for violation in over:
-            logger.warning(f"[entry_limits] WARN {branch} {file_path.name} {_violation_line(violation)}")
+            logger.warning(f"[entry_limits] WARN {branch} {file_path.name} {violation_line(violation)}")
         return None  # Write through in warn mode
 
     # Enforce mode — block the write
-    details = "; ".join(_violation_line(v) for v in over)
+    details = "; ".join(violation_line(v) for v in over)
     return {"success": False, "error": f"Entry limit exceeded: {details}"}
 
 

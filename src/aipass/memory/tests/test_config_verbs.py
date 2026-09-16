@@ -75,6 +75,7 @@ _HANDLER_MODULES = (
 )
 
 _ROLLOVER_MODULE = "aipass.memory.apps.modules.rollover"
+_ROLLOVER_CONFIG_MODULE = "aipass.memory.apps.modules.rollover_config"
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +183,15 @@ def _real_verbs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     _evict(monkeypatch, _ROLLOVER_MODULE)
     rollover = importlib.import_module(_ROLLOVER_MODULE)
     monkeypatch.setattr(rollover, "json_handler", MagicMock())
+
+    # The config verbs live in modules/rollover_config.py and read
+    # `json_handler` from THEIR OWN module globals, so the patch above does not
+    # reach them: without this second one, config get/set/set-default log
+    # through the real service while the test believes it is sandboxed. That
+    # module is NOT evicted with rollover -- the re-import above binds the same
+    # cached object -- so patching it here is what makes the seam hold.
+    rollover_config = importlib.import_module(_ROLLOVER_CONFIG_MODULE)
+    monkeypatch.setattr(rollover_config, "json_handler", MagicMock())
 
     _pin_console_width(monkeypatch)
 
@@ -1992,8 +2002,13 @@ class TestThePrintedExamplesAreLegalCommands:
 
         from aipass.memory.apps.handlers.json import config_loader
         from aipass.memory.apps.modules import rollover as rollover_mod
+        from aipass.memory.apps.modules import rollover_config
 
-        source = Path(rollover_mod.__file__).read_text(encoding="utf-8")
+        # Both halves of the split: the verbs (and every refusal they print)
+        # moved to rollover_config.py, the routing stayed in rollover.py.
+        source = "".join(
+            Path(module.__file__).read_text(encoding="utf-8") for module in (rollover_mod, rollover_config)
+        )
         ceilings = config_loader.get_count_ceilings()
         examples = re.findall(r"config set(?:-default)?(?: @\w+)? (\w+) (\d+)", source)
         assert examples, "no example commands found — the pin would pass vacuously"

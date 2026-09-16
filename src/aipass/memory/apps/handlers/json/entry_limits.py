@@ -194,8 +194,13 @@ NEAR_CAP_RATIO = 0.9
 
 # Derived from the cap, never stored beside it: a second number per entry type
 # would go stale the first time a per_branch override moved only the cap.
-# Integer percent so the floor is exact (300/200/150 -> 240/160/120).
-DRAFT_PERCENT = 80
+# Integer percent so the floor is exact (300/200/100 -> 240/160/80).
+#
+# The percent itself lives in memory.config.json under entry_limits, read
+# through draft_percent() below. It was a module constant here until FPLAN-0593
+# Phase 5; @seedgo had to mirror it as _DRAFT_PERCENT behind a pin on
+# draft_target(), and a mirror behind a pin is a copy that happens to be tested,
+# not a source.
 
 
 # The closed shape's home on an entry type definition, and the two reasons it
@@ -212,6 +217,19 @@ _TYPE_STR = "str"
 _TYPE_STR_LIST = "list[str]"
 
 
+def draft_percent() -> int:
+    """Return the percent of a cap an agent should draft to.
+
+    A DELEGATION, not a second reader.  ``config_loader`` owns config reads and
+    publishes this number through ``get_draft_percent()``; this name exists
+    because callers already hold this module when they reach for a cap.
+
+    Returns:
+        The published percent as an int — 80 unless the config says otherwise.
+    """
+    return config_loader.get_draft_percent()
+
+
 def draft_target(max_chars: int) -> int:
     """Return the length to draft an entry to, for a cap of *max_chars*.
 
@@ -219,9 +237,9 @@ def draft_target(max_chars: int) -> int:
         max_chars: The enforced character cap for the entry type.
 
     Returns:
-        ``DRAFT_PERCENT`` of the cap, floored. Always below a positive cap.
+        ``draft_percent()`` of the cap, floored. Always below a positive cap.
     """
-    return max_chars * DRAFT_PERCENT // 100
+    return max_chars * draft_percent() // 100
 
 
 def _deep_merge_entry_types(
@@ -757,6 +775,82 @@ def check_fields(
             length = len(entry[field]) if isinstance(entry[field], str) else 0
             hits.append(_field_violation(type_name, container, key, field, REASON_UNKNOWN_FIELD, length, 0))
 
+    return hits
+
+
+def check_entry_shape(
+    type_name: str,
+    container: str,
+    key: str,
+    entry: Any,
+    limits: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Every violation in ONE entry: the canonical field and the closed shape together.
+
+    :func:`check_entry` owns the canonical field and :func:`check_fields` owns
+    the rest, and they stay split on purpose — the write gate reaches them at
+    different points in a before/after diff, and joining them there would report
+    one defect twice.
+
+    A caller holding a whole entry and NO diff needs both, in one list. That is
+    the restore lane: a backlog record is handed back verbatim, and until this
+    existed the seat learned it was non-canonical only by attempting the write,
+    reading one refusal, fixing one field and attempting again. Naming every
+    broken rule at once is the difference between one pass and a bisect.
+
+    Args:
+        type_name: Entry type name (e.g. ``"todos"``).
+        container: Container key in the file dict.
+        key: Dict key or list index, as a string.
+        entry: The entry as it would be written.
+        limits: The dict returned by :func:`load_entry_limits`.
+
+    Returns:
+        Violation dicts in the published shape, empty when the entry is legal
+        or the type publishes no shape at all.  Reports only — it never repairs
+        an entry, and it never decides what a caller does with a refusal.
+    """
+    type_def = limits.get("entry_types", {}).get(type_name)
+    if not isinstance(type_def, dict):
+        return []
+    if not isinstance(entry, dict):
+        hit = _field_violation(type_name, container, key, "", "unmeasurable", 0, 0)
+        hit["found_type"] = type(entry).__name__
+        return [hit]
+
+    hits = list(check_fields(type_name, container, key, entry, limits))
+
+    canonical = type_def.get("field")
+    if not isinstance(canonical, str) or not canonical:
+        return hits
+
+    if canonical not in entry:
+        missing = _field_violation(type_name, container, key, canonical, "missing_field", 0, 0)
+        missing["found_type"] = "missing"
+        hits.append(missing)
+        return hits
+
+    verdict = check_entry(type_name, entry[canonical], limits)
+    if verdict.get("ok"):
+        return hits
+    if verdict.get("reason") == "unmeasurable":
+        hit = _field_violation(type_name, container, key, canonical, "unmeasurable", 0, 0)
+        hit["found_type"] = verdict.get("found_type", "unknown")
+        hits.append(hit)
+        return hits
+    # Rendered as a NAMED field rather than the bare "todos[0] 117/100" the
+    # diff path prints: a caller with no diff is being told which field to cut.
+    hits.append(
+        _field_violation(
+            type_name,
+            container,
+            key,
+            canonical,
+            REASON_FIELD_OVER_CAP,
+            int(verdict.get("length", 0)),
+            int(verdict.get("cap", 0)),
+        )
+    )
     return hits
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: normalize.py
 # Description: Memory File Schema Normalizer
-# Version: 0.4.0
+# Version: 0.4.1
 # Created: 2026-01-22
-# Modified: 2026-08-12
+# Modified: 2026-09-16
 # =============================================
 
 """
@@ -95,7 +95,12 @@ def _sort_container_newest_first(container: list, container_name: str, changes: 
     guardrail used to skip the whole container silently on a single bad entry).
 
     Returns the reordered list, or None when the container carries no numbers
-    at all — the legitimate shape for todos, which is not a defect.
+    at all. That was written when a numberless todo was the legitimate shape;
+    the closed field shape (FPLAN-0593) made ``number`` required on every entry
+    type, todos included, so a container with none is LEGACY rather than
+    intended. Still not a defect to handle here: this function orders entries
+    and does not judge them, and the write gate is where a missing required
+    field is named. Leaving it unordered is the honest answer either way.
     """
     numbers = [_read_entry_number(entry) for entry in container]
     slots = [i for i, number in enumerate(numbers) if number is not None]

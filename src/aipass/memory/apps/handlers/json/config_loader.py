@@ -94,6 +94,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # out; the fleet has run true for months, so a reborn file that came
         # back warn-only would silently drop enforcement, not protect anyone.
         "enforce": True,
+        # The length an agent drafts to, as a percent of the cap it will be
+        # measured against. One number for the whole fleet, derived from each
+        # cap rather than stored beside it. Published here so @seedgo's meta
+        # line can read it instead of mirroring it (FPLAN-0593 Phase 5).
+        "draft_percent": 80,
         "entry_types": {
             "key_learnings": {
                 "file": "local.json",
@@ -167,6 +172,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "supported_extensions": [".md"],
     },
     "rollover": {
+        # How many records a todo backlog keeps before the OLDEST move to the
+        # sibling archive file. Not a cap on what exists — a cap on what the
+        # working file holds. A backlog is the only copy of a rolled todo and
+        # is never vectorised, so nothing here may delete one (FPLAN-0593 Ph5).
+        "backlog": {"max_records": 100},
         "defaults": {
             "local": {
                 "sessions": {"count": 15, "auto_compact_cap": 3},
@@ -696,6 +706,27 @@ def get_todos_count(branch: str, rollover_cfg: dict[str, Any] | None = None) -> 
     return count
 
 
+def get_backlog_ceiling() -> int | None:
+    """How many records a todo backlog keeps before the oldest are archived.
+
+    Fleet-wide, not per branch: a backlog is a plain file nobody reads on a
+    schedule, and the number exists to keep it readable rather than to ration
+    anything. Nothing about it is a deadline.
+
+    Returns:
+        A whole number >= 1, or None when no usable ceiling is configured —
+        and None means NO TRIM, never a trim to zero. A config that lost the
+        key must leave every record where it is; the failure mode of this
+        number is "the file stays long", never "the last copy is gone".
+    """
+    raw = _as_dict(_as_dict(section("rollover")).get("backlog")).get("max_records")
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        if raw is not None:
+            logger.warning(f"[config_loader] rollover.backlog.max_records is not a record count ({raw!r}) — no trim")
+        return None
+    return raw
+
+
 def get_branches_with_overrides() -> dict[str, Any]:
     """Return only the configured branches whose limits deviate from defaults.
 
@@ -744,6 +775,28 @@ def get_file_budgets() -> dict[str, Any]:
         logger.warning("[config_loader] No 'file_budgets' in config — serving the regeneration seed")
         budgets = DEFAULT_CONFIG["entry_limits"]["file_budgets"]
     return copy.deepcopy(budgets)
+
+
+def get_draft_percent() -> int:
+    """Return the percent of a cap an agent should draft to.
+
+    The number every ``*_meta`` line's "draft to N" is computed from, fleet-wide
+    and not per entry type: the target is derived from each cap, so one percent
+    covers every type and no second number can go stale when a cap moves.
+    ``entry_limits.draft_percent()`` DELEGATES here for the same reason
+    ``load_file_budgets`` does — config reads live in one module.
+
+    Returns:
+        The published percent as an int.  The regeneration seed's 80 when the
+        config publishes nothing usable, so a truncated config narrows the
+        draft target rather than removing it.
+    """
+    raw = section("entry_limits").get("draft_percent")
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100:
+        if raw is not None:
+            logger.warning(f"[config_loader] entry_limits.draft_percent is not 1-100 ({raw!r}) — serving the seed")
+        return int(DEFAULT_CONFIG["entry_limits"]["draft_percent"])
+    return raw
 
 
 def get_count_ceilings(branch: str | None = None) -> dict[str, Any]:
