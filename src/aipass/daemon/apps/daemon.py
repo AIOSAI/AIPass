@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Entry point CLI for drone @daemon
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -152,6 +152,7 @@ def print_help(modules: List[Any]):
     console.print()
     console.print("  [dim]drone @daemon <command> \\[args...][/dim]")
     console.print("  [dim]drone @daemon --help[/dim]")
+    console.print("  [dim]drone @daemon --version[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -227,7 +228,7 @@ def main():
 
     # Version flag
     if args[0] in ["--version", "-V"]:
-        console.print("DAEMON v1.0.0")
+        console.print("DAEMON v1.1.0")
         return 0
 
     # Show help for explicit help flags
