@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-08-20
-# Modified: 2026-09-12
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -40,7 +40,7 @@ if sys.platform == "win32":
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit  # noqa: E402
 from aipass.prax import logger  # noqa: E402
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -159,8 +159,15 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Flags:[/yellow]")
-    console.print("  [cyan]--help, -h[/cyan]      Show this help")
-    console.print("  [cyan]--version, -V[/cyan]   Show version")
+    console.print("  [cyan]--help, -h, help[/cyan]   Show this help (all three forms)")
+    console.print("  [cyan]--version, -V[/cyan]      Show version")
+    console.print("  [dim]<command> --help (or -h) prints that command's own help without running it[/dim]")
+    console.print()
+
+    console.print("[yellow]Exit codes:[/yellow]")
+    console.print("  [cyan]0[/cyan]   the command was handled")
+    console.print("  [cyan]1[/cyan]   unknown command")
+    console.print("  [cyan]2[/cyan]   a routed command refused (the refusal prints to stderr)")
     console.print()
 
     console.print("[yellow]Examples:[/yellow]")
