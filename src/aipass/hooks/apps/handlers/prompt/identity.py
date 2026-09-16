@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: identity.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Injects branch identity from passport.json (UserPromptSubmit), cadence-gated
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Reads .trinity/passport.json and outputs formatted identity for prompt injection.
@@ -35,11 +35,14 @@ def handle(hook_data: dict) -> dict:
         if not cadence.should_fire("identity", hook_data):
             return {"stdout": "", "exit_code": 0}
     except Exception as exc:
+        # The degraded fail mode (DPLAN-0347): a cadence that cannot answer withholds
+        # this loader; the kernel fires alone and its banner names why.
         logger.warning(
-            "[HOOKS] identity FAIL-OPEN loader=identity: cadence check raised, so it fires EVERY turn "
-            "until this is cured: %s",
+            "[HOOKS] identity DEGRADED loader=identity: cadence check raised, so it is WITHHELD and the kernel "
+            "fires alone until this is cured: %s",
             exc,
         )
+        return {"stdout": "", "exit_code": 0}
 
     try:
         content = load_content(hook_data)

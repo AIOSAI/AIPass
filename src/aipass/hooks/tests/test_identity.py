@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/prompt/identity.py.
@@ -65,7 +65,8 @@ class TestCadenceGate:
         assert "devpulse Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_fires_anyway_when_cadence_check_raises(self, tmp_path, monkeypatch):
+    def test_is_withheld_when_cadence_check_raises(self, tmp_path, monkeypatch, caplog):
+        """The degraded fail mode (DPLAN-0347): identity waits, the kernel fires alone and says why."""
         from aipass.hooks.apps.handlers.prompt.identity import handle
 
         self._write_passport(tmp_path)
@@ -77,8 +78,8 @@ class TestCadenceGate:
 
         result = handle({"cwd": str(tmp_path)})
 
-        assert "devpulse Identity" in result["stdout"]
-        assert result["exit_code"] == 0
+        assert result == {"stdout": "", "exit_code": 0}
+        assert "identity DEGRADED loader=identity" in caplog.text
 
 
 # Schema 1.0.0 shape — principles live at the TOP LEVEL. Live on every passport

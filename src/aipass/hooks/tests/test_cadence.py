@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for apps/modules/cadence.py.
@@ -120,7 +120,8 @@ class TestShouldFire:
         ):
             assert should_fire("global") is True
 
-    def test_no_session_id_fires(self, tmp_path):
+    def test_no_session_id_withholds_all_but_the_kernel_and_the_notices(self, tmp_path):
+        """The degraded fail mode (DPLAN-0347): not every loader every turn, not dark."""
         from aipass.hooks.apps.modules.cadence import should_fire
 
         with (
@@ -131,7 +132,11 @@ class TestShouldFire:
             env = dict(__import__("os").environ)
             env.pop("CLAUDE_CODE_SESSION_ID", None)
             with patch.dict("os.environ", env, clear=True):
-                assert should_fire("global") is True
+                assert should_fire("global") is False
+                for withheld in ("navmap", "branch", "identity"):
+                    assert should_fire(withheld) is False, withheld
+                for kept in ("tier0", "alert"):
+                    assert should_fire(kept) is True, kept
 
     def test_counter_increments_once_across_sibling_processes(self, tmp_path):
         """Each loader is a SEPARATE OS process. The counter must advance
@@ -1458,11 +1463,13 @@ class TestCurrentTurn:
 
 
 class TestFailOpenIsLoud:
-    """DPLAN-0347 row 1: a fail-open is a WARNING that names the loader and the cause.
+    """DPLAN-0347 row 1: a degraded read is a WARNING that names the cause — once per turn.
 
-    Every fail-open path forces turn 0, and turn 0 fires EVERY loader — the four
-    heavy ones cost 13,235 to 21,536 chars per fire. It was logged at info for
-    months and the fleet log holds no such line since 09-13: nobody greps info.
+    A degraded read used to force turn 0, and turn 0 fires EVERY loader — the
+    four heavy ones cost 13,235 to 21,536 chars per fire. The room ruled the
+    degraded mode instead (FPLAN-0593 Phase 5): the kernel fires alone, the
+    heavy loaders are withheld, and only the kernel's line is a WARNING, so a
+    degraded turn costs one WARNING rather than one per loader.
     """
 
     def setup_method(self):
@@ -1473,8 +1480,8 @@ class TestFailOpenIsLoud:
         config.write_text(json.dumps({"enabled": True, "period": 5}), encoding="utf-8")
         return config
 
-    def test_no_session_id_warns_and_names_the_loader(self, tmp_path, caplog):
-        from aipass.hooks.apps.modules.cadence import should_fire
+    def test_no_session_id_warns_once_and_names_the_cause(self, tmp_path, caplog):
+        from aipass.hooks.apps.modules.cadence import degraded_reason, should_fire
 
         env = dict(os.environ)
         env.pop("CLAUDE_CODE_SESSION_ID", None)
@@ -1483,12 +1490,15 @@ class TestFailOpenIsLoud:
             patch.dict("os.environ", env, clear=True),
             patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
         ):
-            assert should_fire("navmap") is True
+            fired = {name: should_fire(name) for name in ("tier0", "navmap", "branch", "identity", "alert")}
 
+        assert fired == {"tier0": True, "navmap": False, "branch": False, "identity": False, "alert": True}
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
-        assert warnings, "a fail-open that logs at info is a fail-open nobody reads"
-        assert "FAIL-OPEN loader=navmap" in warnings[0].getMessage()
+        assert len(warnings) == 1, "one degraded turn is one WARNING, not one per loader"
+        assert "DEGRADED loader=tier0 fires" in warnings[0].getMessage()
         assert "CLAUDE_CODE_SESSION_ID" in warnings[0].getMessage()
+        assert "DEGRADED loader=navmap WITHHELD" in caplog.text
+        assert "CLAUDE_CODE_SESSION_ID" in degraded_reason()
 
     def test_an_unreadable_state_file_warns_with_the_cause(self, tmp_path, caplog):
         from aipass.hooks.apps.modules.cadence import should_fire
@@ -1503,9 +1513,10 @@ class TestFailOpenIsLoud:
             patch("builtins.open", _boom),
         ):
             assert should_fire("tier0") is True
+            assert should_fire("navmap") is False
 
         text = caplog.text
-        assert "FAIL-OPEN loader=tier0" in text
+        assert "DEGRADED loader=tier0 fires" in text
         assert "state dir is read-only" in text
 
     def test_a_healthy_turn_says_nothing_at_warning(self, tmp_path, caplog):

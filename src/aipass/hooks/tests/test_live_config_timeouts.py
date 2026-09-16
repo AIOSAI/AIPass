@@ -159,6 +159,18 @@ class TestTheTemplateRuling:
         """Ruled project-appropriate, but a project opts IN to being asked."""
         assert self._entries()["feedback_pulse"]["enabled"] is False
 
+    def test_the_scripted_lane_is_live_in_the_template(self):
+        """A matcher without Bash is a fence only the tool lane can see.
+
+        The framework file has carried Bash since 2026-08-30, when the scripted
+        lane shipped. The template never did, so every project `aipass init`
+        created got the cross-project fence on Edit/Write and nothing at all on
+        `sed -i` — the exact gap the lane was built to close, reopened for every
+        seat outside this repo (feedback c273274e, 2026-09-16).
+        """
+        matcher = self._template()["PreToolUse"]["pre_edit_gate"]["matcher"]
+        assert "Bash" in matcher.split("|"), f"the scripted lane is dark in the template: {matcher}"
+
     def test_release_notice_is_wired_on_session_start(self):
         entry = self._template()["SessionStart"]["release_notice"]
         assert entry["handler"] == "aipass.hooks.apps.handlers.lifecycle.release_notice.handle"

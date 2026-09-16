@@ -22,6 +22,14 @@ measured 2026-09-05 by calling `_all_git_reads()` directly: `git tag --sort=…`
 The earlier wording here said "status, log, diff, show, blame, grep, **etc.**", which read as an open
 set; it is not one. Whether the list should grow is a code question, open — see [known_issues.md](known_issues.md).
 
+**What it reads is code, not data (1.1.0, 2026-09-16).** Before matching, the command goes through
+`bash_writes.code_text()`, the branch's one shell reader: a heredoc body whose consumer only reads it (a
+mail body, a `cat` into a file) is blanked, and a shell's own program text (`bash -c "…"`,
+`bash <<'EOF'`) is kept, tokenized. The first cures the false fire where prose that merely quoted a
+write-shaped git line refused an `ai_mail` reply; the second closes the opposite hole, where a quoted
+`bash -c` script was blanked as an argument and read as no invocation at all. If the reader raises, the
+gate scans the raw command as before — a gate that cannot parse must not turn permissive.
+
 One refusal is all-or-nothing per command: `_all_git_reads()` requires *every* git invocation in the
 command to be an allowed verb, so `git status && git tag` is refused whole.
 
@@ -44,4 +52,5 @@ command to be an allowed verb, so `git status && git tag` is refused whole.
 ## Related
 
 - [edit_gate.md](edit_gate.md) — the write fence that runs beside it on the same event
-- [known_issues.md](known_issues.md) — the closed allow-list and the heredoc false fire
+- [known_issues.md](known_issues.md) — the closed allow-list, still open
+- [bash_writes.md](bash_writes.md) — the shell reader that tells code from data

@@ -56,6 +56,17 @@ which keys on the same cwd.
 The exemption is narrow: it opens the **cross-project** fence only. Inbox writes, the cross-branch
 fence, daemon confinement and the `.trinity` caps are unchanged for every seat including the admin.
 
+## Outside AIPass — what a project `aipass init` creates gets
+
+**The Bash lane ships on (2026-09-16).** The template `.aipass/project_hooks.json` matched
+`pre_edit_gate` on `Edit|MultiEdit|Write|NotebookEdit` only, so a new project never ran the scripted-write
+fence or the memory shell refusal. It now matches `Bash|…` like this repo does. Existing projects keep
+their own `hooks.json` until they widen the matcher and re-run `aipass trust`.
+
+**The memory refusal names only cures that work there.** A project outside the fleet has no @memory, so
+the shell refusal no longer sends the agent to a `drone @memory` verb or claims a cap is measured: it checks
+whether @memory imports at refusal time and, if not, says "write it with the Edit or Write tool" and why.
+
 ---
 
 ## Related

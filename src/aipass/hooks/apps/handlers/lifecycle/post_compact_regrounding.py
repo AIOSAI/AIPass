@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.0.0
+# Version: 2.1.0
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-07-31
-# Modified: 2026-09-10
+# Modified: 2026-09-16
 # =============================================
 
 """Re-grounds the agent after compaction even when no UserPromptSubmit arrives.
@@ -98,25 +98,24 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
     than trailing the payload, so it lands in part 1 on every seat. It is built
     only once there is grounding to carry it — the two reads it costs are not
     spent on a regroup that has nothing to say.
+
+    A section that was EXPECTED here and did not load is named, not swallowed
+    (DPLAN-0347, hooks row 1): the banner rides at the head of part 1 and the
+    same lines go to the log at WARNING. A regroup that loses everything still
+    ships the banner rather than going silent — a post-compact session with no
+    grounding at all is the one that most needs to be told so.
     """
     grounding_content = importlib.import_module("aipass.hooks.apps.modules.grounding_content")
-    loaders = (
-        ("branch", grounding_content.load_branch),
-        ("identity", grounding_content.load_identity),
-        ("kernel", grounding_content.load_kernel),
-        ("navmap", grounding_content.load_navmap),
-    )
-    sections: list[tuple[str, str]] = []
-    for label, loader in loaders:
-        try:
-            content = loader(hook_data)
-        except Exception as exc:
-            logger.info("[HOOKS] post_compact_regrounding: %s load failed: %s", label, exc)
-            content = ""
-        if content and content.strip():
-            sections.append((label, content.strip("\n")))
+    sections, failures = grounding_content.grounding_report(hook_data)
+    banner = grounding_content.degraded_banner(failures, [label for label, _ in sections])
+    if failures:
+        logger.warning(
+            "[HOOKS] post_compact_regrounding DEGRADED: carried=%s missing=%s",
+            ",".join(label for label, _ in sections) or "nothing",
+            " | ".join(failures),
+        )
     if not sections:
-        return []
+        return [("degraded", banner)] if banner else []
 
     try:
         release_notice = importlib.import_module("aipass.hooks.apps.modules.release_notice")
@@ -129,6 +128,10 @@ def _load_sections(hook_data: dict) -> list[tuple[str, str]]:
             sections[0] = ("branch+notice", notice + _SEP + sections[0][1])
         else:
             sections.insert(0, ("notice", notice))
+    if banner:
+        # Ahead of everything, including the notice: it changes how the rest of
+        # the re-ground must be read, so it cannot be the part that gets cut.
+        sections.insert(0, ("degraded", banner))
     return sections
 
 

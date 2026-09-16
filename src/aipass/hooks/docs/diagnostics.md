@@ -42,9 +42,31 @@ exists — hard-deleted, renamed to `name(disabled).py`, or moved to `.archive/`
 those three are the house cleanup pattern. Escape: recreate the file clean, let re-validation drop the
 state, then remove it.
 
+## The injection ledger — what a seat was told, per turn
+
+`apps/modules/injection_ledger.py` (DPLAN-0347 hooks row 3) writes one JSONL line per engine dispatch that
+put something in front of the model: `{ts, event, token, turn, hooks: {name: {chars, sha}}, total, delivered}`,
+to `aipass-ledger-<session>.jsonl` in the temp dir beside cadence's state. Only what reaches the model is
+counted — plain stdout on UserPromptSubmit and SessionStart, `additionalContext` on tool events — in UTF-16
+units, the way Claude Code measures. `total` is what the hooks produced, `delivered` what the merged document
+carried; they differ only when the merge dropped a block.
+
+Rows are grouped on cadence's **turn token** (the transcript size at the prompt), not the turn number:
+parallel UserPromptSubmit siblings share the token exactly, while a sibling that finishes before the counter
+increments reads the previous number.
+
+```bash
+drone @hooks ledger                    # this session (else the most recently written, said so)
+drone @hooks ledger --session <id> --last 5
+```
+
+**Warn-only.** Nothing reads it to decide anything. It warns in two cases: a single injection over the
+10,000-unit persist line (the model saw a preview), and a record it could not write.
+
 ---
 
 ## Related
 
 - [engine.md](engine.md) — what is written to each stream and when
 - [edit_gate.md](edit_gate.md) — the gate the block is enforced by
+- [prompt_injection.md](prompt_injection.md) — the caps and the cadence each ledger row is measured against

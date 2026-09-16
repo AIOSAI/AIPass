@@ -33,6 +33,7 @@ apps/
   modules/                 # One per concern; bare `drone @hooks` lists them live
     engine.py              #   Core dispatch -- routes events to handlers, logs every one
     cadence.py             #   Which turn a loader fires on; state per session in the temp dir
+    injection_ledger.py    #   What a seat was told, per turn (`ledger` verb, warn-only)
     grounding_content.py   #   The injected blocks and their budgets (read, never copied)
     bash_writes.py         #   Write targets a shell command names -- edit_gate's scripted lane
     testwrite_targets.py   #   Which of those targets are NEW test files

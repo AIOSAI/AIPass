@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for edit_gate's scripted lane and the devpulse admin exemption.
@@ -416,6 +416,29 @@ class TestShellWritesToMemoryAreRefused:
         result = _run(sibling_projects["plain_seat"], command=command)
         assert _blocked(result)
         assert "Read tool, cat or jq" in _reason(result)
+
+    def test_the_cure_drops_the_fleet_clauses_where_there_is_no_fleet(self, sibling_projects: dict):
+        """This gate ships to projects `aipass init` creates, and they have no @memory.
+
+        Two clauses of the cure sentence are AIPass-only: that a cap is measured
+        on the Edit/Write lane, and that a `drone @memory` verb is the other
+        door. Sent to a project without the fleet they name a service that is
+        not there and a verb that will refuse the caller — a refusal whose cure
+        does not work is one agents route around instead of reporting
+        (feedback c273274e, 2026-09-16).
+        """
+        from unittest.mock import patch
+
+        target = "aipass.hooks.apps.handlers.security.edit_gate._memory_service_reachable"
+        with patch(target, return_value=False):
+            reason = _reason(_run(sibling_projects["plain_seat"], command="sed -i s/a/b/ .trinity/local.json"))
+
+        # Still refused, and still says where the write belongs.
+        assert "local.json via sed -i" in reason
+        assert "Edit or Write tool" in reason
+        # The two clauses that would be false there.
+        assert "drone @memory" not in reason
+        assert "@memory's caps are measured" not in reason
 
 
 class TestShellMemoryRuleDoesNotOverreach:

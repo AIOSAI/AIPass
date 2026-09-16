@@ -28,9 +28,12 @@ verb.
 `tripwire_snapshot` (PreToolUse, Bash) records `(mtime_ns, size)` for every watched memory file under the
 call's `tool_use_id`, and `tripwire` (PostToolUse, Bash) compares. If a memory file changed during the call
 and the command ran no `drone @memory` or `drone @spawn` verb, the whole file is measured on disk against
-@memory's caps and the agent is told `MEMORY WRITTEN FROM A SHELL: <file> changed during this Bash call,
-outside the caps gate`, followed by every over-cap entry with its cut point, or "It measures clean". It never
-blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
+@memory's caps. An over-cap or unparseable file is charged: `MEMORY WRITTEN FROM A SHELL: <file> changed
+during this Bash call, outside the caps gate`, followed by every over-cap entry with its cut point. A file
+that measures clean is **said, not charged** (1.15.0): `MEMORY CHANGED DURING THIS BASH CALL`, which adds
+that it may not have been this command — @memory's rollover, run by *any* seat's compaction, writes here
+too. Measured 2026-09-16: a neighbour's PreCompact rolled this seat's `local.json` mid-call and the old
+wording accused the seat. A clean change logs at INFO, a charged one at WARNING. It never blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
 
 Since 1.13.0 (DPLAN-0347) it watches **every `.trinity` in the project**, not just the seat's, and
 `passport.json` with `local.json` and `observations.json` — 24 directories and 72 stats, ~19 ms, measured on
@@ -48,6 +51,15 @@ not text, entries already over cap before the call are listed too ("holds", neve
 > matcher `Bash`; `PostToolUse.trinity_tripwire` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire`,
 > matcher `Bash`. No provider wire: tool events already run every enabled handler. The refusal needs no wire;
 > it rides `pre_edit_gate`, which already matches Bash.
+
+**No grace window — the tripwire's "file did not parse" alarm is a real broken file (FPLAN-0593 Phase 5).**
+A grace-then-re-stat was proposed for the tripwire's false alarms and measured first. Every writer of these
+files is atomic (the Edit tool swaps the inode; @memory and prax write through `os.replace`), so no reader
+can see a torn file. The retained logs (09-12 → 09-16) held 2 real breakages, open for 9 s and 8 s — one was a
+seat's own Edit that left `observations.json` invalid until its next Edit. A grace long enough to hide those
+would stall every Bash call and hide the breakage it was meant to report. The cure landed at the source
+instead: an Edit or Write that would leave a memory file **unparseable is refused** (the reason quotes the
+parse error), and an edit that *repairs* an already-broken file is allowed with a WARNING that it was broken.
 
 ## `.trinity` caps — a write is judged on what it AUTHORS
 

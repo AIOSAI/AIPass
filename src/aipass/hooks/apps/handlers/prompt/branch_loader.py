@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: branch_loader.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Loads branch-specific prompt + private integrations (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Loads .aipass/aipass_local_prompt.md and private integration prompts for injection."""
@@ -30,11 +30,14 @@ def handle(hook_data: dict) -> dict:
         if not cadence.should_fire("branch", hook_data):
             return {"stdout": "", "exit_code": 0}
     except Exception as exc:
+        # The degraded fail mode (DPLAN-0347): a cadence that cannot answer withholds
+        # this loader; the kernel fires alone and its banner names why.
         logger.warning(
-            "[HOOKS] branch_loader FAIL-OPEN loader=branch: cadence check raised, so it fires EVERY turn "
-            "until this is cured: %s",
+            "[HOOKS] branch_loader DEGRADED loader=branch: cadence check raised, so it is WITHHELD and the kernel "
+            "fires alone until this is cured: %s",
             exc,
         )
+        return {"stdout": "", "exit_code": 0}
 
     try:
         content = load_content(hook_data)

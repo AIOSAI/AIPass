@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.4.2
+# Version: 1.5.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-09-13
+# Modified: 2026-09-16
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -79,6 +79,8 @@ _INPLACE_FLAGS = frozenset({"-i", "--in-place"})
 _INTERPRETERS = frozenset(
     {"python", "python3", "node", "nodejs", "perl", "ruby", "php", "bash", "sh", "zsh", "awk", "gawk"}
 )
+#: The interpreters whose program text is shell grammar — what code_text() hands back.
+_SHELLS = frozenset({"bash", "sh", "zsh"})
 
 # NOTE ON TOOLING THAT CARRIES ITS OWN FENCE — `drone`, `aipass`, `git`, `gh`.
 # This module first held an explicit skip-list for them. A mutation run killed
@@ -582,3 +584,55 @@ def write_targets(command: str, cwd: str) -> list[tuple[Path, str]]:
         same as "writes nothing"; see :data:`NOT_CAUGHT`.
     """
     return [hit for _segment, hits in write_targets_by_segment(command, cwd) for hit in hits]
+
+
+def code_text(command: str) -> str:
+    """The parts of *command* that are shell CODE, with data blanked.
+
+    A mail body is an ARGUMENT, not a command. Any gate that pattern-matches a
+    whole Bash command string convicts prose: @ai_mail was refused twice on
+    2026-09-15 for a reply whose body merely QUOTED a write-shaped version
+    control line, and the standing workaround was a line in every dispatch brief
+    telling recipients not to quote one. The distinction lives here, in the
+    reader that already knows where a heredoc starts and which verbs run code,
+    so a caller asking "is there a real invocation in this command" gets one
+    answer and this module keeps the only shell grammar in the branch.
+
+    Two rules, opposite directions, one principle — text is data unless a
+    shell owns it:
+
+    * A heredoc body is blanked, because its consumer reads it as input.
+    * A SHELL's own text is appended back, tokenized, because ``bash <<'EOF'``
+      and ``bash -c "..."`` really are shell programs. Tokenized matters: the
+      caller blanks quoted spans next, and an inline script that arrives
+      already unquoted survives that blanking, which is what closes the hole
+      where ``bash -c "<write verb>"`` read as an empty string.
+
+    Shells only (:data:`_SHELLS`), not every interpreter. The caller reads shell
+    grammar; an awk or python program is not shell, and the first version that
+    appended them refused a read-only ``awk '/^diff --git a/…/'`` on a real turn
+    (2026-09-16). Their quoted programs were blanked before this function
+    existed, so leaving them out restores that reading and opens nothing new.
+
+    A command whose heredoc openers and bodies do not pair up falls back to the
+    whole command per segment, the old broader reading: a reader that cannot
+    tell whose text is whose keeps all of it.
+
+    Args:
+        command: The raw Bash command string from the tool input.
+
+    Returns:
+        The command with heredoc bodies blanked, followed by the program text of
+        each shell invocation. Never raises on unparseable input: shlex failures
+        surface as an empty reading, and the shell half is still returned.
+    """
+    shell = _strip_heredoc_bodies(command)
+    bodies = _split_heredocs(command)[1]
+    programs: list[str] = []
+    for tokens in _readings(command):
+        segments = _segments(tokens)
+        owned = _heredocs_by_segment(segments, bodies)
+        for index, segment in enumerate(segments):
+            if segment and Path(segment[0]).name in _SHELLS:
+                programs.append(owned.get(index, " ".join(segment)))
+    return "\n".join([shell, *dict.fromkeys(programs)])

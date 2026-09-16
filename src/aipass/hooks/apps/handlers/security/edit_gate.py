@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.13.0
+# Version: 1.15.0
 # Description: Cross-project (tool + scripted), cross-branch, inbox and shell-to-memory write protection
 #              (PreToolUse), plus the shell-memory tripwire (PreToolUse snapshot, PostToolUse report)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -25,7 +25,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
-# The one seat that reaches outwards. Patrick, 2026-08-30, compassed as devpulse
+# The one seat that reaches outwards. The owner, 2026-08-30, compassed as devpulse
 # entry 322: "It is only you who can reach outwards. Nobody else." The cross-
 # project fence stays for every other agent, tool lane and scripted lane alike.
 # Named here for the log line only — WHO is decided by modules/admin_seat's
@@ -299,14 +299,41 @@ def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
         logger.warning("[HOOKS] edit_gate: shell write to a memory file refused: %s via %s", target, how)
         reason = (
             f"Memory files are not written from a shell: {target} via {how}.\n"
-            "Write .trinity/local.json, observations.json and passport.json with the Edit or Write tool, where "
-            "@memory's caps are measured, or through a drone @memory verb. A shell write lands unmeasured, which "
-            "is how whole branches drifted over cap.\n"
+            f"{_where_memory_is_written()}\n"
             "Only reading it? An interpreter that names a memory path is refused whether it reads or writes, "
             "because this gate cannot tell which. Read the file with the Read tool, cat or jq."
         )
         return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
     return None
+
+
+def _memory_service_reachable() -> bool:
+    """True when @memory's cap module imports from where this hook is running.
+
+    Asked at refusal time, not at import: the same handler serves AIPass seats and
+    `aipass init` projects, which have no @memory (docs/edit_gate.md).
+    """
+    try:
+        importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        return True
+    except Exception as exc:  # noqa: BLE001 - any import failure means "not reachable here"
+        logger.info("[HOOKS] edit_gate: @memory is not reachable from this project (%s)", exc)
+        return False
+
+
+def _where_memory_is_written() -> str:
+    """The shell refusal's cure sentence; outside the fleet there is no cap and no ``drone @memory`` verb."""
+    files = ", ".join(sorted(_TRINITY_MEMORY_FILES))
+    if _memory_service_reachable():
+        return (
+            f"Write {files} with the Edit or Write tool, where @memory's caps are measured, or through a "
+            "drone @memory verb. A shell write lands unmeasured, which is how whole branches drifted over cap."
+        )
+    return (
+        f"Write {files} with the Edit or Write tool. This project has no @memory service, so no cap is "
+        "measured here either way; the rule stands because a shell write is invisible to every reader that "
+        "would measure one."
+    )
 
 
 def _get_package_from_cwd(cwd: str) -> str:
@@ -975,27 +1002,55 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
     return None
 
 
+def _unparseable_refusal(fp: Path, exc: ValueError) -> dict:
+    """Refuse a memory write whose RESULT does not parse — the file would be broken for every reader.
+
+    Until 2026-09-16 this fell into the catch-all below and was ALLOWED. Every
+    writer is atomic, so an unparseable memory file is a complete file an edit
+    broke; refusing the edit means it never breaks. Why this and not a reader
+    grace window: docs/trinity_memory_gate.md.
+    """
+    reason = (
+        f"{fp.name}: this edit would leave the file unparseable as JSON ({exc}). A memory file that does "
+        "not parse is broken for every reader until the next edit lands — @memory, this gate, the tripwire "
+        "and the startup read all see a corrupt seat. Make the edit so the whole file still parses, then retry."
+    )
+    return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+
+
 def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: str) -> dict | None:
-    """Check .trinity Write/Edit/MultiEdit for over-limit entries and newest-first violations."""
+    """Check .trinity Write/Edit/MultiEdit for unparseable results, over-limit entries and newest-first violations."""
     try:
         resolved_path = str(fp.resolve()) if not fp.is_absolute() else str(fp)
 
         if tool_name == "Write":
             after_text = tool_input.get("content", "")
-            after = json.loads(after_text)
-            before = {}
+            current_text = None
             if Path(resolved_path).exists():
-                before = json.loads(Path(resolved_path).read_text(encoding="utf-8"))
+                current_text = Path(resolved_path).read_text(encoding="utf-8")
         else:
             if not Path(resolved_path).exists():
                 return None
             current_text = Path(resolved_path).read_text(encoding="utf-8")
-            before = json.loads(current_text)
             resolved_after = _resolve_after_text(tool_name, tool_input, current_text)
             if resolved_after is None:
                 return None
             after_text = resolved_after
+
+        try:
             after = json.loads(after_text)
+        except ValueError as exc:
+            logger.info("[HOOKS] edit_gate: refused a %s that leaves %s unparseable: %s", tool_name, fp, exc)
+            return _unparseable_refusal(fp, exc)
+
+        try:
+            before = json.loads(current_text) if current_text is not None else {}
+        except ValueError as exc:
+            # Already broken on disk and this edit parses: it is the repair, so no caps against it.
+            logger.warning(
+                "[HOOKS] edit_gate: %s did not parse before this %s, which repairs it: %s", fp, tool_name, exc
+            )
+            return None
 
         block = _check_newest_first(before, after)
         if block:
@@ -1343,29 +1398,31 @@ def tripwire_snapshot(hook_data: dict) -> dict:
     return {"stdout": "", "exit_code": 0}
 
 
-def _report_change(path: Path, seat: Path) -> list[str]:
-    """Report one changed memory file — as an accusation for the seat's own, as a question for anyone else's.
+def _report_change(path: Path, seat: Path) -> tuple[list[str], bool]:
+    """Report one changed memory file — loud when it does not measure clean, a question when it does.
 
-    The seat's own memory changing during its own shell call is a write this
-    session made: there is no one else in that directory. Another branch's is
-    NOT the same claim. Every citizen runs its own live session, so a neighbour
-    saving its memory while this command runs lands inside the same window —
-    measured the first time this ran fleet-wide (a 76-second pytest caught
-    @devpulse and @memory writing their own local.json mid-run, 2026-09-15).
-
-    Reporting it anyway is right: a cross-branch shell write is exactly the
-    shape the fence exists to refuse and the reader cannot always see it. Saying
-    "you wrote this" when the neighbour did is not.
+    A clean change is said, not charged, even for the seat's own file: another
+    seat's compaction rolls THIS seat's local.json (measured 2026-09-16). An
+    unclean change keeps the accusation and the cure. Cases: docs/trinity_memory_gate.md.
 
     Args:
         path: The changed memory file.
         seat: The seat's own .trinity directory, from the snapshot.
 
     Returns:
-        Lines for the report, already indented where they belong.
+        (lines, clean) — lines for the report, already indented where they
+        belong, and whether the file measured clean.
     """
     findings = _measure_memory_file(path)
     mine = path.parent == seat
+    if mine and not findings:
+        clean = "It is inside its file budget." if path.name in _FILE_BUDGET_FILES else "It measures clean."
+        return [
+            f"MEMORY CHANGED DURING THIS BASH CALL: {path} changed during this Bash call, outside the caps gate. "
+            f"{clean} If this command wrote it, memory is written with Edit/Write or a drone @memory verb, never "
+            "a shell. It may not have been this command: @memory's rollover, run by any seat's compaction, "
+            "writes here too."
+        ], True
     if mine:
         head = f"MEMORY WRITTEN FROM A SHELL: {path} changed during this Bash call, outside the caps gate"
         cure = (
@@ -1379,9 +1436,9 @@ def _report_change(path: Path, seat: Path) -> list[str]:
             "If that seat is live right now, this is its own write and there is nothing to do here."
         )
     if findings:
-        return [f"{head}, and it does not measure clean:", *findings, cure]
+        return [f"{head}, and it does not measure clean:", *findings, cure], False
     clean = "It is inside its file budget." if path.name in _FILE_BUDGET_FILES else "It measures clean."
-    return [f"{head}. {clean}", cure] if not mine else [f"{head}. {clean} {cure.strip()}"]
+    return [f"{head}. {clean}", cure], True
 
 
 def tripwire(hook_data: dict) -> dict:
@@ -1422,11 +1479,15 @@ def tripwire(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
 
         parts: list[str] = []
+        all_clean = True
         for key in changed:
-            path = Path(key)
-            parts.extend(_report_change(path, trinity))
+            lines, clean = _report_change(Path(key), trinity)
+            parts.extend(lines)
+            all_clean = all_clean and clean
         context = "\n".join(parts)
-        logger.warning("[HOOKS] edit_gate tripwire: %s", context.replace("\n", " | "))
+        # A clean change is no defect, whoever made it: WARNING is what @trigger escalates.
+        log = logger.info if all_clean else logger.warning
+        log("[HOOKS] edit_gate tripwire: %s", context.replace("\n", " | "))
         output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}
         return {"stdout": json.dumps(output), "exit_code": 0}
     except Exception as exc:

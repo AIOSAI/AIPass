@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Blocks raw git/gh commands and protected file edits (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-05-21
+# Modified: 2026-09-16
 # =============================================
 
 """Blocks raw git/gh commands and edits to settings/hooks files."""
 
+import importlib
 import json
 import os
 import re
@@ -240,12 +241,42 @@ def _block(reason: str) -> dict:
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "git gate"}
 
 
+def _scan_text(cmd: str) -> str:
+    """The command text this gate is entitled to convict on.
+
+    Quoted spans were already blanked here — an argument is not a command. A
+    heredoc body was NOT, because it carries no quotes, so a mail body that
+    merely QUOTED a write-shaped line was refused as if it ran one. @ai_mail hit
+    that twice on 2026-09-15 and shipped its replies through a file instead, and
+    every dispatch brief since has carried a line telling recipients not to
+    quote such a line — a workaround issued over and over in place of a cure.
+
+    The distinction between code and data lives in ``bash_writes``, the branch's
+    one shell reader: it blanks a heredoc body whose consumer merely reads it,
+    and hands back the program text of a real interpreter, tokenized. Tokenized
+    is what closes the opposite hole in the same move: ``bash -c "<write>"`` had
+    its whole script blanked as a quoted argument and read as no invocation at
+    all.
+
+    Fails to the OLD, BROADER reading. If the reader raises, this gate scans the
+    raw command as it always did: a gate that cannot parse a command must not
+    become permissive on it.
+    """
+    try:
+        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+        code = bw.code_text(cmd)
+    except Exception as exc:  # noqa: BLE001 - any reader failure falls back to the raw text
+        logger.warning("[HOOKS] git_gate: bash_writes unavailable, scanning raw command: %s", exc)
+        code = cmd
+    scan = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
+    return re.sub(r"'(?:[^'\\]|\\.)*'", "''", scan)
+
+
 def _check_bash(tool_input: dict) -> dict:
     cmd = tool_input.get("command", "")
     if not cmd:
         return _BLOCK_ALLOW
-    scan = re.sub(r'"(?:[^"\\]|\\.)*"', '""', cmd)
-    scan = re.sub(r"'(?:[^'\\]|\\.)*'", "''", scan)
+    scan = _scan_text(cmd)
     path_git = any(_path_exec_tail(clause, "git") is not None for clause in _split_clauses(scan))
     if (RAW_GIT_RE.search(scan) or path_git) and not _all_git_reads(scan):
         return _block(GIT_REDIRECT)

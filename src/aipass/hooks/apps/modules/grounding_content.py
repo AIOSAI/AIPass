@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating.
@@ -116,36 +116,50 @@ def _find_project_file(filename: str) -> Path | None:
     return None
 
 
-def load_kernel(hook_data: dict) -> str:
-    """Read tier0_kernel.md content."""
+def _find_project_dir() -> Path | None:
+    """Walk up from CWD to the nearest .aipass/ directory — the mark of a stamped tree."""
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        candidate = parent / ".aipass"
+        if candidate.is_dir():
+            return candidate
+        if parent == parent.parent:
+            break
+    return None
+
+
+def _tier_file(filename: str) -> Path | None:
+    """The .aipass/<filename> this session reads: AIPASS_HOME's when inside it, else the nearest.
+
+    Args:
+        filename: The tier file's name, e.g. "tier0_kernel.md".
+
+    Returns:
+        The path when it exists, else None.
+    """
     aipass_home = os.environ.get("AIPASS_HOME", "")
     cwd = str(Path.cwd())
 
     if aipass_home and cwd.startswith(aipass_home):
-        prompt_file = Path(aipass_home) / ".aipass" / "tier0_kernel.md"
+        prompt_file = Path(aipass_home) / ".aipass" / filename
     else:
-        prompt_file = _find_project_file("tier0_kernel.md")
+        prompt_file = _find_project_file(filename)
 
     if not prompt_file or not prompt_file.exists():
-        return ""
+        return None
+    return prompt_file
 
-    return prompt_file.read_text(encoding="utf-8")
+
+def load_kernel(hook_data: dict) -> str:
+    """Read tier0_kernel.md content."""
+    prompt_file = _tier_file("tier0_kernel.md")
+    return prompt_file.read_text(encoding="utf-8") if prompt_file else ""
 
 
 def load_navmap(hook_data: dict) -> str:
     """Read tier1_navmap.md content."""
-    aipass_home = os.environ.get("AIPASS_HOME", "")
-    cwd = str(Path.cwd())
-
-    if aipass_home and cwd.startswith(aipass_home):
-        prompt_file = Path(aipass_home) / ".aipass" / "tier1_navmap.md"
-    else:
-        prompt_file = _find_project_file("tier1_navmap.md")
-
-    if not prompt_file or not prompt_file.exists():
-        return ""
-
-    return prompt_file.read_text(encoding="utf-8")
+    prompt_file = _tier_file("tier1_navmap.md")
+    return prompt_file.read_text(encoding="utf-8") if prompt_file else ""
 
 
 def _find_branch_root(cwd: str) -> Path | None:
@@ -333,3 +347,131 @@ def load_identity(hook_data: dict) -> str:
     if not output:
         return ""
     return "\n" + _truncate_block(output, IDENTITY_CHAR_BUDGET, passport)
+
+
+#: The grounding sections, in the order a session must not lose them. Branch
+#: first: it carries the seat's own rules and no other injection repeats it.
+SECTION_ORDER = ("branch", "identity", "kernel", "navmap")
+
+DEGRADED_HEADING = "[GROUNDING DEGRADED — this session is running on PARTIAL grounding]"
+
+
+def _unhomed(text: str) -> str:
+    """The same text with the home directory spelled ~, for anything the agent will read."""
+    return text.replace(str(Path.home()), "~")
+
+
+def _tier_failure(label: str, filename: str) -> str | None:
+    """Why a tier file is missing, or None when nothing was expected here.
+
+    An unstamped tree has no .aipass/ at all and was never promised a kernel;
+    a stamped one that cannot produce the file has lost something it had.
+    """
+    if _find_project_dir() is None:
+        return None
+    return f"{label}: this tree is AIPass-stamped but .aipass/{filename} is missing or unreadable"
+
+
+def _branch_failure(hook_data: dict) -> str | None:
+    """Why the branch prompt is missing, or None when this seat is not a branch."""
+    root = _find_branch_root(hook_data.get("cwd", "") or str(Path.cwd()))
+    if root is None:
+        return None
+    return f"branch: {root.name} is a branch but .aipass/aipass_local_prompt.md is missing or unreadable"
+
+
+def _branch_has_trinity(cwd: str) -> Path | None:
+    """The nearest .trinity/ above *cwd*, stopping at home."""
+    search = Path(cwd).resolve()
+    home = Path.home()
+    while search != home and search.parent != search:
+        candidate = search / ".trinity"
+        if candidate.is_dir():
+            return candidate
+        search = search.parent
+    return None
+
+
+def _identity_failure(hook_data: dict) -> str | None:
+    """Why the identity block is missing, or None when this seat has no .trinity/ at all."""
+    cwd = hook_data.get("cwd", "") or str(Path.cwd())
+    if _branch_has_trinity(cwd) is None:
+        return None
+    if _find_passport(cwd) is None:
+        return "identity: a .trinity/ is present but holds no passport.json"
+    return "identity: passport.json was read but rendered no identity block"
+
+
+_FAILURE_OF = {
+    "branch": _branch_failure,
+    "identity": _identity_failure,
+    "kernel": lambda hook_data: _tier_failure("kernel", "tier0_kernel.md"),
+    "navmap": lambda hook_data: _tier_failure("navmap", "tier1_navmap.md"),
+}
+
+
+def grounding_report(hook_data: dict) -> tuple[list[tuple[str, str]], list[str]]:
+    """Every grounding section that loaded, and one line per section that was expected and did not.
+
+    Two different empties, kept apart on purpose (DPLAN-0347, hooks row 1). A
+    seat that is not a branch has no branch prompt to lose: that is the shape of
+    the tree, not a defect, and measured on 2026-09-16 it is the common case —
+    four of four stamped projects on this machine carry a kernel and a navmap
+    and no .trinity/ or branch prompt at all. Warning on those every beat is the
+    false-alarm class this branch is curing elsewhere, so they are silent.
+
+    A seat that IS a branch and still gets no branch prompt has lost something it
+    was promised, and doctrine is that it fails loud rather than quietly running
+    on less. A loader that RAISES is always a failure — a reader that cannot
+    parse its own input never gets to call the result "not applicable".
+
+    Args:
+        hook_data: The hook payload; only "cwd" is read.
+
+    Returns:
+        (sections, failures) — sections as (label, content) in SECTION_ORDER,
+        failures as one already-worded line each, safe to inject verbatim.
+    """
+    loaders = {"branch": load_branch, "identity": load_identity, "kernel": load_kernel, "navmap": load_navmap}
+    sections: list[tuple[str, str]] = []
+    failures: list[str] = []
+    for label in SECTION_ORDER:
+        try:
+            content = loaders[label](hook_data)
+        except Exception as exc:  # noqa: BLE001 - any loader failure is a failure, whatever its type
+            failures.append(_unhomed(f"{label}: loading it raised {type(exc).__name__}: {exc}"))
+            continue
+        if content and content.strip():
+            sections.append((label, content.strip("\n")))
+            continue
+        reason = _FAILURE_OF[label](hook_data)
+        if reason:
+            failures.append(_unhomed(reason))
+    return sections, failures
+
+
+def degraded_banner(failures: list[str], loaded: list[str]) -> str:
+    """The loud line for a session flying on partial grounding — what is missing and why.
+
+    Substitutes nothing. A fallback that hands back a different answer than the
+    one asked for is banned here, so this names the hole instead of filling it.
+
+    Args:
+        failures: Already-worded lines from grounding_report.
+        loaded: Labels of the sections that did load.
+
+    Returns:
+        The banner, or "" when nothing was lost.
+    """
+    if not failures:
+        return ""
+    return "\n".join(
+        [
+            DEGRADED_HEADING,
+            f"Carried: {', '.join(loaded) if loaded else 'nothing'}. Missing, and why:",
+            *(f" - {failure}" for failure in failures),
+            "Nothing was substituted for the missing part. Treat any rule that lives there as UNREAD: "
+            "fetch it (`drone @<self> --help`, the branch README, .trinity/) before acting on memory of "
+            "it, and say in your reply that you ran degraded.",
+        ]
+    )

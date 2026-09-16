@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_branch_loader.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for branch_loader prompt handler (injection caps since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/prompt/branch_loader.py."""
@@ -228,3 +228,18 @@ class TestInjectedBlocksStayUnderTheirCaps:
         head = rendered.split("\n[… cut at")[0]
 
         assert head.endswith(tuple(str(d) for d in range(10))), "a block never stops mid-word"
+
+
+def test_the_branch_prompt_is_withheld_when_cadence_raises(tmp_path, caplog):
+    """The degraded fail mode (DPLAN-0347): 9,000 chars do not fire every turn on a broken cadence."""
+    from aipass.hooks.apps.handlers.prompt.branch_loader import handle
+
+    seat = tmp_path / "seat"
+    (seat / ".aipass").mkdir(parents=True)
+    (seat / ".trinity").mkdir()
+    (seat / ".aipass" / "aipass_local_prompt.md").write_text("BRANCH PROMPT", encoding="utf-8")
+    with _patch_cadence(error=ImportError("no cadence")):
+        result = handle({"cwd": str(seat)})
+
+    assert result == {"stdout": "", "exit_code": 0}
+    assert "branch_loader DEGRADED loader=branch" in caplog.text

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.6.0
+# Version: 1.7.0
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for edit_gate .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -590,7 +590,7 @@ class TestTripwireWatchesEveryTrinityInTheProject:
             self._around(seats["hooks"], lambda: passport.write_text(json.dumps({"identity": {"role": "r"}})))
         )
 
-        assert f"MEMORY WRITTEN FROM A SHELL: {passport} changed" in clean
+        assert f"MEMORY CHANGED DURING THIS BASH CALL: {passport} changed" in clean
         assert "inside its file budget" in clean
 
     def test_an_over_budget_passport_is_named_with_its_numbers(self, tmp_path, monkeypatch):
@@ -621,15 +621,32 @@ class TestTripwireWatchesEveryTrinityInTheProject:
         assert "If that seat is live right now" in context
         assert "memory owns that file" in context
 
-    def test_the_seats_own_file_is_still_named_as_this_calls_write(self, tmp_path, monkeypatch):
+    def test_the_seats_own_broken_file_is_still_named_as_this_calls_write(self, tmp_path, monkeypatch):
+        seats = self._project(tmp_path, monkeypatch)
+        mine = seats["hooks"] / ".trinity" / "local.json"
+        over = json.dumps({"sessions": [{"summary": "s" * 300 + "tail"}]})
+
+        context = self._context(self._around(seats["hooks"], lambda: mine.write_text(over)))
+
+        assert context.startswith("MEMORY WRITTEN FROM A SHELL")
+        assert "Re-land each entry" in context
+
+    def test_the_seats_own_clean_change_is_said_not_charged(self, tmp_path, monkeypatch, caplog):
+        """Measured 2026-09-16: another seat's compaction ran @memory's rollover, which rewrote
+        THIS seat's local.json mid-call. Clean, sanctioned, and not this command's write."""
         seats = self._project(tmp_path, monkeypatch)
         mine = seats["hooks"] / ".trinity" / "local.json"
 
-        context = self._context(
-            self._around(seats["hooks"], lambda: mine.write_text(json.dumps({"sessions": [{"summary": "new"}]})))
-        )
+        with caplog.at_level("INFO"):
+            context = self._context(
+                self._around(seats["hooks"], lambda: mine.write_text(json.dumps({"sessions": [{"summary": "new"}]})))
+            )
 
-        assert context.startswith("MEMORY WRITTEN FROM A SHELL")
+        assert context.startswith("MEMORY CHANGED DURING THIS BASH CALL")
+        assert "MEMORY WRITTEN FROM A SHELL" not in context and "Re-land" not in context
+        assert "It may not have been this command" in context
+        tripwire_lines = [r for r in caplog.records if "edit_gate tripwire:" in r.getMessage()]
+        assert tripwire_lines and all(r.levelname == "INFO" for r in tripwire_lines), "clean is not a defect"
 
     def test_an_untouched_project_stays_silent(self, tmp_path, monkeypatch):
         seats = self._project(tmp_path, monkeypatch)
@@ -741,10 +758,18 @@ class TestTrinityWriteNonTrinity:
 
 
 class TestTrinityWriteFailOpen:
-    """Invalid or unparseable content -> fail-open (allowed)."""
+    """A write whose RESULT does not parse is refused; a gate that cannot run still allows.
+
+    Until 2026-09-16 unparseable content fell into the catch-all and was allowed.
+    Measured then (FPLAN-0593 Phase 5, row 4): every fleet writer is atomic, so a
+    memory file that does not parse is a complete file an edit broke — two in the
+    retained logs, each on disk 8-9 seconds, one reported by another seat's
+    tripwire as a defect. The import failure below stays fail-open: that is the
+    gate unable to run, not the file being broken.
+    """
 
     def test_invalid_json_content(self, tmp_path):
-        """Non-JSON content -> JSONDecodeError caught, fail-open."""
+        """Non-JSON content is refused with the parse error, before any cap is measured."""
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -753,11 +778,12 @@ class TestTrinityWriteFailOpen:
         with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_ENFORCE)):
             result = handle(_hook_data(file_path, "not valid json {{{", cwd=cwd))
 
-        assert result["exit_code"] == 0
-        assert result["stdout"] == ""
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "local.json: this edit would leave the file unparseable as JSON" in reason
 
     def test_empty_content(self, tmp_path):
-        """Empty content string -> JSONDecodeError caught, fail-open."""
+        """An empty Write would blank the seat's memory: refused like any other unparseable result."""
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -766,7 +792,7 @@ class TestTrinityWriteFailOpen:
         with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_ENFORCE)):
             result = handle(_hook_data(file_path, "", cwd=cwd))
 
-        assert result["exit_code"] == 0
+        assert result["exit_code"] == 2
 
     def test_import_failure_fail_open(self, tmp_path):
         """importlib.import_module raises ImportError -> caught, fail-open."""
@@ -942,8 +968,8 @@ class TestTrinityEditFailOpen:
 
         assert result["exit_code"] == 0
 
-    def test_edit_producing_invalid_json_fail_open(self, tmp_path):
-        """Edit breaks JSON structure -> JSONDecodeError caught -> allow."""
+    def test_edit_producing_invalid_json_is_refused(self, tmp_path):
+        """Edit breaks JSON structure -> refused, the file on disk stays whole."""
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
@@ -960,6 +986,22 @@ class TestTrinityEditFailOpen:
                     old_string='"hello"',
                     new_string='"hello',
                 )
+            )
+
+        assert result["exit_code"] == 2
+        assert "unparseable as JSON" in json.loads(result["stdout"])["reason"]
+
+    def test_an_edit_that_repairs_an_already_broken_file_is_allowed(self, tmp_path):
+        """The measured 18:40 shape, second half: the next Edit is the fix, and it must land."""
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        Path(file_path).write_text('{"key_learnings": {"k1": "hello}}', encoding="utf-8")
+
+        with patch("importlib.import_module", return_value=_mock_entry_limits(_TEST_LIMITS_ENFORCE)):
+            result = handle(
+                _hook_data(file_path, tool_name="Edit", cwd=cwd, old_string='"hello}}', new_string='"hello"}}')
             )
 
         assert result["exit_code"] == 0

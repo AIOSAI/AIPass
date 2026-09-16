@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-08-01
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/lifecycle/post_compact_regrounding.py.
@@ -52,9 +52,16 @@ class TestPostCompactRegrounding:
         assert "IDENTITY" in context
         assert "DPLAN-0276" in context
 
-    def test_silent_when_pending_but_all_content_empty(self, tmp_path):
+    def test_silent_when_pending_but_all_content_empty(self, tmp_path, monkeypatch):
+        """Silent only where nothing was promised: an unstamped, non-branch directory.
+
+        The chdir is the contract, not scaffolding. From inside a stamped tree the
+        same four empties are a degraded regroup and ship a banner — the twin
+        below pins that side (DPLAN-0347, hooks row 1).
+        """
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
+        monkeypatch.chdir(tmp_path)
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
             patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value=""),
@@ -65,6 +72,49 @@ class TestPostCompactRegrounding:
             result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
 
         assert result == {"stdout": "", "exit_code": 0}
+
+    def test_a_stamped_tree_with_nothing_loaded_ships_the_banner_not_silence(self, tmp_path, monkeypatch):
+        """The quiet nothing this row exists to end: a post-compact session that
+        got no grounding at all is the one that most needs to be told so."""
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+        from aipass.hooks.apps.modules import release_notice
+
+        (tmp_path / ".aipass").mkdir()
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value=""),
+            patch.object(release_notice, "build_notice", return_value="NOTICE") as spy,
+        ):
+            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert "[GROUNDING DEGRADED" in context
+        assert "Carried: nothing." in context
+        assert "kernel: this tree is AIPass-stamped but .aipass/tier0_kernel.md is missing" in context
+        assert "navmap: this tree is AIPass-stamped but .aipass/tier1_navmap.md is missing" in context
+        spy.assert_not_called()
+
+    def test_the_banner_opens_part_one_ahead_of_the_branch(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+
+        (tmp_path / ".aipass").mkdir()
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", side_effect=OSError("boom")),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value="BRANCH"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value="IDENTITY"),
+        ):
+            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert "navmap: loading it raised OSError: boom" in context
+        assert context.index("[GROUNDING DEGRADED") < context.index("BRANCH") < context.index("KERNEL")
 
     def test_one_loader_failing_does_not_block_the_others(self, tmp_path):
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
@@ -442,13 +492,14 @@ class TestReleaseNoticeCompactDoor:
         context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
         assert "KERNEL" in context
 
-    def test_the_notice_is_not_even_built_when_there_is_no_grounding(self, tmp_path):
+    def test_the_notice_is_not_even_built_when_there_is_no_grounding(self, tmp_path, monkeypatch):
         """Guard order, not just output: a bare notice under a re-ground header
         would read as a regroup that reground nothing, and the two file reads
         would be spent on a block nobody sees."""
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
         from aipass.hooks.apps.modules import release_notice
 
+        monkeypatch.chdir(tmp_path)
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
             patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value=""),

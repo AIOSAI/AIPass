@@ -18,11 +18,35 @@ persists a hook output over 10,000 UTF-16 units and shows the agent a 2,000-char
 that crosses that line is not read at all. Every cut logs a WARNING naming the file and both numbers.
 The `.trinity` caps and `passport.json`'s 6,000/600 are @memory's numbers; README 10,000 is @seedgo's.
 
-**Fail-open is loud (cadence 2.5.0).** Turn 0 fires *every* loader, so any path that forces turn 0 —
-no `CLAUDE_CODE_SESSION_ID`, an unreadable state file, a cadence import that raises — makes the session
-pay the whole grounding bill on every prompt. Those paths logged at INFO for months and the fleet log
-held no such line since 09-13. They now log
-`[HOOKS] cadence FAIL-OPEN loader=<name>: turn forced to 0, so it fires EVERY turn — <cause>`.
+**Degraded fail mode: kernel only, plus a warning (cadence 2.6.0, DPLAN-0347 hooks row 1).** When cadence
+cannot count turns — no `CLAUDE_CODE_SESSION_ID`, an unreadable state file, a cadence import that raises —
+it used to force turn 0, and turn 0 fires *every* loader: the whole grounding bill (21,383 chars measured)
+on every prompt. Now only `DEGRADED_LOADERS` fire — the kernel and the two notice channels (alerts, mail) —
+and navmap, branch and identity are **withheld**, not replaced: 3,750 chars a turn. cadence logs one WARNING
+per degraded turn from the kernel's decision
+(`[HOOKS] cadence DEGRADED loader=tier0 fires: turns cannot be counted, … — <cause>`) and the rest at INFO.
+Dropping alerts and mail from `DEGRADED_LOADERS` makes the mode literally kernel-only. Measured before the
+change: 0 real fail-opens in 1,190 cadence decisions over 24 h — this is a rare path made cheap and loud.
+
+**The degraded banner.** Grounding a seat was promised but did not get — a stamped tree with no kernel, a
+branch root with no prompt, a `.trinity` that will not render, a loader that raises — opens the kernel
+block (and part 1 of the post-compact re-ground) with `[GROUNDING DEGRADED — …]`: what was carried, what is
+missing and why, and that nothing was substituted, so any rule that lives there is unread. A tree that
+promises nothing (no `.aipass/`, not a branch root) stays silent. `grounding_content.grounding_report()`
+decides it in under a millisecond; the log line is WARNING on turn 0 and INFO on later beats, one warning
+per context.
+
+**Cadence-by-default: measured and NOT shipped (FPLAN-0593 Phase 5, hooks row 2).** The row was fenced as a
+restatement: the same handlers fire on the same turns afterwards, or stop. DPLAN-0347 named 4 opt-outs
+(`temporal`, `context_gauge`, `compass_recall`, `feedback_pulse`). This repo's `hooks.json` has 13
+UserPromptSubmit entries and only 4 are plain period-5 loaders (`tier0`, `navmap`, `identity`, `branch`),
+so a restatement needs **9** opt-outs: the named 4 plus `presence_gate` (a gate on every prompt),
+`persistent_alert` and `email_notification` (fire on arrival first), `auto_process` and `user_message_relay`.
+And a default lives in the engine, which every stamped project runs: Vera-Studio and wren carry `temporal`
+and `context_gauge` with no opt-out key, so they would drop from every turn to every fifth until re-stamped.
+That changes what fires, so it stopped there. What fires today is the record: an 11-turn trace per handler
+(kernel, navmap, branch, identity, mail on turns 0/5/10; `temporal` every turn), identical before and after
+this phase's other rows.
 
 ## Persistent Alerts
 

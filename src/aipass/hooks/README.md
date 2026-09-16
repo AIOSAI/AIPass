@@ -91,7 +91,8 @@ and `--help` does not name it, the bug is in `--help`.
 
 Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
 command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
-`engine` (the dispatcher itself), `cadence` (which turn a loader fires on), `grounding_content` (the
+`engine` (the dispatcher itself), `cadence` (which turn a loader fires on), `injection_ledger` (what a
+seat was told, per turn), `grounding_content` (the
 injected blocks and their budgets), `bash_writes` and `testwrite_targets` (what a shell command can be
 seen to write, and which of those are new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,

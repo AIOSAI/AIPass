@@ -1330,6 +1330,11 @@
       "file": "apps/handlers/config/output_merge.py",
       "standard": "json_structure",
       "reason": "Parses each handler's stdout and serialises the ONE hook-protocol document Claude Code reads, in memory, with stdlib json (FPLAN-0535). Opens no file and stores nothing, so json_handler has nothing to open and log_operation nothing to log. Same profile as post_compact_regrounding.py and the security gates' hook protocol responses."
+    },
+    {
+      "file": "apps/handlers/config/ledger_store.py",
+      "standard": "json_structure",
+      "reason": "The injection ledger IS an operations record: one JSONL line per engine dispatch, in the temp dir beside cadence's per-session state (DPLAN-0347 hooks row 3). It runs inside every dispatch, tool events included, so a log_operation per call would write a second ledger into hooks_json on every tool call. The read verb logs through json_handler in apps/modules/injection_ledger.py."
     }
   ],
   "notes": {

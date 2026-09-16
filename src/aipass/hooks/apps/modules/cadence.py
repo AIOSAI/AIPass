@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.5.0
+# Version: 2.6.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -56,6 +56,26 @@ DEFAULTS = {
 }
 
 MAIL_LOADER = "email"
+
+#: The degraded fail mode (DPLAN-0347, ruled by the room 2026-09-15: "degraded:
+#: kernel only + warning"). When turns cannot be counted, these fire and every
+#: other loader is WITHHELD. Not open — that forced turn 0 on every prompt and
+#: fired all loaders, ~21k chars a turn. Not closed — dark, and post-compact
+#: re-grounding with it. The kernel is the floor, and its banner names what was
+#: withheld and why.
+#:
+#: "alert" and "email" ride with the kernel on purpose. The ruling cut the
+#: grounding bill — navmap, branch and identity, ~18k a beat — and these two are
+#: not grounding: they are the channels that say something needs this session,
+#: tiny (an alert body is capped at 300, the mail banner is ~130) and silent
+#: unless there is something to say. A degraded session is exactly when they
+#: must not go quiet. Drop them here to make the mode literally kernel-only;
+#: nothing else reads this set.
+DEGRADED_LOADERS = frozenset({"tier0", "alert", MAIL_LOADER})
+
+#: The one loader whose degraded line logs at WARNING. Every withheld loader
+#: logs at info, so a degraded turn costs one WARNING, not one per loader.
+DEGRADED_REPORTER = "tier0"
 
 _turn: int | None = None
 _config: dict | None = None
@@ -204,23 +224,33 @@ def _load_and_increment(hook_data: dict) -> int:
         return 0
 
 
-def _warn_fail_open(loader_name: str) -> None:
-    """One WARNING per degraded read, naming the loader and the cause.
+def degraded_reason() -> str | None:
+    """Why this process cannot count turns, or None when cadence is healthy.
 
-    A fail-open is not a quiet default: the turn falls back to 0 and turn 0
-    fires every loader, so the session pays the whole grounding bill on every
-    prompt. It was logged at info for months and no line was ever read
-    (0 fail-open lines since 09-13 — measured 2026-09-15, thread 16). WARNING is
-    what a log reader greps, and the message says what it costs, not just that
-    something failed.
+    Meaningful after should_fire() has run in this process — that is what reads
+    the state. The kernel's banner quotes it so the session learns the cause.
     """
-    if _turn_degraded is None:
-        return
-    logger.warning(
-        "[HOOKS] cadence FAIL-OPEN loader=%s: turn forced to 0, so it fires EVERY turn — %s",
+    return _turn_degraded
+
+
+def _degraded_fire(loader_name: str) -> bool:
+    """The degraded fail mode's answer for one loader, logged once per turn at WARNING.
+
+    A degraded read used to force turn 0, and turn 0 fires every loader, so the
+    session paid the whole grounding bill on every prompt (0 real occurrences in
+    1,190 cadence decisions on 2026-09-15/16 — rare, and expensive when it hits).
+    """
+    fires = loader_name in DEGRADED_LOADERS
+    log = logger.warning if loader_name == DEGRADED_REPORTER else logger.info
+    log(
+        "[HOOKS] cadence DEGRADED loader=%s %s: turns cannot be counted, so only %s fire and every other "
+        "loader is withheld until this is cured — %s",
         loader_name,
+        "fires" if fires else "WITHHELD",
+        ", ".join(sorted(DEGRADED_LOADERS)),
         _turn_degraded,
     )
+    return fires
 
 
 def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
@@ -240,7 +270,8 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
         return True
 
     turn = _load_and_increment(hook_data or {})
-    _warn_fail_open(loader_name)
+    if _turn_degraded is not None:
+        return _degraded_fire(loader_name)
 
     fired = turn == 0 or (turn % period) == offset
 
@@ -330,16 +361,9 @@ def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
         return True
 
     path = _mail_state_path()
-    if path is None:
-        logger.warning(
-            "[HOOKS] cadence FAIL-OPEN loader=%s: the mail banner fires EVERY turn — "
-            "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to throttle in",
-            MAIL_LOADER,
-        )
-        return True
-
     turn = _load_and_increment(hook_data or {})
-    _warn_fail_open(MAIL_LOADER)
+    if path is None or _turn_degraded is not None:
+        return _degraded_fire(MAIL_LOADER)
     last_fired = _read_last_mail_turn(path)
 
     # turn < last_fired means the counter was reset under us (compact / new session);
@@ -367,6 +391,15 @@ ADVISORY_PERIOD = 10
 # this long in practice, and a throttle that silently degrades to "every time"
 # is the bug being fixed, not a fallback.
 ADVISORY_SECONDS = 600
+
+
+def turn_token(hook_data: dict) -> int:
+    """The per-turn token for *hook_data*: identical in every sibling process of one turn.
+
+    Public for the injection ledger, which groups by it (DPLAN-0347, hooks row 3).
+    Read-only — it stats the transcript and touches no cadence state.
+    """
+    return _get_turn_token(hook_data)
 
 
 def current_turn() -> int | None:
