@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: navmap.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tier 1 navigation map — periodic prompt injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-09-15
 # =============================================
 
 """Loads .aipass/tier1_navmap.md — richer navigation map injected periodically."""
@@ -30,7 +30,11 @@ def handle(hook_data: dict) -> dict:
         if not cadence.should_fire("navmap", hook_data):
             return {"stdout": "", "exit_code": 0}
     except Exception as exc:
-        logger.info("[HOOKS] navmap: cadence check failed, firing anyway: %s", exc)
+        logger.warning(
+            "[HOOKS] navmap FAIL-OPEN loader=navmap: cadence check raised, so it fires EVERY turn "
+            "until this is cured: %s",
+            exc,
+        )
 
     try:
         content = load_content(hook_data)

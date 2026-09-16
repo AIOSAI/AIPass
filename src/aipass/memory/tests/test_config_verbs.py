@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
-# Version: 1.4.1
+# Version: 1.5.0
 # Created: 2026-08-16
 # Modified: 2026-09-15
 # =============================================
@@ -24,6 +24,9 @@ Covers:
   - A help flag in ANY slot prints help and leaves the file byte-identical
   - A malformed config is refused, not clobbered (bytes unchanged)
   - Bounds: 0, negative, 101, non-numeric
+  - The keep-count CEILING (FPLAN-0593): refused at both write verbs, the refusal
+    naming the ceiling, the worst case, the file budget and the co-tenant counts;
+    a count at exactly the ceiling is accepted and lands
   - Rich actually renders the [DEFAULT] / [OVERRIDE] markers on screen
     (a lowercase [default] tag is eaten by Rich's markup parser while the
     source string still reads correctly -- the assertion must see the screen)
@@ -295,6 +298,21 @@ def _payload(verbs: SimpleNamespace, capsys: pytest.CaptureFixture, *args: str) 
     return json.loads(_raw_stdout(verbs, capsys, *args))
 
 
+def _ceiling(verbs: SimpleNamespace, entry_type: str, branch: str | None = None) -> int:
+    """The keep-count ceiling the THROWAWAY config publishes for *entry_type*.
+
+    Read, never hard-coded: the number falls out of the entry caps and the
+    file budget, and a test that pinned today's arithmetic as a literal would
+    go red the day a cap moves without anything being wrong.
+    """
+    return verbs.loader.get_count_ceilings(branch)[entry_type]["ceiling"]
+
+
+def _budget_chars(verbs: SimpleNamespace, entry_type: str) -> int:
+    """The whole-file budget the ceiling for *entry_type* was measured against."""
+    return verbs.loader.get_count_ceilings()[entry_type]["budget_chars"]
+
+
 def _payload_rollover(verbs: SimpleNamespace, capsys: pytest.CaptureFixture, *args: str) -> dict:
     """Same, for the `rollover` verb."""
     capsys.readouterr()
@@ -311,11 +329,11 @@ class TestUnknownBranchRefusal:
     """Registry is truth; an unknown branch never reaches the writer."""
 
     def test_set_unknown_branch_message(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@wizard", "sessions", "25")
+        _run(verbs, "set", "@wizard", "sessions", "12")
         assert "Unknown branch: @wizard" in _streams(capsys)
 
     def test_set_unknown_branch_suggestion(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@wizard", "sessions", "25")
+        _run(verbs, "set", "@wizard", "sessions", "12")
         assert "Registry is truth — run 'drone systems' to list branches" in _streams(capsys)
 
     def test_get_unknown_branch_refuses(self, verbs, capsys) -> None:
@@ -324,12 +342,12 @@ class TestUnknownBranchRefusal:
 
     def test_unknown_branch_writes_nothing(self, verbs) -> None:
         before = verbs.path.read_bytes()
-        _run(verbs, "set", "@wizard", "sessions", "25")
+        _run(verbs, "set", "@wizard", "sessions", "12")
         assert verbs.path.read_bytes() == before
 
     def test_refusal_echoes_the_branch_as_typed(self, verbs, capsys) -> None:
         """Echo what the operator typed -- not a normalized form they never used."""
-        _run(verbs, "set", "@WiZaRd", "sessions", "25")
+        _run(verbs, "set", "@WiZaRd", "sessions", "12")
         assert "Unknown branch: @WiZaRd" in _streams(capsys)
 
 
@@ -337,25 +355,25 @@ class TestUnknownTypeRefusal:
     """Only three entry types are settable; anything unknown is refused by name (todos: see section 8)."""
 
     def test_set_unknown_type_message(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "foo", "25")
+        _run(verbs, "set", "@memory", "foo", "12")
         assert "Unknown entry type: 'foo'" in _streams(capsys)
 
     def test_set_unknown_type_suggestion(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "foo", "25")
+        _run(verbs, "set", "@memory", "foo", "12")
         assert "Valid types: sessions, key_learnings, observations" in _streams(capsys)
 
     def test_set_default_unknown_type_message(self, verbs, capsys) -> None:
-        _run(verbs, "set-default", "wizard", "25")
+        _run(verbs, "set-default", "wizard", "12")
         assert "Unknown entry type: 'wizard'" in _streams(capsys)
 
     def test_unknown_type_writes_nothing(self, verbs) -> None:
         before = verbs.path.read_bytes()
-        _run(verbs, "set", "@memory", "foo", "25")
+        _run(verbs, "set", "@memory", "foo", "12")
         assert verbs.path.read_bytes() == before
 
 
 class TestCountRefusals:
-    """A limit is a whole number in [1, 100] -- everything else is refused."""
+    """A limit is a whole number in [1, 100] AND under its file's ceiling."""
 
     def test_non_numeric_message(self, verbs, capsys) -> None:
         _run(verbs, "set", "@memory", "sessions", "abc")
@@ -363,7 +381,7 @@ class TestCountRefusals:
 
     def test_non_numeric_suggestion(self, verbs, capsys) -> None:
         _run(verbs, "set", "@memory", "sessions", "abc")
-        assert "Example: drone @memory config set @devpulse sessions 25" in _streams(capsys)
+        assert "Example: drone @memory config set @devpulse sessions 12" in _streams(capsys)
 
     def test_decimal_is_not_a_whole_number(self, verbs, capsys) -> None:
         _run(verbs, "set", "@memory", "sessions", "12.5")
@@ -394,16 +412,102 @@ class TestCountRefusals:
         assert "Count must not exceed 100 (got 101)" in _streams(capsys)
 
     def test_bounds_are_inclusive(self, verbs) -> None:
-        """1 and 100 are legal -- the refusal is for what lies outside."""
+        """1 and the file ceiling are legal -- the refusal is for what lies outside.
+
+        100 used to be legal here. The numeric cap is still 100, but FPLAN-0593
+        put a second, lower bound under it: local.json's budget refuses a
+        sessions count long before the flat cap does.
+        """
         assert _run(verbs, "set", "@memory", "sessions", "1") is True
         assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 1
-        assert _run(verbs, "set", "@memory", "sessions", "100") is True
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 100
+        ceiling = _ceiling(verbs, "sessions")
+        assert _run(verbs, "set", "@memory", "sessions", str(ceiling)) is True
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == ceiling
 
     def test_bad_count_writes_nothing(self, verbs) -> None:
         before = verbs.path.read_bytes()
         _run(verbs, "set", "@memory", "sessions", "0")
         assert verbs.path.read_bytes() == before
+
+
+class TestCountCeilingRefusal:
+    """A keep-count multiplies an entry cap, so it is refused at the FILE budget.
+
+    FPLAN-0593. 25 sessions of 706 legal chars is local.json's 25,000-char
+    budget missed by a third with every entry inside its cap, and until now
+    the verb wrote it. The refusal has to carry the arithmetic: the ceiling,
+    the worst case it measured, the budget, and the co-tenant counts the
+    ceiling was computed against -- a bare "too big" is unanswerable.
+    """
+
+    def test_set_names_the_ceiling(self, verbs, capsys) -> None:
+        _run(verbs, "set", "@memory", "sessions", "40")
+        assert f"sessions may keep at most {_ceiling(verbs, 'sessions')}" in _streams(capsys)
+
+    def test_set_names_the_budget_and_the_worst_case(self, verbs, capsys) -> None:
+        _run(verbs, "set", "@memory", "sessions", "40")
+        out = _unwrapped(_streams(capsys))
+        assert _unwrapped(f"against its {_budget_chars(verbs, 'sessions'):,} budget") in out
+        assert _unwrapped("local.json's worst case at 40 would be 41,623 chars") in out
+
+    def test_set_names_the_co_tenants(self, verbs, capsys) -> None:
+        """Naming only sessions would be a half-truth: local.json is shared."""
+        _run(verbs, "set", "@memory", "sessions", "40")
+        assert _unwrapped("(with key_learnings 15, todos 10)") in _unwrapped(_streams(capsys))
+
+    def test_set_suggestion_names_where_the_budget_lives(self, verbs, capsys) -> None:
+        _run(verbs, "set", "@memory", "sessions", "40")
+        assert _unwrapped("memory.config.json entry_limits.file_budgets") in _unwrapped(_streams(capsys))
+
+    def test_set_default_names_the_ceiling_and_the_budget(self, verbs, capsys) -> None:
+        _run(verbs, "set-default", "sessions", "40")
+        out = _unwrapped(_streams(capsys))
+        assert _unwrapped(f"sessions may keep at most {_ceiling(verbs, 'sessions')}") in out
+        assert _unwrapped(f"against its {_budget_chars(verbs, 'sessions'):,} budget") in out
+
+    def test_observations_is_measured_against_its_own_file(self, verbs, capsys) -> None:
+        """A sole tenant says so rather than listing an empty company."""
+        _run(verbs, "set", "@memory", "observations", "90")
+        out = _unwrapped(_streams(capsys))
+        assert _unwrapped(f"against its {_budget_chars(verbs, 'observations'):,} budget") in out
+        assert _unwrapped("observations is observations.json's only tenant") in out
+
+    def test_an_over_ceiling_set_writes_nothing(self, verbs) -> None:
+        before = verbs.path.read_bytes()
+        _run(verbs, "set", "@memory", "sessions", "40")
+        assert verbs.path.read_bytes() == before
+
+    def test_an_over_ceiling_set_default_writes_nothing(self, verbs) -> None:
+        before = verbs.path.read_bytes()
+        _run(verbs, "set-default", "sessions", "40")
+        assert verbs.path.read_bytes() == before
+
+    def test_exactly_the_ceiling_is_accepted_by_set(self, verbs) -> None:
+        """The ceiling is the largest LEGAL count, not the first illegal one."""
+        ceiling = _ceiling(verbs, "sessions")
+        assert _run(verbs, "set", "@memory", "sessions", str(ceiling)) is True
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == ceiling
+
+    def test_exactly_the_ceiling_is_accepted_by_set_default(self, verbs) -> None:
+        ceiling = _ceiling(verbs, "sessions", None)
+        assert _run(verbs, "set-default", "sessions", str(ceiling)) is True
+        assert _rollover_section(verbs)["defaults"]["local"]["sessions"]["count"] == ceiling
+
+    def test_one_above_the_ceiling_is_refused(self, verbs) -> None:
+        before = verbs.path.read_bytes()
+        _run(verbs, "set", "@memory", "sessions", str(_ceiling(verbs, "sessions") + 1))
+        assert verbs.path.read_bytes() == before
+
+    def test_the_refusal_is_a_json_payload_too(self, verbs, capsys) -> None:
+        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "40", "--json")
+        assert payload["ok"] is False
+        assert f"at most {_ceiling(verbs, 'sessions')}" in payload["error"]
+        assert "entry_limits.file_budgets" in payload["suggestion"]
+
+    def test_the_flat_cap_still_answers_first(self, verbs, capsys) -> None:
+        """101 is out of bounds before it is over budget -- the older, cheaper no."""
+        _run(verbs, "set", "@memory", "sessions", "101")
+        assert "Count must not exceed 100 (got 101)" in _streams(capsys)
 
 
 class TestMissingArgumentRefusals:
@@ -415,7 +519,7 @@ class TestMissingArgumentRefusals:
 
     def test_set_missing_args_suggestion(self, verbs, capsys) -> None:
         _run(verbs, "set")
-        assert "Example: drone @memory config set @devpulse sessions 25" in _streams(capsys)
+        assert "Example: drone @memory config set @devpulse sessions 12" in _streams(capsys)
 
     def test_set_default_missing_args_message(self, verbs, capsys) -> None:
         _run(verbs, "set-default", "sessions")
@@ -423,7 +527,7 @@ class TestMissingArgumentRefusals:
 
     def test_set_default_missing_args_suggestion(self, verbs, capsys) -> None:
         _run(verbs, "set-default")
-        assert "Example: drone @memory config set-default sessions 25" in _streams(capsys)
+        assert "Example: drone @memory config set-default sessions 12" in _streams(capsys)
 
 
 class TestUnknownSubcommandRefusal:
@@ -446,27 +550,27 @@ class TestUnreadableConfigRefusal:
 
     def test_message_on_set(self, verbs, capsys) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         expected = f"Config at {verbs.path} is unreadable — fix or move it aside, then try again"
         assert _unwrapped(expected) in _unwrapped(_streams(capsys))
 
     def test_message_on_set_default(self, verbs, capsys) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
-        _run(verbs, "set-default", "sessions", "25")
+        _run(verbs, "set-default", "sessions", "12")
         expected = f"Config at {verbs.path} is unreadable — fix or move it aside, then try again"
         assert _unwrapped(expected) in _unwrapped(_streams(capsys))
 
     def test_bytes_unchanged(self, verbs) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
         before = verbs.path.read_bytes()
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert verbs.path.read_bytes() == before
 
     def test_wrong_shape_is_also_refused(self, verbs, capsys) -> None:
         """Valid JSON, wrong type -- same no-clobber path as malformed."""
         verbs.path.write_text('["a", "list"]', encoding="utf-8")
         before = verbs.path.read_bytes()
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert _unwrapped("is unreadable — fix or move it aside, then try again") in _unwrapped(_streams(capsys))
         assert verbs.path.read_bytes() == before
 
@@ -480,12 +584,12 @@ class TestSetBranchLimit:
     """`config set @branch <type> <count>` writes rollover.per_branch."""
 
     def test_sessions_lands_in_per_branch(self, verbs) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 25
+        _run(verbs, "set", "@memory", "sessions", "12")
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 12
 
     def test_key_learnings_lands_in_per_branch(self, verbs) -> None:
-        _run(verbs, "set", "@memory", "key_learnings", "42")
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["key_learnings"]["count"] == 42
+        _run(verbs, "set", "@memory", "key_learnings", "12")
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["key_learnings"]["count"] == 12
 
     def test_observations_lands_in_its_own_file_key(self, verbs) -> None:
         _run(verbs, "set", "@memory", "observations", "7")
@@ -493,42 +597,42 @@ class TestSetBranchLimit:
         assert per_branch["observations"]["observations"]["count"] == 7
 
     def test_reads_back_as_an_override(self, verbs) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         limits = verbs.loader.get_effective_limits("memory")
-        assert limits["sessions"]["count"] == 25
+        assert limits["sessions"]["count"] == 12
         assert limits["sessions"]["is_override"] is True
 
     def test_untouched_types_stay_default(self, verbs) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         limits = verbs.loader.get_effective_limits("memory")
         assert limits["key_learnings"]["is_override"] is False
 
     def test_branch_matching_is_case_insensitive(self, verbs) -> None:
         """The registry carries DAEMON uppercase; per_branch keys are lowercase."""
-        assert _run(verbs, "set", "@DAEMON", "sessions", "25") is True
-        assert _rollover_section(verbs)["per_branch"]["daemon"]["local"]["sessions"]["count"] == 25
+        assert _run(verbs, "set", "@DAEMON", "sessions", "12") is True
+        assert _rollover_section(verbs)["per_branch"]["daemon"]["local"]["sessions"]["count"] == 12
 
     def test_write_key_is_always_lowercase(self, verbs) -> None:
-        _run(verbs, "set", "@DAEMON", "sessions", "25")
+        _run(verbs, "set", "@DAEMON", "sessions", "12")
         assert "DAEMON" not in _rollover_section(verbs)["per_branch"]
 
     def test_bare_branch_name_without_at_works(self, verbs) -> None:
-        _run(verbs, "set", "memory", "sessions", "33")
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 33
+        _run(verbs, "set", "memory", "sessions", "13")
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 13
 
     def test_defaults_untouched_by_a_branch_set(self, verbs) -> None:
         before = _rollover_section(verbs)["defaults"]
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert _rollover_section(verbs)["defaults"] == before
 
     def test_other_branches_untouched(self, verbs) -> None:
         before = _rollover_section(verbs)["per_branch"]["devpulse"]
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert _rollover_section(verbs)["per_branch"]["devpulse"] == before
 
     def test_other_config_sections_survive(self, verbs) -> None:
         before = json.loads(verbs.path.read_text(encoding="utf-8"))["entry_limits"]
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         after = json.loads(verbs.path.read_text(encoding="utf-8"))["entry_limits"]
         assert after == before
 
@@ -544,7 +648,7 @@ class TestWriteDoesNotReencodeTheFile:
 
     def test_em_dashes_stay_literal(self, verbs) -> None:
         assert "—" in verbs.path.read_text(encoding="utf-8")
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         after = verbs.path.read_text(encoding="utf-8")
         assert "—" in after
         assert "\\u2014" not in after
@@ -562,13 +666,13 @@ class TestAutoCompactCapPreserved:
 
     def test_survives_a_sessions_set(self, verbs) -> None:
         before = _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["auto_compact_cap"]
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         after = _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["auto_compact_cap"]
         assert after == before
 
     def test_survives_a_default_set(self, verbs) -> None:
         before = _rollover_section(verbs)["defaults"]["local"]["sessions"]["auto_compact_cap"]
-        _run(verbs, "set-default", "sessions", "25")
+        _run(verbs, "set-default", "sessions", "12")
         after = _rollover_section(verbs)["defaults"]["local"]["sessions"]["auto_compact_cap"]
         assert after == before
 
@@ -585,7 +689,7 @@ class TestSeedingANewBranchEntry:
         raw["rollover"]["per_branch"].pop("memory", None)
         verbs.path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
 
         entry = _rollover_section(verbs)["per_branch"]["memory"]
         assert entry["_note"] == "Limits for @memory. Manual edits persist until next push."
@@ -595,7 +699,7 @@ class TestSeedingANewBranchEntry:
         raw["rollover"]["per_branch"].pop("memory", None)
         verbs.path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
 
         entry = _rollover_section(verbs)["per_branch"]["memory"]
         assert entry["local"]["key_learnings"]["count"] == 15
@@ -607,12 +711,12 @@ class TestSetDefault:
     """`config set-default` writes defaults and DOES NOT touch per_branch."""
 
     def test_writes_defaults(self, verbs) -> None:
-        _run(verbs, "set-default", "sessions", "40")
-        assert _rollover_section(verbs)["defaults"]["local"]["sessions"]["count"] == 40
+        _run(verbs, "set-default", "sessions", "12")
+        assert _rollover_section(verbs)["defaults"]["local"]["sessions"]["count"] == 12
 
     def test_leaves_per_branch_untouched(self, verbs) -> None:
         before = _rollover_section(verbs)["per_branch"]
-        _run(verbs, "set-default", "sessions", "40")
+        _run(verbs, "set-default", "sessions", "12")
         assert _rollover_section(verbs)["per_branch"] == before
 
     def test_observations_default(self, verbs) -> None:
@@ -621,12 +725,12 @@ class TestSetDefault:
 
     def test_default_note_survives(self, verbs) -> None:
         before = _rollover_section(verbs)["defaults"]["_note"]
-        _run(verbs, "set-default", "sessions", "40")
+        _run(verbs, "set-default", "sessions", "12")
         assert _rollover_section(verbs)["defaults"]["_note"] == before
 
     def test_raising_the_default_turns_a_materialized_branch_into_an_override(self, verbs) -> None:
         """Marking is BY VALUE: the branch did not move, the default did."""
-        _run(verbs, "set-default", "sessions", "40")
+        _run(verbs, "set-default", "sessions", "12")
         limits = verbs.loader.get_effective_limits("memory")
         assert limits["sessions"]["count"] == 15
         assert limits["sessions"]["is_override"] is True
@@ -636,8 +740,8 @@ class TestPushRoundTrip:
     """set -> push must return the branch to defaults. Push is THE reset."""
 
     def test_set_then_push_restores_defaults(self, verbs) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 25
+        _run(verbs, "set", "@memory", "sessions", "12")
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 12
 
         result = verbs.loader.push_defaults_to_per_branch()
         assert result["success"] is True
@@ -647,7 +751,7 @@ class TestPushRoundTrip:
         assert limits["sessions"]["is_override"] is False
 
     def test_push_via_the_rollover_verb_also_restores(self, verbs) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         verbs.rollover.handle_command("rollover", ["push"])
         assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 15
 
@@ -668,13 +772,13 @@ class TestEffectiveLimitsPerFileKey:
 
     def _plant_partial_local(self, verbs) -> None:
         raw = json.loads(verbs.path.read_text(encoding="utf-8"))
-        raw["rollover"]["per_branch"]["memory"] = {"local": {"sessions": {"count": 30}}}
+        raw["rollover"]["per_branch"]["memory"] = {"local": {"sessions": {"count": 22}}}
         verbs.path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
     def test_partial_file_key_does_not_deep_merge(self, verbs) -> None:
         self._plant_partial_local(verbs)
         limits = verbs.loader.get_effective_limits("memory")
-        assert limits["sessions"]["count"] == 30
+        assert limits["sessions"]["count"] == 22
         assert limits["key_learnings"]["count"] is None
 
     def test_absent_file_key_falls_back_to_defaults(self, verbs) -> None:
@@ -707,7 +811,7 @@ class TestEffectiveLimitsPerFileKey:
 
         should, _lines, _schema, reason = verbs.detector._should_rollover(local)
 
-        # 20 sessions >= 30? No. 99 key_learnings has NO limit at all.
+        # 20 sessions >= 22? No. 99 key_learnings has NO limit at all.
         assert "key_learnings" not in reason
         assert should is False
         assert verbs.loader.get_effective_limits("memory")["key_learnings"]["count"] is None
@@ -732,7 +836,7 @@ class TestGetDisplay:
             assert entry_type in out
 
     def test_a_deviating_branch_is_listed(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         capsys.readouterr()
         _run(verbs, "get")
         out = _streams(capsys)
@@ -740,7 +844,7 @@ class TestGetDisplay:
         assert "All branches at defaults" not in out
 
     def test_non_deviating_branches_are_not_listed(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         capsys.readouterr()
         _run(verbs, "get")
         assert "@devpulse" not in _streams(capsys)
@@ -758,17 +862,17 @@ class TestBranchDisplayMarkers:
         assert "[DEFAULT]" in _streams(capsys)
 
     def test_override_marker_survives_rich(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         capsys.readouterr()
         _run(verbs, "get", "@memory")
         assert "[OVERRIDE]" in _streams(capsys)
 
     def test_override_row_shows_both_numbers(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         capsys.readouterr()
         _run(verbs, "get", "@memory")
         out = _streams(capsys)
-        assert "25" in out
+        assert "12" in out
         assert "15" in out
 
     def test_get_branch_lists_all_three_types(self, verbs, capsys) -> None:
@@ -789,13 +893,13 @@ class TestHelpNeverWrites:
     @pytest.mark.parametrize(
         "args",
         [
-            ("set", "@memory", "sessions", "25", "--help"),
-            ("set", "@memory", "sessions", "--help", "25"),
-            ("set", "--help", "@memory", "sessions", "25"),
-            ("--help", "set", "@memory", "sessions", "25"),
-            ("set", "@memory", "sessions", "25", "-h"),
-            ("set", "@memory", "sessions", "25", "help"),
-            ("set-default", "sessions", "25", "--help"),
+            ("set", "@memory", "sessions", "12", "--help"),
+            ("set", "@memory", "sessions", "--help", "12"),
+            ("set", "--help", "@memory", "sessions", "12"),
+            ("--help", "set", "@memory", "sessions", "12"),
+            ("set", "@memory", "sessions", "12", "-h"),
+            ("set", "@memory", "sessions", "12", "help"),
+            ("set-default", "sessions", "12", "--help"),
         ],
     )
     def test_file_is_byte_identical(self, verbs, args) -> None:
@@ -804,7 +908,7 @@ class TestHelpNeverWrites:
         assert verbs.path.read_bytes() == before
 
     def test_help_is_actually_printed(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25", "--help")
+        _run(verbs, "set", "@memory", "sessions", "12", "--help")
         out = _streams(capsys)
         assert "set-default" in out
         assert "USAGE" in out
@@ -865,14 +969,14 @@ class TestOperatorConfigIsolation:
 
     def test_operator_config_unchanged_by_a_set(self, verbs) -> None:
         before = _snapshot(verbs.operator_path)
-        _run(verbs, "set", "@memory", "sessions", "25")
-        _run(verbs, "set-default", "sessions", "40")
+        _run(verbs, "set", "@memory", "sessions", "12")
+        _run(verbs, "set-default", "sessions", "12")
         assert _snapshot(verbs.operator_path) == before
 
     def test_operator_config_unchanged_by_json_mode(self, verbs) -> None:
         before = _snapshot(verbs.operator_path)
-        _run(verbs, "set", "@memory", "sessions", "25", "--json")
-        _run(verbs, "set-default", "sessions", "40", "--json")
+        _run(verbs, "set", "@memory", "sessions", "12", "--json")
+        _run(verbs, "set-default", "sessions", "12", "--json")
         _run_rollover(verbs, "push", "--json")
         assert _snapshot(verbs.operator_path) == before
 
@@ -905,9 +1009,9 @@ class TestJsonIsOneDocumentOnStdout:
         [
             (("get", "--json"), "config get"),
             (("get", "@memory", "--json"), "config get"),
-            (("set", "@memory", "sessions", "25", "--json"), "config set"),
-            (("set-default", "sessions", "25", "--json"), "config set-default"),
-            (("set", "@wizard", "sessions", "25", "--json"), "config set"),
+            (("set", "@memory", "sessions", "12", "--json"), "config set"),
+            (("set-default", "sessions", "12", "--json"), "config set-default"),
+            (("set", "@wizard", "sessions", "12", "--json"), "config set"),
             # `reset` is the one verb whose document does not name itself -- it
             # reports the bare "config". Pinned as MEASURED, not as wished: the
             # wire string is @api's to renegotiate, not a test's to assume.
@@ -924,9 +1028,9 @@ class TestJsonIsOneDocumentOnStdout:
         [
             ("get", "--json"),
             ("get", "@memory", "--json"),
-            ("set", "@memory", "sessions", "25", "--json"),
-            ("set-default", "sessions", "25", "--json"),
-            ("set", "@wizard", "sessions", "25", "--json"),
+            ("set", "@memory", "sessions", "12", "--json"),
+            ("set-default", "sessions", "12", "--json"),
+            ("set", "@wizard", "sessions", "12", "--json"),
         ],
     )
     def test_exactly_one_line(self, verbs, capsys, args) -> None:
@@ -936,7 +1040,7 @@ class TestJsonIsOneDocumentOnStdout:
     def test_stderr_is_silent_on_a_refusal(self, verbs, capsys) -> None:
         """A JSON refusal is IN BAND -- nothing leaks onto the error stream."""
         capsys.readouterr()
-        _run(verbs, "set", "@wizard", "sessions", "25", "--json")
+        _run(verbs, "set", "@wizard", "sessions", "12", "--json")
         assert capsys.readouterr().err == ""
 
     def test_push_stdout_parses(self, verbs, capsys) -> None:
@@ -979,21 +1083,21 @@ class TestJsonGetPayload:
         assert _payload(verbs, capsys, "get", "--json")["overrides"] == {}
 
     def test_a_deviating_branch_appears(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert "memory" in _payload(verbs, capsys, "get", "--json")["overrides"]
 
     def test_non_deviating_branches_are_absent(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert "devpulse" not in _payload(verbs, capsys, "get", "--json")["overrides"]
 
     def test_override_row_shape(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         row = _payload(verbs, capsys, "get", "--json")["overrides"]["memory"]["sessions"]
-        assert row == {"count": 25, "default_count": 15, "is_override": True, "source": "per_branch"}
+        assert row == {"count": 12, "default_count": 15, "is_override": True, "source": "per_branch"}
 
     def test_only_deviating_types_are_listed(self, verbs, capsys) -> None:
         """Same rule the rendered OVERRIDES block applies -- one notion of override."""
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         assert set(_payload(verbs, capsys, "get", "--json")["overrides"]["memory"]) == {"sessions"}
 
 
@@ -1024,9 +1128,9 @@ class TestJsonGetBranchPayload:
         }
 
     def test_override_is_reported(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         row = _payload(verbs, capsys, "get", "@memory", "--json")["limits"]["sessions"]
-        assert row["count"] == 25
+        assert row["count"] == 12
         assert row["default_count"] == 15
         assert row["is_override"] is True
 
@@ -1043,12 +1147,12 @@ class TestJsonGetBranchPayload:
         would be claiming enforcement that does not happen.
         """
         raw = json.loads(verbs.path.read_text(encoding="utf-8"))
-        raw["rollover"]["per_branch"]["memory"] = {"local": {"sessions": {"count": 30}}}
+        raw["rollover"]["per_branch"]["memory"] = {"local": {"sessions": {"count": 22}}}
         verbs.path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
         limits = _payload(verbs, capsys, "get", "@memory", "--json")["limits"]
         assert limits["key_learnings"]["count"] is None
-        assert limits["sessions"]["count"] == 30
+        assert limits["sessions"]["count"] == 22
         assert limits["observations"]["source"] == "defaults"
 
 
@@ -1115,10 +1219,10 @@ class TestTodosCountMaterializesThroughTheVerbs:
         del raw["rollover"]["per_branch"]["memory"]["local"]["todos"]
         verbs.path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
 
         local = _rollover_section(verbs)["per_branch"]["memory"]["local"]
-        assert local["sessions"]["count"] == 25
+        assert local["sessions"]["count"] == 12
         assert local["todos"] == {"count": 10}
 
     def test_a_push_writes_todos_into_every_block(self, verbs) -> None:
@@ -1565,36 +1669,36 @@ class TestJsonWritePayloads:
     """`set` / `set-default` / `rollover push` report what they did."""
 
     def test_set_payload(self, verbs, capsys) -> None:
-        assert _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json") == {
+        assert _payload(verbs, capsys, "set", "@memory", "sessions", "12", "--json") == {
             "ok": True,
             "verb": "config set",
             "branch": "memory",
             "entry_type": "sessions",
-            "count": 25,
+            "count": 12,
             "pushed": False,
         }
 
     def test_set_actually_wrote(self, verbs, capsys) -> None:
-        _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 25
+        _payload(verbs, capsys, "set", "@memory", "sessions", "12", "--json")
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 12
 
     def test_set_branch_is_lowercased_in_the_payload(self, verbs, capsys) -> None:
-        payload = _payload(verbs, capsys, "set", "@DAEMON", "sessions", "25", "--json")
+        payload = _payload(verbs, capsys, "set", "@DAEMON", "sessions", "12", "--json")
         assert payload["branch"] == "daemon"
 
     def test_set_default_payload(self, verbs, capsys) -> None:
-        assert _payload(verbs, capsys, "set-default", "sessions", "25", "--json") == {
+        assert _payload(verbs, capsys, "set-default", "sessions", "12", "--json") == {
             "ok": True,
             "verb": "config set-default",
             "entry_type": "sessions",
-            "count": 25,
+            "count": 12,
             "pushed": False,
         }
 
     def test_set_default_pushed_false_is_the_truth(self, verbs, capsys) -> None:
         """`pushed: false` is a fact about the file, not a decoration."""
         before = _rollover_section(verbs)["per_branch"]
-        payload = _payload(verbs, capsys, "set-default", "sessions", "40", "--json")
+        payload = _payload(verbs, capsys, "set-default", "sessions", "12", "--json")
         assert payload["pushed"] is False
         assert _rollover_section(verbs)["per_branch"] == before
 
@@ -1605,7 +1709,7 @@ class TestJsonWritePayloads:
         assert payload["branches"] == len(_rollover_section(verbs)["per_branch"])
 
     def test_push_actually_reset_the_branch(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         _payload_rollover(verbs, capsys, "push", "--json")
         assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 15
 
@@ -1620,11 +1724,11 @@ class TestJsonRefusals:
 
     # One row per refusal path the config verbs own.
     _CASES = [
-        ("set", "@wizard", "sessions", "25"),
-        ("set", "@WiZaRd", "sessions", "25"),
+        ("set", "@wizard", "sessions", "12"),
+        ("set", "@WiZaRd", "sessions", "12"),
         ("get", "@wizard"),
-        ("set", "@memory", "foo", "25"),
-        ("set-default", "todos", "25"),
+        ("set", "@memory", "foo", "12"),
+        ("set-default", "todos", "12"),
         ("set", "@memory", "sessions", "abc"),
         ("set", "@memory", "sessions", "12.5"),
         ("set", "@memory", "sessions", "0"),
@@ -1676,7 +1780,7 @@ class TestJsonRefusals:
         assert verbs.path.read_bytes() == before
 
     def test_unknown_branch_echoes_what_was_typed(self, verbs, capsys) -> None:
-        payload = _payload(verbs, capsys, "set", "@WiZaRd", "sessions", "25", "--json")
+        payload = _payload(verbs, capsys, "set", "@WiZaRd", "sessions", "12", "--json")
         assert payload["error"] == "Unknown branch: @WiZaRd"
 
     def test_unknown_subcommand_verb_is_the_root(self, verbs, capsys) -> None:
@@ -1692,27 +1796,27 @@ class TestJsonUnreadableConfigRefusal:
 
     def test_set_is_refused(self, verbs, capsys) -> None:
         self._break_the_file(verbs)
-        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
+        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "12", "--json")
         assert payload["ok"] is False
         assert payload["verb"] == "config set"
 
     def test_suggestion_key_is_present_and_null(self, verbs, capsys) -> None:
         self._break_the_file(verbs)
-        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
+        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "12", "--json")
         assert "suggestion" in payload
         assert payload["suggestion"] is None
 
     def test_error_matches_the_human_sentence(self, verbs, capsys) -> None:
         self._break_the_file(verbs)
-        payload = _payload(verbs, capsys, "set-default", "sessions", "25", "--json")
+        payload = _payload(verbs, capsys, "set-default", "sessions", "12", "--json")
         capsys.readouterr()
-        _run(verbs, "set-default", "sessions", "25")
+        _run(verbs, "set-default", "sessions", "12")
         assert _unwrapped(payload["error"]) in _unwrapped(_streams(capsys))
 
     def test_bytes_unchanged(self, verbs, capsys) -> None:
         self._break_the_file(verbs)
         before = verbs.path.read_bytes()
-        _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
+        _payload(verbs, capsys, "set", "@memory", "sessions", "12", "--json")
         assert verbs.path.read_bytes() == before
 
     def test_push_is_refused_too(self, verbs, capsys) -> None:
@@ -1745,7 +1849,7 @@ class TestJsonSurvivesRich:
 
     def test_a_long_refusal_arrives_unwrapped(self, verbs, capsys) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
-        raw = _raw_stdout(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
+        raw = _raw_stdout(verbs, capsys, "set", "@memory", "sessions", "12", "--json")
 
         assert len(raw) > 150, "the guard is worthless unless the payload exceeds the console width"
         assert raw.count("\n") == 1
@@ -1753,7 +1857,7 @@ class TestJsonSurvivesRich:
 
     def test_no_newline_hides_inside_any_string_value(self, verbs, capsys) -> None:
         verbs.path.write_text("{ this is not json", encoding="utf-8")
-        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "25", "--json")
+        payload = _payload(verbs, capsys, "set", "@memory", "sessions", "12", "--json")
         strings = {key: value for key, value in payload.items() if isinstance(value, str)}
         assert set(strings) == {"verb", "error"}, strings
         for key, value in strings.items():
@@ -1772,7 +1876,7 @@ class TestJsonSurvivesRich:
         write can never raise UnicodeEncodeError, and json.loads hands back
         the exact character regardless.
         """
-        raw = _raw_stdout(verbs, capsys, "set", "@wizard", "sessions", "25", "--json")
+        raw = _raw_stdout(verbs, capsys, "set", "@wizard", "sessions", "12", "--json")
         raw.encode("ascii")  # raises if a literal em-dash reached the pipe
         assert "—" in json.loads(raw)["suggestion"]
 
@@ -1790,18 +1894,18 @@ class TestJsonFlagPosition:
         "verb": "config set",
         "branch": "memory",
         "entry_type": "sessions",
-        "count": 25,
+        "count": 12,
         "pushed": False,
     }
 
     @pytest.mark.parametrize(
         "args",
         [
-            ("set", "@memory", "sessions", "25", "--json"),
-            ("set", "@memory", "sessions", "--json", "25"),
-            ("set", "@memory", "--json", "sessions", "25"),
-            ("set", "--json", "@memory", "sessions", "25"),
-            ("--json", "set", "@memory", "sessions", "25"),
+            ("set", "@memory", "sessions", "12", "--json"),
+            ("set", "@memory", "sessions", "--json", "12"),
+            ("set", "@memory", "--json", "sessions", "12"),
+            ("set", "--json", "@memory", "sessions", "12"),
+            ("--json", "set", "@memory", "sessions", "12"),
         ],
     )
     def test_payload_is_identical(self, verbs, capsys, args) -> None:
@@ -1810,14 +1914,14 @@ class TestJsonFlagPosition:
     @pytest.mark.parametrize(
         "args",
         [
-            ("set", "@memory", "sessions", "25", "--json"),
-            ("set", "--json", "@memory", "sessions", "25"),
-            ("--json", "set", "@memory", "sessions", "25"),
+            ("set", "@memory", "sessions", "12", "--json"),
+            ("set", "--json", "@memory", "sessions", "12"),
+            ("--json", "set", "@memory", "sessions", "12"),
         ],
     )
     def test_the_write_still_lands(self, verbs, capsys, args) -> None:
         _payload(verbs, capsys, *args)
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 25
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 12
 
     def test_push_flag_before_the_subcommand(self, verbs, capsys) -> None:
         assert _payload_rollover(verbs, capsys, "--json", "push")["verb"] == "rollover push"
@@ -1836,11 +1940,11 @@ class TestHelpOutranksJson:
     """`--help --json` is still a question. The push scar, one flag later."""
 
     _COMBOS = [
-        ("set", "@memory", "sessions", "25", "--help", "--json"),
-        ("set", "@memory", "sessions", "25", "--json", "--help"),
-        ("set", "--json", "@memory", "sessions", "25", "-h"),
-        ("--json", "set", "@memory", "sessions", "25", "help"),
-        ("set-default", "sessions", "25", "--json", "--help"),
+        ("set", "@memory", "sessions", "12", "--help", "--json"),
+        ("set", "@memory", "sessions", "12", "--json", "--help"),
+        ("set", "--json", "@memory", "sessions", "12", "-h"),
+        ("--json", "set", "@memory", "sessions", "12", "help"),
+        ("set-default", "sessions", "12", "--json", "--help"),
     ]
     # seedgo SHORT-TABLE (2026-08-31): same guard as _CASES above.
     assert len(_COMBOS) == 5
@@ -1864,11 +1968,37 @@ class TestHelpOutranksJson:
         assert "USAGE" in _streams(capsys)
 
     def test_push_help_json_does_not_push(self, verbs, capsys) -> None:
-        _run(verbs, "set", "@memory", "sessions", "25")
+        _run(verbs, "set", "@memory", "sessions", "12")
         capsys.readouterr()
         assert _run_rollover(verbs, "push", "--json", "--help") is True
-        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 25
+        assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == 12
 
     def test_help_documents_the_flag(self, verbs, capsys) -> None:
         _run(verbs, "--help")
         assert "--json" in _streams(capsys)
+
+
+class TestThePrintedExamplesAreLegalCommands:
+    """A suggestion naming a command the next verb refuses teaches the wrong thing.
+
+    The count ceiling (FPLAN-0593) turned `sessions 25` — printed in four
+    refusals and the help block — into an illegal command overnight. Nothing
+    caught it; three tests pinned the stale text and went red only because the
+    string moved. This pins the PROPERTY instead of the string.
+    """
+
+    def test_every_example_count_in_a_refusal_is_within_its_ceiling(self):
+        import re
+
+        from aipass.memory.apps.handlers.json import config_loader
+        from aipass.memory.apps.modules import rollover as rollover_mod
+
+        source = Path(rollover_mod.__file__).read_text(encoding="utf-8")
+        ceilings = config_loader.get_count_ceilings()
+        examples = re.findall(r"config set(?:-default)?(?: @\w+)? (\w+) (\d+)", source)
+        assert examples, "no example commands found — the pin would pass vacuously"
+        for entry_type, raw in examples:
+            ceiling = ceilings.get(entry_type, {}).get("ceiling")
+            if ceiling is None:
+                continue
+            assert int(raw) <= ceiling, f"example '{entry_type} {raw}' exceeds its ceiling of {ceiling}"

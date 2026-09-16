@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_flow_section_contract.py
 # Description: sections.flow has two writers — both must build the same shape
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-15
 # =============================================
 
 """Contract cover for the 2026-08-16 sections.flow handoff (@devpulse dispatch).
@@ -248,6 +247,55 @@ class TestOpenRecent:
 
         oversized = [k for k, v in section.items() if isinstance(v, list) and len(v) > 5]
         assert oversized == [], f"unbounded list still published: {oversized}"
+
+
+class TestSubjectCap:
+    """A plan subject is a glance, not an essay (DPLAN-0347, thread 16).
+
+    Five rows of a 430-char subject is 2 KB of every greeting on every branch,
+    forever. The count cap alone never bounded the section: the subjects are the
+    section. Truncate, never refuse — refusing drops the plan from the glance.
+    """
+
+    def test_an_essay_subject_is_cut_to_the_cap_in_open_recent(self):
+        refresh = _load(REFRESH_PATH)
+        essay = "FPLAN-0593 " + "startup floor fleet-wide " * 20
+        centrals = _centrals(active=[_plan("FPLAN-0593", "prax", "2026-09-15T09:00:00+00:00", essay)])
+        subject = refresh._extract_flow_section(centrals, "PRAX")["open_recent"][0]["subject"]
+
+        assert len(essay) > 400, "the row this pins is an essay, not a subject"
+        assert len(subject) <= 120
+        assert subject.endswith("...")
+        assert essay.startswith(subject[: -len("...")].rstrip())
+
+    def test_an_essay_subject_is_cut_to_the_cap_in_recently_closed(self):
+        refresh = _load(REFRESH_PATH)
+        essay = "DPLAN-0339 follow-up: " + "trigger imported inside the fire sites " * 10
+        centrals = _centrals(closed=[_closed("FPLAN-0555", "prax", subject=essay)])
+        subject = refresh._extract_flow_section(centrals, "PRAX")["recently_closed"][0]["subject"]
+
+        assert len(subject) <= 120
+        assert subject.endswith("...")
+
+    def test_a_short_subject_is_published_whole(self):
+        """The cap cuts essays; it must not touch the subjects that already fit."""
+        refresh = _load(REFRESH_PATH)
+        centrals = _centrals(
+            active=[_plan("FPLAN-0001", "prax", "2026-08-10T09:00:00+00:00", "Log rotation")],
+            closed=[_closed("FPLAN-0002", "prax", subject="Done")],
+        )
+        section = refresh._extract_flow_section(centrals, "PRAX")
+
+        assert section["open_recent"][0]["subject"] == "Log rotation"
+        assert section["recently_closed"][0]["subject"] == "Done"
+
+    def test_the_cut_is_the_shared_number_not_a_second_copy(self):
+        """One number for every writer: refresh, the devpulse plugin, @flow's push."""
+        refresh = _load(REFRESH_PATH)
+        from aipass.prax.apps.handlers.dashboard import operations
+
+        assert refresh.cap_subject is operations.cap_subject
+        assert operations.SUBJECT_CAP == 120
 
 
 # ═══════════════════════════════════════════════════════════

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dashboard.py
 # Description: Dashboard Section Utilities
-# Version: 0.3.0
+# Version: 0.4.0
 # Created: 2026-02-25
-# Modified: 2026-09-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -19,6 +19,9 @@ __all__ = [
     "write_section",
     "update_section",
     "get_dashboard_path",
+    "SUBJECT_CAP",
+    "DASHBOARD_CHAR_BUDGET",
+    "cap_subject",
     "calculate_quick_status",
     "get_branch_paths",
     "resolve_branch_path",
@@ -53,6 +56,11 @@ from aipass.prax.apps.handlers.dashboard.operations import (
     update_section as handler_update_section,
     write_section,  # re-exported: used by ai_mail.apps.handlers.email.dashboard_sync
     get_dashboard_path,
+    # Re-exported dashboard limits: handlers are internal, so every writer
+    # outside prax — @flow's push, the devpulse plugin — reads the caps here.
+    SUBJECT_CAP,
+    DASHBOARD_CHAR_BUDGET,
+    cap_subject,
 )
 from aipass.prax.apps.handlers.dashboard.status import (
     calculate_quick_status,

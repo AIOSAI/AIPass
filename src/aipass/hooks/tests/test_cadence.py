@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.0.0
-# Description: Tests for cadence module (DPLAN-0200)
+# Version: 1.1.0
+# Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0
 # Branch: hooks
 # Created: 2026-06-08
-# Modified: 2026-06-08
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for apps/modules/cadence.py.
@@ -35,6 +35,7 @@ def _reset_module_globals():
 
     mod._turn = None
     mod._config = None
+    mod._turn_degraded = None
 
 
 def _write_state(tmp_path, turn, token=-1, session="test-session", aged=True):
@@ -1454,3 +1455,77 @@ class TestCurrentTurn:
     def test_no_session_id_is_none(self, monkeypatch):
         monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
         assert cadence.current_turn() is None
+
+
+class TestFailOpenIsLoud:
+    """DPLAN-0347 row 1: a fail-open is a WARNING that names the loader and the cause.
+
+    Every fail-open path forces turn 0, and turn 0 fires EVERY loader — the four
+    heavy ones cost 13,235 to 21,536 chars per fire. It was logged at info for
+    months and the fleet log holds no such line since 09-13: nobody greps info.
+    """
+
+    def setup_method(self):
+        _reset_module_globals()
+
+    def _config(self, tmp_path):
+        config = tmp_path / "cadence.json"
+        config.write_text(json.dumps({"enabled": True, "period": 5}), encoding="utf-8")
+        return config
+
+    def test_no_session_id_warns_and_names_the_loader(self, tmp_path, caplog):
+        from aipass.hooks.apps.modules.cadence import should_fire
+
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", env, clear=True),
+            patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
+        ):
+            assert should_fire("navmap") is True
+
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert warnings, "a fail-open that logs at info is a fail-open nobody reads"
+        assert "FAIL-OPEN loader=navmap" in warnings[0].getMessage()
+        assert "CLAUDE_CODE_SESSION_ID" in warnings[0].getMessage()
+
+    def test_an_unreadable_state_file_warns_with_the_cause(self, tmp_path, caplog):
+        from aipass.hooks.apps.modules.cadence import should_fire
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("state dir is read-only")
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
+            patch("builtins.open", _boom),
+        ):
+            assert should_fire("tier0") is True
+
+        text = caplog.text
+        assert "FAIL-OPEN loader=tier0" in text
+        assert "state dir is read-only" in text
+
+    def test_a_healthy_turn_says_nothing_at_warning(self, tmp_path, caplog):
+        from aipass.hooks.apps.modules.cadence import should_fire
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", self._config(tmp_path)),
+        ):
+            should_fire("identity")
+
+        assert [r for r in caplog.records if r.levelname == "WARNING"] == []
+
+    def test_the_advisory_throttle_warns_when_it_cannot_throttle(self, tmp_path, caplog):
+        from aipass.hooks.apps.modules.cadence import should_fire_advisory
+
+        env = dict(os.environ)
+        env.pop("CLAUDE_CODE_SESSION_ID", None)
+        with patch(f"{MODULE}._GUARD_DIR", tmp_path), patch.dict("os.environ", env, clear=True):
+            assert should_fire_advisory("todos_count") is True
+
+        assert "FAIL-OPEN advisory=todos_count" in caplog.text

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.4.1
+# Version: 2.5.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
@@ -51,6 +51,7 @@ DEFAULTS = {
         "identity": {"period": 5, "offset": 0},
         "branch": {"offset": 0},
         "email": {"period": 5},
+        "alert": {"period": 5},
     },
 }
 
@@ -58,6 +59,11 @@ MAIL_LOADER = "email"
 
 _turn: int | None = None
 _config: dict | None = None
+#: Why the turn counter fell back to 0, when it did. Turn 0 fires EVERY loader,
+#: so a fallback is the whole cadence going open — the fleet pays ~21k chars a
+#: turn and nothing says why (DPLAN-0347, hooks row 1). Set beside _turn so the
+#: memoised answer carries its own provenance.
+_turn_degraded: str | None = None
 
 
 def _deep_merge(base: dict, updates: dict) -> dict:
@@ -152,12 +158,13 @@ def _should_increment(stored_turn: int, stored_token: int, token: int, fd) -> bo
 
 def _load_and_increment(hook_data: dict) -> int:
     """Load turn counter, increment exactly once per real turn. Multi-process safe."""
-    global _turn
+    global _turn, _turn_degraded
     if _turn is not None:
         return _turn
 
     path = _state_path()
     if path is None:
+        _turn_degraded = "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to count in"
         _turn = 0
         return 0
 
@@ -189,11 +196,31 @@ def _load_and_increment(hook_data: dict) -> int:
         return new_turn
 
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: state access failed: %s", exc)
+        _turn_degraded = f"cadence state file {path} could not be read or written: {exc}"
+        logger.warning("[HOOKS] cadence: state access failed, turn falls back to 0: %s", exc)
         if fd is not None:
             _close_fd(fd)
         _turn = 0
         return 0
+
+
+def _warn_fail_open(loader_name: str) -> None:
+    """One WARNING per degraded read, naming the loader and the cause.
+
+    A fail-open is not a quiet default: the turn falls back to 0 and turn 0
+    fires every loader, so the session pays the whole grounding bill on every
+    prompt. It was logged at info for months and no line was ever read
+    (0 fail-open lines since 09-13 — measured 2026-09-15, thread 16). WARNING is
+    what a log reader greps, and the message says what it costs, not just that
+    something failed.
+    """
+    if _turn_degraded is None:
+        return
+    logger.warning(
+        "[HOOKS] cadence FAIL-OPEN loader=%s: turn forced to 0, so it fires EVERY turn — %s",
+        loader_name,
+        _turn_degraded,
+    )
 
 
 def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
@@ -213,6 +240,7 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
         return True
 
     turn = _load_and_increment(hook_data or {})
+    _warn_fail_open(loader_name)
 
     fired = turn == 0 or (turn % period) == offset
 
@@ -303,9 +331,15 @@ def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
 
     path = _mail_state_path()
     if path is None:
+        logger.warning(
+            "[HOOKS] cadence FAIL-OPEN loader=%s: the mail banner fires EVERY turn — "
+            "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to throttle in",
+            MAIL_LOADER,
+        )
         return True
 
     turn = _load_and_increment(hook_data or {})
+    _warn_fail_open(MAIL_LOADER)
     last_fired = _read_last_mail_turn(path)
 
     # turn < last_fired means the counter was reset under us (compact / new session);
@@ -382,6 +416,11 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
     """
     path = _advisory_state_path(name)
     if path is None:
+        logger.warning(
+            "[HOOKS] cadence FAIL-OPEN advisory=%s: it fires EVERY time — "
+            "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to throttle in",
+            name,
+        )
         return True
 
     turn = current_turn()

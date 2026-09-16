@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: identity.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Injects branch identity from passport.json (UserPromptSubmit), cadence-gated
 # Branch: hooks
 # Layer: apps/handlers/prompt
@@ -35,7 +35,11 @@ def handle(hook_data: dict) -> dict:
         if not cadence.should_fire("identity", hook_data):
             return {"stdout": "", "exit_code": 0}
     except Exception as exc:
-        logger.info("[HOOKS] identity: cadence check failed, firing anyway: %s", exc)
+        logger.warning(
+            "[HOOKS] identity FAIL-OPEN loader=identity: cadence check raised, so it fires EVERY turn "
+            "until this is cured: %s",
+            exc,
+        )
 
     try:
         content = load_content(hook_data)

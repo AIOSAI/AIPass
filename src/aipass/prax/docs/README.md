@@ -8,3 +8,8 @@ is committed, so write it as if it ships.
 
 Near-empty is the correct steady state, not a gap to fill: work in progress,
 research and dated one-offs belong in `docs.local/`.
+
+## Index
+
+- [dashboard_caps.md](dashboard_caps.md) — the subject cap and whole-file budget
+  every dashboard section writer reads, including writers outside prax.

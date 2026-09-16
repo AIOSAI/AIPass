@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: push_branch_dashboard.py
 # Description: Push flow section to branch dashboards
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-01
-# Modified: 2026-08-16
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -60,6 +60,12 @@ from typing import Dict, Any, List, Tuple
 from aipass.flow.apps.handlers.json import json_handler
 from aipass.prax.apps.modules.logger import system_logger as logger
 
+# The dashboard caps contract (prax/docs/dashboard_caps.md). Import the numbers,
+# never retype them: a second copy is what drifts. `sections.flow` has two
+# writers -- prax's refresh and this push -- and a cap on one side alone
+# re-inflates on the other side's next plan operation.
+from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET, cap_subject
+
 # INFRASTRUCTURE IMPORT PATTERN
 from aipass.flow.apps.handlers.repo_root import module_file
 
@@ -89,6 +95,34 @@ DERIVED_KEYS = frozenset({"action_required", "summary"})
 # =============================================
 # DASHBOARD WRITE (local — no cross-branch imports)
 # =============================================
+
+
+def _warn_over_budget(branch_path: Path, rendered: str) -> None:
+    """
+    Log one WARNING when a rendered dashboard is over DASHBOARD_CHAR_BUDGET.
+
+    prax's save_dashboard() carries this measurement for every writer that goes
+    through it; this handler writes the file itself, so it mirrors the budget on
+    its own write -- same number, same warn-only shape.
+
+    Warn, never refuse, never trim. A refused save leaves a stale dashboard, and
+    stale is the failure already on the board: zero new mail reported while three
+    wait in the inbox. The budget is a signal to the branch that owns the file.
+
+    Units are chars -- len() over the rendered JSON, the number wc -m reports.
+
+    Args:
+        branch_path: Path to branch root (named in the warning)
+        rendered: The exact JSON text about to be written
+    """
+    size = len(rendered)
+    if size > DASHBOARD_CHAR_BUDGET:
+        logger.warning(
+            "Dashboard for branch '%s' is %d chars, over the %d budget",
+            branch_path.name,
+            size,
+            DASHBOARD_CHAR_BUDGET,
+        )
 
 
 def _write_dashboard_section(branch_path: Path, section_name: str, section_data: Dict[str, Any]) -> bool:
@@ -133,7 +167,9 @@ def _write_dashboard_section(branch_path: Path, section_name: str, section_data:
         dashboard["quick_status"] = _calculate_quick_status(dashboard["sections"], dashboard.get("quick_status"))
         dashboard["last_updated"] = datetime.now().isoformat()
 
-        dashboard_path.write_text(json.dumps(dashboard, indent=2))
+        rendered = json.dumps(dashboard, indent=2)
+        _warn_over_budget(branch_path, rendered)
+        dashboard_path.write_text(rendered)
         return True
 
     except Exception as exc:
@@ -440,6 +476,9 @@ def _build_open_recent(active_plans: List[Dict[str, Any]]) -> List[Dict[str, Any
     Args:
         active_plans: Open plan dicts as built by _filter_branch_plans
 
+    Subjects are cut to SUBJECT_CAP by prax's cap_subject() -- truncate, never
+    refuse, because refusing drops the plan from the glance entirely.
+
     Returns:
         At most OPEN_RECENT_LIMIT entries of {plan_id, subject, created}
     """
@@ -447,7 +486,7 @@ def _build_open_recent(active_plans: List[Dict[str, Any]]) -> List[Dict[str, Any
     return [
         {
             "plan_id": plan.get("id", ""),
-            "subject": plan.get("subject", ""),
+            "subject": cap_subject(plan.get("subject", "")),
             "created": plan.get("created", ""),
         }
         for plan in newest_first[:OPEN_RECENT_LIMIT]
@@ -459,6 +498,11 @@ def _build_section_data(
 ) -> Dict[str, Any]:
     """
     Build the flow section data for write_section().
+
+    Every published subject goes through prax's cap_subject() here, at the one
+    seam both lists pass through -- _filter_branch_plans builds closed entries
+    on two paths (parseable and unparseable timestamps), and a cap applied per
+    path is a cap one new path forgets.
 
     Args:
         active_plans: List of active plan dicts
@@ -472,7 +516,7 @@ def _build_section_data(
         "managed_by": "flow",
         "active_plans": len(active_plans),
         "open_recent": _build_open_recent(active_plans),
-        "recently_closed": recently_closed,
+        "recently_closed": [{**plan, "subject": cap_subject(plan.get("subject", ""))} for plan in recently_closed],
         "total_plans": total_plans,
     }
 

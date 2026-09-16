@@ -1,18 +1,39 @@
 # =================== AIPass ====================
 # Name: test_persistent_alert.py
-# Version: 1.0.0
-# Description: Tests for persistent_alert handler and alert_dismiss module
+# Version: 1.1.0
+# Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-09-15
 # =============================================
 
-"""Tests for handlers/prompt/persistent_alert.py and modules/alert_dismiss.py."""
+"""Tests for handlers/prompt/persistent_alert.py and modules/alert_dismiss.py.
+
+A banner announces on arrival and then repeats only on the cadence beat, so the
+gate is held open for every test here and TestAlertCadence pins the gate itself.
+The announce guards are redirected into tmp for the same reason: they are keyed
+by the LIVE session id, so on a real seat the suite read guard files written by
+the session running it.
+"""
 
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+
+_MODULE = "aipass.hooks.apps.handlers.prompt.persistent_alert"
+_CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_guards_and_open_beat(tmp_path, monkeypatch):
+    """Per-test announce guards, and the repeat beat held open."""
+    guards = tmp_path / "alert-guards"
+    guards.mkdir()
+    monkeypatch.setattr(f"{_MODULE}._GUARD_DIR", guards)
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: True)
 
 
 def _make_alert(
@@ -418,6 +439,104 @@ class TestAlertBannerCap:
             result = persistent_alert.handle({"session_id": "s-under-cap"})
 
         assert "more (dismiss some" not in result["stdout"]
+
+
+class TestAlertBodyCap:
+    """DPLAN-0347 row 3: a body is cut at 300 chars, and the cut says where the full text lives."""
+
+    def _banner(self, tmp_path, body):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert(alert_id="body-cap", body=body)])
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
+            return persistent_alert.handle({"session_id": "s-body"})["stdout"]
+
+    def test_a_long_body_is_cut_and_points_at_the_full_text(self, tmp_path):
+        banner = self._banner(tmp_path, "b" * 900)
+        body_line = next(line for line in banner.splitlines() if line.startswith("  b"))
+        assert len(body_line.strip()) == 300, body_line
+        assert "drone @hooks alerts" in body_line
+
+    def test_a_body_at_the_cap_is_untouched(self, tmp_path):
+        """The cap is a ceiling, not a target: 300 chars renders whole, marker included nowhere."""
+        banner = self._banner(tmp_path, "b" * 300)
+        assert "b" * 300 in banner
+        assert "cut at 300 chars" not in banner
+
+
+class TestAlertCadence:
+    """DPLAN-0347 row 3: announce on arrival, then only on the beat.
+
+    The old guard file silenced the SOUND alone — the banner itself re-injected
+    in full on every turn for as long as the alert stayed active, up to ten
+    alerts with uncapped bodies. Arrival stays ungated: a notification that waits
+    four turns for a beat is not a notification.
+    """
+
+    def _seat(self, tmp_path, alert_id="beat-1"):
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        _write_alerts(aipass_dir, [_make_alert(alert_id=alert_id)])
+        return aipass_dir
+
+    def test_arrival_announces_even_when_the_beat_says_skip(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = self._seat(tmp_path)
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: False)
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
+            result = persistent_alert.handle({"session_id": "s-arrival"})
+
+        assert "Test alert" in result["stdout"]
+        assert "sound" in result
+
+    def test_an_announced_alert_is_held_until_the_beat(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = self._seat(tmp_path, alert_id="beat-2")
+        seen: list[str] = []
+
+        def _skip(loader_name, _hook_data=None):
+            seen.append(loader_name)
+            return False
+
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
+            persistent_alert.handle({"session_id": "s-held"})
+            monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", _skip)
+            result = persistent_alert.handle({"session_id": "s-held"})
+
+        assert seen == ["alert"]
+        assert result == {"stdout": "", "exit_code": 0}
+
+    def test_the_beat_re_injects_the_standing_alert(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = self._seat(tmp_path, alert_id="beat-3")
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
+            persistent_alert.handle({"session_id": "s-beat"})
+            result = persistent_alert.handle({"session_id": "s-beat"})
+
+        assert "Test alert" in result["stdout"], "a standing alert still reminds, on the beat"
+        assert "sound" not in result, "the sound stays a first-sighting signal"
+
+    def test_a_cadence_failure_keeps_the_banner_and_warns(self, tmp_path, monkeypatch, caplog):
+        """Fail-open, loudly: an alert nobody sees is worse than one seen too often."""
+        from aipass.hooks.apps.handlers.prompt import persistent_alert
+
+        aipass_dir = self._seat(tmp_path, alert_id="beat-4")
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("no cadence state")
+
+        with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
+            persistent_alert.handle({"session_id": "s-fail"})
+            monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", _boom)
+            result = persistent_alert.handle({"session_id": "s-fail"})
+
+        assert "Test alert" in result["stdout"]
+        assert "FAIL-OPEN loader=alert" in caplog.text
 
 
 class TestAlertDismiss:

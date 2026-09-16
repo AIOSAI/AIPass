@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_branch_loader.py
-# Version: 1.0.0
-# Description: Tests for branch_loader prompt handler
+# Version: 1.1.0
+# Description: Tests for branch_loader prompt handler (injection caps since 1.1.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for handlers/prompt/branch_loader.py."""
@@ -167,3 +167,64 @@ class TestBranchLoaderHandler:
             result = handle({"cwd": str(tmp_path)})
 
         assert "Source:" in result["stdout"]
+
+
+class TestInjectedBlocksStayUnderTheirCaps:
+    """DPLAN-0347 row 2: the branch block is capped at 9,000 chars, each integration prompt at 2,000.
+
+    Patrick ruled the layer contract on 2026-09-15. The number is measured, not
+    chosen: Claude Code persists a hook output over 10,000 UTF-16 units to a file
+    and hands the model a 2,000-char preview, so a prompt that crosses the line
+    is not read at all. A cut with a marker naming the file keeps the first
+    9,000 chars live and tells the reader where the rest is.
+    """
+
+    @staticmethod
+    def _seat(tmp_path, body):
+        (tmp_path / ".trinity").mkdir()
+        aipass_dir = tmp_path / ".aipass"
+        aipass_dir.mkdir()
+        (aipass_dir / "aipass_local_prompt.md").write_text(body, encoding="utf-8")
+        return aipass_dir / "aipass_local_prompt.md"
+
+    def _render(self, tmp_path):
+        from aipass.hooks.apps.handlers.prompt.branch_loader import handle
+
+        with _patch_cadence(_mock_cadence_fires()):
+            return handle({"cwd": str(tmp_path)})["stdout"]
+
+    def test_an_over_budget_prompt_is_cut_and_the_marker_names_the_file(self, tmp_path):
+        prompt = self._seat(tmp_path, "\n".join(f"line {n} " + "x" * 80 for n in range(200)))
+        rendered = self._render(tmp_path)
+
+        assert len(rendered) <= 9000, f"branch block rendered {len(rendered)} chars"
+        assert "cut at 9000 chars" in rendered
+        assert str(prompt) in rendered, "a cut block must say where the rest lives"
+
+    def test_a_prompt_under_the_budget_is_untouched(self, tmp_path):
+        self._seat(tmp_path, "# Small\nbreadcrumbs only")
+        rendered = self._render(tmp_path)
+
+        assert "breadcrumbs only" in rendered
+        assert "cut at" not in rendered
+
+    def test_each_integration_prompt_is_capped_on_its_own(self, tmp_path):
+        """Zero are live fleet-wide; the first one written is the one that would have blown the block."""
+        self._seat(tmp_path, "# Small\nbreadcrumbs only")
+        for name in ("alpha", "beta"):
+            integration = tmp_path / "apps" / "integrations" / name
+            integration.mkdir(parents=True)
+            (integration / "private_prompt.md").write_text(f"{name}\n" + "y" * 5000, encoding="utf-8")
+
+        rendered = self._render(tmp_path)
+
+        assert rendered.count("cut at 2000 chars") == 2, "each prompt is cut against its own budget"
+        assert "alpha" in rendered and "beta" in rendered
+        assert len(rendered) < 4500, f"two capped integrations rendered {len(rendered)} chars"
+
+    def test_the_cut_lands_on_a_line_boundary(self, tmp_path):
+        self._seat(tmp_path, "\n".join(f"line {n}" for n in range(3000)))
+        rendered = self._render(tmp_path)
+        head = rendered.split("\n[… cut at")[0]
+
+        assert head.endswith(tuple(str(d) for d in range(10))), "a block never stops mid-word"

@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.0.0
-# Description: Tests for the admin exemption and the scripted (Bash) cross-project lane
+# Version: 1.1.0
+# Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-09-10
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for edit_gate's scripted lane and the devpulse admin exemption.
@@ -428,14 +428,27 @@ class TestShellMemoryRuleDoesNotOverreach:
             "jq . .trinity/local.json > docs/trinity_copy.json",
             "wc -c .trinity/local.json .trinity/observations.json",
             "drone @memory lint",
-            "echo x > .trinity/passport.json",
             "echo x > docs/local.json",
             "echo x > observations.json",
+            "echo x > docs/passport.json",
         ],
-        ids=["cat-jq", "jq-elsewhere", "wc", "drone-memory", "passport", "local-json-elsewhere", "bare-name"],
+        ids=["cat-jq", "jq-elsewhere", "wc", "drone-memory", "local-json-elsewhere", "bare-name", "passport-elsewhere"],
     )
     def test_reads_verbs_and_other_files_are_allowed(self, sibling_projects: dict, command: str):
         assert _run(sibling_projects["plain_seat"], command=command)["exit_code"] == 0, command
+
+    def test_a_shell_write_to_a_passport_is_refused_like_the_other_two(self, sibling_projects: dict):
+        """DPLAN-0347 row 4 inverts this: passport.json was the one .trinity file any lane could write.
+
+        It was allowed here for a reason that no longer holds — @memory capped no
+        passport field, so there was nothing to measure. The identity block is
+        injected on every cadence beat, and the largest passport in the fleet had
+        reached 5,461 chars against a 4,000 budget nothing read. The refusal names
+        all three files now.
+        """
+        result = _run(sibling_projects["plain_seat"], command="echo x > .trinity/passport.json")
+        assert _blocked(result)
+        assert "passport.json" in _reason(result)
 
 
 class TestBashWritesParser:
