@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.1.0
+# Version: 3.2.0
 # Created: 2026-03-02
-# Modified: 2026-09-10
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -30,6 +30,9 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 from aipass.ai_mail.apps.handlers.dispatch import session_pointer
+from aipass.ai_mail.apps.handlers.dispatch.wake_dashboard import (
+    refresh_recipient_dashboard as _refresh_recipient_dashboard,
+)
 
 
 def _find_claude_bin() -> str:
@@ -1109,6 +1112,13 @@ def wake_branch(
         return status, False
 
     status.ok("occupancy", "No interactive session")
+
+    # Step 6b: the recipient's dashboard, refreshed before anything spawns.
+    # THIS LINE IS WHY IT SITS HERE: every gate above can still refuse the wake,
+    # and all three spawn lanes below (tmux manager, systemd scope, detached
+    # Popen) are downstream — so the dashboard is written exactly when a session
+    # is certain to start, and exactly once. Fail-open; see the helper.
+    _refresh_recipient_dashboard(branch_path, email, status)
 
     # A @daemon-sender manager wake spawns an interactive tmux session instead
     # of the -p/monitor pipeline below. The scheduled lane deliberately does not

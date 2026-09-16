@@ -12,11 +12,13 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
     _read_json,
     _check_lock,
@@ -298,7 +300,9 @@ def test_get_pid_cwd_linux_oserror(monkeypatch):
 def test_get_pid_cwd_darwin(monkeypatch, tmp_path):
     """macOS: reads cwd via lsof."""
     monkeypatch.setattr("sys.platform", "darwin")
-    target = "/tmp/pytest-project"
+    # Any path the fake lsof could print; taken from tmp_path so the literal
+    # does not hardcode a POSIX directory the Windows run cannot name.
+    target = str(tmp_path / "pytest-project")
 
     class FakeResult:
         returncode = 0
@@ -995,6 +999,11 @@ def _patch_wake_deps(monkeypatch, **overrides):
         "_is_branch_occupied": lambda p: False,
         "_acquire_lock": lambda p, pid: (True, "ok"),
         "_check_pid_alive": lambda pid: True,
+        # Stubbed by default: a unit test of the wake must not read the fleet's
+        # real .central.json files or write a dashboard into tmp_path. The pins
+        # that are ABOUT the refresh put the real hook back (see
+        # TestRecipientDashboardRefresh._real_refresh).
+        "_refresh_recipient_dashboard": lambda path, email, status: None,
     }
     defaults.update(overrides)
     for attr, val in defaults.items():
@@ -2570,3 +2579,163 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         assert ok is False
         assert self._kind(status, "resolve") == "fail"
         assert status.find_step("blocked") is None, "a missing branch is not a transient block"
+
+
+class TestRecipientDashboardRefresh:
+    """The recipient's dashboard is refreshed BEFORE their session spawns.
+
+    FPLAN-0599 (FPLAN-0593 Phase 3). An agent's first turn reads
+    DASHBOARD.local.json as its single status glance; until now nothing
+    refreshed it on the way in, so a woken agent read whatever its last session
+    left behind — "0 unread" while three dispatches waited. The refresh is one
+    branch (measured 0.85-0.98 s), never the fleet, and it is FAIL-OPEN: a
+    dashboard is a convenience, a wake is the work, so every failure mode below
+    still spawns.
+    """
+
+    @staticmethod
+    def _prax(monkeypatch, fake=None, fleet_guard=True):
+        """Patch the prax entry point where the wake imports it from — the
+        MODULE door (apps/modules/dashboard.py), which is prax's published
+        surface and the only one another branch may read."""
+        import aipass.prax.apps.modules.dashboard as prax_refresh
+
+        if fake is not None:
+            monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)
+        if fleet_guard:
+
+            def _refused_fleet():
+                raise AssertionError("the wake must never refresh all 18 branches")
+
+            monkeypatch.setattr(prax_refresh, "refresh_all_dashboards", _refused_fleet)
+        return prax_refresh
+
+    @staticmethod
+    def _real_refresh(monkeypatch, **overrides):
+        """_patch_wake_deps, but with the REAL refresh hook left in place."""
+        _patch_wake_deps(
+            monkeypatch,
+            _refresh_recipient_dashboard=wake_mod._refresh_recipient_dashboard,
+            **overrides,
+        )
+
+    def test_the_recipient_dashboard_is_refreshed_before_the_spawn(self, tmp_path, monkeypatch):
+        """Order is the whole claim: refresh, THEN the process that reads it."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        order = []
+
+        def _fake_refresh(path):
+            order.append(("refresh", path))
+            return {"status": "success", "branch": path.name.upper()}
+
+        self._prax(monkeypatch, _fake_refresh)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: order.append(("spawn", None)) or _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True
+        assert [step for step, _ in order] == ["refresh", "spawn"]
+        assert order[0][1] == branch_path, "the RECIPIENT's branch, not the caller's"
+        assert status.find_step("dashboard")[0] == "ok"
+
+    def test_the_refresh_is_one_branch_never_the_fleet(self, tmp_path, monkeypatch):
+        """--all is 18 branches and 18x the cost; the recipient is one."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        refreshed = []
+
+        self._prax(monkeypatch, lambda path: refreshed.append(path) or {"status": "success", "branch": "X"})
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True
+        assert refreshed == [branch_path]
+
+    def test_a_raising_refresh_does_not_cost_the_wake(self, tmp_path, monkeypatch):
+        """Fail-open, named: the warning carries the branch and the reason."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        spawned = []
+
+        def _boom(path):
+            raise RuntimeError("AIPASS_REGISTRY.json is unreadable")
+
+        self._prax(monkeypatch, _boom)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True, "a wake must never die on a dashboard"
+        assert spawned == [1]
+        kind, _, detail = status.find_step("dashboard")
+        assert kind == "warn"
+        assert "@testbranch" in detail and "unreadable" in detail
+
+    def test_a_refresh_over_the_bound_does_not_cost_the_wake(self, tmp_path, monkeypatch):
+        """A refresh that hangs is overtaken, not waited on."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        # Patched where it is READ: the bound lives beside the function now.
+        monkeypatch.setattr(wake_dashboard_mod, "DASHBOARD_REFRESH_TIMEOUT", 0.05)
+        spawned = []
+        release = threading.Event()
+
+        def _hang(path):
+            release.wait(30)
+            return {"status": "success", "branch": "X"}
+
+        self._prax(monkeypatch, _hang)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
+
+        try:
+            status, ok = wake_branch("@testbranch", auto=True)
+        finally:
+            release.set()
+
+        assert ok is True
+        assert spawned == [1]
+        kind, _, detail = status.find_step("dashboard")
+        assert kind == "warn"
+        assert "@testbranch" in detail
+
+    def test_an_error_status_from_prax_is_a_warning_not_an_ok(self, tmp_path, monkeypatch):
+        """prax swallows its own exception and RETURNS the failure — read it."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+
+        self._prax(monkeypatch, lambda path: {"status": "error", "branch": "TESTBRANCH", "error": "no centrals"})
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True
+        kind, _, detail = status.find_step("dashboard")
+        assert kind == "warn"
+        assert "no centrals" in detail
+
+    def test_the_interactive_manager_lane_refreshes_too(self, tmp_path, monkeypatch):
+        """Placed above the tmux branch, so all three spawn lanes inherit it."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        order = []
+
+        def _fake_run(cmd, **kwargs):
+            order.append(("tmux", list(cmd)[:2]))
+
+            class _Done:
+                returncode = 0
+                stderr = ""
+
+            return _Done()
+
+        self._prax(monkeypatch, lambda path: order.append(("refresh", path)) or {"status": "success", "branch": "X"})
+        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: "/usr/bin/tmux")
+        monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
+
+        status, ok = wake_branch("@testbranch", custom_message="go", sender="@daemon")
+
+        assert ok is True
+        assert order[0][0] == "refresh"
+        assert status.find_step("dashboard")[0] == "ok"
