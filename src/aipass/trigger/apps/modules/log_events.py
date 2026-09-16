@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_events.py
 # Description: Log events module for centralized log watcher public API
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-01-31
-# Modified: 2026-01-31
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -65,13 +65,17 @@ def print_introspection():
 
 def start() -> bool:
     """
-    Start the centralized log watcher.
+    Start the centralized log watcher — which declines, by design.
 
-    Watches system_logs/ for log file changes.
-    Fires error_logged and warning_logged events.
+    system_logs/ has one owner: the branch watcher (branch_log_events), which
+    globs it alongside the per-branch logs. This observer always returns None,
+    so this call reports False and the CLI exits 2 rather than telling a
+    caller's && that a watcher is running. It fires no events at all; the
+    branch watcher fires error_detected and warning_logged.
 
     Returns:
-        True if started successfully, False otherwise
+        True if started successfully, False otherwise (always, since the
+        2026-08-14 ownership ruling)
     """
     logger.info("[TRIGGER] Starting log watcher")
     observer = start_log_watcher()
@@ -126,14 +130,15 @@ def print_help() -> None:
     console.print()
     console.rule("COMMANDS")
     console.print()
-    console.print("  [bold]start[/bold]   Start watching logs for errors/warnings")
+    console.print("  [bold]start[/bold]   Declines by design, exits 2 — branch_log_events owns system_logs")
     console.print("  [bold]stop[/bold]    Stop the log watcher")
     console.print("  [bold]status[/bold]  Show watcher status")
     console.print()
     console.rule("EVENTS FIRED")
     console.print()
-    console.print("  [bold]error_logged[/bold]     When ERROR level log detected")
-    console.print("  [bold]warning_logged[/bold]   When WARNING level log detected")
+    console.print("  [dim]None from this module.[/dim] The branch watcher reads system_logs and")
+    console.print("  fires [bold]error_detected[/bold] and [bold]warning_logged[/bold]:")
+    console.print("  [dim]drone @trigger branch_log_events --help[/dim]")
     console.print()
 
 

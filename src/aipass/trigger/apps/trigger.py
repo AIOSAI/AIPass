@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trigger.py
 # Description: Entry point CLI for drone @trigger — event bus and error registry
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -41,7 +41,7 @@ if sys.platform == "win32":
 # Kept in step with the README header by test_trigger_entry.py — this string sat
 # at 2.2.0 through four documented feature releases (found by the APLAN-0008
 # audit), so the two are now pinned to each other rather than to a human's memory.
-__version__ = "2.7.0"
+__version__ = "3.0.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -162,6 +162,7 @@ def print_help(modules: List[Any]):
     console.print()
     console.print("  [dim]drone @trigger <command> \\[args...][/dim]")
     console.print("  [dim]drone @trigger --help[/dim]")
+    console.print("  [dim]drone @trigger --version[/dim]")
     console.print()
     console.print("─" * 70)
     console.print()
@@ -196,6 +197,9 @@ def print_help(modules: List[Any]):
 
     console.print("[bold]TIP:[/bold] For module-specific help:")
     console.print("  [dim]drone @trigger <command> --help[/dim]")
+    console.print()
+    console.print("[dim]The bus verbs are typed directly, not under a module name:[/dim]")
+    console.print("  [dim]fire <event> \\[key=value ...] · list · status  →  drone @trigger core --help[/dim]")
     console.print()
 
 

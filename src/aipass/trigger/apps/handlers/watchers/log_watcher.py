@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-01-31
-# Modified: 2026-08-04
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -14,8 +14,12 @@ Detects ERROR/WARNING/INFO entries and fires appropriate events.
 
 Events fired:
     - error_detected: When ERROR level log detected (Medic v2 pipeline via registry_report)
-    - error_logged: Monitoring-only event (no dispatch)
     - warning_logged: When WARNING level log detected
+
+An `error_logged` event is named nowhere in the fleet and is fired by nothing. It was
+advertised here and in the log_events help page until 2026-09-15; the line is gone rather
+than kept as vocabulary, because a name with no firer sends a reader looking for a lane
+that does not exist.
 
 Architecture:
     - Trigger OWNS all file watching (filesystem events)
