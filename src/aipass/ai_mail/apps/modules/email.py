@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.4.0
+# Version: 3.5.0
 # Created: 2025-12-02
-# Modified: 2026-08-20
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -149,10 +149,12 @@ COMMANDS:
 USAGE:
   ai_mail email @recipient "subject" "message" [--dispatch] [--reply-to @branch]
   ai_mail send @recipient "subject" "message"   (same as email)
-  ai_mail inbox | view <id> | reply <id> "msg" | close <id> | sent | contacts
+  ai_mail inbox | view <id> | view latest | reply <id> "msg" | close <id> | sent | contacts
 
 FLAGS:
   --dispatch        Mark as dispatch task (adds dispatch header)
+  --from @branch    Send as a named sender — the explicit identity override
+                    used when caller detection cannot see who is calling
   --reply-to        Redirect replies to a different branch
   --no-memory-save  Skip memory update requirement in dispatch header
   --upsert-key KEY  Repeat signature: rewrite the recipient's open message
