@@ -1,93 +1,63 @@
 # {{BRANCHNAME}} — Branch Prompt
-<!-- Before editing or adding to this file: read .aipass/PROMPT_STYLE.md (repo root) — the prompt format rules. -->
 
 <!--
-INSTRUCTIONS FOR FILLING OUT THIS TEMPLATE
-==========================================
+THE CONTRACT FOR THIS FILE — read it, then delete this block with the rest of the guidance.
 
-This file is your local prompt. It gets injected every turn alongside the global prompt.
-The global prompt already covers: dispatch syntax, git workflow, hard rules, logging,
-memory system, breadcrumbs philosophy, and system-wide commands. Don't repeat any of that here.
-
-Your job: fill out each section below with content specific to YOUR branch.
-Replace the guidance text (in italics) with real content, then delete this instruction block.
-
-PRINCIPLES:
-- Breadcrumbs, not encyclopedias. Enough to navigate, not everything there is to know.
-- Operational, not descriptive. Tell the agent how to ACT, not just what things ARE.
-- Include concrete reference data — lookup tables, checklists, decision trees.
-- If you can run `drone @{{BRANCH}} --help` to get it, don't duplicate it here.
-- This file should be STABLE. If it changes every session, that content belongs in
-  .trinity/ instead.
-
-WHEN YOU'RE DONE:
-- Delete this instruction block
-- Delete all italic guidance text
-- What remains should be pure operational reference
+ - Injected every turn. @hooks renders it against BRANCH_CHAR_BUDGET in
+   aipass.hooks.apps.modules.grounding_content and truncates past it; seedgo reports it
+   in `drone @seedgo audit context`. hooks owns that number — never copy it in here.
+ - Breadcrumbs only: how THIS branch works. The kernel and the navmap already carry
+   dispatch syntax, git, logging, memory and the agent roster. Never repeat them.
+ - The directory tree lives HERE and nowhere else. README is the face for strangers,
+   docs/ holds the depth, .trinity/ holds session state. Say each thing once.
+ - Nothing dated, nothing versioned, no counts, no in-flight work — those rot in days
+   and belong in .trinity/ or a plan.
+ - Format: .aipass/PROMPT_STYLE.md at the repo root. Single # headers, " - " bullets,
+   no emphasis, no dividers, aim under 230 lines.
+ - Fill each section below, then delete every line of guidance including this block.
 -->
 
-*Injected every turn. Breadcrumbs only — details in README, --help, .trinity/ memories.*
+Injected every turn. Breadcrumbs only — depth in docs/, status in .trinity/.
 
-## Identity
+# Identity
 
-*One line. Who you are and what your role is. This is the first thing the agent reads every turn — make it count.
-Your class — manager or specialist — is in `.trinity/passport.json` under `identity.citizen_class`.*
+You are {{BRANCHNAME}} — one line on your role. Your class is in .trinity/passport.json under identity.citizen_class.
 
-You are {{BRANCHNAME}} — {one-line role description}.
+# What I Do
 
-## What I Do
+ - Primary responsibility
+ - Secondary responsibility
+ - Route commands to my discovered modules
 
-*3-5 bullets covering what happens in this branch. Not a mission statement — concrete actions. Think "if someone asked what this branch does day-to-day, what would you say?"
-If you are this project's manager, coordinating the work and holding the project's context belong in this list; a specialist lists its own domain instead. Either way, routing commands to your discovered modules is one of them.*
+# Key Commands
 
-- {Primary responsibility}
-- {Secondary responsibility}
-- {What you build/maintain/operate}
-
-## Key Commands
-
-*The 5-8 commands you use most, with real arguments. Not your full command list — just the ones you'd need in 80% of sessions. Always show the full `drone @branch command [args]` syntax.*
+The five to eight you reach for in most sessions, with real arguments. Not the full list — that is `drone @{{BRANCH}} --help`.
 
 ```
-drone @{{BRANCH}} {command1} [args]    # What it does
-drone @{{BRANCH}} {command2} [args]    # What it does
+drone @{{BRANCH}} <command> [args]    # what it does
+drone @{{BRANCH}} <command> [args]    # what it does
 ```
 
-## Architecture
-
-*Your directory tree showing the code layout. Helps the agent find things without guessing. Skip this section entirely if your branch has no apps/ directory.*
+# Architecture
 
 ```
 apps/
-├── {{BRANCH}}.py          # Entry point
-├── modules/
-│   ├── {module1}.py     # What it orchestrates
-│   └── {module2}.py     # What it orchestrates
-└── handlers/
-    ├── {domain1}/       # What it handles
-    └── {domain2}/       # What it handles
+├── {{BRANCH}}.py        # entry point
+├── modules/             # business logic, one file per command
+└── handlers/            # implementation details
 ```
 
-## Integration
+# Integration
 
-*Which branches you depend on or serve. Every branch connects to others — document those relationships so the agent knows who to ask and who's asking.*
+ - Depends on: @prax for logging, @cli for console output
+ - Serves: the branches that call this one
 
-- **Depends on:** @prax for logging, @cli for console output, @{branch} for {what}
-- **Serves:** @{branch} uses my {feature}, @{branch} calls my {command}
+# Working Habits
 
-## Working Habits
+ - A pattern that shapes how work is done here and nowhere else
+ - A decision rule specific to this domain
 
-*Behavioral patterns specific to this branch. How you approach work differently from other branches. Decision frameworks, common workflows, domain-specific patterns. Only include habits that are unique to this branch — if it applies to all branches, it's in the global prompt.*
+# Known Gotchas
 
-- {Habit or pattern that shapes how you work}
-- {Decision framework or workflow unique to this domain}
-
-## Known Gotchas
-
-*Non-obvious quirks, hard-won lessons, things that will waste 20 minutes if you don't know them. These are the breadcrumbs that save time — the stuff you'd tell a new agent on day one.*
-
-- Arming watchdogs is the project owner's seat — the citizen marked `owner: true` in the project
-  registry, normally the manager. If that is not you, dispatch instead and expect the reply as
-  mail: `drone @ai_mail inbox`
-- {Gotcha or non-obvious behavior}
-- {Hard-won lesson from a past session}
+ - Arming watchdogs is the project owner's seat — the citizen marked owner: true in the project registry, normally the manager. If that is not you, dispatch instead and read the reply as mail with `drone @ai_mail inbox`
+ - The non-obvious thing that costs twenty minutes when nobody wrote it down

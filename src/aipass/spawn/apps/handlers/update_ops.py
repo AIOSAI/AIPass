@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-07
-# Modified: 2026-07-27
+# Modified: 2026-09-15
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -129,13 +129,26 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     paths, and for each file decides add/merge/skip. No renames, no pruning.
     Identity/memory files (DASHBOARD, birth_certificate, bypass.json, and all
     of .trinity/ except passport.json) are create-only. passport.json heals
-    against a narrow allowlist only — see _PASSPORT_HEAL_ALLOWLIST.
+    against a narrow allowlist only — see _PASSPORT_HEAL_ALLOWLIST. Existing
+    .md files are COMPARED and reported (md_matches / md_differs / md_unreadable
+    and _md_detail) and never written — see _md_state.
     """
     errors: list[str] = []
-    counts = {"additions": 0, "renames": 0, "updates": 0, "pruned": 0, "skipped_py": 0, "owner_protected": 0}
+    counts = {
+        "additions": 0,
+        "renames": 0,
+        "updates": 0,
+        "pruned": 0,
+        "skipped_py": 0,
+        "owner_protected": 0,
+        "md_matches": 0,
+        "md_differs": 0,
+        "md_unreadable": 0,
+    }
     additions_detail: list[dict] = []
     updates_detail: list[dict] = []
     ignored_detail: list[dict] = []
+    md_detail: list[dict] = []
 
     branch_dir = _resolve_branch_path(branch_name)
     if branch_dir is None:
@@ -250,8 +263,23 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
                     shutil.copy2(template_file, dest)
             additions_detail.append({"template_path": resolved_path, "type": "file"})
             counts["additions"] += 1
+            if dest.suffix == ".md":
+                md_detail.append({"branch_path": resolved_path, "state": "absent"})
             if trace:
                 logger.info("[update] Added: %s", resolved_path)
+
+        elif dest.suffix == ".md":
+            # READ-ONLY, ALWAYS. update never rewrites a .md: the README diet is
+            # owner judgment by ruling (DPLAN-0199 is what an unguarded overwrite
+            # did, thread 16 re-confirmed it 2026-09-15). What update owes the
+            # owner is the FACT — until now an existing .md fell through every arm
+            # below in silence, so a branch could drift from the template for
+            # months with nothing anywhere to read.
+            state = _md_state(template_file, dest, replacements)
+            counts[f"md_{state}"] += 1
+            md_detail.append({"branch_path": resolved_path, "state": state})
+            if trace:
+                logger.info("[update] .md %s: %s", state, resolved_path)
 
         elif dest.suffix == ".py":
             counts["skipped_py"] += 1
@@ -298,6 +326,7 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
         _renames_detail=[],
         _pruned_detail=[],
         _ignored_detail=ignored_detail,
+        _md_detail=md_detail,
     )
 
 
@@ -524,6 +553,28 @@ def _grow_template_owned_lists(merged: dict, template_data: dict, dotted_keys: t
         section[leaf] = existing_list + [item for item in template_list if item not in existing_list]
 
 
+def _md_state(template_file: Path, dest: Path, replacements: dict) -> str:
+    """Compare a branch .md against what the template would render, writing nothing.
+
+    Args:
+        template_file: The template's copy, placeholders unresolved.
+        dest: The branch's copy on disk.
+        replacements: The placeholder map for this branch.
+
+    Returns:
+        ``"matches"``, ``"differs"``, or ``"unreadable"`` when either side cannot
+        be read as text. Unreadable is its own answer rather than a guessed
+        "differs": the owner is being told what update saw, not what it assumed.
+    """
+    try:
+        rendered = replace_placeholders(template_file.read_text(encoding="utf-8"), replacements)
+        current = dest.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.info("[update] .md unreadable, not compared: %s (%s)", dest, exc)
+        return "unreadable"
+    return "matches" if rendered == current else "differs"
+
+
 def _merge_json(
     template_file: Path,
     dest: Path,
@@ -596,6 +647,9 @@ def _result(
         "pruned": counts.get("pruned", 0),
         "skipped_py": counts.get("skipped_py", 0),
         "owner_protected": counts.get("owner_protected", 0),
+        "md_matches": counts.get("md_matches", 0),
+        "md_differs": counts.get("md_differs", 0),
+        "md_unreadable": counts.get("md_unreadable", 0),
         "errors": errors,
         "dry_run": dry_run,
     }

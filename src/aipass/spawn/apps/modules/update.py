@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update.py
 # Description: Update orchestrator — thin CLI layer for branch updates
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-03-14
+# Modified: 2026-09-15
 # =============================================
 
 """Update orchestrator for branch lifecycle management.
@@ -102,6 +102,9 @@ def handle_update(args: list[str]) -> int:
         console.print()
         console.print("  [dim]A branch may protect its own files from update with a .updateignore at its[/dim]")
         console.print("  [dim]root — one pattern per line, e.g. .trinity/passport.json or docs.local/[/dim]")
+        console.print()
+        console.print("  [dim].md files are REPORTED, never written: the preview says differ / match /[/dim]")
+        console.print("  [dim]absent per file. A README or prompt diet is the owner's to run.[/dim]")
         return 0
 
     if not args:
@@ -205,6 +208,16 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
     if owner_protected:
         console.print(f"  Owner-protected: {owner_protected} [dim](.updateignore)[/dim]")
 
+    md_differs = result.get("md_differs", 0)
+    md_matches = result.get("md_matches", 0)
+    md_unreadable = result.get("md_unreadable", 0)
+    if md_differs or md_matches or md_unreadable:
+        unreadable = f", {md_unreadable} unreadable" if md_unreadable else ""
+        console.print(
+            f"  Markdown:   {md_differs} differ, {md_matches} match{unreadable} "
+            f"[dim](read-only - update never rewrites a .md)[/dim]"
+        )
+
     errs = result.get("errors", [])
     if errs:
         error(f"Errors: {len(errs)}")
@@ -230,6 +243,18 @@ def _print_branch_summary(result: dict, dry_run: bool) -> None:
             for g in ignored_detail:
                 if isinstance(g, dict):
                     console.print(f"    = {g.get('branch_path', '')} [dim](skipped - .updateignore)[/dim]")
+
+        md_detail = result.get("_md_detail", [])
+        if isinstance(md_detail, list) and md_detail:
+            # A line per .md, and never a write. "differs" is the owner's cue that
+            # the diet (or any other edit) has moved this file away from the
+            # template — not an instruction, and not something update will act on.
+            console.print("  [cyan]Markdown drift (read-only):[/cyan]")
+            for m in md_detail:
+                if isinstance(m, dict):
+                    state = m.get("state", "")
+                    mark = {"differs": "~", "matches": "=", "absent": "+"}.get(state, "?")
+                    console.print(f"    {mark} {m.get('branch_path', '')} [dim]({state})[/dim]")
 
         updates_detail = result.get("_updates_detail", [])
         if isinstance(updates_detail, list) and updates_detail:
@@ -276,6 +301,7 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
     total_prn = sum(r.get("pruned", 0) for r in results)
     total_skip = sum(r.get("skipped_py", 0) for r in results)
     total_prot = sum(r.get("owner_protected", 0) for r in results)
+    total_md = sum(r.get("md_differs", 0) for r in results)
     total_err = sum(len(r.get("errors", [])) for r in results)
 
     for r in results:
@@ -288,7 +314,8 @@ def _print_all_summary(results: list[dict], dry_run: bool) -> None:
     console.print(
         f"  Totals: +{total_add} added, ~{total_upd} updated, "
         f">{total_ren} renamed, -{total_prn} pruned, "
-        f"!{total_skip} py-skipped, ={total_prot} owner-protected"
+        f"!{total_skip} py-skipped, ={total_prot} owner-protected, "
+        f"~{total_md} md-drifted (reported, never written)"
     )
 
     if total_err:

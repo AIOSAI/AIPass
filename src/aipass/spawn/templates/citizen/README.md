@@ -3,76 +3,41 @@
 **Purpose:** {{PURPOSE_BRIEF}}
 **Module:** `aipass.{{MODULE}}`
 **Class:** {{CITIZEN_CLASS}}
-**Created:** {{DATE}}
 
 ---
 
-## Overview
+## What I Am
 
-### What I Do
-
-*Replace with 3-5 concrete responsibilities — what happens here day to day, not a
-mission statement. A manager (the first citizen in a project) also carries the
-project's context and coordinates its work; a specialist owns one domain. Write
-whichever is true for you — your class is in `.trinity/passport.json` under
+*One short paragraph for a stranger or another branch: what this branch owns, and
+what it is for. A manager (a project's first citizen) also holds the project's
+context and coordinates its work; a specialist owns one domain — write whichever
+is true for you. Your class is in `.trinity/passport.json` under
 `identity.citizen_class`.*
 
-- {Primary responsibility}
-- Route commands to discovered modules
-- {What I build, maintain or operate}
-
-### How I Work
-- **Entry Point:** `apps/{{BRANCH}}.py`
-- **Pattern:** Auto-discovers and routes to modules
-
 ---
 
-## Quick Start
+## How To Reach Me
 
 ```bash
-# See what this branch is and which modules it has discovered
-drone @{{BRANCH}}
-
-# Full help - usage, commands, flags, examples
-drone @{{BRANCH}} --help
-
-# Version
-drone @{{BRANCH}} --version
+drone @{{BRANCH}}                                     # live inventory — modules and commands, read from the code
+drone @{{BRANCH}} --help                              # the full reference
+drone @ai_mail dispatch @{{BRANCH}} "Subject" "Body"  # hand me work
 ```
+
+The inventory is generated, so it is never stale. This README does not repeat it.
 
 ---
 
-## Architecture
+## Where The Depth Lives
 
-```
-{{BRANCH}}/
-├── apps/
-│   ├── {{BRANCH}}.py       # Entry point
-│   ├── modules/            # Business logic
-│   ├── handlers/           # Implementation
-│   └── plugins/            # Extensions
-├── docs/
-├── tests/
-├── .trinity/
-│   ├── passport.json       # Identity
-│   ├── local.json          # Session history
-│   └── observations.json   # Collaboration patterns
-└── README.md
-```
+| Layer | What it carries |
+|-------|-----------------|
+| `README.md` | this file — the face for strangers and other branches |
+| `docs/` | the depth: one tracked file per module or handler group, indexed below |
+| `.aipass/aipass_local_prompt.md` | breadcrumbs for the agent working here, injected every turn |
+| `.trinity/` | identity, session history, what was learned |
 
-### Three-Layer Design
-
-1. **Entry point** (`apps/{{BRANCH}}.py`) — Routes CLI commands, never imports handlers directly
-2. **Modules** (`apps/modules/`) — Business logic coordinators, parse arguments, delegate to handlers
-3. **Handlers** (`apps/handlers/`) — Implementation details, pure functions where possible
-
----
-
-## Commands
-
-All commands run through `drone @{{BRANCH}} <command>`.
-
-*Configure after initialization — list each command you add, with one line on what it does.*
+*Index each `docs/` file here as you write it — one line on what it covers.*
 
 ---
 
@@ -80,8 +45,8 @@ All commands run through `drone @{{BRANCH}} <command>`.
 
 ### Depends On
 
-- **aipass.prax** — Logging via `logger`
-- **aipass.cli** — Console output (`console`, `error`)
+- **aipass.prax** — logging via `logger`
+- **aipass.cli** — console output (`console`, `error`)
 
 ### Provides To
 
@@ -89,4 +54,5 @@ All commands run through `drone @{{BRANCH}} <command>`.
 
 ---
 
-*Last Updated: {{DATE}}*
+*This file is measured against a cap by `drone @seedgo audit context @{{BRANCH}}` —
+seedgo owns the number. Past it, move depth into `docs/`, never into the prompt.*
