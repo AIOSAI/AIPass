@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-16
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """
@@ -2002,12 +2002,17 @@ class TestThePrintedExamplesAreLegalCommands:
 
         from aipass.memory.apps.handlers.json import config_loader
         from aipass.memory.apps.modules import rollover as rollover_mod
+        from aipass.memory.apps.handlers.cli import config_content
         from aipass.memory.apps.modules import rollover_config
 
-        # Both halves of the split: the verbs (and every refusal they print)
-        # moved to rollover_config.py, the routing stayed in rollover.py.
+        # Every file an example can be printed from: the verbs (and every
+        # refusal they print) moved to rollover_config.py, the routing stayed in
+        # rollover.py, and the help page's TEXT moved to config_content.py — the
+        # file holding `set @b sessions 12`. Leaving it out would let the one
+        # page operators copy from drift past its own ceiling unpinned.
         source = "".join(
-            Path(module.__file__).read_text(encoding="utf-8") for module in (rollover_mod, rollover_config)
+            Path(module.__file__).read_text(encoding="utf-8")
+            for module in (rollover_mod, rollover_config, config_content)
         )
         ceilings = config_loader.get_count_ceilings()
         examples = re.findall(r"config set(?:-default)?(?: @\w+)? (\w+) (\d+)", source)
@@ -2017,3 +2022,79 @@ class TestThePrintedExamplesAreLegalCommands:
             if ceiling is None:
                 continue
             assert int(raw) <= ceiling, f"example '{entry_type} {raw}' exceeds its ceiling of {ceiling}"
+
+
+class TestTheConfigContentHandlerReturnsLinesAndNeverPrints:
+    """handlers/cli/config_content.py: the help page and limit blocks as lines.
+
+    FPLAN-0593 Phase 5. rollover_config.py sat at 657 lines against @seedgo's
+    600-line module band, and its display code could not move to handlers/
+    because handlers may not print. The TEXT could: this handler builds it and
+    returns it, the module prints it. These pins hold both halves of that
+    bargain — the handler never reaches a console, and the module prints exactly
+    what the handler returns, so the page an operator reads is the page built.
+    """
+
+    def test_the_handler_never_imports_the_cli_service_or_prints(self):
+        import ast
+
+        from aipass.memory.apps.handlers.cli import config_content
+
+        tree = ast.parse(Path(config_content.__file__).read_text(encoding="utf-8"))
+        imported = {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)} | {
+            alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names
+        }
+        called = {
+            node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+        }
+        assert not any(name.startswith("aipass.cli") for name in imported), imported
+        assert "print" not in called, "a handler that prints is the defect this file exists to avoid"
+
+    def test_every_block_is_a_list_of_strings_ending_in_a_blank_line(self):
+        from aipass.memory.apps.handlers.cli import config_content as cc
+
+        blocks = [
+            cc.help_lines(1, 100, {"sessions": {"ceiling": 16, "file_key": "local", "budget_chars": 25000}}),
+            cc.defaults_lines({"sessions": {"count": 15}}, ("sessions", "todos"), ("todos",)),
+            cc.overrides_lines({}, ("sessions",)),
+            cc.overrides_lines({"daemon": {"sessions": {"count": 12, "is_override": True}}}, ("sessions",)),
+            cc.branch_limits_lines("memory", {"sessions": {"count": 12}}, ("sessions",), ()),
+        ]
+        for block in blocks:
+            assert block and all(isinstance(line, str) for line in block)
+            assert block[-1] == ""
+
+    def test_the_help_bounds_print_the_ceilings_they_are_handed(self):
+        # Data in, lines out: the handler reads no config of its own, so the
+        # BOUNDS block cannot print a ceiling the refusal would contradict.
+        from aipass.memory.apps.handlers.cli import config_content as cc
+
+        lines = cc.help_lines(
+            1, 100, {"observations": {"ceiling": 7, "file_key": "observations", "budget_chars": 15000}}
+        )
+        text = "\n".join(lines)
+
+        assert "1-100 inclusive" in text
+        assert "at most 7" in text and "budget 15,000 chars" in text
+
+    def test_an_absent_count_says_unset_never_zero(self):
+        from aipass.memory.apps.handlers.cli import config_content as cc
+
+        line = cc.defaults_lines({"sessions": {"count": None}}, ("sessions",), ())[1]
+
+        assert "unset" in line and " 0" not in line
+
+    def test_the_module_prints_exactly_what_the_handler_returns(self, monkeypatch):
+        from aipass.memory.apps.handlers.cli import config_content as cc
+        from aipass.memory.apps.modules import rollover_config
+
+        printed = []
+        monkeypatch.setattr(rollover_config, "console", SimpleNamespace(print=lambda *a, **k: printed.append(a)))
+        defaults = {"sessions": {"count": 15, "auto_compact_cap": 3}, "todos": {"count": 10}}
+
+        rollover_config._show_defaults(defaults)
+
+        expected = cc.defaults_lines(defaults, rollover_config._DISPLAY_TYPES, rollover_config._READ_ONLY_TYPES)
+        assert [args[0] for args in printed] == expected

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rollover_config.py
 # Description: The `config` verb surface over rollover limits - get / set / set-default
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-15
 # Modified: 2026-09-16
 # =============================================
@@ -12,8 +12,11 @@ Rollover Config Verbs (DPLAN-0302)
 The `config` verb surface over the rollover entry-count limits in
 memory.config.json, lifted out of ``modules/rollover.py`` when that module
 reached the seedgo length standard. The code here is the code that was there:
-the routing, the validation, the rendered views, the introspection and help
-pages, and the ``--json`` emitter every verb answers through.
+the routing, the validation, the rendered views and the introspection and help
+pages. The TEXT of the help page and the limit blocks is built by
+``handlers/cli/config_content.py``, which returns lines and never prints; this
+module prints them. That kept the module under @seedgo's 600-line band without a
+bypass, a rename or a fourth split (FPLAN-0593 Phase 5).
 
 WHY IT SITS IN ``modules/`` AND NOT ``handlers/``. This is DISPLAY code - it is
 almost nothing but ``console.print``. ``apps/handlers/`` is private
@@ -49,6 +52,7 @@ from aipass.cli.apps.modules import console, error
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.cli.help_flags import wants_help
 from aipass.memory.apps.handlers.cli.json_flag import strip_json_flag, wants_json
+from aipass.memory.apps.handlers.cli import config_content
 from aipass.memory.apps.handlers.monitor import detector
 
 # The `--json` emitter moved to modules/rollover_json.py when this module reached
@@ -123,15 +127,15 @@ def _handle_config(args: List[str]) -> bool:
     sub = args[0]
 
     if sub == "get":
-        config_get(args[1:], _Json(_VERB_CONFIG_GET, json_mode))
+        handle_config_get(args[1:], _Json(_VERB_CONFIG_GET, json_mode))
         return True
 
     if sub == "set":
-        config_set(args[1:], _Json(_VERB_CONFIG_SET, json_mode))
+        handle_config_set(args[1:], _Json(_VERB_CONFIG_SET, json_mode))
         return True
 
     if sub == "set-default":
-        config_set_default(args[1:], _Json(_VERB_CONFIG_SET_DEFAULT, json_mode))
+        handle_config_set_default(args[1:], _Json(_VERB_CONFIG_SET_DEFAULT, json_mode))
         return True
 
     _refuse(
@@ -266,74 +270,25 @@ def _validate_count(raw: str, entry_type: str, ctx: _Json, branch: str | None = 
 # =============================================================================
 
 
-def _fmt_count(value: object) -> str:
-    """Render a limit for display — an absent limit says so, never shows 0."""
-    return "unset" if value is None else str(value)
-
-
 def _show_defaults(defaults: dict) -> None:
-    """Print the global default limits block."""
-    console.print("[bold]DEFAULTS[/bold] [dim](drone @memory config set-default <type> <count>)[/dim]")
-    for entry_type in _DISPLAY_TYPES:
-        row = defaults.get(entry_type, {})
-        cap = row.get("auto_compact_cap")
-        suffix = "" if cap is None else f"  [dim]auto_compact_cap {cap} (read-only)[/dim]"
-        if entry_type in _READ_ONLY_TYPES:
-            suffix = "  [dim](read-only in v1)[/dim]"
-        console.print(f"  [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count'))}{suffix}")
-    console.print()
+    """Print the global default limits block — content built by handlers/cli/config_content."""
+    for line in config_content.defaults_lines(defaults, _DISPLAY_TYPES, _READ_ONLY_TYPES):
+        console.print(line)
 
 
 def _show_overrides(overrides: dict) -> None:
     """Print every branch whose effective limits deviate from the defaults."""
-    if not overrides:
-        console.print("[green]>[/green] All branches at defaults — no per-branch overrides")
-        console.print()
-        return
-
-    console.print(f"[bold]OVERRIDES[/bold] [dim]({len(overrides)} branch(es) deviating from defaults)[/dim]")
-    for branch, limits in overrides.items():
-        console.print(f"  [bold]@{branch}[/bold]")
-        for entry_type in _DISPLAY_TYPES:
-            row = limits.get(entry_type, {})
-            if not row.get("is_override"):
-                continue
-            console.print(
-                f"    [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count'))} "
-                f"[yellow][OVERRIDE][/yellow] [dim](default {_fmt_count(row.get('default_count'))})[/dim]"
-            )
-    console.print()
+    for line in config_content.overrides_lines(overrides, _DISPLAY_TYPES):
+        console.print(line)
 
 
 def _show_branch_limits(branch: str, limits: dict) -> None:
-    """Print one branch's EFFECTIVE limits, each marked default-or-override.
-
-    Markers are UPPERCASE on purpose: Rich reads `[default]` as a style name
-    and deletes it silently, so a lowercase marker would look right in the
-    source and be invisible on screen.
-    """
-    console.print(f"[bold]@{branch}[/bold] [dim](effective limits — what the rollover engine applies)[/dim]")
-    console.print()
-
-    for entry_type in _DISPLAY_TYPES:
-        row = limits.get(entry_type, {})
-        marker = "[yellow][OVERRIDE][/yellow]" if row.get("is_override") else "[green][DEFAULT][/green]"
-        console.print(
-            f"  [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count')):<6} {marker} "
-            f"[dim](default {_fmt_count(row.get('default_count'))}, resolved from {row.get('source')})[/dim]"
-        )
-        cap = row.get("auto_compact_cap")
-        if cap is not None:
-            console.print(f"                 [dim]auto_compact_cap {cap} — read-only in v1[/dim]")
-        if entry_type in _READ_ONLY_TYPES:
-            console.print("                 [dim]read-only in v1 — the todo roll reads it, config set does not[/dim]")
-
-    console.print()
-    console.print("[dim]Change with: drone @memory config set @" + branch + " sessions <count>[/dim]")
-    console.print()
+    """Print one branch's EFFECTIVE limits, each marked default-or-override."""
+    for line in config_content.branch_limits_lines(branch, limits, _DISPLAY_TYPES, _READ_ONLY_TYPES):
+        console.print(line)
 
 
-def config_get(args: List[str], ctx: _Json) -> None:
+def handle_config_get(args: List[str], ctx: _Json) -> None:
     """Show rollover limits — defaults plus deviations, or one branch.
 
     Args:
@@ -405,7 +360,7 @@ def config_get(args: List[str], ctx: _Json) -> None:
 # =============================================================================
 
 
-def config_set(args: List[str], ctx: _Json) -> None:
+def handle_config_set(args: List[str], ctx: _Json) -> None:
     """Write one branch's rollover limit override.
 
     Args:
@@ -461,7 +416,7 @@ def config_set(args: List[str], ctx: _Json) -> None:
     )
 
 
-def config_set_default(args: List[str], ctx: _Json) -> None:
+def handle_config_set_default(args: List[str], ctx: _Json) -> None:
     """Write one global default rollover limit, leaving per_branch alone.
 
     Args:
@@ -559,7 +514,12 @@ def print_introspection() -> None:
 
 
 def print_config_help() -> None:
-    """Display config-verb help — the BOUNDS block reads the LIVE ceilings."""
+    """Display config-verb help — the BOUNDS block reads the LIVE ceilings.
+
+    The page's text lives in handlers/cli/config_content.py, which returns it as
+    lines and never prints; the panel and the printing stay here, where the cli
+    standard allows them (FPLAN-0593 Phase 5).
+    """
     from aipass.memory.apps.handlers.json import config_loader
 
     console.print()
@@ -571,57 +531,8 @@ def print_config_help() -> None:
         )
     )
     console.print()
-    console.print("[bold]USAGE:[/bold]")
-    console.print("  drone @memory config get                        Defaults + branches that deviate")
-    console.print("  drone @memory config get @<branch>              One branch's effective limits")
-    console.print("  drone @memory config set @<branch> <type> <n>   Override one branch")
-    console.print("  drone @memory config set-default <type> <n>     Change the global default")
-    console.print()
-    console.print("[bold]--json — THE MACHINE SURFACE:[/bold]")
-    console.print("  Every verb above takes [cyan]--json[/cyan] in ANY slot; it is stripped before")
-    console.print("  positional parsing, so `set @b sessions 12 --json` parses like `set @b sessions 12`.")
-    console.print("  Exactly ONE JSON document reaches stdout — no panels, no banners, no Rich.")
-    console.print("  A help flag OUTRANKS it: `set ... --help --json` prints this page and writes nothing.")
-    console.print()
-    console.print("  Every payload carries [cyan]ok[/cyan] and [cyan]verb[/cyan]. [cyan]ok[/cyan] is the signal,")
-    console.print("  because refusals exit 0 — a refusal is [cyan]ok: false[/cyan] plus [cyan]error[/cyan] and")
-    console.print("  [cyan]suggestion[/cyan], carrying the SAME sentences the human path prints.")
-    console.print()
-    console.print("[bold]ENTRY TYPES:[/bold]")
-    console.print("  [cyan]sessions[/cyan]        local.json -> sessions")
-    console.print("  [cyan]key_learnings[/cyan]   local.json -> key_learnings")
-    console.print("  [cyan]observations[/cyan]    observations.json -> observations")
-    console.print(
-        "  [cyan]todos[/cyan]           local.json -> todos  [dim](count shown by get, read-only in v1)[/dim]"
-    )
-    console.print()
-    console.print(f"[bold]BOUNDS:[/bold] a whole number, {_MIN_COUNT}-{_MAX_COUNT} inclusive — AND under its ceiling")
-    console.print(
-        f"  {_MIN_COUNT - 1} would roll over every entry immediately; past {_MAX_COUNT} rollover is defeated entirely."
-    )
-    console.print("  The ceiling is lower and is PER TYPE and PER FILE: a keep-count multiplies an entry cap,")
-    console.print("  so the file it fills must still fit its budget. At the counts the other types hold:")
-    for entry_type, row in config_loader.get_count_ceilings().items():
-        console.print(
-            f"    [cyan]{entry_type:<14}[/cyan] at most {row['ceiling']:<4}"
-            f" [dim]{row['file_key']} budget {row['budget_chars']:,} chars[/dim]"
-        )
-    console.print("  Raise one type and its co-tenants' ceilings drop. Budgets: memory.config.json")
-    console.print("  entry_limits.file_budgets; the refusal names the ceiling and the worst case it measured.")
-    console.print()
-    console.print("[bold]EFFECTIVE LIMITS:[/bold]")
-    console.print("  Resolution is per FILE KEY, not per entry type — exactly what the")
-    console.print("  rollover engine does. Once per_branch -> <branch> -> local exists,")
-    console.print("  the default local block is never consulted for that branch again.")
-    console.print("  A value is marked [yellow][OVERRIDE][/yellow] when it differs from the default,")
-    console.print("  [green][DEFAULT][/green] when it matches.")
-    console.print()
-    console.print("[bold]SET-DEFAULT DOES NOT PUSH:[/bold]")
-    console.print("  set-default writes defaults only and leaves per_branch untouched.")
-    console.print("  drone @memory rollover push stays the one explicit fleet-wide reset.")
-    console.print()
-    console.print("[bold]READ-ONLY:[/bold] auto_compact_cap and the todos count are displayed but not settable in v1.")
-    console.print()
+    for line in config_content.help_lines(_MIN_COUNT, _MAX_COUNT, config_loader.get_count_ceilings()):
+        console.print(line)
 
 
 def handle_command(command: str, args: list) -> bool:
