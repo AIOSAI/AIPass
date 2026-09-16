@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons.py
 # Description: Entry point CLI for drone @commons
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-08-31
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -79,7 +79,10 @@ from aipass.cli.apps.modules.display import reset_command_state, resolve_exit  #
 
 MODULE_ROOT = Path(__file__).parent
 MODULES_DIR = MODULE_ROOT / "modules"
-VERSION = "1.0.0"
+# The one version constant. --version prints it, the file header above states it,
+# and the README header quotes it - three places that used to be free to disagree
+# (the header said 1.1.0 while --version answered 1.0.0).
+VERSION = "1.2.0"
 
 
 # =============================================================================
@@ -230,7 +233,10 @@ def print_help() -> None:
     console.print("  [green]log[/green]          Export room log")
     console.print("  [green]welcome[/green]      Welcome new branches")
     console.print("  [green]react[/green]        Add a reaction to content")
-    console.print("  [green]pin[/green]          Pin/unpin posts")
+    console.print("  [green]unreact[/green]      Remove your reaction from content")
+    console.print("  [green]reactions[/green]    Show the reactions on a post or comment")
+    console.print("  [green]pin[/green]          Pin a post")
+    console.print("  [green]unpin[/green]        Unpin a post")
     console.print("  [green]pinned[/green]       Show pinned posts")
     console.print("  [green]trending[/green]     Show trending posts")
     console.print()
@@ -264,6 +270,7 @@ def print_help() -> None:
     console.print("[bold cyan]FUN:[/bold cyan]")
     console.print()
     console.print("  [green]leaderboard[/green]  Show rankings (artifacts, trades, posts, rooms, karma)")
+    console.print("  [dim]leaderboards[/dim] Accepted alias for leaderboard")
     console.print("  [green]explore[/green]      Discover hints about secret rooms")
     console.print("  [green]secrets[/green]      List secret rooms you've discovered")
     console.print("  [green]collab[/green]       Initiate a joint artifact (requires co-signers)")
@@ -271,6 +278,12 @@ def print_help() -> None:
     console.print("  [green]capsule[/green]      Seal a time capsule (opens after N days)")
     console.print("  [green]capsules[/green]     List all time capsules")
     console.print("  [green]open[/green]         Open a time capsule (if ready)")
+    console.print()
+    console.print("[bold cyan]BRANCH SERVICES:[/bold cyan]")
+    console.print()
+    console.print("  [green]whoami[/green]       Show the branch identity commons resolved for you")
+    console.print("  [green]database[/green]     Database module introspection")
+    console.print("  [green]push-central[/green] Aggregate branch stats into the central file")
     console.print()
     console.print("-" * 70)
     console.print()
@@ -303,7 +316,7 @@ def print_help() -> None:
     console.print("-" * 70)
     console.print()
     warning(
-        "Caller identity is auto-detected from PWD (branch directory).",
+        "Caller identity comes from the AIPASS_CALLER_CWD drone sets, then the real PWD.",
         details="Run from any branch directory to post as that branch.",
     )
     console.print()
