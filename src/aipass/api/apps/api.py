@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: api.py
-# Description: Entry point CLI for drone @api — LLM client via OpenRouter
-# Version: 1.0.0
+# Description: Entry point CLI for drone @api — external clients, secrets, usage and the host API
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -154,6 +154,8 @@ def print_help():
     console.print("  [cyan]•[/cyan] Model discovery and availability")
     console.print("  [cyan]•[/cyan] Usage tracking and statistics")
     console.print("  [cyan]•[/cyan] Connection testing and diagnostics")
+    console.print("  [cyan]•[/cyan] Secret storage per provider, read without printing values")
+    console.print("  [cyan]•[/cyan] The Stage 0 host API the BAUD phone talks to")
     console.print()
 
     console.print("[bold cyan]AVAILABLE COMMANDS:[/bold cyan]")
@@ -179,6 +181,8 @@ def print_help():
     table.add_row("session", "Show session usage data")
     table.add_row("caller-usage", "Show usage by caller module")
     table.add_row("cleanup", "Clean up old usage data")
+    table.add_row("integrations", "List or call a registered contract")
+    table.add_row("host-api", "The phone's server: serve, status, stop, tokens, config")
 
     console.print(table)
     console.print()
@@ -228,12 +232,17 @@ def print_help():
     console.print("    [dim]drone @api stats[/dim]                                [dim]# Overall usage stats[/dim]")
     console.print("    [dim]drone @api caller-usage flow[/dim]                    [dim]# Usage by caller[/dim]")
     console.print()
+    console.print("  [yellow]The phone's server:[/yellow]")
+    console.print("    [dim]drone @api host-api status[/dim]                      [dim]# Up? who holds it?[/dim]")
+    console.print("    [dim]drone @api host-api --help[/dim]                      [dim]# Its own subcommands[/dim]")
+    console.print()
     console.print("─" * 70)
     console.print()
 
     console.print(
         "[dim]Commands: get-key, get-secret, validate, test, models, status, call,"
-        " list-providers, init, track, stats, session, caller-usage, cleanup[/dim]"
+        " list-providers, init, track, stats, session, caller-usage, cleanup,"
+        " integrations, host-api[/dim]"
     )
     console.print()
 
