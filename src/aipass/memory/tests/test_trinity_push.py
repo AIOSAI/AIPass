@@ -1005,7 +1005,11 @@ class TestTodosMoveToTheBacklog:
     # -- the shape ---------------------------------------------------------------
 
     def test_the_canonical_todo_shape_has_no_status(self):
-        assert tp.ENTRY_RULES["todos"] == {
+        # Read from the config now, not from a literal in trinity_push
+        # (FPLAN-0593): the shape has one home and this is where the push
+        # picks it up. A `status` key reappearing in memory.config.json would
+        # fail here, which is the point.
+        assert tp.entry_rules("todos") == {
             "required": {"number": "int", "date": "str", "task": "str"},
             "optional": {"priority": "str"},
         }
@@ -1338,3 +1342,68 @@ class TestTodosMoveToTheBacklog:
 
         assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
         assert f"40 todo(s) moved to {backlog}" in note["summary"]
+
+
+# =============================================================================
+# THE SHAPE COMES FROM THE CONFIG (FPLAN-0593)
+# =============================================================================
+
+
+class TestEntryRulesReadTheConfig:
+    """ENTRY_RULES was a second copy of a contract that lives in memory.config.json.
+
+    Three copies of one shape — here, the config, and @seedgo's trinity_groups
+    — is three chances for a push to prune an entry the write gate would have
+    accepted. These pin that this module now derives its split rather than
+    holding one.
+    """
+
+    def test_every_section_derives_a_required_and_optional_split(self):
+        for section in ("sessions", "key_learnings", "todos", "observations"):
+            rules = tp.entry_rules(section)
+            assert rules is not None, section
+            assert set(rules) == {"required", "optional"}
+            assert "number" in rules["required"] and "date" in rules["required"]
+
+    def test_an_unknown_section_stays_unknown(self):
+        assert tp.entry_rules("nope") is None
+        assert tp.entry_problems("nope", {"number": 1}) == ["unknown section 'nope'"]
+
+    def test_a_resolved_type_definition_wins_over_the_global_config(self):
+        """The push hands its own caps in, so a per_branch override is honoured."""
+        cap_spec = {
+            "field": "task",
+            "max_chars": 100,
+            "fields": {
+                "number": {"type": "int", "required": True},
+                "date": {"type": "str", "required": True},
+                "task": {"type": "str", "required": True},
+                "colour": {"type": "str", "required": False},
+            },
+        }
+        assert tp.entry_rules("todos", cap_spec)["optional"] == {"colour": "str"}
+        entry = {"number": 1, "date": "2026-09-15", "task": "t", "colour": "red"}
+        assert tp.entry_problems("todos", entry, cap_spec) == []
+        # …and without that override the same entry is out of shape.
+        assert any("colour" in p for p in tp.entry_problems("todos", entry))
+
+    def test_the_todo_defect_walker_reads_the_same_derived_shape(self):
+        cap_spec = {
+            "field": "task",
+            "max_chars": 100,
+            "fields": {
+                "number": {"type": "int", "required": True},
+                "date": {"type": "str", "required": True},
+                "task": {"type": "str", "required": True},
+                "colour": {"type": "str", "required": False},
+            },
+        }
+        entry = {"number": 1, "date": "2026-09-15", "task": "t", "colour": "red"}
+        assert tp.todo_defect(entry, cap_spec) is None
+        assert tp.todo_defect(entry, {"field": "task", "max_chars": 100}) == tp.DEFECT_UNKNOWN
+
+    def test_the_global_fallback_is_cached_not_re_read_per_entry(self):
+        """734 entries must not be 734 config reads; the push path never touches it."""
+        tp._RULES_CACHE.clear()
+        assert tp.entry_rules("todos") is not None
+        assert set(tp._RULES_CACHE) == {"sessions", "key_learnings", "todos", "observations"}

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: tier0_kernel.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tier 0 kernel — always-on minimal prompt injection (UserPromptSubmit)
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-09-15
 # =============================================
 
 """Loads .aipass/tier0_kernel.md — tiny always-on identity + reflex block."""
@@ -30,7 +30,11 @@ def handle(hook_data: dict) -> dict:
         if not cadence.should_fire("tier0", hook_data):
             return {"stdout": "", "exit_code": 0}
     except Exception as exc:
-        logger.info("[HOOKS] tier0_kernel: cadence check failed, firing anyway: %s", exc)
+        logger.warning(
+            "[HOOKS] tier0_kernel FAIL-OPEN loader=tier0: cadence check raised, so it fires EVERY turn "
+            "until this is cured: %s",
+            exc,
+        )
 
     try:
         content = load_content(hook_data)

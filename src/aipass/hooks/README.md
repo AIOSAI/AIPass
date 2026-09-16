@@ -109,12 +109,12 @@ src/aipass/hooks/
 │   │   │   ├── branch_loader.py #   Injects aipass_local_prompt.md
 │   │   │   ├── tier0_kernel.py  #   Injects tier0 kernel prompt (every turn)
 │   │   │   ├── navmap.py        #   Injects tier1 navmap prompt (periodic)
-│   │   │   ├── identity.py      #   Injects passport identity block
+│   │   │   ├── identity.py      #   Injects passport identity block (capped 4,000)
 │   │   │   ├── compass_recall.py #  Governance recall injection (hooks.json knobs, capped per context window)
 │   │   │   ├── feedback_pulse.py #  Periodic feedback ask (~10 turns, toggleable — disabled here)
-│   │   │   ├── context_gauge.py #   Nudges /prep before auto-compact fires (80%/95% of window)
+│   │   │   ├── context_gauge.py #   Nudges /prep before auto-compact (80%/95%, once per window)
 │   │   │   ├── temporal.py      #   Injects weekday/date/time/tz/part-of-day, every turn
-│   │   │   └── persistent_alert.py # Injects advisory banners from .aipass/alerts.json
+│   │   │   └── persistent_alert.py # alerts.json banners: on arrival, then cadence 5
 │   │   ├── security/            # Enforcement hooks
 │   │   │   ├── edit_gate.py     #   Blocks unsafe edits (cross-project, cross-branch, inbox, diagnostics)
 │   │   │   ├── git_gate.py      #   Enforces git access tiers
@@ -550,16 +550,22 @@ verb.
   and write verbs the reader has no grammar for (`sponge`, `ed`). All are in the list above.
 
 **The tripwire reports what the refusal cannot see.** Two more functions in `edit_gate`:
-`tripwire_snapshot` (PreToolUse, Bash) records the seat's memory-file `(mtime_ns, size)` under the call's
-`tool_use_id`, and `tripwire` (PostToolUse, Bash) compares. If a memory file changed during the call and the
-command ran no `drone @memory` or `drone @spawn` verb, the whole file is measured on disk against @memory's
-caps and the agent is told `MEMORY WRITTEN FROM A SHELL: <file> changed during this Bash call, outside the
-caps gate`, followed by every over-cap entry with its cut point, or "It measures clean". It never blocks.
-Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it. Its
-own limits: a call that ends in a tool error fires `PostToolUseFailure`, which this engine does not wire, so
-a write followed by a failure goes unreported; a concurrent writer during a long call (a fleet re-render)
-is reported as the shell's; and because the snapshot holds stats, not text, entries already over cap before
-the call are listed too ("holds", never "wrote").
+`tripwire_snapshot` (PreToolUse, Bash) records `(mtime_ns, size)` for every watched memory file under the
+call's `tool_use_id`, and `tripwire` (PostToolUse, Bash) compares. If a memory file changed during the call
+and the command ran no `drone @memory` or `drone @spawn` verb, the whole file is measured on disk against
+@memory's caps and the agent is told `MEMORY WRITTEN FROM A SHELL: <file> changed during this Bash call,
+outside the caps gate`, followed by every over-cap entry with its cut point, or "It measures clean". It never
+blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
+
+Since 1.13.0 (DPLAN-0347) it watches **every `.trinity` in the project**, not just the seat's, and
+`passport.json` with `local.json` and `observations.json` — 24 directories and 72 stats, ~19 ms, measured on
+this repo. A cross-branch shell write is exactly the shape the reader cannot always see. The wording follows
+ownership: the seat's own file is reported as this call's write, another branch's as
+`ANOTHER BRANCH'S MEMORY CHANGED`, which says plainly that a live neighbouring session may own it. That is
+not hypothetical — the first fleet-wide run caught @devpulse and @memory saving their own memory inside a
+76-second `pytest`. Its own limits: a call that ends in a tool error fires `PostToolUseFailure`, which this
+engine does not wire, so a write followed by a failure goes unreported; and because the snapshot holds stats,
+not text, entries already over cap before the call are listed too ("holds", never "wrote").
 
 > **CONFIG WIRE — the tripwire is not live until two entries land in `.aipass/hooks.json`**, followed by
 > `aipass trust <path-to-this-repo>` (any byte change voids the trust hash):
@@ -618,11 +624,32 @@ an existing test looked new (PR #762).
 > *every* hook dark. Verify with `drone @hooks hookstatus`; re-run `aipass trust` after any further
 > edit to that file.
 
+### Injection caps — every grounding block is rendered under a number (DPLAN-0347)
+
+Patrick ruled the layer contract on 2026-09-15: each grounding layer has one job and one cap, and the
+cap is **read, never copied**. The branch prompt is capped at **9,000** chars and each
+`apps/integrations/*/private_prompt.md` at **2,000** (`grounding_content.py`); the rendered identity
+block at **4,000** (`IDENTITY_CHAR_BUDGET`, declared 2026-09-08 and read by nothing until now).
+Over-budget content is **cut with a marker naming the source file**, never dropped — Claude Code
+persists a hook output over 10,000 UTF-16 units and shows the agent a 2,000-char preview, so a prompt
+that crosses that line is not read at all. Every cut logs a WARNING naming the file and both numbers.
+The `.trinity` caps and `passport.json`'s 6,000/600 are @memory's numbers; README 10,000 is @seedgo's.
+
+**Fail-open is loud (cadence 2.5.0).** Turn 0 fires *every* loader, so any path that forces turn 0 —
+no `CLAUDE_CODE_SESSION_ID`, an unreadable state file, a cadence import that raises — makes the session
+pay the whole grounding bill on every prompt. Those paths logged at INFO for months and the fleet log
+held no such line since 09-13. They now log
+`[HOOKS] cadence FAIL-OPEN loader=<name>: turn forced to 0, so it fires EVERY turn — <cause>`.
+
 ### `.trinity` caps — a write is judged on what it AUTHORS
 
-`edit_gate` also measures `.trinity/local.json` and `observations.json` against @memory's published
-caps (`memory.config.json` → `entry_limits`, read through their `entry_limits` module — this gate
-never restates a cap). An entry over its character limit is refused, and so is an entry whose
+`edit_gate` also measures `.trinity/local.json`, `observations.json` and `passport.json` against
+@memory's published caps (`memory.config.json` → `entry_limits`, read through their `entry_limits`
+module — this gate never restates a cap). A passport is measured by **size only** — 6,000 chars per
+file, 600 per string, via `check_file_budget` — because @spawn owns its schema. @memory 1.11.0's two
+newer refusal species are rendered as themselves: `unknown_field` names the allowed fields from
+`fields_for` (never a copy), and `field_over_cap` prints `'status' is 917/40 chars (+877 over)` in the
+units the violation carries, chars or items. An entry over its character limit is refused, and so is an entry whose
 canonical field is *missing*: a renamed `learning` where the config says `value` leaves the extractor
 with no key to read, and `""` and "cannot read this" are different answers.
 
@@ -683,7 +710,9 @@ state, then remove it.
 
 The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).
 
-**How it works:** Reads `.aipass/alerts.json` at the project root. Each alert has an ID, source, severity (`warning`/`critical`), title, body, and optional `expires_at`. Active alerts render as a banner every turn until dismissed or expired. Expired alerts are auto-cleaned on read.
+**How it works:** Reads `.aipass/alerts.json` at the project root. Each alert has an ID, source, severity (`warning`/`critical`), title, body, and optional `expires_at`. Expired alerts are auto-cleaned on read.
+
+**On arrival, then on the beat (1.1.0, DPLAN-0347).** An alert announces on the turn it lands — a notification that waits four turns is not a notification — and after that the banner re-injects only on the cadence beat (loader `alert`, period 5). Until 1.1.0 the guard file silenced the *sound* alone and the full banner was re-injected every single turn for as long as the alert stayed active, up to ten alerts with uncapped bodies. Each body is now cut at 300 chars.
 
 **Sound:** Piper TTS fires on first injection per alert ID — subsequent turns are silent for known alerts. New alerts trigger a fresh announcement.
 

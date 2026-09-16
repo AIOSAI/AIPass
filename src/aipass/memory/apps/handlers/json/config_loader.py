@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: config_loader.py
 # Description: Unified config loader for memory.config.json
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-06-13
 # Modified: 2026-09-15
 # =============================================
@@ -37,6 +37,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from aipass.memory.apps.handlers.json import budget
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.prax import logger
 from aipass.memory.apps.handlers.repo_root import module_file
@@ -51,8 +52,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "purpose": "Vectorize files dropped in memory_pool/, archive beyond keep_recent",
         },
         "entry_limits": {
-            "consumers": ["json/entry_limits.py", "modules/lint.py"],
-            "purpose": "Per-entry char caps on .trinity writes (enforced)",
+            "consumers": [
+                "json/entry_limits.py",
+                "json/budget.py",
+                "modules/lint.py",
+                "templates/trinity_push.py",
+            ],
+            "purpose": "The closed entry shape: entry_types.<type>.fields is every field an entry may carry,"
+            " its type and its cap (FPLAN-0593). file_budgets is the whole-file ceiling seedgo and the"
+            " keep-count check read.",
         },
         "plans": {
             "consumers": ["intake/plans_processor.py", "monitor/memory_watcher.py"],
@@ -93,6 +101,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "kind": "list",
                 "field": "value",
                 "max_chars": 200,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "key": {"type": "str", "required": True, "max_chars": 80},
+                    "value": {"type": "str", "required": True, "max_chars": 200},
+                },
             },
             "sessions": {
                 "file": "local.json",
@@ -100,6 +114,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "kind": "list",
                 "field": "summary",
                 "max_chars": 300,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "summary": {"type": "str", "required": True, "max_chars": 300},
+                    "status": {"type": "str", "required": True, "max_chars": 40},
+                    "tags": {"type": "list[str]", "required": False, "max_items": 10, "max_chars": 120},
+                },
             },
             "todos": {
                 "file": "local.json",
@@ -107,6 +128,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "kind": "list",
                 "field": "task",
                 "max_chars": 100,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "task": {"type": "str", "required": True, "max_chars": 100},
+                    "priority": {"type": "str", "required": False, "max_chars": 10},
+                },
             },
             "observations": {
                 "file": "observations.json",
@@ -114,7 +141,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "kind": "list",
                 "field": "note",
                 "max_chars": 300,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "note": {"type": "str", "required": True, "max_chars": 300},
+                    "tags": {"type": "list[str]", "required": True, "max_items": 10, "max_chars": 120},
+                },
             },
+        },
+        # The whole-file ceilings. Read, never copied: @seedgo's startup_budget
+        # pack and the keep-count check both come here for these three numbers.
+        # passport.json is SIZE only — @spawn owns its schema, so there is no
+        # closed field shape for it, just a file budget and a per-string cap.
+        "file_budgets": {
+            "local.json": {"max_chars": 25000},
+            "observations.json": {"max_chars": 15000},
+            "passport.json": {"max_chars": 6000, "max_string_chars": 600},
         },
         "per_branch": {},
     },
@@ -413,7 +455,81 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]:
+def _co_tenant_text(file_key: str, counts: dict[str, Any], entry_types: dict[str, Any], entry_type: str) -> str:
+    """Render the co-tenant counts a ceiling was computed against.
+
+    Args:
+        file_key: ``"local.json"`` or ``"observations.json"``.
+        counts: ``{entry_type: count}`` as resolved.
+        entry_types: The ``entry_limits.entry_types`` map.
+        entry_type: The type being measured — left out of its own company.
+
+    Returns:
+        ``"key_learnings 15, todos 10"``, or ``"no co-tenants"`` when the type
+        has the file to itself.
+    """
+    others = budget.co_tenants(file_key, counts, entry_types, exclude=entry_type)
+    return ", ".join(f"{name} {count}" for name, count in others.items()) if others else "no co-tenants"
+
+
+def _clamp_to_budget(resolved: dict[str, Any], entry_cfg: dict[str, Any], branch: str) -> None:
+    """Lower any resolved count whose worst-case file would bust its budget.
+
+    A keep-count multiplies an entry that is individually legal until the FILE
+    it lives in is not.  Nothing measured that until now, so a hand-edit of
+    memory.config.json could put a branch permanently over budget with every
+    single entry inside its cap — and the number was reported, and obeyed, as
+    if it were enforceable.  It is not: the budget is the harder bound.
+
+    The count is lowered to the ceiling rather than dropped, because a branch
+    with no limit rolls nothing and grows without end.  The raw value stays on
+    the row as ``requested_count`` so ``config get`` can still show what the
+    operator wrote next to what the engine will do.
+
+    Mutates *resolved* in place.
+
+    Args:
+        resolved: The rows built by :func:`_resolve_limits`.
+        entry_cfg: The ``entry_limits`` section — its ``entry_types`` shapes
+            and ``file_budgets``.  Anything else is no ceiling data and the
+            rows are left exactly as resolved.
+        branch: Branch name, for the warning.
+    """
+    entry_types = _as_dict(entry_cfg.get("entry_types"))
+    budgets = _as_dict(entry_cfg.get("file_budgets"))
+    if not entry_types or not budgets:
+        return
+
+    # The snapshot is taken BEFORE any clamp so every ceiling is measured
+    # against the same co-tenants; clamping one type must not silently buy
+    # room for the next one in iteration order.
+    counts = {name: row["count"] for name, row in resolved.items()}
+
+    for entry_type, row in resolved.items():
+        count = row["count"]
+        if isinstance(count, bool) or not isinstance(count, int):
+            continue
+        ceiling = budget.count_ceiling(entry_type, counts, entry_types, budgets)
+        if count <= ceiling:
+            continue
+
+        file_key = _as_dict(entry_types.get(entry_type)).get("file", "")
+        max_chars = _as_dict(budgets.get(file_key)).get("max_chars")
+        worst = budget.worst_file_chars(str(file_key), counts, entry_types)
+        logger.warning(
+            f"[config_loader] {branch}: {entry_type} count {count} exceeds the ceiling of {ceiling} for "
+            f"{file_key} — worst case {worst:,} chars against its {max_chars:,} budget "
+            f"(with {_co_tenant_text(str(file_key), counts, entry_types, entry_type)}). Enforcing {ceiling}."
+        )
+        row["count"] = ceiling
+        row["is_override"] = ceiling != row["default_count"]
+
+
+def _resolve_limits(
+    rollover_cfg: dict[str, Any],
+    branch: str,
+    entry_cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Resolve the limits the rollover engine will REALLY apply to *branch*.
 
     Mirrors ``monitor/detector.py`` ``_should_rollover`` exactly: the lookup is
@@ -428,14 +544,34 @@ def _resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]
     them an override would be pure noise.  A value is an override when it
     differs from the corresponding default.
 
+    THE COUNT IS ALSO CLAMPED TO THE FILE BUDGET (1.5.0, FPLAN-0593).  A
+    keep-count is a multiplier on an entry cap, and nothing measured the
+    product: 40 sessions of 706 legal chars is a 25,000-char budget missed by
+    a third, with every entry inside its cap.  When *entry_cfg* is supplied,
+    any count above :func:`budget.count_ceiling` is lowered to the ceiling and
+    the raw value is kept on the row as ``requested_count``.
+
+    *entry_cfg* is a PARAMETER and not a read because this function promises
+    no I/O and means it: ``config_loader.load()`` writes an operation-log line
+    through a read-modify-write of a 1,000-entry JSON file, and the fleet tab
+    renderer resolves limits four times per branch.  Fetching budgets here
+    would have turned one dashboard refresh into ~70 of those.  Every caller
+    that has already loaded the config passes the section along and gets the
+    clamp; a caller holding only the rollover section gets the pre-1.5.0
+    behaviour, unclamped, which is why the accessors below all pass it.
+
     Args:
         rollover_cfg: The ``rollover`` section (already loaded — no I/O here).
         branch: Branch name, matched case-insensitively.
+        entry_cfg: The ``entry_limits`` section, when the caller has it. No
+            ceiling data means no clamp.
 
     Returns:
-        ``{entry_type: {"count", "default_count", "auto_compact_cap",
-        "source", "is_override"}}`` for each of ``ENTRY_TYPE_KEYS``.
-        ``count`` is None when neither per_branch nor defaults set one.
+        ``{entry_type: {"count", "requested_count", "default_count",
+        "auto_compact_cap", "source", "is_override"}}`` for each of
+        ``ENTRY_TYPE_KEYS``.  ``count`` is None when neither per_branch nor
+        defaults set one, and is the ceiling when the configured value was
+        above it; ``requested_count`` is always what the config actually says.
     """
     per_branch = _as_dict(rollover_cfg.get("per_branch"))
     defaults = _as_dict(rollover_cfg.get("defaults"))
@@ -462,16 +598,24 @@ def _resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]
 
         resolved[entry_type] = {
             "count": count,
+            "requested_count": count,
             "default_count": default_count,
             "auto_compact_cap": leaf.get("auto_compact_cap"),
             "source": source,
             "is_override": count != default_count,
         }
 
+    if isinstance(entry_cfg, dict):
+        _clamp_to_budget(resolved, entry_cfg, branch)
+
     return resolved
 
 
-def resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]:
+def resolve_limits(
+    rollover_cfg: dict[str, Any],
+    branch: str,
+    entry_cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Public, no-I/O resolver — the ONE implementation of "what does the engine enforce".
 
     Takes an already-loaded ``rollover`` section so a caller rendering every
@@ -488,11 +632,14 @@ def resolve_limits(rollover_cfg: dict[str, Any], branch: str) -> dict[str, Any]:
     Args:
         rollover_cfg: The ``rollover`` section, already loaded.
         branch: Branch name, matched case-insensitively.
+        entry_cfg: The ``entry_limits`` section, when the caller has it.
+            Without it there is no budget to clamp against — see
+            ``_resolve_limits`` for why this is passed and never fetched.
 
     Returns:
         See ``_resolve_limits``.
     """
-    return _resolve_limits(rollover_cfg, branch)
+    return _resolve_limits(rollover_cfg, branch, entry_cfg)
 
 
 def get_default_limits() -> dict[str, Any]:
@@ -518,9 +665,11 @@ def get_effective_limits(branch: str) -> dict[str, Any]:
         branch: Branch name, matched case-insensitively.
 
     Returns:
-        See ``_resolve_limits`` — one entry per settable entry type.
+        See ``_resolve_limits`` — one entry per settable entry type, clamped
+        to the file budgets.
     """
-    return _resolve_limits(section("rollover"), branch)
+    config = load()
+    return _resolve_limits(_as_dict(config.get("rollover")), branch, _as_dict(config.get("entry_limits")))
 
 
 def get_todos_count(branch: str, rollover_cfg: dict[str, Any] | None = None) -> int | None:
@@ -529,13 +678,19 @@ def get_todos_count(branch: str, rollover_cfg: dict[str, Any] | None = None) -> 
     Args:
         branch: Branch directory name, matched case-insensitively.
         rollover_cfg: An already-loaded ``rollover`` section; loaded when None.
+            Supplying it keeps this call free of I/O, and therefore free of
+            the budget clamp — the same trade ``_resolve_limits`` documents.
 
     Returns:
         A whole number >= 1, or None when no usable count is configured (a
         bool, a string, zero or a negative number is not a pad size).
     """
-    cfg = rollover_cfg if rollover_cfg is not None else section("rollover")
-    count = _resolve_limits(cfg, branch)["todos"]["count"]
+    if rollover_cfg is not None:
+        cfg, entry_cfg = rollover_cfg, None
+    else:
+        config = load()
+        cfg, entry_cfg = _as_dict(config.get("rollover")), _as_dict(config.get("entry_limits"))
+    count = _resolve_limits(cfg, branch, entry_cfg)["todos"]["count"]
     if isinstance(count, bool) or not isinstance(count, int) or count < 1:
         return None
     return count
@@ -550,16 +705,144 @@ def get_branches_with_overrides() -> dict[str, Any]:
     Returns:
         ``{branch: effective_limits}``, branch-sorted, deviating branches only.
     """
-    rollover_cfg = section("rollover")
+    config = load()
+    rollover_cfg = _as_dict(config.get("rollover"))
+    entry_cfg = _as_dict(config.get("entry_limits"))
     per_branch = _as_dict(rollover_cfg.get("per_branch"))
 
     deviating: dict[str, Any] = {}
     for branch in sorted(per_branch):
-        limits = _resolve_limits(rollover_cfg, branch)
+        limits = _resolve_limits(rollover_cfg, branch, entry_cfg)
         if any(row["is_override"] for row in limits.values()):
             deviating[branch] = limits
 
     return deviating
+
+
+# =============================================================================
+# ENTRY LIMITS — READ
+# =============================================================================
+
+
+def get_file_budgets() -> dict[str, Any]:
+    """Return the whole-file ceilings for the .trinity files.
+
+    config_loader owns config reads, so the keep-count ceiling comes here for
+    the budgets rather than opening the file itself.  ``entry_limits``
+    publishes the same three numbers under its own name for callers already
+    holding its module, and that name DELEGATES here — two readers of one key
+    is exactly the drift ``load()`` was written to end.
+
+    Returns:
+        ``{file_name: {"max_chars": int, "max_string_chars": int?}}`` — a
+        private copy, so a caller cannot edit the fleet's budgets by mutating
+        what it was handed.  The regeneration seed's budgets when the config
+        publishes none.
+    """
+    budgets = _as_dict(section("entry_limits").get("file_budgets"))
+    if not budgets:
+        logger.warning("[config_loader] No 'file_budgets' in config — serving the regeneration seed")
+        budgets = DEFAULT_CONFIG["entry_limits"]["file_budgets"]
+    return copy.deepcopy(budgets)
+
+
+def get_count_ceilings(branch: str | None = None) -> dict[str, Any]:
+    """The largest keep-count each entry type may take, and what bounds it.
+
+    One config read for the whole table.  The ceiling is per type and per
+    file: local.json's budget is shared by sessions, key_learnings and todos,
+    so each type's ceiling is what is left once the other two hold their
+    counts — raise one and the others' ceilings drop.
+
+    Args:
+        branch: Whose counts are the co-tenants.  None asks about the fleet
+            defaults, which is the company a ``set-default`` lands in.
+
+    Returns:
+        ``{entry_type: {"ceiling", "count", "file_key", "budget_chars",
+        "co_tenants", "fixed_chars", "entry_chars"}}``, empty when the config
+        publishes no entry shapes or no budgets — nothing measurable is
+        nothing to enforce.  ``fixed_chars + n * entry_chars`` is the file's
+        worst case at any keep-count *n*, which is what a refusal quotes.
+    """
+    config = load()
+    entry_cfg = _as_dict(config.get("entry_limits"))
+    entry_types = _as_dict(entry_cfg.get("entry_types"))
+    budgets = _as_dict(entry_cfg.get("file_budgets"))
+    if not entry_types or not budgets:
+        return {}
+
+    rollover_cfg = _as_dict(config.get("rollover"))
+    counts: dict[str, Any]
+    if branch:
+        counts = {name: row.get("count") for name, row in _resolve_limits(rollover_cfg, branch, entry_cfg).items()}
+    else:
+        defaults = _as_dict(rollover_cfg.get("defaults"))
+        counts = {
+            name: _as_dict(_as_dict(defaults.get(file_key)).get(leaf_key)).get("count")
+            for name, (file_key, leaf_key) in ENTRY_TYPE_KEYS.items()
+        }
+
+    table: dict[str, Any] = {}
+    for entry_type in ENTRY_TYPE_KEYS:
+        file_key = _as_dict(entry_types.get(entry_type)).get("file")
+        if not isinstance(file_key, str):
+            continue
+        company = budget.co_tenants(file_key, counts, entry_types, exclude=entry_type)
+        table[entry_type] = {
+            "ceiling": budget.count_ceiling(entry_type, counts, entry_types, budgets),
+            "count": counts.get(entry_type),
+            "file_key": file_key,
+            "budget_chars": _as_dict(budgets.get(file_key)).get("max_chars"),
+            "co_tenants": company,
+            "fixed_chars": budget.worst_file_chars(file_key, company, entry_types),
+            "entry_chars": budget.worst_entry_chars(_as_dict(_as_dict(entry_types.get(entry_type)).get("fields"))),
+        }
+    return table
+
+
+def ceiling_refusal(entry_type: str, count: int, branch: str | None = None) -> dict[str, Any] | None:
+    """Judge one proposed keep-count against its file budget.
+
+    THE SENTENCE LIVES HERE, not at the verb, for the same reason
+    ``set_branch_limit``'s refusals do: config_loader owns config reads, and a
+    refusal that quoted numbers the verb had fetched itself would be a second
+    reader free to drift from this one.
+
+    Args:
+        entry_type: The type the count is for.
+        count: The proposed keep-count.
+        branch: The branch being written, or None for the fleet defaults.
+
+    Returns:
+        ``{"error", "suggestion", "ceiling", "file_key", "budget_chars"}``
+        when the count busts the budget, else None — an unmeasurable or
+        unconfigured ceiling refuses nothing.
+    """
+    row = get_count_ceilings(branch).get(entry_type)
+    if row is None or count <= row["ceiling"]:
+        return None
+
+    company = row["co_tenants"]
+    with_clause = (
+        "with " + ", ".join(f"{name} {value}" for name, value in company.items())
+        if company
+        else f"{entry_type} is {row['file_key']}'s only tenant"
+    )
+    worst = row["fixed_chars"] + count * row["entry_chars"]
+    return {
+        "error": (
+            f"{entry_type} may keep at most {row['ceiling']} — {row['file_key']}'s worst case at {count} "
+            f"would be {worst:,} chars against its {row['budget_chars']:,} budget ({with_clause})"
+        ),
+        "suggestion": (
+            f"{row['budget_chars']:,} is {row['file_key']}'s budget, in memory.config.json "
+            "entry_limits.file_budgets — the ceiling moves only when that number or the entry caps do"
+        ),
+        "ceiling": row["ceiling"],
+        "file_key": row["file_key"],
+        "budget_chars": row["budget_chars"],
+    }
 
 
 # =============================================================================
@@ -630,7 +913,7 @@ def _materialize_todos(entry: dict[str, Any], defaults: dict[str, Any]) -> None:
     """Carry the todos count into a per_branch ``local`` block that lacks one, in place.
 
     Limits resolve per FILE key as a whole block, so a ``local`` block written
-    by ``config set @b sessions 25`` without ``todos`` reads as "no todo count"
+    by ``config set @b sessions 12`` without ``todos`` reads as "no todo count"
     to any reader following that rule (hooks' count advisory does). The
     resolver falls back anyway; this keeps the file saying the same thing.
 

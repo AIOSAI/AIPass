@@ -561,3 +561,525 @@ class TestTheEmptyRegistryRefusalReachesTheExitCode:
         assert resolve_exit(True) == 2, "lint found no branches but would exit 0"
         captured = capsys.readouterr()
         assert "No branches found" in captured.out + captured.err
+
+
+# ===========================================================================
+# 4. Fields mode — the closed-shape inventory (FPLAN-0593 / DPLAN-0347)
+#
+# One capped field per entry type is what let a 917-char `status` ride past
+# every gate while the fleet median was 9. These pin the second measurement:
+# every string field listed by chars, everything outside the shape flagged,
+# and the canonical field left to the mode that already owns it.
+# ===========================================================================
+
+
+_BUDGETS = {"passport.json": {"max_chars": 6000, "max_string_chars": 600}}
+
+
+def _shape_limits() -> dict[str, Any]:
+    """Limits carrying a closed field shape, same form as memory.config.json."""
+    return {
+        "enabled": True,
+        "enforce": False,
+        "entry_types": {
+            "sessions": {
+                "file": "local.json",
+                "container": "sessions",
+                "kind": "list",
+                "field": "summary",
+                "max_chars": 300,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "summary": {"type": "str", "required": True, "max_chars": 300},
+                    "status": {"type": "str", "required": True, "max_chars": 40},
+                    "tags": {"type": "list[str]", "required": False, "max_items": 3, "max_chars": 120},
+                },
+            },
+        },
+    }
+
+
+def _session(**overrides: Any) -> dict[str, Any]:
+    """A session entry that matches the shape, with fields swapped in per test."""
+    entry = {"number": 1, "date": "2026-09-15", "summary": "a fine summary", "status": "complete", "tags": ["one"]}
+    entry.update(overrides)
+    return entry
+
+
+def _plant(tmp_path: Path, name: str, sessions: list[Any], passport: Any = None) -> list[dict[str, str]]:
+    """Write a throwaway branch tree under tmp_path and return its registry rows."""
+    trinity = tmp_path / name / ".trinity"
+    trinity.mkdir(parents=True)
+    (trinity / "local.json").write_text(json.dumps({"sessions": sessions}, indent=2), encoding="utf-8")
+    if passport is not None:
+        (trinity / "passport.json").write_text(json.dumps(passport, indent=2), encoding="utf-8")
+    return [{"name": name, "path": str(tmp_path / name)}]
+
+
+def _run_fields(handler, branches: list[dict[str, str]], limits: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run the fields mode against test limits and test budgets — never the live config."""
+    with patch.object(handler, "load_entry_limits", return_value=limits or _shape_limits()):
+        with patch.object(handler, "load_file_budgets", return_value=_BUDGETS):
+            return handler.run_lint_fields(branches)
+
+
+def _flags_for(result: dict[str, Any], field: str) -> list[dict[str, Any]]:
+    """Every flag naming *field*."""
+    return [v for v in result["violations"] if v.get("field") == field]
+
+
+class TestFieldsModeFlagsTheClosedShape:
+    """A field outside the shape is named, whichever way it is outside it."""
+
+    def test_unknown_field_is_flagged(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(mood="great")])
+
+        result = _run_fields(handler, branches)
+
+        hits = _flags_for(result, "mood")
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "unknown_field"
+        assert hits[0]["branch"] == "alpha"
+        assert hits[0]["file"] == "local.json"
+        assert hits[0]["length"] == 5
+
+    def test_field_over_its_cap_is_flagged(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(status="s" * 60)])
+
+        result = _run_fields(handler, branches)
+
+        hits = _flags_for(result, "status")
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "field_over_cap"
+        assert hits[0]["length"] == 60
+        assert hits[0]["cap"] == 40
+        assert hits[0]["over_by"] == 20
+        assert hits[0]["units"] == "chars"
+
+    def test_list_over_max_items_is_flagged(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(tags=["a", "b", "c", "d", "e"])])
+
+        result = _run_fields(handler, branches)
+
+        hits = [v for v in _flags_for(result, "tags") if v["units"] == "items"]
+        assert len(hits) == 1
+        assert hits[0]["length"] == 5
+        assert hits[0]["cap"] == 3
+        assert hits[0]["over_by"] == 2
+
+    def test_missing_required_field_is_flagged(self, tmp_path: Path) -> None:
+        entry = _session()
+        del entry["status"]
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [entry])
+
+        result = _run_fields(handler, branches)
+
+        hits = _flags_for(result, "status")
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "missing_field"
+
+    def test_a_clean_branch_flags_nothing(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(), _session(number=2)])
+
+        result = _run_fields(handler, branches)
+
+        assert result["success"] is True
+        assert result["violations"] == []
+        assert result["branches_scanned"] == 1
+
+
+class TestFieldsModeIsAnInventory:
+    """Every string field is LISTED by chars, not only the ones in breach."""
+
+    def test_every_string_field_is_measured(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session()])
+
+        result = _run_fields(handler, branches)
+
+        measured = {(r["field"], r["units"]): r for r in result["fields"]}
+        # date, summary, status, tags-as-items, tags-as-chars. `number` is an
+        # int and has no characters to list.
+        assert set(measured) == {
+            ("date", "chars"),
+            ("summary", "chars"),
+            ("status", "chars"),
+            ("tags", "items"),
+            ("tags", "chars"),
+        }
+        assert measured[("status", "chars")]["length"] == len("complete")
+        assert measured[("status", "chars")]["cap"] == 40
+        assert measured[("tags", "items")]["length"] == 1
+        assert result["total_fields"] == 5
+
+    def test_summary_rows_carry_max_p95_and_flag_counts(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        sessions = [_session(status="s" * n) for n in (5, 5, 5, 5, 5, 5, 5, 5, 5, 60)]
+        branches = _plant(tmp_path, "alpha", sessions)
+
+        result = _run_fields(handler, branches)
+
+        row = next(r for r in result["summary"] if r["field"] == "status" and r["units"] == "chars")
+        assert row["count"] == 10
+        assert row["max"] == 60
+        assert row["p95"] == 60  # nearest-rank: a real entry's length, never an average
+        assert row["flagged"] == 1
+        assert row["worst_over"] == 20
+        assert row["branch"] == "alpha"
+
+    def test_worst_first_ordering_matches_the_original_mode(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(status="s" * 45, tags=["t" * 200])])
+
+        result = _run_fields(handler, branches)
+
+        overs = [v["over_by"] for v in result["violations"]]
+        assert overs == sorted(overs, reverse=True)
+
+
+class TestTheCanonicalFieldIsNotReportedTwice:
+    """The canonical field is inventoried here and JUDGED by `lint run` — never both.
+
+    check_fields skips it by contract; this pins that the fields mode does not
+    quietly re-derive its cap, which would make one fat summary two findings.
+    """
+
+    def test_over_cap_canonical_field_is_listed_but_not_flagged(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(summary="x" * 500)])
+
+        result = _run_fields(handler, branches)
+
+        assert _flags_for(result, "summary") == []
+        listed = next(r for r in result["fields"] if r["field"] == "summary")
+        assert listed["length"] == 500
+        assert listed["cap"] == 300
+        assert listed["canonical"] is True
+
+    def test_the_original_mode_still_owns_that_violation(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session(summary="x" * 500)])
+
+        with patch.object(handler, "load_entry_limits", return_value=_shape_limits()):
+            canonical = handler.run_lint(branches)
+
+        assert canonical["total_violations"] == 1
+        assert canonical["violations"][0]["over_by"] == 200
+
+
+class TestThePassportRow:
+    """passport.json is measured by SIZE only — @spawn owns its schema."""
+
+    def test_a_string_over_600_is_flagged(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        passport = {"identity": {"purpose": "p" * 700}}
+        branches = _plant(tmp_path, "alpha", [_session()], passport=passport)
+
+        result = _run_fields(handler, branches)
+
+        hits = [v for v in result["violations"] if v["entry_type"] == "passport.json"]
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "field_over_cap"
+        assert hits[0]["key"] == "identity.purpose"
+        assert hits[0]["length"] == 700
+        assert hits[0]["cap"] == 600
+        assert hits[0]["branch"] == "alpha"
+
+    def test_a_file_over_6000_is_flagged(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        passport = {"identity": {"purpose": "p" * 7000}}
+        branches = _plant(tmp_path, "alpha", [_session()], passport=passport)
+
+        result = _run_fields(handler, branches)
+
+        reasons = {v["reason"] for v in result["violations"] if v["entry_type"] == "passport.json"}
+        assert "file_over_budget" in reasons
+        row = result["passport"][0]
+        assert row["cap"] == 6000
+        assert row["string_cap"] == 600
+        assert row["length"] > 6000
+        assert row["oversized_strings"] == 1
+
+    def test_a_passport_within_budget_is_reported_clean(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session()], passport={"identity": {"purpose": "small"}})
+
+        result = _run_fields(handler, branches)
+
+        assert result["violations"] == []
+        assert result["passport"][0]["oversized_strings"] == 0
+        assert result["passport"][0]["length"] > 0
+
+    def test_a_branch_without_a_passport_gets_no_row(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        branches = _plant(tmp_path, "alpha", [_session()])
+
+        result = _run_fields(handler, branches)
+
+        assert result["passport"] == []
+
+
+class TestFieldsModeIsReadOnly:
+    """The fields mode never writes, truncates or deletes — content AND mtime."""
+
+    def test_nothing_on_disk_moves(self, tmp_path: Path) -> None:
+        handler = _get_lint_handler()
+        passport = {"identity": {"purpose": "p" * 700}}
+        branches = _plant(
+            tmp_path,
+            "alpha",
+            [_session(mood="great", status="s" * 60, tags=["a", "b", "c", "d"])],
+            passport=passport,
+        )
+
+        tree = sorted(p for p in (tmp_path / "alpha" / ".trinity").iterdir())
+        before = {p: (p.read_text(encoding="utf-8"), p.stat().st_mtime_ns) for p in tree}
+
+        result = _run_fields(handler, branches)
+        assert result["violations"], "the scan must have found something to report"
+
+        after = {p: (p.read_text(encoding="utf-8"), p.stat().st_mtime_ns) for p in tree}
+        assert after == before, "lint fields modified a file"
+        still_there = sorted(p for p in (tmp_path / "alpha" / ".trinity").iterdir())
+        assert still_there == tree, "lint fields added or removed a file"
+
+
+class TestFieldsModeRouting:
+    """`lint fields` is ADDITIVE — the old spellings route exactly where they did."""
+
+    def _lint_module(self):
+        return importlib.import_module("aipass.memory.apps.modules.lint")
+
+    def test_fields_routes_to_the_fields_mode(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "_execute_lint_fields") as fields:
+            with patch.object(lint, "_execute_lint") as canonical:
+                assert lint.handle_command("lint", ["fields"]) is True
+        fields.assert_called_once_with(None)
+        canonical.assert_not_called()
+
+    def test_fields_takes_a_branch_filter(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "_execute_lint_fields") as fields:
+            assert lint.handle_command("lint", ["fields", "@devpulse"]) is True
+        fields.assert_called_once_with("devpulse")
+
+    def test_fields_help_still_prints_help(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "print_help") as helped:
+            with patch.object(lint, "_execute_lint_fields") as fields:
+                assert lint.handle_command("lint", ["fields", "--help"]) is True
+        helped.assert_called_once()
+        fields.assert_not_called()
+
+    def test_an_unknown_fields_argument_is_refused(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "error") as errored:
+            with patch.object(lint, "_execute_lint_fields") as fields:
+                assert lint.handle_command("lint", ["fields", "bogus"]) is True
+        errored.assert_called_once()
+        fields.assert_not_called()
+
+    def test_the_old_spellings_still_reach_the_old_mode(self) -> None:
+        lint = self._lint_module()
+        for args, expected in ((["run"], None), (["@devpulse"], "devpulse"), (["run", "@devpulse"], "devpulse")):
+            with patch.object(lint, "_execute_lint") as canonical:
+                with patch.object(lint, "_execute_lint_fields") as fields:
+                    assert lint.handle_command("lint", args) is True
+            canonical.assert_called_once_with(expected)
+            fields.assert_not_called()
+
+    def test_bare_lint_still_introspects(self) -> None:
+        lint = self._lint_module()
+        with patch.object(lint, "print_introspection") as introspected:
+            with patch.object(lint, "_execute_lint_fields") as fields:
+                assert lint.handle_command("lint", []) is True
+        introspected.assert_called_once()
+        fields.assert_not_called()
+
+
+class TestTheOriginalOutputIsUnchanged:
+    """A regression pin on the ORIGINAL mode's rendering, character for character.
+
+    The fields mode shares the module's console helpers and the registry
+    bridge, so the way it could break `lint run` is by changing what that
+    prints. This is the tripwire.
+    """
+
+    def _lint_module(self):
+        return importlib.import_module("aipass.memory.apps.modules.lint")
+
+    def test_violation_rendering_is_byte_for_byte(self, capsys) -> None:
+        lint = self._lint_module()
+        result = {
+            "success": True,
+            "violations": [
+                {
+                    "branch": "alpha",
+                    "file": "local.json",
+                    "container": "key_learnings",
+                    "key": "k1",
+                    "length": 15,
+                    "cap": 10,
+                    "over_by": 5,
+                    "entry_type": "key_learnings",
+                },
+            ],
+            "total_violations": 1,
+            "branches_scanned": 2,
+            "branches_skipped": 1,
+        }
+
+        lint._display_results(result, None)
+
+        captured = capsys.readouterr()
+        lines = [line.rstrip() for line in captured.out.splitlines() if line.strip()]
+        assert lines == [
+            "  alpha",
+            "    ! local.json:key_learnings/k1 (key_learnings) 15/10 chars +5 over",
+            "Scanned 2 branch(es), skipped 1",
+        ]
+        assert "1 violation(s) found" in captured.err
+
+    def test_the_clean_line_is_unchanged(self, capsys) -> None:
+        lint = self._lint_module()
+        result = {"success": True, "violations": [], "total_violations": 0, "branches_scanned": 22}
+
+        lint._display_results(result, "memory")
+
+        captured = capsys.readouterr()
+        assert "No violations found across @memory (22 scanned)" in captured.out
+
+
+class TestFieldsModeDisplay:
+    """A clean fleet must SAY it is clean — an empty screen proves nothing ran."""
+
+    def _lint_module(self):
+        return importlib.import_module("aipass.memory.apps.modules.lint")
+
+    def _summary_row(self, **overrides: Any) -> dict[str, Any]:
+        row = {
+            "branch": "alpha",
+            "file": "local.json",
+            "entry_type": "sessions",
+            "field": "status",
+            "units": "chars",
+            "cap": 40,
+            "canonical": False,
+            "count": 3,
+            "max": 12,
+            "p95": 12,
+            "flagged": 0,
+            "worst_over": 0,
+        }
+        row.update(overrides)
+        return row
+
+    def test_clean_fleet_prints_the_success_line(self, capsys) -> None:
+        lint = self._lint_module()
+        passport = {
+            "branch": "alpha",
+            "file": "passport.json",
+            "length": 1797,
+            "cap": 6000,
+            "string_cap": 600,
+            "oversized_strings": 0,
+        }
+        result = {
+            "success": True,
+            "summary": [self._summary_row()],
+            "violations": [],
+            "passport": [passport],
+            "total_fields": 3,
+            "branches_scanned": 22,
+            "branches_skipped": 0,
+        }
+
+        lint._display_field_results(result, None)
+
+        out = capsys.readouterr().out
+        assert "No fields outside the shape across all branches (22 scanned)" in out
+        assert "alpha" in out
+        assert "status" in out
+        assert "1797/6000 chars" in out
+
+    def test_a_flagged_field_is_obvious(self, capsys) -> None:
+        lint = self._lint_module()
+        result = {
+            "success": True,
+            "summary": [self._summary_row(max=917, flagged=1, worst_over=877)],
+            "violations": [
+                {
+                    "branch": "alpha",
+                    "file": "local.json",
+                    "container": "sessions",
+                    "key": "[2]",
+                    "entry_type": "sessions",
+                    "field": "status",
+                    "units": "chars",
+                    "reason": "field_over_cap",
+                    "length": 917,
+                    "cap": 40,
+                    "over_by": 877,
+                },
+            ],
+            "passport": [],
+            "total_fields": 3,
+            "branches_scanned": 1,
+            "branches_skipped": 0,
+        }
+
+        lint._display_field_results(result, "alpha")
+
+        captured = capsys.readouterr()
+        assert "outside shape" in captured.out
+        assert "917/40" in captured.out
+        assert "+877 over" in captured.out
+        assert "1 field(s) outside the shape" in captured.err
+
+    def test_an_empty_scan_says_so(self, capsys) -> None:
+        lint = self._lint_module()
+        result = {
+            "success": True,
+            "summary": [],
+            "violations": [],
+            "passport": [],
+            "total_fields": 0,
+            "branches_scanned": 0,
+            "branches_skipped": 0,
+        }
+
+        lint._display_field_results(result, None)
+
+        captured = capsys.readouterr()
+        assert "No .trinity fields to measure" in captured.out + captured.err
+
+    def test_the_fields_mode_reaches_the_display(self) -> None:
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "run_lint_fields", return_value={"success": True}) as scanned:
+                with patch.object(lint, "_display_field_results") as displayed:
+                    lint._execute_lint_fields(branch_filter="memory")
+
+        scanned.assert_called_once()
+        displayed.assert_called_once()
+
+    def test_an_unknown_branch_is_refused_in_fields_mode_too(self) -> None:
+        lint = self._lint_module()
+        registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
+
+        with patch.object(lint, "_read_registry", return_value=registry):
+            with patch.object(lint, "error") as errored:
+                with patch.object(lint, "run_lint_fields") as scanned:
+                    lint._execute_lint_fields(branch_filter="nosuchbrnach")
+
+        errored.assert_called_once()
+        scanned.assert_not_called()

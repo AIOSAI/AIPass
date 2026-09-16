@@ -2521,7 +2521,11 @@ class TestTodoRestore:
         return tr.restore_todo("guinea", number, local_path=local, backup_root=tmp_path / ".backup")
 
     def test_restore_reissues_the_next_number_and_carries_every_other_field(self, tr, tmp_path):
-        original = _todo(2, task="bring it back", priority="high", tags=["x"])
+        # `tags` used to stand in for "every other field" here. The closed
+        # field shape (FPLAN-0593) made that a field a todo may not carry, so
+        # the pin now rides on `priority` — a field the shape allows — and the
+        # tags case is pinned below for what it actually does now.
+        original = _todo(2, task="bring it back", priority="high")
         local = _mint_pad(tmp_path, [_todo(n) for n in (5, 9, 3)])
         backlog = self._backlog_with(
             tmp_path, [self._record(_todo(1)), self._record(original), self._record(_todo(14))]
@@ -2534,6 +2538,26 @@ class TestTodoRestore:
         assert json.loads(local.read_text(encoding="utf-8"))["todos"][0] == {**original, "number": 15}
         remaining = json.loads(backlog.read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in remaining] == [1, 14]
+
+    def test_restoring_a_non_canonical_todo_is_refused_by_the_write_gate(self, tr, tmp_path):
+        # THE DEAD END, pinned rather than hidden (FPLAN-0593). A todo reaches
+        # the backlog BECAUSE it is non-canonical, and the closed field shape
+        # means putting it back on the pad is now a refused write. Restore
+        # must not reshape it to get past the gate — that is the one thing the
+        # backlog contract forbids — so the honest outcome is a refusal, and
+        # `drone @memory todo backlog` remains the way to read the text and
+        # re-add it by hand in the canonical shape.
+        original = _todo(2, task="bring it back", tags=["x"])
+        local = _mint_pad(tmp_path, [_todo(5)])
+        backlog = self._backlog_with(tmp_path, [self._record(original)])
+
+        result = self._restore(tr, 2, local, tmp_path)
+
+        assert result["success"] is False
+        assert "tags" in result["error"] or "shape" in result["error"], result["error"]
+        # The pad and the backlog are both left exactly as found.
+        assert [t["number"] for t in json.loads(local.read_text(encoding="utf-8"))["todos"]] == [5]
+        assert [r["entry"]["number"] for r in json.loads(backlog.read_text(encoding="utf-8"))["entries"]] == [2]
 
     def test_the_pad_is_written_before_the_backlog_is_touched(self, tr, tmp_path, monkeypatch):
         local = _mint_pad(tmp_path, [_todo(3)])

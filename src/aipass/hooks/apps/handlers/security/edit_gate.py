@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.12.0
+# Version: 1.13.0
 # Description: Cross-project (tool + scripted), cross-branch, inbox and shell-to-memory write protection
 #              (PreToolUse), plus the shell-memory tripwire (PreToolUse snapshot, PostToolUse report)
 # Branch: hooks
@@ -39,7 +39,18 @@ ADMIN_SEAT = "devpulse"
 # the file fence and the mail fence must draw the boundary in the same place, or
 # an agent is refused a send and allowed the equivalent write (GH #733).
 _PROJECT_MARKER = "*_REGISTRY.json"
-_TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json"})
+# passport.json joined these on 2026-09-15 (DPLAN-0347 rows 4 and 6). It is a
+# .trinity file every bit as much as the other two, and until then it was
+# writable by any lane at any size: the identity block renders on every cadence
+# beat, so a passport that grows is a standing tax on the session. @spawn owns
+# its schema, so it is measured by SIZE only — @memory's check_file_budget,
+# 6,000 chars per file and 600 per string, never a field shape.
+_TRINITY_MEMORY_FILES = frozenset({"local.json", "observations.json", "passport.json"})
+_FILE_BUDGET_FILES = frozenset({"passport.json"})
+# How deep under the project root a .trinity can sit: src/<pkg>/<branch>/.trinity
+# is four. Bounded on purpose — a full walk of a repo this size on every Bash
+# call is a cost no report is worth (24 dirs, 72 stats, ~19 ms measured 09-15).
+_TRINITY_SCAN_DEPTH = 4
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 _NUMBER_KEYS = ("number", "session_number")
 # todos roll (DPLAN-0345, Patrick 2026-09-14): over the pad count is legal on disk,
@@ -288,9 +299,9 @@ def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
         logger.warning("[HOOKS] edit_gate: shell write to a memory file refused: %s via %s", target, how)
         reason = (
             f"Memory files are not written from a shell: {target} via {how}.\n"
-            "Write .trinity/local.json and observations.json with the Edit or Write tool, where @memory's caps "
-            "are measured, or through a drone @memory verb. A shell write lands unmeasured, which is how whole "
-            "branches drifted over cap.\n"
+            "Write .trinity/local.json, observations.json and passport.json with the Edit or Write tool, where "
+            "@memory's caps are measured, or through a drone @memory verb. A shell write lands unmeasured, which "
+            "is how whole branches drifted over cap.\n"
             "Only reading it? An interpreter that names a memory path is refused whether it reads or writes, "
             "because this gate cannot tell which. Read the file with the Read tool, cat or jq."
         )
@@ -499,7 +510,14 @@ def _cut_point(text: str, cap: int) -> str:
     return f"kept: {kept} | over: {over}"
 
 
-def _format_violation(v: dict, text: str | None = None) -> str:
+def _where(v: dict) -> str:
+    """'sessions [0]' for an entry, just the file name for a whole-file finding."""
+    if v.get("key") in (None, "", v.get("entry_type")):
+        return str(v.get("entry_type", "?"))
+    return f"{v['entry_type']} [{v['key']}]"
+
+
+def _format_violation(v: dict, text: str | None = None, allowed: list[str] | None = None) -> str:
     """Render one violation line, plus the cut point when the text is known.
 
     A refusal that cannot be measured must not print as a measurement. The
@@ -507,8 +525,28 @@ def _format_violation(v: dict, text: str | None = None) -> str:
     keep @memory's published six-key contract, so rendering them through the
     over-cap format produces "0/300 chars (+0)" — which reads as a bug in the
     gate rather than as the named refusal it is.
+
+    @memory 1.11.0 (FPLAN-0593) adds two species to that contract —
+    ``unknown_field`` and ``field_over_cap`` — plus ``file_over_budget`` from
+    the passport row. Each carries ``field`` and ``units``; rendering them
+    through the catch-all below would have called an over-cap status
+    "unmeasurable", which is the opposite of what happened.
     """
     reason = v.get("reason")
+    if reason == "unknown_field":
+        shape = ", ".join(allowed) if allowed else "the published shape"
+        return (
+            f"  {_where(v)}: field '{v.get('field', '?')}' is not part of the entry shape — "
+            f"allowed: {shape}. Remove it, or ask @memory to add it to the shape."
+        )
+    if reason == "field_over_cap":
+        units = v.get("units", "chars")
+        return f"  {_where(v)}: '{v.get('field', '?')}' is {v['length']}/{v['cap']} {units} (+{v['over_by']} over)"
+    if reason == "file_over_budget":
+        return (
+            f"  {_where(v)}: the whole file is {v['length']}/{v['cap']} chars (+{v['over_by']} over). "
+            "Roll or trim before saving — this budget is @memory's, read here, never copied."
+        )
     if reason == "missing_field":
         return (
             f"  {v['entry_type']} [{v['key']}]: no '{v.get('field', '?')}' field — "
@@ -528,7 +566,20 @@ def _format_violation(v: dict, text: str | None = None) -> str:
 
 def _log_violation(v: dict, text: str | None = None) -> None:
     """Warn-mode log line — carries the same cause, and cut, the block would have named."""
-    if v.get("reason"):
+    reason = v.get("reason")
+    if reason in ("unknown_field", "field_over_cap", "file_over_budget"):
+        logger.warning(
+            "[HOOKS] edit_gate: %s .trinity %s field '%s' %d/%d %s (+%d) — warn only",
+            reason,
+            _where(v),
+            v.get("field", "?"),
+            v["length"],
+            v["cap"],
+            v.get("units", "chars"),
+            v["over_by"],
+        )
+        return
+    if reason:
         logger.warning(
             "[HOOKS] edit_gate: unreadable .trinity entry %s [%s]: %s (field '%s', cap %d) — warn only",
             v["entry_type"],
@@ -574,6 +625,28 @@ def _dedupe_violations(violations: list[dict]) -> list[dict]:
     return unique
 
 
+def _allowed_fields(v: dict, limits: dict, el: Any) -> list[str] | None:
+    """The entry type's published field names, for an unknown-field refusal.
+
+    Read from @memory through ``fields_for`` rather than the raw key: the shape
+    is memory's to publish and this gate's to render (DPLAN-0347). An
+    unconfigured type answers {} and the refusal then says "the published
+    shape" rather than naming an empty list.
+    """
+    if v.get("reason") != "unknown_field":
+        return None
+    try:
+        fields = el.fields_for(v.get("entry_type", ""), limits)
+    except AttributeError as exc:
+        # An older @memory in the tree has no fields_for. The refusal is still
+        # correct without the allow-list; going dark over a missing helper is not.
+        logger.info("[HOOKS] edit_gate: fields_for unavailable, refusal renders without the shape: %s", exc)
+        return None
+    # Declaration order, not alphabetical: the config lists a field's own order
+    # (number, date, summary, status, tags) and that reads as the entry's shape.
+    return list(fields) if isinstance(fields, dict) and fields else None
+
+
 def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict | None:
     """Diff changed entries and return block dict or None (allow)."""
     over = el.changed_entries(before, after, limits)
@@ -584,7 +657,7 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
     if limits.get("enforce"):
         lines = ["Unwritable .trinity entries (fix before saving):"]
         for v, text in zip(over, texts, strict=True):
-            lines.append(_format_violation(v, text))
+            lines.append(_format_violation(v, text, _allowed_fields(v, limits, el)))
         # Say what this gate can actually see. The cap is measured on the
         # Edit/Write lane. Until DPLAN-0342 row 3 this line said a Bash write was
         # "not measured" — true, and three branches drifted over cap through that
@@ -605,6 +678,54 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
     for v, text in zip(over, texts, strict=True):
         _log_violation(v, text)
     return None
+
+
+def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any) -> dict | None:
+    """Measure a whole-file budget — the passport row (DPLAN-0347, @memory 1.11.0).
+
+    SIZE only, never a field shape: @spawn owns passport.json's schema, @memory
+    owns the numbers (6,000 chars per file, 600 per string), and this gate does
+    what it is for — enforcing them at the write. The per-entry path above never
+    saw a passport, because a passport carries no entry arrays.
+
+    Warn-mode (``enforce`` false) logs and allows, exactly as the entry caps do.
+
+    Args:
+        file_name: The .trinity file being written, e.g. "passport.json".
+        after_text: The file as it would be on disk after this call.
+        limits: @memory's entry-limits block — read for its enforce switch.
+        el: @memory's entry_limits module.
+
+    Returns:
+        A block dict, or None to allow.
+    """
+    if file_name not in _FILE_BUDGET_FILES:
+        return None
+    try:
+        violations = el.check_file_budget(file_name, after_text)
+    except AttributeError as exc:
+        # An older @memory in the tree publishes no file budgets. Allow, and say
+        # so once: a size rule that cannot be read is not a size rule that failed.
+        logger.info("[HOOKS] edit_gate: check_file_budget unavailable, %s unmeasured: %s", file_name, exc)
+        return None
+    if not violations:
+        return None
+    if not limits.get("enforce"):
+        for v in violations:
+            _log_violation(v)
+        return None
+    lines = [f"{file_name} is over its budget (fix before saving):"]
+    lines.extend(_format_violation(v) for v in violations)
+    lines.append(
+        "  The identity block renders from this file on every cadence beat, so its size is a standing cost. "
+        "Caps live in @memory's memory.config.json (file_budgets); @spawn owns the schema."
+    )
+    logger.warning("[HOOKS] edit_gate: %s refused — %d file-budget violation(s)", file_name, len(violations))
+    return {
+        "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
+        "exit_code": 2,
+        "sound": "edit gate",
+    }
 
 
 def _todos_count_advisory(after: dict, branch: str) -> str:
@@ -860,8 +981,8 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         resolved_path = str(fp.resolve()) if not fp.is_absolute() else str(fp)
 
         if tool_name == "Write":
-            content = tool_input.get("content", "")
-            after = json.loads(content)
+            after_text = tool_input.get("content", "")
+            after = json.loads(after_text)
             before = {}
             if Path(resolved_path).exists():
                 before = json.loads(Path(resolved_path).read_text(encoding="utf-8"))
@@ -870,9 +991,10 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
                 return None
             current_text = Path(resolved_path).read_text(encoding="utf-8")
             before = json.loads(current_text)
-            after_text = _resolve_after_text(tool_name, tool_input, current_text)
-            if after_text is None:
+            resolved_after = _resolve_after_text(tool_name, tool_input, current_text)
+            if resolved_after is None:
                 return None
+            after_text = resolved_after
             after = json.loads(after_text)
 
         block = _check_newest_first(before, after)
@@ -883,6 +1005,9 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         limits = el.load_entry_limits(branch)
         if limits.get("enabled"):
             block = _evaluate_limits(before, after, limits, el)
+            if block:
+                return block
+            block = _evaluate_file_budget(fp.name, after_text, limits, el)
             if block:
                 return block
 
@@ -917,16 +1042,46 @@ def _seat_trinity(cwd: str) -> Path | None:
     return None
 
 
-def _memory_stats(trinity: Path) -> dict[str, list[int] | None]:
-    """(mtime_ns, size) per memory file. None for a missing file, so a creation or a removal reads as a change."""
+def _watched_trinity_dirs(cwd: str) -> list[Path]:
+    """Every .trinity in the project, the seat's own first; just the seat's when there is no project.
+
+    DPLAN-0347 row 4. The tripwire used to watch the seat alone, so a shell write
+    into ANOTHER branch's memory — the shape the cross-branch fence exists to
+    refuse, arriving by a path the reader cannot see — landed unreported. A stat
+    is all it takes to notice, and no file is read unless something changed.
+    """
+    seat = _seat_trinity(cwd)
+    dirs: list[Path] = [seat] if seat is not None else []
+    root = _find_project_root(Path(cwd)) if cwd else None
+    if root is None:
+        return dirs
+    try:
+        for depth in range(1, _TRINITY_SCAN_DEPTH + 1):
+            pattern = "/".join(["*"] * (depth - 1) + [".trinity"])
+            for found in root.glob(pattern):
+                if found.is_dir() and found not in dirs:
+                    dirs.append(found)
+    except OSError as exc:
+        logger.info("[HOOKS] edit_gate tripwire: .trinity scan under %s failed: %s", root, exc)
+    return dirs
+
+
+def _memory_stats(dirs: list[Path]) -> dict[str, list[int] | None]:
+    """(mtime_ns, size) per watched file, keyed by full path.
+
+    None for a missing file, so a creation or a removal reads as a change. Keyed
+    by path rather than name because the tripwire now watches every .trinity in
+    the project and two branches have the same three file names.
+    """
     stats: dict[str, list[int] | None] = {}
-    for name in sorted(_TRINITY_MEMORY_FILES):
-        path = trinity / name
-        if not path.is_file():
-            stats[name] = None
-            continue
-        found = path.stat()
-        stats[name] = [found.st_mtime_ns, found.st_size]
+    for trinity in dirs:
+        for name in sorted(_TRINITY_MEMORY_FILES):
+            path = trinity / name
+            if not path.is_file():
+                stats[str(path)] = None
+                continue
+            found = path.stat()
+            stats[str(path)] = [found.st_mtime_ns, found.st_size]
     return stats
 
 
@@ -967,6 +1122,14 @@ def _measure_memory_file(path: Path) -> list[str]:
     """
     if not path.is_file():
         return [f"  {path.name} no longer exists."]
+    if path.name in _FILE_BUDGET_FILES:
+        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            logger.info("[HOOKS] edit_gate tripwire: %s unreadable after a shell call: %s", path, exc)
+            return [f"  {path.name} could not be read: {exc}"]
+        return [_format_violation(v) for v in el.check_file_budget(path.name, text)]
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -1157,8 +1320,8 @@ def tripwire_snapshot(hook_data: dict) -> dict:
     try:
         if hook_data.get("tool_name") != "Bash":
             return {"stdout": "", "exit_code": 0}
-        trinity = _seat_trinity(hook_data.get("cwd", "") or os.getcwd())
-        if trinity is None:
+        dirs = _watched_trinity_dirs(hook_data.get("cwd", "") or os.getcwd())
+        if not dirs:
             return {"stdout": "", "exit_code": 0}
         tool_use_id = hook_data.get("tool_use_id")
         if not tool_use_id:
@@ -1167,7 +1330,9 @@ def tripwire_snapshot(hook_data: dict) -> dict:
         path = _tripwire_path(hook_data)
         pending = _read_pending(path)
         pending.pop(tool_use_id, None)
-        pending[tool_use_id] = {"trinity": str(trinity), "stats": _memory_stats(trinity)}
+        # The dir list is stored, not rescanned at PostToolUse: the comparison must
+        # be against what was measured, and a rescan would also pay the glob twice.
+        pending[tool_use_id] = {"trinity": str(dirs[0]), "stats": _memory_stats(dirs)}
         while len(pending) > _TRIPWIRE_PENDING_MAX:
             pending.pop(next(iter(pending)))
         scratch = path.with_name(f"{path.name}.{os.getpid()}.tmp")
@@ -1176,6 +1341,47 @@ def tripwire_snapshot(hook_data: dict) -> dict:
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate tripwire: snapshot failed, this call goes unwatched: %s", exc)
     return {"stdout": "", "exit_code": 0}
+
+
+def _report_change(path: Path, seat: Path) -> list[str]:
+    """Report one changed memory file — as an accusation for the seat's own, as a question for anyone else's.
+
+    The seat's own memory changing during its own shell call is a write this
+    session made: there is no one else in that directory. Another branch's is
+    NOT the same claim. Every citizen runs its own live session, so a neighbour
+    saving its memory while this command runs lands inside the same window —
+    measured the first time this ran fleet-wide (a 76-second pytest caught
+    @devpulse and @memory writing their own local.json mid-run, 2026-09-15).
+
+    Reporting it anyway is right: a cross-branch shell write is exactly the
+    shape the fence exists to refuse and the reader cannot always see it. Saying
+    "you wrote this" when the neighbour did is not.
+
+    Args:
+        path: The changed memory file.
+        seat: The seat's own .trinity directory, from the snapshot.
+
+    Returns:
+        Lines for the report, already indented where they belong.
+    """
+    findings = _measure_memory_file(path)
+    mine = path.parent == seat
+    if mine:
+        head = f"MEMORY WRITTEN FROM A SHELL: {path} changed during this Bash call, outside the caps gate"
+        cure = (
+            "  Re-land each entry through Edit, trimming the over tail. Memory is written with Edit/Write "
+            "or a drone @memory verb, never a shell."
+        )
+    else:
+        head = f"ANOTHER BRANCH'S MEMORY CHANGED: {path} changed during this Bash call"
+        cure = (
+            f"  If this command wrote it, that is a cross-branch write — {path.parent.parent.name} owns that file. "
+            "If that seat is live right now, this is its own write and there is nothing to do here."
+        )
+    if findings:
+        return [f"{head}, and it does not measure clean:", *findings, cure]
+    clean = "It is inside its file budget." if path.name in _FILE_BUDGET_FILES else "It measures clean."
+    return [f"{head}. {clean}", cure] if not mine else [f"{head}. {clean} {cure.strip()}"]
 
 
 def tripwire(hook_data: dict) -> dict:
@@ -1203,8 +1409,9 @@ def tripwire(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
 
         trinity = Path(before["trinity"])
-        now = _memory_stats(trinity)
-        changed = [name for name in sorted(_TRINITY_MEMORY_FILES) if now.get(name) != before["stats"].get(name)]
+        stats_before: dict = before["stats"]
+        now = _memory_stats(sorted({Path(key).parent for key in stats_before}))
+        changed = [key for key in sorted(stats_before) if now.get(key) != stats_before[key]]
         if not changed:
             return {"stdout": "", "exit_code": 0}
         command = hook_data.get("tool_input", {}).get("command", "")
@@ -1215,24 +1422,9 @@ def tripwire(hook_data: dict) -> dict:
             return {"stdout": "", "exit_code": 0}
 
         parts: list[str] = []
-        for name in changed:
-            path = trinity / name
-            findings = _measure_memory_file(path)
-            if findings:
-                parts.append(
-                    f"MEMORY WRITTEN FROM A SHELL: {path} changed during this Bash call, outside the caps gate, "
-                    "and it does not measure clean:"
-                )
-                parts.extend(findings)
-                parts.append(
-                    "  Re-land each entry through Edit, trimming the over tail. Memory is written with Edit/Write "
-                    "or a drone @memory verb, never a shell."
-                )
-            else:
-                parts.append(
-                    f"MEMORY WRITTEN FROM A SHELL: {path} changed during this Bash call, outside the caps gate. "
-                    "It measures clean; write memory with Edit/Write or a drone @memory verb."
-                )
+        for key in changed:
+            path = Path(key)
+            parts.extend(_report_change(path, trinity))
         context = "\n".join(parts)
         logger.warning("[HOOKS] edit_gate tripwire: %s", context.replace("\n", " | "))
         output = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": context}}

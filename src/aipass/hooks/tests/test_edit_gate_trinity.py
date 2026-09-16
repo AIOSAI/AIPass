@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
@@ -154,6 +154,12 @@ def _mock_importlib_modules(limits, rollover_cfg=None):
     entry_limits_mock = MagicMock()
     entry_limits_mock.load_entry_limits.return_value = limits
     entry_limits_mock.changed_entries = el_real.changed_entries
+    # The shape reader and the file budgets stay REAL. A MagicMock answers an
+    # empty iterator for both, which reads as "measures clean" — the one answer
+    # a size gate must never invent (FPLAN-0593: the passport row is measured
+    # against @memory's published 6,000/600, not against a stand-in).
+    entry_limits_mock.fields_for = el_real.fields_for
+    entry_limits_mock.check_file_budget = el_real.check_file_budget
 
     config_loader_mock = MagicMock()
     cfg = rollover_cfg if rollover_cfg is not None else _ROLLOVER_CONFIG_10
@@ -515,6 +521,137 @@ class TestShellMemoryTripwire:
                 edit_gate.tripwire_snapshot(self._data(seat, "ls", tool_use_id=f"toolu_{index}"))
         pending = json.loads((tmp_path / "aipass-trinity-tripwire-session-1.json").read_text(encoding="utf-8"))
         assert list(pending) == [f"toolu_{index}" for index in range(12, 20)]
+
+
+class TestTripwireWatchesEveryTrinityInTheProject:
+    """DPLAN-0347 row 4: the tripwire stats every .trinity in the project, and passport.json with them.
+
+    It used to watch the seat's own two files alone, so the one shape the
+    cross-branch fence exists to refuse — a shell write into ANOTHER branch's
+    memory, arriving by a path the reader cannot see — landed unreported. Stats
+    only: 24 dirs and 72 stats measured ~19 ms on this repo, and no file is read
+    unless something changed.
+    """
+
+    SILENT = {"stdout": "", "exit_code": 0}
+    RESIDUAL = 'F=.trinity/local.json; printf "%s" "$doc" > "$F"'
+
+    def _project(self, tmp_path, monkeypatch):
+        """A project root with a registry marker and two branches that each hold memory."""
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", tmp_path)
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        seats = {}
+        for name in ("hooks", "memory"):
+            seat = tmp_path / "src" / "aipass" / name
+            (seat / ".trinity").mkdir(parents=True)
+            (seat / ".trinity" / "local.json").write_text(
+                json.dumps({"sessions": [{"summary": "short"}]}), encoding="utf-8"
+            )
+            (seat / ".trinity" / "passport.json").write_text(json.dumps({"identity": {}}), encoding="utf-8")
+            seats[name] = seat
+        return seats
+
+    def _around(self, seat, during, command=RESIDUAL):
+        data = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(seat),
+            "session_id": "session-wide",
+            "tool_use_id": "toolu_wide",
+        }
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+            edit_gate.tripwire_snapshot(data)
+            during()
+            return edit_gate.tripwire(data)
+
+    @staticmethod
+    def _context(result):
+        assert result["exit_code"] == 0, "the tripwire never blocks: the command has already run"
+        return json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+
+    def test_a_write_into_another_branchs_memory_is_reported(self, tmp_path, monkeypatch):
+        seats = self._project(tmp_path, monkeypatch)
+        target = seats["memory"] / ".trinity" / "local.json"
+
+        def _write_next_door():
+            target.write_text(json.dumps({"sessions": [{"summary": "s" * 300 + "tail"}]}), encoding="utf-8")
+
+        context = self._context(self._around(seats["hooks"], _write_next_door))
+
+        assert str(target) in context
+        assert "sessions [0]: 304/300 chars (+4)" in context
+
+    def test_a_passport_change_is_reported_and_measured_by_size(self, tmp_path, monkeypatch):
+        """A passport is measured by its file budget (@memory 1.11.0), never by a field shape — @spawn owns that."""
+        seats = self._project(tmp_path, monkeypatch)
+        passport = seats["hooks"] / ".trinity" / "passport.json"
+
+        clean = self._context(
+            self._around(seats["hooks"], lambda: passport.write_text(json.dumps({"identity": {"role": "r"}})))
+        )
+
+        assert f"MEMORY WRITTEN FROM A SHELL: {passport} changed" in clean
+        assert "inside its file budget" in clean
+
+    def test_an_over_budget_passport_is_named_with_its_numbers(self, tmp_path, monkeypatch):
+        seats = self._project(tmp_path, monkeypatch)
+        passport = seats["hooks"] / ".trinity" / "passport.json"
+        fat = json.dumps({"identity": {"purpose": "p" * 7000}})
+
+        context = self._context(self._around(seats["hooks"], lambda: passport.write_text(fat)))
+
+        assert "the whole file is" in context and "/6000 chars" in context
+        assert "'identity.purpose' is 7000/600 chars (+6400 over)" in context
+
+    def test_a_neighbours_change_is_a_question_not_an_accusation(self, tmp_path, monkeypatch):
+        """Measured the first time this ran fleet-wide: a 76s pytest caught two live seats saving their own memory.
+
+        Every citizen runs its own session, so a neighbour's write lands inside
+        this call's window through no act of this command. The report stays —
+        a cross-branch shell write is the shape the fence cannot always see —
+        but it may not say "you wrote this" when the neighbour did.
+        """
+        seats = self._project(tmp_path, monkeypatch)
+        target = seats["memory"] / ".trinity" / "local.json"
+
+        context = self._context(self._around(seats["hooks"], lambda: target.write_text(json.dumps({"sessions": []}))))
+
+        assert context.startswith("ANOTHER BRANCH'S MEMORY CHANGED")
+        assert "MEMORY WRITTEN FROM A SHELL" not in context
+        assert "If that seat is live right now" in context
+        assert "memory owns that file" in context
+
+    def test_the_seats_own_file_is_still_named_as_this_calls_write(self, tmp_path, monkeypatch):
+        seats = self._project(tmp_path, monkeypatch)
+        mine = seats["hooks"] / ".trinity" / "local.json"
+
+        context = self._context(
+            self._around(seats["hooks"], lambda: mine.write_text(json.dumps({"sessions": [{"summary": "new"}]})))
+        )
+
+        assert context.startswith("MEMORY WRITTEN FROM A SHELL")
+
+    def test_an_untouched_project_stays_silent(self, tmp_path, monkeypatch):
+        seats = self._project(tmp_path, monkeypatch)
+        assert self._around(seats["hooks"], lambda: None) == self.SILENT
+
+    def test_outside_a_project_only_the_seat_is_watched(self, tmp_path, monkeypatch):
+        """No registry marker means no project boundary, and a fence that cannot find one never invents it."""
+        monkeypatch.setattr(edit_gate, "_TRIPWIRE_DIR", tmp_path)
+        loose = tmp_path / "loose"
+        (loose / ".trinity").mkdir(parents=True)
+        (loose / ".trinity" / "local.json").write_text(json.dumps({"sessions": []}), encoding="utf-8")
+
+        watched = edit_gate._watched_trinity_dirs(str(loose))
+
+        assert watched == [loose / ".trinity"]
+
+    def test_the_seat_is_always_first_in_the_watch_list(self, tmp_path, monkeypatch):
+        seats = self._project(tmp_path, monkeypatch)
+        watched = edit_gate._watched_trinity_dirs(str(seats["memory"]))
+
+        assert watched[0] == seats["memory"] / ".trinity"
+        assert seats["hooks"] / ".trinity" in watched
 
 
 class TestTrinityWriteOverLimitWarnOnly:
@@ -2931,3 +3068,120 @@ class TestAuthoredVsCarriedUnit:
         )
 
         assert hits == [], f"a prepend re-authored entries it only shifted: {hits}"
+
+
+_TEST_LIMITS_FIELDS = {
+    "enabled": True,
+    "enforce": True,
+    "entry_types": {
+        "sessions": {
+            "file": "local.json",
+            "container": "sessions",
+            "kind": "list",
+            "field": "summary",
+            "max_chars": 300,
+            "fields": {
+                "number": {"type": "int", "required": True},
+                "date": {"type": "str", "required": True, "max_chars": 10},
+                "summary": {"type": "str", "required": True, "max_chars": 300},
+                "status": {"type": "str", "required": True, "max_chars": 40},
+                "tags": {"type": "list[str]", "required": False, "max_items": 10, "max_chars": 120},
+            },
+        },
+    },
+}
+
+
+def _session(**over):
+    entry = {"number": 1, "date": "2026-09-15", "summary": "a session", "status": "completed", "tags": ["one"]}
+    entry.update(over)
+    return entry
+
+
+class TestMemorysNewRefusalReasonsRender:
+    """FPLAN-0593 row 6: @memory 1.11.0 publishes unknown_field and field_over_cap; this gate renders them.
+
+    Both arrive in the same six-key shape as the canonical cap, plus `field` and
+    `units`. The catch-all that used to swallow every reason called them
+    "unmeasurable — expected a string", which is the opposite of what happened:
+    a 917-char status was measured exactly, and a field outside the shape was
+    never a measurement at all. The closed shape is @memory's to publish and
+    this gate's to render — the allow-list comes from fields_for, never a copy.
+    """
+
+    def _refuse(self, tmp_path, entry):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [entry]})
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_FIELDS)):
+            return handle(_hook_data(file_path, content, cwd=cwd))
+
+    def test_an_unknown_field_names_the_shape_it_broke(self, tmp_path):
+        result = self._refuse(tmp_path, _session(mood="great"))
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "field 'mood' is not part of the entry shape" in reason
+        assert "allowed: number, date, summary, status, tags" in reason
+        assert "unmeasurable" not in reason, "an unknown field was never a measurement"
+
+    def test_a_field_over_its_cap_is_rendered_with_its_numbers(self, tmp_path):
+        """devpulse's 917-char status is the entry this shape exists for (S464 in a field nobody capped)."""
+        result = self._refuse(tmp_path, _session(status="s" * 917))
+
+        reason = json.loads(result["stdout"])["reason"]
+        assert "'status' is 917/40 chars (+877 over)" in reason
+
+    def test_a_list_over_its_item_count_says_items_not_chars(self, tmp_path):
+        result = self._refuse(tmp_path, _session(tags=[f"t{n}" for n in range(11)]))
+
+        reason = json.loads(result["stdout"])["reason"]
+        assert "'tags' is 11/10 items (+1 over)" in reason
+
+    def test_a_legal_entry_still_writes(self, tmp_path):
+        assert self._refuse(tmp_path, _session()) == {"stdout": "", "exit_code": 0}
+
+
+class TestPassportFileBudget:
+    """FPLAN-0593 row 6, the passport row: size only, the numbers are @memory's.
+
+    @spawn owns passport.json's schema, so this gate never judges its fields —
+    only how big the file is (6,000) and whether any one string is oversized
+    (600). Until today a passport was the one .trinity file any lane could write
+    at any size, and the identity block renders from it on every cadence beat.
+    """
+
+    def _write(self, tmp_path, doc, limits=_TEST_LIMITS_ENFORCE):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "passport.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        with patch("importlib.import_module", side_effect=_mock_importlib_modules(limits)):
+            return handle(_hook_data(file_path, json.dumps(doc), cwd=cwd))
+
+    def test_a_passport_over_its_file_budget_is_refused(self, tmp_path):
+        result = self._write(tmp_path, {"identity": {"purpose": "p" * 7000}})
+
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "passport.json: the whole file is" in reason
+        assert "/6000 chars" in reason
+
+    def test_one_oversized_string_is_named_by_its_path(self, tmp_path):
+        """aipass carries identity.purpose at 869 today; the refusal has to say WHICH string."""
+        result = self._write(tmp_path, {"identity": {"purpose": "p" * 700, "role": "r"}})
+
+        reason = json.loads(result["stdout"])["reason"]
+        assert "'identity.purpose' is 700/600 chars (+100 over)" in reason
+        assert "the whole file is" not in reason, "a 700-char string is not a 6,000-char file"
+
+    def test_a_passport_inside_its_budget_writes(self, tmp_path):
+        assert self._write(tmp_path, {"identity": {"role": "hook_infrastructure"}}) == {"stdout": "", "exit_code": 0}
+
+    def test_warn_mode_allows_and_logs(self, tmp_path, caplog):
+        result = self._write(tmp_path, {"identity": {"purpose": "p" * 7000}}, limits=_TEST_LIMITS_WARN)
+
+        assert result == {"stdout": "", "exit_code": 0}
+        assert "file_over_budget" in caplog.text

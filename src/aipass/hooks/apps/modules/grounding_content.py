@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.1.0
-# Description: Shared content loaders for grounding prompt injections (DPLAN-0276)
+# Version: 1.2.0
+# Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-01
-# Modified: 2026-08-07
+# Modified: 2026-09-15
 # =============================================
 
 """Loads raw grounding content — kernel, navmap, branch, identity — with no cadence gating.
@@ -21,7 +21,7 @@ import os
 from pathlib import Path
 
 from aipass.cli.apps.modules import err_console
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: F401
+from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
@@ -44,9 +44,64 @@ STARTUP_REGROUND_INSTRUCTION = (
 )
 
 
+#: Ceiling for the rendered branch block — the branch prompt plus its header.
+#: Patrick ruled the layer contract on 2026-09-15 (DPLAN-0347): 9,000 chars, one
+#: under the 10,000 the harness persists behind a 2,000-char preview. A prompt
+#: that crosses that line is not read by the model at all; truncation here is
+#: what keeps the first 9,000 chars of it live.
+BRANCH_CHAR_BUDGET = 9000
+
+#: Each apps/integrations/*/private_prompt.md, appended after the branch prompt.
+#: Zero live fleet-wide today, uncapped and ungated until now: the first one
+#: written is the one that would have pushed the block over the persist line.
+INTEGRATION_CHAR_BUDGET = 2000
+
+
 def print_introspection() -> None:
     """Print module structure for drone routing."""
     CONSOLE.print("[bold cyan]grounding_content[/bold cyan] — Kernel/navmap/branch/identity loaders (DPLAN-0276)")
+
+
+def _truncate_block(text: str, limit: int, source: Path | str) -> str:
+    """Cut a rendered block to *limit* chars, ending with a marker that names *source*.
+
+    The marker is the point. A block that simply stops reads as a corrupted
+    prompt and the agent has no way to find the rest; a marker naming the file
+    turns a cut into a pointer — and gives whoever wrote past the cap the one
+    line they need to see in the transcript.
+
+    The cut lands on the last line boundary in the window when there is one past
+    the halfway mark, so a truncated block never ends mid-sentence.
+
+    Args:
+        text: The rendered block.
+        limit: Maximum characters for the result, marker included.
+        source: The file the block was rendered from, named in the marker.
+
+    Returns:
+        The text unchanged when it fits, else the kept head plus the marker.
+    """
+    if len(text) <= limit:
+        return text
+
+    marker = f"\n[… cut at {limit} chars by @hooks — the rest of this block is in {source}]"
+    keep = limit - len(marker)
+    if keep <= 0:
+        # A budget smaller than its own marker cannot say where the rest went;
+        # a bare cut is the honest answer rather than a marker with no content.
+        return text[:limit]
+
+    window = text[:keep]
+    boundary = window.rfind("\n")
+    if boundary > keep // 2:
+        window = window[:boundary]
+    logger.warning(
+        "[HOOKS] grounding_content: %s renders %d chars, over the %d budget — cut, marker names the file",
+        source,
+        len(text),
+        limit,
+    )
+    return window.rstrip() + marker
 
 
 def _find_project_file(filename: str) -> Path | None:
@@ -118,12 +173,14 @@ def load_branch(hook_data: dict) -> str:
     if prompt_file.exists():
         content = prompt_file.read_text(encoding="utf-8").strip()
         branch_name = branch_root.name.upper()
-        parts.append(f"# Branch Context: {branch_name}\n<!-- Source: {prompt_file} -->\n{content}")
+        block = f"# Branch Context: {branch_name}\n<!-- Source: {prompt_file} -->\n{content}"
+        parts.append(_truncate_block(block, BRANCH_CHAR_BUDGET, prompt_file))
 
     integrations_dir = branch_root / "apps" / "integrations"
     if integrations_dir.is_dir():
         for prompt in sorted(integrations_dir.glob("*/private_prompt.md")):
-            parts.append(prompt.read_text(encoding="utf-8").strip())
+            body = prompt.read_text(encoding="utf-8").strip()
+            parts.append(_truncate_block(body, INTEGRATION_CHAR_BUDGET, prompt))
 
     return "\n".join(parts)
 
@@ -141,8 +198,10 @@ def _find_passport(cwd: str) -> Path | None:
 
 
 #: Ceiling for the whole rendered identity block, in characters. Not a hard
-#: platform limit — a budget. This block is injected on EVERY turn, so a
-#: passport that grows without bound quietly taxes every prompt in the session.
+#: platform limit — a budget. This block is injected on every cadence beat, so a
+#: passport that grows without bound quietly taxes the whole session. Declared
+#: 2026-09-08 and read by nothing until DPLAN-0347: a budget no code enforces is
+#: documentation, and the largest passport in the fleet had already reached 5,461.
 IDENTITY_CHAR_BUDGET = 4000
 
 #: What a facet may spend before it is cut at a sentence boundary. Sized so the
@@ -271,4 +330,6 @@ def load_identity(hook_data: dict) -> str:
 
     data = json.loads(passport.read_text(encoding="utf-8"))
     output = _format_identity(data)
-    return f"\n{output}" if output else ""
+    if not output:
+        return ""
+    return "\n" + _truncate_block(output, IDENTITY_CHAR_BUDGET, passport)

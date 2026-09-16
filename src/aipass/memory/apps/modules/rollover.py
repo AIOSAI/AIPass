@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.7.1
+# Version: 0.8.0
 # Created: 2025-11-16
 # Modified: 2026-09-15
 # =============================================
@@ -208,7 +208,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     `--json` rides in any slot on the config verbs and on `rollover push`,
     and is stripped before positional parsing. A help flag still outranks
-    it — `config set @b sessions 25 --help --json` prints help and writes
+    it — `config set @b sessions 12 --help --json` prints help and writes
     neither the config nor a payload.
 
     Backward-compatible top-level commands (routed from entry point):
@@ -470,7 +470,7 @@ def _handle_config(args: List[str]) -> bool:
         return True
 
     # Machine output is read and REMOVED before positional parsing, so
-    # `set @memory sessions 25 --json` parses identically to the same line
+    # `set @memory sessions 12 --json` parses identically to the same line
     # without it, whichever slot the flag rode in.
     json_mode = wants_json(args)
     args = strip_json_flag(args)
@@ -562,12 +562,21 @@ def _validate_type(entry_type: str, ctx: _Json) -> bool:
     return False
 
 
-def _validate_count(raw: str, ctx: _Json) -> int | None:
+def _validate_count(raw: str, entry_type: str, ctx: _Json, branch: str | None = None) -> int | None:
     """Parse and bound-check a limit, emitting its own refusal.
+
+    Three bounds, widening in what each one knows: the count is a whole
+    number, it is inside ``_MIN_COUNT``/``_MAX_COUNT``, and the file it grows
+    still fits its budget. Only the third depends on the entry type and on
+    what its CO-TENANTS hold — a keep-count multiplies an entry cap, and
+    local.json's 25,000 chars are shared by three families.
 
     Args:
         raw: The count token as typed.
+        entry_type: The type the count is for — the ceiling is per type.
         ctx: Verb name and machine-output mode for the refusal.
+        branch: The branch being written, whose own counts are the co-tenants.
+            None for ``set-default``, where the fleet defaults are.
 
     Returns:
         The count, or None when the refusal was emitted.
@@ -579,7 +588,7 @@ def _validate_count(raw: str, ctx: _Json) -> int | None:
         _refuse(
             ctx,
             f"Count must be a whole number: '{raw}'",
-            suggestion="Example: drone @memory config set @devpulse sessions 25",
+            suggestion="Example: drone @memory config set @devpulse sessions 12",
         )
         return None
 
@@ -597,6 +606,14 @@ def _validate_count(raw: str, ctx: _Json) -> int | None:
             f"Count must not exceed {_MAX_COUNT} (got {count})",
             suggestion=f"{_MAX_COUNT} is the cap — larger limits defeat rollover entirely",
         )
+        return None
+
+    from aipass.memory.apps.handlers.json import config_loader
+
+    over_budget = config_loader.ceiling_refusal(entry_type, count, branch)
+    if over_budget is not None:
+        logger.warning(f"[rollover] {entry_type} {count} refused: {over_budget['error']}")
+        _refuse(ctx, over_budget["error"], suggestion=over_budget["suggestion"])
         return None
 
     return count
@@ -759,7 +776,7 @@ def config_set(args: List[str], ctx: _Json) -> None:
         _refuse(
             ctx,
             "config set needs: @branch <type> <count>",
-            suggestion="Example: drone @memory config set @devpulse sessions 25",
+            suggestion="Example: drone @memory config set @devpulse sessions 12",
         )
         return
 
@@ -771,7 +788,7 @@ def config_set(args: List[str], ctx: _Json) -> None:
     if not _validate_type(entry_type, ctx):
         return
 
-    count = _validate_count(args[2], ctx)
+    count = _validate_count(args[2], entry_type, ctx, branch)
     if count is None:
         return
 
@@ -815,7 +832,7 @@ def config_set_default(args: List[str], ctx: _Json) -> None:
         _refuse(
             ctx,
             "config set-default needs: <type> <count>",
-            suggestion="Example: drone @memory config set-default sessions 25",
+            suggestion="Example: drone @memory config set-default sessions 12",
         )
         return
 
@@ -823,7 +840,7 @@ def config_set_default(args: List[str], ctx: _Json) -> None:
     if not _validate_type(entry_type, ctx):
         return
 
-    count = _validate_count(args[1], ctx)
+    count = _validate_count(args[1], entry_type, ctx)
     if count is None:
         return
 
@@ -880,14 +897,16 @@ def print_config_introspection() -> None:
     console.print("[yellow]Next:[/yellow]")
     console.print("  [green]drone @memory config get[/green]                       [dim]# Defaults + deviations[/dim]")
     console.print("  [green]drone @memory config get @devpulse[/green]             [dim]# One branch[/dim]")
-    console.print("  [green]drone @memory config set @devpulse sessions 25[/green] [dim]# Override[/dim]")
+    console.print("  [green]drone @memory config set @devpulse sessions 12[/green] [dim]# Override[/dim]")
     console.print("  [green]drone @memory config get --json[/green]                [dim]# Machine surface[/dim]")
     console.print("  [green]drone @memory config --help[/green]                    [dim]# Full usage guide[/dim]")
     console.print()
 
 
 def print_config_help() -> None:
-    """Display config-verb help."""
+    """Display config-verb help — the BOUNDS block reads the LIVE ceilings."""
+    from aipass.memory.apps.handlers.json import config_loader
+
     console.print()
     console.print(
         Panel.fit(
@@ -905,7 +924,7 @@ def print_config_help() -> None:
     console.print()
     console.print("[bold]--json — THE MACHINE SURFACE:[/bold]")
     console.print("  Every verb above takes [cyan]--json[/cyan] in ANY slot; it is stripped before")
-    console.print("  positional parsing, so `set @b sessions 25 --json` parses like `set @b sessions 25`.")
+    console.print("  positional parsing, so `set @b sessions 12 --json` parses like `set @b sessions 12`.")
     console.print("  Exactly ONE JSON document reaches stdout — no panels, no banners, no Rich.")
     console.print("  A help flag OUTRANKS it: `set ... --help --json` prints this page and writes nothing.")
     console.print()
@@ -921,10 +940,19 @@ def print_config_help() -> None:
         "  [cyan]todos[/cyan]           local.json -> todos  [dim](count shown by get, read-only in v1)[/dim]"
     )
     console.print()
-    console.print(f"[bold]BOUNDS:[/bold] a whole number, {_MIN_COUNT}-{_MAX_COUNT} inclusive")
+    console.print(f"[bold]BOUNDS:[/bold] a whole number, {_MIN_COUNT}-{_MAX_COUNT} inclusive — AND under its ceiling")
     console.print(
         f"  {_MIN_COUNT - 1} would roll over every entry immediately; past {_MAX_COUNT} rollover is defeated entirely."
     )
+    console.print("  The ceiling is lower and is PER TYPE and PER FILE: a keep-count multiplies an entry cap,")
+    console.print("  so the file it fills must still fit its budget. At the counts the other types hold:")
+    for entry_type, row in config_loader.get_count_ceilings().items():
+        console.print(
+            f"    [cyan]{entry_type:<14}[/cyan] at most {row['ceiling']:<4}"
+            f" [dim]{row['file_key']} budget {row['budget_chars']:,} chars[/dim]"
+        )
+    console.print("  Raise one type and its co-tenants' ceilings drop. Budgets: memory.config.json")
+    console.print("  entry_limits.file_budgets; the refusal names the ceiling and the worst case it measured.")
     console.print()
     console.print("[bold]EFFECTIVE LIMITS:[/bold]")
     console.print("  Resolution is per FILE KEY, not per entry type — exactly what the")

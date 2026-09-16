@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: context_gauge.py
-# Version: 1.0.1
-# Description: Calm heads-up to run /prep as auto-compact approaches (UserPromptSubmit, DPLAN-0253)
+# Version: 1.1.0
+# Description: Calm heads-up to run /prep as auto-compact approaches (UserPromptSubmit, DPLAN-0253), once per window
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-20
-# Modified: 2026-08-01
+# Modified: 2026-09-15
 # =============================================
 
 """Heads-up so the model banks memories via /prep before the compact ceiling.
@@ -16,8 +16,14 @@ a natural breakpoint, not an alarm.
 Reads live transcript usage every prompt (cheap tail read), resolves the
 branch's compact trigger (window * 0.9), and injects a line once fill
 crosses 80%/95% of that trigger. Independent of the cadence system — its own
-per-session, per-threshold guard file in tempdir, same idiom as
-feedback_pulse.py / auto_process.py, so it isn't gated by turn count."""
+per-threshold guard file in tempdir, same idiom as feedback_pulse.py /
+auto_process.py, so it isn't gated by turn count.
+
+The guard is keyed per CONTEXT WINDOW, not per session (DPLAN-0347). A session
+id outlives every compaction, so the old key meant the gauge fired at most twice
+in a session's whole life: after the first compact it went silent for good,
+exactly when the next fill starts climbing again. cadence.window_opened_at()
+changes at each compaction, so each window gets its own pair of nudges."""
 
 import importlib
 import os
@@ -32,19 +38,35 @@ _NUDGE_THRESHOLD_PCT = 80
 _ESCALATE_THRESHOLD_PCT = 95
 
 
-def _guard_path(session_id: str, threshold: str) -> Path | None:
+def _window_key(hook_data: dict) -> str:
+    """A tag that changes at every compaction, or 'w0' before the first one.
+
+    cadence stamps the window when it resets the turn counter on PreCompact.
+    No stamp means no compaction has happened in this session yet — the first
+    window, which is a real window and gets its own pair of nudges.
+    """
+    try:
+        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        opened_at = cadence.window_opened_at(hook_data)
+    except Exception as exc:
+        logger.warning("[HOOKS] context_gauge: window stamp unreadable, guarding per session: %s", exc)
+        return "w0"
+    return f"w{int(opened_at)}" if opened_at else "w0"
+
+
+def _guard_path(session_id: str, window: str, threshold: str) -> Path | None:
     if not session_id:
         return None
-    return _GUARD_DIR / f"aipass-context-gauge-{session_id}-{threshold}"
+    return _GUARD_DIR / f"aipass-context-gauge-{session_id}-{window}-{threshold}"
 
 
-def _already_fired(session_id: str, threshold: str) -> bool:
-    path = _guard_path(session_id, threshold)
+def _already_fired(session_id: str, window: str, threshold: str) -> bool:
+    path = _guard_path(session_id, window, threshold)
     return path is not None and path.exists()
 
 
-def _mark_fired(session_id: str, threshold: str) -> None:
-    path = _guard_path(session_id, threshold)
+def _mark_fired(session_id: str, window: str, threshold: str) -> None:
+    path = _guard_path(session_id, window, threshold)
     if path is not None:
         try:
             path.touch()
@@ -76,10 +98,14 @@ def handle(hook_data: dict) -> dict:
         fill_k = fill // 1000
         trigger_k = int(trigger) // 1000
 
-        if pct >= _ESCALATE_THRESHOLD_PCT and not _already_fired(session_id, "95"):
-            _mark_fired(session_id, "95")
-            _mark_fired(session_id, "80")
-            logger.info("[HOOKS] context_gauge: escalate fired at %.0f%% session=%s", pct, session_id[:8])
+        window = _window_key(hook_data)
+
+        if pct >= _ESCALATE_THRESHOLD_PCT and not _already_fired(session_id, window, "95"):
+            _mark_fired(session_id, window, "95")
+            _mark_fired(session_id, window, "80")
+            logger.info(
+                "[HOOKS] context_gauge: escalate fired at %.0f%% session=%s window=%s", pct, session_id[:8], window
+            )
             return {
                 "stdout": (
                     f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — compact fires soon. "
@@ -90,9 +116,11 @@ def handle(hook_data: dict) -> dict:
                 "sound": "context gauge",
             }
 
-        if pct >= _NUDGE_THRESHOLD_PCT and not _already_fired(session_id, "80"):
-            _mark_fired(session_id, "80")
-            logger.info("[HOOKS] context_gauge: nudge fired at %.0f%% session=%s", pct, session_id[:8])
+        if pct >= _NUDGE_THRESHOLD_PCT and not _already_fired(session_id, window, "80"):
+            _mark_fired(session_id, window, "80")
+            logger.info(
+                "[HOOKS] context_gauge: nudge fired at %.0f%% session=%s window=%s", pct, session_id[:8], window
+            )
             return {
                 "stdout": (
                     f"CONTEXT GAUGE: ~{fill_k}k/{trigger_k}k ({pct:.0f}%) — heads up, auto-compact "
