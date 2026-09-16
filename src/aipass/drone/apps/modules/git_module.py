@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-03-17
 # Modified: 2026-09-15
 # =============================================
@@ -1332,5 +1332,13 @@ def print_introspection() -> None:
 
 
 def print_help() -> None:
-    """Print help (seedgo compliance)."""
-    _get_console().print(get_help())
+    """Print help (seedgo compliance).
+
+    ``markup=False``: this page is documentation, not styled output, and its
+    argument placeholders are literal. Rendered as markup, Rich read ``[count]``
+    and ``[path]`` as style tags and deleted them silently — ``log [count]``
+    reached the terminal as ``log``. Measured 2026-09-15, with the Rich_Markup
+    standard scoring 100, because the literal is returned by ``get_help()``
+    rather than written at the print site.
+    """
+    _get_console().print(get_help(), markup=False)
