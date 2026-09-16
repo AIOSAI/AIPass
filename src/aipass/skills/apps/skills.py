@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.0.2
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """Skills system entry point.
 
 Provides handle_command(command, args) for drone routing.
-Commands: list, info, run, create, validate, --help.
+Commands: list, info, run, create, validate, on, off, switch, --help, --version.
 """
 
 import os
@@ -35,6 +35,9 @@ if _script_dir in sys.path:
 
 from aipass.prax import logger  # noqa: E402
 from aipass.cli.apps.modules import console, error  # noqa: E402
+
+# One version string, printed by --version and carried in this file's header.
+VERSION = "1.1.0"
 
 
 def print_introspection():
@@ -77,7 +80,7 @@ def handle_command(command, args=None):
         return True
 
     if command in ("--version", "-V"):
-        console.print("SKILLS v1.0.0")
+        console.print(f"SKILLS v{VERSION}")
         return True
 
     if command == "list":
@@ -137,14 +140,16 @@ def print_help():
     console.print("  list                         Show all discovered skills")
     console.print("  info <name>                  Display SKILL.md contents")
     console.print("  run <name> \\[action] \\[args]   Execute a skill's handler")
+    console.print("  run <name> --help            Show a skill's SKILL.md instead of running it")
     console.print("  create <name>                Scaffold new skill (markdown only)")
     console.print("  create <name> --with-handler Scaffold with handler.py")
     console.print("  create <name> --full         Scaffold with full 3-layer structure")
+    console.print("  create <name> --help         Scaffold flags and what each tier writes")
     console.print("  validate <name>              Check if skill requirements are met")
     console.print("  on <name>                    Reconnect a skill and start its processes")
-    console.print("  off <name> \\[reason]         Disconnect a skill and stop its processes")
-    console.print("  switch \\[name]               Show each skill's on/off state")
-    console.print("  --help                       Show this help")
+    console.print("  off <name> \\[reason]          Disconnect a skill and stop its processes")
+    console.print("  switch \\[name]                Show each skill's on/off state")
+    console.print("  --help, -h, help             Show this help")
     console.print("  --version, -V                Show version")
     console.print()
     console.print("Search paths (first match wins):")
@@ -412,7 +417,10 @@ if __name__ == "__main__":
 
     args = sys.argv[1:]
     if not args:
-        ok = handle_command("--help")
+        # Bare `drone @skills` is the live self-map across the fleet; it printed
+        # this page's reference text instead, so print_introspection was
+        # unreachable through drone. --help is still the reference.
+        ok = handle_command(None)
     else:
         command = args[0]
         remaining = args[1:] if len(args) > 1 else []
