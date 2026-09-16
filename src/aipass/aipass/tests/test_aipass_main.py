@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-08-07
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for aipass.py — main entry point and module discovery."""
@@ -20,6 +20,7 @@ from aipass.aipass.apps.aipass import (
     _resolve_version,
     discover_modules,
     main,
+    print_help,
     route_command,
 )
 
@@ -263,15 +264,14 @@ class TestMain:
     def test_version_flag_fallback(self) -> None:
         """--version prints 'unknown' when no repo pyproject AND no metadata."""
         _not_found = importlib.metadata.PackageNotFoundError
-        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]):
-            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None):
-                    with patch(
-                        "aipass.aipass.apps.aipass.importlib.metadata.version",
-                        side_effect=_not_found,
-                    ):
-                        with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                            result = main()
+        with (
+            patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
+            patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
+            patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None),
+            patch("aipass.aipass.apps.aipass.importlib.metadata.version", side_effect=_not_found),
+            patch("aipass.aipass.apps.aipass.console") as mock_con,
+        ):
+            result = main()
         assert result == 0
         mock_con.print.assert_called_once_with("aipass unknown")
 
@@ -562,3 +562,40 @@ class TestMain:
         assert "failed to load" in err_text
         assert "no module" in err_text
         aipass_mod._import_failures.clear()
+
+
+# =============================================================================
+# TestHelpAgreesWithCode
+# =============================================================================
+
+
+class TestHelpAgreesWithCode:
+    """print_help against the verbs the dispatcher actually routes.
+
+    The README carried a hand-typed command table for months and was the only
+    witness to three of these; the table is gone (FPLAN-0616), so the page can
+    no longer cover for a help line that disagrees with the code.
+    """
+
+    @staticmethod
+    def _help_text() -> str:
+        """Rendered help as one plain string, markup and all."""
+        with patch("aipass.aipass.apps.aipass.console") as mock_con:
+            print_help(modules=[])
+        return " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
+
+    def test_help_names_revoke(self) -> None:
+        """`revoke` routes in trust.py, so help must name it — it named only `trust`."""
+        assert "revoke <path>" in self._help_text()
+
+    def test_help_does_not_claim_bare_json_is_json_output(self) -> None:
+        """JSON comes from `doctor --fix --json`; `--json` alone falls through."""
+        text = self._help_text()
+        assert "doctor --fix --json" in text
+        assert "JSON output for structure scan" not in text
+
+    def test_help_names_init_run_not_bare_init(self) -> None:
+        """Bare `init` prints usage; `init run` is what walks the stages."""
+        text = self._help_text()
+        assert "init run" in text
+        assert "aipass init[/green]" not in text
