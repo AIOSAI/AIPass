@@ -1,465 +1,132 @@
+[<- Back to AIPass](../../../README.md)
+
 # BACKUP
 
-**Purpose:** Standalone backup system — project-owned, local-first backups for any directory
+**Purpose:** Project-owned, local-first backups for any directory on this machine
 **Module:** `aipass.backup`
-**Version:** 1.0.0
+**Version:** 1.1.0
 **Created:** 2026-04-16
-**Last Updated:** 2026-09-11
-
-> Every number and command in this file was re-measured against the tree on
-> **2026-09-05** (FPLAN-0490). Anything that could not be verified tonight is
-> marked *unverified* where it is claimed, not left standing green. Later
-> additions carry their own measurement date (the `*.tmp` floor: 2026-09-11,
-> FPLAN-0547).
-
----
-
-## Overview
-
-### What I Do
-
-- Back up any project directory on the system (not just AIPass projects)
-- Each project owns its backup config (`.backup/`) and ignore patterns (`.backupignore`)
-- Snapshot mode: full mirror copy
-- Versioned mode: incremental timestamped backups (append-only — there is no pruning; see "Store Cleanup")
-- Project registry for name-based lookups (`backup snapshot @AIPass`)
-
-### How I Work
-- **Entry Point:** `apps/backup.py`
-- **Pattern:** Auto-discovers and routes to modules
-
----
-
-## Architecture
-
-```
-apps/
-├── backup.py              # Entry point (auto-discovery router)
-├── modules/
-│   ├── all.py             # Snapshot + versioned orchestration
-│   ├── display.py         # Rich CLI rendering (used by snapshot/versioned/all)
-│   ├── drive_clear.py     # Clears the LOCAL Drive sync tracker
-│   ├── drive_stats.py     # Drive tracker statistics
-│   ├── drive_sync.py      # Uploads the backup store to Google Drive
-│   ├── drive_check.py     # Drive connectivity check via @api gateway
-│   ├── register.py        # Project registration + @name resolution
-│   ├── restore.py         # Version discovery + file restoration
-│   ├── settings.py        # Settings UI (stub)
-│   ├── share.py           # Single-file Drive upload + share link
-│   ├── snapshot.py        # Full mirror backup
-│   ├── status.py          # Backup status display
-│   └── versioned.py       # Incremental timestamped backup
-└── handlers/
-    ├── audit/             # backup's own operation trail (JSONL -> logs/operations.jsonl)
-    ├── cleanup/           # Mirror cleanup — removes snapshot files whose source is gone
-    ├── copy/              # File copying (snapshot + versioned)
-    ├── diff/              # Diff generation + restore from the versioned store
-    ├── drive/             # Google Drive handlers (auth, upload, tracker, share)
-    ├── ignore/            # .backupignore patterns + whitelist + the built-in *.tmp floor
-    ├── json/              # The fleet's json shim — BINDS @prax's service, identical
-    │                      #   in every branch (DPLAN-0325). sha256 3456b766…,
-    │                      #   1724 B, mode 664 — re-verified 2026-09-05
-    ├── path/              # Backup path building, caller-CWD resolution,
-    │                      #   and module_paths.py (the safe-resolve helper)
-    ├── project/           # Config, registry, setup (.backup/)
-    ├── report/            # Result formatting
-    ├── scan/              # Directory walking + filtering + the run ceiling
-    ├── state/             # Changelog, metadata, timestamps
-    └── ui/                # Settings window (archived — see ui/.archive/)
-```
-
-`apps/integrations/` and `apps/plugins/` also exist on disk but are empty
-scaffolds with no code — `plugins/` holds a `README.md` and an `__init__.py`,
-`integrations/` holds only a `README.md`. They are left out of the tree above
-deliberately, not by oversight.
-
----
-
-## Commands
-
-```
-backup register <path> [--name <name>]   # Register a project for backup
-backup snapshot <path|@name>             # Full mirror backup
-backup versioned <path|@name>            # Incremental timestamped backup
-backup all <path|@name>                  # Snapshot + versioned + drive sync
-backup status <path|@name>               # Show backup info and history
-backup restore <path|@name> list <name>  # List available versions of a file
-backup restore <path|@name> file <name> <out>  # Restore current version to <out>
-backup settings <path|@name>             # NOT IMPLEMENTED — settings UI deferred
-backup drive_sync <path|@name>           # Upload the backup store to Google Drive
-backup drive_check <path|@name>          # Drive connectivity check
-backup drive_stats <path|@name>          # Drive tracker statistics
-backup drive_clear <path|@name> --force  # Clear the LOCAL tracker (remote files untouched)
-backup share <file> [--public]           # Upload one file to Drive, return share link
-```
-
-The router auto-discovers every file in `apps/modules/` that exposes a
-`handle_command()`. That is 13 modules: the 12 verbs above, plus `display`,
-which is a rendering helper rather than a backup verb — it answers only to its
-own name (`drone @backup display` prints its introspection and does nothing
-else) and is intentionally undocumented as a command.
-
-**A `--help` anywhere in the arguments prints help and runs nothing** — `drone
-@backup snapshot @myapp --help` is a safe probe, not a backup.
-
-**`restore` takes a bare filename or a path from the project root.** `restore
-@myapp list src/main.py` names exactly one file; `restore @myapp list main.py`
-takes the first `main.py` the store walk meets, so use the path when two files
-share a basename. Until 2026-09-14 only the bare form worked: the lookup joined
-the whole argument onto the matched folder and looked for
-`<store>/src/main.py/src/main.py`. Pinned by
-`test_versioned_engine.py::TestRestoreModule::test_find_file_folder_path_shaped`.
-
-**Drive commands need credentials.** They authenticate through the @api gateway;
-without Google API libraries or credentials they fail loudly rather than
-pretending to sync. `drive_clear` only clears the local dedup tracker — it never
-deletes anything already uploaded to Drive.
-
-Verified 2026-09-05: `drive_check` authenticated through the gateway and
-returned a live backup-folder ID, and `drive_stats` read the tracker. The
-**upload** path (`drive_sync`, `share`) was deliberately *not* exercised — it
-publishes files to a real Drive account — so it stands **unverified since
-2026-08-29**, the last recorded `drive_sync` run.
-
-**Relative paths resolve where you are.** Backup runs as an installed entry
-point, so its process CWD is its own branch directory. Drone exports
-`AIPASS_CALLER_CWD`; `handlers/path/caller.py` re-anchors every user-supplied
-relative path to it, so `drone @backup share docs/notes.md` means the caller's
-`docs/notes.md`. Absolute paths are untouched.
+**Last Updated:** 2026-09-15
 
 ---
 
 ## Quick Start
 
 ```bash
-# Register a project for backup
-drone @backup register /path/to/project --name myapp
-
-# Full mirror snapshot
-drone @backup snapshot @myapp
-
-# Incremental timestamped backup
-drone @backup versioned @myapp
-
-# Check backup status
-drone @backup status @myapp
-
-# List available versions of a file (path from the project root, or bare filename)
-drone @backup restore @myapp list src/main.py
+drone @backup register /path/to/project --name myapp   # register and scaffold .backup/
+drone @backup snapshot @myapp                          # full mirror copy
+drone @backup versioned @myapp                         # incremental, timestamped
+drone @backup status @myapp                            # what is stored, and when
 ```
 
 ---
 
-## `.backup/` Store Structure
+## What It Does
 
-Each registered project gets a `.backup/` directory at its root:
+- **Snapshot** — a full mirror of a project as it stands right now.
+- **Versioned** — an incremental, timestamped store that keeps the current copy
+  and a baseline beside it, so a file can be recovered as it was.
+- **Restore** — finds a version by path or by name and writes it where you say.
+- **Registration** — a project registers once, gets its own `.backup/` store and
+  its own `.backupignore`, and answers to `@name` afterwards.
+- **Ignore rules** — gitignore-style patterns, with a built-in floor that reaches
+  every project whether or not its ignore file knows about the rule.
+- **A run ceiling** — every run measures what it is about to copy and refuses
+  loudly rather than walking a build-artifact tree for hours.
+- **Drive sync** — optional, off by default, and the only lane that leaves the
+  machine.
 
-```
-.backup/
-├── config.json          # Project backup configuration
-├── snapshots/           # Full mirror copies (eager — created on register)
-├── versioned/           # Incremental timestamped backups (lazy)
-├── logs/                # Operation logs (eager — created on register)
-├── timestamps.json      # Per-file mtime index for change detection (lazy)
-├── changelog.json       # Change history (lazy)
-└── drive_tracker.json   # Drive sync dedup tracker (lazy)
-```
-
-On `register`, only `snapshots/` and `logs/` are created eagerly (plus
-`config.json` and the project's `.backupignore`). The rest are created lazily on
-first use. Verified live 2026-09-05 by registering a scratch project: the eager
-set was exactly `config.json`, `snapshots/`, `logs/`; `timestamps.json`,
-`changelog.json` and `versioned/` appeared only after the first `versioned` run.
-
-**`timestamps.json` is not a record of when backups ran.** It maps each relative
-path to the mtime the versioned engine last saw (`handlers/state/timestamps.py`),
-which is how "changed since last run" is decided. The *when-did-a-backup-run*
-clock is a separate, branch-global file — see "Status / Known issues".
-
-**Shared namespace:** `.backup/` is NOT exclusive to @backup. Three writers use it:
-- **@backup** — snapshot/versioned stores at a registered project root
-- **@memory** — rollover safety copies (`rollover_backup_*.json`) written to `<branch>/.backup/` during memory overflow
-- **@flow** — closed plans archived to `<repo-root>/.backup/processed_plans/` for vectorization by @memory
-
-The root `.gitignore` covers all three with a single `.backup/` entry.
+The backups belong to the project, not to this branch: the store and the ignore
+file live in the target project's own root, so a project keeps its backups when
+this branch is not around. There is no compression, no encryption, and no
+schedule — a backup happens when something asks for one.
 
 ---
 
-## How Ignores Work
+## Live Inventory
 
-Three layers — seed, built-in floor, runtime:
+The list of what this branch can do is generated from the code, never typed
+here, because a typed copy starts rotting the day it is written:
 
-1. **`templates/backupignore.template`** — the **seed**. Read by `setup._build_backupignore()` and written into a new project's `.backupignore` at `register` time. Never consulted at backup time. If this file is missing, registration raises — an empty seed would back up everything and crash the machine.
-2. **`BUILTIN_IGNORE_PATTERNS`** in `handlers/ignore/patterns.py` — the **built-in floor**, today exactly one rule: `*.tmp`. `load_spec()` puts it ahead of the project's own lines on every run, so it reaches every project, including every `.backupignore` seeded before the rule existed.
-3. **`.backupignore`** — the **runtime source of truth**. `load_spec()` reads it on every backup; the seed template is not applied. True pathspec/gitwildmatch semantics: `#` comments, `!` negation, trailing `/` for dirs, last-match-wins.
+- `drone @backup` — the self-map: every module discovered, one line each.
+- `drone @backup --help` — the full reference: every command, every flag, and
+  the examples that go with them.
 
-The floor is not a fallback for the seed. An empty or missing `.backupignore` still means back up everything except `*.tmp` (`.venv`, `node_modules`, `.git` included), which can crash the machine. The seed IS the safety mechanism. Keep the template sane.
-
-### Why `*.tmp` is built in (DPLAN-0338)
-
-The fleet's json service writes through a sibling staging temp (`.<pid>_<n>.tmp`,
-older era `tmpXXXX.tmp`) inside `*_json` folders and renames it over the real
-file. A writer killed mid-write leaves the temp behind. The real json is intact
-either way, so a temp is never anyone's work, and backing one up only copies
-litter. Patrick, 2026-09-11: "backup needs to ignore temporary files".
-
-- **One rule, one place.** `load_spec()` is the only ignore source for every lane: `snapshot`, `versioned`, `all` (one shared scan) and `drive_sync` (which re-filters the versioned store through it before uploading). `DIFF_IGNORE_PATTERNS` in `handlers/diff/generator.py` decides only which files get a diff, never which files get copied, so it is not a copy rule.
-- **Why not the seed?** The seed reaches only projects registered after the edit, and `.backupignore` is never overwritten. AIPass's own `/.backupignore` (hand-maintained) does not name `*.tmp`, and that store is where the temps piled up.
-- **Overridable.** The floor goes first, so a project that genuinely keeps `.tmp` files re-includes them with `!*.tmp` in its own `.backupignore` (last match wins). A `whitelist` entry in `.backup/config.json` also overrides it, as it overrides any ignore.
-- **Scope of the match.** gitwildmatch `*.tmp` matches at any depth and also matches a *directory* named `*.tmp`, which drops that directory's contents too. Near-misses such as `notes.tmpl`, `tmp.json`, `state.tmp.json` or `tmp/data.json` are not matched (pinned in `tests/test_ignore_pathspec.py`).
-
-Measured 2026-09-11 on a scratch copy of `src/aipass/prax/prax_json` (599 files: 452 temps, 145 json, 2 others), outside the repo:
-
-| Run | Snapshot store | Versioned store |
-|---|---|---|
-| Before the rule | 452 `*.tmp`, 145 json | 904 `*.tmp` files (452 × current + baseline), 290 json |
-| After the rule, fresh project | 0 `*.tmp`, 145 json | 0 `*.tmp`, 290 json |
-
-Re-running the *before* project after the rule still left its 452 old copies in `snapshots/`: the rule stops new copies, it does not remove old ones (see "Store Cleanup").
-
-- To change defaults for **new** projects → edit `templates/backupignore.template`
-- To change ignores for an **existing** project → edit its `.backupignore`
-
-The repo-root `/.backupignore` ships intentionally as the curated default so
-users don't snapshot junk. It is hand-maintained, not generated from the seed.
-It had **drifted** as of 2026-08-25 (missing `target/` and `logs/`, header still
-citing the old `handlers/ignore/patterns.py`); re-checked 2026-09-05, all three
-are cured — `target/` at line 26, `logs/` at line 28, header citing
-`templates/backupignore.template`. AIPass's own tree is now covered against the
-runaway class the `target/` pattern was added for.
-
-A project's own `.backupignore` is **generated at `register` time** by
-`handlers/project/setup.py` (`if not ignore_path.exists()`), from the seed
-template. It is not shipped by `init` and it is never overwritten once present.
-
-**A miss in the seed is expensive.** The template covers `build/`, `dist/`, `target/`, `node_modules/`, `.venv/` and friends precisely because an uncovered build-artifact tree is indistinguishable from real source to the walker. `target/` was added on 2026-08-20 after a Rust `src-tauri/target` tree (33,093 files / 18GB) was walked and copied for 7.5h, writing 50GB into the stores. Patterns are unanchored on purpose: baud's tree was `app/src-tauri/target`, so an anchored `/target/` would have missed it.
+A `--help` anywhere in the arguments prints the page and runs nothing, so both
+are safe to probe against a real project.
 
 ---
 
-## Run Ceiling — the runaway guard
+## Commands
 
-An ignore miss cannot be caught by better ignore patterns alone; the next unfamiliar build system will have a directory nobody has listed yet. So every run **measures the filtered set before copying anything** and refuses loudly when it breaches a ceiling:
-
-| Config key | Default | Meaning |
-|---|---|---|
-| `max_backup_files` | `25000` | Maximum files in one run |
-| `max_backup_size_gb` | `10` | Maximum total source bytes in one run |
-
-Set either to `0` to disable it for a project that genuinely is that large.
-
-A refusal names the directories that caused it, at a depth you can paste straight into `.backupignore`:
-
-```
-✗ Backup refused — 33,093 files exceeds the 25,000-file ceiling
-  Largest directories in this run:
-    app/src-tauri/target  —  33,093 files
-  Add the build-artifact directories above to .backupignore, then re-run.
-  If the project really is this large, raise 'max_backup_files' in .backup/config.json (0 disables).
-```
-
-The guard sits in `snapshot`, `versioned` **and** `all`. It is in `all` as well as the sub-modules because `run_snapshot` does its own full walk — letting a breach fall through means walking a runaway tree twice before refusing it.
-
-**Known gap:** the ceiling stops a runaway *before* it happens. It does not clean up a store that a previous run already filled — see "Store Cleanup" below.
+Deliberately no list here. The command reference is `drone @backup --help`, and
+what it prints is the truth of the moment; a second copy in this file could only
+disagree with it. For the parts `--help` cannot tell you about itself — how the
+router resolves relative paths, which flag belongs to which verb, and the legacy
+entry form that still works — see [docs/cli.md](docs/cli.md).
 
 ---
 
-## Store Cleanup — what exists and what does not
+## Architecture
 
-Mirror cleanup (`handlers/cleanup/mirror.py`) removes snapshot files **whose source no longer exists**. That is its only trigger.
+Three layers. `apps/backup.py` is the entry point: it discovers the modules,
+routes a verb to whichever one claims it, and resolves `@name` to a path.
 
-There is **no lane** that removes files which are now *ignored* but still present in the source tree. A directory added to `.backupignore` after a backup stays in `snapshots/` and `versioned/` indefinitely:
+The modules are the verbs. `register` scaffolds a project's store; `snapshot`
+mirrors, `versioned` keeps history, and `all` runs both lanes over one shared
+scan before handing off to `drive_sync`. `restore` reads history back out,
+`status` reports what is stored, and `display` renders the panels the other
+lanes print. The Drive lane is `drive_sync`, `drive_check`, `drive_stats`,
+`drive_clear` and `share`. `settings` is a stub that fails honestly rather than
+pretending to have saved anything.
 
-- `snapshots/` — `_should_delete()` keeps any file whose source still exists, and an ignored-but-present `target/` still exists. `cleanup_deleted_files()` accepts a `should_ignore` callback and **never calls it** — the ignore-aware sweep is unimplemented, not merely unused.
-- `versioned/` — has no cleanup path at all. The store is append-only, and holds two copies of every new file (current + baseline), so it grows to roughly 2× the source.
+Underneath, the handlers do the work: walking and filtering a tree, applying
+ignore rules, copying, diffing, building store paths, reading and writing the
+project's config and registry, keeping the changelog, talking to Drive, and
+writing this branch's own operation trail. They are shared by every module, and
+they refuse to be imported from outside this branch —
+see [docs/module_fence.md](docs/module_fence.md).
 
-**`max_versions` does nothing.** `.backup/config.json` carries a `max_versions`
-key (default `10`), `register` writes it, and `status` prints it as "Max
-versions" — but no code reads it. Re-verified 2026-09-05: the only three
-mentions in the whole tree are the two defaults that write it
-(`project/config.py:24`, `project/setup.py:41`) and the one line that displays
-it (`modules/status.py:80`). Nothing prunes old versions.
-
-The only deletion of a *backed-up* file anywhere in this branch is
-`mirror.py:59`, the vanished-source snapshot sweep above. (There is one other
-`unlink` in the tree, `state/backup_timestamps.py:61`, but it removes that
-module's own temp file when an atomic write fails — it never touches a store.)
-Treat `max_versions` as advertised-but-unimplemented until a pruning lane exists.
-
-Removing a now-ignored tree from a store is currently a manual `rm -rf` of the corresponding path under `.backup/`.
-
-**The `*.tmp` copies made before the rule (2026-09-11).** The AIPass store
-(`/.backup/`, last snapshotted 2026-08-15) held 498 temp copies in `snapshots/`
-(14,265,519 B) and 996 in `versioned/` (498 file-folders × current + baseline,
-28,531,038 B), every one from a `*_json` folder: 458 prax, 36 memory, 3 trigger,
-1 seedgo. None of the 498 snapshot copies still had a source.
-
-- `snapshots/` — **pruned** with `drone rm --stale 10d .backup/snapshots`, the
-  fleet's logged delete: 498 matched, 498 deleted, 0 refusals, 0 left. They
-  could never be restored as anything useful, and with no source they would
-  only have gone at the next AIPass snapshot.
-- `versioned/` — **left in place, 996 files.** The stale sweep matches only
-  files directly inside a `*_json` folder, and this store wraps each file in a
-  `<name>.tmp/` folder. The plain `drone rm` lane refuses the folders
-  (`Protected: path is inside sibling branch memory/`) because the store
-  mirrors `src/aipass/<branch>/`. The gate is not routed around. The copies
-  are inert: `drive_sync` re-filters the store through `load_spec()`, so they
-  never upload. They go when a pruning lane exists.
+The directory tree lives in one place only, the branch prompt
+(`.aipass/aipass_local_prompt.md`), so it cannot disagree with itself.
 
 ---
 
-### Fabricated filenames never name the real tree (round 12)
+## Documentation
 
-The fence pins drive the guard by compiling `check()` under a made-up caller
-filename. coverage.py records every executed code object BY FILENAME, existing
-file or not -- so a fabrication that looks like a real tree file makes the
-coverage *report* step exit 1 with `No source for code` while every test passes.
-That is what reddened the coverage CI leg on `5bfd5b63`.
+Depth lives in [docs/](docs/), one page per lane or handler group:
 
-Two rules, both pinned:
-
-- Every fabricated filename lives under `tmp_path`, outside coverage's `source`
-  filter. Real-tree adjacency (is `src/aipass/memory` foreign? is a real backup
-  file kin?) is asserted on `_is_kin`, which is pure and compiles nothing.
-- There is exactly ONE `compile()` in the test file, and it refuses a filename
-  that `abspath`s inside the source tree. `abspath`, not the literal: coverage
-  resolves a relative name against the cwd at trace time, so a Windows-spelled
-  literal is inert from the repo root and a minter from the branch directory.
-
-### Kinship is spelled, not compared raw (round 5)
-
-The handlers fence asks one question -- is this caller inside my branch? -- and
-until 2026-08-31 it asked it with a raw substring test that normalised only ONE
-side. On Windows `_BRANCH_ROOT` arrives from `Path` with backslashes while the
-caller had just had its backslashes replaced with forward slashes, so the test
-could never match: every file in this branch read as FOREIGN and the whole tree
-died at the door with backup's own ACCESS DENIED message.
-
-Both sides now go through `_spell_for_kinship()`. Case is folded only when
-`os.name == "nt"` -- folding everywhere would ADMIT a foreign `/tmp/BACKUP` on a
-case-sensitive filesystem, which is a wider fence, not a safer one. The guard's
-own-frame skip uses the same rule for a sharper reason: if that skip misses,
-`__init__.py` becomes the reported caller, is trivially kin, and the real
-foreign frame beneath it is never examined.
-
-## Path Resolution — why nothing here calls `resolve()` at import
-
-`ntpath.realpath` reads `os.getcwd()` **unconditionally** (posixpath only does so
-for relative paths), and `Path.resolve()` routes through it. So on Windows every
-`resolve()` *reached at import time* is an import-time crash for a process whose
-cwd has been deleted: the module cannot be imported at all. The discriminator is
-**reached-at-import**, not written-at-module-scope — a `resolve()` inside a
-function that the module calls while importing is just as fatal.
-
-Every module-level path in this branch therefore goes through one helper,
-`handlers/path/module_paths.py`:
-
-- `module_file(__file__)` — `resolve()` first, so symlinks still collapse
-  normally; on `OSError` it degrades to `os.path.abspath`, which is the identity
-  for an already-absolute path and needs no cwd.
-- `branch_root(__file__, n)` — the same, then climbs `n` levels.
-
-The helper is **stdlib-only on purpose**. Importing `@prax` here would put the
-logger's own cwd-reading construction onto the path this module exists to
-protect, so its diagnostics go to `sys.stderr` — reported once per path, because
-in a dead-cwd world *every* resolve fails and one line per call would bury the
-real traceback.
-
-The handlers package guard walks `sys._getframe` rather than `inspect.stack()`.
-`inspect.stack()` calls `getmodule` → `getabsfile` → `os.path.realpath` on every
-frame with no guard (inspect.py:1009), so it dies before the guard's own
-skip-the-pseudo-frame logic is ever consulted. Reading `f_code.co_filename` off
-the frame touches no filesystem at all.
-
-Measured on 2026-08-31 by importing all 57 modules then in the tree, in a child
-interpreter under two injections: **57/57 failed to import before the cure, 0/57
-after**. Re-measured 2026-09-05 against the tree as it now stands (60 modules,
-`audit/` added since): **0/60 red in both denial worlds**.
-
-The standing pin is `tests/test_dead_cwd_imports.py`. Note what it does and does
-not do: it re-runs the two injections against **9 representative modules**
-(`PROBE_MODULES`), not the whole tree — the 57 and 60 figures above are ad-hoc
-sweeps, not something CI re-walks. The file also carries an AST ban on
-`inspect.stack()` — a behavioural test cannot catch its return, because the
-branch that used it is unreachable from any import-shaped pin.
-
-**Backup destinations are unaffected by all of this.** Every path under
-`.backup/` is derived from the caller-supplied `project_root` (see
-`handlers/path/builder.py`), never from a module-level resolve and never from
-the cwd — so no backup or archive has ever been written to a location derived
-from where the caller's shell happened to be standing.
-
----
-
-## Tests
-
-**306 test functions across 13 files in `tests/`; pytest expands them to 379
-cases.** Both numbers re-measured 2026-09-14 — the first by counting `def test_`
-lines the way the seedgo readme rule counts them, the second from a full run:
-
-```
-python -m pytest src/aipass/backup/tests -q     # 379 passed
-```
-
-The +1 over 2026-09-11 (305 / 378) is `test_find_file_folder_path_shaped`
-(`test_versioned_engine.py`), the restore path-lookup pin.
-
-The +7 over the 2026-09-08 figures (298 defs / 371 cases) are the `*.tmp`
-floor's pins (DPLAN-0338): six in `TestBuiltinTmpFloor`
-(`test_ignore_pathspec.py`: the spec with and without a `.backupignore`, the
-`!*.tmp` escape, and the snapshot, versioned and `all` lanes end to end) and
-one in `test_drive_pipeline.py` (a pre-rule store's temps never upload).
-
-The 2026-09-08 drop from 302 defs / 14 files / 383 cases was one file, not
-attrition: `tests/test_json_handler.py` (6 defs, 14 cases) was archived on
-2026-09-07 to `tests/.archive/`.
-
-The gap is parametrisation, concentrated in `test_drive_pipeline.py` (71 defs)
-and `test_dead_cwd_imports.py` (37 defs). Run it from the **repo root** — from
-the branch directory the local `aipass/` tree shadows the installed package.
-
----
-
-## Status / Known issues
-
-A 2026-09-05 docs verification pass reproduced four **code** defects live and
-logged them here rather than correcting them in prose. Three were fixed
-2026-09-14, each with a test that failed before the fix:
-
-- **Was #1:** `restore` was missing from the `--help` COMMANDS block. It has a
-  row now, pinned in `test_cli_routing.py::TestPrintHelp`.
-- **Was #2:** `restore.py` `_find_file_folder` could not find a file from a path
-  like `src/main.py`. Fixed; see the `restore` note under Commands.
-- **Was #4:** the `--help` row for `all` said "snapshot then versioned" and left
-  out the `drive_sync` stage in `modules/all.py`. The row names all three now,
-  pinned in the same unit.
-
-Still open:
-
-| # | Where | What |
-|---|---|---|
-| 3 | `apps/handlers/state/backup_timestamps.py:22` | `TIMESTAMPS_FILE` is a branch-global module constant, so the "Backups now:" panel (`modules/display.py:176`) reports @backup's last run **anywhere** as if it were this project's. A project registered 30 seconds earlier displayed *"Versioned: 2 mins ago · Drive sync: 7 days ago"*. Same root cause makes the file unpatchable in tests, which is why the suite still rewrites the live one (re-observed 2026-09-14: a full run moved its mtime). |
-
-**Unverified in this pass:** the Drive **upload** path (`drive_sync`, `share`).
-Authentication and connectivity were verified; uploading publishes to a real
-Drive account, so it was not exercised. Last recorded successful `drive_sync`:
-2026-08-29.
-
-**Known-and-by-design, documented above:** no version pruning
-(`max_versions` is inert), no ignore-aware store sweep, and `versioned/` is
-append-only at roughly 2× the source.
+| Doc | What it covers |
+|---|---|
+| [store.md](docs/store.md) | The `.backup/` store, and who else writes there |
+| [ignores.md](docs/ignores.md) | Seed, built-in floor, runtime — the whole rule set |
+| [run_ceiling.md](docs/run_ceiling.md) | The guard that refuses a runaway run |
+| [store_cleanup.md](docs/store_cleanup.md) | Deletions that exist, and ones that do not |
+| [restore.md](docs/restore.md) | Finding a version and recovering it |
+| [drive_sync.md](docs/drive_sync.md) | The Drive lane, and what is verified |
+| [cli.md](docs/cli.md) | Router behaviour, flags by verb, legacy entry form |
+| [module_fence.md](docs/module_fence.md) | The handlers access guard |
+| [path_resolution.md](docs/path_resolution.md) | Why nothing here resolves at import |
+| [tests.md](docs/tests.md) | Running the suite |
+| [known_issues.md](docs/known_issues.md) | Defects reproduced live, open and cured |
 
 ---
 
 ## Integration Points
 
 ### Depends On
-Verified 2026-09-05 by reading every import in `apps/`:
 
-- @prax — logging (`logger`, `append_jsonl`) **and** the json service, bound by
-  the shim (`from aipass.prax import json_handler`)
-- @cli — Rich console output (`console`, `error`, `header`, `success`, `warning`)
-- @api — Google Drive auth + retry, via
-  `aipass.api.apps.modules.google_client` (Drive commands only)
+- **@prax** — logging; every lane writes its trail through it.
+- **@cli** — Rich console output, shared with the rest of the fleet.
+- **@api** — the gateway the Drive lane authenticates through.
 
 ### Provides To
-- Any project on the PC — backups are project-owned (`.backup/` in target root)
+
+- **Any project on this machine** — registered or named by path; the store is
+  written into the project, not into this branch.
+- **@memory** — rollover safety copies share the `.backup/` directory.
+- **@flow** — closed plans are archived under the repo root's `.backup/`.
+
+---
+
+[<- Back to AIPass](../../../README.md)
