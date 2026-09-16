@@ -2,821 +2,163 @@
 
 # Hooks
 
-> Hook infrastructure for AIPass. A single dispatch engine routes hook events across platforms (Claude Code, Codex) with per-project configuration, full logging, and crash isolation.
+**Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
+platforms (Claude Code, Codex) with per-project configuration, full logging and crash isolation. On
+one side it injects the grounding an agent wakes up with; on the other it fences the writes an agent
+makes.
+**Module:** `aipass.hooks`
+**Version:** 1.3.0
+**Last Updated:** 2026-09-15
 
-Every hook event flows through one engine. Platform bridges normalize the event format, the engine reads per-project config (`.aipass/hooks.json`), dispatches matching handlers, and logs everything to JSONL diagnostics.
+---
 
 ## Quick Start
 
 ```bash
-drone @hooks status              # Show hook config for current project
-drone @hooks log                 # Tail recent hook activity
-drone @hooks engine              # Show connected handlers
-drone @hooks verify              # Cross-check provider ↔ project wiring
-drone @hooks --help              # Full help reference
+drone @hooks status     # What is wired to fire in this project
+drone @hooks log        # The most recent entries from the diagnostics stream
+drone @hooks verify     # Provider settings against project config, non-zero on ERROR
+drone @hooks --help     # Every verb, generated from the code that runs it
 ```
 
-## Start here
+A platform bridge normalizes the event, the engine reads the project's `.aipass/hooks.json` (walking
+up from the working directory), dispatches the handlers whose matcher fits, and writes the outcome of
+each one to JSONL. One broken hook never blocks the rest — the engine catches, logs, and carries on.
 
-| You want to | Read |
-|---|---|
-| Identity, session history | [`.trinity/`](.trinity/) |
-| Hook engine design | `DPLAN-0184` |
-| Per-project config | `.aipass/hooks.json` |
+---
+
+## What It Does
+
+- **Grounds the session.** The branch prompt, the kernel, the fleet navmap, the passport identity
+  block, the date, alert banners and a mid-turn re-ground after compaction, each rendered under a cap
+  its owner publishes and fired on a cadence rather than every turn.
+- **Fences writes.** Cross-project and cross-branch edits, raw git, destructive `rm`, sealed
+  registries and the creation of new test files are refused at PreToolUse — on the tool lane and on
+  the shell lane both, because a fence only one of them can see is not a fence.
+- **Measures memory writes.** A write to a `.trinity` file is judged against @memory's published
+  caps, and a shell write that slips past the reader is reported afterwards by a tripwire.
+- **Bridges platforms.** One thin normalization layer per provider, no business logic, so a second
+  platform costs a bridge rather than a fork.
+- **Logs every dispatch** to a JSONL stream that is the source of truth for hook diagnostics, with a
+  quieter copy in prax for warnings, blocks and crashes.
+- **Hands each project the switch.** `.aipass/hooks.json` decides what fires where; the framework
+  file and the template a new project is stamped from are separate rulings.
+
+Not the platform's hook system — this bridges it rather than replacing it. Not the handlers' business
+logic: each handler is self-contained and the engine only dispatches. Never another branch's files.
+
+---
+
+## Live Inventory
+
+The list of modules and commands is generated from the code that runs them, so it is not written down
+here and cannot go stale:
+
+- `drone @hooks` — the self-map: every discovered module with its one-line description, and the data
+  each gate publishes about what it deliberately cannot catch.
+- `drone @hooks --help` — the full command surface: every verb, its arguments and its flags.
+
+---
+
+## How To Reach Me
+
+- Mail: `drone @ai_mail email @hooks "Subject" "Body"` — a gate that refused work it should have
+  allowed, a hook that did not fire, a prompt block that arrived cut or not at all.
+- **A false refusal is a defect here, not a fault in your branch.** Say which command or file, and
+  paste the refusal text verbatim: every gate names itself and its reason, so the text alone usually
+  identifies the lane.
+- **Adding or renaming a handler?** `.aipass/hooks.json` alone is not enough for UserPromptSubmit,
+  SessionStart or PreCompact — those events are wired per handler in provider settings, which no
+  branch may edit. Ask, and the exact entries come back with the answer. See
+  [docs/wiring.md](docs/wiring.md).
+- Caps other branches read from this branch are named as constants, never as numbers to copy:
+  `BRANCH_CHAR_BUDGET`, `IDENTITY_CHAR_BUDGET` and `INTEGRATION_CHAR_BUDGET` in
+  `apps/modules/grounding_content.py`. The contract for all three is
+  [docs/prompt_injection.md](docs/prompt_injection.md).
+
+---
 
 ## Commands
 
-| Command | What it does |
-|---|---|
-| `drone @hooks` | Show branch structure (auto-discovered modules) |
-| `drone @hooks status` | Show hook config for current project — **exits 1** when there is no config to show |
-| `drone @hooks engine` | Show connected handlers — **works, but is absent from `--help`** (see Status) |
-| `drone @hooks log` | Tail recent hook activity (last 20 JSONL entries) |
-| `drone @hooks hooksound` | Show current sound mute status |
-| `drone @hooks hooksound off` | Mute all hook sounds |
-| `drone @hooks hooksound on` | Unmute all hook sounds |
-| `drone @hooks feedback` | Show feedback pulse status (enabled/disabled) |
-| `drone @hooks feedback off` | Disable feedback pulse for this project — **exits 1** outside an AIPass project |
-| `drone @hooks feedback on` | Enable feedback pulse for this project — **exits 1** outside an AIPass project |
-| `drone @hooks dismiss <alert-id>` | Remove an alert from `.aipass/alerts.json` — **exits 1** when the id is not found |
-| `drone @hooks cadence` | Show prompt injection cadence config and state |
-| `drone @hooks diagnostics_state` | Show recorded post-edit diagnostics and re-check them live |
-| `drone @hooks sessions` | List live Claude Code sessions (PIDs) |
-| `drone @hooks sessions reclaim [@branch]` | Stop sessions cleanly — clean slate |
-| `drone @hooks context_window` | Show transcript fill vs the compact window |
-| `drone @hooks sandbox` | Show kernel sandbox (srt/bwrap) status |
-| `drone @hooks testwrite` | Show the test-write policy in force + what the gate cannot catch |
-| `drone @hooks test [--verbose]` | Run the portable hook test runner — fires every hook with mock data against a throwaway branch skeleton, so no run touches real memory (2026-09-06). Bare `test` with no argument prints the module blurb and fires nothing — see Status |
-| `drone @hooks verify` | Cross-check provider settings vs project hook config (exits non-zero on ERROR findings) |
-| `drone @hooks --help` | Full help reference |
-| `drone @hooks --version` | Version info |
+There is no command list on this page, deliberately: a hand-typed copy of the branch's own help output
+rots the next time a verb is added or renamed. The generated surface above under **Live Inventory** is
+always current, and the depth behind each verb is in the documentation index below. When a verb exists
+and `--help` does not name it, the bug is in `--help`.
 
-## Two-Tier Hook Model
-
-Hooks operate on two tiers:
-
-**Tier 1 — Provider Settings (wiring).** Claude Code's `~/.claude/settings.json` (or project `.claude/settings.json`) defines hook entries that point to the bridge (`claude.py`). These are installed by `setup.sh` / `doctor` — they're pure wiring. Wiring comes in two shapes. Five events use **one fan-out entry** that dispatches every enabled handler for that event: PreToolUse, PostToolUse, SubagentStop, Stop, Notification. Three events are wired **per handler** (`claude.py EventType:hook_name`, one entry each): UserPromptSubmit (13 entries), PreCompact (8 — four handlers × `manual`/`auto`), SessionStart (1). The per-handler form exists for two reasons: a single fan-out entry answers with ONE merged document whose `additionalContext` shares one 10,000-unit display limit (How It Works, step 7), which the prompt injectors together would cross; and per-entry wiring gives each handler its own timeout budget (in the current manifest, UserPromptSubmit runs at 90s except `auto_process` at 120s; PreCompact runs 60s/120s/120s/30s; SessionStart 30s). Provider settings cannot be changed by branches — only setup tooling manages them.
-
-**Tier 2 — Project Config (control).** Each project's `.aipass/hooks.json` controls which hooks fire for that project. Created by `aipass init`. Edit `enabled` flags to turn hooks on/off per project. Use `drone @hooks status` to view current config.
-
-**Why provider-only wiring?** Claude Code does not fire `PreToolUse`/`PostToolUse` hooks from project-level settings — only from user-level settings (DPLAN-0160 platform limitation). So all hook entries live in provider settings, and per-project control happens through `.aipass/hooks.json`.
-
-**Deploying new handlers:** whether `.aipass/hooks.json` alone is enough depends on which shape the event uses.
-
-| New handler on | Provider change needed |
-|---|---|
-| PreToolUse, PostToolUse, SubagentStop, Stop, Notification | **None** — the fan-out entry already dispatches it |
-| UserPromptSubmit, SessionStart | **One** new entry: `claude.py <Event>:<hook_name>` |
-| PreCompact | **Two** new entries — one `matcher: manual`, one `matcher: auto` |
-
-Provider settings are human-gated (`git_gate.py` `TRUSTED_HOOK_EDITORS`), so when an entry is needed, email @devpulse to wire it. Without it the engine never receives the event and the handler never fires — and the suite cannot see the gap, so verify with firing evidence in `engine.jsonl`.
-
-**Keeping the manifest and live settings in sync:** `.claude/provider_manifest.json` (repo root, self-editable by @hooks) is the source of truth; `~/.claude/settings.json` is the live copy Claude Code actually reads, and only `aipass doctor --fix` (or a trusted editor like @devpulse) can write it. Editing the manifest does NOT apply live — this sync step has silently lapsed before (DPLAN-0278: live drifted a full matcher behind for weeks). Run `aipass doctor` after any manifest edit to see the drift, then ask @devpulse to apply it (or run `aipass doctor --fix` if you're a trusted editor).
+---
 
 ## Architecture
 
-```
-src/aipass/hooks/
-├── .trinity/                    # Identity & memory
-├── apps/
-│   ├── hooks.py                 # Entry point (drone @hooks)
-│   ├── sound.py                 # Shared sound utilities (speak, play, mute)
-│   ├── modules/
-│   │   ├── cadence.py           # Prompt injection cadence (every-Nth-turn gating)
-│   │   ├── context_window.py    # Transcript usage reader + per-branch compact-window resolver
-│   │   ├── diagnostics_state.py # What .diagnostics_state.json means — shared by auto_fix + edit_gate
-│   │   ├── hook_test.py         # Portable test runner (drone @hooks test)
-│   │   ├── cc_sessions.py       # CC-native session reader + session-PID resolution
-│   │   ├── cc_transcripts.py    # CC-native transcript reader (~/.claude/projects/<cwd>/<sessionId>.jsonl)
-│   │   ├── engine.py            # Core dispatch — routes events to handlers
-│   │   ├── feedback.py          # Feedback pulse toggle (drone @hooks feedback on/off)
-│   │   ├── grounding_content.py # Shared kernel/navmap/branch/identity content loaders (DPLAN-0276)
-│   │   ├── hooksound.py         # Sound control (drone @hooks hooksound on/off)
-│   │   ├── hookstatus.py        # Config viewer (drone @hooks status)
-│   │   ├── alert_dismiss.py      # Dismiss alerts (drone @hooks dismiss <id>)
-│   │   ├── bash_writes.py       # Write targets a shell command names — edit_gate's scripted lane
-│   │   ├── admin_seat.py        # The verified admin-seat exemption — one home, read by two gates
-│   │   ├── testgate_policy.py   # Reads .aipass/test_write_policy.json (drone @hooks testwrite)
-│   │   ├── testwrite_targets.py # Which write targets are NEW test files — testwrite_gate's classifier
-│   │   ├── presence(disabled).py # RETIRED 2026-09-07 — superseded by cc_sessions.py; PID resolution moved there
-│   │   ├── sandbox.py           # Kernel sandbox — srt/bwrap wrapper + per-role policy generator
-│   │   └── wire_verify.py       # Wire verification — provider ↔ project hook wiring checker
-│   ├── handlers/
-│   │   ├── bridges/             # One per provider (thin normalization)
-│   │   │   ├── claude.py        # Claude Code bridge
-│   │   │   └── codex.py         # Codex bridge (normalizes stdin/stdout envelope)
-│   │   ├── prompt/              # Prompt injection hooks
-│   │   │   ├── branch_loader.py #   Injects aipass_local_prompt.md
-│   │   │   ├── tier0_kernel.py  #   Injects tier0 kernel prompt (every turn)
-│   │   │   ├── navmap.py        #   Injects tier1 navmap prompt (periodic)
-│   │   │   ├── identity.py      #   Injects passport identity block (capped 4,000)
-│   │   │   ├── compass_recall.py #  Governance recall injection (hooks.json knobs, capped per context window)
-│   │   │   ├── feedback_pulse.py #  Periodic feedback ask (~10 turns, toggleable — disabled here)
-│   │   │   ├── context_gauge.py #   Nudges /prep before auto-compact (80%/95%, once per window)
-│   │   │   ├── temporal.py      #   Injects weekday/date/time/tz/part-of-day, every turn
-│   │   │   └── persistent_alert.py # alerts.json banners: on arrival, then cadence 5
-│   │   ├── security/            # Enforcement hooks
-│   │   │   ├── edit_gate.py     #   Blocks unsafe edits (cross-project, cross-branch, inbox, diagnostics)
-│   │   │   ├── git_gate.py      #   Enforces git access tiers
-│   │   │   ├── presence_gate.py  #   Single-session gate — blocks duplicate runtimes per branch
-│   │   │   ├── registry_gate.py  #   Seals *_REGISTRY.json — blocks raw writes/edits/deletes, redirects to drone @spawn
-│   │   │   ├── rm_gate.py       #   Guardrail — catches accidental rm -rf, teaches drone rm
-│   │   │   ├── subagent_gate.py #   Blocks sub-agent stop until clean
-│   │   │   └── testwrite_gate.py #  Blocks agent CREATION of new test files behind a JSON switch
-│   │   ├── lifecycle/           # Session management hooks
-│   │   │   ├── auto_fix.py      #   Post-edit diagnostics (ruff, pyright, py_compile)
-│   │   │   ├── auto_process.py  #   Scheduled inbox/task processing (UserPromptSubmit + PreCompact)
-│   │   │   ├── auto_watchdog(disabled).py # RETIRED 2026-09-07 — was watchdog arming after dispatch
-│   │   │   ├── compact.py       #   Pre-compact memory archival
-│   │   │   ├── session_boot.py  #   Boot wrapper (main() CLI, not a hook — no handle())
-│   │   │   ├── post_compact_regrounding.py # Mid-turn re-ground backstop after compaction, in budgeted parts (PostToolUse, DPLAN-0276, #752)
-│   │   │   ├── pre_compact_prep.py # Mechanical AUTO-COMPACT SNAPSHOT stamp (fill %, git, locks, plans)
-│   │   │   ├── rollover.py      #   Pre-compact memory rollover — fleet files + the compacting branch's todo pad (--branch, DPLAN-0345)
-│   │   │   └── session_start.py #   Cadence reset on new chat / clear (SessionStart)
-│   │   └── notification/        # Sound/alert hooks
-│   │       ├── announce.py      #   Announcement tone on notification
-│   │       ├── email.py         #   Inbox check on prompt
-│   │       ├── stop_sound.py    #   Bell on session stop
-│   │       ├── telegram_response.py # Telegram reply delivery on Stop
-│   │       └── tool_sound.py    #   Announces tool name via TTS
-│   ├── handlers/config/         # Config utilities (not hooks — no handle())
-│   │   ├── loader.py            #   hooks.json discovery + validation
-│   │   ├── trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
-│   │   ├── diagnostics.py       #   JSONL logging for hook execution
-│   │   └── output_merge.py      #   Fan-out stdouts merged into ONE hook document (FPLAN-0535)
-│   ├── handlers/cli/            # CLI utilities (not hooks — no handle())
-│   │   └── help_flags.py        #   Help-flag detection — did the caller ask, or instruct?
-│   ├── handlers/json/           # JSON utilities (not hooks — no handle())
-│   │   ├── json_handler.py      #   The fleet's one json service, bound to hooks (DPLAN-0325 shim)
-│   │   └── files.py             #   Atomic read/write for paths outside hooks_json/ — raises, never None
-│   └── handlers/module_root.py  # Guarded __file__ resolution — the one import-time-safe spelling
-├── logs/
-│   └── engine.jsonl             # JSONL diagnostics (every hook execution)
-├── tools/
-│   └── install_boot_shim.sh     # Appends a claude() shell function to ~/.bashrc + ~/.zshrc
-└── tests/                       # 1911 test functions across 51 files; pytest expands to 2009 cases (2007 pass, 2 skipped — 1 env, 1 win32-only)
-    └── .archive/                # removed suites, kept never deleted — each header says what it pinned and why it stopped applying
-```
-
-## How It Works
-
-1. Provider settings invoke the bridge one of two ways: `claude.py <Event>` (one fan-out entry, all enabled handlers — tool events) or `claude.py <Event>:<hook_name>` (one entry per handler — UserPromptSubmit, PreCompact, SessionStart). There is no bare `claude.py UserPromptSubmit` entry; it is 13 named ones.
-2. Bridge normalizes stdin, loads project config via `loader.find_project_config()`
-3. Bridge calls `engine.dispatch(event_type, stdin_data, config)`
-4. Engine runs matching hooks sequentially, logs each to JSONL
-5. First hook returning `{"decision": "block"}` with exit code 2 = bail (block the action)
-6. Exit code 2 without JSON = crash (log error, continue to next hook)
-7. Hook stdouts returned to the platform as ONE document (`handlers/config/output_merge.py`). Claude Code parses a hook's stdout as a single document: two JSON objects on two lines are a non-blocking hook error and NEITHER is applied. So:
-   - a single output passes through untouched, and plain-only outputs are newline-joined as before;
-   - once any handler answers in JSON, the answer is one object: `additionalContext` joined in handler order by a blank line, `systemMessage` joined by a newline, other keys first-handler-wins (a conflict is logged);
-   - the merged context stays within Claude Code's 10,000 UTF-16-unit display limit. The post-compact re-ground is placed first, and a context that would cross the limit is dropped with a WARNING naming it — never silently.
-
-## Importing Without a Working Directory
-
-Every hooks module must import in a process whose working directory is gone.
-`ntpath.realpath` reads `os.getcwd()` UNCONDITIONALLY — not only for relative
-paths, the way `posixpath` does — and `Path.resolve()` routes through it. So on
-Windows every `Path(__file__).resolve()` *reached at import time* is an
-import-time working-directory dependency, and a process whose cwd was deleted
-cannot import the module at all. (Measured on the Windows CI gate 2026-08-31,
-@memory's finding, routed here by @devpulse.)
-
-**The one spelling:** `apps/handlers/module_root.py` → `module_file(__file__)`.
-It still attempts `.resolve()` — normalising symlinks is why the call exists —
-and falls back to the absolute spelling only in the world where the alternative
-is a dead import. New module-level `__file__` resolution goes through it.
-
-**The count was wrong until the guard was cured.** `apps/handlers/__init__.py`
-runs a cross-branch import guard on *every* hooks import, and it died first, so
-all 68 modules reported that one line and no other site was visible. Curing the
-guard is what made the remaining sites measurable — the honest sequence was
-1 → 5 → 6, each cure unmasking the next. `tests/test_import_dead_cwd.py` pins
-the whole tree, discovered by walk rather than listed.
-
-**Two worlds, because one proves half.** World A emulates ntpath (`realpath`
-reads cwd, `getcwd` denied) and convicts an unguarded `resolve()`; on Linux it
-does NOT convict `inspect.stack()`, because there the raise happens inside
-`getabsfile()` where inspect catches it. World B denies `os.path.realpath`
-outright and convicts `inspect.stack()` at `inspect.py:1009`. The guard now
-walks frames with `sys._getframe` and reads the import line with `linecache`.
-
-The `inspect.stack()` ban is **structural** (AST, not grep): the guard's
-caller-is-None branch is unreachable from any import probe, so a regrown call
-there is invisible to the world tests — a mutant proved exactly that, killed
-only by the AST pin. AST and not a string ban because this guard's own
-docstrings name the defect, and a spelling ban convicts prose while acquitting
-code.
-
-## Two Log Streams
-
-Hook execution is recorded twice, at different levels of detail:
-
-| Stream | Contents | Default |
-|--------|----------|---------|
-| `logs/engine.jsonl` | Every hook — agent, exit code, timing, stderr, cwd. Source of truth for diagnostics. | Always on |
-| `system_logs/hooks_engine.log` (prax) | Warnings, errors, blocks, engine lifecycle. Per-hook narration suppressed. | Quiet |
-
-Per-hook narration ran ~3 lines per tool call, which dominated the prax stream and tripped the runaway detector during ordinary multi-agent operation. It is off by default; nothing is lost, since `engine.jsonl` carries strictly more detail.
-
-```bash
-AIPASS_HOOKS_VERBOSE_LOG=1    # restore per-hook lines in the prax stream
-```
-
-The switch lives in `engine._log_detail()`, read per call. **Correction, 2026-09-05:** this section used to say prax's `SystemLogger` exposes only `info`/`warning`/`error` and so had no DEBUG level to demote to. It does now — `prax/apps/modules/logger.py:154` has `debug()`, silent under the default INFO level and opened with `AIPASS_LOG_LEVEL`. The env switch here predates it and still works; folding `_log_detail` onto `logger.debug` is an open cleanup, not a done one. Blocks, crashes, timeouts, and trust-break banners are never suppressed.
-
-## Dynamic Dispatch
-
-Handlers are called **dynamically at runtime** — the engine uses `importlib.import_module()` + `getattr()` on the dotted handler path from `hooks.json` (e.g., `aipass.hooks.apps.handlers.prompt.identity.handle`). Handlers are never statically imported. This means static analysis tools (including seedgo's dead_code checker) cannot see that they are used — the last unshielded run scored `dead_code` at 40% and reported 29 of 49 files unreferenced, which is this indirection and not rot. That measurement is historic and not re-verified here: `apps/` now carries 59 live non-`__init__` files (61 on disk, two parked as `(disabled)`), and re-running unshielded needs a bypass-rule change this branch does not make for a doc pass. Shielded, `dead_code` audits 100%.
-
-Every handler is verified wired in `hooks.json` (32 entries, 31 distinct names — `auto_process` is the one name wired twice, on UserPromptSubmit and PreCompact). **30 of the 32 are `enabled: true`** as of 2026-09-07: `feedback_pulse` is off by choice in this repo, and `auto_watchdog` was flipped off when it was retired (FPLAN-0495 item 3). Editing `.aipass/hooks.json` breaks its enrolled hash, which disables EVERY hook for the project until a human re-enrolls with `aipass trust /home/patrick/Projects/AIPass` — that checkpoint is deliberate, it does not auto-heal, and it is outstanding right now. Firing evidence is a *narrow* window — `logs/engine.jsonl` rotates at `JSONL_MAX_BYTES = 500_000` keeping one `.1` backup (prax `jsonl_writer.py`), so it holds minutes to tens of minutes of live traffic and absence from it is **not** evidence of a dead wire. Measured 2026-09-05 over a 4.3-minute window: **27 of the 31 names appear**. The four absentees are the three PreCompact-only handlers (`pre_compact`, `pre_compact_rollover`, `pre_compact_prep`) and `cadence_reset` — PreCompact did not fire in the window and SessionStart fired before it opened. `feedback_pulse` does appear, but as `{"action": "skipped_disabled"}`: it is wired `enabled: false` in this repo, so it is dispatched and declines.
-
-## Event Types
-
-| Event | Hooks | Description |
-|---|---|---|
-| UserPromptSubmit | presence_gate, persistent_alert, identity, email, branch_loader, tier0_kernel, navmap, compass_recall, feedback_pulse, context_gauge, temporal, auto_process, user_message_relay | Presence gate + alerts + prompt injection + inbox + governance recall + feedback + context gauge + temporal + auto-process + TG mirror |
-| PreToolUse | tool_sound, edit_gate, git_gate, rm_gate, testwrite_gate, registry_gate | Security gates + guardrails + sound. `edit_gate` reads Bash too (scripted cross-project lane) once its matcher is widened — see the CONFIG WIRE note under Edit Gate |
-| PostToolUse | auto_fix, post_compact_regrounding | Diagnostics + post-compaction re-ground backstop |
-| SubagentStop | subagent_gate | Seedgo validation |
-| Stop | stop_sound, telegram_response, presence_release | Bell + Telegram delivery + presence release |
-| Notification | announce | Announcement tone |
-| SessionStart | cadence_reset | Cadence reset on new chat / clear |
-| PreCompact | compact, rollover, pre_compact_prep, auto_process | Memory archival + rollover + mechanical snapshot stamp + inbox/task processing |
-
-That table mixes handler filenames with `hooks.json` entry names, because three of the names are not
-handler files in this branch. `user_message_relay` belongs to @skills
-(`skills/lib/telegram/apps/handlers/user_message_relay.py`) and rides the engine as a guest.
-`presence_release` is a hooks.json entry name pointing at `security/presence_gate.py:handle_stop`.
-`cadence_reset` is likewise an entry name — the handler file is `lifecycle/session_start.py`.
-`feedback_pulse` is wired but `enabled: false` in this repo, so it is listed and does not fire.
-
-Entry name and filename diverge for others too (`pre_edit_gate` → `security/edit_gate.py`,
-`tool_use_sound` → `notification/tool_sound.py`, `branch_prompt` → `prompt/branch_loader.py`,
-`identity_injector` → `prompt/identity.py`, `email_notification` → `notification/email.py`,
-`auto_fix_diagnostics` → `lifecycle/auto_fix.py`, `subagent_stop_gate` → `security/subagent_gate.py`,
-`notification_sound` → `notification/announce.py`, `pre_compact` → `lifecycle/compact.py`,
-`pre_compact_rollover` → `lifecycle/rollover.py`). **`.claude/provider_manifest.json` keys by the
-entry name, not the filename** — `claude.py UserPromptSubmit:branch_prompt`, never `:branch_loader`.
-Wire a new per-handler entry with the name as it appears in `hooks.json`.
-
-### auto_watchdog — retired 2026-09-07, awaiting the trust re-enrol
-
-`auto_watchdog` fired on every PostToolUse to pattern-match one command shape and inject a reminder.
-Its arming path is owner-only, which made it a refusal for 17 of 18 citizens. Retired under
-FPLAN-0495 item 3:
-
-1. `apps/handlers/lifecycle/auto_watchdog.py` → `auto_watchdog(disabled).py`; its tests were parked under
-   `tests/parked/` and archived to `tests/.archive/` on 2026-09-08 (FPLAN-0513) after a clean session
-   cycle, along with `presence`'s. `tests/parked/` no longer exists. The dotted-path entry in both configs names the old module, so the rename alone
-   disables nothing — the flip below is what retires it.
-2. `"enabled": false` in **both** `.aipass/hooks.json` and `.aipass/project_hooks.json`. One line
-   changed per file; nothing else was touched.
-
-**Every hook in this project is DARK until the trust re-enrol runs.** `hooks.json` is hash-enrolled,
-so any byte change invalidates it. The re-enrol is a human checkpoint (the DPLAN-0285 scar — an
-out-of-band config edit took all hooks dark for ~8 minutes) and was deliberately not run here:
-
-```
-aipass trust <path-to-this-repo>
-```
-
-Enrolled hash was `sha256:2d545329590915e3…`; after the flip the file hashes `sha256:6bfb591a3e8305…`.
-Archive the handler only after a session cycle proves nothing was connected.
-
-## The template ruling — what a project gets, and what stays framework-only
-
-`.aipass/project_hooks.json` is the base config `aipass init` copies into a new project. It used to be
-described as a mirror of AIPass's own `.aipass/hooks.json` and had drifted 13 handlers behind it. On
-2026-09-09 (DPLAN-0335 leg 2) every one of those was ruled individually rather than bulk-copied; this
-table is the record. `aipass init update` merges the template into a project by union, so anything
-ruled *project* below reaches Vera-Studio, wren and `projects/*` on their next apply.
-
-| Handler | Event | Ruling | Why |
-|---|---|---|---|
-| `temporal` | UserPromptSubmit | **project** | One line off the host clock. No AIPass state, no project assumptions, no dependency. |
-| `context_gauge` | UserPromptSubmit | **project** | Reads the Claude Code transcript and nudges `/prep` before the compact ceiling. That is a Claude Code fact, not an AIPass one — every project manager compacts. |
-| `persistent_alert` | UserPromptSubmit | **project** | Reads the project's *own* `.aipass/alerts.json`; the walk-up stops at the project root. No file means silent, so it costs nothing and hands projects an alert channel they currently cannot use. |
-| `pre_compact_prep` | PreCompact | **project** | Stamps the compacting branch's own `.trinity/local.json`. Memory that survives compaction is the platform's headline promise, and it is not AIPass-specific. |
-| `post_compact_regrounding` | PostToolUse | **project** | Re-injects branch/identity/kernel/navmap after a compact — the four files `init` scaffolds into every project — in parts of at most 9,000 chars, one per tool call, branch first. Claude Code shows the agent only a 2,000-char preview of a hook context over 10,000 (issue #752); every part logs `[HOOKS] regroup fired loader=… part=k/N bytes=… chars=…` to `hooks_cadence.log`. Also the carrier for the `release_notice` compact path. |
-| `registry_gate` | PreToolUse | **project** | Every project has a `*_REGISTRY.json` (measured 2026-09-09: all four under `projects/`, plus Vera-Studio). Without this gate a project's sealed registry is an ordinary editable file. |
-| `feedback_pulse` | UserPromptSubmit | **project**, ships `enabled: false` | Its own docstring scopes it to "external user projects (not the AIPass host)" — it belongs here more than in the framework file. Off by default, same as in the framework, so a project opts in. |
-| `presence_gate` | UserPromptSubmit | framework-only | Enforces one interactive brain per branch across the AIPass fleet. A solo project has no competing citizen to fence, and a false block costs the user their session. Revisit if a project ever runs several citizens. |
-| `presence_release` | Stop | framework-only, **retire candidate** | `presence_gate.handle_stop` is a documented no-op (Stop fires every turn; CC-native session files do the cleanup). Shipping it would buy a per-turn dispatch for nothing. Flagged for removal from the framework file too. |
-| `auto_process` | UserPromptSubmit + PreCompact | framework-only | Spawns @memory's vectorize/rollover child. @memory is an AIPass branch, and its deps (`numpy`, `chromadb`, `fastembed`) are an optional extra a project will not have. |
-| `compass_recall` | UserPromptSubmit | framework-only | Queries @devpulse's compass FTS, an AIPass-internal decision store. A project has no compass, so the handler would query nothing on every turn. |
-| `user_message_relay` | UserPromptSubmit | framework-only | @skills' Telegram guest handler; needs per-branch chat registration and the `telegram` extra. Not a scaffold default. |
-| `telegram_response` | Stop | framework-only | Same reason — delivery into Patrick's Telegram chats. |
-| `auto_watchdog` | PostToolUse | **dropped** | Retired 2026-09-07 (see above). Its handler file is already `auto_watchdog(disabled).py`, so the dotted path in the template resolved to nothing. Removed from the template on 2026-09-09; still present and `enabled: false` in `.aipass/hooks.json`, which cannot be touched without a trust re-enrol. |
-| `release_notice` | SessionStart | **added** | DPLAN-0335 leg 2 — see below. |
-
-Result: the template went from 18 handler entries to 25.
-
-### `release_notice` — a manager hears that AIPass moved
-
-`apps/handlers/lifecycle/release_notice.py` (wiring) over `apps/modules/release_notice.py` (the
-deciding) tells a **project manager** that the installed AIPass is newer than the AIPass that wrote
-their scaffold. It reads two files — the nearest `.trinity/passport.json` and the project root's
-`.aipass/scaffold_manifest.json` — and writes none. It never runs the update: applying is Patrick's
-or @devpulse's call (Patrick, 2026-09-09).
-
-It is silent for every one of these: a passport whose `citizen_class` is not `manager`; a cwd with no
-passport above it; a cwd outside any `*_REGISTRY.json` root; the AIPass source repo itself (`src/aipass`
-plus a root `pyproject.toml` — `aipass init update` refuses its own repo, so a notice there could never
-be cleared, and @devpulse's passport says `manager`); and a scaffold already at the installed version.
-An absent or unparseable manifest counts as **behind** — a project that cannot say which AIPass wrote it
-has not been stamped by leg 3 yet. Versions compare as zero-padded integer tuples rather than through
-`packaging.version`, because `packaging` is not in this project's declared `dependencies` and a hook must
-not rest on whatever pip left in the venv.
-
-Two doors, one code path:
-
-| Door | Wiring | Provider entry needed |
-|---|---|---|
-| SessionStart (`source` `startup` / `clear`; `resume` and `compact` skipped) | `project_hooks.json` → `SessionStart.release_notice` | **Yes** — `claude.py SessionStart:release_notice`, in the provider manifest and live settings since 2026-09-09. SessionStart is wired per handler: without that entry this hook is configured but never dispatched. |
-| Post-compact regroup | `post_compact_regrounding` opens its branch section with the block, so it lands in part 1 of the re-ground on every seat | No — PostToolUse is a fan-out event |
-
-## Git Gate
-
-The `git_gate` handler (`security/git_gate.py`) enforces git access via drone to prevent state conflicts between agents. It is **enabled by default** in every project created by `aipass init`.
-
-**What it blocks:** Raw `git` write commands (push, commit, checkout, merge, etc.) and raw `gh` commands (except `gh api`).
-
-**What it allows raw is a CLOSED allow-list, not "read-only verbs".** `READ_ALLOWED_GIT_SUBCOMMANDS`
-(`security/git_gate.py:26`) holds exactly these 21: `ls-files`, `ls-tree`, `show`, `cat-file`,
-`rev-parse`, `rev-list`, `log`, `status`, `diff`, `blame`, `describe`, `for-each-ref`, `show-ref`,
-`symbolic-ref`, `shortlog`, `grep`, `archive`, `count-objects`, `var`, `help`, `version`. A verb that
-is not on the list is refused *whatever it does*, and several ordinary read verbs are not on it —
-measured 2026-09-05 by calling `_all_git_reads()` directly: `git tag --sort=…`, `git branch -a`,
-`git remote -v`, `git config --get …`, `git stash list`, `git reflog`, `git worktree list` and
-`git notes list` are all **blocked**. This surprised @devpulse live on `git tag --sort` (2026-09-05).
-The earlier wording here said "status, log, diff, show, blame, grep, **etc.**", which read as an open
-set; it is not one. Whether the list should grow is a code question, open — see Status below.
-
-One refusal is all-or-nothing per command: `_all_git_reads()` requires *every* git invocation in the
-command to be an allowed verb, so `git status && git tag` is refused whole.
-
-**What it protects:** Edits to `.claude/settings.json`, `.claude/hooks/`, and `.git/hooks/` — the enforcement layer itself.
-
-**Disabling for a project:** Set `git_gate.enabled` to `false` in your project's `.aipass/hooks.json`. This disables git enforcement in isolation — all other hooks (edit_gate, rm_gate, prompt injection, etc.) continue to work normally. No sync, rebase, or PR flows depend on git_gate being active; those are handled independently by `drone @git`.
-
-```json
-"git_gate": {
-    "enabled": false,
-    "handler": "aipass.hooks.apps.handlers.security.git_gate.handle",
-    "matcher": "Bash|Edit|MultiEdit|Write|NotebookEdit"
-}
-```
-
-**Why it's on by default:** Agents reflexively reach for raw git, which causes state chaos in a multi-agent system. The gate redirects to `drone @git` which enforces access tiers (read-only for most branches, write-only for devpulse). External users who don't need multi-agent git orchestration can safely disable it.
-
-## Edit Gate — the project boundary
-
-The `edit_gate` handler (`security/edit_gate.py`) fences writes at two levels. Inside one project it enforces the branch boundary (`hooks` cannot write to `drone`; `devpulse`, `seedgo`, `spawn` are trusted cross-writers). Across projects it enforces the project boundary.
-
-A **project root** is the nearest ancestor directory holding a `*_REGISTRY.json` — the same marker `@ai_mail` uses to refuse cross-project mail. The two fences share a definition on purpose: an agent that is refused a send must not be allowed the equivalent write (GH #733).
-
-The project fence is directional, unlike the mail fence:
-
-| Direction | Example | Verdict |
-|---|---|---|
-| Inside own project | `projects/baud` → `projects/baud/src/...` | allowed |
-| Downward (host → hosted) | `src/aipass/devpulse` → `projects/baud/...` | allowed |
-| Upward (hosted → host) | `projects/baud` → `src/aipass/drone/...` | **blocked** |
-| Sideways (project → sibling) | `projects/baud` → `projects/earmark/...` | **blocked** |
-
-Trust runs downward. Downward writes also have to stay open because the host tree carries artifact registries of its own — `flow/flow_json/PLAN_REGISTRY.json`, `.backup/snapshots/` — which a strict rule would read as foreign projects to the very branches that own them.
-
-Where no project root is resolvable on either side, the gate allows the write: a fence that cannot locate a boundary must not invent one.
-
-### The admin exemption — one seat reaches outwards
-
-Patrick's ruling, 2026-08-30 (compassed as @devpulse entry 322): the cross-project fence stays for
-every agent, and **@devpulse is the sole exemption** — *"It is only you who can reach outwards.
-Nobody else."*
-
-The exemption is granted on a **verified** identity, never a claimed one. `_is_admin_seat()` consumes
-@ai_mail's `is_verified_admin_caller()` — the same boolean their projects sweep gates on, which
-delegates to @devpulse's `admin_grant` reference implementation and its 5-leg contract (caller,
-registry-resolved cert, cert content, HMAC-SHA256 signature, registry admin flag). No second
-implementation lives here, and `ADMIN_SEAT = "devpulse"` decides nothing — it appears in the log line
-only. A session standing in a directory named `devpulse` with no valid grant on the machine is
-refused.
-
-**What a hook has to supply.** That rail reads identity from the env drone's router stamps
-(`AIPASS_CALLER_BRANCH` / `AIPASS_CALLER_CWD`), and a PreToolUse hook is not drone-invoked — measured
-2026-08-30: a hook process carries `AIPASS_BRANCH_NAME` and `AIPASS_SESSION_TYPE`, and neither caller
-variable. Left alone the rail answers "unprovable" for every seat and the exemption never opens. So
-the gate stamps `AIPASS_CALLER_CWD` from the platform's own record of the session directory — the
-same species of evidence drone stamps, from the same kind of source — and lets the rail do the rest.
-An existing stamp is never overwritten, and the stamp does not outlive the check.
-
-**Residual, stated rather than discovered:** leg 1 resolves through the session directory, so a
-session whose cwd is devpulse's tree *and* a validly signed grant on this machine together satisfy
-it. That is the grant's own stated threat model (`admin_grant.py`, "Security note": every agent here
-shares one OS user; the signature buys tamper-evidence, not attack-proofing). It is also no new
-reach — a session standing in devpulse's tree already writes that tree under the cross-branch fence,
-which keys on the same cwd.
-
-The exemption is narrow: it opens the **cross-project** fence only. Inbox writes, the cross-branch
-fence, daemon confinement and the `.trinity` caps are unchanged for every seat including the admin.
-
-### The test-write gate — agents do not create tests right now
-
-Patrick ruled on 2026-09-01 (@devpulse `DPLAN-0323`) that agents are stripped of self-directed test
-creation while @seedgo's `test_quality` v5 pack lands: the corpus being culled — tests written to
-satisfy a checker rather than to pin a defect — regrows faster than a standards pack can cull it.
-`security/testwrite_gate.py` is what stops the regrowth while the cull runs.
-
-**Blocked:** *creation* of a pytest-collectable file (`test_*.py`, `*_test.py`, `conftest.py`) inside
-a `tests/` tree, on **both** lanes — Edit/Write/MultiEdit/NotebookEdit and Bash (via the same
-`bash_writes` parser the cross-project fence uses).
-
-**Not blocked:** editing a test that already exists. An agent fixing a red test is doing legitimate
-work; this ruling is about the corpus growing, not about freezing it. `block_test_edits` closes that
-too — shipped `false`, but live rather than dormant, because a branch nobody has ever executed is not
-a switch.
-
-The policy is data, so later changes are field flips rather than rebuilds:
-
-```jsonc
-// <project>/.aipass/test_write_policy.json
-{ "agent_test_writing": "off",   // "on" lifts it fleet-wide
-  "allow": [],                   // one branch name here = the canary trial
-  "block_test_edits": false,
-  "note": "who ruled, and why" }
-```
-
-**Why its own file and not a key in `hooks.json`.** `hooks.json` is hash-enrolled in the trust
-registry: every edit to it darks *every* hook for the project until a human re-runs `aipass trust`.
-A switch meant to be flipped cannot live in a file whose every edit disables the engine that reads
-it. Same directory, same walk-up, separate hash.
-
-**The fail mode is closed** — for a missing policy *and* for an unreadable one. `bash_writes` allows
-what it cannot parse, and that is right there for a reason that does not transfer: an unparseable
-command taught the fence nothing *about that command*, so the policy question was never reached.
-Here the file **is** the policy question, and "no answer" read as "allow" means the switch is
-repealed by deleting one file. Two properties keep that survivable, and both have pins: the policy is
-never read for a write that is not test-shaped (so ordinary work cannot be bricked), and writing the
-policy file is not itself a test write (so the cure is always reachable from where you are).
-
-The **admin seat** is checked *before* the policy read — through the same verified 5-leg grant rail
-in `modules/admin_seat.py` that `edit_gate` uses — so cleanup work with Patrick survives a broken
-policy file. A crash inside the gate allows rather than walls: fail-closed covers a policy that could
-not be *read*, not a defect that is ours.
-
-**What it deliberately does NOT catch** — published as data in `testwrite_targets.NOT_CAUGHT` and
-printed by `drone @hooks testwrite`, so this list and the code cannot drift apart:
-
-- a test file created outside any `tests/` directory — the gate reads the tree shape
-- test data, fixtures and snapshots that are not `.py` (JSON corpora, `.txt` goldens)
-- a new test appended *into* an existing test file — the deliberate cost of letting agents fix reds
-- a test tree under a different directory name (`specs/`, `testing/`, `t/`)
-- everything `bash_writes.NOT_CAUGHT` already lists, on the scripted lane
-- a file created by a process the command merely starts (a scaffolder, a generator)
-- deletion or renaming of the policy file itself — this gate does not guard its own switch
-
-**New projects inherit it.** `.aipass/project_hooks.json` — the template `aipass init` stamps —
-carries the `testwrite_gate` entry, so the ruling is fleet-wide rather than AIPass-tree-wide.
-`init` does **not** yet stamp a `test_write_policy.json`, so a freshly-created project lands on the
-fail-closed missing-policy path; that refusal names Patrick's ruling and the one-file opt-in, and
-`TestTheProjectTemplateCarriesTheTestWriteGate` in `tests/test_live_config_timeouts.py` pins the
-template entry against silent drift. Stamping a default policy is @aipass's call, not this branch's.
-
-`registry_gate` is deliberately **not** in that template. It matches on filename shape alone
-(`\w+_REGISTRY\.json$`) with no project-awareness, and its refusal hardcodes "use `drone @spawn`" —
-correct inside AIPass, wrong advice for an unrelated project that happens to own its own
-`FOO_REGISTRY.json`. That needs its own measurement, not a ride-along.
-
-### The scripted lane — writes made through Bash
-
-Until 2026-08-30 every fence above was invisible to a write made through the shell, because the gate
-matched only Edit/Write/MultiEdit/NotebookEdit. @devpulse measured it live: their `Edit` into a
-sibling project was correctly refused and `sed -i` on the same file went straight through — for all
-18 citizens, not just the admin seat.
-
-`apps/modules/bash_writes.py` reads a Bash command and reports the paths it can be **seen** to write;
-`edit_gate` then applies the identical direction rules and prints the identical refusal. Two reading
-modes:
-
-| Mode | Commands | What is reported |
-|---|---|---|
-| Directed verbs | `>`, `>>`, `tee`, `sed -i`, `cp`, `mv`, `ln`, `install`, `rsync`, `dd of=`, `touch`, `mkdir`, `truncate` | The target the verb's own grammar names — so `cat /other/x > ./mine` names `./mine`, and reading a foreign file stays legal |
-| Interpreters | `python`, `python3`, `node`, `perl`, `ruby`, `php`, `sh`, `bash`, `zsh`, `awk` — inline script or heredoc | **Every** path in its own command and the heredoc it opened, because arbitrary code has no grammar naming its target. Not another command's arguments: until 2026-09-10 it read the whole command line, so a python step standing before a `cd` claimed the later pytest argument and resolved it from the wrong directory (devpulse 213c64fd) |
-
-`cd` inside a chain moves the ground the next segment stands on, so `cd ../Other && sed -i s/a/b/ f.json`
-is resolved against `../Other`; a `cd` inside `( … )` ends with the subshell.
-
-Every line is a command. Until 2026-09-10 a newline never separated (the lexer counted it as blank
-space), so line two of a multi-line Bash call was glued onto line one: its write was invisible to both
-gates and its `cd` never moved. A backslash-newline still joins two lines into one command, and a `#`
-opens a comment only where a word starts outside quotes (the lexer's own rule cut the line at any `#`).
-
-**What it deliberately does NOT catch.** A perfect shell parser is not the bar and is not achievable;
-the residual is published as data in `bash_writes.NOT_CAUGHT` and printed by `drone @hooks` module
-introspection, so this list and the code cannot drift apart:
-
-- paths built from shell or program variables (`$DIR/x`) — there is nothing to resolve
-- paths reached through a symlink pointing into another project
-- `find -exec` / `xargs`, which name the write verb but not the operand
-- background or detached writes (`nohup`, `disown`, `at`, `cron`, `systemd-run`)
-- metadata-only changes: `chmod`, `chown`, `touch -t` on an existing file
-- `git`, `gh`, `drone`, `aipass` — they name no write verb this parser reads; their own fences apply
-- writes made by a process the command merely starts (a server, a test runner)
-- paths an interpreter receives from *another* command — through a pipe, a file or an argument list
-  built elsewhere; only the paths in its own command and its own heredoc are read as held
-- a path spelled for the *other* operating system's filesystem — `C:\Proj\x` read on Linux names no
-  drive that exists here, so it resolves relative and reads as local
-- a file name with no separator inside interpreter source — a bare `local.json` after a `cd` (a bare
-  word cannot be told from `json.load`; `./local.json` is read)
-- a path joined in program text — `Path('.trinity') / 'local.json'` is two strings, neither a path
-- write verbs the parser has no grammar for: `sponge`, `ed` / `ex`, an interactive editor
-
-A command the parser cannot read at all (an unbalanced quote, an internal error) **allows** and logs:
-a parser that has learned nothing about a command must not convict on it.
-
-**Memory files are not written from a shell (2026-09-13, DPLAN-0342 row 3).** A second rule runs on the
-same targets: a claimed write to `.trinity/local.json` or `.trinity/observations.json` is refused for every
-seat in every project, the admin seat included (its exemption is for the project fence, not for how memory
-is written). @memory's caps are measured on the Edit/Write lane, so a shell write landed unmeasured: @baud
-wrote 21 of 21 sessions over cap that way, @api 12 sessions and 16 learnings, @hooks 9 entries. The refusal
-names the target and the verb, and says where memory is written: the Edit or Write tool, or a `drone @memory`
-verb.
-
-- **Known over-refusal.** An interpreter that only *reads* a memory path is refused too, because the
-  interpreter rule cannot tell a read from a write. The refusal says so and names the tools that read: the
-  Read tool, `cat`, `jq`.
-- **Open shapes, measured 2026-09-13.** A bare file name in interpreter source after a `cd` (the `cd` *is*
-  honoured; `./local.json` after it is caught), a path joined in program text, a path in a shell variable,
-  and write verbs the reader has no grammar for (`sponge`, `ed`). All are in the list above.
-
-**The tripwire reports what the refusal cannot see.** Two more functions in `edit_gate`:
-`tripwire_snapshot` (PreToolUse, Bash) records `(mtime_ns, size)` for every watched memory file under the
-call's `tool_use_id`, and `tripwire` (PostToolUse, Bash) compares. If a memory file changed during the call
-and the command ran no `drone @memory` or `drone @spawn` verb, the whole file is measured on disk against
-@memory's caps and the agent is told `MEMORY WRITTEN FROM A SHELL: <file> changed during this Bash call,
-outside the caps gate`, followed by every over-cap entry with its cut point, or "It measures clean". It never
-blocks. Keying on `tool_use_id` is what keeps a memory Edit made just before the call from being blamed on it.
-
-Since 1.13.0 (DPLAN-0347) it watches **every `.trinity` in the project**, not just the seat's, and
-`passport.json` with `local.json` and `observations.json` — 24 directories and 72 stats, ~19 ms, measured on
-this repo. A cross-branch shell write is exactly the shape the reader cannot always see. The wording follows
-ownership: the seat's own file is reported as this call's write, another branch's as
-`ANOTHER BRANCH'S MEMORY CHANGED`, which says plainly that a live neighbouring session may own it. That is
-not hypothetical — the first fleet-wide run caught @devpulse and @memory saving their own memory inside a
-76-second `pytest`. Its own limits: a call that ends in a tool error fires `PostToolUseFailure`, which this
-engine does not wire, so a write followed by a failure goes unreported; and because the snapshot holds stats,
-not text, entries already over cap before the call are listed too ("holds", never "wrote").
-
-> **CONFIG WIRE — the tripwire is not live until two entries land in `.aipass/hooks.json`**, followed by
-> `aipass trust <path-to-this-repo>` (any byte change voids the trust hash):
-> `PreToolUse.trinity_tripwire_snapshot` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire_snapshot`,
-> matcher `Bash`; `PostToolUse.trinity_tripwire` → `aipass.hooks.apps.handlers.security.edit_gate.tripwire`,
-> matcher `Bash`. No provider wire: tool events already run every enabled handler. The refusal needs no wire;
-> it rides `pre_edit_gate`, which already matches Bash.
-
-**Both separator spellings are read (2026-08-31).** `shlex` runs in POSIX mode, where a backslash is
-an *escape* — so it ate every separator of a Windows path and
-`C:\Users\me\Vera-Studio\f.json` arrived as the single token `C:UsersmeVera-Studiof.json`. That is
-not a degraded reading, it is the dangerous one: a drive-absolute foreign path became one relative
-filename, resolved under the caller's **own** project, and read as a local write. Every catch
-category in the table returned exit 0 on Windows, and the class had never been green there since the
-day it shipped. Found by @devpulse in `windows-test.yml` (which runs the whole tree, unlike main CI);
-reproduced on Linux at the parser level, because the bug never needed a Windows runner — only a
-backslash.
-
-The fix does not pick a dialect. A command containing a backslash is lexed **twice** — once with
-shlex's escape rules (correct for POSIX `cp a\ b.txt dest`) and once with backslashes protected
-(correct for a Windows path) — and the write targets are unioned. Reading `\` as a separator only
-ever *adds* path components, so a local write can never become foreign by it, while the reverse is
-exactly how a foreign write became local. Separators are then normalised before `pathlib` sees the
-token, on every OS: `WindowsPath("C:/a/b")` is absolute and correct, so one spelling reaches `Path`
-from both dialects and the parser's reading stops depending on which machine runs it.
-
-What is *not* portable is the **root**, which is why the drive-letter entry is in the residual list
-above rather than left to be discovered. The tests pin the Windows spelling in-process on any OS by
-back-slashing a real local path (`str(p).replace("/", "\\")`) — a no-op on Windows, and on Linux the
-exact spelling that killed the parser, still resolving to the same real file under the same real
-fence.
-
-**Git Bash's own drive spelling is read too (2026-09-10, FPLAN-0537, devpulse 401ee814).** Git Bash
-spells drive C as `/c`: its `pwd` prints `/c/Users/me`, and every command it runs accepts that. A
-Windows path cannot hold that spelling: `WindowsPath("/c/Users/me")` has a root and no drive, so it
-joined the seat's drive and named `C:\c\Users\me`. That directory has no registry, so `edit_gate`
-**allowed** a foreign write spelled that way, and `testwrite_gate` called an edit of an existing test
-a creation. `/x` or `/x/...` (one letter) now reads as drive `X:` whenever the path being resolved
-against is a Windows path. On POSIX, `/c` stays an ordinary directory. Paths lifted out of
-interpreter source get the same reading, although python itself would not translate them: broader
-than the write, which is the safe direction for a fence. The pins use a platform oracle: `bash_writes`
-is made to build every path in one flavour (`PureWindowsPath` or `PurePosixPath`), so Linux reads a
-command the way Windows does, and nothing about the host is asserted.
-
-A path put *into* a command string in these suites is spelled with `as_posix()`, the form bash takes
-on every OS. `str()` once handed windows-setup an unquoted `C:\Users\...` cd target. Bash eats those
-backslashes, and the reader, reading as bash does, `cd`'d into a directory named `C:Users...`, where
-an existing test looked new (PR #762).
-
-> **CONFIG WIRE — landed 2026-08-30, the lane is live.** `pre_edit_gate` now carries
-> `matcher: "Bash|Edit|MultiEdit|Write|NotebookEdit"` in `.aipass/hooks.json` (the matcher `git_gate`
-> and `registry_gate` already had). Before that widening, Bash events never reached the handler at
-> all and the scripted lane was dark no matter what the code did. Because any byte change to
-> `hooks.json` invalidates the trust hash in `~/.aipass/trusted_projects.json`, the edit was followed
-> immediately by `aipass trust <path-to-this-repo>` — an un-re-enrolled config edit takes
-> *every* hook dark. Verify with `drone @hooks hookstatus`; re-run `aipass trust` after any further
-> edit to that file.
-
-### Injection caps — every grounding block is rendered under a number (DPLAN-0347)
-
-Patrick ruled the layer contract on 2026-09-15: each grounding layer has one job and one cap, and the
-cap is **read, never copied**. The branch prompt is capped at **9,000** chars and each
-`apps/integrations/*/private_prompt.md` at **2,000** (`grounding_content.py`); the rendered identity
-block at **4,000** (`IDENTITY_CHAR_BUDGET`, declared 2026-09-08 and read by nothing until now).
-Over-budget content is **cut with a marker naming the source file**, never dropped — Claude Code
-persists a hook output over 10,000 UTF-16 units and shows the agent a 2,000-char preview, so a prompt
-that crosses that line is not read at all. Every cut logs a WARNING naming the file and both numbers.
-The `.trinity` caps and `passport.json`'s 6,000/600 are @memory's numbers; README 10,000 is @seedgo's.
-
-**Fail-open is loud (cadence 2.5.0).** Turn 0 fires *every* loader, so any path that forces turn 0 —
-no `CLAUDE_CODE_SESSION_ID`, an unreadable state file, a cadence import that raises — makes the session
-pay the whole grounding bill on every prompt. Those paths logged at INFO for months and the fleet log
-held no such line since 09-13. They now log
-`[HOOKS] cadence FAIL-OPEN loader=<name>: turn forced to 0, so it fires EVERY turn — <cause>`.
-
-### `.trinity` caps — a write is judged on what it AUTHORS
-
-`edit_gate` also measures `.trinity/local.json`, `observations.json` and `passport.json` against
-@memory's published caps (`memory.config.json` → `entry_limits`, read through their `entry_limits`
-module — this gate never restates a cap). A passport is measured by **size only** — 6,000 chars per
-file, 600 per string, via `check_file_budget` — because @spawn owns its schema. @memory 1.11.0's two
-newer refusal species are rendered as themselves: `unknown_field` names the allowed fields from
-`fields_for` (never a copy), and `field_over_cap` prints `'status' is 917/40 chars (+877 over)` in the
-units the violation carries, chars or items. An entry over its character limit is refused, and so is an entry whose
-canonical field is *missing*: a renamed `learning` where the config says `value` leaves the extractor
-with no key to read, and `""` and "cannot read this" are different answers.
-
-**Both refusals apply only to entries the write authored.** An entry byte-identical to the one
-already on disk is *carried*, not authored — reported at INFO with a pointer to `drone @memory lint`,
-never blocked. This was narrowed to `todos` on 2026-08-27 and made universal again on 2026-08-30
-after @memory measured what the narrowing did: their rollover lane failed identically every 20
-minutes for three hours, because the extractor removed a tail, wrote the *smaller* document back, and
-this gate refused the whole file over an entry in the head the extraction never touched. The archiver
-is always on the losing side of that trade — the file cannot get smaller because it is too big.
-
-The other half of the evidence is how that drift arrived: through the shell, where the cap check never
-ran. Since 2026-09-13 a shell write to a memory file is refused when the reader can see it and reported
-by the tripwire when it cannot (see the scripted lane above), and the refusal text says so. A gate that
-judges a write still cannot refuse a file for drift it already carries: detecting drift already on disk
-is `drone @memory lint`'s job, which reads the file.
-
-Identity is the raw entry, never its index. A prepend shifts every position down, so an index-keyed
-diff would call the whole file newly authored on exactly the write that authored nothing.
-
-Carrying a drifted entry does not license adding another in the same shape: a NEW entry with a
-missing canonical field is authored, and refused.
-
-**The todo pad count is advised, never refused** (DPLAN-0345). An 11th todo is legal on disk: the
-oldest roll off to `.backup/todo/<branch>/backlog.json` at that branch's next PreCompact or
-`drone @memory rollover run --branch @<branch>`. The pad size is @memory's own resolver
-(`config_loader.get_todos_count`), the number its roll applies. A write that leaves the pad over it
-gets an advisory as PreToolUse `hookSpecificOutput.additionalContext`, because the model writing the
-todo is its audience. Until 2026-09-15 it went out as plain stdout, which Claude Code shows in the
-transcript view on a PreToolUse exit 0 and never hands to the model (@canary measured it: 227 bytes
-logged, nothing in the Edit result). **The advisory fires at most once per cadence window per
-session** (`cadence.should_fire_advisory("todos_count")`: 10 turns, or 600 s when the turn counter
-cannot be read). An over-count pad is a standing condition, and per-write firing once wrote 209
-identical lines. So a second over-count write in the same window is silent by design, its log line
-drops to DEBUG, and the per-write INFO note that names the backlog still lands in `edit_gate.log`.
-
-### The diagnostics block
-
-After an edit leaves type errors behind, `auto_fix` records them in `.diagnostics_state.json` and `edit_gate` stops you editing *other* files in that branch until they are fixed. Two rules keep that block honest (both reported by @seedgo with a live repro, 2026-08-13):
-
-**The block must be satisfiable.** An error that can only be resolved in another file — `"X" is unknown import symbol`, `Import "Y" could not be resolved` — never blocks edits to other files. Red-first is mandated fleet-wide and the test and the implementation always live in different files, so blocking the resolving edit is unsatisfiable by any allowed action. One locally-fixable error among them keeps the block.
-
-**The block must be live, not remembered.** Before blocking, the gate re-runs pyright on the recorded file. Clean now → the state is dropped and the edit proceeds; still failing → the block quotes the *current* errors, not the recorded ones. Any resolving write the hook never observed (a Bash heredoc, an external editor) used to leave a block behind that outlived the error. If the file cannot be re-checked (pyright missing, timed out), the recorded errors stand — unknown is not clean.
-
-Re-validation is not free, and — measured 2026-08-13, correcting an earlier claim here — the cost is
-**not** confined to the blocking path. Of the `pre_edit_gate` invocations over 500ms in a live window,
-7 of 8 **allowed** the edit, and 3 of the 4 blocks returned in ~0.1s. Common-path median is 6.8ms; the
-slow path runs ~1.35s. So the expensive work is real but is not gated on blocking the way this section
-originally described. `drone @hooks diagnostics_state` shows what is recorded and re-checks it live.
-
-Known gap (reported by @seedgo, 2026-08-13, unfixed and escalated): if the recorded file no longer
-exists — hard-deleted, renamed to `name(disabled).py`, or moved to `.archive/` — re-validation returns
-"unknown" rather than "clean", and the block stands forever, quoting a path with nothing on it. Two of
-those three are the house cleanup pattern. Escape: recreate the file clean, let re-validation drop the
-state, then remove it.
-
-## Persistent Alerts
-
-The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).
-
-**How it works:** Reads `.aipass/alerts.json` at the project root. Each alert has an ID, source, severity (`warning`/`critical`), title, body, and optional `expires_at`. Expired alerts are auto-cleaned on read.
-
-**On arrival, then on the beat (1.1.0, DPLAN-0347).** An alert announces on the turn it lands — a notification that waits four turns is not a notification — and after that the banner re-injects only on the cadence beat (loader `alert`, period 5). Until 1.1.0 the guard file silenced the *sound* alone and the full banner was re-injected every single turn for as long as the alert stayed active, up to ten alerts with uncapped bodies. Each body is now cut at 300 chars.
-
-**Sound:** Piper TTS fires on first injection per alert ID — subsequent turns are silent for known alerts. New alerts trigger a fresh announcement.
-
-**Dismissing alerts:** `drone @hooks dismiss <alert-id>` removes an alert by ID from `alerts.json`.
-
-**Schema:**
-```json
-{
-  "alerts": [{
-    "id": "uuid", "source": "prax", "severity": "warning",
-    "title": "High log rate", "body": "commons exceeds 50 lines/s",
-    "created_at": "iso", "expires_at": "iso or null"
-  }]
-}
-```
-
-## Kernel Sandbox (srt/bwrap)
-
-The sandbox module (`apps/modules/sandbox.py`) provides the kernel-level filesystem boundary for agent sessions. It wraps Anthropic's `@anthropic-ai/sandbox-runtime` (srt) library, which uses bubblewrap (bwrap) + Landlock + seccomp on Linux to enforce write/read restrictions at the OS level.
-
-### Key Functions
-
-| Function | What it does |
+Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside it and dispatches each
+command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
+`engine` (the dispatcher itself), `cadence` (which turn a loader fires on), `grounding_content` (the
+injected blocks and their budgets), `bash_writes` and `testwrite_targets` (what a shell command can be
+seen to write, and which of those are new tests), `admin_seat` and `testgate_policy` (who is exempt,
+and what the policy says), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
+`cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
+`wire_verify`. `apps/handlers/` holds the implementation, one directory per concern: `bridges/` per
+platform, `prompt/` for injection, `security/` for the gates, `lifecycle/` for session and compaction
+events, `notification/` for sound and mail, plus `config/`, `cli/` and the `json/` service every
+branch shares.
+
+Handlers are imported dynamically by dotted path at dispatch time, never statically, which is why no
+handler is referenced anywhere in this tree and why static analysis cannot see them as used. Every
+module-level `__file__` resolution goes through `apps/handlers/module_root.py`, because a hook must
+import in a process whose working directory is gone.
+
+The directory tree lives in this branch's own prompt (`.aipass/aipass_local_prompt.md`) — one place,
+so it cannot disagree with itself.
+
+---
+
+## Documentation
+
+Depth lives in [docs/](docs/), one file per gate or module group:
+
+| Doc | What it covers |
 |---|---|
-| `build_policy(branch_path)` | Generates per-role writable/RO map from branch passport |
-| `sandbox_launch(command, *, cwd=None, policy, env=None)` | Resolves bwrap command via srt, spawns sandboxed process |
-| `resolve_bwrap_command(...)` | Resolves the bwrap argv without spawning — what external callers actually consume |
-| `build_srt_config(policy)` | Converts policy dict to srt config format |
+| [docs/wiring.md](docs/wiring.md) | The two-tier model, every event and its wiring shape, entry names vs handler filenames, what a new handler needs in provider settings |
+| [docs/engine.md](docs/engine.md) | Dispatch, the merged output document, dynamic handler import, the import-time working-directory rule |
+| [docs/project_config.md](docs/project_config.md) | The project template and what it ships, the trust hash and the re-enrol checkpoint, the release notice |
+| [docs/git_gate.md](docs/git_gate.md) | The closed allow-list of raw git verbs, what it protects, how a project disables it |
+| [docs/edit_gate.md](docs/edit_gate.md) | The branch and project fences, the direction table, the verified admin-seat exemption |
+| [docs/bash_writes.md](docs/bash_writes.md) | The scripted lane: what a shell command can be seen to write, what it misses, both Windows path spellings |
+| [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |
+| [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning |
+| [docs/prompt_injection.md](docs/prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, the alert banners |
+| [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
+| [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
+| [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
+| [docs/known_issues.md](docs/known_issues.md) | Open defects and stated-not-fixed items, each with its measurement |
+| [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
+| [docs/cadence_redo_brief.md](docs/cadence_redo_brief.md) | The brief that rebuilt cadence after the suite modelled the wrong execution model |
 
-### Policy Rules
-
-- **Every agent**: own branch tree + the system temp dir (`tempfile.gettempdir()`, plus `$TMPDIR` when it differs) + shared channels (system_logs, .ai_central, memory_pool, AIPASS_REGISTRY.json, flow_json) + sibling `.ai_mail.local/` and `DASHBOARD.local.json` carve-ins + its **own** `~/.claude/projects/<encoded-cwd>/` (added only if that directory already exists — not the whole `projects/` tree)
-- **devpulse only**: .git writable (the only committer)
-- **All other agents**: .git read-only, sibling source trees read-only
-- **Deny**: broker_secret (deny_read + deny_write for all roles)
-
-Bind-mount, not isolation: the sandbox preserves the shared live filesystem. Reads stay open everywhere. Only writes to protected paths are blocked at the kernel level (EROFS).
-
-### Architecture
-
-The Node helper (`_srt_resolve.mjs`) resolves the globally-installed srt library via `process.execPath` (ESM resolution doesn't walk to global node_modules). The resolver runs with CWD set to `/var/tmp` to prevent srt's mandatory-deny mask files from polluting the branch directory.
-
-@ai_mail's `dispatch_monitor` wires the launch seam with `build_policy` + `build_srt_config` +
-`resolve_bwrap_command` — **not** `sandbox_launch`, which this section previously claimed. Corrected
-2026-08-13 against `ai_mail/apps/handlers/dispatch/dispatch_monitor.py:69`, whose call order is pinned
-by `ai_mail/tests/test_dispatch_monitor.py:1759`. An earlier claim here that the @drone broker
-validates sandbox policy before agent launch could not be substantiated — the broker is a privileged
-delete daemon and no policy validation was found in its tree — so it has been removed rather than
-restated.
-
-## The Boot Shim — it edits your shell startup files
-
-`tools/install_boot_shim.sh` is the one thing in this branch that writes outside the repo, so it is
-documented rather than left to be discovered. Verified by reading the script, 2026-09-05:
-
-- It **appends** a `claude()` shell function to `~/.bashrc` **and** `~/.zshrc`, between the markers
-  `# >>> AIPass boot shim >>>` / `# <<< AIPass boot shim <<<`. A missing rc file is skipped, and a rc
-  file already carrying the marker is left alone, so re-running is safe.
-- The function intercepts **only** bare `claude` and `claude --permission-mode …`, and **only** when
-  the current directory contains a `.trinity/` directory. Everything else — `claude agents`,
-  `--resume`, `-c`, `auth`, `--help` — falls through to `command claude` untouched.
-- An intercepted call runs `python -m aipass.hooks.apps.handlers.lifecycle.session_boot`, with the
-  interpreter resolved from the repo's own `.venv` at install time (POSIX and Windows layouts both
-  probed, falling back to `python3`). No user path is hardcoded.
-
-There is no uninstall script: remove the marked block from each rc file by hand.
+---
 
 ## Integration Points
 
 ### Depends On
 
-| Branch | What for |
-|---|---|
-| prax | Logging (system_logger for prax monitor visibility) — 57 import statements in 56 files under `apps/` |
-| cli | Rich console rendering for every command surface — 21 import statements in 21 files under `apps/` |
+- `aipass.prax` — structured logging through `system_logger`, and the JSONL writer behind the
+  diagnostics stream.
+- `aipass.cli` — Rich console rendering for every command surface.
+- `aipass.memory` — the published field shape and file budgets the `.trinity` caps are measured
+  against. Read at call time through their own module; no cap is copied into this branch.
+- `aipass.ai_mail` — the verified admin-caller rail the cross-project exemption consumes. There is no
+  second implementation here.
+- Python stdlib: `pathlib`, `importlib`, `json`, `shlex`, `subprocess`, `threading`.
 
 ### Provides To
 
-- All branches via hook dispatch — every Claude Code session routes through the engine
-- @ai_mail dispatch_monitor — `build_policy` + `build_srt_config` + `resolve_bwrap_command` at the agent launch boundary
-
-## Status / Known issues
-
-Every number and behaviour above was measured on **2026-09-05** unless the line says otherwise.
-What is open, and what is stated rather than fixed:
-
-| Item | State |
-|---|---|
-| `drone @hooks engine` runs but is **missing from `--help`** — `print_help()` skips it, so the Commands table above lists a command the help does not | Open, verified 2026-08-27 and again 2026-09-05 |
-| The git-gate allow-list refuses 8 measured ordinary read verbs (`tag`, `branch`, `remote`, `config --get`, `stash list`, `reflog`, `worktree list`, `notes list`) | Open — whether the list should grow is a code decision, not made in this doc pass |
-| `testwrite_gate` has false-fired **7 times** across the DPLAN-0325 campaign: it reads a path-shaped *argument* of a read-only command (a pytest target, a `cd`-compound resolved against the wrong cwd) as a new test file | Open, reported by @devpulse 2026-09-04, queued |
-| `git_gate` false-fired once on a **heredoc mail body**: `RAW_GIT_RE` scans command text after stripping *quoted* strings, and a heredoc body is not quoted, so prose containing "git" blocked an `ai_mail` reply | Open, reported by @devpulse/@seedgo 2026-09-04, queued |
-| `engine._log_detail()`'s env switch predates prax gaining `logger.debug()`; folding one onto the other is unstarted | Open cleanup |
-| ~~`auto_watchdog` retirement is **decided but not executed** — it is live and fires on every PostToolUse~~ | **Executed 2026-09-07** (FPLAN-0495 item 3). Renamed + both configs flipped. Hooks are dark until `aipass trust <path-to-this-repo>` runs — see its section above |
-| Branch audit is **100%** on every category, with **no `test_quality` bypass in `.seedgo/bypass.json`**. It sat at 99% from 2026-09-03, when the DPLAN-0325 sweep dropped that bypass and `seedgo`'s v4 pack went on asking for a `mock_json_handler` fixture and an `invalid_mode_raises` contract the sweep had retired. Measured green again 2026-09-05: @seedgo's v4 retirement has landed, and the 100 is earned rather than suppressed | Closed |
-| `.claude/provider_manifest.json` pins `2.1.228`; the installed binary is `2.1.263` | Drift, not re-pinned in this doc pass |
-| ~~`drone @hooks test` fires the **real** PreCompact handlers, so `pre_compact_prep` stamps a genuine AUTO-COMPACT SNAPSHOT into the running branch's `.trinity/local.json` when no compaction happened. Found by running it for this doc pass, 2026-09-05; the false entry was removed by hand~~ | **Closed 2026-09-06.** Every fire now aims at a throwaway branch skeleton (payload `cwd` + process cwd + `AIPASS_HOME`). Proven by sha256 of all three `.trinity` files, identical across a run, with the handler's own log showing it stamped the skeleton — not vacuous |
-| Fixing the above surfaced two worse side effects the original report missed: `rollover` shelled out `drone @memory rollover run`, a **fleet-wide** memory trim, and `auto_process` spawned @memory's real background worker (the session guard keys on session id, so the first probe run of a mock id spawned for real). @memory resolves neither cwd nor `AIPASS_HOME` — measured, the name appears nowhere in its tree — so no environment seam can confine either | **Closed 2026-09-06.** Both refuse on `AIPASS_HOOK_PROBE`, read at the mutation and never at the entry, so everything up to the mutation still runs |
-| Bare `drone @hooks test` prints the module blurb and fires nothing (`hook_test.py:221` — `if not args: print_introspection()`). The documented command does not do the documented thing; the run needs an argument such as `--verbose`. Found 2026-09-06 while measuring the fix | Open — reported to @devpulse, not fixed here (a behaviour change outside the dispatched scope) |
-| A `MagicMock/LOG_FILE/` directory sits in the branch root, created 2026-07-10 — test debris from a mock used as a path. Author unknown; not attributed | Unexplained, left in place |
-| The `dead_code` 40% / "29 of 49 files" figure in Dynamic Dispatch is **historic and not re-verified** — re-running unshielded needs a bypass-rule change this branch does not make for a doc pass | Unverified, marked in place |
-
-*Last Updated: 2026-09-07*
+- Every Claude Code and Codex session in the fleet — grounding injection, the security gates, and the
+  record of every hook that fired.
+- `aipass.ai_mail` — `build_policy`, `build_srt_config` and `resolve_bwrap_command` at the agent
+  launch boundary.
+- Every project `aipass init` creates — the template config, and the gates that ship enabled in it.
 
 ---
 
+**Last Updated:** 2026-09-15
+
+---
 [← Back to AIPass](../../../README.md)

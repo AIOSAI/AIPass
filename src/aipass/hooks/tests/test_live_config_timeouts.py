@@ -126,8 +126,8 @@ class TestTheTemplateRuling:
         assert "auto_watchdog" not in self._entries()
 
     def test_the_project_appropriate_handlers_are_all_present(self):
-        """The ruling itself. Each was judged individually — README section
-        'The template ruling' carries the per-handler reason."""
+        """The ruling itself. Each was judged individually — docs/project_config.md,
+        section 'The template ruling', carries the per-handler reason."""
         entries = self._entries()
         for name in (
             "temporal",
@@ -166,7 +166,12 @@ class TestTheTemplateRuling:
 
     def test_the_comment_records_where_the_ruling_lives(self):
         """A config that silently stopped mirroring the framework file has to say
-        so in the file itself, or the next reader re-derives the drift as a bug."""
+        so in the file itself, or the next reader re-derives the drift as a bug.
+
+        The pointer has to name the file the table actually lives in: the README
+        diet (FPLAN-0593 Phase 4) moved it to docs/, and a comment still naming
+        the README would send the next reader to a page that no longer carries it.
+        """
         comment = self._template()["_comment"]
         assert "RULING 2026-09-09" in comment
-        assert "README.md" in comment
+        assert "docs/project_config.md" in comment

@@ -10,7 +10,7 @@ HOOKS -- hook infrastructure owner. One engine dispatches every hook across plat
 ## What I Do
 
 - Own the engine -- bridges hand it events, it routes to handlers and logs every one
-- Maintain 28 handlers in 4 categories (prompt, security, lifecycle, notification)
+- Maintain the handlers in four categories (prompt, security, lifecycle, notification)
 - Bridge platforms -- thin normalization per provider (Claude + Codex, both shipping)
 - Per-project config -- `.aipass/hooks.json` decides what fires where
 
@@ -22,88 +22,85 @@ HOOKS -- hook infrastructure owner. One engine dispatches every hook across plat
 
 ## Key Commands
 
-```
-drone @hooks status              # Hook config for this project
-drone @hooks log                 # Last 20 JSONL entries
-drone @hooks test --verbose      # Portable runner (bare 'test' prints a blurb, fires nothing)
-drone @hooks verify              # Provider <-> project wiring (non-zero on ERROR)
-```
+`status` (what fires here) · `log` (last JSONL entries) · `verify` (provider <-> project wiring, non-zero on ERROR) · `test --verbose` (portable runner; bare `test` prints a blurb and fires nothing). Full surface: `drone @hooks --help`.
 
 ## Architecture
 
 ```
 apps/
-  hooks.py                 # Entry point (drone @hooks)
-  modules/
-    engine.py              # Core dispatch -- routes events to handlers
+  hooks.py                 # Entry point (drone @hooks) -- thin router over modules/
+  sound.py                 # Shared sound utilities (speak, play, mute)
+  modules/                 # One per concern; bare `drone @hooks` lists them live
+    engine.py              #   Core dispatch -- routes events to handlers, logs every one
+    cadence.py             #   Which turn a loader fires on; state per session in the temp dir
+    grounding_content.py   #   The injected blocks and their budgets (read, never copied)
+    bash_writes.py         #   Write targets a shell command names -- edit_gate's scripted lane
+    testwrite_targets.py   #   Which of those targets are NEW test files
+    testgate_policy.py     #   Reads .aipass/test_write_policy.json (drone @hooks testwrite)
+    admin_seat.py          #   The verified admin-seat exemption, read by two gates
+    diagnostics_state.py   #   What .diagnostics_state.json means -- auto_fix + edit_gate
+    hook_test.py           #   Portable runner (bare 'test' prints a blurb, fires nothing)
+    wire_verify.py         #   Provider <-> project hook wiring checker
+    sandbox.py             #   Kernel sandbox -- srt/bwrap + per-role policy generator
+    release_notice.py      #   Tells a project manager the installed AIPass moved
+    context_window.py cc_sessions.py cc_transcripts.py   # CC transcript + session readers
+    hookstatus.py hooksound.py feedback.py alert_dismiss.py   # the one-verb modules
+    presence(disabled).py  #   RETIRED 2026-09-07 -- PID resolution moved to cc_sessions.py
   handlers/
+    module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve
     bridges/
-      claude.py            # Claude Code bridge (provider settings entry point)
-      codex.py              #   Codex bridge (shipped, wired in .codex/hooks.json)
-    prompt/                # Prompt injection hooks (UserPromptSubmit)
-      branch_loader.py     #   This prompt (9,000) + integration prompts (2,000 each)
-      tier0_kernel.py      #   Injects tier0 kernel (cadence 5)
-      navmap.py            #   Injects tier1 navmap (cadence 5)
-      identity.py          #   Passport identity block, capped 4,000
-      compass_recall.py     #   Governance recall injection
-      feedback_pulse.py     #   10-turn cadence feedback nudge (disabled default)
-      context_gauge.py      #   Transcript-fill nudge toward /prep, once per window
-      temporal.py            #   Weekday/date/time/tz/part-of-day, every turn
-      persistent_alert.py   #   alerts.json banners: on arrival, then cadence 5
-    security/              # Enforcement hooks
-      presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
-      edit_gate.py         #   Fences writes: cross-project/branch, inbox, .trinity caps
-      git_gate.py          #   Enforces git access tiers
-      rm_gate.py           #   Guards destructive rm commands
-      registry_gate.py     #   Guards registry-modifying commands
-      subagent_gate.py     #   Blocks sub-agent stop until clean
+      claude.py            #   Claude Code bridge (provider settings entry point)
+      codex.py             #   Codex bridge (shipped, wired in .codex/hooks.json)
+    prompt/                # Prompt injection (UserPromptSubmit)
+      branch_loader.py     #   This prompt + integration prompts
+      tier0_kernel.py navmap.py identity.py   # kernel, fleet navmap, passport block
+      context_gauge.py     #   Transcript-fill nudge toward /prep, once per window
+      temporal.py          #   Weekday/date/time/tz/part-of-day, every turn
+      persistent_alert.py  #   alerts.json banners: on arrival, then on the beat
+      compass_recall.py feedback_pulse.py   # governance recall; feedback nudge (ships disabled)
+    security/              # Enforcement (PreToolUse)
+      edit_gate.py         #   Fences writes: cross-project/branch, inbox, .trinity caps, tripwire
       testwrite_gate.py    #   Blocks CREATION of new test files (drone @hooks testwrite)
-    lifecycle/             # Session management hooks
+      presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
+      git_gate.py rm_gate.py registry_gate.py subagent_gate.py   # git tiers, rm, registries, stop
+    lifecycle/             # Session + compaction
       auto_fix.py          #   Post-edit diagnostics (ruff, pyright, py_compile)
       auto_process.py      #   Scheduled inbox/task processing
-      compact.py           #   Pre-compact memory archival
-      rollover.py          #   Pre-compact memory rollover (+ compacting branch's todo pad via --branch)
-      pre_compact_prep.py  #   Pre-compact snapshot stamp (context/dispatch/plans)
-      post_compact_regrounding.py # Mid-turn re-ground backstop (PostToolUse)
+      compact.py rollover.py pre_compact_prep.py   # archival, rollover (+ todo pad), stamp
+      post_compact_regrounding.py   # Mid-turn re-ground backstop (PostToolUse)
       session_start.py     #   SessionStart cadence reset
       session_boot.py      #   Boot wrapper (main() CLI, not a hook -- no handle())
-    notification/          # Alert hooks
-      announce.py          #   Announcement tone on Notification events
-      email.py             #   Inbox check on prompt (unread mail banner)
-      stop_sound.py        #   Sound on session stop
-      tool_sound.py        #   Sound on tool use
-      telegram_response.py #   Telegram reply delivery on Stop
-    module_root.py         # module_file() -- the ONE import-time-safe __file__ resolve (dead-cwd cure)
-    json/
-      json_handler.py      #   The fleet's one json service (DPLAN-0325 shim)
-      files.py             #   read/write_json_file -- raises where the service returns None
-    config/                # NOTE: under handlers/, not apps/ -- apps/config/ is an empty package
-      loader.py            #   hooks.json discovery + validation, config-independent trust checks
+      release_notice.py    #   SessionStart + post-compact wiring for the notice
+    notification/          # Sound, mail, Telegram
+      announce.py email.py stop_sound.py tool_sound.py telegram_response.py
+    config/                # NOTE: under handlers/ -- apps/config/ is an empty package
+      loader.py            #   hooks.json discovery + validation, trust checks
       trust_registry.py    #   Trusted-project registry (enroll/revoke/hash checks)
       diagnostics.py       #   JSONL diagnostics config
       output_merge.py      #   Fan-out stdouts -> ONE document (two JSON objects = neither applied)
-logs/
-  engine.jsonl             # 2 generations @ ~500KB = ~11 MINUTES of retention
-tests/                     # 51 files, 2077 cases (2 skips: 1 env, 1 win32-only)
+    cli/help_flags.py json/   # help-flag detection; the fleet's one json service + files.py
+docs/                      # The depth, one file per gate or module group; index in README.md
+logs/engine.jsonl          # 2 generations @ ~500KB = ~11 MINUTES of retention
+tests/                     # Existing files only -- a NEW test file needs the gate's permission
   .archive/                # removed suites, never deleted -- header says what each pinned
 ```
 
 ## How It Works
 
-1. Provider settings invoke the bridge two ways: `claude.py EventType` (all enabled handlers -- tool events) or `claude.py EventType:handler_name` (one per entry -- UserPromptSubmit, PreCompact)
-2. Bridge calls `engine.dispatch(event_type, stdin_data, config)`; the engine reads `.aipass/hooks.json` (walking up from CWD), runs matching hooks in order, logs each to JSONL
+1. Provider settings invoke the bridge two ways: `claude.py Event` (fan-out, tool events) or `claude.py Event:handler_name` (one entry per handler -- UserPromptSubmit, SessionStart, PreCompact). Shapes and event table: `docs/wiring.md`
+2. Bridge calls `engine.dispatch(...)`; the engine reads `.aipass/hooks.json` (walking up from CWD), runs matching hooks in order, logs each to JSONL
 3. `{"decision": "block"}` + exit 2 = block. Exit 2 without JSON = crash (logged, next hook still runs)
 4. Stdouts merge into ONE document (output_merge.py), additionalContext capped at 10,000 UTF-16 units (re-ground first, a drop is a WARNING)
 
-## Injection caps (DPLAN-0347, Patrick 2026-09-15)
+## Injection caps (DPLAN-0347, the owner's ruling 2026-09-15)
 
 Read, never copied: branch prompt 9,000 and identity 4,000 are mine (grounding_content.py); .trinity caps and passport 6,000/600 are @memory's; README 10,000 is @seedgo's. Loaders fire on cadence 5 (`cadence.py`, loader names in cadence_config.json); an over-budget block is cut with a marker naming its file, never dropped.
 
 ## New handler? Check the provider wire
 
-hooks.json alone is not live: UserPromptSubmit + PreCompact are invoked per-handler (`claude.py Event:name`) -- handlers on those events ALSO need a command entry in `.claude/provider_manifest.json` (PreCompact: manual + auto pair). Verify with firing evidence in engine.jsonl, not just the suite.
+hooks.json alone is not live: UserPromptSubmit, SessionStart and PreCompact are invoked per-handler (`claude.py Event:name`) -- those ALSO need a command entry in `.claude/provider_manifest.json` (PreCompact: manual + auto pair). Verify with firing evidence in engine.jsonl, not just the suite.
 
-EVERY reply that adds/renames/moves a handler MUST say "provider settings update needed: <exact entries>" or "no provider wire needed" -- never silent. @devpulse and Patrick apply live-settings changes.
+EVERY reply that adds/renames/moves a handler MUST say "provider settings update needed: <exact entries>" or "no provider wire needed" -- never silent. @devpulse and the owner apply live-settings changes.
 
 ## Integration
 
@@ -113,9 +110,9 @@ EVERY reply that adds/renames/moves a handler MUST say "provider settings update
 
 - Handlers are self-contained: one file per hook, one test file per handler, no cross-handler imports.
 - Crash isolation is non-negotiable. One broken hook never blocks the rest; the engine catches and logs.
-- Bridges stay thin -- normalization only, no business logic.
+- Bridges stay thin; config walks up from CWD, never a hardcoded path.
 - Test in isolation: handlers without the engine, the engine without handlers.
-- Config walks up from CWD; never a hardcoded path.
+- Depth is `docs/`, one file per gate or module group, indexed from README.md. Written once, there.
 
 ## Known Gotchas
 

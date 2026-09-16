@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: engine.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Hook engine — unified dispatcher for all hook events
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-05-18
-# Modified: 2026-09-14
+# Modified: 2026-09-15
 # =============================================
 
 """Hook engine — dispatches hook events to handlers, logs via prax + JSONL."""
@@ -32,6 +32,10 @@ BRANCH_ROOT = module_file(__file__).parent.parent.parent
 
 HELP_COMMANDS = [
     ("log", "Tail recent hook activity (last 20 entries)"),
+    # Live since the module router existed and named nowhere but the README,
+    # which the diet deletes (FPLAN-0593 Phase 4): --help is the reference, so a
+    # verb the README was the only witness to belongs here or nowhere.
+    ("engine", "Show the engine's handler map (every handler it dispatches, by category)"),
 ]
 
 VERBOSE_LOG_ENV = "AIPASS_HOOKS_VERBOSE_LOG"
