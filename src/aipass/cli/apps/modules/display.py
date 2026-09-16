@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.4.0
+# Version: 0.4.1
 # Created: 2025-11-12
-# Modified: 2025-11-15
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -245,7 +245,7 @@ def print_help():
     _cli_root = _display_path.parents[2]  # display.py -> modules -> apps -> cli
     CONSOLE.print(f"  [yellow]Module:[/yellow]      [dim]{_display_path}[/dim]")
     CONSOLE.print(f"  [yellow]Handlers:[/yellow]    [dim]{_cli_root / 'apps' / 'handlers' / 'display'}[/dim]")
-    CONSOLE.print("  [yellow]Standards:[/yellow]   [dim]See CODE_STANDARDS/cli.md[/dim]")
+    CONSOLE.print("  [yellow]Standards:[/yellow]   [dim]See docs/display_api.md[/dim]")
     CONSOLE.print()
     CONSOLE.print("─" * 70)
     CONSOLE.print()

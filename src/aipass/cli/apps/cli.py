@@ -3,7 +3,7 @@
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
 # Version: 2.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-08
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -39,7 +39,7 @@ from rich import box
 # CLI modules (showcasing our own services!)
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -189,6 +189,9 @@ def print_help() -> None:
     console.print("  [green]drone @cli display demo[/green]                [dim]# Run display demo[/dim]")
     console.print("  [green]drone @cli templates[/green]                   [dim]# Templates module info[/dim]")
     console.print("  [green]drone @cli templates demo[/green]              [dim]# Run templates demo[/dim]")
+    console.print("  [green]drone @cli show[/green]                        [dim]# Alias of display[/dim]")
+    console.print("  [green]drone @cli demo[/green]                        [dim]# Runs the display demo[/dim]")
+    console.print("  [green]drone @cli --version[/green]                   [dim]# Print the version[/dim]")
     console.print("  [green]drone @cli --help[/green]                      [dim]# This help message[/dim]")
     console.print()
     console.print("\u2500" * 70)
@@ -255,7 +258,7 @@ def print_help() -> None:
     console.print()
 
     # Drone compliance — commands line
-    console.print("[dim]Commands: display, templates, demo, --help[/dim]")
+    console.print("[dim]Commands: display, templates, show, demo, --help[/dim]")
     console.print()
 
 
