@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_standards_query.py
 # Description: Unit tests for the standards_query module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-08-07
+# Modified: 2026-09-15
 # =============================================
 
 import pytest
@@ -132,7 +132,10 @@ def test_print_introspection_runs():
 
     print_introspection()
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    # type: ignore -- `console` is the fixture's MagicMock at run time; pyright
+    # sees the real rich.Console the module declares, whose bound `print` has no
+    # call_args_list. Pre-existing on all three call sites here.
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]  # type: ignore[attr-defined]
     assert "[bold cyan]standards_query Module[/bold cyan]" in lines
     assert "[yellow]Discovered Packs:[/yellow]" in lines
     assert "  [cyan]handlers/pytest_quality_standards/[/cyan]" in lines
@@ -149,7 +152,10 @@ def test_print_help_runs():
 
     print_help()
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    # type: ignore -- `console` is the fixture's MagicMock at run time; pyright
+    # sees the real rich.Console the module declares, whose bound `print` has no
+    # call_args_list. Pre-existing on all three call sites here.
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]  # type: ignore[attr-defined]
     assert "[bold cyan]Standards Query Module[/bold cyan]" in lines
     assert "[yellow]COMMANDS:[/yellow]" in lines
     assert "  [green]drone @seedgo standards_query aipass_standards architecture[/green]" in lines
@@ -157,19 +163,26 @@ def test_print_help_runs():
 
 
 def test_discover_packs_returns_dict():
-    """_discover_packs finds seedgo's three packs, each mapped to its own directory.
+    """_discover_packs finds seedgo's four packs, each mapped to its own directory.
 
     The isinstance check alone pinned the return TYPE and nothing about the
     value (assertion_shape), so a discovery that found no pack at all scored a
-    pass. The three names below are the *_standards directories under
-    apps/handlers/ that hold a *_check.py, measured 2026-09-07; the last
-    assertion pins that the value is the pack directory itself, not its parent.
+    pass. The four names below are the *_standards directories under
+    apps/handlers/ that hold a *_check.py, measured 2026-09-15 when
+    context_standards landed (DPLAN-0347 -- `drone @seedgo audit context`); the
+    last assertion pins that the value is the pack directory itself, not its
+    parent.
     """
     from aipass.seedgo.apps.modules.standards_query import _discover_packs
 
     packs = _discover_packs()
     assert isinstance(packs, dict)
-    assert set(packs) == {"aipass_standards", "pytest_quality_standards", "tests_pytest_standards"}
+    assert set(packs) == {
+        "aipass_standards",
+        "context_standards",
+        "pytest_quality_standards",
+        "tests_pytest_standards",
+    }
     assert (packs["pytest_quality_standards"] / "no_oracle_check.py").is_file()
 
 
@@ -248,7 +261,10 @@ def test_print_alias_help_runs():
 
     print_alias_help()
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    # type: ignore -- `console` is the fixture's MagicMock at run time; pyright
+    # sees the real rich.Console the module declares, whose bound `print` has no
+    # call_args_list. Pre-existing on all three call sites here.
+    lines = [call.args[0] for call in console.print.call_args_list if call.args]  # type: ignore[attr-defined]
     assert "[bold cyan]Standard (short alias)[/bold cyan]" in lines
     assert "  [green]drone @seedgo standard json_structure[/green]" in lines
     assert "  Short form of [green]standards_query <pack> <standard>[/green]." in lines

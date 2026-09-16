@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_content.py
 # Description: README Standards Content
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-05-15
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -44,11 +44,13 @@ def get_readme_standards() -> str:
 
 [yellow]CHECK 3 - LAST UPDATED FRESHNESS:[/yellow]
 
-  README must contain a [dim]*Last Updated: YYYY-MM-DD*[/dim] line.
-  Date must be within [bold white]7 days[/bold white] of the newest .py file
-  modification in the branch.
+  README must contain a [dim]*Last Updated: YYYY-MM-DD*[/dim] line
+  with a parseable date.
 
-  If code changed but README didn't update, it's likely stale.
+  Local-file only: presence and shape, never a comparison against code
+  history. Recency is not a property of the files on disk, and a git
+  comparison would score a working tree and a clean CI checkout
+  differently.
 
 [yellow]CHECK 4 - DIRECTORY TREE ACCURACY:[/yellow]
 
@@ -90,7 +92,44 @@ def get_readme_standards() -> str:
   Skips external links (http/https/mailto) and anchor links (#).
   Dead links mislead contributors navigating via README.
 
+[yellow]ADVISORY LANE - DOCS INDEX + ROT BAIT (never scored):[/yellow]
+
+  [bold cyan]ADVISORY[/bold cyan] - reports lines, moves no number. These
+  arrive as [dim]info lines[/dim] on [bold cyan]drone @seedgo audit aipass @branch[/bold cyan],
+  rendered at any score, and are never merged into scores or violations.
+  The README is the [bold white]face[/bold white] plus an index of docs/;
+  the live inventory is [bold cyan]drone @<branch>[/bold cyan] and
+  [bold cyan]--help[/bold cyan]; the depth is docs/, one file per module or
+  handler group (DPLAN-0347, boardroom thread 16).
+
+  [bold cyan]docs index[/bold cyan]
+    Every [dim]docs/*.md[/dim] must be reachable from the README - a
+    relative link that resolves to it, or the literal path
+    [dim]docs/<name>[/dim] in the text. A link to [dim]docs/[/dim] itself
+    covers [dim]docs/README.md[/dim]. No docs/ directory is SILENCE.
+
+  [bold cyan]named paths[/bold cyan]
+    A path the README names, rooted in one of this branch's own top-level
+    directories, must exist. Paths relative to somewhere deeper, a
+    neighbour branch's files and illustrations are out of scope: an audit
+    of one branch cannot tell a stale reference from a foreign one.
+    Link targets belong to CHECK 8, directories to CHECK 4.
+
+  [bold cyan]rot bait[/bold cyan]
+    Content that stays true only while someone re-types it:
+    counts ("46 standards", "13 modules"), dated or Status/Latest Audit
+    headings, and a Commands section that re-types [dim]--help[/dim].
+    The Last Updated line is exempt - CHECK 3 requires it. The Commands
+    line asks for a POINTER, not a deletion: CHECKS 2 and 6 still want
+    the section.
+
+  [dim]Why advisory: readme is scored and CI gates every branch at 100.
+  17 of 18 branches have no docs index today, so a ninth scored check
+  would red the whole fleet on one commit - exactly what happened on
+  2026-09-13. Advisory first, ratchet later.[/dim]
+
 [yellow]SCORING:[/yellow]
 
   8 checks, each worth ~12.5 points. Pass threshold: 75%.
-  A branch with a missing README scores 12/100 (only check 1 runs)."""
+  A branch with a missing README scores 12/100 (only check 1 runs).
+  The advisory lane is outside this arithmetic entirely."""

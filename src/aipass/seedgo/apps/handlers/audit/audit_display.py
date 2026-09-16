@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-03-08
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -194,6 +194,118 @@ def _render_info_lines(audit_result: dict, console_obj) -> None:
             console_obj.print(f"  [dim]ⓘ {message}[/dim]")
 
 
+#: Cell states a checker may publish in a fleet row, and how each prints.
+#: A state this map does not know prints as its own name rather than being
+#: dropped: a cell that silently vanishes is a measurement the reader cannot
+#: tell from a clean one.
+_FLEET_STATE_STYLE = {"over": "red", "error": "red", "absent": "dim", "under": ""}
+
+
+def _fleet_rows(audit_results: List[Dict]) -> List[Dict]:
+    """Every ``fleet_row`` the pack's checkers published, in the order audited.
+
+    A GENERIC CHANNEL, not one pack's arm. A branch_level checker whose whole
+    point is one number per branch (context/startup_budget: six files against
+    six caps) has nowhere to say so on a fleet run — print_branch_summary is
+    only called for a single-branch audit, so on `audit <pack>` the per-branch
+    detail never prints at all. Any checker that returns a ``fleet_row`` dict
+    of ``{branch, title, cells, notes}`` gets a table here; every pack that
+    returns none renders byte-identically to before this existed.
+    """
+    rows = []
+    for result in audit_results:
+        for _standard, data in sorted(result.get("results", {}).items()):
+            if not isinstance(data, dict):
+                continue
+            row = data.get("fleet_row")
+            if isinstance(row, dict) and row.get("cells"):
+                rows.append(row)
+    return rows
+
+
+def _fleet_columns(rows: List[Dict]) -> List[tuple]:
+    """(label, cap) per column, first-seen order, cap from the first row that knows one.
+
+    Read from the rows rather than declared here, so the display carries no
+    knowledge of which files a checker measures — a column added to the checker
+    appears without touching this module.
+    """
+    caps: Dict[str, int | None] = {}
+    for row in rows:
+        for cell in row["cells"]:
+            label = str(cell.get("label", ""))
+            if caps.get(label) is None:
+                caps[label] = cell.get("cap")
+    return list(caps.items())
+
+
+def _fleet_cell_text(cell: dict) -> str:
+    """One cell's unpadded text — the number, or why there is not one."""
+    state = str(cell.get("state", ""))
+    if state == "absent":
+        return "—"
+    if state == "error":
+        return "ERR"
+    chars = cell.get("chars")
+    return f"{chars:,}" if isinstance(chars, int) else "?"
+
+
+def _render_fleet_table(audit_results: List[Dict], console_obj) -> None:
+    """Print the fleet table a checker published, one row per branch.
+
+    Returns immediately when no checker published one, which is every pack but
+    context today — the guard is what keeps every other pack's output
+    unchanged. Laid out as padded text inside Rich markup rather than as a Rich
+    Table: the padding has to be INSIDE the markup or the invisible style tags
+    are counted as width, and a fixed 8-column grid stays readable at 80 chars
+    where a bordered table wraps.
+    """
+    rows = _fleet_rows(audit_results)
+    if not rows:
+        return
+
+    columns = _fleet_columns(rows)
+    widths = [max(len(label), len(f"{cap:,}") if isinstance(cap, int) else 1, 6) + 1 for label, cap in columns]
+    for row in rows:
+        by_label = {str(cell.get("label", "")): cell for cell in row["cells"]}
+        for index, (label, _cap) in enumerate(columns):
+            cell = by_label.get(label)
+            if cell is not None:
+                widths[index] = max(widths[index], len(_fleet_cell_text(cell)) + 1)
+    name_width = max([len("BRANCH"), *(len(str(row.get("branch", ""))) for row in rows)]) + 2
+
+    console_obj.print()
+    console_obj.print(f"[bold]{rows[0].get('title', 'FLEET TABLE')}[/bold]")
+    console_obj.print(
+        "[dim]cap on the line under each column · red = over cap · — = absent (not a violation) "
+        "· ERR = a cap or a file could not be read[/dim]"
+    )
+    head = "".join(f"{label:>{widths[i]}}" for i, (label, _cap) in enumerate(columns))
+    caps = "".join(
+        f"{(f'{cap:,}' if isinstance(cap, int) else '?'):>{widths[i]}}" for i, (_label, cap) in enumerate(columns)
+    )
+    console_obj.print(f"[bold]{'BRANCH':<{name_width}}{head}[/bold]")
+    console_obj.print(f"[dim]{'cap':<{name_width}}{caps}[/dim]")
+    console_obj.print(f"[dim]{'─' * (name_width + sum(widths))}[/dim]")
+
+    for row in rows:
+        by_label = {str(cell.get("label", "")): cell for cell in row["cells"]}
+        line = f"[cyan]{str(row.get('branch', '')):<{name_width}}[/cyan]"
+        for index, (label, _cap) in enumerate(columns):
+            cell = by_label.get(label)
+            if cell is None:
+                line += f"{'':>{widths[index]}}"
+                continue
+            text = f"{_fleet_cell_text(cell):>{widths[index]}}"
+            style = _FLEET_STATE_STYLE.get(str(cell.get("state", "")), "yellow")
+            line += f"[{style}]{text}[/{style}]" if style else text
+        console_obj.print(line)
+
+    for row in rows:
+        for note in row.get("notes", []):
+            console_obj.print(f"  [yellow]⚠[/yellow] [dim]{row.get('branch', '')}: {note}[/dim]")
+
+
 def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
     """Special renderer for deprecated patterns — different structure."""
     deprecated_patterns = audit_result.get("deprecated_patterns", [])
@@ -330,6 +442,11 @@ def print_branch_summary(
     # Deprecated patterns
     _render_deprecated_patterns(audit_result, console)
 
+    # A published fleet row, as a one-row table. Same arm as the fleet run, so
+    # `audit context @seedgo` and `audit context` cannot describe one branch
+    # two different ways. Prints nothing when the pack publishes no row.
+    _render_fleet_table([audit_result], console)
+
 
 def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
     """Print system-wide summary with standard averages
@@ -338,6 +455,12 @@ def print_system_summary(audit_results: List[Dict], no_bypass: bool = False):
     this block is the part that gets copied into a plan or a message, and a
     fleet average with every rule switched off means something else entirely.
     """
+    # The fleet table first: on a full audit this is the only place a
+    # branch_level checker's per-branch reading can appear at all, because
+    # print_branch_summary is skipped for a compact run. No row published, no
+    # output — every pack that predates this channel prints exactly as before.
+    _render_fleet_table(audit_results, console)
+
     total_branches = len(audit_results)
     avg_compliance = int(sum(r["average"] for r in audit_results) / total_branches) if total_branches else 0
 

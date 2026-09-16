@@ -46,7 +46,7 @@ Every command below was run against this branch on **2026-09-07** and produced t
 ### Via Drone (primary)
 
 ```bash
-drone @seedgo                                          # Introspection (13 modules, 3 packs, version)
+drone @seedgo                                          # Introspection (13 modules, 4 packs, version)
 drone @seedgo --help                                   # Usage guide (see the gap note below)
 drone @seedgo --version                                # Version string — "seedgo v2.0.1"
 
@@ -56,7 +56,7 @@ drone @seedgo audit aipass @flow                       # Audit single branch
 drone @seedgo audit inbox-ids                          # Inbox message-ID validation
 
 # Standards Query
-drone @seedgo standard                                 # List every standard name across ALL THREE packs (57)
+drone @seedgo standard                                 # List every standard name across ALL FOUR packs (64)
 drone @seedgo standard cli                             # Show standard content (short form)
 drone @seedgo standards_query aipass_standards         # List the 46 standards in the aipass pack
 drone @seedgo standards_query aipass_standards cli     # Show specific standard content
@@ -118,7 +118,7 @@ python3 -m aipass.seedgo.apps.seedgo standards_query aipass_standards cli
 > and the pack under Audit, and the `Commands:` line lists all 18.
 
 > **Note — `standard` and `standards_query` count differently.** `drone @seedgo standard` is
-> pack-agnostic and lists the union of all three checker packs (**57** names on 2026-09-07).
+> pack-agnostic and lists the union of all four checker packs (**64** names on 2026-09-15).
 > `drone @seedgo standards_query aipass_standards` lists that one pack (**45**). Both read names
 > from `*_content.py`, which is why `ruff` appears as `ruff_check` — see the naming-split note
 > under the standards table.
@@ -147,7 +147,7 @@ seedgo/
 │   │   ├── permissions.py           # TRUSTED_CROSS_WRITERS list for hook + drone auth
 │   │   ├── readme_update.py         # README generation module
 │   │   └── test_map.py              # Custom function test coverage mapping
-│   └── handlers/                    # 15 handler directories + 2 shared modules
+│   └── handlers/                    # 16 handler directories + 2 shared modules
 │       ├── module_root.py           # Guarded module_file() — the one import-time __file__ resolve
 │       ├── registry_scan.py         # Case-EXACT registry discovery — the one reader every lane uses
 │       ├── aipass_standards/        # 45 checker standards (134 files: 45 check + 45 content
@@ -183,10 +183,11 @@ seedgo/
 │       ├── audit_tests/             # audit-tests execution lane (write-gated suite run)
 │       ├── tests_pytest_standards/  # pytest-standards adapter pack for the audit-tests lane
 │       ├── pytest_quality_standards/ # GENERIC test-quality scoring pack (v5) — 15 AST rules, weekly + on demand
+│       ├── context_standards/       # ADVISORY startup-budget pack — `audit context` = the fleet table
 │       ├── test_inventory/          # static fleet-wide test inventory (phase A, outside the lane)
 │       ├── shadow_cycle/            # the weekly cadence — score + inventory + twins, then one mail
 │       └── test_map/                # Function test coverage scanner
-├── tests/                           # 62 test files, 3446 test functions (pytest expands to 4178 cases)
+├── tests/                           # 62 test files, 3501 test functions (pytest expands to 4241 cases)
 ├── .trinity/                        # Identity + memory
 ├── .aipass/                         # Branch prompt (aipass_local_prompt.md)
 ├── .seedgo/                         # Self-bypass rules + audit artifacts
@@ -343,8 +344,8 @@ restate them here. Read the directory, or ask @hooks.
 
 Counted 2026-09-07, both ways, because the two numbers answer different questions:
 
-- **62 test files, 3446 test functions** — the `def test_` count, the way seedgo's own
-  `readme_check._count_test_functions()` counts it. **pytest expands to 4178 cases** once
+- **62 test files, 3501 test functions** — the `def test_` count, the way seedgo's own
+  `readme_check._count_test_functions()` counts it. **pytest expands to 4241 cases** once
   parametrisation is applied (both re-counted 2026-09-15, after the audit-cache external inputs
   and module_eviction pins; the prose below is the
   2026-09-07 measurement). Re-measured
@@ -505,7 +506,7 @@ Everything below was re-checked on 2026-09-07 unless marked **UNVERIFIED**.
   trips it.
 - **Tests:** 3843 passed, 53 skipped, 1 failed — the failure is another branch's live trinity
   drift, not seedgo's code (see the run result above). 3028 test functions across 62 files then;
-  3446 across 62 on 2026-09-15, expanding to 4178 cases (4125 passed, 53 skipped).
+  3501 across 62 on 2026-09-15, expanding to 4241 cases (4188 passed, 53 skipped).
 - **Coverage:** 451 public functions tested of 588 (77%)
 - **Type errors:** 0
 - **Proof:** NOT CERTIFIED — 3 of 5 proofs pass (see Known Issues)

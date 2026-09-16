@@ -1,11 +1,12 @@
-"""Tests for readme_check.py — Check 7 (test count accuracy) and Check 8 (markdown link validity)."""
+"""Tests for readme_check.py — Check 7 (test count accuracy), Check 8 (markdown link
+validity) and the advisory docs-index / rot-bait lane (check_branch_info)."""
 
 # =================== META ====================
 # Name: test_readme_content_checks.py
 # Description: Unit tests for readme content accuracy checks
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-09-15
 # =============================================
 
 import pytest
@@ -567,3 +568,306 @@ def test_directory_tree_passes_absent_runtime_dir(tmp_path):
     result = check_directory_tree(lines, branch_root, str(apps_dir / "entry.py"))
     assert result["passed"] is True
     assert "verified" in result["message"]
+
+
+# ===========================================================================
+# Advisory lane: docs index, named paths, rot bait (check_branch_info)
+# ===========================================================================
+
+
+def _advisory_branch(tmp_path, readme_text: str, docs: dict | None = None, name: str = "mybranch"):
+    """A branch root with an entry point, a README and optional docs/*.md."""
+    branch_root = tmp_path / name
+    apps_dir = branch_root / "apps"
+    apps_dir.mkdir(parents=True)
+    (apps_dir / f"{name}.py").write_text("# entry\n", encoding="utf-8")
+    (branch_root / "README.md").write_text(readme_text, encoding="utf-8")
+    for doc_name, body in (docs or {}).items():
+        docs_dir = branch_root / "docs"
+        docs_dir.mkdir(exist_ok=True)
+        (docs_dir / doc_name).write_text(body, encoding="utf-8")
+    return branch_root
+
+
+_PLAIN_README = "# MyBranch\n\nA face for strangers.\n\n*Last Updated: 2099-01-01*\n"
+
+
+def test_docs_index_reports_unlinked_doc(tmp_path):
+    """A docs/*.md the README never names is reported, by name."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    branch_root = _advisory_branch(tmp_path, _PLAIN_README, docs={"audit.md": "# Audit\n"})
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "docs index" in line]
+    assert len(lines) == 1
+    assert "not linked" in lines[0]
+    assert "docs/audit.md" in lines[0]
+    assert "advisory" in lines[0]
+
+
+def test_docs_index_linked_doc_not_reported(tmp_path):
+    """A docs/*.md reached by a relative link is not reported as unlinked."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nDepth: [audit](docs/audit.md)\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "docs index" in line]
+    assert lines == ["readme docs index (advisory): all 1 docs/*.md linked from README"]
+
+
+def test_docs_index_link_is_resolved_not_string_matched(tmp_path):
+    """A link that reaches the file by a path the README never spells out
+    ("docs/./audit.md") still indexes it: link targets are RESOLVED against the
+    branch root, not string-matched against the text. Without resolution the
+    lane would only ever see paths written the one canonical way."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nDepth: [audit](docs/./audit.md)\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
+    assert "docs/audit.md" not in readme
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "docs index" in line]
+    assert lines == ["readme docs index (advisory): all 1 docs/*.md linked from README"]
+
+
+def test_docs_index_plain_path_mention_counts_as_linked(tmp_path):
+    """The literal path docs/<name> indexes the file even without link syntax."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nDepth lives in `docs/audit.md`.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "docs index" in line]
+    assert "not linked" not in lines[0]
+
+
+def test_docs_index_dir_link_covers_docs_readme(tmp_path):
+    """A link to docs/ indexes docs/README.md — that is how a directory index renders."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nDepth: [docs](docs/)\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme, docs={"README.md": "# Docs\n"})
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "docs index" in line]
+    assert "not linked" not in lines[0]
+
+
+def test_docs_index_absent_docs_dir_is_silence(tmp_path):
+    """No docs/ directory reports NOTHING — silence, not a finding."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    branch_root = _advisory_branch(tmp_path, _PLAIN_README)
+
+    assert check_branch_info(str(branch_root)) == []
+
+
+def test_docs_index_empty_docs_dir_is_silence(tmp_path):
+    """A docs/ directory with no *.md in it reports nothing either."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    branch_root = _advisory_branch(tmp_path, _PLAIN_README)
+    (branch_root / "docs").mkdir()
+
+    assert check_branch_info(str(branch_root)) == []
+
+
+def test_missing_readme_is_silence(tmp_path):
+    """No README at all: the advisory lane says nothing (check 1 owns that)."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    branch_root = _advisory_branch(tmp_path, _PLAIN_README, docs={"audit.md": "# Audit\n"})
+    (branch_root / "README.md").unlink()
+
+    assert check_branch_info(str(branch_root)) == []
+
+
+def test_broken_readme_link_reported_by_scored_check_only(tmp_path):
+    """A dead relative link is reported — by check 8, and NOT duplicated in the
+    advisory lane. The target is branch-rooted on purpose: the advisory lane
+    would pick it up if it stopped skipping link targets, and then one dead
+    link would be told twice."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
+        check_branch_info,
+        check_markdown_links,
+    )
+
+    readme = "# MyBranch\n\nThe gate: [gate](apps/handlers/gone.py)\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    scored = check_markdown_links(_lines(readme), branch_root, str(branch_root / "apps" / "mybranch.py"))
+    assert scored["passed"] is False
+    assert "apps/handlers/gone.py" in scored["message"]
+
+    assert not [line for line in check_branch_info(str(branch_root)) if "apps/handlers/gone.py" in line]
+
+
+def test_named_path_absent_is_reported(tmp_path):
+    """A branch-rooted path the README names but that is not there is reported."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nThe gate is `apps/handlers/gone.py`.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "readme paths" in line]
+    assert len(lines) == 1
+    assert "apps/handlers/gone.py" in lines[0]
+
+
+def test_named_path_present_is_silent(tmp_path):
+    """A named path that exists produces no line."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nThe entry is `apps/mybranch.py`.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    assert not [line for line in check_branch_info(str(branch_root)) if "readme paths" in line]
+
+
+def test_named_path_outside_branch_root_ignored(tmp_path):
+    """A path rooted somewhere else (a neighbour branch, an illustration) is out
+    of scope: this audit reads ONE branch and cannot tell stale from foreign."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nSee `lifecycle/auto_fix.py` and `/path/to/registry.json`.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    assert not [line for line in check_branch_info(str(branch_root)) if "readme paths" in line]
+
+
+def test_rot_bait_stale_count_reported(tmp_path):
+    """A count claim in the README is rot bait, quoted back with its noun."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\nThis branch ships 46 standards today.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "count claim" in line]
+    assert len(lines) == 1
+    assert "46 standards" in lines[0]
+
+
+def test_rot_bait_dated_status_heading_reported(tmp_path):
+    """A dated heading and a Status heading are both snapshots."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\n## Status (2026-09-07)\n\nGreen.\n\n## Latest Audit\n\n100.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "dated/status" in line]
+    assert len(lines) == 1
+    assert "2 dated/status heading(s)" in lines[0]
+    assert "## Status (2026-09-07)" in lines[0]
+
+
+def test_rot_bait_last_updated_is_never_rot_bait(tmp_path):
+    """Last Updated carries a date and is REQUIRED by check 3 — never flagged,
+    not even when a branch writes it as a dated HEADING, which is the only
+    shape where the exemption is load-bearing."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\n## Last Updated (2026-09-15)\n\nA face.\n\n**Last Updated:** 2026-09-15\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    assert not [line for line in check_branch_info(str(branch_root)) if "dated/status" in line]
+
+
+def test_rot_bait_command_list_reported(tmp_path):
+    """A Commands section that re-types --help is reported with its count."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = (
+        "# MyBranch\n\n## Commands\n\n"
+        "- `drone @mybranch audit`\n"
+        "- `drone @mybranch check`\n"
+        "- `drone @mybranch report`\n\n"
+        "## Depends On\n\ndrone\n\n*Last Updated: 2099-01-01*\n"
+    )
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "Commands section" in line]
+    assert len(lines) == 1
+    assert "3 invocation(s)" in lines[0]
+    assert "drone @mybranch --help" in lines[0]
+
+
+def test_rot_bait_short_command_pointer_is_silent(tmp_path):
+    """A pointer (under the threshold) is the contract, not rot bait."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = (
+        "# MyBranch\n\n## Commands\n\nEvery command: `drone @mybranch --help`\n\n"
+        "## Depends On\n\ndrone\n\n*Last Updated: 2099-01-01*\n"
+    )
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    assert not [line for line in check_branch_info(str(branch_root)) if "Commands section" in line]
+
+
+def test_command_count_survives_fenced_comments(tmp_path):
+    """A bash comment inside a fence is not a markdown heading: counting must
+    not stop at '# Audit' three invocations in."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = (
+        "# MyBranch\n\n## Commands\n\n```bash\n"
+        "drone @mybranch one\n"
+        "drone @mybranch two\n\n"
+        "# Audit\n"
+        "drone @mybranch three\n"
+        "drone @mybranch four\n"
+        "```\n\n## Depends On\n\ndrone\n\n*Last Updated: 2099-01-01*\n"
+    )
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "Commands section" in line]
+    assert "4 invocation(s)" in lines[0]
+
+
+def test_advisory_samples_are_rich_safe(tmp_path):
+    """Square brackets in quoted README text would be eaten as Rich markup."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    readme = "# MyBranch\n\n## Status [2026-09-07]\n\nGreen.\n\n*Last Updated: 2099-01-01*\n"
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    lines = [line for line in check_branch_info(str(branch_root)) if "dated/status" in line]
+    assert "[" not in lines[0] and "]" not in lines[0]
+    assert "(2026-09-07)" in lines[0]
+
+
+def test_branch_inputs_declares_docs_for_the_audit_cache(tmp_path):
+    """docs/*.md is declared, or a new docs file is invisible until something
+    else in the branch changes and the index line is served stale."""
+    from aipass.seedgo.apps.handlers.aipass_standards import readme_check
+
+    assert "docs/*.md" in readme_check.BRANCH_INPUTS
+
+
+def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
+    """LOAD-BEARING: a branch that trips every advisory line still scores
+    exactly what it scored before the lane existed — 8 checks, no advisory
+    finding anywhere in checks[]. CI gates every branch at 100."""
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info, check_module
+
+    readme = (
+        "# MyBranch\n\n## Architecture\n\n```\nmybranch/\n```\n\n"
+        "## Commands\n\n"
+        "- `drone @mybranch one`\n- `drone @mybranch two`\n- `drone @mybranch three`\n\n"
+        "## Depends On\n\ndrone\n\n"
+        "## Status (2026-09-07)\n\nShips 46 standards. See `apps/handlers/gone.py`.\n\n"
+        "*Last Updated: 2099-01-01*\n"
+    )
+    branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
+    entry = branch_root / "apps" / "mybranch.py"
+
+    result = check_module(str(entry))
+    advisory = check_branch_info(str(branch_root))
+
+    assert len(advisory) >= 4, "the branch must actually trip the advisory lane"
+    assert result["score"] == 100
+    assert len(result["checks"]) == 8
+    assert all(c["passed"] for c in result["checks"])
+    blob = " ".join(f"{c['name']} {c['message']}" for c in result["checks"]).lower()
+    for word in ("docs index", "rot bait", "branch-rooted path", "dated/status", "not linked from readme"):
+        assert word not in blob

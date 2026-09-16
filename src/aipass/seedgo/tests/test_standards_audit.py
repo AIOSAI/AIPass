@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-15
 # =============================================
 
 import time
@@ -934,3 +934,107 @@ def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv)
     assert handle_command("audit", argv) is True
     assert calls == []
     assert not _refused_argv()
+
+
+# ---------------------------------------------------------------------------
+# THE CONTEXT PACK -- `audit context` is the startup-budget fleet table
+# ---------------------------------------------------------------------------
+#
+# The verb strips the `_standards` suffix, so `handlers/context_standards/`
+# IS `drone @seedgo audit context`. That is the whole reason the pack carries
+# that directory name (DPLAN-0347, seedgo's row 1): one rule that measures six
+# files per branch must not drag the 47 rules of aipass_standards over every
+# branch's source to answer.
+
+#: This branch's real `handlers/` directory, reached through the real discovery
+#: handler bound above -- the autouse fixture replaces the module in sys.modules
+#: for every test in this file, so asking for the path through the mock would
+#: hand back a MagicMock.
+_HANDLERS_DIR = Path(real_discovery.__file__).resolve().parent.parent
+
+
+def test_the_context_pack_is_discovered_as_the_context_verb():
+    """`handlers/context_standards/` must reach the audit as the word `context`.
+
+    Pins the DIRECTORY NAME against the verb, and the manifest's `kind` against
+    the lane. A pack that declared `kind: execution` would vanish from the
+    scoring audit entirely and `drone @seedgo audit context` would refuse as an
+    unknown pack -- the same silent disappearance discover_packs() publishes
+    non_scoring_packs() to prevent.
+    """
+    packs = real_discovery.discover_packs(_HANDLERS_DIR)
+
+    assert "context" in packs, f"the context pack must be offered for scoring; found {sorted(packs)}"
+    assert packs["context"].name == "context_standards"
+    assert real_discovery.pack_kind(packs["context"]) == real_discovery.SCORING_PACK_KIND
+    assert "context" not in real_discovery.non_scoring_packs(_HANDLERS_DIR)
+
+
+def test_the_context_pack_holds_only_the_startup_budget_checker():
+    """One rule, its own pack -- the point of giving it a pack at all.
+
+    `audit context` exists so the startup budget can be asked without running
+    the other 47 rules. A second checker landing here without that being the
+    intent would make the cheap question expensive again.
+    """
+    pack = real_discovery.discover_packs(_HANDLERS_DIR)["context"]
+
+    assert [f.name for f in sorted(pack.glob("*_check.py"))] == ["startup_budget_check.py"]
+
+
+def _wire_context_pack(monkeypatch):
+    """Make `context` resolve to this branch's real pack directory."""
+    import sys
+
+    packs = {"aipass": Path("handlers/aipass_standards"), "context": _HANDLERS_DIR / "context_standards"}
+    monkeypatch.setattr(
+        sys.modules["aipass.seedgo.apps.handlers.audit.discovery"], "discover_packs", MagicMock(return_value=packs)
+    )
+    return packs
+
+
+def test_audit_context_with_no_branch_audits_every_branch(monkeypatch):
+    """`drone @seedgo audit context` is the FLEET table -- no branch argument.
+
+    A pack name with nothing after it must not be read as a missing branch: the
+    fleet run is the command Patrick asks for, and the table is one row per
+    citizen.
+    """
+    audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")
+    _wire_context_pack(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["context", "--no-artifact"]) is True
+    assert audit_mock.call_count == 2, "every discovered branch gets a row"
+    assert {call.kwargs["pack_path"].name for call in audit_mock.call_args_list} == {"context_standards"}
+
+
+def test_audit_context_standards_reaches_the_same_pack(monkeypatch):
+    """The directory's own name is an unambiguous spelling for its pack."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    _wire_context_pack(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["context_standards", "@flow", "--no-artifact"]) is True
+    assert audit_mock.call_args.kwargs["pack_path"].name == "context_standards"
+
+
+def test_audit_context_refuses_an_unknown_branch_by_name(monkeypatch):
+    """A branch that does not exist REFUSES, names itself, and audits nothing.
+
+    Same contract as `audit aipass @nope`, asserted for the new verb because a
+    pack reached through a different code path is a pack whose refusal nobody
+    has watched: printing the ❌ line and exiting 0 is the exact defect the
+    2026-09-07 fleet sweep found here.
+    """
+    from aipass.seedgo.apps.handlers.audit_tests import refusal
+
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    _wire_context_pack(monkeypatch)
+
+    refused = _refuse(["context", "@not_a_branch_xyz", "--no-artifact"])
+
+    assert refused.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert "NOT_A_BRANCH_XYZ" in str(refused.token)
+    assert "not_a_branch_xyz" in _refusal_text().lower(), "the refusal must name the branch it could not find"
+    assert audit_mock.call_count == 0, "nothing may be audited once the target is unknown"

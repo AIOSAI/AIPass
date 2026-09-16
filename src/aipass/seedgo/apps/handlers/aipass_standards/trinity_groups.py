@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_groups.py
 # Description: Trinity standard - the eight group checkers and their shared helpers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -41,6 +41,33 @@ backlog file and the next number.  Group 8, Todos hygiene, is RETIRED: it
 flagged a todo kept as ``status: done``, and with no ``status`` field that
 trophy can only be spelled as a key outside the closed shape, which Entry
 shapes already flags by name.  Its weight moved with the defect.
+
+The shape is READ, not remembered (FPLAN-0593 Phase 2, 2026-09-15)
+------------------------------------------------------------------
+``_ENTRY_RULES`` used to sit at the top of this file: a hand-kept copy of the
+four entry shapes, correct on the day it was written and one @memory config
+edit away from wrong on any day after.  It is gone.  :func:`entry_shapes`
+derives the required/optional split from
+``entry_limits.entry_types.<type>.fields`` in memory.config.json -- the same
+closed map @memory's ``trinity_push`` derives its own rules from, so the
+checker and the push cannot disagree about what a canonical entry is.
+
+Fail CLOSED, on the Char caps group's contract: the shape is never assumed any
+more than the cap numbers are.  An unreadable config refuses Entry shapes
+whole; a config that publishes no ``fields`` for a section raises an error row
+naming that key, and a group holding any record can never score 100.
+
+The read is by CONFIG KEY, not by import.  @memory's accessor
+(``entry_limits.fields_for``) lives under its ``apps/handlers/``, and a
+cross-branch handler import fails seedgo's own encapsulation standard --
+which scores this branch too.  ``memory/apps/modules/`` carries no gateway for
+it.  memory.config.json is a file this checker already reads and already
+declares in ``external_inputs()``, so the shape arrives with no new coupling
+and nothing new for the audit cache to watch.
+
+One number did not make the move: ``_DRAFT_PERCENT``.  @memory keeps it as a
+module constant rather than a config key, so there is no key to read; the
+comment on it says what guards it in the meantime and what retires it.
 """
 
 import re
@@ -124,46 +151,17 @@ _SECTION_FILE = {
 }
 
 # Type specs are strings so a violation message can name the expectation in
-# the same words the contract uses.
+# the same words the contract uses -- and the same three words @memory's
+# config spells them with, which is what lets a config `type` be compared
+# against a value here without a translation table in between.
 _TYPE_INT = "int"
 _TYPE_STR = "str"
 _TYPE_STR_LIST = "list[str]"
 
-_ENTRY_RULES: dict[str, dict[str, dict[str, str]]] = {
-    "sessions": {
-        "required": {
-            "number": _TYPE_INT,
-            "date": _TYPE_STR,
-            "summary": _TYPE_STR,
-            "status": _TYPE_STR,
-        },
-        "optional": {"tags": _TYPE_STR_LIST},
-    },
-    "key_learnings": {
-        "required": {
-            "number": _TYPE_INT,
-            "date": _TYPE_STR,
-            "key": _TYPE_STR,
-            "value": _TYPE_STR,
-        },
-        "optional": {},
-    },
-    # DPLAN-0345: no `status`. What is on the pad IS the status; done = deleted.
-    # Mirrors @memory's trinity_push.ENTRY_RULES["todos"].
-    "todos": {
-        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "task": _TYPE_STR},
-        "optional": {"priority": _TYPE_STR},
-    },
-    "observations": {
-        "required": {
-            "number": _TYPE_INT,
-            "date": _TYPE_STR,
-            "note": _TYPE_STR,
-            "tags": _TYPE_STR_LIST,
-        },
-        "optional": {},
-    },
-}
+# Where the closed field shape lives on an entry type definition, spelled as
+# @memory spells it (entry_limits.FIELDS_KEY). The KEY is carried here; the
+# MAP never is -- see entry_shapes().
+_FIELDS_KEY = "fields"
 
 # -- Rendering (mirrors memory/apps/handlers/tracking/tab_renderer.py) -------
 
@@ -186,9 +184,27 @@ _RENDERER_FALLBACK_MAX_CHARS = 300
 _RENDERER_FALLBACK_FIELD = "value"
 
 # The draft target every tab carries beside its cap (DPLAN-0342, Patrick's
-# ruling 2026-09-13). Mirrors @memory's entry_limits.DRAFT_PERCENT and
-# draft_target(): integer percent, floored, derived from the SAME resolved cap
-# (per_branch included) - 300/200/150 -> 240/160/120, 77 -> 61, never rounded.
+# ruling 2026-09-13): integer percent, floored, derived from the SAME resolved
+# cap (per_branch included) - 300/200/150 -> 240/160/120, 77 -> 61, never
+# rounded.
+#
+# THIS ONE COULD NOT RETIRE WITH THE SHAPE (FPLAN-0593 Phase 2, 2026-09-15).
+# The shape moved into memory.config.json in Phase 1 and this module now reads
+# it from there. The draft percentage did NOT move: @memory publishes it as a
+# module constant, entry_limits.DRAFT_PERCENT, and memory.config.json carries
+# no key for it -- measured, not assumed. So there is nothing to read, and the
+# two ways to reach a Python constant across a branch boundary are both shut:
+# a cross-branch `handlers` import violates seedgo's own encapsulation
+# standard, and `memory/apps/modules/` publishes no gateway for it.
+#
+# Failing closed on it would put all 18 branches' Meta lines group red over a
+# number nobody disagrees about, so the number stays here and the GUARD moves
+# instead: test_the_draft_percent_is_memorys_own_number in
+# test_trinity_check.py calls @memory's real draft_target() and goes red the
+# hour that constant moves, naming it. That is a pin on the live source, not a
+# memory of it -- but it is still one number in two places, and it retires for
+# real the day @memory publishes `entry_limits.draft_percent` in the config
+# and draft_target() reads it.
 _DRAFT_PERCENT = 80
 
 # The todos pad tab (DPLAN-0345), mirroring @memory's tab_renderer._todos_tab
@@ -512,7 +528,85 @@ def _optional_field_problems(optional: dict, entry: dict) -> list[str]:
     return problems
 
 
-def validate_entry_shape(section: str, entry: object) -> list[str]:
+def _rules_from_fields(fields: dict) -> dict | None:
+    """Split one closed field map into the required/optional shape this module checks.
+
+    The derivation @memory's ``trinity_push._rules_from_fields`` runs on the
+    same map, reproduced as LOGIC rather than as data: a field is required
+    when the config says so and optional otherwise, and ``type`` is one of the
+    three names both sides already spell identically.
+
+    Args:
+        fields: ``entry_types.<type>.fields`` --
+            ``{name: {"type", "required", ...}}`` as the config publishes it.
+
+    Returns:
+        ``{"required": {name: type}, "optional": {name: type}}``, or None when
+        a field spec is not an object or carries no ``type`` string.  None is
+        the fail-closed answer: a shape that cannot be read is not a shape
+        every entry happens to satisfy, and the caller turns it into an error
+        row naming the key rather than measuring against a remembered rule.
+    """
+    required: dict[str, str] = {}
+    optional: dict[str, str] = {}
+    for name, spec in fields.items():
+        if not isinstance(spec, dict):
+            return None
+        field_type = spec.get("type")
+        if not isinstance(field_type, str):
+            return None
+        target = required if spec.get("required") else optional
+        target[name] = field_type
+    return {"required": required, "optional": optional}
+
+
+def entry_shapes(config: object, branch_name: str) -> dict:
+    """Return the canonical entry shape per section, read from @memory's config.
+
+    THE SHAPE HAS ONE HOME AND IT IS NOT HERE (FPLAN-0593 Phase 2).  This
+    module carried its own literal copy of the four entry shapes until
+    2026-09-15, @memory's ``trinity_push`` carried a second, and the write
+    gate measured against a third.  Three copies of one contract is three
+    chances for a push to prune an entry the gate would have accepted.  Phase
+    1 moved the shape into ``entry_limits.entry_types.<type>.fields`` in
+    memory.config.json; this reads it from there, through the same per_branch
+    resolution the caps already use, so a branch cannot be held to one shape
+    and told another.
+
+    Read from the CONFIG KEY, not through a gateway, and deliberately:
+    @memory publishes ``entry_limits.fields_for()`` from
+    ``apps/handlers/json/entry_limits.py``, and a cross-branch ``handlers``
+    import is a violation of seedgo's own encapsulation standard (it scores
+    every branch, including this one).  ``apps/modules/`` carries no gateway
+    for it -- those modules are CLI command handlers, not an importable
+    surface.  memory.config.json is the file this checker already opens
+    (:func:`trinity_check.load_memory_config`) and already declares in
+    ``external_inputs()``, so reading one more key out of it adds no new
+    coupling and nothing new for the audit cache to watch.
+
+    Args:
+        config: The parsed memory.config.json, or anything unusable.
+        branch_name: Branch directory name; per-branch overrides match it
+            case-insensitively.
+
+    Returns:
+        ``{section: {"required": {...}, "optional": {...}}}`` holding only the
+        sections the config publishes a usable shape for.  A section missing
+        from the result is the fail-closed signal -- the caller raises an
+        error row naming the key, never a pass.
+    """
+    shapes: dict[str, dict] = {}
+    for section, spec in _resolve_entry_limits(_as_dict(config), branch_name).items():
+        fields = _as_dict(spec).get(_FIELDS_KEY)
+        if not isinstance(fields, dict) or not fields:
+            continue
+        rules = _rules_from_fields(fields)
+        if rules is not None:
+            shapes[section] = rules
+    return shapes
+
+
+def validate_entry_shape(section: str, entry: object, shapes: dict) -> list[str]:
     """Validate one entry against its section's canonical shape.
 
     Required fields must be present WITH their required types, optional
@@ -524,12 +618,16 @@ def validate_entry_shape(section: str, entry: object) -> list[str]:
     Args:
         section: One of sessions, key_learnings, todos, observations.
         entry: The candidate entry, of any type.
+        shapes: The map from :func:`entry_shapes` -- @memory's published
+            shape, resolved for this branch.  Required rather than defaulted:
+            a shape this module could supply on its own is the mirror Phase 2
+            exists to delete.
 
     Returns:
         A list of human-readable violation strings; empty means clean.
     """
-    rules = _ENTRY_RULES.get(section)
-    if rules is None:
+    rules = _as_dict(shapes).get(section)
+    if not isinstance(rules, dict):
         return [f"unknown section '{section}' -- no canonical shape to measure against"]
     if not isinstance(entry, dict):
         return [f"entry must be an object, found {type(entry).__name__}"]
@@ -908,13 +1006,16 @@ def _group_top_level(ctx: dict) -> dict:
 # =============================================================================
 
 
-def _shape_probe(section: str, entries: list) -> tuple[int, list]:
-    """Validate every entry of *section*; return (ok_count, records)."""
+def _shape_probe(section: str, entries: list, shapes: dict) -> tuple[int, list]:
+    """Validate every entry of *section* against the published shape; return (ok_count, records)."""
     label = _section_file(section)
+    if section not in shapes:
+        reason = f"cannot measure shapes for '{section}': config has no usable entry_types.{section}.fields"
+        return 0, [(label, reason, None)]
     ok = 0
     records: list = []
     for index, entry in enumerate(entries):
-        problems = validate_entry_shape(section, entry)
+        problems = validate_entry_shape(section, entry, shapes)
         if not problems:
             ok += 1
             continue
@@ -924,8 +1025,20 @@ def _shape_probe(section: str, entries: list) -> tuple[int, list]:
 
 
 def _group_entry_shapes(ctx: dict) -> dict:
-    """Group 3: required fields with required types, no extras."""
-    ok, total, records = _entry_scan(ctx, _ALL_SECTIONS, _shape_probe)
+    """Group 3: required fields with required types, no extras -- the shape from the config.
+
+    Fails CLOSED, on the Char caps group's contract: the shape is never
+    assumed any more than the cap numbers are.  An unreadable config refuses
+    the whole group; a config that publishes no ``fields`` map for a section
+    raises an error row naming that key, and a group holding any record can
+    never score 100 (see ``_records_check``).
+    """
+    config = ctx["config"]
+    if config is None:
+        message = "cannot measure shapes: memory.config.json unreadable -- the entry shape is never assumed"
+        return _binary_check("Entry shapes", False, message)
+    shapes = entry_shapes(config, ctx["branch"])
+    ok, total, records = _entry_scan(ctx, _ALL_SECTIONS, partial(_shape_probe, shapes=shapes))
     return _records_check("Entry shapes", ok, total, records, f"All {total} entries carry the canonical shape")
 
 

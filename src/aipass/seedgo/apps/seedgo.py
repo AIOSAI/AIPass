@@ -211,6 +211,10 @@ def print_help() -> None:
     console.print(
         "  [green]drone @seedgo audit pytest_quality[/green]           [dim]# The same over every citizen[/dim]"
     )
+    console.print(
+        "  [green]drone @seedgo audit context[/green]                  "
+        "[dim]# Startup-budget fleet table: 6 files per branch vs their owners' caps (advisory)[/dim]"
+    )
     console.print()
 
     console.print("[yellow]Test Quality:[/yellow]")

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-25
 # Modified: 2026-09-15
 # =============================================
@@ -47,6 +47,26 @@ for _parent in Path(__file__).resolve().parents:
         from aipass.memory.apps.handlers.tracking.tab_renderer import compose_meta as _compose_meta
 
         _COMPOSE_META_IMPORT_ERROR = ""
+        break
+
+# The OTHER side of the SHAPE guard (FPLAN-0593 Phase 2). @memory's push
+# derives its required/optional rules from the same
+# ``entry_types.<type>.fields`` map this checker now reads, and @memory's
+# ``draft_target()`` owns the one number the meta line still carries in
+# seedgo's tree. Reached exactly like the renderer above -- by looking for the
+# file rather than by catching an ImportError, and before the autouse mock
+# swaps aipass.prax in sys.modules.
+_PUSH_RELATIVE = ("src", "aipass", "memory", "apps", "handlers", "templates", "trinity_push.py")
+_entry_rules = None
+_draft_target = None
+_MEMORY_SHAPE_IMPORT_ERROR = "@memory trinity_push.py is not on disk"
+
+for _parent in Path(__file__).resolve().parents:
+    if _parent.joinpath(*_PUSH_RELATIVE).is_file():
+        from aipass.memory.apps.handlers.json.entry_limits import draft_target as _draft_target
+        from aipass.memory.apps.handlers.templates.trinity_push import entry_rules as _entry_rules
+
+        _MEMORY_SHAPE_IMPORT_ERROR = ""
         break
 
 
@@ -102,6 +122,12 @@ _CONFIG = {
                 "kind": "list",
                 "field": "value",
                 "max_chars": 200,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "key": {"type": "str", "required": True, "max_chars": 80},
+                    "value": {"type": "str", "required": True, "max_chars": 200},
+                },
             },
             "sessions": {
                 "file": "local.json",
@@ -109,6 +135,13 @@ _CONFIG = {
                 "kind": "list",
                 "field": "summary",
                 "max_chars": 300,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "summary": {"type": "str", "required": True, "max_chars": 300},
+                    "status": {"type": "str", "required": True, "max_chars": 40},
+                    "tags": {"type": "list[str]", "required": False, "max_items": 10, "max_chars": 120},
+                },
             },
             "todos": {
                 "file": "local.json",
@@ -116,6 +149,12 @@ _CONFIG = {
                 "kind": "list",
                 "field": "task",
                 "max_chars": 150,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "task": {"type": "str", "required": True, "max_chars": 150},
+                    "priority": {"type": "str", "required": False, "max_chars": 10},
+                },
             },
             "observations": {
                 "file": "observations.json",
@@ -123,6 +162,12 @@ _CONFIG = {
                 "kind": "list",
                 "field": "note",
                 "max_chars": 300,
+                "fields": {
+                    "number": {"type": "int", "required": True},
+                    "date": {"type": "str", "required": True, "max_chars": 10},
+                    "note": {"type": "str", "required": True, "max_chars": 300},
+                    "tags": {"type": "list[str]", "required": True, "max_items": 10, "max_chars": 120},
+                },
             },
         },
         "per_branch": {},
@@ -360,6 +405,26 @@ def _assert_failed(check: dict, *fragments: str) -> None:
     lowered = check["message"].lower()
     for fragment in fragments:
         assert fragment.lower() in lowered, f"{fragment!r} missing from {check['message']!r}"
+
+
+def _strings_in(value) -> set:
+    """Every string reachable inside a constant, at any depth."""
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, dict):
+        return set().union(*(_strings_in(k) | _strings_in(v) for k, v in value.items())) if value else set()
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return set().union(*(_strings_in(item) for item in value)) if value else set()
+    return set()
+
+
+def _shapes(trinity, config=None, branch: str = _BRANCH) -> dict:
+    """The entry shape the checker derives from a config -- the fixture's by default.
+
+    Nothing in this file spells a shape out. The tests move the CONFIG and
+    watch the shape follow it, which is the whole of FPLAN-0593 Phase 2.
+    """
+    return trinity.entry_shapes(_CONFIG if config is None else config, branch)
 
 
 def _repo_root() -> Path | None:
@@ -626,17 +691,19 @@ class TestTheOneLaw:
         _assert_failed(_group(result, "Receipt"), "gold templates unreadable")
 
     def test_validate_entry_shape_refuses_an_unknown_section(self, trinity):
-        problems = trinity.validate_entry_shape("nonexistent", {"number": 1})
+        problems = trinity.validate_entry_shape("nonexistent", {"number": 1}, _shapes(trinity))
 
         assert problems
         assert "no canonical shape" in problems[0]
 
     def test_validate_entry_shape_refuses_a_non_dict_entry(self, trinity):
-        assert trinity.validate_entry_shape("observations", ["a", "list"]) == ["entry must be an object, found list"]
+        assert trinity.validate_entry_shape("observations", ["a", "list"], _shapes(trinity)) == [
+            "entry must be an object, found list"
+        ]
 
     def test_validate_entry_shape_rejects_bool_masquerading_as_number(self, trinity):
         problems = trinity.validate_entry_shape(
-            "observations", {"number": True, "date": "2026-08-25", "note": "x", "tags": []}
+            "observations", {"number": True, "date": "2026-08-25", "note": "x", "tags": []}, _shapes(trinity)
         )
 
         assert any("number must be int" in problem for problem in problems)
@@ -1713,9 +1780,10 @@ class TestFleetAcceptanceBar:
         entries = result["data"].get("observations")
         if not isinstance(entries, list):
             return [f"{path.name} observations is {type(entries).__name__}, not a list"]
+        shapes = _shapes(trinity)
         problems: list[str] = []
         for entry in entries:
-            problems.extend(trinity.validate_entry_shape("observations", entry))
+            problems.extend(trinity.validate_entry_shape("observations", entry, shapes))
         return problems
 
     def test_exactly_six_citizens_are_canonical_on_observations(self, trinity):
@@ -2389,6 +2457,235 @@ class TestKnownSilentPassHole:
         check = _group(result, "Char caps")
         assert check["passed"] is False, f"silent pass: {check['message']}"
         assert check["score"] < 100
+
+
+# ===========================================================================
+# FPLAN-0593 Phase 2 -- THE ENTRY SHAPE IS READ, NEVER REMEMBERED
+# ===========================================================================
+
+
+class TestTheEntryShapeComesFromTheConfig:
+    """The shape has one home and it is @memory's config, not this branch.
+
+    ``trinity_groups._ENTRY_RULES`` was a hand-kept copy of the four entry
+    shapes: correct on the day it was written, and one @memory config edit away
+    from wrong on any day after -- the third copy of a contract that already had
+    two. Phase 1 published the closed map at
+    ``entry_limits.entry_types.<type>.fields``; Phase 2 makes this checker read
+    it. These tests move the CONFIG and watch the measured shape follow, which
+    no mirror can fake.
+    """
+
+    def test_a_new_required_field_in_the_config_is_required_here(self, trinity, tmp_path, monkeypatch):
+        """Move the config, the shape moves. The canonical fixture now misses a field."""
+        widened = copy.deepcopy(_CONFIG)
+        widened["entry_limits"]["entry_types"]["observations"]["fields"]["mood"] = {
+            "type": "str",
+            "required": True,
+        }
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(widened))
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "missing required field 'mood'")
+
+    def test_a_field_dropped_from_the_config_becomes_an_extra(self, trinity, tmp_path, monkeypatch):
+        """The closed set closes from the config too -- `tags` is legal only while it is published."""
+        narrowed = copy.deepcopy(_CONFIG)
+        del narrowed["entry_limits"]["entry_types"]["observations"]["fields"]["tags"]
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(narrowed))
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "unexpected field 'tags'")
+
+    def test_flipping_required_in_the_config_flips_the_verdict(self, trinity, tmp_path, monkeypatch):
+        """`priority` is optional today; the config alone decides that."""
+        strict = copy.deepcopy(_CONFIG)
+        strict["entry_limits"]["entry_types"]["todos"]["fields"]["priority"]["required"] = True
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(strict))
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "missing required field 'priority'")
+
+    def test_the_type_comes_from_the_config_not_from_a_remembered_spec(self, trinity, tmp_path, monkeypatch):
+        """Retype `number` in the config and the int entries become violations against the new type."""
+        retyped = copy.deepcopy(_CONFIG)
+        retyped["entry_limits"]["entry_types"]["observations"]["fields"]["number"]["type"] = "list[str]"
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(retyped))
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "number must be list[str], found int")
+
+    def test_a_per_branch_override_moves_the_shape_for_that_branch(self, trinity, tmp_path, monkeypatch):
+        """Same resolution the caps take: per_branch wins, case-insensitively."""
+        overridden = copy.deepcopy(_CONFIG)
+        overridden["entry_limits"]["per_branch"] = {
+            _BRANCH.upper(): {
+                "todos": {
+                    "fields": {
+                        "number": {"type": "int", "required": True},
+                        "date": {"type": "str", "required": True},
+                        "task": {"type": "str", "required": True},
+                    }
+                }
+            }
+        }
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(overridden))
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(_group(result, "Entry shapes"), "unexpected field 'priority'")
+
+    @pytest.mark.parametrize(
+        ("section", "mangle"),
+        [
+            pytest.param("observations", lambda d: d.pop("fields"), id="no-fields-key"),
+            pytest.param("observations", lambda d: d.update(fields={}), id="empty-fields-map"),
+            pytest.param("observations", lambda d: d.update(fields="a string"), id="fields-not-a-map"),
+            pytest.param("todos", lambda d: d["fields"].update(task="str"), id="field-spec-not-a-map"),
+            pytest.param("todos", lambda d: d["fields"]["task"].pop("type"), id="field-spec-without-a-type"),
+        ],
+    )
+    def test_a_config_with_no_usable_fields_map_fails_closed_naming_the_key(
+        self, trinity, tmp_path, section, mangle, monkeypatch
+    ):
+        """The Char caps contract, applied to the shape: it is never assumed.
+
+        Every arm leaves a PERFECTLY canonical branch on disk, so the only way
+        the group can fail is by refusing to measure -- which is the point. A
+        fallback to a remembered shape would score every one of these 100.
+        """
+        broken = copy.deepcopy(_CONFIG)
+        mangle(broken["entry_limits"]["entry_types"][section])
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(broken))
+        result = trinity.check_branch(str(branch))
+
+        check = _group(result, "Entry shapes")
+        _assert_failed(check, f"cannot measure shapes for '{section}'", f"entry_types.{section}.fields")
+
+    def test_an_empty_container_cannot_hide_the_refusal(self, trinity, tmp_path, monkeypatch):
+        """The silent-pass hole Char caps had: no entries, so nothing to divide by.
+
+        A group holding a refusal record never scores 100 whatever the
+        denominator says -- pinned here for shapes as it is for caps.
+        """
+        broken = copy.deepcopy(_CONFIG)
+        del broken["entry_limits"]["entry_types"]["observations"]["fields"]
+        observations = _canonical_observations()
+        observations["observations"] = []
+        branch = _write_branch(tmp_path, observations=observations)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(broken))
+        result = trinity.check_branch(str(branch))
+
+        check = _group(result, "Entry shapes")
+        assert check["passed"] is False, f"silent pass: {check['message']}"
+        assert check["score"] < 100
+
+    def test_an_unreadable_config_refuses_entry_shapes_rather_than_assuming_one(self, trinity, tmp_path, monkeypatch):
+        """No config, no shape -- the same answer Char caps gives for its numbers."""
+        branch = _write_branch(tmp_path)
+
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: None)
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(
+            _group(result, "Entry shapes"),
+            "cannot measure shapes",
+            "memory.config.json unreadable",
+            "never assumed",
+        )
+
+    def test_a_legal_entry_still_passes_and_an_illegal_field_still_fails(self, trinity, tmp_path):
+        """The behaviour that must NOT move: canonical passes, an extra key fails."""
+        clean = trinity.check_branch(str(_write_branch(tmp_path / "clean")))
+
+        drifted_local = _canonical_local()
+        drifted_local["sessions"][0]["findings"] = ["bolted on"]
+        dirty = trinity.check_branch(str(_write_branch(tmp_path / "dirty", local=drifted_local)))
+
+        assert _group(clean, "Entry shapes")["score"] == 100
+        assert _group(clean, "Char caps")["score"] == 100
+        assert clean["score"] == 100
+        _assert_failed(_group(dirty, "Entry shapes"), "unexpected field 'findings'")
+        assert _group(dirty, "Char caps")["score"] == 100, "a shape violation must not move the cap group"
+
+    def test_the_module_carries_no_copy_of_the_shape(self, trinity):
+        """The mirror is GONE, not merely unused -- an unused copy grows a caller."""
+        from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
+
+        carried: set = set()
+        for name, value in vars(trinity_groups).items():
+            if name.startswith("__") or callable(value):
+                continue
+            carried |= _strings_in(value)
+
+        assert not hasattr(trinity_groups, "_ENTRY_RULES"), "the hand-kept shape mirror is back"
+        # Four field names that belong to @memory's shape and to nothing else
+        # this module legitimately names. A literal shape cannot come back
+        # without at least one of them landing in a module constant.
+        assert not ({"summary", "task", "note", "priority"} & carried), (
+            f"entry field names are carried in a module constant again: "
+            f"{sorted({'summary', 'task', 'note', 'priority'} & carried)}"
+        )
+
+    def test_the_derived_shape_is_byte_identical_to_what_memorys_push_derives(self, trinity):
+        """The cross-implementation guard, for the shape.
+
+        @memory's push prunes entries this checker scores. Both now read
+        ``entry_types.<type>.fields`` off the LIVE config, and if the two
+        derivations ever disagree the push removes entries the standard
+        accepts, or leaves ones it does not. Read from the live config on both
+        sides on purpose -- a fixture would pin the derivation and miss the
+        disagreement.
+        """
+        assert _entry_rules is not None, (
+            f"@memory's trinity_push is the OTHER side of this guard and it is unreachable "
+            f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the shape agreement cannot be checked, which is a "
+            f"finding about the fleet and not a reason to pass"
+        )
+        live = trinity.load_memory_config()
+        assert live is not None, "live memory.config.json is unreadable - the shape has no source"
+
+        mine = trinity.entry_shapes(live, "memory")
+
+        assert mine, "the live config publishes no closed shape at all"
+        for section in ("todos", "key_learnings", "sessions", "observations"):
+            assert mine.get(section) == _entry_rules(section), f"{section}: the two derivations disagree"
+
+    @pytest.mark.parametrize("cap", [300, 200, 150, 77, 1])
+    def test_the_draft_percent_is_memorys_own_number(self, trinity, cap):
+        """The one number Phase 2 could NOT move into the config.
+
+        @memory publishes the draft percentage as a module constant
+        (``entry_limits.DRAFT_PERCENT``), not as a config key, and a
+        cross-branch handler import is a violation of seedgo's own
+        encapsulation standard -- so the number still sits in trinity_groups.
+        This is the guard that keeps it honest: it calls @memory's real
+        ``draft_target()`` and goes red, by name, the hour that constant moves.
+        It retires when @memory publishes ``entry_limits.draft_percent`` in
+        memory.config.json and this reads it like every other number.
+        """
+        assert _draft_target is not None, (
+            f"@memory's entry_limits is the source of the draft number and it is unreachable "
+            f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the draft target has nothing to be checked against"
+        )
+        capped = copy.deepcopy(_CONFIG)
+        capped["entry_limits"]["entry_types"]["sessions"]["max_chars"] = cap
+
+        line = trinity.expected_meta_line("sessions", _BRANCH, capped, _PROSE["sessions"])
+
+        assert f"≤{cap} chars · draft to {_draft_target(cap)} ⟧" in line
 
 
 # ===========================================================================

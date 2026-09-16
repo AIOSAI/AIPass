@@ -39,9 +39,10 @@ Provider settings route all events through the bridge: `src/aipass/hooks/apps/ha
 apps/
 ├── seedgo.py                    # Entry point — thin router; turns a CommandRefused into its exit code
 ├── modules/                     # 13 CLI verbs; __init__.py holds CommandRefused
-└── handlers/                    # 15 directories
+└── handlers/                    # 16 directories
     ├── aipass_standards/        # v4 checker pack (*_check.py + *_content.py + *.md triplets)
     ├── pytest_quality_standards/ # v5 SCORING pack, generic, 15 branch-level AST rules
+    ├── context_standards/       # ADVISORY startup-budget pack — `audit context` = the fleet table
     ├── tests_pytest_standards/  # EXECUTION pack — nominators, not checkers; never scored
     ├── aipass_proof/            # Proof certification
     ├── audit/                   # branch_audit, discovery, audit_display, artifact, incremental_cache
