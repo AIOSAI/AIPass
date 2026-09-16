@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trinity_groups.py
 # Description: Trinity standard - the eight group checkers and their shared helpers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """
@@ -57,17 +57,19 @@ more than the cap numbers are.  An unreadable config refuses Entry shapes
 whole; a config that publishes no ``fields`` for a section raises an error row
 naming that key, and a group holding any record can never score 100.
 
-The read is by CONFIG KEY, not by import.  @memory's accessor
-(``entry_limits.fields_for``) lives under its ``apps/handlers/``, and a
-cross-branch handler import fails seedgo's own encapsulation standard --
-which scores this branch too.  ``memory/apps/modules/`` carries no gateway for
-it.  memory.config.json is a file this checker already reads and already
-declares in ``external_inputs()``, so the shape arrives with no new coupling
-and nothing new for the audit cache to watch.
+The read is by CONFIG KEY, not by import.  memory.config.json is a file this
+checker already reads and already declares in ``external_inputs()``, so the
+shape arrives with no new coupling and nothing new for the audit cache to
+watch.  @memory now publishes ``apps/modules/limits.py`` as the door to the
+same accessors, which is the right reach for a caller that holds no config;
+this module holds the config dict it is auditing, and a live import would
+answer from @memory's own file instead of that dict.
 
-One number did not make the move: ``_DRAFT_PERCENT``.  @memory keeps it as a
-module constant rather than a config key, so there is no key to read; the
-comment on it says what guards it in the meantime and what retires it.
+The draft percent made the move too (2026-09-16).  ``_DRAFT_PERCENT = 80`` sat
+here for as long as @memory published the number as a module constant with no
+key to read.  memory.config.json now carries ``entry_limits.draft_percent``,
+so the percent arrives out of the same dict as the caps and the shape, and no
+number in this file is a copy of a number in that one.
 """
 
 import re
@@ -183,29 +185,28 @@ _ROLLOVER_KEYS = {
 _RENDERER_FALLBACK_MAX_CHARS = 300
 _RENDERER_FALLBACK_FIELD = "value"
 
-# The draft target every tab carries beside its cap (DPLAN-0342, Patrick's
+# The draft target every tab carries beside its cap (DPLAN-0342, the user's
 # ruling 2026-09-13): integer percent, floored, derived from the SAME resolved
 # cap (per_branch included) - 300/200/150 -> 240/160/120, 77 -> 61, never
 # rounded.
 #
-# THIS ONE COULD NOT RETIRE WITH THE SHAPE (FPLAN-0593 Phase 2, 2026-09-15).
-# The shape moved into memory.config.json in Phase 1 and this module now reads
-# it from there. The draft percentage did NOT move: @memory publishes it as a
-# module constant, entry_limits.DRAFT_PERCENT, and memory.config.json carries
-# no key for it -- measured, not assumed. So there is nothing to read, and the
-# two ways to reach a Python constant across a branch boundary are both shut:
-# a cross-branch `handlers` import violates seedgo's own encapsulation
-# standard, and `memory/apps/modules/` publishes no gateway for it.
+# THE MIRROR RETIRED (2026-09-16). It was `_DRAFT_PERCENT = 80` here, guarded
+# by a pin on @memory's live draft_target(), for as long as @memory published
+# the percent as a module constant with no key to read. It publishes
+# entry_limits.draft_percent now, so the number is READ from the config dict
+# this module is handed -- the same dict the caps and the entry shape come
+# out of, from a file external_inputs() already declares.
 #
-# Failing closed on it would put all 18 branches' Meta lines group red over a
-# number nobody disagrees about, so the number stays here and the GUARD moves
-# instead: test_the_draft_percent_is_memorys_own_number in
-# test_trinity_check.py calls @memory's real draft_target() and goes red the
-# hour that constant moves, naming it. That is a pin on the live source, not a
-# memory of it -- but it is still one number in two places, and it retires for
-# real the day @memory publishes `entry_limits.draft_percent` in the config
-# and draft_target() reads it.
-_DRAFT_PERCENT = 80
+# NEVER ASSUMED. A config that publishes no usable percent (absent, not an
+# int, outside 1-100) does not get a guessed one: _draft_percent returns None,
+# the tab renders the marker below rather than a number, and the Meta lines
+# group refuses the whole group loud, naming the key and its owner. @memory's
+# own loader narrows to its regeneration seed instead, which is its call to
+# make about what it writes -- but a checker that quietly agreed with a seed
+# would be scoring files against a number nobody published.
+_DRAFT_PERCENT_KEY = "draft_percent"
+_DRAFT_PERCENT_BOUNDS = (1, 100)
+_UNPUBLISHED_DRAFT = "<entry_limits.draft_percent unpublished>"
 
 # The todos pad tab (DPLAN-0345), mirroring @memory's tab_renderer._todos_tab
 # and todo_roll's BACKUP_DIR / TODO_DIR / BACKLOG_FILE. A caller without branch
@@ -392,6 +393,24 @@ def _gold_versions_from_templates(templates: dict | None) -> dict | None:
 # =============================================================================
 
 
+def _draft_percent(config: object) -> int | None:
+    """Return the draft percent @memory publishes in *config*, or None when it publishes none usable.
+
+    Args:
+        config: The memory.config.json mapping, as read.
+
+    Returns:
+        The percent as an int when ``entry_limits.draft_percent`` is an int
+        inside :data:`_DRAFT_PERCENT_BOUNDS`; None otherwise, so no caller can
+        receive a number this file invented.
+    """
+    raw = _as_dict(_as_dict(config).get("entry_limits")).get(_DRAFT_PERCENT_KEY)
+    low, high = _DRAFT_PERCENT_BOUNDS
+    if not _is_int(raw) or not low <= int(raw) <= high:  # pyright: ignore[reportArgumentType]
+        return None
+    return int(raw)  # pyright: ignore[reportArgumentType]
+
+
 def _resolve_entry_limits(config: dict, branch_name: str) -> dict:
     """Merge entry_limits.per_branch[branch] over entry_limits.entry_types."""
     section = _as_dict(config).get("entry_limits")
@@ -486,8 +505,13 @@ def expected_meta_line(
     max_chars = spec.get("max_chars", _RENDERER_FALLBACK_MAX_CHARS)
     field = spec.get("field", _RENDERER_FALLBACK_FIELD)
     # A non-integer cap is a config error the Char caps group reports; echo it
-    # rather than raise, so this function stays total.
-    draft = max_chars * _DRAFT_PERCENT // 100 if _is_int(max_chars) else max_chars
+    # rather than raise, so this function stays total. An unpublished percent
+    # renders its marker for the same reason: loud in the diff, never a guess.
+    percent = _draft_percent(config)
+    if percent is None:
+        draft = _UNPUBLISHED_DRAFT
+    else:
+        draft = max_chars * percent // 100 if _is_int(max_chars) else max_chars
 
     if section == "todos":
         return f"{_todos_tab(_as_dict(config), branch_name, max_chars, draft, todo_ctx)} {template_prose}"
@@ -1240,6 +1264,13 @@ def _group_meta_lines(ctx: dict) -> dict:
 
     if ctx["guidelines"] is None:
         message = "cannot read the gold guidelines block: memory/templates/*.template.json unreadable -- never assumed"
+        return _binary_check("Meta lines & _usage", False, message)
+
+    if _draft_percent(ctx["config"]) is None:
+        message = (
+            "cannot compose expected meta lines: memory.config.json publishes no usable "
+            f"entry_limits.{_DRAFT_PERCENT_KEY} (int 1-100, owner @memory) -- the draft target is never assumed"
+        )
         return _binary_check("Meta lines & _usage", False, message)
 
     items = [_meta_item(ctx, section) for section in _ALL_SECTIONS]

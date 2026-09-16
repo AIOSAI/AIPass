@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-25
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for trinity_check -- the trinity memory file standards checker.
@@ -52,19 +52,26 @@ for _parent in Path(__file__).resolve().parents:
 # The OTHER side of the SHAPE guard (FPLAN-0593 Phase 2). @memory's push
 # derives its required/optional rules from the same
 # ``entry_types.<type>.fields`` map this checker now reads, and @memory's
-# ``draft_target()`` owns the one number the meta line still carries in
-# seedgo's tree. Reached exactly like the renderer above -- by looking for the
-# file rather than by catching an ImportError, and before the autouse mock
-# swaps aipass.prax in sys.modules.
+# ``draft_target()`` answers what the renderer will write beside a cap.
+# Reached exactly like the renderer above -- by looking for the file rather
+# than by catching an ImportError, and before the autouse mock swaps
+# aipass.prax in sys.modules.
+#
+# ``draft_target`` comes through ``memory/apps/modules/limits.py``, the door
+# @memory published on 2026-09-15, not through its ``handlers`` package: that
+# is what seedgo's own check_handler_independence tells cross-branch callers
+# to do, and this suite scores the branch that wrote the rule. The MODULE is
+# held, never the symbol, so a signature change surfaces here as an
+# AttributeError instead of a wrong number downstream.
 _PUSH_RELATIVE = ("src", "aipass", "memory", "apps", "handlers", "templates", "trinity_push.py")
 _entry_rules = None
-_draft_target = None
+_memory_limits = None
 _MEMORY_SHAPE_IMPORT_ERROR = "@memory trinity_push.py is not on disk"
 
 for _parent in Path(__file__).resolve().parents:
     if _parent.joinpath(*_PUSH_RELATIVE).is_file():
-        from aipass.memory.apps.handlers.json.entry_limits import draft_target as _draft_target
         from aipass.memory.apps.handlers.templates.trinity_push import entry_rules as _entry_rules
+        from aipass.memory.apps.modules import limits as _memory_limits
 
         _MEMORY_SHAPE_IMPORT_ERROR = ""
         break
@@ -115,6 +122,10 @@ _CONFIG = {
     "entry_limits": {
         "enabled": True,
         "enforce": True,
+        # @memory's key since 2026-09-16, and the ONLY source of the "draft to
+        # N" half of every tab. A fixture without it renders the unpublished
+        # marker, which is the behaviour TestTheDraftPercentIsRead pins.
+        "draft_percent": 80,
         "entry_types": {
             "key_learnings": {
                 "file": "local.json",
@@ -2664,28 +2675,104 @@ class TestTheEntryShapeComesFromTheConfig:
             assert mine.get(section) == _entry_rules(section), f"{section}: the two derivations disagree"
 
     @pytest.mark.parametrize("cap", [300, 200, 150, 77, 1])
-    def test_the_draft_percent_is_memorys_own_number(self, trinity, cap):
-        """The one number Phase 2 could NOT move into the config.
+    def test_the_draft_target_matches_memorys_own_answer_on_the_live_config(self, trinity, cap):
+        """The tab's draft number agrees with @memory's, through @memory's door.
 
-        @memory publishes the draft percentage as a module constant
-        (``entry_limits.DRAFT_PERCENT``), not as a config key, and a
-        cross-branch handler import is a violation of seedgo's own
-        encapsulation standard -- so the number still sits in trinity_groups.
-        This is the guard that keeps it honest: it calls @memory's real
-        ``draft_target()`` and goes red, by name, the hour that constant moves.
-        It retires when @memory publishes ``entry_limits.draft_percent`` in
-        memory.config.json and this reads it like every other number.
+        Was ``test_the_draft_percent_is_memorys_own_number``, the guard over a
+        ``_DRAFT_PERCENT = 80`` mirror that existed only because @memory
+        published the percent as a module constant. It publishes
+        ``entry_limits.draft_percent`` now and the mirror is gone, so this
+        pins the surviving claim: for the LIVE config, what this checker
+        composes is what @memory's ``draft_target`` answers -- computed there,
+        read here, never copied.
         """
-        assert _draft_target is not None, (
-            f"@memory's entry_limits is the source of the draft number and it is unreachable "
+        assert _memory_limits is not None, (
+            f"@memory's limits gateway is the source of the draft number and it is unreachable "
             f"({_MEMORY_SHAPE_IMPORT_ERROR}) - the draft target has nothing to be checked against"
         )
-        capped = copy.deepcopy(_CONFIG)
+        live = trinity.load_memory_config()
+        assert live is not None, "live memory.config.json is unreadable - the draft percent has no source"
+        capped = copy.deepcopy(live)
         capped["entry_limits"]["entry_types"]["sessions"]["max_chars"] = cap
 
-        line = trinity.expected_meta_line("sessions", _BRANCH, capped, _PROSE["sessions"])
+        line = trinity.expected_meta_line("sessions", "memory", capped, _PROSE["sessions"])
 
-        assert f"≤{cap} chars · draft to {_draft_target(cap)} ⟧" in line
+        assert f"≤{cap} chars · draft to {_memory_limits.draft_target(cap)} ⟧" in line
+
+
+# ===========================================================================
+# THE DRAFT PERCENT IS READ FROM THE CONFIG, NEVER CARRIED HERE
+# ===========================================================================
+
+
+class TestTheDraftPercentIsRead:
+    """``_DRAFT_PERCENT = 80`` lived in trinity_groups for as long as @memory
+    published the number as a module constant with no key to read. It publishes
+    ``entry_limits.draft_percent`` as of 2026-09-16, so the last mirrored number
+    retired with the shape mirror before it.
+
+    Two claims, both behavioural, because CPython interns small ints and an
+    identity check could never tell a read from a copy: move the number in the
+    config and the tab moves with it; publish nothing usable and the tab carries
+    a marker while the group refuses LOUD, naming the key and its owner. A
+    checker that quietly agreed with @memory's regeneration seed would be
+    scoring files against a number nobody published.
+    """
+
+    @pytest.mark.parametrize(("percent", "draft"), [(80, 240), (50, 150), (100, 300), (1, 3), (33, 99)])
+    def test_the_tab_moves_when_the_published_percent_moves(self, trinity, percent, draft):
+        moved = copy.deepcopy(_CONFIG)
+        moved["entry_limits"]["draft_percent"] = percent
+
+        line = trinity.expected_meta_line("sessions", _BRANCH, moved, _PROSE["sessions"])
+
+        assert f"≤300 chars · draft to {draft} ⟧" in line
+
+    @pytest.mark.parametrize("published", [None, 0, 101, -1, "80", 80.0, True])
+    def test_an_unusable_percent_renders_a_marker_and_never_a_number(self, trinity, published):
+        """Absent, out of 1-100, or the wrong type: no number is invented."""
+        broken = copy.deepcopy(_CONFIG)
+        if published is None:
+            broken["entry_limits"].pop("draft_percent")
+        else:
+            broken["entry_limits"]["draft_percent"] = published
+
+        line = trinity.expected_meta_line("sessions", _BRANCH, broken, _PROSE["sessions"])
+
+        assert "draft to <entry_limits.draft_percent unpublished>" in line
+        assert "draft to 240" not in line
+
+    def test_an_unpublished_percent_fails_the_meta_group_naming_the_key(self, trinity, tmp_path, monkeypatch):
+        without = copy.deepcopy(_CONFIG)
+        without["entry_limits"].pop("draft_percent")
+        monkeypatch.setattr(trinity, "load_memory_config", lambda: copy.deepcopy(without))
+        branch = _write_branch(tmp_path)
+
+        result = trinity.check_branch(str(branch))
+
+        _assert_failed(
+            _group(result, "Meta lines & _usage"),
+            "entry_limits.draft_percent",
+            "@memory",
+            "never assumed",
+        )
+        assert _group(result, "Meta lines & _usage")["score"] == 0
+
+    def test_no_percent_literal_came_back_into_the_module(self):
+        """The mirror is gone from the SOURCE, not merely unreferenced."""
+        import ast
+
+        from aipass.seedgo.apps.handlers.aipass_standards import trinity_groups
+
+        source = Path(trinity_groups.__file__).read_text(encoding="utf-8")
+        ints = {
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool)
+        }
+
+        assert not hasattr(trinity_groups, "_DRAFT_PERCENT"), "the draft percent mirror is back"
+        assert 80 not in ints, "80 is a literal in trinity_groups again - the percent belongs to memory.config.json"
 
 
 # ===========================================================================

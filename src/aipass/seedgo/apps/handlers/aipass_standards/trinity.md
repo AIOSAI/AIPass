@@ -1,6 +1,6 @@
 # Trinity Standards
-**Status:** Live v1.1 — enforced by `trinity_check.py`
-**Date:** 2026-09-15
+**Status:** Live v1.2 — enforced by `trinity_check.py`
+**Date:** 2026-09-16
 **Standard:** `trinity` (branch_level, no bypass)
 **Scope:** `local.json`, `observations.json`, `.template_version.json`. Passports and compass are separate systems with their own rules.
 
@@ -81,7 +81,7 @@ rather than fields: a `todos` entry carrying `status` is an EXTRA (done means de
 ⟦ rollover ON → oldest archived to @memory · keep 15 · summary ≤300 chars · draft to 240 ⟧ The chronicle — what happened and how it ended; one entry per session.
 ```
 
-`draft to N` is the length to write to, not a second cap: 80% of the resolved cap, floored (`300/200/150 → 240/160/120`, `77 → 61`), per_branch overrides included (DPLAN-0342). It is derived, never stored, so it cannot go stale beside the cap.
+`draft to N` is the length to write to, not a second cap: `entry_limits.draft_percent` in `memory.config.json` (80 today) of the resolved cap, floored (`300/200/150 → 240/160/120`, `77 → 61`), per_branch overrides included (DPLAN-0342). It is derived, never stored, so it cannot go stale beside the cap — and the percent is read from that key, so moving it there moves every tab.
 
 The ⟦⟧ tab carries the live numbers (rendered from config — a config change re-renders every file); the sentence after it carries the section's meaning (owned by the template). The agent reads the cap where it writes; it never has to know the config exists.
 
