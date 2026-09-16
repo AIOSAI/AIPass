@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: git_section.py
 # Description: Git status section builder for devpulse dashboard
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-16
 # Modified: 2026-09-15
 # =============================================
@@ -19,21 +19,18 @@ from pathlib import Path
 from typing import Dict
 import subprocess
 
-from aipass.prax.apps.modules.dashboard import write_section
+from aipass.prax.apps.modules.dashboard import SUBJECT_CAP, cap_subject, write_section
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-SUBJECT_CAP = 120
+# SUBJECT_CAP and the cut itself now live once, beside the dashboard handlers
+# (DPLAN-0347): a commit subject and a plan subject are the same glance, so they
+# are the same number. Re-exported here because this module's tests read it.
+__all__ = ["SUBJECT_CAP", "build_git_section"]
 
 
 def _subject_line(message: str) -> str:
     """First line of a commit subject, capped — an essay subject stays one glance here."""
-    stripped = message.strip()
-    if not stripped:
-        return ""
-    first = stripped.splitlines()[0].strip()
-    if len(first) <= SUBJECT_CAP:
-        return first
-    return first[: SUBJECT_CAP - 3].rstrip() + "..."
+    return cap_subject(message)
 
 
 def _find_git_root(start: Path) -> Path:

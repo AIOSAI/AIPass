@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_devpulse_dashboard_plugin.py
 # Description: Tests for devpulse dashboard plugin
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-16
 # Modified: 2026-09-15
 # =============================================
@@ -122,6 +122,14 @@ class TestGitSection:
         assert _subject_line("feat(x): short\n") == "feat(x): short"
         assert _subject_line("feat(x): short\n\nWHY: the essay lives here\n") == "feat(x): short"
         assert _subject_line("   \n") == ""
+
+    def test_the_plugin_reads_the_shared_cap_instead_of_its_own(self):
+        """A commit subject and a plan subject are the same glance — one number (DPLAN-0347)."""
+        from aipass.prax.apps.handlers.dashboard import operations
+        from aipass.prax.apps.plugins.devpulse_dashboard import git_section
+
+        assert git_section.SUBJECT_CAP is operations.SUBJECT_CAP
+        assert git_section._subject_line("x" * 500) == operations.cap_subject("x" * 500)
 
     @patch("aipass.prax.apps.plugins.devpulse_dashboard.git_section.subprocess.run")
     def test_build_git_section_subprocess_failure(self, mock_run, branch_with_git):
