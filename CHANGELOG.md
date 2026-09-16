@@ -36,6 +36,10 @@ PyPI version — not the changelog header.
 
 ---
 
+### Fixed
+
+- **memory: the push's dry-run tests no longer pass or fail on which xdist worker they land** (FPLAN-0593 Phase 4 follow-up; devpulse edit, memory owning and mailed). macOS run 35050261305 on 31c71f5d went red on two `test_trinity_push.py::TestDryRunWritesNothing` tests with `unknown section 'sessions'` while the same tests were green on every earlier head and green locally in the full run. Cause: the test fixture config published the four entry types without their `fields` maps, and since the closed field shape landed (Phase 1) that map is the only source of an entry's shape — with it absent the push falls back to a module-level rules cache, so the class passed only when an earlier test on the same worker had warmed the cache from the real config. xdist's `loadscope` distributes classes, not files, so a cold worker was a matter of scheduling. Cure in the test file alone (1.2.0 → 1.2.1): the fixture config now carries the closed `fields` map for sessions, key_learnings, todos and observations, mirroring `memory.config.json`. The class passes alone and the file passes whole.
+
 ## [2026-09-15] — the todos v2 day: the sticky-note pad (10 live, no status, the oldest roll to a per-agent backlog), startup context pass 3 (the devpulse README as an awareness map, identity on the cadence beat, the dashboard subject cap, one file per startup read), memory's restore re-render and test-leak cures, seedgo's `module_eviction` rule and audit-cache external inputs, the PreCompact rollover naming its branch, and the stdout self-map (DPLAN-0345 / DPLAN-0346 / FPLAN-0590, merged as PR #769, v2.8.10)
 
 ### Added
