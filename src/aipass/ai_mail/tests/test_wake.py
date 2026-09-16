@@ -297,12 +297,16 @@ def test_get_pid_cwd_linux_oserror(monkeypatch):
     assert _get_pid_cwd("100") is None
 
 
-def test_get_pid_cwd_darwin(monkeypatch, tmp_path):
-    """macOS: reads cwd via lsof."""
+def test_get_pid_cwd_darwin(monkeypatch):
+    """macOS: reads cwd via lsof.
+
+    The target is a synthetic POSIX literal, never a path from tmp_path: fake
+    lsof output is DATA the parser reads, not a directory the host has to own.
+    On a Windows runner tmp_path is a drive-letter path, the 'n/' prefix the
+    parser requires never appears, and the test reads None (CI 35058244702).
+    """
     monkeypatch.setattr("sys.platform", "darwin")
-    # Any path the fake lsof could print; taken from tmp_path so the literal
-    # does not hardcode a POSIX directory the Windows run cannot name.
-    target = str(tmp_path / "pytest-project")
+    target = "/private/var/folders/aipass/pytest-project"
 
     class FakeResult:
         returncode = 0
@@ -310,6 +314,23 @@ def test_get_pid_cwd_darwin(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
     assert _get_pid_cwd("100") == target
+
+
+def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(monkeypatch):
+    """The leading slash is load-bearing: 'n' alone is not a cwd.
+
+    lsof -Fn prefixes every name line with 'n'; the parser takes only the ones
+    that are absolute POSIX paths. Without the slash a non-path name line would
+    be returned as a cwd. This is the mechanism behind CI 35058244702.
+    """
+    monkeypatch.setattr("sys.platform", "darwin")
+
+    class FakeResult:
+        returncode = 0
+        stdout = "p100\nnD:\\build\\project\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
+    assert _get_pid_cwd("100") is None
 
 
 def test_get_pid_cwd_darwin_failure(monkeypatch):
@@ -2637,7 +2658,9 @@ class TestRecipientDashboardRefresh:
         assert ok is True
         assert [step for step, _ in order] == ["refresh", "spawn"]
         assert order[0][1] == branch_path, "the RECIPIENT's branch, not the caller's"
-        assert status.find_step("dashboard")[0] == "ok"
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        assert dashboard_step[0] == "ok"
 
     def test_the_refresh_is_one_branch_never_the_fleet(self, tmp_path, monkeypatch):
         """--all is 18 branches and 18x the cost; the recipient is one."""
@@ -2669,7 +2692,9 @@ class TestRecipientDashboardRefresh:
 
         assert ok is True, "a wake must never die on a dashboard"
         assert spawned == [1]
-        kind, _, detail = status.find_step("dashboard")
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        kind, _, detail = dashboard_step
         assert kind == "warn"
         assert "@testbranch" in detail and "unreadable" in detail
 
@@ -2696,7 +2721,9 @@ class TestRecipientDashboardRefresh:
 
         assert ok is True
         assert spawned == [1]
-        kind, _, detail = status.find_step("dashboard")
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        kind, _, detail = dashboard_step
         assert kind == "warn"
         assert "@testbranch" in detail
 
@@ -2711,7 +2738,9 @@ class TestRecipientDashboardRefresh:
         status, ok = wake_branch("@testbranch", auto=True)
 
         assert ok is True
-        kind, _, detail = status.find_step("dashboard")
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        kind, _, detail = dashboard_step
         assert kind == "warn"
         assert "no centrals" in detail
 
@@ -2738,4 +2767,6 @@ class TestRecipientDashboardRefresh:
 
         assert ok is True
         assert order[0][0] == "refresh"
-        assert status.find_step("dashboard")[0] == "ok"
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        assert dashboard_step[0] == "ok"
