@@ -1,6 +1,6 @@
 # Trinity Standards
-**Status:** Live — enforced by `trinity_check.py`
-**Date:** 2026-08-25
+**Status:** Live v1.1 — enforced by `trinity_check.py`
+**Date:** 2026-09-15
 **Standard:** `trinity` (branch_level, no bypass)
 **Scope:** `local.json`, `observations.json`, `.template_version.json`. Passports and compass are separate systems with their own rules.
 
@@ -52,13 +52,28 @@ sessions_meta     sessions[]
 
 **document_metadata** (machine-owned): `document_type`, `document_name` (`<branch>.LOCAL`), `version`, `schema_version`, `created`, `last_updated` (bumped on EVERY write), `managed_by` (exact branch name, one casing across all files), `tags`, `_usage` (the template text, verbatim). No `status` block — health is not stored, it is computed by the checker at run time (a stored copy of a derivable fact is a second source of truth waiting to go stale).
 
-**Entry shapes** (all lists newest-first, `number` monotonic per type = max+1, never reused):
+**Entry shapes** (all lists newest-first, `number` monotonic per type = max+1, never reused).
 
-| Section | Shape | Cap (config value today) | Rollover |
-|---|---|---|---|
-| sessions | `{number, date, summary, status, tags?}` | summary ≤300 | keep 15, oldest → @memory |
-| key_learnings | `{number, date, key, value}` | value ≤200 | keep 15, oldest → @memory |
-| todos | `{number, date, task, priority?}` — no `status` | task ≤100 | a pad of 10; the oldest roll to `.backup/todo/<branch>/backlog.json` (a plain file, never vectors) — delete one when done |
+**The shape is not written down here.** Field names, their types, which are required and the
+per-field caps are `entry_limits.entry_types.<type>.fields` in @memory's `memory.config.json`
+— one map, published by the branch that owns it. The checker resolves it at run time
+(`trinity_groups.entry_shapes()` / `_resolve_entry_limits()`, with `entry_limits.per_branch`
+merged over the defaults), and @memory's `trinity_push` derives its write gate from the same
+key. A table in this document would be a fourth copy: right only while someone re-types it,
+and silently wrong the day a field is closed, renamed or capped.
+
+Read the key when you need the shape. What this document owns is what the config cannot say:
+
+| Section | Where it lives | Rollover |
+|---|---|---|
+| sessions | `local.json` | keep-count from `rollover`; oldest archived to @memory |
+| key_learnings | `local.json` | keep-count from `rollover`; oldest archived to @memory |
+| todos | `local.json` | a pad sized by `rollover.defaults.local.todos.count`; the oldest roll to `.backup/todo/<branch>/backlog.json` (a plain file, never vectors) — delete one when done |
+| observations | `observations.json` | no rollover; patterns live for weeks |
+
+Two shape rules are this standard's own, not the config's, because they are prohibitions
+rather than fields: a `todos` entry carrying `status` is an EXTRA (done means deleted), and a
+`document_metadata` `status` block is a violation (health is computed, never stored).
 
 **Meta lines** — every section's `*_meta` value is `⟦ machine tab ⟧ + one-sentence semantics`, fully rendered, never hand-edited:
 
@@ -97,7 +112,7 @@ The pad size is `rollover.defaults.local.todos.count` through @memory's resolver
 
 Top-level keys: `document_metadata`, `guidelines`, `observations_meta`, `observations[]`.
 
-**Entry shape:** `{number, date, note, tags}` — `note` is a STRING ≤300, `tags` is a `list[str]`. No other field names, no other types.
+**Entry shape:** `entry_limits.entry_types.observations.fields` in `memory.config.json` — read it there, as with every other type. No other field names, no other types: the map is closed, and a field it does not name is an extra.
 
 **Semantics:** observations capture how THIS user works — nontechnical, per-user. Every user is different; capture this one. **No cadence duty** — add one only when a real pattern shows; sessions without a new observation are normal. Patterns live for weeks; local.json is the working draft.
 

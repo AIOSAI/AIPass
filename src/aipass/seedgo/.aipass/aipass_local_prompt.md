@@ -7,7 +7,7 @@ Standards compliance platform. Audits branches, queries standard content, manage
 ## Commands
 
 ```
-seedgo audit aipass                              # Audit all 18 citizens against 46 consulted entries
+seedgo audit aipass                              # Audit every citizen against the aipass pack
 seedgo audit aipass @flow                        # Single branch
 seedgo audit pytest_quality [@branch]            # v5 pack — 15 AST rules over tests/ (scores, gates nothing)
 seedgo audit-tests @branch                       # Execution lane — a suite under the write gate, advisory
@@ -38,8 +38,8 @@ Provider settings route all events through the bridge: `src/aipass/hooks/apps/ha
 ```
 apps/
 ├── seedgo.py                    # Entry point — thin router; turns a CommandRefused into its exit code
-├── modules/                     # 13 CLI verbs; __init__.py holds CommandRefused
-└── handlers/                    # 16 directories
+├── modules/                     # One module per CLI verb; __init__.py holds CommandRefused
+└── handlers/                    # One directory per concern
     ├── aipass_standards/        # v4 checker pack (*_check.py + *_content.py + *.md triplets)
     ├── pytest_quality_standards/ # v5 SCORING pack, generic, 15 branch-level AST rules
     ├── context_standards/       # ADVISORY startup-budget pack — `audit context` = the fleet table
@@ -49,7 +49,7 @@ apps/
     ├── audit_tests/             # The execution lane: refusal vocabulary, runner, render
     ├── bypass/                  # bypass_handler, ignore_handler, inert
     ├── cli/                     # help_flags
-    ├── config/                  # aipass_bypass, aipass_ignore
+    ├── config/                  # Package marker only — no handlers today
     ├── diagnostics/             # discovery (standalone disabled, runs via audit pipeline)
     ├── json/                    # json_handler — the canonical shim, byte-identical fleet-wide
     ├── readme/                  # readme_update handlers
@@ -84,4 +84,6 @@ Seedgo + devpulse have **system-wide file access**. "No cross-branch edits" rule
 - `audit` strips `_standards` suffix: `aipass_standards/` → `audit aipass`
 - `standards_query` uses full dir name: `standards_query aipass_standards`
 - Rich markup only — never bare `print()`, never captured ANSI drone output
-- See README full directory tree + integration points
+- `standard ruff` answers "Unknown standard": the audit shows `ruff` (file `ruff_check.py` minus `_check`), the query surface takes `ruff_check` (its content/md names). Two names, one checker
+- The tree above is the ONLY copy — README is the face, not the map, and is off the startup read (DPLAN-0347)
+- Depth is `docs/` (indexed from README): standards pack, v5 pack, startup budget, audit engine, checklist+hooks, proof+coverage, tech debt
