@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-01
 # Modified: 2026-09-15
 # =============================================
@@ -152,6 +152,43 @@ class TestRefreshProviderHooks:
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
         assert _platform_bridge_command(new_cmd) in stop_dump
+
+    def test_install_door_sets_the_manifest_settings_scalar(self, tmp_path) -> None:
+        """The scalars land at INSTALL, not one doctor run later (setup.sh's only wire door)."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"model": "mine"}), encoding="utf-8")
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = refresh_provider_hooks(manifest)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is False
+        assert updated["model"] == "mine"
+        assert "Set includeGitInstructions=false" in actions
+
+    def test_install_door_does_not_overwrite_a_human_value(self, tmp_path) -> None:
+        """An upgrade re-runs install: a value the user set must survive it, reported only."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = refresh_provider_hooks(manifest)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is True
+        assert any("Kept your includeGitInstructions=true" in action for action in actions)
 
     def test_manifest_unreadable_raises_and_settings_untouched(self, tmp_path) -> None:
         """Missing/unreadable manifest raises and settings.json is left byte-for-byte unchanged."""

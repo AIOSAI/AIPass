@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-11
 # Modified: 2026-09-15
 # =============================================
@@ -24,6 +24,10 @@ The merge is additive and one-directional — a key AIPass wants and the user ha
 not set gets set; a key the user has set to a DIFFERENT value is reported and
 left alone, because an explicit human value outranks the manifest. No other key
 in the file is read or written.
+
+Both wire doors merge it: ``refresh_provider_hooks`` at install (setup.sh) and
+``auto_wire_provider`` in-process (``doctor --fix``, the wire prompt), so a fresh
+clone gets the scalars at install rather than at the first doctor run.
 """
 
 from __future__ import annotations
@@ -217,14 +221,19 @@ def _strip_and_readd_hooks(
 
 
 def refresh_provider_hooks(manifest_path: Path) -> List[str]:
-    """Strip-and-readd AIPass bridge hooks from manifest into ~/.claude/settings.json.
+    """Write the manifest's hooks and settings scalars into ~/.claude/settings.json.
 
     The install-time entry point: setup.sh's venv-python heredoc is its only caller.
     The in-process path (`doctor --fix`, the interactive wire-prompt) goes through
     auto_wire_provider instead — the two are siblings, not a chain. What they share
-    is _strip_and_readd_hooks, the single source of truth for the merge itself, so
-    upgrades never leave a stale bridge entry from an old manifest version alongside
-    the current one.
+    is _strip_and_readd_hooks and _merge_settings_scalars, the single sources of
+    truth for each merge, so upgrades never leave a stale bridge entry from an old
+    manifest version alongside the current one, and both doors treat a human's own
+    settings value the same way: report it, never overwrite it.
+
+    The scalars belong at INSTALL, not one doctor run later: without
+    includeGitInstructions a fresh clone pays the ~4k-char gitStatus block from its
+    very first session, and this is the only wire door install itself calls.
 
     Fails honestly: raises if the manifest can't be read/parsed rather than silently
     leaving stale wiring in place.
@@ -239,9 +248,10 @@ def refresh_provider_hooks(manifest_path: Path) -> List[str]:
 
     merged_hooks, actions = _strip_and_readd_hooks(settings.get("hooks", {}) or {}, manifest_hooks)
     settings["hooks"] = merged_hooks
+    actions.extend(_merge_settings_scalars(settings, manifest_settings(manifest)))
 
     json_handler.write_json(settings_path, settings)
-    actions.append("Updated ~/.claude/settings.json (hooks)")
+    actions.append("Updated ~/.claude/settings.json (hooks + settings)")
     json_handler.log_operation("refresh_provider_hooks", {"actions": len(actions)})
     return actions
 

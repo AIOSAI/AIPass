@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-07-04
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for aipass init_flow module — Phase 3 (FPLAN-0188)."""
@@ -46,6 +46,14 @@ from aipass.aipass.apps.modules.init_flow import (
 # Fixtures
 # =============================================================================
 
+_POLICY_MOD = "aipass.aipass.apps.modules.init_flow"
+
+# Bound at import, so the two resolver tests below measure the REAL function while
+# the autouse fixture has the module attribute patched for everyone else.
+from aipass.aipass.apps.modules.init_flow import (  # noqa: E402
+    _get_test_write_policy_path as _real_policy_path,
+)
+
 
 @pytest.fixture
 def tmp_local_json(tmp_path: Path) -> Generator[Path, None, None]:
@@ -54,6 +62,22 @@ def tmp_local_json(tmp_path: Path) -> Generator[Path, None, None]:
     local_json.parent.mkdir(parents=True)
     with patch("aipass.aipass.apps.modules.init_flow._get_local_json_path", return_value=local_json):
         yield local_json
+
+
+@pytest.fixture(autouse=True)
+def test_write_policy_stays_in_tmp(tmp_path: Path) -> Generator[Path, None, None]:
+    """No test in this file stamps a test-write policy into the real tree.
+
+    stage_1_welcome calls _stamp_test_write_policy, which resolved bare cwd until
+    2026-09-15 — so a suite run from a branch directory created a SECOND
+    .aipass/test_write_policy.json beside the fleet's live one, and @hooks' gate
+    walks up and reads the nearest copy first (found in the tree by @devpulse,
+    twice: DPLAN-0337 R5 and again tonight). Tests that patch the path themselves
+    still win; this is the floor for the ones that do not.
+    """
+    policy = tmp_path / "policy-home" / ".aipass" / "test_write_policy.json"
+    with patch(f"{_POLICY_MOD}._get_test_write_policy_path", return_value=policy):
+        yield policy
 
 
 @pytest.fixture
@@ -168,6 +192,40 @@ class TestSaveStage:
         assert not isinstance(stored["agent_test_writing"], bool)
         assert stored["allow"] == []
         assert stored["block_test_edits"] is False
+
+    def test_policy_path_is_the_registry_root_not_cwd(self, tmp_path, monkeypatch) -> None:
+        """The policy belongs to the project: a run from a subdirectory must not fork it.
+
+        Red before 2026-09-15: bare Path.cwd() put a second policy in whatever
+        directory the caller stood in, and @hooks' gate reads the nearest one first.
+        """
+        project = tmp_path / "project"
+        (project / "src" / "aipass" / "aipass").mkdir(parents=True)
+        (project / "PROJECT_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
+        monkeypatch.chdir(project / "src" / "aipass" / "aipass")
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+
+        assert _real_policy_path() == project / ".aipass" / "test_write_policy.json"
+
+    def test_policy_path_falls_back_to_cwd_on_a_fresh_install(self, tmp_path, monkeypatch) -> None:
+        """No registry yet means a fresh install: cwd IS the project root there."""
+        fresh = tmp_path / "fresh"
+        fresh.mkdir()
+        monkeypatch.chdir(fresh)
+        monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        with patch(f"{_MOD}.find_registry", return_value=None):
+            resolved = _real_policy_path()
+
+        assert resolved == fresh / ".aipass" / "test_write_policy.json"
+
+    def test_stage_1_writes_no_policy_outside_the_project(self, tmp_local_json, tmp_path) -> None:
+        """The door that leaked: stage 1 stamps only where the resolver points."""
+        before = {p for p in Path.cwd().glob(".aipass/*")}
+
+        with patch(f"{_MOD}.console"):
+            stage_1_welcome()
+
+        assert {p for p in Path.cwd().glob(".aipass/*")} == before
 
     def test_test_write_policy_is_never_clobbered(self, tmp_local_json) -> None:
         """An existing policy may hold a deliberate flip — init must not repeal it."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-14
-# Modified: 2026-05-14
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for structure scanner handler — agent detection, placement, pollution, registry."""
@@ -162,6 +162,90 @@ class TestCheckPlacement:
         issues = check_placement(agents, tmp_path)
         assert len(issues) == 1
         assert issues[0].agent_name == "stray"
+
+
+# =============================================================================
+# TestProjectCitizenResidency
+# =============================================================================
+
+
+class TestProjectCitizenResidency:
+    """A registered citizen of a project under projects/ is measured at ITS OWN root.
+
+    The scanner warned once per scan for every such citizen (28 for aipass_site
+    since 2026-08-28, escalated by @trigger 2026-09-15) because it only ever knew
+    the framework's src/. Residency — the project registry listing the citizen — is
+    what makes the placement legitimate, so that is what the scanner now reads.
+    """
+
+    @staticmethod
+    def _project_citizen(tmp_path: Path, name: str, registry_branches: list | None = None) -> Path:
+        """A citizen at projects/<name>/src/<name>/<name>, with its own registry."""
+        project = tmp_path / "projects" / name
+        agent_dir = project / "src" / name / name
+        trinity = agent_dir / ".trinity"
+        trinity.mkdir(parents=True)
+        passport = {"branch_info": {"branch_name": name}, "citizenship": {"registry_id": "uuid-p"}}
+        (trinity / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        if registry_branches is not None:
+            reg = project / f"{name.upper()}_REGISTRY.json"
+            reg.write_text(json.dumps({"branches": registry_branches}), encoding="utf-8")
+        return agent_dir
+
+    def test_registered_project_citizen_is_not_flagged(self, tmp_path: Path) -> None:
+        """Listed by name in the registry beside its project root — legitimate, no issue."""
+        _make_registry(tmp_path, [{"name": "AIPASS", "path": "src/aipass/aipass"}])
+        _make_agent(tmp_path, "aipass", subdir="aipass")
+        self._project_citizen(tmp_path, "site", [{"name": "SITE", "path": "src/site/site"}])
+
+        issues = check_placement(scan_agents(tmp_path), tmp_path)
+
+        assert issues == []
+
+    def test_residency_by_path_counts_when_the_name_differs(self, tmp_path: Path) -> None:
+        """The registry row names a different string but points AT the agent: still resident."""
+        self._project_citizen(tmp_path, "site", [{"name": "some_other_label", "path": "src/site/site"}])
+
+        issues = check_placement(scan_agents(tmp_path), tmp_path)
+
+        assert issues == []
+
+    def test_unregistered_citizen_outside_src_is_still_flagged(self, tmp_path: Path) -> None:
+        """No registry claims it, so nothing changed: a stray outside src/ is reported."""
+        self._project_citizen(tmp_path, "site", registry_branches=None)
+
+        issues = check_placement(scan_agents(tmp_path), tmp_path)
+
+        assert len(issues) == 1
+        assert issues[0].agent_name == "site"
+        assert issues[0].severity == "warn"
+
+    def test_a_registry_that_lists_someone_else_does_not_claim_it(self, tmp_path: Path) -> None:
+        """Residency is a listing, not a neighbouring file — an unrelated registry is no cover."""
+        self._project_citizen(tmp_path, "site", [{"name": "different", "path": "src/different/different"}])
+
+        issues = check_placement(scan_agents(tmp_path), tmp_path)
+
+        assert len(issues) == 1
+        assert issues[0].agent_name == "site"
+
+    def test_resident_root_reads_the_projects_own_packages(self, tmp_path: Path) -> None:
+        """A project pyproject declaring its package keeps its single-level citizen valid."""
+        project = tmp_path / "projects" / "solo"
+        agent_dir = project / "src" / "solo"
+        (agent_dir / ".trinity").mkdir(parents=True)
+        passport = {"branch_info": {"branch_name": "solo"}, "citizenship": {"registry_id": "uuid-s"}}
+        (agent_dir / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
+        (project / "SOLO_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "SOLO", "path": "src/solo"}]}), encoding="utf-8"
+        )
+        (project / "pyproject.toml").write_text(
+            '[tool.hatch.build.targets.wheel]\npackages = ["src/solo"]\n', encoding="utf-8"
+        )
+
+        issues = check_placement(scan_agents(tmp_path), tmp_path)
+
+        assert issues == []
 
 
 # =============================================================================
