@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_tier0_kernel.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
@@ -176,6 +176,39 @@ class TestDegradedGroundingIsLoud:
             result = handle({"cwd": str(project)})
 
         assert result["stdout"] == "KERNEL"
+
+    def test_the_per_user_aipass_dir_above_a_tree_promises_nothing(self, tmp_path, monkeypatch):
+        """The Windows CI layout on every host: the cwd sits under a home that holds ~/.aipass.
+
+        On the Windows runner the temp dir is under home, so this was the shape of
+        every tmp_path there, and the walk counted ~/.aipass as a stamped tree
+        (2026-09-16). The control below keeps a REAL stamped tree under the same
+        home loud, so the skip cannot pass by silencing everything.
+
+        The silent side is asserted on the walk itself, not on the handler's
+        stdout: tmp_path may sit under the REAL home too, and the walk keeps
+        climbing past this fake home to whatever lies above. Asserting silence
+        would make the pin a property of the host it runs on.
+        """
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+        from aipass.hooks.apps.modules.grounding_content import _find_project_dir
+
+        home = tmp_path / "home"
+        (home / ".aipass").mkdir(parents=True)
+        (home / ".aipass" / "trusted_projects.json").write_text("{}", encoding="utf-8")
+        loose = home / "scratch" / "work"
+        loose.mkdir(parents=True)
+        for var in ("HOME", "USERPROFILE"):
+            monkeypatch.setenv(var, str(home))
+        monkeypatch.chdir(loose)
+        found = _find_project_dir()
+        assert found is None or home not in found.parents, f"the per-user dir was read as a stamped tree: {found}"
+
+        stamped = self._stamped(home / "project", kernel=False)
+        monkeypatch.chdir(stamped)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(_mock_cadence(True)):
+            out = handle({"cwd": str(stamped)})["stdout"]
+        assert out.startswith("[GROUNDING DEGRADED") and "kernel: this tree is AIPass-stamped" in out
 
     def test_a_branch_missing_its_prompt_gets_the_kernel_and_the_reason(self, tmp_path, monkeypatch):
         from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle

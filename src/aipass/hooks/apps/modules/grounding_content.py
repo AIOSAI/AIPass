@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: grounding_content.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Shared content loaders for grounding prompt injections (DPLAN-0276), each rendered under its cap
 # Branch: hooks
 # Layer: apps/modules
@@ -116,12 +116,31 @@ def _find_project_file(filename: str) -> Path | None:
     return None
 
 
+def _is_user_state_dir(candidate: Path) -> bool:
+    """True when *candidate* is the per-user ~/.aipass (trust registry, commons.db), not a stamped tree.
+
+    Compared by samefile, not by spelling: a Windows TEMP can reach the same
+    directory through an 8.3 name (C:\\Users\\RUNNER~1) that no string compare matches.
+    """
+    try:
+        return candidate.samefile(Path.home() / ".aipass")
+    except OSError:
+        return False
+
+
 def _find_project_dir() -> Path | None:
-    """Walk up from CWD to the nearest .aipass/ directory — the mark of a stamped tree."""
+    """Walk up from CWD to the nearest .aipass/ directory — the mark of a stamped tree.
+
+    The per-user ~/.aipass is skipped. Any tree under home walks up through it,
+    so counting it made every unstamped tree under home "promise" a kernel. The
+    Windows CI runner measured that: its temp dir is under home, so tests that
+    expected silence got the degraded banner (2026-09-16). Linux never saw it,
+    because /tmp is not under home.
+    """
     cwd = Path.cwd()
     for parent in [cwd, *cwd.parents]:
         candidate = parent / ".aipass"
-        if candidate.is_dir():
+        if candidate.is_dir() and not _is_user_state_dir(candidate):
             return candidate
         if parent == parent.parent:
             break

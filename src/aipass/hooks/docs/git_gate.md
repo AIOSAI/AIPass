@@ -34,6 +34,9 @@ One refusal is all-or-nothing per command: `_all_git_reads()` requires *every* g
 command to be an allowed verb, so `git status && git tag` is refused whole.
 
 **What it protects:** Edits to `.claude/settings.json`, `.claude/hooks/`, and `.git/hooks/` — the enforcement layer itself.
+The path is matched with `\` read as `/` and case-insensitively (1.2.0). Before that, a Windows backslash
+path never matched and the edit was allowed. See [known_issues.md](known_issues.md), "When the
+host-derived value was right".
 
 **Disabling for a project:** Set `git_gate.enabled` to `false` in your project's `.aipass/hooks.json`. This disables git enforcement in isolation — all other hooks (edit_gate, rm_gate, prompt injection, etc.) continue to work normally. No sync, rebase, or PR flows depend on git_gate being active; those are handled independently by `drone @git`.
 

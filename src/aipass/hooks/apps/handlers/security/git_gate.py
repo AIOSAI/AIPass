@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: git_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Blocks raw git/gh commands and protected file edits (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
@@ -71,10 +71,14 @@ READ_ALLOWED_GIT_SUBCOMMANDS = frozenset(
 
 _GIT_OPTS_WITH_ARG = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--exec-path", "--namespace"})
 
+# Matched against the path with separators normalised to "/" (_check_edit), and
+# case-insensitively: Windows and default macOS filesystems open .Claude\Settings.json
+# as the same file. Until 1.2.0 a Windows backslash path never matched and the gate
+# ALLOWED the edit (measured on the Windows CI runner, 2026-09-16).
 BLOCKED_EDIT_PATTERNS = [
-    re.compile(r"/\.claude/settings(\.local)?\.json$"),
-    re.compile(r"/\.claude/hooks/"),
-    re.compile(r"/\.git/hooks/"),
+    re.compile(r"/\.claude/settings(\.local)?\.json$", re.IGNORECASE),
+    re.compile(r"/\.claude/hooks/", re.IGNORECASE),
+    re.compile(r"/\.git/hooks/", re.IGNORECASE),
 ]
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
@@ -292,8 +296,9 @@ def _check_edit(tool_input: dict, cwd: str) -> dict:
     file_path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
     if not file_path:
         return _BLOCK_ALLOW
+    spelled = file_path.replace("\\", "/")
     for pat in BLOCKED_EDIT_PATTERNS:
-        if pat.search(file_path):
+        if pat.search(spelled):
             if _cwd_branch(cwd) in TRUSTED_HOOK_EDITORS:
                 return _BLOCK_ALLOW
             return _block(EDIT_REDIRECT.format(path=file_path))

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Tests for git_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
@@ -410,6 +410,32 @@ class TestGitGateEditProtection:
             }
         )
         _assert_blocked(result)
+
+    def test_windows_spellings_of_a_protected_path_are_blocked_on_every_host(self):
+        """The Windows CI runner measured the gate ALLOWING these (2026-09-16).
+
+        The tests above build their paths from the host, so Linux never saw a
+        backslash. These are spelled out so every host exercises the Windows form,
+        and in mixed case, which Windows and default macOS filesystems open as the same file.
+        """
+        from aipass.hooks.apps.handlers.security.git_gate import handle
+
+        for path in (
+            r"D:\work\.claude\settings.json",
+            r"D:\work\.claude\settings.local.json",
+            r"D:\a\repo\.claude\hooks\some_hook.py",
+            r"D:\a\repo\.git\hooks\pre-commit",
+            r"D:\work\.Claude\Settings.JSON",
+            "D:/work/.CLAUDE/hooks/x.py",
+        ):
+            result = handle({"tool_name": "Edit", "tool_input": {"file_path": path}, "cwd": CWD})
+            assert result["exit_code"] == 2, f"allowed: {path}"
+
+    def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
+        from aipass.hooks.apps.handlers.security.git_gate import handle
+
+        for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
+            _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
 
 
 class TestGitGateMisc:
