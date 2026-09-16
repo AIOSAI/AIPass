@@ -1,10 +1,28 @@
-"""CI gate: run seedgo standards audit across all branches."""
+"""CI gate: run seedgo standards audit across all branches.
+
+Two gates, one job, one branch list (DPLAN-0347 phase 5):
+
+1. The STARTUP RATCHET holds every branch's README.md and branch prompt at the
+   caps their owners publish. It runs FIRST because it is 36 file reads against
+   two caps — under a second, where the audit below runs pyright over eighteen
+   branches. An over-cap README is self-diagnosing: its red names the file, the
+   size, the cap and the owner, and needs nothing the audit would have printed.
+   When it is green (the ordinary case) everything after it runs exactly as it
+   did before the ratchet existed.
+2. The STANDARDS AUDIT scores every branch against the aipass pack and holds
+   the fleet at 100%, with the pack-count tripwire guarding the average itself.
+
+They share the branch list built once below, deliberately: two walks of
+src/aipass could drift, and a file gated on a branch the audit does not score
+(or the reverse) is a hole nobody would see until it was used.
+"""
 
 import sys
 from pathlib import Path
 
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
+from aipass.seedgo.apps.handlers.context_standards import startup_ratchet
 
 THRESHOLD = 100
 
@@ -38,6 +56,34 @@ for d in sorted(src.iterdir()):
             }
         )
 
+# -----------------------------------------------------------------------------
+# GATE 1 — THE STARTUP RATCHET (DPLAN-0347 phase 5)
+# -----------------------------------------------------------------------------
+# README.md and .aipass/aipass_local_prompt.md only: both are tracked in git, so
+# this checkout measures what a local audit measures. .trinity/ and
+# DASHBOARD.local.json are gitignored - CI never sees them, and a gate that
+# measures nothing passes by accident forever. docs/ pages are measured by the
+# advisory lane but not gated: the fleet holds pages that predate the 20,000-char
+# rule. Stabilise, do not expand.
+#
+# No cap number lives here or in the ratchet module. Every cap is read from its
+# owner on every run (seedgo's pack.json, @hooks' BRANCH_CHAR_BUDGET) and a cap
+# that cannot be read is a RED naming the owner, never a remembered default.
+# A file measuring exactly its cap passes; over is strictly greater.
+ratchet = startup_ratchet.run(branches)
+for line in ratchet["report"]:
+    print(line)
+if not ratchet["passed"]:
+    print(f"\nSTARTUP RATCHET FAILED: {len(ratchet['failures'])} gated file(s) over cap or unmeasurable")
+    for line in ratchet["failure_lines"]:
+        print(line)
+    print("\n  Shrink the file, or move the cap at its OWNER - never here. The gate reads the owner's number.")
+    sys.exit(1)
+print()
+
+# -----------------------------------------------------------------------------
+# GATE 2 — THE STANDARDS AUDIT
+# -----------------------------------------------------------------------------
 failed = []
 for branch in branches:
     bypass_rules = load_bypass_rules(branch["path"])

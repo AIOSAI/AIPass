@@ -98,7 +98,7 @@ def get_startup_budget_standards() -> str:
         "  [dim]See: context standards pack (startup_budget)[/dim]",
         "  [dim]Checker: startup_budget_check.py[/dim]",
         "  [dim]Design: DPLAN-0347 / FPLAN-0593, boardroom thread 16[/dim]",
-        "  [dim]README cap 10,000 ruled by Patrick 2026-09-15 16:02[/dim]",
+        "  [dim]README cap: context_standards/pack.json, caps[README.md] (seedgo owns it)[/dim]",
     ]
 
     return "\n".join(lines)

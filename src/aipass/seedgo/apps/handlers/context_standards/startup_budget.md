@@ -20,7 +20,7 @@ It measures six files per branch in **characters** and compares each against the
 
 ## Why It Matters
 
-On the morning this rule was written, 17 of 18 branches read a README of 13k–96k characters at every greeting, and seedgo's 47 rules measured Python LINE counts and nothing else — no README, no branch prompt, no `.trinity`, no dashboard. Every context regression AIPass has taken was found by Patrick reading a percentage on a status line. Nothing measured the greeting.
+On the morning this rule was written, 17 of 18 branches read a README of 13k–96k characters at every greeting, and seedgo's 47 rules measured Python LINE counts and nothing else — no README, no branch prompt, no `.trinity`, no dashboard. Every context regression AIPass has taken was found by the user reading a percentage on a status line. Nothing measured the greeting.
 
 A cap nobody measures is a preference. This is the measurement.
 
@@ -39,7 +39,7 @@ A cap nobody measures is a preference. This is the measurement.
 
 **Read, never copied.** The checker reads each name off the owner's live module — or the owner's config — at CALL time. It carries no copy of any of these numbers. Move a cap at its owner and the next audit moves with it; nothing in seedgo is edited.
 
-**The README cap is seedgo's own**, so it lives in seedgo's own config rather than as a Python constant: Phase 5's per-file CI ratchet has to read and move that number without importing Python. Patrick ruled 10,000 on 2026-09-15 at 16:02 ("readme 10k and off from start up"). The room had proposed 6,000, and FPLAN-0593 lines 179 and 221 still say 6,000 — **those lines are stale**; `pack.json` says so beside the number.
+**The README cap is seedgo's own**, so it lives in seedgo's own config rather than as a Python constant: Phase 5's per-file CI ratchet has to read and move that number without importing Python. The user ruled 10,000 on 2026-09-15 at 16:02 ("readme 10k and off from start up"). The room had proposed 6,000, and FPLAN-0593 lines 179 and 221 still say 6,000 — **those lines are stale**; `pack.json` says so beside the number.
 
 **`external_inputs()`** names the four owner files (memory's config, hooks' `grounding_content.py`, prax's `operations.py` and its re-export) so the incremental audit cache re-scores every branch when an owner moves a cap. Without that channel each branch keeps serving the row it cached against the OLD number until someone runs `--full`.
 
@@ -114,5 +114,5 @@ drone @seedgo standard startup_budget   # this rule's content
 ## Reference
 
 - **Design:** DPLAN-0347 (devpulse), FPLAN-0593 Phase 2, boardroom `drone @commons thread 16` (converged 2026-09-15), seedgo's comment on Q1/Q2
-- **Rulings:** README 10,000 and off the startup read — Patrick, 2026-09-15 16:02. Branch prompt 9,000 — the room's measured number, against the harness's 10,000 persist line.
+- **Rulings:** README 10,000 and off the startup read — the user, 2026-09-15 16:02. Branch prompt 9,000 — the room's measured number, against the harness's 10,000 persist line.
 - **Sibling:** `trinity` (`aipass_standards/trinity_check.py`) — the shape this checker copies: `AUDIT_SCOPE`, `BRANCH_INPUTS`, `GROUP_WEIGHTS`, `external_inputs()`, and the doctrine that a number is never assumed.

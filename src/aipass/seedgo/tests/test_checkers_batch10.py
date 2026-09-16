@@ -1,9 +1,9 @@
-"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget)."""
+"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget, the ratchet)."""
 
 # =================== META ====================
 # Name: test_checkers_batch10.py
-# Description: Unit tests for hardcoded_path_check and context/startup_budget_check
-# Version: 1.1.0
+# Description: Unit tests for hardcoded_path_check, startup_budget_check and startup_ratchet
+# Version: 1.2.0
 # Created: 2026-06-18
 # Modified: 2026-09-15
 # =============================================
@@ -22,6 +22,7 @@ from unittest.mock import MagicMock
 # against nothing. Imported here, at collection time, the owners are real -- and
 # a monkeypatch on one of their constants is then what moves a row.
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as sb  # noqa: E402
+from aipass.seedgo.apps.handlers.context_standards import startup_ratchet as ratchet  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +414,7 @@ class TestStartupBudgetCapsAreRead:
     def test_the_shipped_manifest_carries_patricks_ruled_ten_thousand(self):
         """The one live-tree pin: the ruled number, where the ratchet will read it.
 
-        Patrick ruled 10,000 on 2026-09-15 at 16:02. The room had proposed
+        The user ruled 10,000 on 2026-09-15 at 16:02. The room had proposed
         6,000 and FPLAN-0593 lines 179/221 still say 6,000; if anyone edits
         pack.json back to the stale number, this is what says so.
         """
@@ -618,3 +619,411 @@ class TestStartupBudgetContract:
 
         for rel, _label in sb.MEASURED_FILES:
             assert any(fnmatch(rel, pattern) for pattern in sb.BRANCH_INPUTS), f"{rel} is scored but never watched"
+
+
+# ===========================================================================
+# 5. startup_ratchet -- the per-file CI gate (DPLAN-0347 / FPLAN-0593 phase 5)
+# ===========================================================================
+#
+# The advisory row next door gates nothing on purpose. This is the part that
+# holds, so what is pinned here is what a red must be able to say and what it
+# must refuse to do:
+#
+#   * a gated file over its cap turns CI red, and the line names FOUR things --
+#     the file, the measured size, the cap, and the owning branch. A red that
+#     does not name the owner costs a seat a round trip.
+#   * every cap is still READ from its owner on every run. The pins below move
+#     the OWNER's number and watch the verdict flip; a constant copied into the
+#     gate leaves them red.
+#   * a cap that cannot be read is a RED naming the owner, never a remembered
+#     default. A gate that substitutes last week's number has stopped
+#     measuring and has not said so.
+#   * `<=` passes. A branch that diets to exactly its cap is not failed by one.
+#   * .trinity/, the dashboard and docs/ are NOT gated -- the first two are
+#     gitignored and a CI checkout holds neither, so a gate on them would
+#     measure nothing on every run and pass by accident forever.
+#
+# Nothing here reads the live fleet except the two pins that say so in their
+# names. Every branch under test is written into tmp_path.
+
+
+def _gate(root, name="probe"):
+    """Run the gate over one throwaway branch and hand back the whole verdict."""
+    return ratchet.run([{"name": name, "path": str(root)}])
+
+
+def _gated_row(result, rel):
+    """The row for one gated file."""
+    return next(row for row in result["rows"] if row["rel"] == rel)
+
+
+def _pack_manifest(root, cap):
+    """A stand-in for this pack's pack.json carrying only the README cap."""
+    path = root / "pack.json"
+    path.write_text(json.dumps({"caps": {"README.md": {"max_chars": cap}}}), encoding="utf-8")
+    return path
+
+
+class TestRatchetRed:
+    """What CI prints when a gated file grows past its cap."""
+
+    def test_an_over_cap_readme_is_red_and_names_file_measured_cap_and_owner(self, monkeypatch, tmp_path):
+        """The four things a red must say, in one greppable line.
+
+        A failure line that says only "README too big" sends whoever reads it
+        looking for the number and then for whose number it is. The owner is
+        named inline because that is the difference between a fix and a round
+        trip -- and the cap is printed beside the measurement so nobody has to
+        go and find out what the limit was on the day the job ran.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 40))
+        root = _branch(tmp_path / "b", **{"README.md": "x" * 51})
+
+        result = _gate(root, name="probe")
+        line = result["failure_lines"][0]
+
+        assert result["passed"] is False
+        assert _gated_row(result, "README.md")["state"] == "over"
+        assert "README.md" in line, "the file"
+        assert "51 chars" in line, "the measurement"
+        assert "40 chars" in line, "the cap"
+        assert "@seedgo" in line, "the owner -- a red without it costs a round trip"
+        assert "OVER by 11" in line
+
+    def test_an_over_cap_branch_prompt_is_red_and_names_hooks(self, monkeypatch, tmp_path):
+        """The prompt is gated too, and its cap belongs to another branch.
+
+        @hooks owns BRANCH_CHAR_BUDGET, so an over-cap prompt must send the
+        reader to @hooks -- not to seedgo, which merely runs the measurement.
+        """
+        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 10)
+        root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 30})
+
+        result = _gate(root)
+        line = next(one for one in result["failure_lines"] if "aipass_local_prompt" in one)
+
+        assert result["passed"] is False
+        assert _gated_row(result, ".aipass/aipass_local_prompt.md")["state"] == "over"
+        assert "30 chars" in line and "10 chars" in line and "@hooks" in line
+
+    def test_a_file_that_cannot_be_decoded_is_red_not_skipped(self, monkeypatch, tmp_path):
+        """An unreadable README is not a small README.
+
+        Falling through to "no measurement, no problem" is how a gate goes
+        quiet: the one file it exists to hold becomes the one file it never
+        reads, and the run stays green.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
+        root = tmp_path / "b"
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "README.md").write_bytes(b"\xff\xfe\x00 not utf-8 \xff")
+
+        result = _gate(root)
+
+        assert result["passed"] is False
+        assert _gated_row(result, "README.md")["state"] == "error"
+        assert "cannot be read" in result["failure_lines"][0]
+
+
+class TestRatchetBoundary:
+    """`<=` passes. The boundary is the cap itself, and it is said out loud."""
+
+    def test_a_file_exactly_at_its_cap_passes(self, monkeypatch, tmp_path):
+        """A branch that diets to precisely 10,000 is not failed by zero chars.
+
+        The same comparison the advisory checker makes (`chars > cap`), so the
+        gate and the table can never disagree about the branch sitting on the
+        line. The banner says it in words for the same reason.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 40))
+        root = _branch(tmp_path / "b", **{"README.md": "x" * 40})
+
+        result = _gate(root)
+
+        assert result["passed"] is True
+        assert _gated_row(result, "README.md")["state"] == "under"
+        assert result["failure_lines"] == []
+        assert "AT its cap passes" in ratchet.TITLE, "the boundary is printed, not left to be guessed"
+
+    def test_one_char_over_the_cap_is_red(self, monkeypatch, tmp_path):
+        """OVER is strictly greater -- the other side of the same line."""
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 40))
+        root = _branch(tmp_path / "b", **{"README.md": "x" * 41})
+
+        assert _gate(root)["passed"] is False
+
+    def test_chars_not_bytes_decides_the_boundary(self, monkeypatch, tmp_path):
+        """wc -m, never wc -c -- the unit the boardroom corrected three times.
+
+        Ten multi-byte characters are thirty bytes. A gate measuring st_size
+        would red-line a README three times shorter than its cap.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 20))
+        root = _branch(tmp_path / "b", **{"README.md": "日" * 10})
+
+        row = _gated_row(_gate(root), "README.md")
+
+        assert row["chars"] == 10 and row["state"] == "under"
+
+
+class TestRatchetReadsTheOwnersCap:
+    """Move the owner's number and the verdict moves. Copy it and these go red."""
+
+    def test_the_prompt_verdict_flips_when_hooks_moves_its_constant(self, monkeypatch, tmp_path):
+        """The gate holds @hooks' number, not a remembered 9,000.
+
+        The file never changes between the two runs; only BRANCH_CHAR_BUDGET
+        does. A `from ... import BRANCH_CHAR_BUDGET` binding, or a literal in
+        seedgo, would keep one of these two verdicts wrong.
+        """
+        root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y" * 100})
+
+        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 50)
+        red = _gate(root)
+        monkeypatch.setattr(sb.hooks_grounding, "BRANCH_CHAR_BUDGET", 500)
+        green = _gate(root)
+
+        assert red["passed"] is False and green["passed"] is True
+        assert _gated_row(red, ".aipass/aipass_local_prompt.md")["cap"] == 50
+        assert _gated_row(green, ".aipass/aipass_local_prompt.md")["cap"] == 500
+        assert _gated_row(red, ".aipass/aipass_local_prompt.md")["chars"] == 100, "only the owner's cap moved"
+
+    def test_the_readme_verdict_flips_when_the_manifest_moves(self, monkeypatch, tmp_path):
+        """seedgo's own cap lives in pack.json so a non-Python tool can move it."""
+        root = _branch(tmp_path / "b", **{"README.md": "x" * 100})
+
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 50))
+        red = _gate(root)
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 500))
+        green = _gate(root)
+
+        assert red["passed"] is False and green["passed"] is True
+        assert _gated_row(red, "README.md")["cap"] == 50
+        assert _gated_row(green, "README.md")["cap"] == 500
+        assert _gated_row(red, "README.md")["chars"] == 100, "only the manifest moved"
+
+    def test_the_cap_reader_is_looked_up_by_name_at_measurement_time(self):
+        """Stored as a NAME, fetched with getattr -- never bound at import.
+
+        A bound function object is the owner's answer copied at import time.
+        The attribute spelling is what lets the lookup happen on every run, and
+        it is the same idiom the checker uses for @hooks' and @prax' constants.
+        """
+        for gated in ratchet.GATED_FILES:
+            assert isinstance(gated.cap_reader, str), "a bound function is a copy taken at import"
+            assert callable(getattr(sb, gated.cap_reader)), f"{gated.cap_reader} must resolve on the checker"
+
+    def test_no_cap_NUMBER_is_written_into_the_gate(self):
+        """The gate carries paths and owner names. Never an integer cap.
+
+        Read with ast, so the prose that discusses 10,000 and 9,000 is not
+        mistaken for a constant -- what is forbidden is a literal the code can
+        compare against, not a sentence explaining why there isn't one.
+        """
+        import ast
+
+        source = ratchet.__file__
+        with open(source, encoding="utf-8") as handle:
+            tree = ast.parse(handle.read())
+        literals = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool)
+        }
+
+        assert literals.isdisjoint({10000, 9000, 6000, 15000, 25000, 600}), (
+            f"a cap was copied into the gate: {literals}"
+        )
+
+
+class TestRatchetFailsHonestly:
+    """An unreadable cap is a red naming the owner. Never a pass, never a default."""
+
+    def test_an_unreadable_manifest_is_red_and_names_seedgo(self, monkeypatch, tmp_path):
+        """seedgo cannot read its own number: say so, do not remember one.
+
+        This is the defect the whole pack was written against, one layer up. A
+        gate that silently substitutes the cap it saw last week is a gate that
+        has stopped measuring and has not told anybody.
+        """
+        broken = tmp_path / "pack.json"
+        broken.write_text("{ this manifest no longer parses", encoding="utf-8")
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: broken)
+        root = _branch(tmp_path / "b", **{"README.md": "x"})
+
+        result = _gate(root)
+        line = result["failure_lines"][0]
+
+        assert result["passed"] is False, "an unmeasurable gate is a failing gate"
+        assert _gated_row(result, "README.md")["state"] == "error"
+        assert _gated_row(result, "README.md")["cap"] is None, "an unknown cap is None, never a plausible number"
+        assert "@seedgo" in line and "UNREADABLE" in line
+        assert "10,000" not in line and "10000" not in line, "no remembered number may stand in for the config"
+
+    def test_an_unimportable_owner_is_red_and_names_hooks(self, monkeypatch, tmp_path):
+        """@hooks gone: the prompt row says hooks, and it does not pass."""
+        monkeypatch.setattr(sb, "hooks_grounding", None)
+        monkeypatch.setattr(sb, "_HOOKS_IMPORT_ERROR", "ModuleNotFoundError: no aipass.hooks")
+        root = _branch(tmp_path / "b", **{"README.md": "x", ".aipass/aipass_local_prompt.md": "y"})
+
+        result = _gate(root)
+        line = next(one for one in result["failure_lines"] if "aipass_local_prompt" in one)
+
+        assert result["passed"] is False
+        assert "@hooks" in line and "9,000" not in line and "9000" not in line
+
+    def test_an_unreadable_cap_is_red_even_when_the_file_is_absent(self, monkeypatch, tmp_path):
+        """'We do not know the limit' and 'there is no file' are different facts."""
+        monkeypatch.setattr(sb, "hooks_grounding", None)
+        monkeypatch.setattr(sb, "_HOOKS_IMPORT_ERROR", "ImportError: boom")
+        root = _branch(tmp_path / "b", **{"README.md": "x"})
+
+        assert _gated_row(_gate(root), ".aipass/aipass_local_prompt.md")["state"] == "error"
+
+    def test_an_absent_gated_file_is_not_a_failure(self, monkeypatch, tmp_path):
+        """A missing README is readme_check's red, not a second differently-worded one.
+
+        The scored pack already fails "README exists" and gates at 100% in the
+        same CI job. This rule is about GROWTH; duplicating that red here would
+        only split the diagnosis across two messages.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
+        root = tmp_path / "bare"
+        root.mkdir(parents=True, exist_ok=True)
+
+        result = _gate(root)
+
+        assert result["passed"] is True
+        assert {row["state"] for row in result["rows"]} == {"absent"}
+        assert all(row["chars"] is None for row in result["rows"]), "absent is never spelled as a number"
+
+
+class TestRatchetScope:
+    """Two files, both tracked in git. What is left out, and why."""
+
+    def test_trinity_and_the_dashboard_and_docs_are_not_gated(self, monkeypatch, tmp_path):
+        """Gitignored files cannot be gated by a job that never sees them.
+
+        .trinity/ and DASHBOARD.local.json are machine-local; a CI checkout
+        holds neither, so a gate on them would measure nothing on every run and
+        pass by accident forever. docs/ is measured by the advisory lane but
+        left ungated while the fleet still holds pages that predate the
+        20,000-chars-per-page rule.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
+        huge = "z" * 200000
+        root = _branch(
+            tmp_path / "b",
+            **{
+                "README.md": "x",
+                ".trinity/local.json": huge,
+                ".trinity/observations.json": huge,
+                ".trinity/passport.json": huge,
+                "DASHBOARD.local.json": huge,
+                "docs/research.md": huge,
+            },
+        )
+
+        result = _gate(root)
+
+        assert result["passed"] is True, "none of those five files is gated"
+        assert sorted(row["rel"] for row in result["rows"]) == [".aipass/aipass_local_prompt.md", "README.md"]
+
+    def test_the_gated_paths_come_from_the_checker_not_a_second_spelling(self):
+        """One spelling of each path, or the gate and the table hold different files."""
+        measured = {rel for rel, _label in sb.MEASURED_FILES}
+
+        for gated in ratchet.GATED_FILES:
+            assert gated.rel in measured, f"{gated.rel} is gated but the advisory row never measures it"
+        assert {gated.rel for gated in ratchet.GATED_FILES} == {sb.README_REL, sb.PROMPT_REL}
+
+    def test_the_states_match_the_advisory_checkers_vocabulary(self):
+        """One table vocabulary across both rules, or two readers of one report."""
+        assert (ratchet.STATE_UNDER, ratchet.STATE_OVER) == (sb._STATE_UNDER, sb._STATE_OVER)
+        assert (ratchet.STATE_ABSENT, ratchet.STATE_ERROR) == (sb._STATE_ABSENT, sb._STATE_ERROR)
+        assert ratchet.FAILING_STATES == (ratchet.STATE_OVER, ratchet.STATE_ERROR), "absent never fails the gate"
+
+
+class TestRatchetFleetWalk:
+    """The branch list: the audit's rule, from whatever root the caller names."""
+
+    def test_a_directory_is_a_branch_when_it_has_apps(self, tmp_path):
+        """The same rule .github/scripts/seedgo_audit.py applies, so one fleet.
+
+        A file gated on a branch the audit does not score -- or the reverse --
+        is a hole nobody would find until it was used.
+        """
+        fleet = tmp_path / "src" / "aipass"
+        for name in ("alpha", "bravo"):
+            (fleet / name / "apps").mkdir(parents=True)
+        (fleet / "not_a_branch").mkdir(parents=True)
+        (fleet / "loose.py").parent.mkdir(parents=True, exist_ok=True)
+        (fleet / "loose.py").write_text("x", encoding="utf-8")
+
+        found = ratchet.discover_branches(tmp_path)
+
+        assert [branch["name"] for branch in found] == ["alpha", "bravo"]
+
+    def test_the_paths_stay_relative_to_the_root_it_was_given(self, tmp_path):
+        """No absolute path is invented, so CI logs read repo-relative.
+
+        A gate that resolved to an absolute path would print lines shaped like
+        one host and unusable from anywhere else.
+        """
+        (tmp_path / "src" / "aipass" / "alpha" / "apps").mkdir(parents=True)
+
+        from pathlib import Path as _Path
+
+        relative = ratchet.discover_branches(_Path("."))
+        assert all(not _Path(branch["path"]).is_absolute() for branch in relative), relative
+
+    def test_a_root_with_no_fleet_yields_no_branches_rather_than_raising(self, tmp_path):
+        """A gate that crashes on an odd cwd cannot report that anything is wrong."""
+        assert ratchet.discover_branches(tmp_path / "nowhere") == []
+
+    def test_the_live_fleet_is_under_every_gated_cap(self):
+        """The one live-tree pin: the state the ratchet was dropped on.
+
+        Seventeen README diets landed on 2026-09-15 to make this true. If this
+        goes red, a gated file grew -- and the failure lines say which.
+        """
+        from pathlib import Path as _Path
+
+        repo_root = _Path(__file__).resolve().parents[4]
+        result = ratchet.run(ratchet.discover_branches(repo_root))
+
+        assert len(result["rows"]) >= 2, "the walk found no branches -- the pin would be vacuous"
+        assert result["passed"] is True, "\n".join(result["failure_lines"])
+
+
+class TestRatchetReport:
+    """What the job prints when nothing is wrong -- which is most runs."""
+
+    def test_every_branch_is_printed_not_only_the_failing_ones(self, monkeypatch, tmp_path):
+        """A gate whose log only appears on red hides how close a branch is running.
+
+        The reading that lets a diet happen BEFORE the red is the green one.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 10000))
+        alpha = _branch(tmp_path / "alpha", **{"README.md": "x" * 10})
+        bravo = _branch(tmp_path / "bravo", **{"README.md": "y" * 20})
+
+        report = ratchet.run([{"name": "alpha", "path": str(alpha)}, {"name": "bravo", "path": str(bravo)}])["report"]
+
+        assert any("alpha" in line and "10/10,000" in line for line in report), report
+        assert any("bravo" in line and "20/10,000" in line for line in report), report
+        assert report[-1].startswith("  2 branch(es), 4 gated file(s)")
+        assert "0 over cap, 0 unmeasurable" in report[-1]
+
+    def test_the_gate_never_prints_it_returns_lines(self, capsys, monkeypatch, tmp_path):
+        """A handler that writes to stdout cannot be called from a test or a dashboard.
+
+        The .github runner prints; this module hands it strings. Anything else
+        makes the module unusable anywhere output is not already expected.
+        """
+        monkeypatch.setattr(sb, "pack_manifest_path", lambda: _pack_manifest(tmp_path, 1))
+        root = _branch(tmp_path / "b", **{"README.md": "x" * 50})
+
+        _gate(root)
+
+        assert capsys.readouterr().out == "", "the gate printed instead of returning"

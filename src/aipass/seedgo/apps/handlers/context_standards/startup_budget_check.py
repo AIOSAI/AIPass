@@ -9,7 +9,7 @@
 """Startup Budget Standards Checker — what a greeting costs, in characters.
 
 THE INSTRUMENT NOBODY HAD. Every context regression AIPass has taken was found
-by Patrick reading a percentage on a status line. Seventeen of eighteen branches
+by the user reading a percentage on a status line. Seventeen of eighteen branches
 read a 13k–96k-char README at every greeting and no seedgo rule measured a
 README, a branch prompt, a ``.trinity`` file or a dashboard: the only size rules
 in the aipass pack are Python LINE counts. Boardroom thread 16 converged on
@@ -43,7 +43,7 @@ DASHBOARD.local.json                  6,000     prax — ``DASHBOARD_CHAR_BUDGET
 The README cap is seedgo's own, so it lives in seedgo's own config — this
 pack's ``pack.json`` — and not as a constant in this file: Phase 5's per-file CI
 ratchet has to be able to read and move that number without importing Python.
-Patrick ruled 10,000 at 16:02 on 2026-09-15 ("readme 10k and off from start
+The user ruled 10,000 at 16:02 on 2026-09-15 ("readme 10k and off from start
 up"). The room had proposed 6,000 and FPLAN-0593 lines 179/221 still say 6,000;
 those lines are stale, and the manifest says so beside the number.
 
