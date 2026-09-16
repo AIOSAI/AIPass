@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-15
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -66,7 +66,9 @@ from aipass.aipass.apps.modules._doctor_fix import (
 from aipass.aipass.apps.modules._doctor_wire import (
     _auto_wire_provider,
     _prompt_auto_wire as prompt_auto_wire,
+    check_settings_scalars,
     check_wire_verify,
+    merge_manifest_rows,
     reconcile_stale_deny,
 )
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
@@ -566,8 +568,14 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
                 )
             )
 
+    # --- Settings scalars the manifest names (DPLAN-0347) ---
+    settings_rows, missing_settings = check_settings_scalars(manifest)
+    results.extend(CheckResult(*row) for row in settings_rows)
+
     # --- Interactive auto-wire prompt / --fix auto-accept ---
-    if (interactive or fix) and any(r.glyph != GLYPH_PASS for r in results):
+    # Gate on what the wire verb would actually change, not on the glyphs: a settings key
+    # the user set to their own value warns forever and must never trigger the prompt.
+    if (interactive or fix) and (missing_hooks or missing_env or missing_deny or missing_ask or missing_settings):
         wired = False
         if fix:
             actions = _auto_wire_provider(manifest_path, interactive=False)
@@ -575,7 +583,9 @@ def _check_provider_manifest(interactive: bool = False, fix: bool = False) -> Li
                 success(action)
             wired = bool(actions)
         else:
-            wired = prompt_auto_wire(manifest_path, missing_hooks, missing_env, missing_deny, missing_ask)
+            wired = prompt_auto_wire(
+                manifest_path, missing_hooks, missing_env, missing_deny, missing_ask, missing_settings
+            )
 
         if wired:
             return _check_provider_manifest(interactive=False, fix=False)
@@ -1189,7 +1199,8 @@ def _check_tier0(root: Path, aipass_home: str | None, preview: str) -> List[Chec
             "tier0_kernel.md",
             GLYPH_WARN,
             provenance,
-            f"Update keeps your copy. Delete it to take the template, or add it to {sm.IGNORE_NAME} to keep it for good",
+            f"Update keeps your copy. Delete it to take the template, "
+            f"or add it to {sm.IGNORE_NAME} to keep it for good",
         )
     ]
 
@@ -1301,9 +1312,7 @@ def _compute_doctor_groups(
     if interactive or fix:
         manifest_results = _check_provider_manifest(interactive=interactive, fix=fix)
         if manifest_results:
-            groups["Services"] = [
-                r for r in groups.get("Services", []) if r.label not in ("hooks", "env vars", "permissions")
-            ] + manifest_results
+            groups["Services"] = merge_manifest_rows(groups.get("Services", []), manifest_results)
 
     if fix:
         stale_results = [CheckResult(*tup) for tup in reconcile_stale_deny(fix=True)]
