@@ -690,7 +690,10 @@ def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, mon
         assert exc_info.value.code == 1
         out = capsys.readouterr().out
         assert "run_in_background" in out
-        assert "Monitor" in out
+        # The refusal must name a remedy that still exists: Claude Code 2.1.271
+        # removed Monitor's `persistent`, so it points at the one-shot (DPLAN-0348).
+        assert "baseline --once" in out
+        assert "persistent" not in out
         assert peer.poll() is None, "a refused arm must not have taken over the existing wire"
     finally:
         peer.kill()

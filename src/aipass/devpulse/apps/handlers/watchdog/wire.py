@@ -643,8 +643,8 @@ def arm_wire(
     if not once and my_target is None:
         reason = (
             "stdout target unresolvable — this continuous wire cannot tell which wrapper carries it, "
-            "so it cannot know anyone would hear a delivery. Re-arm via the Monitor tool: "
-            "Monitor(command='drone @devpulse watchdog baseline', description='watchdog', persistent=true)"
+            "so it cannot know anyone would hear a delivery. Arm the one-shot instead, under the Bash "
+            "tool with run_in_background: drone @devpulse watchdog baseline --once"
         )
         _stderr(f"watchdog wire: REFUSED — {reason}")
         _stdout_event(f"BASELINE DEAD: {reason}")
@@ -654,8 +654,8 @@ def arm_wire(
     if not once and my_target is not None and my_session is not None and my_target.is_file():
         _stdout_event(
             "BASELINE DEAD: continuous wire armed with run_in_background — its per-event stdout lines "
-            "would never notify anyone. Re-arm via the Monitor tool: "
-            "Monitor(command='drone @devpulse watchdog baseline', description='watchdog', persistent=true)"
+            "would never notify anyone. Arm the one-shot instead, same wrapper: "
+            "drone @devpulse watchdog baseline --once (exits on the first delivery = one wake)"
         )
         logger.error("[watchdog.wire] refused continuous arm under run_in_background stdout=%s", my_target)
         raise SystemExit(1)

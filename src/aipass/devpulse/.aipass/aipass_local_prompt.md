@@ -3,10 +3,12 @@
 
 Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.json`. The global prompt covers the shared system; this is devpulse-only.
 
-# Watchdog — sign in once per fresh context (session start, /clear, post-compact)
+# Watchdog — one-shot wire, armed in the background
 
-Always on, automatic — every dispatch this seat sends reports back; just sign in to receive:
-`Monitor(command="drone @devpulse watchdog baseline", description="watchdog", persistent=true)` — the Monitor tool, never run_in_background. Survives /compact; the statusline is the truth, never memory or TaskList: green `watchdog:in` = signed in, any red = sign in again. How it works: `docs/watchdog.md`.
+Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
+`drone @devpulse watchdog baseline --once` — it sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no coded lifetime cap and survives /compact (DPLAN-0348).
+
+**Never the Monitor tool for this.** Claude Code 2.1.271 removed `persistent` and kills every Monitor at 30m, waking this seat to say so — 33 empty wakes in one 15-hour absence. The continuous `baseline` (no `--once`) refuses background Bash by design; don't fight it. After a compact, check TaskList for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = nothing armed (the resting state) — it cannot see work out with no wire, so arm when you dispatch. How it works: `docs/watchdog.md`.
 
 # Identity
 
