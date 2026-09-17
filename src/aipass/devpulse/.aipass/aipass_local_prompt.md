@@ -6,7 +6,7 @@ Breadcrumbs only — details in README, `--help`, `.trinity/`, `DASHBOARD.local.
 # Watchdog — one-shot wire, armed in the background
 
 Nothing happening ⇒ nothing happens. Arm with the Bash tool, `run_in_background: true`:
-`drone @devpulse watchdog baseline --once` — it sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no coded lifetime cap and survives /compact (DPLAN-0348).
+`drone @devpulse watchdog baseline --once` — it sits silent, exits on the first completion of a dispatch this seat sent (or a dead monitor), and that exit is the one wake, carrying the report. Re-arm inside that same turn while work is still out. Zero model turns while idle; background Bash has no timer and survives /compact (DPLAN-0348). A `killed … low on memory` notification is the harness reaping it — report it, don't re-arm unprompted.
 
 **Never the Monitor tool for this.** Claude Code 2.1.271 removed `persistent` and kills every Monitor at 30m, waking this seat to say so — 33 empty wakes in one 15-hour absence. The continuous `baseline` (no `--once`) refuses background Bash by design; don't fight it. After a compact, check TaskList for a live wire before arming a second. Statusline: `watchdog:in` green = wire live, `idle` dim = nothing armed (the resting state) — it cannot see work out with no wire, so arm when you dispatch. How it works: `docs/watchdog.md`.
 
