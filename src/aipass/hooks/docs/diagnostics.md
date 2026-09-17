@@ -55,6 +55,10 @@ Rows are grouped on cadence's **turn token** (the transcript size at the prompt)
 parallel UserPromptSubmit siblings share the token exactly, while a sibling that finishes before the counter
 increments reads the previous number.
 
+A UserPromptSubmit row also carries `automated` (DPLAN-0348): whether the harness sent the prompt, as
+`cadence.is_automated` read it. The verb marks those rows `automated`, so idle wakes can be counted from the
+ledger without reading transcripts.
+
 ```bash
 drone @hooks ledger                    # this session (else the most recently written, said so)
 drone @hooks ledger --session <id> --last 5

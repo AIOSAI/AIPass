@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: injection_ledger.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Per-turn record of what the engine injected into a session, keyed on cadence's turn token (warn-only)
 # Branch: hooks
 # Layer: apps/modules
@@ -57,6 +57,22 @@ def _turn_token_and_number(payload: dict) -> tuple[int | None, int | None]:
         return None, None
 
 
+def _automated(event_type: str, payload: dict) -> bool | None:
+    """Whether the harness sent this prompt (DPLAN-0348); None off UserPromptSubmit or when unreadable.
+
+    The 33 idle wakes of 09-16 were counted by reading transcripts. The row
+    carries the answer cadence acted on, so the next audit counts rows.
+    """
+    if event_type != "UserPromptSubmit":
+        return None
+    try:
+        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        return bool(cadence.is_automated(payload))
+    except Exception as exc:  # noqa: BLE001 - a ledger line without the flag is still a record
+        logger.info("[HOOKS] injection_ledger: automated flag unreadable, recorded without it: %s", exc)
+        return None
+
+
 def record(event_type: str, outputs: list[tuple[str, str, str]], merged: str, payload: dict) -> dict | None:
     """Append one record for a dispatch that injected something. Never gates.
 
@@ -81,7 +97,9 @@ def record(event_type: str, outputs: list[tuple[str, str, str]], merged: str, pa
         )
         return None
     token, turn = _turn_token_and_number(payload)
-    return ledger_store.append_record(session_id, event_type, hooks, merged, token, turn)
+    return ledger_store.append_record(
+        session_id, event_type, hooks, merged, token, turn, automated=_automated(event_type, payload)
+    )
 
 
 def _default_session() -> tuple[str | None, str]:
@@ -135,8 +153,9 @@ def handle_command(command: str, args: list) -> bool:
         stamp = time.strftime("%H:%M:%S", time.localtime(row.get("ts", 0)))
         turn = row.get("turn")
         parts = " ".join(f"{name}={meta.get('chars', 0)}" for name, meta in row["hooks"].items())
+        marker = " automated" if row.get("automated") else ""
         console.print(
-            f"{stamp} {row.get('event')} turn={turn if turn is not None else '?'} "
+            f"{stamp} {row.get('event')}{marker} turn={turn if turn is not None else '?'} "
             f"token={row.get('token')} total={row['total']} | {parts}"
         )
     return True

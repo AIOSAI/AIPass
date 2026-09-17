@@ -48,6 +48,29 @@ That changes what fires, so it stopped there. What fires today is the record: an
 (kernel, navmap, branch, identity, mail on turns 0/5/10; `temporal` every turn), identical before and after
 this phase's other rows.
 
+**A turn the harness sent is not a turn (cadence 2.7.0, DPLAN-0348).** Since Claude Code 2.1.271 a Monitor
+dies at 30 minutes and wakes the seat with a `<task-notification>` prompt, and UserPromptSubmit hooks fire on it.
+On 09-16 an idle seat took 33 of those in 15 hours, and 7 paid the full ~20,400-char stack. `cadence.is_automated`
+reads the payload's `source` first (`system` = automated). The 2.1.273 schema declares that field, but no live
+payload carried it: 6 were measured on 2.1.273 and 2.1.274, and the build hard-codes it out. So the
+fallback is how the prompt *opens*: `<task-notification>` or `[SYSTEM NOTIFICATION`, left-stripped, never a
+substring. A missing prompt reads as human. On an automated turn the counter does not advance, the state
+file is not written (token included), and `should_fire` answers False for every loader, turn 0 too. Mail still
+announces on arrival, and an alert's arrival never asks cadence. One behaviour change: a notification no
+longer cancels queued post-compact re-ground parts.
+
+**Ground once after a compaction (DPLAN-0348).** The PostToolUse backstop used to record nothing, so the next
+prompt's turn-0 fire-all sent the same grounding again: 21,688 chars at 09:03, 20,310 more at 09:30. When
+the backstop hands out its final part, it now stamps `aipass-regroup-done-<session>.json`: the window and the
+transcript size at completion. A degraded or partial re-ground stamps nothing. At turn 0, `tier0`/`navmap`/
+`identity`/`branch` stand down once if the stamp's window is the current one, and the prompt sits within
+`regroup_fresh_bytes` of it: 150,000 in `DEFAULTS`, which a clone runs on, and an operator can override it in
+the gitignored `cadence_config.json`. Every sibling of that prompt shares its
+token, so all four agree. The number comes from the 09-16 ledgers. The double ground sat 126,258 bytes past
+the last part. The other two post-compact prompts came after 308,557 and 587,488 bytes of autonomous work,
+and those still ground. A second compaction opens a new window. A prompt straight after a compaction had no
+backstop, so it grounds through turn 0 as before (DPLAN-0276's dead zone stays closed).
+
 ## Persistent Alerts
 
 The `persistent_alert` handler (`prompt/persistent_alert.py`) injects advisory banners into every prompt when active alerts exist. General-purpose — any agent can raise alerts (prax for runaway logs, trigger for medic, backup for sync failures).

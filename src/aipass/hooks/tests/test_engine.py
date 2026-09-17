@@ -1871,6 +1871,21 @@ class TestInjectionLedger:
         assert "1 injection moment(s)" in out
         assert "total=34" in out and "tier0_kernel=30" in out and "temporal=4" in out
 
+    def test_a_harness_wake_is_marked_so_an_audit_can_count_them(self, ledger, capsys):
+        """DPLAN-0348: the 33 idle wakes of 09-16 were counted from transcripts. The row says it now."""
+        mod, payload = ledger
+        wake = {**payload, "prompt": "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"}
+        mod.record("UserPromptSubmit", [("temporal", "h", "T")], "T", wake)
+        with open(payload["transcript_path"], "a", encoding="utf-8") as fh:
+            fh.write("more")
+        mod.record("UserPromptSubmit", [("temporal", "h", "T")], "T", {**payload, "prompt": "typed"})
+
+        assert [row.get("automated") for row in mod.ledger_store.read_turns("sess-1")] == [True, False]
+        with patch(f"{_LEDGER}.json_handler"):
+            mod.handle_command("ledger", ["--session", "sess-1"])
+        rows = [line for line in capsys.readouterr().out.splitlines() if "UserPromptSubmit" in line]
+        assert "automated" in rows[0] and "automated" not in rows[1]
+
     def test_a_bare_read_is_the_callers_own_session_even_when_a_neighbour_wrote_last(self, ledger, capsys, monkeypatch):
         """Every citizen has a live session, so the newest ledger is usually someone else's."""
         import os

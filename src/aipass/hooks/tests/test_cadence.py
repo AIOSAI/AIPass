@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: test_cadence.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for cadence module (DPLAN-0200), fail-open warnings since 1.1.0
 # Branch: hooks
 # Created: 2026-06-08
@@ -47,6 +47,12 @@ def _write_state(tmp_path, turn, token=-1, session="test-session", aged=True):
         old = time.time() - 10
         os.utime(state_file, (old, old))
     return state_file
+
+
+#: A harness task-notification as it reached a live UserPromptSubmit hook on
+#: Claude Code 2.1.273: the text opens with the tag and the payload carries no
+#: `source` key (DPLAN-0348, measured 2026-09-16).
+_NOTIFICATION = "<task-notification>\n<task-id>b1hws2iup</task-id>\n<status>completed</status>\n</task-notification>"
 
 
 class TestShouldFire:
@@ -251,6 +257,117 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("unknown_loader") is True
+
+    # --- DPLAN-0348: a turn the harness sent is not a turn ---
+
+    def test_is_automated_reads_the_payload_source_first(self):
+        """The 2.1.273 hook schema declares `source`; a payload that carries it decides by it."""
+        from aipass.hooks.apps.modules.cadence import is_automated
+
+        assert is_automated({"source": "system", "prompt": "typed words"}) is True
+        assert is_automated({"source": "user", "prompt": _NOTIFICATION}) is False
+        for other in ("sdk", "loop_wakeup", "schedule_wakeup", "poll_event"):
+            assert is_automated({"source": other, "prompt": "x"}) is False, other
+
+    def test_is_automated_falls_back_to_how_the_prompt_opens(self):
+        """No live payload carried `source`, so the text decides, and only by how it opens."""
+        from aipass.hooks.apps.modules.cadence import is_automated
+
+        assert is_automated({"prompt": _NOTIFICATION}) is True
+        assert is_automated({"prompt": "\n  " + _NOTIFICATION}) is True
+        assert is_automated({"prompt": "[SYSTEM NOTIFICATION] monitor expired"}) is True
+        # A human quoting a marker mid-sentence keeps their grounding.
+        assert is_automated({"prompt": "why did a <task-notification> land here?"}) is False
+        assert is_automated({"prompt": "I got a [SYSTEM NOTIFICATION today"}) is False
+        # A dispatch wake and a slash command, as they reached the hook.
+        assert is_automated({"prompt": "Hi. Check inbox, process new emails, update memories when done."}) is False
+        assert is_automated({"prompt": "/prep"}) is False
+
+    def test_is_automated_reads_a_missing_prompt_as_human(self):
+        """A payload change must fail toward today's behaviour, never go dark."""
+        from aipass.hooks.apps.modules.cadence import is_automated
+
+        for payload in (None, {}, {"prompt": ""}, {"prompt": None}, {"source": None}, {"source": "", "prompt": "hi"}):
+            assert is_automated(payload) is False, payload
+
+    def test_an_automated_turn_neither_counts_nor_writes_the_state(self, tmp_path):
+        """33 harness wakes in 15 idle hours advanced the counter like typed turns.
+
+        The token is left alone too: a stored token equal to the next real
+        turn's would debounce that turn away, so the human turn after the wake
+        must still count.
+        """
+        from aipass.hooks.apps.modules.cadence import should_fire
+
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 500)
+        state_file = _write_state(tmp_path, turn=3, token=100)
+        before = (state_file.read_text(), state_file.stat().st_mtime)
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        ):
+            wake = {"transcript_path": str(transcript), "prompt": _NOTIFICATION}
+            for loader in ("tier0", "navmap", "identity", "branch", "alert"):
+                _reset_module_globals()
+                should_fire(loader, wake)
+            # Mail is the sibling that still reads the counter on a wake, so it is the one that could write it.
+            _reset_module_globals()
+            cadence.should_fire_mail(1, wake)
+            assert (state_file.read_text(), state_file.stat().st_mtime) == before
+
+            _reset_module_globals()
+            should_fire("tier0", {"transcript_path": str(transcript), "prompt": "a human turn"})
+            assert json.loads(state_file.read_text()) == {"turn": 4, "token": 500}
+
+    def test_an_automated_prompt_after_a_compaction_fires_no_grounding(self, tmp_path):
+        """The 09:30 row: turn 0 on a harness wake delivered 20,310 chars to nobody.
+
+        The guard sits before the turn-0 clause, the wake leaves the armed state
+        as it found it (regroup token included), and the next human prompt is
+        still turn 0 and grounds in full.
+        """
+        from aipass.hooks.apps.modules import cadence
+
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        ):
+            cadence.reset_counter()
+            state_file = tmp_path / "aipass-cadence-test-session.json"
+            armed = json.loads(state_file.read_text())
+            for loader in ("tier0", "navmap", "identity", "branch"):
+                _reset_module_globals()
+                assert cadence.should_fire(loader, {"prompt": _NOTIFICATION}) is False, loader
+            assert json.loads(state_file.read_text()) == armed
+
+            for loader in ("tier0", "navmap", "identity", "branch"):
+                _reset_module_globals()
+                assert cadence.should_fire(loader, {"prompt": "the owner types"}) is True, loader
+
+    def test_an_automated_turn_is_never_a_beat_but_mail_still_announces(self, tmp_path):
+        """The channels. Mail announces on arrival whoever sent the turn. An alert's
+        arrival is not cadence-gated at all (persistent_alert), so should_fire('alert')
+        only decides a REPEAT, and a turn that does not count is not a beat to repeat on:
+        read without advancing, a stored beat would otherwise repeat on every wake."""
+        from aipass.hooks.apps.modules import cadence
+
+        notification = {"prompt": _NOTIFICATION}
+        with (
+            patch(f"{MODULE}._GUARD_DIR", tmp_path),
+            patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "test-session"}),
+            patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
+        ):
+            for stored in (4, 5):
+                state_file = _write_state(tmp_path, turn=stored)
+                _reset_module_globals()
+                assert cadence.should_fire("alert", notification) is False, stored
+            _reset_module_globals()
+            assert cadence.should_fire_mail(2, notification) is True
+            assert json.loads(state_file.read_text())["turn"] == 5
 
 
 class TestResetCounter:
@@ -1498,7 +1615,7 @@ class TestFailOpenIsLoud:
         assert "DEGRADED loader=tier0 fires" in warnings[0].getMessage()
         assert "CLAUDE_CODE_SESSION_ID" in warnings[0].getMessage()
         assert "DEGRADED loader=navmap WITHHELD" in caplog.text
-        assert "CLAUDE_CODE_SESSION_ID" in degraded_reason()
+        assert "CLAUDE_CODE_SESSION_ID" in (degraded_reason() or "")
 
     def test_an_unreadable_state_file_warns_with_the_cause(self, tmp_path, caplog):
         from aipass.hooks.apps.modules.cadence import should_fire

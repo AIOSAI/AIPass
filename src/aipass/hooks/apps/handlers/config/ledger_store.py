@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: ledger_store.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: The injection ledger's file: what counts as injected, one JSONL record per dispatch, folded per turn
 # Branch: hooks
 # Layer: apps/handlers/config
@@ -119,11 +119,15 @@ def measure_hooks(event_type: str, outputs: list[tuple[str, str, str]]) -> dict[
     return hooks
 
 
-def append_record(session_id: str, event_type: str, hooks: dict, merged: str, token, turn) -> dict | None:
+def append_record(
+    session_id: str, event_type: str, hooks: dict, merged: str, token, turn, automated: bool | None = None
+) -> dict | None:
     """Write one record. A record that cannot be written WARNS: a gap in the ledger must not be silent.
 
     "total" is what the hooks produced and "delivered" is what the merged
     document carried to the model; they differ only when the merge dropped a block.
+    "automated" rides only when known: whether the harness, not a person, sent
+    the prompt (DPLAN-0348).
 
     Returns:
         The record written, or None when the write failed.
@@ -137,6 +141,8 @@ def append_record(session_id: str, event_type: str, hooks: dict, merged: str, to
         "total": sum(h["chars"] for h in hooks.values()),
         "delivered": cc_len(injected_text(event_type, merged)),
     }
+    if automated is not None:
+        entry["automated"] = automated
     try:
         with ledger_path(session_id).open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, separators=(",", ":")) + "\n")

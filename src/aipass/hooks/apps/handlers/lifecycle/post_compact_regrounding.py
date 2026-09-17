@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: post_compact_regrounding.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Mid-turn grounding backstop after compaction, budgeted per fire (PostToolUse, DPLAN-0276, #752)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
@@ -44,6 +44,12 @@ if anything is ever lost it is the least important tail. The parts ride the
 cadence regroup token: the first fire consumes it and queues the rest, a real
 UserPromptSubmit cancels what is left (the cadence turn-0 path then delivers
 every loader as its own injection), and a new compaction starts over.
+
+The handoff runs both ways since DPLAN-0348. The last part stamps completion,
+and the next prompt's turn-0 fire-all stands down for the four grounding
+loaders while that prompt is still near it in the transcript. A harness
+task-notification is not a real UserPromptSubmit: it neither cancels the queue
+nor spends turn 0.
 """
 
 import importlib
@@ -263,6 +269,11 @@ def handle(hook_data: dict) -> dict:
 
         context, labels = fires[index - 1]
         cadence.log_regroup_fire(labels, index, len(fires), context, REGROUP_FIRE_BUDGET, hook_data)
+        if index == len(fires) and sections[0][0] != "degraded":
+            # The whole grounding is out, so the next prompt's turn-0 fire-all
+            # need not send it again (DPLAN-0348). A degraded re-ground did not
+            # ground the seat, and a partial one never reaches this line.
+            cadence.stamp_regroup_complete(hook_data)
         result = {
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
