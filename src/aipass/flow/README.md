@@ -1,11 +1,22 @@
 [← Back to AIPass](../../../README.md)
 
-# Flow
+# FLOW
 
 **Purpose:** Plan lifecycle management for AIPass — creates, tracks, closes and archives numbered work plans across every registered plan type.
 **Module:** `aipass.flow`
 **Version:** 2.7.0
 **Created:** 2025-11-15
+
+---
+
+## Quick Start
+
+```bash
+drone @flow create . "My task description"   # open a plan here
+drone @flow list open                        # what is still open
+drone @flow close FPLAN-0042                 # close it when done
+drone @flow create . "Design topic" dplan    # a design plan instead
+```
 
 ---
 
@@ -24,17 +35,6 @@ directory in, register a prefix, and the new type is live.
 Closing is the interesting half: archival happens in the foreground, where a
 failure can still be reported honestly, and vectorisation is handed to a
 detached background runner so a slow embedding never holds up the caller.
-
----
-
-## Quick Start
-
-```bash
-drone @flow create . "My task description"   # open a plan here
-drone @flow list open                        # what is still open
-drone @flow close FPLAN-0042                 # close it when done
-drone @flow create . "Design topic" dplan    # a design plan instead
-```
 
 ---
 

@@ -8,7 +8,6 @@ section breaks, and operation templates — so every branch looks the same witho
 duplicating Rich formatting code.
 **Module:** `aipass.cli`
 **Version:** 2.3.0
-**Last Updated:** 2026-09-17
 
 ## Quick Start
 
@@ -26,7 +25,14 @@ That is the whole idea: import the function, call it, and the output matches
 every other branch in the system. The full symbol table, signatures and import
 paths are in [the display API](docs/display_api.md).
 
-## How to reach me
+## Live Inventory
+
+The list of modules, verbs and flags is generated from the code that runs them, so it is not written down here and cannot go stale on this page:
+
+- `drone @cli` — the self-map: the discovered modules and what this branch is.
+- `drone @cli --help` — the full command surface. Each module answers for its own verbs: `drone @cli display --help`, `drone @cli templates --help`.
+
+## How To Reach Me
 
 `drone @cli` — bare, no arguments — prints the live self-map: which modules are
 discovered, which services are registered, and what to run next. It is generated
@@ -98,4 +104,9 @@ The import is the real entry point; the command line is a demo of it. To count
 the live importers, grep the tree rather than trusting a number written here.
 
 ---
+
+**Last Updated:** 2026-09-17
+
+---
+
 [← Back to AIPass](../../../README.md)

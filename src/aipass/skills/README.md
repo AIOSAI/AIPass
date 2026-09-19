@@ -1,6 +1,6 @@
 [← Back to AIPass](../../../README.md)
 
-# Skills
+# SKILLS
 
 **Purpose:** Capability framework for AI agents. A skill is a self-contained unit of capability — instructions an agent reads, and optionally code it can execute — discovered, validated and run the same way wherever it lives.
 **Module:** `skills`
@@ -45,6 +45,12 @@ Telegram bridge.
 `drone @skills --help` is the reference: every verb and flag, the search paths,
 and worked examples. Both are produced by the code itself, so neither can drift
 from what the branch actually does.
+
+## How To Reach Me
+
+- Mail: `drone @ai_mail email @skills "Subject" "Body"` for a question, `drone @ai_mail dispatch @skills "Subject" "Body"` when the branch must act. A sleeping agent never reads plain mail.
+- **A skill that reports its requirements met but fails to run, or an off-switch that does not stop what it declares, is a defect here, not a fault in your branch.** Say which skill, which tier, and which search path it was found under.
+- Owner rulings and architecture questions go to @devpulse, not here.
 
 ## Commands
 

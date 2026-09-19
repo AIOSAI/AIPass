@@ -1,6 +1,6 @@
 [← Back to AIPass](../../../README.md)
 
-# Memory
+# MEMORY
 
 **Purpose:** The central memory archive for AIPass. Archives a branch's `.trinity/` entries into searchable vectors when the files outgrow their keep counts, answers semantic queries across every branch's history, holds the entry shape and the character caps the whole fleet writes against, and keeps each branch's todo pad and its backlog.
 **Module:** `aipass.memory`

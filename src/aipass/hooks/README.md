@@ -1,6 +1,6 @@
 [← Back to AIPass](../../../README.md)
 
-# Hooks
+# HOOKS
 
 **Purpose:** Hook infrastructure for AIPass. One dispatch engine routes every hook event across
 platforms (Claude Code, Codex) with per-project configuration, full logging and crash isolation. On
@@ -8,7 +8,6 @@ one side it injects the grounding an agent wakes up with; on the other it fences
 makes.
 **Module:** `aipass.hooks`
 **Version:** 1.3.0
-**Last Updated:** 2026-09-15
 
 ---
 

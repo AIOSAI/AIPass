@@ -6,7 +6,6 @@
 **Module:** `aipass.backup`
 **Version:** 1.1.0
 **Created:** 2026-04-16
-**Last Updated:** 2026-09-15
 
 ---
 
@@ -54,6 +53,14 @@ here, because a typed copy starts rotting the day it is written:
 
 A `--help` anywhere in the arguments prints the page and runs nothing, so both
 are safe to probe against a real project.
+
+---
+
+## How To Reach Me
+
+- Mail: `drone @ai_mail email @backup "Subject" "Body"` for a question, `drone @ai_mail dispatch @backup "Subject" "Body"` when the branch must act. A sleeping agent never reads plain mail.
+- A snapshot, versioned run, or restore that produces the wrong copy, an ignore rule that misses what it should catch, or a run ceiling that fires (or fails to fire) incorrectly is a defect worth reporting here.
+- Owner rulings and architecture questions go to @devpulse, not here.
 
 ---
 
@@ -125,6 +132,10 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
   written into the project, not into this branch.
 - **@memory** — rollover safety copies share the `.backup/` directory.
 - **@flow** — closed plans are archived under the repo root's `.backup/`.
+
+---
+
+**Last Updated:** 2026-09-15
 
 ---
 

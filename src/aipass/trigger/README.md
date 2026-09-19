@@ -1,6 +1,6 @@
 [← Back to AIPass](../../../README.md)
 
-# Trigger
+# TRIGGER
 
 **Purpose:** Event bus and error dispatch for AIPass. Branches fire events and registered handlers react; Medic watches every branch log for errors, fingerprints what it finds, gates dispatch, and tells the branch that owns the fault.
 **Module:** `aipass.trigger`

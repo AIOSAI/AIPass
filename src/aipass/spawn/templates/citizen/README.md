@@ -6,42 +6,66 @@
 
 ---
 
-## What I Am
+## Quick Start
 
-*One short paragraph for a stranger or another branch: what this branch owns, and
-what it is for. A manager (a project's first citizen) also holds the project's
-context and coordinates its work; a specialist owns one domain — write whichever
-is true for you. Your class is in `.trinity/passport.json` under
-`identity.citizen_class`.*
+```bash
+drone @{{BRANCH}}           # what this branch can do, read from the code
+drone @{{BRANCH}} --help    # the full reference
+```
+
+---
+
+## What It Does
+
+*A few lines for a stranger or another branch: what this branch owns and what it is for.
+A manager (a project's first citizen) also holds the project's context and coordinates its
+work; a specialist owns one domain. Your class is `identity.citizen_class` in
+`.trinity/passport.json`.*
+
+---
+
+## Live Inventory
+
+`drone @{{BRANCH}}` prints the self-map, every module with its one-line description, and
+`drone @{{BRANCH}} --help` prints the command surface. Both are generated from the code on
+every call, so this README never copies them.
 
 ---
 
 ## How To Reach Me
 
 ```bash
-drone @{{BRANCH}}                                     # live inventory — modules and commands, read from the code
-drone @{{BRANCH}} --help                              # the full reference
-drone @ai_mail dispatch @{{BRANCH}} "Subject" "Body"  # hand me work
+drone @ai_mail dispatch @{{BRANCH}} "Subject" "Body"   # hand me work, and wake me
+drone @ai_mail email @{{BRANCH}} "Subject" "Body"      # tell me something, no wake
 ```
 
-The inventory is generated, so it is never stale. This README does not repeat it.
+---
+
+## Commands
+
+`drone @{{BRANCH}} --help` is the source of truth. *Name here the few verbs worth knowing
+before reading it, once there are any.*
 
 ---
 
-## Where The Depth Lives
+## Architecture
 
-| Layer | What it carries |
-|-------|-----------------|
-| `README.md` | this file — the face for strangers and other branches |
-| `docs/` | the depth: one tracked file per module or handler group, indexed below |
-| `.aipass/aipass_local_prompt.md` | breadcrumbs for the agent working here, injected every turn |
-| `.trinity/` | identity, session history, what was learned |
-
-*Index each `docs/` file here as you write it — one line on what it covers.*
+`apps/{{BRANCH}}.py` is the entry point; `apps/modules/` holds one coordinator per verb and
+`apps/handlers/` the implementation behind them. *Name the modules here as they land, and
+the idea behind the layout.*
 
 ---
 
-## Integration
+## Documentation
+
+The depth lives in [docs/](docs/README.md), one page per module or handler group, each
+indexed there on a line of its own. This README is measured against a cap by
+`drone @seedgo audit context @{{BRANCH}}`; past it, depth moves into `docs/`, never into
+the prompt.
+
+---
+
+## Integration Points
 
 ### Depends On
 
@@ -54,5 +78,6 @@ The inventory is generated, so it is never stale. This README does not repeat it
 
 ---
 
-*This file is measured against a cap by `drone @seedgo audit context @{{BRANCH}}` —
-seedgo owns the number. Past it, move depth into `docs/`, never into the prompt.*
+**Last Updated:** {{DATE}}
+
+---

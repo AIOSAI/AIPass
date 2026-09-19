@@ -1,11 +1,21 @@
 [← Back to AIPass](../../../README.md)
 
-# Daemon
+# DAEMON
 
 **Purpose:** The fleet's scheduler. A systemd user timer fires one tick every couple of minutes; the tick discovers every citizen's own `.daemon/schedule.json`, decides what is due, and either wakes the owner or runs a drone command as a subprocess. It also reports fleet activity and runs the night watch.
 **Module:** `aipass.daemon`
 **Version:** 2.0.0
 **Created:** 2026-03-07
+
+---
+
+## Quick Start
+
+```bash
+drone @daemon
+drone @daemon queue
+drone @daemon run --dry-run
+```
 
 ---
 
@@ -17,16 +27,6 @@
 - **Keeps the night watch.** One citizen a night gets a maintenance turn, walked alphabetically across the framework fleet.
 - **Reports.** Activity across branches, a per-branch deep dive, memory-entry health through @memory, and red flags such as code that moved while its memory did not.
 - **Refuses what it does not recognise.** An unknown verb or argument fails by name with a non-zero exit, never a default.
-
----
-
-## Quick Start
-
-```bash
-drone @daemon
-drone @daemon queue
-drone @daemon run --dry-run
-```
 
 ---
 

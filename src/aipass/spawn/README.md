@@ -113,7 +113,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 ---
 
-## Integration
+## Integration Points
 
 ### Depends On
 

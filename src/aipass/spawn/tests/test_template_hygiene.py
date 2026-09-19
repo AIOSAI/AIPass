@@ -392,12 +392,72 @@ class TestExpectedMintPaths:
         assert not lines[2].startswith(NOT_PROSE), f"the purpose line is not prose: {lines[2]!r}"
         assert "{{" not in lines[2] and "INDEXED" in lines[2], "the branch placeholder was not rendered"
 
+    def test_a_newborns_readme_has_the_fleet_shape(self, tmp_path):
+        """H1 the branch in capitals, seedgo's eight sections in order, a dated foot between rules.
+
+        The section list is read from seedgo's readme_check at assert time, never
+        copied here: when seedgo moves the shape, this pin moves with it.
+        """
+        import datetime
+
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "shaped"
+        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+
+        readme = (target / "README.md").read_text(encoding="utf-8")
+        assert "{{" not in readme, "the newborn README still carries unrendered placeholders"
+        lines = [line.strip() for line in readme.splitlines() if line.strip()]
+
+        assert [line for line in lines if line.startswith("# ")] == ["# SHAPED"]
+        sections = [line[3:] for line in lines if line.startswith("## ")]
+        assert sections == _seedgo_readme_sections(), f"off seedgo's README shape: {sections}"
+
+        assert lines[-3] == "---" and lines[-1] == "---", f"the foot is not between two rules: {lines[-3:]}"
+        assert lines[-2].startswith("**Last Updated:** "), f"no Last Updated line at the foot: {lines[-2]!r}"
+        datetime.date.fromisoformat(lines[-2].removeprefix("**Last Updated:** "))
+
+    def test_every_link_in_a_newborns_readme_resolves_where_it_lands(self, tmp_path):
+        """seedgo's check 8, on the newborn: no relative link may dangle wherever the citizen is minted."""
+        import re
+
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "deep" / "linked"
+        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+
+        readme = (target / "README.md").read_text(encoding="utf-8")
+        links = [link for link in re.findall(r"\]\(([^)#]+)\)", readme) if not link.startswith(("http", "mailto"))]
+        assert links, "the newborn README links nowhere - it should at least index docs/"
+        dangling = [link for link in links if not (target / link).exists()]
+        assert dangling == [], f"links that dangle in a newborn: {dangling}"
+
 
 # =============================================================================
 # The docs page skeleton - the one source @seedgo's docs_page standard renders
 # =============================================================================
 
 README_BACK_LINK = "[<- Back to the README](../README.md)"
+
+SEEDGO_STANDARDS = (
+    Path(aipass.spawn.__file__).resolve().parents[1] / "seedgo" / "apps" / "handlers" / "aipass_standards"
+)
+SEEDGO_README_CHECK = SEEDGO_STANDARDS / "readme_check.py"
+
+
+def _seedgo_readme_sections() -> list:
+    """seedgo's README_SECTIONS, parsed out of its source at call time - the one list."""
+    import ast
+
+    for node in ast.parse(SEEDGO_README_CHECK.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "README_SECTIONS" and node.value:
+            return list(ast.literal_eval(node.value))
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "README_SECTIONS" for t in node.targets):
+            return list(ast.literal_eval(node.value))
+    raise AssertionError(f"seedgo no longer declares README_SECTIONS in {SEEDGO_README_CHECK}")
+
 
 # What the standard's purpose check refuses as the first line under the H1.
 NOT_PROSE = ("#", "-", "*", "|", ">", "```", "[", "---")

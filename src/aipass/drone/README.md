@@ -1,11 +1,22 @@
 [← Back to AIPass](../../../README.md)
 
-# Drone
+# DRONE
 
 **Purpose:** The command router for AIPass. Resolves an `@name` to a real path at runtime, routes the command there, and owns every git operation behind a tier-based access gate — the one interface through which the whole fleet reaches git.
 **Module:** `aipass.drone`
 **Version:** 1.1.0
 **Created:** 2026-03-05
+
+---
+
+## Quick Start
+
+```bash
+drone systems                     # Every registered branch and module
+drone @seedgo audit aipass        # Route a command to a branch
+drone @flow --help                # The full reference for any target
+drone @git status                 # Read-only git, available to every branch
+```
 
 ---
 
@@ -24,17 +35,6 @@
   rather than written down.
 
 Not a task runner, not a scheduler, and never a writer of another branch's files.
-
----
-
-## Quick Start
-
-```bash
-drone systems                     # Every registered branch and module
-drone @seedgo audit aipass        # Route a command to a branch
-drone @flow --help                # The full reference for any target
-drone @git status                 # Read-only git, available to every branch
-```
 
 ---
 

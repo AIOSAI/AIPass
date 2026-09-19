@@ -7,7 +7,6 @@ and re-scaffolded so no working branch has to be the experiment.
 **Module:** `aipass.canary`
 **Version:** 2.2.0
 **Created:** 2026-08-20
-**Last Updated:** 2026-09-15
 
 Everything here is test data by definition: the mail, the logs, the artifacts,
 the memories. Nothing this branch produces is evidence about the working system,
@@ -23,7 +22,7 @@ drone @canary note list                        # read them back
 pytest src/aipass/canary/tests -v              # the suite, from the repo root
 ```
 
-## What I Do
+## What It Does
 
 Absorb the tests the fleet needs run, especially the ones nobody wants aimed at
 a working branch. Breakage here costs nothing, so this is where a destructive
@@ -38,6 +37,13 @@ gets corrected even when agreeing would be easier — especially then.
 What this branch will not do: report a window it did not hold, call something
 green when the output showed red, treat an absence as a defect before checking
 its own memory for the gap, or take on production work.
+
+## Live Inventory
+
+The list of modules, verbs and flags is generated from the code that runs them, so it is not written down here and cannot go stale on this page:
+
+- `drone @canary` — the self-map: the discovered modules and what this branch is.
+- `drone @canary --help` — the full command surface. Each module answers for its own verbs: `drone @canary note --help`.
 
 ## How To Reach Me
 
@@ -109,5 +115,11 @@ Depth lives in [docs/](docs/), one page per subject:
 - **Any citizen needing a subject.** Send the test you would not run against a
   working branch: breakage here costs nothing, and the report comes back with
   the refusal text intact.
+
+---
+
+**Last Updated:** 2026-09-19
+
+---
 
 [<- Back to AIPass](../../../README.md)

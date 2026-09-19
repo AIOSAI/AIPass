@@ -46,6 +46,13 @@ decide which projects the hook engine will load, `aipass baud` installs the
 phone face, `aipass handoff` launches your chosen CLI, and `aipass feedback`
 toggles the reminder pulse.
 
+## Live Inventory
+
+The list of modules, verbs and flags is generated from the code that runs them, so it is not written down here and cannot go stale on this page:
+
+- `aipass` — the live command inventory.
+- `aipass --help` — the full reference, each command's own `--help` beneath it.
+
 ## How To Reach Me
 
 Run me. Bare `aipass` prints the live command inventory — generated from the

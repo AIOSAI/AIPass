@@ -42,15 +42,6 @@ written down here and cannot go stale:
 
 ---
 
-## Commands
-
-There is no command table on this page, deliberately: a hand-typed copy of this branch's own
-help output rots the next time a verb is added or a flag changes. The generated surface above
-under **Live Inventory** is the current one, and `drone @api host-api --help` covers the host
-server's own subcommands.
-
----
-
 ## How To Reach Me
 
 - Mail: `drone @ai_mail email @api "Subject" "Body"` — a client you need, a credential that
@@ -59,6 +50,15 @@ server's own subcommands.
   read is a bug here, not a fault in your branch. Say which command and what you saw.
 - Cross-branch callers import the in-process door rather than shelling out — see
   [docs/clients.md](docs/clients.md).
+
+---
+
+## Commands
+
+There is no command table on this page, deliberately: a hand-typed copy of this branch's own
+help output rots the next time a verb is added or a flag changes. The generated surface above
+under **Live Inventory** is the current one, and `drone @api host-api --help` covers the host
+server's own subcommands.
 
 ---
 
@@ -82,6 +82,24 @@ one place, so it cannot disagree with itself.
 
 ---
 
+## Documentation
+
+Depth lives in [docs/](docs/README.md), one file per surface or handler group:
+
+| Doc | What it covers |
+|---|---|
+| [docs/clients.md](docs/clients.md) | The in-process Python API other branches import, and the contract registry |
+| [docs/host_api.md](docs/host_api.md) | The Stage 0 host API: bind rule, tokens, scopes, routes, the read cache |
+| [docs/host_surfaces.md](docs/host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads |
+| [docs/host_autostart.md](docs/host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
+| [docs/git_surface.md](docs/git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
+| [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |
+| [docs/internals.md](docs/internals.md) | Import safety without a working directory, and the settings conformance corpus |
+| [docs/decisions.md](docs/decisions.md) | Why this branch is shaped the way it is — the incident record behind the code |
+| [docs/SECURITY.md](docs/SECURITY.md) | The security posture of the host API and the credential store |
+
+---
+
 ## Integration Points
 
 **Depends On**
@@ -98,24 +116,6 @@ one place, so it cannot disagree with itself.
 **Credentials** (`~/.secrets/aipass/`): `.env` for API keys, `google_creds.json` and
 `google_client_secret.json` for OAuth, `host_api/` for the token store and its receipts.
 Values are never printed; read them through the Python door.
-
----
-
-## Documentation
-
-Depth lives in [docs/](docs/README.md), one file per surface or handler group:
-
-| Doc | What it covers |
-|---|---|
-| [docs/clients.md](docs/clients.md) | The in-process Python API other branches import, and the contract registry |
-| [docs/host_api.md](docs/host_api.md) | The Stage 0 host API: bind rule, tokens, scopes, routes, the read cache |
-| [docs/host_surfaces.md](docs/host_surfaces.md) | Scopes and verbs, the phone face, the fleet snapshot, the terminal socket, uploads |
-| [docs/host_autostart.md](docs/host_autostart.md) | The systemd user unit, what it installs, and what it deliberately does not |
-| [docs/git_surface.md](docs/git_surface.md) | The git reads the phone asks for: patch, changes, log, commit |
-| [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |
-| [docs/internals.md](docs/internals.md) | Import safety without a working directory, and the settings conformance corpus |
-| [docs/decisions.md](docs/decisions.md) | Why this branch is shaped the way it is — the incident record behind the code |
-| [docs/SECURITY.md](docs/SECURITY.md) | The security posture of the host API and the credential store |
 
 ---
 

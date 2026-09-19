@@ -1,6 +1,6 @@
 [<- Back to AIPass](../../../README.md)
 
-# Seedgo
+# SEEDGO
 
 **Purpose:** Standards compliance platform for AIPass. Scores every citizen branch against a pack of code standards, runs the per-file gate that fires after each edit, certifies its own pack, measures how much a test suite proves, and measures what a greeting costs.
 **Module:** `aipass.seedgo`

@@ -5,7 +5,6 @@
 **Purpose:** The logging and monitoring backbone of AIPass. Every branch imports one logger and its lines route themselves; on top of that sit Mission Control, the branch dashboards, and the audits that catch a log growing out of control.
 **Module:** `aipass.prax`
 **Version:** 2.4.0
-**Last Updated:** 2026-09-15
 
 ---
 
