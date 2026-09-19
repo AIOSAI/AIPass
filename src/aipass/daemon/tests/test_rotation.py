@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-12
-# Modified: 2026-09-10
+# Modified: 2026-09-19
 # =============================================
 
 """Tests for the nightly rounds (DPLAN-0287, switched on by DPLAN-0337 R2)."""
@@ -585,7 +585,7 @@ class TestRoundsNight:
     def night(offset_days: int) -> datetime:
         return datetime.combine(date.today() + timedelta(days=offset_days), time(5, 1))
 
-    def _tick(self, runstate: dict, at: datetime):
+    def _tick(self, runstate: dict, at: datetime, wake_error: Exception | None = None):
         real_is_due = runstate_mod.is_job_due
         with (
             patch(f"{RUN}.discover_jobs", return_value=[shipped_rounds_job()]),
@@ -596,7 +596,7 @@ class TestRoundsNight:
             patch(f"{HANDLER}.active_citizens", return_value=self.FLEET),
             patch(f"{HANDLER}.citizen_class_for", side_effect=lambda p: self.CLASSES[f"@{p.name}"]),
             patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
-            patch(WAKE_SEAM, return_value=(FakeStatus("woken"), True)) as mock_wake,
+            patch(WAKE_SEAM, return_value=(FakeStatus("woken"), True), side_effect=wake_error) as mock_wake,
         ):
             results = run_module.run_tick()
         return results, mock_wake, mock_save
@@ -610,7 +610,7 @@ class TestRoundsNight:
         assert mock_wake.call_args.args[0] == "@ai_mail", "@aardvark/@abacus sort first; registry order picks @seedgo"
         assert mock_save.called
 
-    def test_the_wake_carries_patricks_ruling(self):
+    def test_the_wake_carries_the_owners_ruling(self):
         _results, mock_wake, _save = self._tick({}, self.night(1))
         kwargs = mock_wake.call_args.kwargs
 
@@ -622,6 +622,19 @@ class TestRoundsNight:
         assert "ROUNDS for @ai_mail." in kwargs["custom_message"]
         assert "{branch}" not in kwargs["custom_message"]
         assert kwargs["wake_back"] is False, "the daemon is never woken back after a rounds night"
+
+    def test_a_rounds_night_lands_in_run_log(self, caplog):
+        with caplog.at_level("INFO"):
+            self._tick({}, self.night(1))
+
+        assert "[run] Fired @daemon/rounds: woken" in caplog.text
+
+    def test_a_failed_rounds_night_lands_in_run_log(self, caplog):
+        with caplog.at_level("INFO"):
+            results, _wake, _save = self._tick({}, self.night(1), wake_error=RuntimeError("quota"))
+
+        assert results["failed"] == 1
+        assert "[run] Failed to fire @daemon/rounds: wake error for @ai_mail: quota" in caplog.text
 
     def test_the_pointer_advances_and_the_next_night_serves_the_next_citizen(self):
         runstate = {}
