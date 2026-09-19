@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Medic — error detection and dispatch
 
 **Branch** trigger · **Code** `apps/modules/medic.py`, `apps/handlers/medic_state.py`, `apps/handlers/events/error_detected.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The verbs are in `drone @trigger medic --help`; `drone @trigger medic status` reads the live
 state and the service. This page is the pipeline behind them and the doctrine each gate carries.

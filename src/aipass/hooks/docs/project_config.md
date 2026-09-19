@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Per-project config: the template, the trust hash, and the release notice
 
 **Branch** hooks · **Code** `.aipass/hooks.json`, `.aipass/project_hooks.json`, `apps/handlers/config/loader.py`, `apps/handlers/config/trust_registry.py`, `apps/modules/release_notice.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 `.aipass/hooks.json` decides what fires for a project; `.aipass/project_hooks.json` is the template `aipass init` stamps into a new one. Both are hash territory: any byte change to an enrolled `hooks.json` takes every hook dark until a human re-runs `aipass trust`.
 
@@ -88,4 +89,3 @@ Two doors, one code path:
 ## Related
 
 - [wiring.md](wiring.md) — the per-handler provider entries a new SessionStart or PreCompact handler needs
-- [known_issues.md](known_issues.md) — what is open

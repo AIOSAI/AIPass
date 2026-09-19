@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # The help chat, and its model
 
 *What answers `aipass help <question>` — and why there is no LLM behind it.*

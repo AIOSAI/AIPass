@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Sending, delivery and the message lifecycle
 
 **Branch** ai_mail · **Code** `apps/handlers/email/delivery.py`, `apps/handlers/email/send.py`, `apps/handlers/email/inbox_ops.py`, `apps/handlers/email/create.py`, `apps/handlers/email/reply.py`, `apps/handlers/email/format.py`, `apps/handlers/email/error_dispatch.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ## Listing Rules
 

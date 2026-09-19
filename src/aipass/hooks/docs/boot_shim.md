@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The boot shim — it edits your shell startup files
 
 **Branch** hooks · **Code** `tools/install_boot_shim.sh`, `apps/handlers/lifecycle/session_boot.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

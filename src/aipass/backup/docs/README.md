@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Depth for the `BACKUP` branch. The face is [../README.md](../README.md); the
@@ -15,4 +17,3 @@ live command surface is `drone @backup` and `drone @backup --help`.
 | [module_fence.md](module_fence.md) | The handlers access guard and its test rules |
 | [path_resolution.md](path_resolution.md) | Why nothing here calls `resolve()` at import |
 | [tests.md](tests.md) | Running the suite, and what it is careful about |
-| [known_issues.md](known_issues.md) | Defects reproduced live, open and cured |

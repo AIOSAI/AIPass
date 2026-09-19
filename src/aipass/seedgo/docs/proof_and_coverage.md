@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # Proof, coverage and the test lanes
 
 **Branch** seedgo · **Code** `apps/handlers/aipass_proof/`, `apps/handlers/test_map/`,
 `apps/handlers/test_inventory/`, `apps/handlers/shadow_cycle/`, `apps/handlers/audit_tests/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Four different questions live here, and they are genuinely different. The verbs are in
 `drone @seedgo --help`.
@@ -23,8 +24,7 @@ auditor rather than a branch.
 | `readme_currency.py` | README freshness against its own markers |
 
 The verdict is CERTIFIED or NOT CERTIFIED for the whole pack — a single failing validator
-withholds certification, deliberately. Seedgo does not currently certify its own pack; the
-reasons, each one measured, are in [tech_debt.md](tech_debt.md).
+withholds certification, deliberately. Seedgo does not currently certify its own pack.
 
 ---
 
@@ -113,4 +113,3 @@ loosen the equality to keep the board green.
 
 - [pytest_quality.md](pytest_quality.md) — the rules the weekly score runs
 - [aipass_standards.md](aipass_standards.md) — the pack the proof lane audits
-- [tech_debt.md](tech_debt.md) — why proof says NOT CERTIFIED

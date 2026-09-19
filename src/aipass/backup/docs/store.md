@@ -26,7 +26,7 @@ set was exactly `config.json`, `snapshots/`, `logs/`; `timestamps.json`,
 **`timestamps.json` is not a record of when backups ran.** It maps each relative
 path to the mtime the versioned engine last saw (`handlers/state/timestamps.py`),
 which is how "changed since last run" is decided. The *when-did-a-backup-run*
-clock is a separate, branch-global file — see [known issues](known_issues.md).
+clock is a separate, branch-global file.
 
 **Shared namespace:** `.backup/` is NOT exclusive to @backup. Three writers use it:
 - **@backup** — snapshot/versioned stores at a registered project root

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The test-write gate
 
 **Branch** hooks · **Code** `apps/handlers/security/testwrite_gate.py`, `apps/modules/testgate_policy.py`, `apps/modules/testwrite_targets.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 
@@ -78,4 +79,3 @@ correct inside AIPass, wrong advice for an unrelated project that happens to own
 
 - [bash_writes.md](bash_writes.md) — the scripted lane this gate also reads
 - [project_config.md](project_config.md) — the template entry that makes the ruling fleet-wide
-- [known_issues.md](known_issues.md) — the false fires on the interpreter lane

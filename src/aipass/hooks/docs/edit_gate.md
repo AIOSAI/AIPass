@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The edit gate — who may write whose files
 
 **Branch** hooks · **Code** `apps/handlers/security/edit_gate.py`, `apps/modules/write_ownership.py`, `apps/modules/admin_seat.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

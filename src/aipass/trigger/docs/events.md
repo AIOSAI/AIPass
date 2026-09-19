@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Events — what fires, what listens, and what only looks like an event
 
 **Branch** trigger · **Code** `apps/handlers/events/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 `drone @trigger list` prints the live event and handler count; this page is the trigger and
 the action behind each row, plus the rows that exist as vocabulary only.
@@ -99,4 +100,3 @@ events stay in the vocabulary and fire into an empty handler list — `fire()` r
 - [event_bus.md](event_bus.md) — `fire`/`on`/`off`, handler isolation, per-handler data contracts
 - [medic.md](medic.md) — the dispatch pipeline behind `error_detected`
 - [error_catchup.md](error_catchup.md) — the only listener on `startup`
-- [known_issues.md](known_issues.md) — the stub handler and the advertised-but-unfired name

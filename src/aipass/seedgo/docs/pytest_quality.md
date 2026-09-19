@@ -1,9 +1,10 @@
+[<- Back to the README](../README.md)
+
 # pytest_quality — the v5 test-quality pack
 
 **Branch** seedgo · **Pack** `apps/handlers/pytest_quality_standards/` · **Verb** `drone @seedgo audit pytest_quality [@branch]`
 **Live roster** `drone @seedgo standards_query pytest_quality_standards`
 **Status** shadow — it scores and gates nothing (`pack.json` says so, with the reason).
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

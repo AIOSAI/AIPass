@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The vector lane
 
 **Branch** memory · **Code** `apps/modules/search.py`, `apps/handlers/vector/`, `apps/handlers/storage/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Everything below is the machinery *behind* `drone @memory search "query"` and
 `drone @memory verify FPLAN-XXXX` — how text becomes vectors, where the model choice lives, and

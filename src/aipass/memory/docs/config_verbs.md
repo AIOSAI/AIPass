@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Rollover limit config verbs
 
 **Branch** memory · **Code** `apps/modules/rollover.py` (the config verbs), `apps/handlers/json/config_loader.py`, `apps/handlers/json/budget.py`, `apps/handlers/cli/json_flag.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 `drone @memory config` is the verb surface over the rollover entry-count limits in
 `memory.config.json`, so nothing hand-edits that file (DPLAN-0302). @api execs these verbs to serve

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Wake lanes: admin, cross-project, @all, and the daemon
 
 **Branch** ai_mail · **Code** `apps/handlers/dispatch/wake.py`, `apps/modules/dispatch.py`, `apps/handlers/dispatch/daemon.py`, `apps/handlers/email/delivery.py`, `apps/handlers/users/verified_caller.py`, `apps/handlers/email/reply.py`, `apps/handlers/registry/read.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 
@@ -182,4 +183,3 @@ The polling daemon (`daemon.py`) watches inboxes for `auto_execute` dispatch ema
 - [wake_pipeline.md](wake_pipeline.md)
 - [identity_and_boundaries.md](identity_and_boundaries.md)
 - [sending_and_delivery.md](sending_and_delivery.md)
-- [known_issues.md](known_issues.md)

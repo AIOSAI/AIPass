@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The service and the reload sentinel
 
 **Branch** trigger · **Code** `apps/log_watcher_service.py`, `apps/handlers/service_control.py`, `apps/handlers/reload_sentinel.py`, `templates/trigger-log-watcher.service.template`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Persistent log watching runs as a systemd user unit, `trigger-log-watcher.service`. The unit
 file is installed from `templates/` on first need and the process handles SIGTERM/SIGINT for

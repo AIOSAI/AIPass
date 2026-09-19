@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Dashboard caps — the contract for every section writer
 
 `DASHBOARD.local.json` is read by its branch on every greeting, so its size is a

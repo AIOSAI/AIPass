@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The CLI contract
 
 How daemon's shared argument gate refuses unknown commands and flags, and what the two retired verbs still do when called.
-
-[<- daemon README](../README.md)
 
 ---
 

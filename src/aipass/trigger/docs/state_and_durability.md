@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # State files, the trio doctrine, and durability
 
 **Branch** trigger · **Code** `apps/config.py`, `apps/handlers/json/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Every runtime file this branch owns lives in `trigger_json/`, except the log watcher's own
 position file at the branch root. This page is the naming rule that keeps live state off the

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Subprocess timeouts — a hang guard, not a performance budget
 
 **Branch** drone · **Code** `apps/handlers/executor.py`, `apps/modules/router.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Routed commands run with a timeout resolved in this order — **explicit flag > per-command policy >
 default**:

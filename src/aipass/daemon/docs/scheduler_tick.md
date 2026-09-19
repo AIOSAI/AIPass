@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Scheduler Tick
 
 How a scheduler tick fires a job, what each fire outcome consumes, how the scheduled lane differs from an interactive one, how jobs are staggered, and how run.py's code is organized.
-
-[<- daemon README](../README.md)
 
 ---
 

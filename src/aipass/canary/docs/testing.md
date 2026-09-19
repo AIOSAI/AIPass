@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Testing
 
 How to run this branch's suite, what runs it in continuous integration, and the

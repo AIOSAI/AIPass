@@ -108,7 +108,6 @@ Depth lives in [docs/](docs/), one page per command group:
 | [baud_phone_face.md](docs/baud_phone_face.md) | Fetch, verify, unpack, swap, point — and every refusal |
 | [admin_setup.md](docs/admin_setup.md) | The admin lane: the five legs, the threat model, lighting it |
 | [shared_contract.md](docs/shared_contract.md) | `shared/`, the part of this branch @spawn imports |
-| [known_issues.md](docs/known_issues.md) | Open items, each verified against live code |
 | [probe_hygiene.md](docs/probe_hygiene.md) | How this branch probes the system without mutating it |
 
 ## Integration Points

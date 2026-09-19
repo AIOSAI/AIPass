@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `AIPASS` branch.
@@ -25,5 +27,4 @@ the depth behind it.
 | [baud_phone_face.md](baud_phone_face.md) | Fetch, verify, unpack, swap, point — and every refusal |
 | [admin_setup.md](admin_setup.md) | The admin lane: the five legs, the threat model, lighting it |
 | [shared_contract.md](shared_contract.md) | `shared/`, the part of this branch @spawn imports |
-| [known_issues.md](known_issues.md) | Open items, each verified against live code |
 | [probe_hygiene.md](probe_hygiene.md) | How this branch probes the system without mutating it |

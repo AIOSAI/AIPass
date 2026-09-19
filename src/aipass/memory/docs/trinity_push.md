@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The trinity push
 
 **Branch** memory · **Code** `apps/modules/push.py`, `apps/handlers/templates/trinity_push.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 `drone @memory push` is the one lane that brings a branch's `.trinity/` files to the trinity
 standard (DPLAN-0318, built 2026-08-27). Per branch it does exactly three things:
@@ -152,7 +153,7 @@ a branch never ends up with one canonical file and one drifted one.
   terminal.
 - **A fleet write requires `--confirm`.** Encoding the gate as a flag rather than as an operator's
   memory is the difference between a rule and a hope; this branch has already demonstrated the
-  alternative (see the `push` alias note in [known_issues.md](known_issues.md), now cleared).
+  alternative.
 
 ---
 
@@ -208,4 +209,3 @@ re-run that night and is carried forward from the 08-27 build.
 - [trinity_standard.md](trinity_standard.md) — the standard this lane pushes to
 - [templates_and_tabs.md](templates_and_tabs.md) — the gold templates, the `*_meta` tabs, the receipt
 - [vector_search.md](vector_search.md) — where a pruned entry lands and how it comes back
-- [known_issues.md](known_issues.md) — the standing defects, including this lane's cleared ones

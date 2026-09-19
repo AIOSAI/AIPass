@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The kernel sandbox (srt/bwrap)
 
 **Branch** hooks · **Code** `apps/modules/sandbox.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

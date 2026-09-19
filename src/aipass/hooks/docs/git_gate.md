@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The git gate
 
 **Branch** hooks · **Code** `apps/handlers/security/git_gate.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 
@@ -20,7 +21,7 @@ measured 2026-09-05 by calling `_all_git_reads()` directly: `git tag --sort=…`
 `git remote -v`, `git config --get …`, `git stash list`, `git reflog`, `git worktree list` and
 `git notes list` are all **blocked**. This surprised @devpulse live on `git tag --sort` (2026-09-05).
 The earlier wording here said "status, log, diff, show, blame, grep, **etc.**", which read as an open
-set; it is not one. Whether the list should grow is a code question, open — see [known_issues.md](known_issues.md).
+set; it is not one. Whether the list should grow is a code question, open.
 
 **What it reads is code, not data (1.1.0, 2026-09-16).** Before matching, the command goes through
 `bash_writes.code_text()`, the branch's one shell reader: a heredoc body whose consumer only reads it (a
@@ -35,8 +36,7 @@ command to be an allowed verb, so `git status && git tag` is refused whole.
 
 **What it protects:** Edits to `.claude/settings.json`, `.claude/hooks/`, and `.git/hooks/` — the enforcement layer itself.
 The path is matched with `\` read as `/` and case-insensitively (1.2.0). Before that, a Windows backslash
-path never matched and the edit was allowed. See [known_issues.md](known_issues.md), "When the
-host-derived value was right".
+path never matched and the edit was allowed.
 
 **Disabling for a project:** Set `git_gate.enabled` to `false` in your project's `.aipass/hooks.json`. This disables git enforcement in isolation — all other hooks (edit_gate, rm_gate, prompt injection, etc.) continue to work normally. No sync, rebase, or PR flows depend on git_gate being active; those are handled independently by `drone @git`.
 
@@ -55,5 +55,4 @@ host-derived value was right".
 ## Related
 
 - [edit_gate.md](edit_gate.md) — the write fence that runs beside it on the same event
-- [known_issues.md](known_issues.md) — the closed allow-list, still open
 - [bash_writes.md](bash_writes.md) — the shell reader that tells code from data

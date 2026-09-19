@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `memory` branch — the **depth** layer of the DPLAN-0347 contract:
@@ -19,7 +21,6 @@ shelf is committed — write it as if it ships.
 | [vector_search.md](vector_search.md) | The vector lane: subprocess isolation, `vectorize_and_store`, anchored plan-ID matching |
 | [cli_surface.md](cli_surface.md) | How this branch's CLI behaves: exit codes on an unknown argument, help flags, `watch` as a module, and why a correct refusal must not become a runaway log |
 | [quality_and_proof.md](quality_and_proof.md) | How this branch's suite is judged, what a parked test costs, and why dead code is archived rather than deleted |
-| [known_issues.md](known_issues.md) | Known issues, each with the measurement behind it |
 
 The live inventory of modules and commands is not written down here — it is `drone @memory` and
 `drone @memory --help`, generated from code.

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The git surface
 
 **Branch** api · **Code** `apps/handlers/host/git_reads.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

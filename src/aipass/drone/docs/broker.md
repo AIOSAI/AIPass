@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # The broker — a delete lane with a server-side path check
 
 **Branch** drone · **Code** `apps/modules/broker.py`, `apps/handlers/broker/` (daemon, client,
 path_resolver, protocol)
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The broker deletes on behalf of an HMAC-authenticated requester over a unix socket, with a typed
 JSON-line protocol and an inherited-fd transport. It records deletions like the plain verb does

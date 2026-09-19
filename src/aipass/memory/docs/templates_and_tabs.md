@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Gold templates and the state tabs
 
 **Branch** memory · **Code** `apps/modules/templates.py`, `apps/handlers/templates/`, `apps/handlers/tracking/tab_renderer.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The gold templates in `memory/templates/` own the *prose* of every branch's `.trinity/` files;
 `memory.config.json` owns the *numbers*; the `*_meta` tabs are where the two meet and become an

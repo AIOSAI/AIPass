@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Trust, and the projects that carry it
 
 *Which projects the hook engine will load, the hash that decides it, and the

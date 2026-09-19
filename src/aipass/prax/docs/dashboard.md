@@ -1,9 +1,8 @@
+[<- Back to the README](../README.md)
+
 # dashboard — refresh, template, write-through
 
 How a branch dashboard is built, pushed and updated, and the programmatic API other branches call.
-
-Moved out of `README.md` on 2026-09-15 (DPLAN-0347, the layer contract): the README is the
-face, the depth lives here. Back to the [branch README](../README.md).
 
 ---
 

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Why this branch is shaped the way it is
 
 **Branch** api · **Code** `apps/` (the record behind the code)
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

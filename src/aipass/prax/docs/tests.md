@@ -1,9 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Tests — the suite and its conventions
 
 How the suite is organised, what the fixtures guarantee, and how to run it.
-
-Moved out of `README.md` on 2026-09-15 (DPLAN-0347, the layer contract): the README is the
-face, the depth lives here. Back to the [branch README](../README.md).
 
 ---
 

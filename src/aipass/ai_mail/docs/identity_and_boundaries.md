@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Sender identity, project boundaries and the registry walk
 
 **Branch** ai_mail · **Code** `apps/handlers/users/branch_detection.py`, `apps/handlers/email/delivery.py`, `apps/handlers/paths.py`, `apps/handlers/users/verified_caller.py`, `apps/handlers/registry/read.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/email/reply.py`, `apps/handlers/email/contacts.py`, `apps/handlers/__init__.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

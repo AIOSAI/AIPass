@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Architecture
 
 Directory layout, per-file responsibilities, and the module status table for the daemon branch.
-
-[<- daemon README](../README.md)
 
 ---
 
@@ -51,7 +51,7 @@ lost.
 | `timer_install.py` | systemd user timer install/uninstall |
 | `schedule.py` | (retired) prints migration notice only |
 | `actions.py` | (retired) prints migration notice only |
-| `wakeup_ops.py` | ORPHANED — imported by nothing, unroutable (see [known_issues.md](known_issues.md)) |
+| `wakeup_ops.py` | ORPHANED — imported by nothing, unroutable |
 | `.archive/` | scheduler_ops (archived) |
 
 ### apps/handlers/actions/

@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Cadence REDO brief — DPLAN-0200 WS-B (FPLAN-0249 reopen)
 
 Your cadence build passed 435 tests but is **BROKEN in the live environment** — confirmed by direct observation + 3 research sub-agents. The 435 tests lied because they modeled the **wrong execution model**. Fix-forward: commit 2bccf03 stays, build on top, no history surgery.

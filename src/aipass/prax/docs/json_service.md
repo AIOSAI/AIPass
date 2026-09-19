@@ -1,9 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The fleet json service
 
 The config/data/log triplet every branch writes through, its test seam, and the post-sweep bundle.
-
-Moved out of `README.md` on 2026-09-15 (DPLAN-0347, the layer contract): the README is the
-face, the depth lives here. Back to the [branch README](../README.md).
 
 ---
 

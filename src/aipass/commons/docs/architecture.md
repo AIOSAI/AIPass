@@ -58,8 +58,7 @@ accepting either a `.trinity/` or an `.aipass/` directory as the marker.
 `.trinity/` is gitignored and `.aipass/` is tracked, so a fresh checkout still
 resolves to the right file. If neither marker is found and `AIPASS_ROOT` is
 unset, `get_db()` raises `CommonsRootNotFound` naming both markers rather than
-opening an empty database somewhere else -- see
-[known_issues.md](known_issues.md) for the defect that behaviour replaced.
+opening an empty database somewhere else.
 
 ## Special mechanics
 

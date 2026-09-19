@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # The git interface — read doors, machine output, and the commit gate
 
 **Branch** drone · **Code** `apps/modules/git_module.py`, `apps/handlers/git/`,
 `apps/handlers/json_flags.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 What each verb does once the tier gate in [git_access.md](git_access.md) has let it through. The
 verb list and its flags are `drone @git --help`.

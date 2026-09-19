@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Command surface
 
 What the entry point routes, what it answers, and what it exits with.

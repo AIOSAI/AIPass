@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The engine
 
 **Branch** hooks · **Code** `apps/modules/engine.py`, `apps/handlers/config/output_merge.py`, `apps/handlers/module_root.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The dispatch path from a normalized event to a handler, how the stdouts become one document, and why every module in this branch must import in a process whose working directory is gone.
 

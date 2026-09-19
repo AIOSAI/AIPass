@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # `rm` and the record — every delete leaves one
 
 **Branch** drone · **Code** `apps/modules/rm.py`, `apps/handlers/rm_handler.py`,
 `apps/handlers/deletion_log.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 `drone rm` is the fleet's only sanctioned delete path — raw recursive `rm` is gate-blocked — which
 makes it the choke point where the record belongs. The owner's ruling: *"if something deletes, there
@@ -41,7 +42,7 @@ Four things worth knowing:
   optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon
   can serve a repository it is not standing in; resolving the store from cwd there files the record
   under the standing project instead — which is exactly how a sandbox suite's deletions came to sit
-  in this ledger (see [known_issues.md](known_issues.md)). `AIPASS_DELETION_LOG` still outranks
+  in this ledger. `AIPASS_DELETION_LOG` still outranks
   both, so the test and container seam cannot be defeated by a lane naming its own root. `rm`
   passes nothing and keeps the cwd walk, which is correct for it: the operator IS standing in the
   project they are deleting from.
@@ -158,4 +159,3 @@ run: the number is a moment, the command is the truth.
 
 - [broker.md](broker.md) — the other delete lane, and how it verifies a path
 - [caller_identity.md](caller_identity.md) — where the `caller` field comes from
-- [known_issues.md](known_issues.md) — the forged records in the live store

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The CLI contract: help flags, exit codes, output ordering
 
 **Branch** ai_mail · **Code** `apps/ai_mail.py`, `apps/handlers/cli/help_flags.py`, `apps/modules/email.py`, `apps/modules/dispatch.py`, `apps/modules/email_send.py`, `apps/handlers/email/send.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ## Help Flags — Explain, Never Execute
 
@@ -92,5 +93,3 @@ prints and the exit code is right.
   help-flag and exit-code rules guard.
 - [wake_pipeline.md](wake_pipeline.md) — what a `--help`-gate miss would have triggered:
   sending the mail and waking the branch it was asked to describe.
-- [known_issues.md](known_issues.md) — `dispatch wake`'s output-ordering issue (the
-  failure line pointing "above" the steps) is tracked there, open under APLAN-0006.

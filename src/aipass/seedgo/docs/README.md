@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `seedgo` branch — the **depth** layer of the DPLAN-0347
@@ -15,7 +17,6 @@ this shelf is committed — write it as if it ships.
 | [audit_engine.md](audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |
 | [checklist_and_hooks.md](checklist_and_hooks.md) | The per-file checklist lane and the PostToolUse hook that runs it |
 | [proof_and_coverage.md](proof_and_coverage.md) | Proof certification, `test_map`, `test-inventory`, `audit-tests`, the weekly shadow cycle |
-| [tech_debt.md](tech_debt.md) | Known issues, each with the measurement behind it; the standing record is APLAN-0005 |
 
 The live inventory of modules, packs and commands is not written down here — it is
 `drone @seedgo` and `drone @seedgo --help`, generated from code.

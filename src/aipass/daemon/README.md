@@ -79,7 +79,6 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/monitoring.md](docs/monitoring.md) | Activity reports, branch health, and memory-entry health through @memory |
 | [docs/cli_and_arguments.md](docs/cli_and_arguments.md) | The refusal contract for unknown verbs and arguments, and the retired verbs |
 | [docs/testing.md](docs/testing.md) | How the suite is run and judged, the two rules a test here may not break, and safe mutation runs |
-| [docs/known_issues.md](docs/known_issues.md) | What is open, what was closed and kept for the lesson, and the retired plugin system |
 
 ---
 

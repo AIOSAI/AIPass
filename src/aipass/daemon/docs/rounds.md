@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Nightly Rounds
 
 How the nightly rounds job wakes one citizen a night for a maintenance turn, and what scope and budget apply to it.
-
-[<- daemon README](../README.md)
 
 ---
 

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Provider wiring and events
 
 **Branch** hooks · **Code** `apps/handlers/bridges/`, `.claude/provider_manifest.json`, `.aipass/hooks.json`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Which events exist, which shape each one is wired in, and what a new handler needs before it fires. The live verb for checking a wire is `drone @hooks verify`.
 

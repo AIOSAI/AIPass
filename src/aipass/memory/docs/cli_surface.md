@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The CLI surface
 
 **Branch** memory · **Code** `apps/memory.py`, `apps/handlers/cli/`, `apps/modules/watch.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 How this branch's entry point routes, refuses, exits and logs. The verb list itself is
 `drone @memory --help`; the bare `drone @memory` starts the watcher and prints the live
@@ -90,4 +91,3 @@ All six are absolute now, and a contract test scans the whole directory.
 - [rollover_pipeline.md](rollover_pipeline.md) — the engine `watch` and `rollover` drive
 - [config_verbs.md](config_verbs.md) — `drone @memory config` and the `--json` machine surface
 - [quality_and_proof.md](quality_and_proof.md) — the contract tests named above
-- [known_issues.md](known_issues.md) — what is still open on this surface

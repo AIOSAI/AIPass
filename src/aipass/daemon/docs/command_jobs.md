@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Command Jobs
 
 How a scheduled job runs a drone command instead of waking an agent, and the rules that keep it safe.
-
-[<- daemon README](../README.md)
 
 ---
 

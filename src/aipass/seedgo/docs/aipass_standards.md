@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # aipass_standards — the checker pack
 
 **Branch** seedgo · **Pack** `apps/handlers/aipass_standards/` · **Verb** `drone @seedgo audit aipass [@branch]`
 **Live roster** `drone @seedgo standards_query aipass_standards` — generated from the directory, never from this page.
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 
@@ -111,7 +112,7 @@ name **`ruff`** — that is what the audit and the checklist display. Its conten
 are `ruff_check_content.py` / `ruff_check.md`, so the query surface lists and accepts
 **`ruff_check`**: `drone @seedgo standard ruff` answers "Unknown standard". The name the audit
 shows you is not the name the query takes, and the `triplet` proof reports the pair as two
-half-standards. Tracked in APLAN-0005; see [tech_debt.md](tech_debt.md).
+half-standards. Tracked in APLAN-0005.
 
 `drone @seedgo standard` is pack-agnostic and lists the union of all four packs;
 `drone @seedgo standards_query aipass_standards` lists this one. Both read names from

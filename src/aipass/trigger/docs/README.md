@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # trigger docs
 
 Depth for the trigger branch — one file per module or handler group, each small enough to
@@ -15,4 +17,3 @@ read in one pass. The face is [../README.md](../README.md); the live inventory i
 | [error_catchup.md](error_catchup.md) | The startup catch-up scan and why the cursor only moves on a completed scan |
 | [service_and_reload.md](service_and_reload.md) | The systemd user unit, the systemd probe, and the reload sentinel |
 | [state_and_durability.md](state_and_durability.md) | `trigger_json/`, the trio-filename doctrine, the migration, atomic writes and locking |
-| [known_issues.md](known_issues.md) | Open defects with their measurements, and what the standards audit means here |

@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # The checklist lane and the hook that runs it
 
 **Branch** seedgo · **Code** `apps/modules/checklist.py`, `apps/handlers/cli/help_flags.py`
 **Verb** `drone @seedgo checklist <file|dir>`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

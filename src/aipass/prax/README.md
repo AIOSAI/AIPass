@@ -116,7 +116,6 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/json_service.md](docs/json_service.md) | The config/data/log triplet every branch writes through, and its test seam |
 | [docs/architecture.md](docs/architecture.md) | How a command reaches a handler: router, unknown-argument gate, exit seam, help behaviour, status sync |
 | [docs/tests.md](docs/tests.md) | How the suite is organised, what the fixtures guarantee, how to run it |
-| [docs/known_issues.md](docs/known_issues.md) | Standing defects and single-machine readings, each with its measurement |
 
 ---
 

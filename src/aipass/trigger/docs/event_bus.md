@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The event bus
 
 **Branch** trigger · **Code** `apps/modules/core.py`, `apps/handlers/cli/help_flags.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The verbs are in `drone @trigger core --help`; `drone @trigger list` prints the live
 event/handler table. This page is what the bus guarantees and what it deliberately does not.

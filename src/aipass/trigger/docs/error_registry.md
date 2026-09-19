@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The error registry
 
 **Branch** trigger · **Code** `apps/handlers/error_registry.py`, `apps/handlers/error_reporter.py`, `apps/modules/errors.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The verbs are in `drone @trigger errors --help`; `drone @trigger errors stats` prints the
 live registry and breaker state. This page is the model behind them.

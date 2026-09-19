@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The external-repo door — `--repo <path>`
 
 **Branch** drone · **Code** `apps/handlers/git/repo_door.py`, `apps/modules/git_module.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Git in a repo that is not AIPass — a project inside the tree, a clone outside it — goes through one
 door, held by @devpulse's admin grant (DPLAN-0344, the owner's go 2026-09-13). Six verbs take

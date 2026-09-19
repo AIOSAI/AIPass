@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Prompt injection: the caps, the cadence, the alerts
 
 **Branch** hooks · **Code** `apps/modules/grounding_content.py`, `apps/modules/cadence.py`, `apps/handlers/prompt/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Every grounding block is rendered under a number, and the number is read from its owner rather than copied here.
 

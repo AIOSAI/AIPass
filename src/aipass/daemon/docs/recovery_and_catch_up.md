@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Recovery and Catch-Up
 
 How the scheduler detects a missed tick window, queues and drains catch-up wakes, and tells the truth about lost time without replaying it.
-
-[<- daemon README](../README.md)
 
 ---
 

@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # context_standards — the startup budget
 
 **Branch** seedgo · **Pack** `apps/handlers/context_standards/` · **Verb** `drone @seedgo audit context [@branch]`
@@ -5,7 +7,6 @@
 holds `README.md` and the branch prompt at their caps (see [The ratchet](#the-ratchet)).
 **Full rule** `apps/handlers/context_standards/startup_budget.md` (scoring groups, failure
 modes, what the rule deliberately does not claim). This page is the short read.
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

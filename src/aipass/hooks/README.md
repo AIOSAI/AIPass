@@ -131,7 +131,6 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |
 | [docs/boot_shim.md](docs/boot_shim.md) | The one script here that writes outside the repo |
-| [docs/known_issues.md](docs/known_issues.md) | Open defects and stated-not-fixed items, each with its measurement |
 | [docs/cadence_investigation.md](docs/cadence_investigation.md) | The per-turn injection counter and why it is keyed per session |
 | [docs/cadence_redo_brief.md](docs/cadence_redo_brief.md) | The brief that rebuilt cadence after the suite modelled the wrong execution model |
 

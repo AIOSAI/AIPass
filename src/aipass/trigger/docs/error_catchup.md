@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The startup catch-up, and when the cursor moves
 
 **Branch** trigger · **Code** `apps/handlers/events/startup.py`, `apps/modules/medic.py` (`run_error_catchup`), `apps/handlers/watchers/log_watcher.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The catch-up covers the window in which no watcher was up. This page is who runs it, why the
 cursor is held back when a scan does not complete, and what that costs.

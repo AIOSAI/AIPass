@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The trinity standard
 
 **Branch** memory · **Code** `apps/handlers/json/entry_limits.py`, `apps/handlers/json/memory_files.py`, `apps/handlers/json/config_loader.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 DPLAN-0318, built 2026-08-25. The standard has one rule: **numbers come from `memory.config.json`,
 prose comes from `memory/templates/*.template.json`, entry content comes from the agent** — and

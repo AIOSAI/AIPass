@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The memory lane — shell refusal, tripwire, and the `.trinity` caps
 
 **Branch** hooks · **Code** `apps/handlers/security/edit_gate.py`, @memory's `memory.config.json` → `entry_limits`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 How a write to `.trinity/local.json`, `observations.json` or `passport.json` is judged, on both lanes. Every cap named here is read from @memory's own module at call time; no number is copied into this branch.
 

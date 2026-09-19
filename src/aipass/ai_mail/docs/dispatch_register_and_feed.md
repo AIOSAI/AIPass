@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The dispatch register, completion reports and the notification feed
 
 **Branch** ai_mail · **Code** `apps/handlers/notify.py`, `apps/handlers/email/delivery.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/daemon.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/register.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

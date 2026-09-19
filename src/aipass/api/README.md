@@ -115,7 +115,6 @@ Depth lives in [docs/](docs/README.md), one file per surface or handler group:
 | [docs/git_remote.md](docs/git_remote.md) | The remote lane, its two fields, and why credentials never travel |
 | [docs/internals.md](docs/internals.md) | Import safety without a working directory, and the settings conformance corpus |
 | [docs/decisions.md](docs/decisions.md) | Why this branch is shaped the way it is — the incident record behind the code |
-| [docs/tech_debt.md](docs/tech_debt.md) | Known issues, each with its measurement |
 | [docs/SECURITY.md](docs/SECURITY.md) | The security posture of the host API and the credential store |
 
 ---

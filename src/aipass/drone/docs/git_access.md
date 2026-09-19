@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Git access — tiers, refusals, and the dev branch model
 
 **Branch** drone · **Code** `apps/plugins/devpulse_ops/auth.py`, `apps/modules/git_module.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Drone is the only git interface in AIPass: raw `git` and `gh` writes are blocked by a hook, and
 every verb arrives here. Which verbs exist is `drone @git --help`; who may run them is this page.

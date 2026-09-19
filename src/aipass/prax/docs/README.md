@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `PRAX` branch.
@@ -30,5 +32,3 @@ something breaks. Work in progress, research and dated one-offs belong in
 - [architecture.md](architecture.md) — how a command reaches a handler: router,
   unknown-argument gate, exit seam, help behaviour, status sync.
 - [tests.md](tests.md) — how the suite is organised and how to run it.
-- [known_issues.md](known_issues.md) — standing defects and single-machine
-  readings, each with its measurement.

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The remote git lane
 
 **Branch** api · **Code** `apps/handlers/host/git_reads.py` (remote verbs)
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

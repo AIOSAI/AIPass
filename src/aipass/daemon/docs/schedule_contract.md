@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Schedule Contract
 
 The job file schema, schedule types, optional fields, and wake options that define how a citizen's scheduled jobs behave.
-
-[<- daemon README](../README.md)
 
 ---
 

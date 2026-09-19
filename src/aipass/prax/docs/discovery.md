@@ -1,9 +1,8 @@
+[<- Back to the README](../README.md)
+
 # discovery — the module registry and its watcher
 
 The scheduled scan that builds the registry, and the watcher's own lifecycle events.
-
-Moved out of `README.md` on 2026-09-15 (DPLAN-0347, the layer contract): the README is the
-face, the depth lives here. Back to the [branch README](../README.md).
 
 ---
 

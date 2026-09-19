@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Autostart — the server comes back on its own
 
 **Branch** api · **Code** `apps/handlers/host/autostart.py`, `apps/modules/host_serve.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

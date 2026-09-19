@@ -70,7 +70,6 @@ The same index, in the docs directory itself: [docs/README.md](docs/README.md).
 | [rich_markup.md](docs/rich_markup.md) | Printing literal square brackets, what eats placeholders, and the rule for the fleet |
 | [testing_output.md](docs/testing_output.md) | Asserting on what is visible, not on raw bytes |
 | [json_handler.md](docs/json_handler.md) | The json shim, and why it may import prax when `apps/modules/` may not |
-| [known_issues.md](docs/known_issues.md) | Open items, and what is carried rather than measured |
 
 ## Integration Points
 

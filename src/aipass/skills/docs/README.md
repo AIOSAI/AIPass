@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # docs
 
 Public, tracked documentation for the skills branch — the depth behind
@@ -12,7 +14,6 @@ Public, tracked documentation for the skills branch — the depth behind
 | [telegram.md](telegram.md) | The retired Telegram bridge |
 | [dead_cwd.md](dead_cwd.md) | Importing without a readable working directory |
 | [json_handler.md](json_handler.md) | Why the JSON handler is a shim |
-| [known_issues.md](known_issues.md) | Carried issues, closed incidents, what is unverified |
 
 This is the only one of the branch's four side directories that ships —
 `docs.local/`, `dropbox/` and `artifacts/` are gitignored by design, so whatever

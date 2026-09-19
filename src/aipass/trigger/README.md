@@ -108,7 +108,6 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/error_catchup.md](docs/error_catchup.md) | The startup catch-up scan, and why the cursor moves only on a completed scan |
 | [docs/service_and_reload.md](docs/service_and_reload.md) | The systemd user unit, the systemd probe, the reload sentinel |
 | [docs/state_and_durability.md](docs/state_and_durability.md) | `trigger_json/`, the trio-filename doctrine, atomic writes and locking |
-| [docs/known_issues.md](docs/known_issues.md) | Open defects with their measurements, and what the standards audit means here |
 
 ---
 

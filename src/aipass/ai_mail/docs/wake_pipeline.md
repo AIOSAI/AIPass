@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The wake pipeline
 
 **Branch** ai_mail · **Code** `apps/modules/dispatch.py`, `apps/handlers/dispatch/wake.py`, `apps/handlers/dispatch/dispatch_monitor.py`, `apps/handlers/dispatch/daemon.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 
@@ -205,4 +206,3 @@ the dispatch that woke it sat in the inbox.
 - [identity_and_boundaries.md](identity_and_boundaries.md) — who may claim to be the sender a wake trusts
 - [sending_and_delivery.md](sending_and_delivery.md) — the delivery pipeline a dispatch rides in on
 - [cli_contract.md](cli_contract.md) — exit codes and the help-flag rule
-- [known_issues.md](known_issues.md) — open defects, all registered in APLAN-0006

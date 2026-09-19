@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The audit engine
 
 **Branch** seedgo · **Code** `apps/handlers/audit/`, `apps/handlers/bypass/`, `apps/modules/standards_audit.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Everything below is the machinery *behind* `drone @seedgo audit <pack> [@branch]`. The verbs
 themselves are in `drone @seedgo --help`; the bare `drone @seedgo` prints the live module and
@@ -47,7 +48,7 @@ globs `*_REGISTRY.json` rather than hardcoding a filename.
 The **audit** walks a branch's `apps/**/*.py`; `tests/` is not in its corpus. The
 PostToolUse **checklist** hook checks whatever file was just edited, including tests. A
 bypass rule can therefore be live in one lane and dead in the other — the mistake a naive
-rot detector makes (see [tech_debt.md](tech_debt.md)).
+rot detector makes.
 
 A pack declares its own corpus in `pack.json`, and the banner printed over its scores is that
 declaration, not the engine's file count.
@@ -124,8 +125,7 @@ still catches real errors while you write; only standards checks skip them. The 
 
 `diagnostics` is consulted as a standard but has no `*_check.py`: pyright runs through the
 audit pipeline (`apps/handlers/diagnostics/`, `apps/modules/diagnostics_audit.py`). Standalone
-diagnostics is disabled — see [tech_debt.md](tech_debt.md) for the `--help` line that still
-advertises a branch argument it will refuse.
+diagnostics is disabled.
 
 ---
 

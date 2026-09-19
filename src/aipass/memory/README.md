@@ -109,7 +109,6 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/vector_search.md](docs/vector_search.md) | The vector lane: subprocess isolation, `vectorize_and_store`, plan-ID matching |
 | [docs/cli_surface.md](docs/cli_surface.md) | How this branch's CLI behaves: exit codes, help flags, and why a correct refusal must not become a runaway log |
 | [docs/quality_and_proof.md](docs/quality_and_proof.md) | How this branch's suite is judged, and what a parked test costs |
-| [docs/known_issues.md](docs/known_issues.md) | Known issues, each with the measurement behind it |
 
 ---
 

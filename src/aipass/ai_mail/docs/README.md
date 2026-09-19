@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked, public reference for `@ai_mail` — the inter-agent messaging branch. The index with

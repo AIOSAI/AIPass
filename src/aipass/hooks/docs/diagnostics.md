@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Diagnostics: the two log streams and the post-edit block
 
 **Branch** hooks · **Code** `apps/handlers/lifecycle/auto_fix.py`, `apps/modules/diagnostics_state.py`, `apps/handlers/config/diagnostics.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

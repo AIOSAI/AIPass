@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The host API — Stage 0
 
 **Branch** api · **Code** `apps/handlers/host/`, `apps/modules/host_api.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

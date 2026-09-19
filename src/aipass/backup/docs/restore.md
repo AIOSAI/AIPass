@@ -30,7 +30,7 @@ The versioned store wraps each file in a folder of its own name
 so the folder and the file inside it share a name, and a lookup has to match the
 folder by the path and the file by its basename. A name longer than 50
 characters is shortened for the folder only (`<name[:30]>_<md5[:8]>`), which the
-lookup does not reproduce — see [known issues](known_issues.md).
+lookup does not reproduce.
 
 ## Subcommands
 

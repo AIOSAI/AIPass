@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # init and install
 
 *The two setup doors: `aipass install` brings AIPass onto a machine,
@@ -6,8 +8,7 @@
 `aipass --help` is the authority on the top-level surface, and each command's
 own `--help` on its flags. This page carries what the help pages do not: the
 entry forms that route in the code, and which of them the help text still
-misses (the full list of those gaps is in
-[`known_issues.md`](known_issues.md)).
+misses.
 
 ## `aipass install` — one-command bootstrap
 

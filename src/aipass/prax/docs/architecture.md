@@ -1,9 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Architecture — routing, gates and seams
 
 How a command reaches a handler: the router, the unknown-argument gate, the exit seam, help behaviour, and the status module.
-
-Moved out of `README.md` on 2026-09-15 (DPLAN-0347, the layer contract): the README is the
-face, the depth lives here. Back to the [branch README](../README.md).
 
 ---
 

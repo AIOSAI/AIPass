@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Todos — the pad and the backlog
 
 **Branch** memory · **Code** `apps/modules/todo.py`, `apps/handlers/rollover/todo_roll.py`, `apps/handlers/rollover/todo_report.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The v2 pad and backlog landed 2026-09-15 (DPLAN-0345). A todo is a sticky note: one line of what to
 do — "Check on seedgo's errors in logs", "fix drone help". The pad holds a few; the ones that roll
@@ -130,4 +131,3 @@ backlog #2, #3, #4.
 - [trinity_push.md](trinity_push.md) — the other lane that moves todos off a pad
 - [rollover_pipeline.md](rollover_pipeline.md) — `rollover run` / `check` and the fleet walk
 - [config_verbs.md](config_verbs.md) — where the pad count is read from and why `set` refuses it
-- [known_issues.md](known_issues.md) — the PreCompact hook cannot roll a pad as wired today

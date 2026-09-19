@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # The ritual — updating a project's scaffold
 
 *Why a merge to main does not bring a project's scaffold forward, and the one

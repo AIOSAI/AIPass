@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The scripted lane — writes made through Bash
 
 **Branch** hooks · **Code** `apps/modules/bash_writes.py`, `apps/handlers/security/edit_gate.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

@@ -1,10 +1,11 @@
+[<- Back to the README](../README.md)
+
 # Routing and resolution
 
 **Branch** drone · **Code** `apps/drone.py`, `apps/modules/` (resolver, router, config, registry,
 discovery, module_registry, commands, scan), `apps/handlers/executor.py`,
 `apps/handlers/router_handler.py`, `apps/handlers/registry_handler.py`,
 `apps/handlers/generic_adapter.py`, `apps/handlers/help_flags.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 How an argument list becomes a running command. The verbs themselves are in `drone --help`;
 the bare `drone @drone` prints the live module inventory.

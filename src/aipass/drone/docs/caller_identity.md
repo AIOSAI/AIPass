@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Caller identity — who a routed command is attributed to
 
 **Branch** drone · **Code** `apps/handlers/router_handler.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Every routed command is attributed to a caller, stamped into `AIPASS_CALLER_BRANCH` and the
 `[CALLER:X]` log tag. Attribution only — nothing here grants authority; git's owner tier reads

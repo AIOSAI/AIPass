@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Monitoring and reports
 
 Home for the monitoring handlers — activity collection, red flags, memory health, and report generation — starting with memory entry health.
-
-[<- daemon README](../README.md)
 
 ---
 

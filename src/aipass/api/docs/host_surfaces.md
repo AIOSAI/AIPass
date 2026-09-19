@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The host surfaces — scopes, verbs, the face, the fleet, the terminal and uploads
 
 **Branch** api · **Code** `apps/handlers/host/` (`verbs.py`, `face.py`, `fleet.py`, `attach.py`, `pump.py`, `uploads.py`)
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

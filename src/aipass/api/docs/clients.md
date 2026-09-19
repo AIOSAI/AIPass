@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Cross-branch clients — the in-process Python API
 
 **Branch** api · **Code** `apps/modules/openrouter_client.py`, `google_client.py`, `secrets.py`, `bridge.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

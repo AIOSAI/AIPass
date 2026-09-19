@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Testing
 
 How the daemon test suite is run, and the two hard rules — no writes into another citizen's tree, no host state changes — that keep a mutation run from doing real damage.
-
-[<- daemon README](../README.md)
 
 ---
 

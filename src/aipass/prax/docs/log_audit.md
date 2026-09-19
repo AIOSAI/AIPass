@@ -1,9 +1,8 @@
+[<- Back to the README](../README.md)
+
 # log_audit and log_health — size, growth, rotation
 
 Log health summaries, runaway-growth rates, truncation, and the weekly tmp sweep the daemon runs.
-
-Moved out of `README.md` on 2026-09-15 (DPLAN-0347, the layer contract): the README is the
-face, the depth lives here. Back to the [branch README](../README.md).
 
 ---
 

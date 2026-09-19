@@ -1,8 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Fleet Inbox Sweep
 
 How the inbox-sweep hand tool wakes owners of stale unread mail across the whole fleet.
-
-[<- daemon README](../README.md)
 
 ---
 

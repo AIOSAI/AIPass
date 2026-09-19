@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Documentation files for the `cli` branch. Each page is linked from the branch
@@ -8,4 +10,3 @@ Documentation files for the `cli` branch. Each page is linked from the branch
 - [rich_markup.md](rich_markup.md) — literal brackets, and what eats placeholders
 - [testing_output.md](testing_output.md) — asserting on visible output
 - [json_handler.md](json_handler.md) — the json shim and the circular-import exception
-- [known_issues.md](known_issues.md) — open items

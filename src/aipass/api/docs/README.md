@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `API` branch — the depth that used to sit in the branch
@@ -14,7 +16,6 @@ is the face; these are what you open when something breaks.
 | [git_remote.md](git_remote.md) | The remote lane, its two fields, and why credentials never travel |
 | [internals.md](internals.md) | Import safety without a working directory, and the settings conformance corpus |
 | [decisions.md](decisions.md) | Why this branch is shaped the way it is — the incident record behind the code |
-| [tech_debt.md](tech_debt.md) | Known issues, each with its measurement |
 | [SECURITY.md](SECURITY.md) | The security posture of the host API and the credential store |
 
 Work in progress, research and dated one-offs belong in `docs.local/`, not here: this

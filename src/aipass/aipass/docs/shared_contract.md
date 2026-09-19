@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # `shared/` — the one part of this branch other branches import
 
 *Why `shared/` is stdlib-only by contract, and who breaks if it is not.*

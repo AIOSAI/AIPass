@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Quality and proof
 
 **Branch** memory · **Code** `tests/`, `tests/parked/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 How this branch's suite is judged, and the three rulings that shaped what "green" is allowed to
 mean here. No test count is written down in this document on purpose: the number is one
@@ -92,7 +93,7 @@ at 12 files that are no longer in the tree** — parked on
 `learnings/manager.py` / `architecture`, twice. This superseded the 08-25 reading of 37 rules across
 10 files, which was correct when taken and drifted with the template-lane retirement. The rules are
 inert — a bypass for an absent file suppresses nothing — but the registry is a record of a tree that
-stopped existing. Cleanup is an open item; see [known_issues.md](known_issues.md).
+stopped existing. Cleanup is an open item.
 
 ---
 
@@ -210,6 +211,5 @@ unreferenced". See that directory's README for the full method.
 
 ## Related
 
-- [known_issues.md](known_issues.md) — what is still open, with the measurement behind each one
 - [vector_search.md](vector_search.md) — the subprocess tier the parked in-process paths were replaced by
 - [trinity_push.md](trinity_push.md) — the lane whose proof-before-prune law the push tests pin

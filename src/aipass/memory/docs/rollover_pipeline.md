@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The rollover pipeline
 
 **Branch** memory · **Code** `apps/modules/rollover.py`, `apps/handlers/rollover/`, `apps/handlers/monitor/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 Everything below is the machinery *behind* `drone @memory rollover run|check|status` and the
 `watch` daemon that fires it. The verbs themselves are in `drone @memory --help`; the bare

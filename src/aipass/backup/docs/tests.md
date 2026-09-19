@@ -22,8 +22,7 @@ parametrised, so case counts run well ahead of function counts there.
 - **Live files.** The audit trail honours `AIPASS_TEST_LOG_DIR`, so a test run
   writes its operation trail into a sandbox rather than the branch's own
   `logs/operations.jsonl`. One live file is still rewritten by a full run, for a
-  reason that is a defect rather than a choice — see
-  [known issues](known_issues.md).
+  reason that is a defect rather than a choice.
 - **Real credentials.** A help-gate test once patched only one lane, so `all`
   fell through to live OAuth and rewrote the machine's real Google credentials
   file. The pins that closed it stay in `tests/test_cli_routing.py`.

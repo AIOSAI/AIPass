@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Log watching — two watchers, one owner per directory
 
 **Branch** trigger · **Code** `apps/handlers/log_watcher.py`, `apps/handlers/watchers/log_watcher.py`, `apps/modules/branch_log_events.py`, `apps/modules/log_events.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The branch watcher reads `src/aipass/*/logs/*.log` and `system_logs/*.log`, parses the prax
 line format, and fires `error_detected` and `warning_logged`. The centralized watcher module

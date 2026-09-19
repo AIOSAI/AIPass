@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Testing — how this branch's suite is run and judged
 
 **Branch** drone · **Code** `tests/`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 
@@ -87,9 +88,3 @@ A test that cannot fail is scenery. The bar in this branch is mutation: apply th
 source, run the targeted tests, expect red, restore. A pin that survives its mutant gets rewritten
 rather than counted — the commit subject cap shipped with one that passed a copied constant,
 because CPython interns small ints, and it was only the mutant that said so.
-
----
-
-## Related
-
-- [known_issues.md](known_issues.md) — what is measured and still open

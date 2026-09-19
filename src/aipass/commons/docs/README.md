@@ -29,7 +29,6 @@ number would go stale, the command that prints the live one is given instead.
 | [exit_codes.md](exit_codes.md) | The refusal contract: what each exit code means |
 | [introspection.md](introspection.md) | The two-tier introspection system and its gates |
 | [boardrooms.md](boardrooms.md) | Using an ordinary room for a design thread |
-| [known_issues.md](known_issues.md) | Live defects, cured shapes worth remembering, how to measure |
 
 ---
 

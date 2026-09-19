@@ -116,7 +116,6 @@ Read the one that broke.
 | [Location Discovery](docs/repo_root.md) | `repo_root.py`, the cross-platform test worlds, and the structural rules earned from reds a single-dimension test could not see |
 | [Argument Gate](docs/argument_gate.md) | Why an unrecognised argument refuses, the one gate every door routes through, and what "absolute" means in a shared registry |
 | [Dashboard Mirror](docs/dashboard_mirror.md) | The flow section contract, why `quick_status` is merged rather than replaced, and the caps mirrored from the dashboard owner |
-| [Known Issues](docs/known_issues.md) | Defects found by measurement and left standing on purpose, each with what was measured |
 
 Current state is never written down here; it is produced on demand.
 `drone @flow templates` lists the registered types, `drone @flow registry

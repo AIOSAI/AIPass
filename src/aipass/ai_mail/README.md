@@ -106,7 +106,6 @@ Depth lives in [docs/](docs/), one file per handler group, each small enough for
 | [docs/sending_and_delivery.md](docs/sending_and_delivery.md) | Listing rules, what a broadcast costs, repeat signals (`upsert_key`), the two message ids, refused sends and the mail lifecycle |
 | [docs/identity_and_boundaries.md](docs/identity_and_boundaries.md) | Sender identity, the verified-caller rail, cross-project mail and wakes, the import guard and the case-exact registry walk |
 | [docs/cli_contract.md](docs/cli_contract.md) | Help flags that explain instead of executing, the exit codes, output ordering, and why interactive send needs a terminal |
-| [docs/known_issues.md](docs/known_issues.md) | Open defects (registered in APLAN-0006), the corrections to earlier claims, and the bypass registry |
 | [docs/s84_multiline_reply_truncation.md](docs/s84_multiline_reply_truncation.md) | The multiline reply truncation defect and its fix |
 
 ---

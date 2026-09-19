@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Internals — import safety and the conformance corpus
 
 **Branch** api · **Code** `apps/handlers/__init__.py`, `apps/handlers/module_root.py`, `apps/handlers/host/settings.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 ---
 

@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `daemon` branch: the depth behind the face.
@@ -18,7 +20,6 @@ contract has to be read exactly:
 | [monitoring.md](monitoring.md) | Activity reports, branch health, memory-entry health |
 | [cli_and_arguments.md](cli_and_arguments.md) | The refusal contract, and the retired verbs |
 | [testing.md](testing.md) | How the suite is run and judged, and safe mutation runs |
-| [known_issues.md](known_issues.md) | What is open, what was closed, and the retired plugin system |
 
 The live inventory is not duplicated here: `drone @daemon` generates it from the code.
 Work in progress, research and dated one-offs belong in `docs.local/`, which is not tracked.

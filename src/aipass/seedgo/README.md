@@ -89,7 +89,6 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/audit_engine.md](docs/audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |
 | [docs/checklist_and_hooks.md](docs/checklist_and_hooks.md) | The per-file lane and the hook that runs it |
 | [docs/proof_and_coverage.md](docs/proof_and_coverage.md) | Proof certification, coverage mapping, the test inventory, the weekly cycle |
-| [docs/tech_debt.md](docs/tech_debt.md) | Known issues, each with its measurement; the standing record is APLAN-0005 |
 
 ---
 

@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # doctor
 
 *What `aipass doctor` checks, what each flag adds, and what it refuses to do

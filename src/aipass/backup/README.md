@@ -108,7 +108,6 @@ Depth lives in [docs/](docs/), one page per lane or handler group:
 | [module_fence.md](docs/module_fence.md) | The handlers access guard |
 | [path_resolution.md](docs/path_resolution.md) | Why nothing here resolves at import |
 | [tests.md](docs/tests.md) | Running the suite |
-| [known_issues.md](docs/known_issues.md) | Defects reproduced live, open and cured |
 
 ---
 

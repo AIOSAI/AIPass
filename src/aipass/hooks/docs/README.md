@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
 Tracked public reference for the `hooks` branch — the **depth** layer of the DPLAN-0347 contract: one
@@ -21,7 +23,6 @@ shelf is committed — write it as if it ships.
 | [diagnostics.md](diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [sandbox.md](sandbox.md) | The kernel filesystem boundary: policy generation, what is writable per role, and the launch seam |
 | [boot_shim.md](boot_shim.md) | The one script in this branch that writes outside the repo |
-| [known_issues.md](known_issues.md) | Open defects and stated-not-fixed items, each with its measurement |
 | [cadence_investigation.md](cadence_investigation.md) | The per-turn injection counter: session keying, the execution model, and the fragility that was already true |
 | [cadence_redo_brief.md](cadence_redo_brief.md) | The brief that rebuilt cadence after the suite modelled the wrong execution model — kept as the record of why the counter is deduped |
 

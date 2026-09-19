@@ -48,7 +48,7 @@ drone @flow --version                           # Version string
 `templates`, `scan`, `register`, `unregister`. The module's full name
 (`list_plans`, `close_plan`, …) resolves for `--help` but is rejected by the
 dispatcher — `post`/`post_close_runner` is the sole module accepting both. The
-`--help` screen claimed otherwise until 2026-09-15; see [Known Issues](known_issues.md).
+`--help` screen claimed otherwise until 2026-09-15.
 
 **A bare number is not an identity.** Every per-type registry numbers from
 `0001`, so `0012` names a row in each of them and a bare number resolves against

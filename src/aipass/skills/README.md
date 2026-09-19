@@ -82,7 +82,6 @@ re-derived from the real tree and read on every prompt.
 | [docs/telegram.md](docs/telegram.md) | The retired Telegram bridge: what retirement means here |
 | [docs/dead_cwd.md](docs/dead_cwd.md) | Importing without a readable working directory |
 | [docs/json_handler.md](docs/json_handler.md) | Why the JSON handler is a shim, and what may not be added to it |
-| [docs/known_issues.md](docs/known_issues.md) | Carried issues, closed incidents, and what is unverified |
 
 The same index, with the pages beside each other, is in [docs/](docs/).
 

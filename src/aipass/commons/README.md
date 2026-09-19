@@ -123,7 +123,6 @@ One page per command group or subsystem, in [docs/](docs/):
 | [exit_codes.md](docs/exit_codes.md) | The refusal contract |
 | [introspection.md](docs/introspection.md) | The two-tier introspection system |
 | [boardrooms.md](docs/boardrooms.md) | Using an ordinary room for a design thread |
-| [known_issues.md](docs/known_issues.md) | Live defects, and how to measure this branch |
 
 ---
 

@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # The escalation digest
 
 **Branch** trigger · **Code** `apps/modules/escalation.py`, `apps/handlers/escalation.py`
-**Moved out of README.md** 2026-09-15 (DPLAN-0347, the layer contract).
 
 The verbs are in `drone @trigger escalation --help`. This page is what the lane counts, what
 makes a signature, and every operator knob behind it.
