@@ -302,7 +302,9 @@ class TestOneFleetOneDefinition:
         assert memory_files.write_memory_file_simple(foreign, {"sessions": []}) is False
         assert foreign.read_bytes() == before
         assert sorted(p.name for p in foreign.parent.iterdir()) == ["local.json"], "a temp file was left behind"
-        errors = " ".join(str(call) for call in said.error.call_args_list)
+        # The rendered messages, never str(call): a call's repr doubles every
+        # backslash, so a Windows path is never found in it (CI red 35426157867).
+        errors = " ".join(str(arg) for call in said.error.call_args_list for arg in call.args)
         assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors
 
     def test_a_refused_write_is_recorded_in_the_operation_log(self, tmp_path, monkeypatch):
