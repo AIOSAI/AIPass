@@ -9,6 +9,12 @@ PyPI version — not the changelog header.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **ci: the GitHub Release body is cut under GitHub's 125,000-character cap instead of failing the release job** (PPLAN-0060; devpulse). The v2.8.11 tag built, attested and published to PyPI, then `gh release create` answered `HTTP 422: body is too long (maximum is 125000 characters)` — the 2026-09-19 CHANGELOG block is 144,571 characters, six times the last train's, and the awk extraction had no cap. `publish.yml` now truncates the notes on an entry boundary under 120,000 and closes with a line naming the full block in `CHANGELOG.md`. The v2.8.11 Release was created by hand from this seat with the same truncation and the run's `dist` artifact (wheel and sdist digests equal to PyPI's); its Sigstore bundles are NOT attached, since the signing step only runs on the tag push and a re-run of the failed job uses the tag's workflow. Whether `publish.yml` gains a dispatch door for re-attaching bundles to an existing release is the owner's call.
+
 ## [2026-09-19] — the diet-and-boundary train: the README leaves the startup read fleet-wide and eighteen faces shrink under a 10k cap with `--help` corrected on each, the docs page standard and the eight-section README shape scored by seedgo, the owner's name swept out of everything that ships with a ratchet behind it, memory's runtime write fence and the Vera Studio leak purged, the hooks edit gate reading the registries, the watchdog off the Monitor tool onto a once-wire, and eight citizens' Windows and CI cures (DPLAN-0347 / DPLAN-0348 / DPLAN-0349 / DPLAN-0350 / DPLAN-0351 / FPLAN-0593 / FPLAN-0622 / FPLAN-0628, merged as PR #770, v2.8.11)
 
 ### Added
