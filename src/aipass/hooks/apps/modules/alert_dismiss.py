@@ -112,7 +112,7 @@ def handle_command(command: str, args: list) -> bool:
     # _dismiss_alert computes the right answer at five sites and every False
     # used to die on this line: `drone @hooks dismiss nosuchid` printed "not
     # found" and exited 0, so a script could not tell a dismissal from a miss.
-    # Patrick's standing ruling — a refusal exits non-zero and names the reason.
+    # The owner's standing ruling — a refusal exits non-zero and names the reason.
     # Idiom is wire_verify.py:221-224; sys.exit rather than a return because
     # handle_command's bool means "I routed this", not "it worked".
     if not _dismiss_alert(args[0]):

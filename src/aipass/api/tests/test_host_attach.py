@@ -601,7 +601,7 @@ class TestTheRoomCanActuallyHearAResize:
     """
     The bug that made every resize a no-op, and the two halves of its fix.
 
-    @devpulse traced it on the live server while Patrick's phone painted 80
+    @devpulse traced it on the live server while the owner's phone painted 80
     columns into a 46-column screen. The evidence chain was: `stty` on the
     client tty read `0 0` at startup; a resize frame DID land in the kernel
     (`stty` then read the new size); and `tmux list-clients` stayed at 80x24
@@ -1821,7 +1821,7 @@ class TestAWatchIsNotAnchorTooling:
     The parked external-watch refusal, ruled against and measured out.
 
     I refused an external project's watch on the reasoning that "a watch is
-    anchor tooling — @prax monitors the repo it lives in". Patrick's ruling
+    anchor tooling — @prax monitors the repo it lives in". The owner's ruling
     ("I run more watchers, in aipass or external projects") sent me to measure
     it instead of arguing it, and the measurement killed the fence outright:
 
@@ -1917,7 +1917,7 @@ class TestOneRoomHonoursAnOutsideSeat:
     ONE ROOM, step 1 (DPLAN-0327). The phone attaches to where the agent
     ACTUALLY IS, not to a room rebuilt from its name.
 
-    On 2026-09-04 Patrick opened his aipass chat on the laptop and attached
+    On 2026-09-04 the owner opened his aipass chat on the laptop and attached
     from the phone to a blank terminal. `_room_for` composed `baud-<branch>`,
     `new-session -A` created that empty room on the spot, and the live seat was
     in the shim's own `aipass-<id>` session the whole time. DPLAN-0310 ruled on
@@ -2258,7 +2258,7 @@ class SilentRoom(StubSession):
 @fastapi_required
 class TestThePhoneCanMeasureItsOwnSocket:
     """
-    @baud's FPLAN-0446 r5 finding: the corpse frame on Patrick's seat.
+    @baud's FPLAN-0446 r5 finding: the corpse frame on the owner's seat.
 
     A phone whose peer vanishes WITHOUT a FIN — a tunnel dropped, a laptop
     slept, a NAT entry expired — reads its socket as OPEN forever. The browser

@@ -9,7 +9,7 @@
 """
 Tests for the config_loader handler (Phase 1 of FPLAN-0271).
 
-Doctrine (Patrick, S193): the JSON file is the runtime authority; code
+Doctrine (the owner, S193): the JSON file is the runtime authority; code
 carries DEFAULT_CONFIG so that file can be regenerated when lost.
 
 Covers:

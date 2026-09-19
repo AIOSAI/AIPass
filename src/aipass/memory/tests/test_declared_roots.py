@@ -8,7 +8,7 @@
 
 """Repos outside this one join the fleet by DECLARATION, never by being nearby.
 
-FPLAN-0460 phase 2. Patrick's ruling, verbatim: "if .daemon is present anywhere
+FPLAN-0460 phase 2. The owner's ruling, verbatim: "if .daemon is present anywhere
 on the machine and an agent exists there, daemon should be available - its really
 that simple." @devpulse gave the GO on the mechanism @drone and I reached
 independently: AIPass home declares which repo roots participate.
@@ -431,7 +431,7 @@ class TestTheLiveMachineIsReachable:
     """The acceptance case, driven against the REAL sibling repos on this disk.
 
     Deliberately does not write ``AIPASS_ROOTS.json`` into the repo: that file is
-    Patrick's to bless and populate, and a test that creates it would both
+    the owner's to bless and populate, and a test that creates it would both
     pre-empt him and make the anchor look self-installing. So the roots file is
     written to a throwaway copy of the repo root instead, pointed at the real
     external repos, which proves the reader against real registries and real

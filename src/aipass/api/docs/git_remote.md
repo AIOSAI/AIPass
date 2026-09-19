@@ -91,7 +91,7 @@ sent to them. A `detail` field on their side retires it, and has been asked for.
 **Every error answers `{"error": {"code", "message"}}` — including the ones this
 server does not raise.** Validation fires in *front* of every handler, so it used to
 emit FastAPI's `{"detail": [...]}`: a client coding to the documented shape lost the
-sentence on every validation error, on every route. @baud found it: Patrick's phone
+sentence on every validation error, on every route. @baud found it: the owner's phone
 read "HTTP 422" while the body named the exact field. Validation is now normalised
 into the envelope, `{"code": "invalid_request", "message": "image: Field required",
 "fields": [...]}`, the structured original kept beside the sentence: wider envelope,

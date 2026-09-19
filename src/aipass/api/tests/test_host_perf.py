@@ -9,7 +9,7 @@
 
 """Tests for the host API's cost doctrine (DPLAN-0305 Audit 2).
 
-Patrick, 2026-08-18: the phone lags. @devpulse audited and found three causes in
+The owner, 2026-08-18: the phone lags. @devpulse audited and found three causes in
 this branch, none of them exotic — the server was doing blocking work in the one
 place that must never block, re-walking the filesystem for a registry it already
 knew, and paying for the same 90ms process spawn twice per screen refresh.
@@ -107,7 +107,7 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> MagicMock
 
 ENVELOPE = {
     "project": "AIPASS",
-    "root": "/home/patrick/Projects/AIPass",
+    "root": "/home/someone/Projects/AIPass",
     "generated_at": "2026-08-18T09:00:00Z",
     "error": None,
     "live_agent_sessions": [],
@@ -312,7 +312,7 @@ class TestASlowReadDoesNotFreezeTheServer:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """The property Patrick feels: one slow card does not freeze the phone."""
+        """The property the owner feels: one slow card does not freeze the phone."""
         entered = threading.Event()
         release = threading.Event()
 

@@ -345,7 +345,7 @@ class TestRefreshPreservesTheSemantics:
 
 
 class TestNoHealthStamping:
-    """Patrick's ruling: status.health is deleted from the standard."""
+    """The owner's ruling: status.health is deleted from the standard."""
 
     def test_the_rollover_extractor_writes_no_status_block(self, monkeypatch):
         from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run

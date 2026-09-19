@@ -215,7 +215,7 @@ class TestHandle:
 
 class TestRemedyIsSatisfiable:
     """A gate must be satisfiable by an action it permits. Ruling (a), DPLAN-0310
-    (Patrick, 2026-08-18): one brain = one INTERACTIVE brain — a bg session is a
+    (the owner, 2026-08-18): one brain = one INTERACTIVE brain — a bg session is a
     job, not a seat, so it never gates at all. The previous pin (bg blocks with an
     honest cannot-stop message) is superseded by the ruling: an unsatisfiable
     block, however honestly worded, only teaches routing around the gate."""

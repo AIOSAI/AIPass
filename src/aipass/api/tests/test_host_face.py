@@ -277,7 +277,7 @@ class TestServingTheFace:
     """One origin: the page and the API answer on the same host."""
 
     def test_face_entry_serves_the_document_at_the_origin_root(self, client) -> None:
-        """The URL Patrick types is the URL that renders."""
+        """The URL the owner types is the URL that renders."""
         response = client.get("/")
 
         assert response.status_code == 200
@@ -393,7 +393,7 @@ class TestTheEntryDocumentIsNeverServedStale:
     """
     A stable name plus no cache-control is a stale bundle waiting to happen.
 
-    @baud measured it and Patrick paid for it on 2026-08-19: GET / answered 200
+    @baud measured it and the owner paid for it on 2026-08-19: GET / answered 200
     with etag and last-modified and NO cache-control, so RFC 9111 4.2.2
     heuristic freshness applies — a browser may treat the document as fresh for
     roughly 10% of its age since last-modified and serve location.reload()

@@ -27,7 +27,7 @@ exactly what makes them dangerous), a hostname is refused as ambiguous, and an
 address the machine does not actually hold is refused rather than quietly
 becoming something else.
 
-THE LOOPBACK GATE IS OPEN: LOOPBACK_ONLY has been False since 2026-08-14, Patrick's
+THE LOOPBACK GATE IS OPEN: LOOPBACK_ONLY has been False since 2026-08-14, the owner's
 ruling on the security review (FPLAN-0411 Phase 5). An address this machine holds
 is accepted, the tailnet one included; every other refusal above still stands.
 Read the flag's own comment before assuming more than that.
@@ -79,7 +79,7 @@ FACE_ENTRY = "phone.html"
 # automatic: fleet.py walks its lookup order on every request.
 BAUD_BIN_KEY = "baud_bin"
 
-# OPENED 2026-08-14 by Patrick's ruling on the Phase 5 security review (C1 audit
+# OPENED 2026-08-14 by the owner's ruling on the Phase 5 security review (C1 audit
 # shipped, C2 blast radius accepted in his words, C3 admission list verified by
 # devpulse: exactly two enrolled devices, both his).
 #

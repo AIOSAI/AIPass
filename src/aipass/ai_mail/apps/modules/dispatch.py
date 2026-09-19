@@ -134,7 +134,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 def _orchestrate_register() -> bool:
     """Show what the register says is still outstanding, and what is overdue.
 
-    The reader door for Patrick's rule 1. Crash detection is supposed to be
+    The reader door for the owner's rule 1. Crash detection is supposed to be
     "visible to any reader" with nothing running to discover it — this is a
     reader, and it proves the claim rather than leaving it as an assertion in
     a docstring. Reading the register costs one file read and no process.
@@ -304,7 +304,7 @@ def _orchestrate_wake(args: List[str]) -> bool:
     # `dispatch wake @vera` answered "manager — wake skipped, caller must mail"
     # (@devpulse, 2026-09-02). The manager gate was never the difference — this
     # lane simply never asked whether the caller held the grant, so wake_branch
-    # received admin=False by default and took the ordinary refusal. Patrick's
+    # received admin=False by default and took the ordinary refusal. The owner's
     # ruling 2026-09-02 00:23 is that the admin seat dispatches any agent in any
     # directory; a verb that drops the grant on the floor cannot honour it.
     #

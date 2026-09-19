@@ -84,7 +84,7 @@ reconnect loop from an operator opening sheets. Every detach now names the room,
 how long the socket lived, and the code it closed on. When the ROOM ends first
 the field says `room ended` rather than `None`: that is a different detach from
 any a client can cause, and a bare `None` reads as a logging bug rather than as
-the fact it is. Both fixes are @baud's r5 diagnosis of an incident on Patrick's
+the fact it is. Both fixes are @baud's r5 diagnosis of an incident on the owner's
 own seat, and neither is LIVE — the production server on 8787 still predates
 them, along with the cache-control fixes below, until the restart window
 @devpulse holds. Nine tests, six mutations, all bitten. The honest cost: +55
@@ -96,7 +96,7 @@ of them were the same defect wearing different clothes. THE PHONE FACE was
 served with an etag, a last-modified and NO cache-control — which is not "do not
 cache" but "guess", and RFC 9111's heuristic guess is ~10% of the age since
 last-modified. The entry is un-hashed and NAMES the content-hashed bundles, so a
-stale entry faithfully fetches OLD assets; Patrick's first reload served a
+stale entry faithfully fetches OLD assets; the owner's first reload served a
 round-3 bundle and cost an acceptance round a false FAIL. Every stable-named
 file revalidates now, including `/phone.html` — the manifest's own start_url,
 which a narrow fix would have left stale for every installed phone while the
@@ -130,7 +130,7 @@ to a corpse.*
 *`--out` became OPTIONAL, and that is a security fix rather than a
 convenience. The rule was never "make the caller name a file", it was S49's
 "never print the raw value" — and the mandatory flag defended it badly, because
-its own example said `--out ~/pixel.token`. Patrick found three raw bearer
+its own example said `--out ~/pixel.token`. The owner found three raw bearer
 receipts sitting in his home root on 2026-08-19, 43 bytes each, put there by
 whoever read my help text and did what it said. The receipt lands beside the
 hashed store now (`~/.secrets/aipass/host_api/<label>.token`, dir 0700, file

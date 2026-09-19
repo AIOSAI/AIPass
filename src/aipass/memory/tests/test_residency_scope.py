@@ -381,7 +381,7 @@ class TestTheLiveFleetStillCountsTwentyTwo:
 
         So it counts what it means, and the external tier is asserted against
         the DECLARATION rather than a number — this machine happens to declare
-        four roots today and that is Patrick's to change without breaking a test
+        four roots today and that is the owner's to change without breaking a test
         in my branch.
         """
         branches = rs.fleet_branches(live_residents)
@@ -668,7 +668,7 @@ class TestMalformedJsonDeclaresNothingAndNeverRaises:
 # `Path.cwd()` is a GUESS: the directory a process happened to start in has
 # nothing to do with where this source file lives, so on a registry-less tree
 # every fleet lane would silently resolve against whatever the caller's shell
-# was pointing at. That is the fallback species Patrick outlawed — the same
+# was pointing at. That is the fallback species the owner outlawed — the same
 # ruling as `_first_registry_in`, "a fallback wearing a determinism costume".
 #
 # THE ANSWER: the root is derived from THIS FILE's own location, never from the

@@ -10,7 +10,7 @@ project @baud's census knows — `files`, `dir`, `diff`, and the fleet routes th
 already did. It used to refuse all but the seated project: `/v1/fleet?project=BAUD`
 painted the cards; every file under them then refused with *"This server is seated in
 AIPass and does not serve project BAUD"* — one surface answering two questions about
-the same project. Patrick's ruling, 2026-08-16: *"I should be able to open another
+the same project. The owner's ruling, 2026-08-16: *"I should be able to open another
 project via the project tab drop down, and view other agent project files, open any
 passport and view watch read files. no restriction."* **Operate routes are untouched**
 — attach is the only takeover, and binds to the seat.
@@ -31,7 +31,7 @@ than the read lane, where an omitted project means the seated one. The seat is m
 case-insensitively: the wire says `AIPASS`, the directory `AIPass`, and a
 case-sensitive check would refuse every verb the phone sends.
 
-**The verbs reach any project too — one terminal, any agent.** Patrick's ruling,
+**The verbs reach any project too — one terminal, any agent.** The owner's ruling,
 2026-08-16: *"the flow is ONE terminal; it hosts the agent I choose, no matter where I
 spawn it… Baud is an aipass tenant in `projects/`, vera is outside, external - that
 should NOT matter. When you block you create friction."* So the seat check is gone from
@@ -61,7 +61,7 @@ never exists — the phone contract carries zero vendor words by ruling.
 
 **Kill goes through the one door, and the gate is why.** For one day this verb answered
 503 naming a seam that did not exist: @baud's binary opted into headless mode for
-`--snapshot` and nothing else, and `tmux kill-session` was one line away. Patrick ruled
+`--snapshot` and nothing else, and `tmux kill-session` was one line away. The owner ruled
 `room_kill` the ONE door that ends a session, so it waited. @baud shipped `baud
 --end-room <branch> --project <name>` the same evening, proving the single-mechanism
 claim instead of asking to be trusted on it: the flag and the desktop button reach the

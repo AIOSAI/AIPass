@@ -7,7 +7,7 @@
 
 ## Notification Feed
 
-Desktop toasts are retired (Patrick's ruling, 2026-08-11) — no D-Bus, no
+Desktop toasts are retired (the owner's ruling, 2026-08-11) — no D-Bus, no
 notify-send, no fallback that still toasts. `notify.py` appends notification
 events to a shared JSONL feed that BAUD's notification bell reads.
 
@@ -77,7 +77,7 @@ appends fake dispatch events to the real feed BAUD renders.
 
 ## Dispatch Register + Completion Reports
 
-Patrick's rule 1 (DPLAN-0317): *"the watchdog knows what is outstanding because it
+The owner's rule 1 (DPLAN-0317): *"the watchdog knows what is outstanding because it
 was TOLD, never because it looked."* Nothing polls. Three files carry it.
 
 ```

@@ -8,7 +8,7 @@
 
 """Tests for the four-kind name fence and /v1/roots (FPLAN-0443 Phase 1).
 
-Patrick, 2026-08-18: "rn I can only see into agent files... I cant explore
+The owner, 2026-08-18: "rn I can only see into agent files... I cant explore
 home. or project files outside agents."
 
 THE FENCE IS NOT DELETED HERE, IT LEARNS MORE WORDS. The client still sends a
@@ -17,7 +17,7 @@ now four kinds of name instead of one. So every test below that proves a root
 resolves is paired with one proving the containment underneath still refuses —
 a wider fence that stopped fencing would be the whole point thrown away.
 
-THE EXPOSURE IS ON THE RECORD, not smuggled: with a `home` root and Patrick's
+THE EXPOSURE IS ON THE RECORD, not smuggled: with a `home` root and the owner's
 FULLY OPEN ruling (FPLAN-0443 Notes, his standing S247 line), a read-scope token
 reads ~/.ssh and friends from the phone. The fixture below builds a `.ssh` and
 the tests read through it deliberately, because a test suite that quietly
@@ -160,7 +160,7 @@ def world(tmp_path: Path):
     (home / "todo.txt").write_text("buy milk", encoding="utf-8")
     (home / "notes").mkdir()
     (home / "notes" / "day.md").write_text("# day", encoding="utf-8")
-    # Patrick's FULLY OPEN ruling, built rather than described. See the module
+    # The owner's FULLY OPEN ruling, built rather than described. See the module
     # docstring: this is reachable by design, and the suite says so out loud.
     (home / ".ssh").mkdir()
     (home / ".ssh" / "id_ed25519").write_text("PRIVATE KEY", encoding="utf-8")
@@ -229,7 +229,7 @@ class TestTheRootKinds:
             host_reads.resolve_root(host_reads.ROOT_BRANCH, "")
 
     def test_home_resolves_to_the_home_directory(self, world: dict) -> None:
-        """The root Patrick named first."""
+        """The root the owner named first."""
         assert host_reads.resolve_root(host_reads.ROOT_HOME) == world["home"].resolve()
 
     def test_aipass_resolves_to_the_seats_own_repository(self, world: dict) -> None:
@@ -478,7 +478,7 @@ class TestReadsStandingOnARoot:
         assert "notes" in names
 
     def test_the_home_exposure_is_real_and_deliberate(self, world: dict) -> None:
-        """Patrick's ruling, executed rather than described. If this test ever
+        """The owner's ruling, executed rather than described. If this test ever
         has to change, the ruling changed — which is exactly when someone
         should have to come here and say so."""
         result = host_reads.read_file("", ".ssh/id_ed25519", root=host_reads.ROOT_HOME)
@@ -512,7 +512,7 @@ class TestAbsentRootIsTodaysAnswerPlusTheFloor:
     It was written to guard the roots round: absent root = the pre-roots
     document, key for key. @devpulse's rider (2026-08-18) adds exactly one key
     to every lane — `floor`, the absolute path of the root the answer stands
-    on — because Patrick wants a copy-path button and the ABSOLUTE path is what
+    on — because the owner wants a copy-path button and the ABSOLUTE path is what
     pastes into a terminal, which is server knowledge the face cannot compose.
 
     So the pin now says: today's document plus `floor`, nothing else moved. It
@@ -761,7 +761,7 @@ class TestRootRoutes:
         assert response.json()["error"]["code"] == "roots_unavailable"
 
     def test_dir_stands_on_home(self, client: Any, world: dict) -> None:
-        """The end-to-end of Patrick's ask, one tap deep."""
+        """The end-to-end of the owner's ask, one tap deep."""
         api, raw = client
 
         response = api.get(

@@ -31,7 +31,7 @@ differently.** Both get the same 401 and the same sentence, because a response
 that distinguished them would let a prober learn which of its guesses was once
 real. The trail records `token_revoked` (with the token's id) or
 `token_unrecognised` (with none). This was one line of aspiration in a comment
-until 2026-08-16, when Patrick's phone was refused for nine minutes and the log
+until 2026-08-16, when the owner's phone was refused for nine minutes and the log
 could not say whether it had presented a credential this host once issued or
 garbage — the store was provably intact, so that missing distinction *was* the
 gap between the evidence and an answer.
@@ -127,7 +127,7 @@ the `branches` count a push answers with. This lane used to hardcode
 stops being honoured — an older @memory on a fresh clone, a renamed flag, a
 banner ahead of the payload — this lane gets prose back and says it could not
 tell. After a write that is the honest answer, and a `200` would be a guess about
-Patrick's configuration.
+the owner's configuration.
 
 **A refusal has one shape on this lane, wherever it was decided:** `400
 memory_config_refused`, their sentence in `message`, their remedy line in

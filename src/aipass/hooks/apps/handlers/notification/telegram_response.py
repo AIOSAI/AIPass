@@ -11,7 +11,7 @@
 """Telegram response delivery on Stop event.
 
 Fires on every Claude Code Stop event. Uses 3-layer defense to ensure only
-the correct response (to Patrick's Telegram message) is delivered:
+the correct response (to the owner's Telegram message) is delivered:
 
 Layer 1: SubagentStop filter — rejects subagent/sidechain Stop events at the gate
 Layer 2: isSidechain filter — skips sidechain entries during transcript extraction

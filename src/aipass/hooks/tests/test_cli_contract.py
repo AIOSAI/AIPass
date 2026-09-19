@@ -109,7 +109,7 @@ class TestClaudeDaemonFlags:
     switch disables the whole `daemon` subcommand — the settings value beats a
     shell override, measured. So session_boot's `claude daemon stop --any` is
     dead code under the switch (devpulse's hardening item 2, plan-only until
-    Patrick asks) and live without it.
+    the owner asks) and live without it.
 
     The invariant across both: the surface session_boot invokes is either
     THERE, or refused by name. What must never happen is a flag going missing

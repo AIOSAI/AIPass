@@ -14,8 +14,8 @@ A release mail can be read and closed; this is the half that stays until the
 scaffold is actually current. It reads two files and writes none: the cwd
 passport (to answer "is this seat a manager?") and the project's
 ``.aipass/scaffold_manifest.json`` (to answer "which AIPass wrote this
-scaffold?"). It never runs ``aipass init update`` — applying is Patrick's or
-devpulse's call, never the notice's (DPLAN-0335, Patrick 2026-09-09 23:51).
+scaffold?"). It never runs ``aipass init update`` — applying is the owner's or
+devpulse's call, never the notice's (DPLAN-0335, the owner 2026-09-09 23:51).
 
 Shared by apps/handlers/lifecycle/release_notice.py (SessionStart) and
 apps/handlers/lifecycle/post_compact_regrounding.py (the post-compact regroup

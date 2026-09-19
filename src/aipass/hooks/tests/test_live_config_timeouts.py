@@ -12,7 +12,7 @@ class TestLiveProjectConfigTimeouts:
     """Pins the shipped .aipass/hooks.json, not a fixture.
 
     UserPromptSubmit handlers ran on the hardcoded 30 because no entry carried a
-    timeout key. Patrick hit a 30s kill with output discarded on 2026-08-13 21:22.
+    timeout key. The owner hit a 30s kill with output discarded on 2026-08-13 21:22.
     These assert the config half of the stopgap is present in the file the engine
     actually reads — a fixture-based test would not have caught its absence.
     """
@@ -42,7 +42,7 @@ class TestLiveProjectConfigTimeouts:
 class TestTheProjectTemplateCarriesTheTestWriteGate:
     """Pins the shipped .aipass/project_hooks.json — what every NEW project inherits.
 
-    Patrick ruled the test-write gate fleet-wide on 2026-09-01 (DPLAN-0323).
+    The owner ruled the test-write gate fleet-wide on 2026-09-01 (DPLAN-0323).
     A template is the one place a fleet-wide ruling can be silently absent: the
     gate can be correct, wired and green in this tree while every project stamped
     tomorrow starts without it, and no suite that reads a fixture would notice.

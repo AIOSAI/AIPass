@@ -7,12 +7,12 @@
 # =============================================
 
 """
-Tests for parking the symbolic fragments tier (Patrick's ruling, 2026-08-14).
+Tests for parking the symbolic fragments tier (the owner's ruling, 2026-08-14).
 
 The Agent Memory Atlas review of AIPass memory (revision 0d27e5ef) flagged the
 AUDN deduplicator: an LLM returns a Delete verdict and nothing records what was
 removed or why — an unauditable deletion. The tier was never wired into any live
-lane, and Compass became the curated-truth piece, so Patrick ruled: park it,
+lane, and Compass became the curated-truth piece, so the owner ruled: park it,
 revivable, and say where the active piece is.
 
 A park is only honest if it is loud. These tests pin the two halves:
@@ -30,7 +30,7 @@ import pytest
 from aipass.memory.apps.modules import symbolic
 
 # The park's TRACKED home. It lived under .archive/ until 2026-08-18, when
-# Patrick ruled .archive/ always-ignored and named it his disposal zone -- at
+# The owner ruled .archive/ always-ignored and named it his disposal zone -- at
 # which point these preservation pins started failing on every fresh clone,
 # because the files they pin no longer shipped. A park that CI cannot see is
 # not a park; see tests/parked/README.md.
@@ -160,7 +160,7 @@ class TestLiveLaneUntouched:
 
 
 class TestRevivable:
-    """Patrick may want this back. Everything must still be here."""
+    """The owner may want this back. Everything must still be here."""
 
     @pytest.mark.parametrize(
         "relative",
@@ -186,7 +186,7 @@ class TestRevivable:
         green on every dev machine and red on every runner, because the files
         were there and untracked. Asserting a file EXISTS cannot tell a tracked
         home from a local one. This asserts the home instead: no component of
-        the path may be `.archive`, which is the one directory Patrick's ruling
+        the path may be `.archive`, which is the one directory the owner's ruling
         says is cleaned without warning.
         """
         assert ".archive" not in _PARK.parts, f"the park is back in the disposal zone: {_PARK}"

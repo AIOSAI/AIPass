@@ -42,7 +42,7 @@ declined here — it is unreachable from here.
 Two further things this lane refuses to forward:
   * `--sender`, because it reaches a privilege-bearing parameter behind a
     verified-caller check, and an unverified network claim does not get to try.
-  * `--model`, because Patrick ruled the phone contract carries zero vendor
+  * `--model`, because the owner ruled the phone contract carries zero vendor
     words — the branch's own config decides what it runs.
 
 The message IS forwarded opaquely, which is safe for a reason worth writing
@@ -57,7 +57,7 @@ binary opted into headless mode for `--snapshot` and nothing else; `room_kill`
 was a `#[tauri::command]`, reachable only from inside the running desktop app.
 Reaching for `tmux kill-session` here was one short line away and would have
 been a SECOND door — and the day the two disagreed, neither would be trusted.
-Patrick ruled on 2026-08-10 that `room_kill` is the one door.
+The owner ruled on 2026-08-10 that `room_kill` is the one door.
 
 @baud shipped `--end-room` the same evening. They also proved the single-mechanism
 claim instead of asking to be trusted on it: the flag and the desktop button both
@@ -382,7 +382,7 @@ def require_project(project: str) -> None:
     project scope, and resolving it against anything else names a DIFFERENT
     room.
 
-    WHICH project is no longer this function's business — Patrick's
+    WHICH project is no longer this function's business — the owner's
     one-terminal ruling (2026-08-16): "the flow is ONE terminal; it hosts the
     agent I choose, no matter where I spawn it... Baud is an aipass tenant in
     projects/, vera is outside, external - that should NOT matter. When you

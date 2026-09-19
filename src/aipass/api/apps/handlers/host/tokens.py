@@ -207,7 +207,7 @@ def receipt_path(label: str) -> Path:
     """
     Where a freshly minted token's raw value belongs, given its label.
 
-    THE RECEIPT IS A SECRET AND BELONGS WITH THE SECRETS. Patrick found three
+    THE RECEIPT IS A SECRET AND BELONGS WITH THE SECRETS. The owner found three
     raw bearer receipts sitting in his home root on 2026-08-19 (43-byte files
     from the August phone-setup mints), and they were there because this
     branch's own help text said `--out ~/pixel.token`. Nobody chose the home
@@ -521,7 +521,7 @@ def resolve_token(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
     Re-reads the store on every call, which is what makes revocation effective
     on the next request.
 
-    WHY THIS EXISTS SEPARATELY FROM verify_token: on 2026-08-16 Patrick's phone
+    WHY THIS EXISTS SEPARATELY FROM verify_token: on 2026-08-16 the owner's phone
     was refused for nine minutes and the trail said only token_unrecognised.
     The store was provably intact, so the one thing that would have closed the
     investigation — did that device present a credential we once issued, or

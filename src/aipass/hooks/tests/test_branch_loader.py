@@ -172,7 +172,7 @@ class TestBranchLoaderHandler:
 class TestInjectedBlocksStayUnderTheirCaps:
     """DPLAN-0347 row 2: the branch block is capped at 9,000 chars, each integration prompt at 2,000.
 
-    Patrick ruled the layer contract on 2026-09-15. The number is measured, not
+    The owner ruled the layer contract on 2026-09-15. The number is measured, not
     chosen: Claude Code persists a hook output over 10,000 UTF-16 units to a file
     and hands the model a 2,000-char preview, so a prompt that crosses the line
     is not read at all. A cut with a marker naming the file keeps the first

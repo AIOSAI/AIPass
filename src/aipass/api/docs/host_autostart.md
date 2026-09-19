@@ -10,7 +10,7 @@
 @baud's phone face went dark this morning. `host_api_serve.log` showed normal
 traffic and then silence — no traceback, no shutdown line, which is exactly what
 a reboot looks like from inside a log. A detached server dies with the machine
-and nothing brought it back; Patrick ruled that a face which waits for a human
+and nothing brought it back; the owner ruled that a face which waits for a human
 after every reboot is wrong.
 
 **It is a systemd user unit, not a loop in this tree, and the reason is the scar
@@ -82,7 +82,7 @@ boots, so the face goes dark after roughly one reboot in three and waits for a h
 which is the exact failure autostart exists to end. The cure is an exit code, not a
 wider window; it is the `Known issues` exit-`0` item, and this is that item's real
 cost. Reported to @devpulse 09-07, unfixed here because the exit-code lane is
-blocked on Patrick's fleet-wide ruling.
+blocked on the owner's fleet-wide ruling.
 
 The unit and `serve --detach` build their argv from one function, `serve_argv()`.
 Two ways to start one server is how a fix lands in one of them and the other

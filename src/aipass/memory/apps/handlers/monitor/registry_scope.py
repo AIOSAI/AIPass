@@ -103,7 +103,7 @@ RESIDENCY_EXTERNAL = "external"
 
 # The machine-scope anchor: AIPass home declares which repo roots participate.
 # Beside AIPASS_REGISTRY.json because it is the same species of file -- machine
-# managed, blessed by Patrick, the anchor of trust for a whole tier.
+# managed, blessed by the owner, the anchor of trust for a whole tier.
 DECLARED_ROOTS = "AIPASS_ROOTS.json"
 EXTERNAL_REGISTRY_GLOB = "*_REGISTRY.json"
 
@@ -138,7 +138,7 @@ def find_repo_root(start: Path | None = None) -> Path:
     directory a process happened to start in says nothing about where this
     source file lives, so on a registry-less tree every fleet lane would have
     resolved against whatever the caller's shell was pointing at — silently,
-    and differently per caller. That is the species Patrick outlawed and the
+    and differently per caller. That is the species the owner outlawed and the
     same objection @drone raised against ``_first_registry_in``: a fallback
     wearing a determinism costume.
 
@@ -506,7 +506,7 @@ def external_branches(repo_root: Path | None = None, name_from: str = "path") ->
     across a whole machine would count every snapshot of every repo.
 
     MEMBERSHIP IS PRESENCE.  A branch is a citizen if ``.trinity/passport.json``
-    exists; it does not have to say anything.  That is Patrick's ruling and the
+    exists; it does not have to say anything.  That is the owner's ruling and the
     reason phase 2 shipped without a schema migration in front of it.
 
     The record carried a ``scheduler`` bool for three hours on 2026-08-30 and

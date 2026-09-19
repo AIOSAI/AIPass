@@ -188,7 +188,7 @@ portion of a `*_meta` value and preserves the template-owned sentence beside it.
 
 ## `status.health` is deleted, not computed
 
-Patrick's ruling: the field had no consumer, read `healthy` hardcoded since 2025-11, and stored a
+The owner's ruling: the field had no consumer, read `healthy` hardcoded since 2025-11, and stored a
 fact that is derivable — a second source of truth waiting to go stale. Every writer is gone
 (`memory_files.update_metadata()` removed, the extractor's post-drain stamper removed,
 `normalize.py` no longer relocates a root `status` or adds `last_health_check`), and the

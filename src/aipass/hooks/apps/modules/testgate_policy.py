@@ -10,7 +10,7 @@
 
 """Reads the test-write policy: may agents create new test files here?
 
-Patrick ruled on 2026-09-01 (devpulse DPLAN-0323) that agents are stripped of
+The owner ruled on 2026-09-01 (devpulse DPLAN-0323) that agents are stripped of
 self-directed test creation while @seedgo's test_quality v5 pack lands. The
 ruling is enforced by ``handlers/security/testwrite_gate.py`` and lives as DATA
 in ``<project>/.aipass/test_write_policy.json``, so turning it back on later is
@@ -275,7 +275,7 @@ def handle_command(command: str, args: list) -> bool:
         CONSOLE.print("  drone @hooks testwrite       Show the policy and the gate's residual")
         CONSOLE.print()
         CONSOLE.print(f"[dim]Policy file: <project>/{POLICY_DIR}/{POLICY_FILENAME}[/dim]")
-        CONSOLE.print("[dim]Read-only on purpose: flipping a Patrick-level ruling is a human edit,")
+        CONSOLE.print("[dim]Read-only on purpose: flipping an owner-level ruling is a human edit,")
         CONSOLE.print("not something an agent can do to the gate that constrains it.[/dim]")
         return True
     print_introspection()

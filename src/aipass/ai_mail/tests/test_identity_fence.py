@@ -8,7 +8,7 @@
 
 """Tests for the caller identity fence.
 
-Patrick's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
+The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
 ur cwd, and if aimail was run in root it should fail outright."
 
 The defect these pin (@devpulse, 0bb77ec2 / 096c9a42): running any ai_mail verb

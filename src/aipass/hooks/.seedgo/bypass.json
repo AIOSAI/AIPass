@@ -1279,7 +1279,7 @@
     {
       "file": "apps/handlers/security/testwrite_gate.py",
       "standard": "unused_function",
-      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. NOTE: the PreToolUse.testwrite_gate entry is NOT yet in .aipass/hooks.json — adding it changes the trust hash, so it is Patrick's/@devpulse's step. No engine.jsonl firing evidence yet; this bypass is provisional until that wire lands."
+      "reason": "handle() called dynamically by engine._run_handler via importlib.import_module + getattr from hooks.json. NOTE: the PreToolUse.testwrite_gate entry is NOT yet in .aipass/hooks.json — adding it changes the trust hash, so it is the owner's/@devpulse's step. No engine.jsonl firing evidence yet; this bypass is provisional until that wire lands."
     },
     {
       "file": "apps/handlers/security/testwrite_gate.py",

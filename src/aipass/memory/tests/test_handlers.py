@@ -546,7 +546,7 @@ class TestNormalizeMemoryFile:
         """The status block is not pruned field-by-field any more — it goes.
 
         The gold-source templates stopped declaring `status` on 2026-08-25
-        (Patrick's ruling: health is computed by the checker, never stored), so
+        (the owner's ruling: health is computed by the checker, never stored), so
         the template-conformance pass strips it whole. This test used to assert
         that one stale field inside the block was dropped while the block
         itself survived.

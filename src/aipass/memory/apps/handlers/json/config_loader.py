@@ -16,7 +16,7 @@ with subtly different defaults and error handling.
 Provides a canonical DEFAULT_CONFIG, a non-mutating deep_merge, and a
 load() that guarantees callers always receive a usable dict.
 
-Doctrine (Patrick, S193): configs live inside JSONs, not inside code.
+Doctrine (the owner, S193): configs live inside JSONs, not inside code.
 memory.config.json on disk is the RUNTIME AUTHORITY the operator edits.
 DEFAULT_CONFIG exists so that file can be REGENERATED when it goes
 missing — it is the regeneration seed, not a rival source of truth.
@@ -89,7 +89,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "entry_limits": {
         "enabled": True,
-        # true = regenerate what we actually operate (Patrick, S193). The June
+        # true = regenerate what we actually operate (the owner, S193). The June
         # fail-safe lean (false) was written when enforcement was still rolling
         # out; the fleet has run true for months, so a reborn file that came
         # back warn-only would silently drop enforcement, not protect anyone.

@@ -85,7 +85,7 @@ status, ok = wake_branch("@devpulse", custom_message=prompt, sender="@daemon", s
 
 ## Unattended Wakes: Permissions, Model, and Marking
 
-Three rulings from Patrick on 2026-08-30, all after @vera's first external daemon
+Three rulings from the owner on 2026-08-30, all after @vera's first external daemon
 wake. The fire itself worked; the **lane** failed three ways around it.
 
 **1 — Always bypass permissions.** *"always bypass permissions always, claude alone
@@ -104,7 +104,7 @@ was written by watching this one fail: @vera is manager-class, so on 2026-09-08 
 11:31 she woke on Fable through the daemon's scheduled lane, and nobody had asked her
 to. A rule keyed on a *class* cannot say "this one manager and no other".
 
-**3 — Daemon sessions are marked.** Patrick killed @vera's live session mid-run: it
+**3 — Daemon sessions are marked.** The owner killed @vera's live session mid-run: it
 was not in the dispatch register (the manager-interactive lane bypasses it) and
 `daemon-vera-192848` read as his own leftover tmux. Two markings:
 
@@ -128,11 +128,11 @@ dispatch are two questions; only one of them has a monitor to close it. The
 routing scheduled manager wakes through it (`scheduled=True`) answers marking and
 supervision together.
 
-## Fable is granted by name (Patrick, 2026-09-08)
+## Fable is granted by name (the owner, 2026-09-08)
 
 *"only devpulse runs on fable (I carry the admin baggage)."* Every other agent —
 every class, every project, Vera-Studio included — runs `DEFAULT_MODEL` when
-dispatched or scheduled, and lighter models on request. **Patrick alone decides who
+dispatched or scheduled, and lighter models on request. **The owner alone decides who
 may run Fable**, @devpulse included. This supersedes the 2026-08-30 ruling above
 (compass #323 → #350).
 

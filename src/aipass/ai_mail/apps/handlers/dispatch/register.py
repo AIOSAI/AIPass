@@ -10,7 +10,7 @@
 
 v1.0.0 — FPLAN-0452 P0
 
-Patrick's rule 1 (DPLAN-0317): *"Any dispatch of any agent — inside AIPass or
+The owner's rule 1 (DPLAN-0317): *"Any dispatch of any agent — inside AIPass or
 external, anywhere in the system — creates a register record at the moment it
 is sent. The watchdog knows what is outstanding because it was TOLD, never
 because it looked."*
@@ -26,7 +26,7 @@ successful spawn only ever records the dispatches that were already fine.
 ``expected_by`` with no completion record is simply a FACT ABOUT A FILE. Any
 reader sees it — ``watchdog status``, the statusline paint, the wire's next
 event — and nothing has to be running to discover it. That is what replaced
-the detection daemon, and it is what satisfies Patrick's rule 2: *"Idle = zero
+the detection daemon, and it is what satisfies the owner's rule 2: *"Idle = zero
 running processes."*
 
 APPEND-ONLY. A dispatch is closed by appending a SECOND record carrying the

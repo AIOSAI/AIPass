@@ -69,7 +69,7 @@ class TestFeedPathDoor:
         renders. @api needs the same escape hatch. Because ``__getattr__``
         imports at access time rather than binding at package import, the door
         sees the patch — a snapshotting export would silently hand their tests
-        the live feed and let a suite write into Patrick's bell.
+        the live feed and let a suite write into the owner's bell.
         """
         redirected = tmp_path / "elsewhere" / "notifications.jsonl"
         monkeypatch.setattr(notify, "FEED_PATH", redirected)

@@ -236,7 +236,7 @@ class TestValidateBind:
 
     def test_the_loopback_gate_is_open(self) -> None:
         """
-        Opened 2026-08-14 by Patrick's ruling on the Phase 5 security review.
+        Opened 2026-08-14 by the owner's ruling on the Phase 5 security review.
 
         Pinned as a fact rather than left implicit: whoever reads this next
         should see that the gate was OPENED by a decision, not eroded.
@@ -1215,7 +1215,7 @@ class TestIssueTokenCommand:
         rule it was defending was never "make the caller name a file", it was
         S49's "never print the raw value". The mandatory flag defended that
         badly: its own example said `--out ~/pixel.token`, and on 2026-08-19
-        Patrick found three raw bearer receipts sitting in his home root
+        the owner found three raw bearer receipts sitting in his home root
         because of it. A default that lands beside the hashed store honours S49
         and takes the home root off the table.
         """

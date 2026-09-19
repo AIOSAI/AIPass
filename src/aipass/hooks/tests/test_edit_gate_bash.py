@@ -9,7 +9,7 @@
 
 """Tests for edit_gate's scripted lane and the devpulse admin exemption.
 
-Patrick's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
+The owner's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
 fence stays for every agent and devpulse is the sole exemption — "It is only you
 who can reach outwards. Nobody else."
 
@@ -130,7 +130,7 @@ def grant_withheld():
 
 
 class TestAdminExemptionToolLane:
-    """devpulse's Edit into a sibling project — the write Patrick overruled."""
+    """devpulse's Edit into a sibling project — the write the owner overruled."""
 
     @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit", "NotebookEdit"])
     def test_verified_admin_passes(self, sibling_projects: dict, grant_granted, tool: str):
@@ -241,7 +241,7 @@ class TestAdminIdentityIsVerifiedNotClaimed:
 
 
 class TestAdminExemptionStaysNarrow:
-    """Patrick exempted the OUTWARD reach. Nothing else moved."""
+    """The owner exempted the OUTWARD reach. Nothing else moved."""
 
     def test_inbox_writes_are_still_refused_for_the_admin_seat(self, sibling_projects: dict, grant_granted):
         inbox = str(Path(sibling_projects["admin_seat"]) / ".ai_mail.local" / "inbox.json")

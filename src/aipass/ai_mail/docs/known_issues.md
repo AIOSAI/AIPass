@@ -60,7 +60,7 @@ Each of these was reproduced when it was last written down; all are open in APLA
   reported three on 2026-09-05; an AST comparison of every top-level test body in the file
   found eight, so the report understated it. Not a correctness bug — the file is green —
   but the suite reports more passing tests than it has distinct assertions. Recorded, not
-  fixed: merging tests is Patrick's call.
+  fixed: merging tests is the owner's call.
 
   | | line | line |
   |---|---|---|

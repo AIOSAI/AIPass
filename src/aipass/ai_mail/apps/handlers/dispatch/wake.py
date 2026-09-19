@@ -61,7 +61,7 @@ _CLAUDE_BIN = _find_claude_bin()
 _REPO_ROOT = find_repo_root()
 _AI_MAIL_DIR = Path(__file__).resolve().parents[3]  # ai_mail/
 # UNTRACKED ON PURPOSE (2026-09-08). This file now holds the Fable grant, and
-# a grant is Patrick's to edit on his machine — the repo must not ship an answer
+# a grant is the owner's to edit on his machine — the repo must not ship an answer
 # to "who may run Fable". `.ai_mail.local/` is gitignored (root .gitignore:30);
 # the branch root is not, and that is where this pointed until today. Measured
 # before the move: no file existed at EITHER spelling, so `_load_config` had
@@ -76,7 +76,7 @@ DEFAULT_PROMPT = "Hi. Check inbox, process new emails, update memories when done
 
 # Model aliases — passed directly to claude CLI which resolves latest-in-class.
 KNOWN_MODEL_ALIASES: frozenset = frozenset({"sonnet", "opus", "haiku", "fable"})
-# If this default is flipped again, update the README to match (Patrick, 2026-08-01).
+# If this default is flipped again, update the README to match (the owner, 2026-08-01).
 DEFAULT_MODEL = "opus"
 
 # The passport value that means "never woken by an ordinary caller".
@@ -86,7 +86,7 @@ DEFAULT_MODEL = "opus"
 # a policy about one named seat.
 MANAGER_CLASS = "manager"
 
-# Patrick, 2026-09-08: "only devpulse runs on fable (I carry the admin
+# The owner, 2026-09-08: "only devpulse runs on fable (I carry the admin
 # baggage)". SUPERSEDES his 2026-08-30 ruling that managers are Fable
 # (compass #323, superseded by #350). The seat is granted BY NAME because the
 # class could not express it: @vera is manager-class, a project owner, and woke
@@ -95,7 +95,7 @@ MANAGER_CLASS = "manager"
 # DEFAULT_MODEL by default and lighter models on request.
 #
 # The default is the FALLBACK, not the policy: the live grant is read from
-# CONFIG_FILE so Patrick can move a seat without a code change.
+# CONFIG_FILE so the owner can move a seat without a code change.
 FABLE_GRANT_DEFAULT: frozenset[str] = frozenset({"@devpulse"})
 #: The key in CONFIG_FILE holding the grant, when one has been written.
 FABLE_GRANT_KEY = "fable_allowed"
@@ -151,9 +151,9 @@ def _normalise_address(target: str) -> str:
 
 
 def fable_allowed() -> frozenset:
-    """Which addresses may run Fable, per Patrick's ruling of 2026-09-08.
+    """Which addresses may run Fable, per the owner's ruling of 2026-09-08.
 
-    Read from CONFIG_FILE rather than hardcoded so Patrick can move the grant
+    Read from CONFIG_FILE rather than hardcoded so the owner can move the grant
     without a code change and without the repo shipping his answer.
 
     A MISSING OR MALFORMED CONFIG FALLS BACK TO THE DEFAULT, NOT TO EMPTY. An
@@ -183,7 +183,7 @@ def fable_allowed() -> frozenset:
 
 
 def resolve_wake_model(target_email: str, requested: Optional[str]) -> ModelDecision:
-    """The model this wake spawns on, per Patrick's ruling of 2026-09-08.
+    """The model this wake spawns on, per the owner's ruling of 2026-09-08.
 
     SUPERSEDES the 2026-08-30 rule that citizen_class manager means Fable. The
     class decides nothing here any more: Fable is granted to named seats, and
@@ -220,7 +220,7 @@ def resolve_wake_model(target_email: str, requested: Optional[str]) -> ModelDeci
 
     refusal = (
         f"{target} may not run Fable — {requested!r} refused, waking on "
-        f"{DEFAULT_MODEL} instead (Patrick's ruling 2026-09-08: Fable is "
+        f"{DEFAULT_MODEL} instead (the owner's ruling 2026-09-08: Fable is "
         f"granted by name and this seat does not hold the grant)"
     )
     logger.warning("[wake] %s", refusal)
@@ -681,7 +681,7 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
     a sibling repo's @baud shadow the one living in our own projects/ — so the
     sweep keeps its position, unchanged and still admin-only. The external step
     carries no admin gate at all: @daemon fires unverified, and the anchor is a
-    machine-managed file Patrick blessed, so declaration IS the credential.
+    machine-managed file the owner blessed, so declaration IS the credential.
 
     Externals are discoverable through @memory's fleet gateway long before they
     are wakeable through here — that gap is what failed @vera's first supervised
@@ -797,7 +797,7 @@ def resolve_branch(branch_email: str, admin: bool = False) -> Optional[Tuple[Pat
 def _mark_daemon_session(session: str, email: str, status: "DispatchStatus") -> None:
     """Tag a live tmux session as daemon work, machine-readably.
 
-    Patrick killed @vera's first external wake on 2026-08-30 because nothing in
+    The owner killed @vera's first external wake on 2026-08-30 because nothing in
     the session said a machine had started it — he read `daemon-vera-192848` as
     his own leftover tmux and took it out mid-playbook. The session NAME is the
     guaranteed half of the answer (see DAEMON_SESSION_PREFIX): tmux either
@@ -859,7 +859,7 @@ def _spawn_manager_interactive(
 
     Attachable is not attended. Every route into this function comes from
     @daemon, i.e. from a clock rather than a person, so the session launches
-    with bypassPermissions unconditionally — Patrick's ruling of 2026-08-30
+    with bypassPermissions unconditionally — the owner's ruling of 2026-08-30
     after @vera sat on a denied Bash prompt here with nobody present to answer
     it ("always bypass permissions always, claude alone will nvr work"). The
     headless lane has carried the flag for months; this one is the lane that
@@ -945,7 +945,7 @@ def wake_branch(
         auto: If True, respect autonomous_pause (used by daemon)
         sender: Return-to-sender for bounce emails
         model: Model shorthand ("sonnet", "opus", "haiku") or full model ID.
-               Defaults to opus (Patrick ruling 2026-08-01: agents run opus).
+               Defaults to opus (the owner ruling 2026-08-01: agents run opus).
         scheduled: Keyword-only opt-in for the scheduled lane (DPLAN-0287) —
                an unattended run fired by a clock, not by a person. A manager
                target then wakes HEADLESS through dispatch_monitor (which pins
@@ -1068,7 +1068,7 @@ def wake_branch(
     # place for the rule to drift, and @vera reached Fable by CLI accident
     # precisely because no site owned the answer.
     #
-    # citizen_class is NO LONGER AN INPUT (Patrick, 2026-09-08) and is no longer
+    # citizen_class is NO LONGER AN INPUT (The owner, 2026-09-08) and is no longer
     # named in the step either: printing it beside the model implied it decided
     # the model, which is exactly the superseded rule. The gate above prints the
     # class where the class actually matters.
@@ -1239,7 +1239,7 @@ def wake_branch(
     status.ok("lock-acquire", "Dispatch lock acquired")
 
     # ─── Register the dispatch BEFORE anything spawns (FPLAN-0452 P0) ───
-    # Patrick's rule 1: the watchdog knows what is outstanding because it was
+    # The owner's rule 1: the watchdog knows what is outstanding because it was
     # TOLD. Written here, above the spawn, so a spawn that never starts still
     # leaves evidence the dispatch was promised — evidence written after a
     # successful spawn only ever records the dispatches that were already fine.

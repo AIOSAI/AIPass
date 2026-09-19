@@ -454,7 +454,7 @@ class TestReleaseNoticeModule:
         assert f"aipass init update {tmp_path / 'proj'} --dry-run" in out
 
     def test_it_never_tells_the_agent_to_apply_on_its_own(self, tmp_path):
-        """Patrick's rule, 2026-09-09: apply only on his or devpulse's go."""
+        """The owner's rule, 2026-09-09: apply only on his or devpulse's go."""
         out = _notice(_make_project(tmp_path / "proj", stamped="2.8.1"))
         assert "Apply ONLY with the owner's or devpulse's go" in out
         assert "--dry-run" in out

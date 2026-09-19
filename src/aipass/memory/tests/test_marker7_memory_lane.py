@@ -952,7 +952,7 @@ class TestTheDeadTemplateLaneIsRetired:
     def test_the_park_keeps_them_with_the_measurement(self):
         """Never a casual delete — the record of WHY outlives the code.
 
-        A TRACKED park, not `.archive/`. Patrick's fleet-wide ruling of
+        A TRACKED park, not `.archive/`. The owner's fleet-wide ruling of
         2026-08-18 makes `.archive/` the disposal zone: gitignored, cleaned
         without warning, present in no clone. This build put them there first,
         which would have made this very assertion pass only on machines that

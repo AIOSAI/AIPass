@@ -1463,7 +1463,7 @@ class TestShouldFireAdvisory:
     """Throttle for STANDING conditions — states that stay true for days and
     re-assert on every qualifying edit. @devpulse's seat sat over the todos cap
     long enough to write 209 identical lines and trip @trigger's
-    repeat-signature escalation (Patrick's ruling, 2026-08-19)."""
+    repeat-signature escalation (the owner's ruling, 2026-08-19)."""
 
     @pytest.fixture(autouse=True)
     def _state(self, tmp_path, monkeypatch):

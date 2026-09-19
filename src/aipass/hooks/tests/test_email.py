@@ -351,7 +351,7 @@ class TestEmailCadenceGate:
         assert "3 new emails" in result["stdout"]
 
     def test_message_format_unchanged(self, tmp_path):
-        """Patrick's spec keeps the wording: count + the three commands."""
+        """The owner's spec keeps the wording: count + the three commands."""
         from aipass.hooks.apps.handlers.notification.email import handle
 
         self._inbox(tmp_path, 1)

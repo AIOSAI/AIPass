@@ -25,7 +25,7 @@ HOOK ENGINE CONTRACT:
 
   auto_process() remains the synchronous API for callers that genuinely want to
   wait. It must NOT be called from a UserPromptSubmit hook: measured 78.5-120.5s
-  with a backlog, while its stdout is always empty -- so by Patrick's test
+  with a backlog, while its stdout is always empty -- so by the owner's test
   (compass #272) it was blocking a prompt it never fed. DPLAN-0295 item 1.
 
 COMPLETION EVENT (1.1.0, 2026-09-05):

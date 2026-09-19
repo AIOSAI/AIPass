@@ -126,7 +126,7 @@ def print_help():
     table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
     table.add_row("config set-default <type> <n> [--json]", "Set a global default rollover limit")
     table.add_row("search <query>", "Semantic search across all branch memories")
-    # PARKED 2026-08-14 (Patrick's ruling) — row kept so the command still explains
+    # PARKED 2026-08-14 (the owner's ruling) — row kept so the command still explains
     # itself instead of reading as an unknown command. Active curated-truth piece:
     # Compass, @devpulse-owned — drone @devpulse compass.
     table.add_row("symbolic", "⚠ PARKED 2026-08-14 — curated truth lives in Compass (drone @devpulse compass)")
@@ -292,7 +292,7 @@ def main() -> int:
     passed it to ``sys.exit``, so the process exited 0 on all three shapes of
     an unknown argument — an unknown verb, an unknown flag, and a known verb
     given a bogus sub-argument. The refusal was printed correctly and then
-    contradicted by the exit code, which is the half a script reads (Patrick's
+    contradicted by the exit code, which is the half a script reads (the owner's
     standing ruling; @devpulse's fleet sweep 2026-09-07 named this branch as
     the only one failing all three probes).
 

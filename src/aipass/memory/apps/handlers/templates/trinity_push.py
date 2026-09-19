@@ -135,7 +135,7 @@ _TEMPLATE_FILES = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS
 
 _DOC_NAME_SUFFIX = {"local": ".LOCAL", "observations": ".OBSERVATIONS"}
 
-# document_metadata is a CLOSED set — Patrick's ruling. Anything not named
+# document_metadata is a CLOSED set — the owner's ruling. Anything not named
 # here is pruned from the block, `status` included (health is computed at run
 # time; a stored copy of a derivable fact is a second source of truth).
 DOC_META_FIELDS = (
@@ -869,7 +869,7 @@ def _trinity_strays(trinity: Path) -> list[str]:
 
     Reported, never removed. Deleting another branch's backup or status file
     is a destructive act outside this lane's three-part mandate; the dry-run
-    surfaces them so the call stays Patrick's.
+    surfaces them so the call stays the owner's.
     """
     try:
         return sorted(

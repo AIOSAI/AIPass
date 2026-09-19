@@ -43,12 +43,12 @@ brief for this round expected ~385 lines of scraping to retire; two of the three
 doors did not carry what that assumed, and reporting the smaller true number was
 cheaper than shipping against a shape nobody had measured.
 
-Patrick, on the phone's git screen: *"git diffs are pretty much useless. we need
+The owner, on the phone's git screen: *"git diffs are pretty much useless. we need
 a real diff setup."* The wall of text was one 308KB response. Tapping one file
 in the same repository is now 5.8KB — **53× less**, measured on a real tree.
 
 **Two grains, and every answer names its own.** The card's git tile is per-branch;
-the git *app* is per-repository (Patrick's ruling, 08-17). Both are honest and
+the git *app* is per-repository (the owner's ruling, 08-17). Both are honest and
 they are not the same number, so `grain` is a parameter *and* a response field —
 a file list that does not state its scope is one a client can silently read at
 the wrong one. `grain=branch` keeps @baud's card contract untouched, including

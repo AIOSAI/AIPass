@@ -182,7 +182,7 @@ class TestEntryPointImportContract:
 
 
 class TestUnknownArgumentExitsNonZero:
-    """An unknown command or argument FAILS — Patrick's standing ruling.
+    """An unknown command or argument FAILS — the owner's standing ruling.
 
     All three shapes printed the correct refusal and then exited 0, because
     every door in main() returned None and __main__ never passed it to

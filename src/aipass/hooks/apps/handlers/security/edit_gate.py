@@ -49,7 +49,7 @@ _FILE_BUDGET_FILES = frozenset({"passport.json"})
 _TRINITY_SCAN_DEPTH = 4
 _NEWEST_FIRST_ARRAYS = ("sessions", "key_learnings")
 _NUMBER_KEYS = ("number", "session_number")
-# todos roll (DPLAN-0345, Patrick 2026-09-14): over the pad count is legal on disk,
+# todos roll (DPLAN-0345, the owner 2026-09-14): over the pad count is legal on disk,
 # and the oldest roll off to the branch's backlog FILE at its next rollover, never
 # to vectors. The path is @memory's (todo_roll.backlog_path_for), spelled here.
 _TODOS_COUNT_FALLBACK = 10
@@ -729,7 +729,7 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
 def _todos_count_advisory(after: dict, branch: str) -> str:
     """Return advisory text if todos exceed rollover count limit, else empty string.
 
-    Throttled to roughly one reminder per 10 turns (Patrick's ruling,
+    Throttled to roughly one reminder per 10 turns (the owner's ruling,
     2026-08-19). Being over the cap is a STANDING condition — it stays true
     until the next rollover and re-asserts on every local.json edit — so firing
     per edit turned a correct advisory into 209 identical log lines and tripped
@@ -798,7 +798,7 @@ def _note_over_budget(branch: str, file_stem: str, label: str, count: int, cap: 
     itself counts, and @memory's detector marks the file ready at exactly this
     threshold, so the archival named here really does happen.
 
-    INFO, not WARNING (compass #273, Patrick 2026-08-14: severity follows design
+    INFO, not WARNING (compass #273, the owner 2026-08-14: severity follows design
     intent). Over-budget is not wrong behaviour — it is behaviour we chose to
     have, and the message itself says nothing is lost. As a WARNING this class
     fed @trigger's escalation lane: 8 signatures, 579 occurrences, 10 of the 62

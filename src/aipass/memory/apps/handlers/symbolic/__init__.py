@@ -6,7 +6,7 @@
 # Category: memory/handlers/symbolic
 #
 # CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-08-14): PARKED by Patrick's ruling — implementation moved to
+#   - v1.0.0 (2026-08-14): PARKED by the owner's ruling — implementation moved to
 #     tests/parked/symbolic_20260814/, this package now refuses on import
 #   - v0.1.0 (2026-02-04): Initial version - Fragmented Memory Phase 1
 # =============================================
@@ -21,7 +21,7 @@ WHY THIS IS PARKED
     ``Delete`` without recording what was removed or why — an unauditable deletion
     in a memory system. The tier was never wired into any live lane (no hook entry,
     no caller in rollover/extractor/auto_process/search/verify), so nothing depends
-    on it. Patrick's ruling, 2026-08-14: park it, revivable, and point at the piece
+    on it. The owner's ruling, 2026-08-14: park it, revivable, and point at the piece
     that is actually active.
 
 WHERE THE ACTIVE PIECE IS

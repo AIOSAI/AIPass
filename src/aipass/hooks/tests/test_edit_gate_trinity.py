@@ -2085,7 +2085,7 @@ class TestTrinityLegacyNumberSchema:
 
 
 class TestOverBudgetSeverity:
-    """Compass #273 (Patrick, 2026-08-14): severity follows design intent.
+    """Compass #273 (the owner, 2026-08-14): severity follows design intent.
 
     Over-budget is not wrong behaviour, it is behaviour we chose to have — the
     message itself says nothing is lost, because @memory's rollover archives the
@@ -2544,7 +2544,7 @@ class TestSectionCountWording:
 
 
 class TestTodosAdvisoryIsThrottled:
-    """Patrick's ruling 2026-08-19: a GENTLE reminder roughly every 10 turns,
+    """The owner's ruling 2026-08-19: a GENTLE reminder roughly every 10 turns,
     not one per qualifying edit. Being over the cap is a standing condition, so
     per-edit emission wrote 209 identical lines from one seat and tripped
     @trigger's repeat-signature escalation."""

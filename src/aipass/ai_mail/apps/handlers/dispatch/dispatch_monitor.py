@@ -480,7 +480,7 @@ def _reconcile_pointer(branch_path: Path, stdout_log: str, claude_cmd: list) -> 
     would promote a guess into a durable record — the next dispatch would then
     resume it deliberately, forever. That turns an occasional wrong landing into
     a permanent one: a branch whose newest transcript happened to be a human's
-    chat would be married to that chat (Patrick's ruling, 2026-08-20).
+    chat would be married to that chat (the owner's ruling, 2026-08-20).
 
     Branches on -c therefore keep behaving exactly as they do today until
     something dispatches them --fresh, which mints a pointer properly. Several
@@ -847,7 +847,7 @@ def main():
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)
     # Pin agent context window to 350k for every dispatched agent, whatever the
-    # model (Patrick's ruling, 2026-08-11). Model-independent on purpose: without
+    # model (the owner's ruling, 2026-08-11). Model-independent on purpose: without
     # the pin an agent inherits its model's native window (1M on some), which
     # carries cost + runaway risk. Written after the CLAUDE* strip above so the
     # pin survives and a parent's own window never leaks through.
@@ -1201,7 +1201,7 @@ def main():
             e,
         )
 
-    # In-process push (Patrick's rule 3). Fired after the durable write, never
+    # In-process push (the owner's rule 3). Fired after the durable write, never
     # instead of it: see report.fire_completed on why this cannot reach the
     # watchdog and the feed line above is what does.
     report_mod.fire_completed(dispatch_id, sender, branch_email, report_path)

@@ -13,7 +13,7 @@
 The boot picker used to enumerate ~/.claude/sessions/<pid>.json, which answers
 "what processes are running". The user asks "where is my conversation". Those
 are different questions, and on 2026-08-18 the difference cost a chat: Ctrl+C
-deletes the dead chat's session file, so the one conversation Patrick wanted was
+deletes the dead chat's session file, so the one conversation the owner wanted was
 the one thing the menu could not show, while three background leftovers were
 offered as if they were his chats.
 

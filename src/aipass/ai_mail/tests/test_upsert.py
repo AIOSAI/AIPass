@@ -494,7 +494,7 @@ def test_format_update_count_survives_garbage():
 
 
 def test_inbox_row_shows_repeat_marker(_silence_format_log):
-    """Patrick sees the ping number at a glance in the listing."""
+    """The owner sees the ping number at a glance in the listing."""
     row = format_mod.format_email_list_item(
         1,
         {

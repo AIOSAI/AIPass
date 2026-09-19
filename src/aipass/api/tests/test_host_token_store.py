@@ -738,8 +738,8 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     """
     Where a raw token lands when the caller does not choose.
 
-    Patrick found three raw bearer receipts in his home root on 2026-08-19 —
-    ~/patrick.token and two siblings, 43 bytes each, from the August phone
+    The owner found three raw bearer receipts in his home root on 2026-08-19 —
+    ~/<owner>.token and two siblings, 43 bytes each, from the August phone
     setup. The mechanism was never wrong (raw never printed, 0600 file); the
     HELP TEXT said `--out ~/pixel.token` and whoever follows the docs mints a
     secret into their home directory. The default lives beside the hashed store
@@ -793,12 +793,12 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     def test_an_ordinary_label_with_spaces_still_works(self, store: Path) -> None:
         """The fence refuses what is DANGEROUS, not what is untidy.
 
-        Labels are human names ("Patrick's old phone"). Refusing a space would
+        Labels are human names ("Someone's old phone"). Refusing a space would
         make the fence a naming policy, which is not what it is for.
         """
-        receipt = host_tokens.receipt_path("Patrick's old phone")
+        receipt = host_tokens.receipt_path("Someone's old phone")
 
-        assert receipt.name == "Patrick's old phone.token"
+        assert receipt.name == "Someone's old phone.token"
         assert receipt.parent == (store / "host_api").resolve()
 
     @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privilege on Windows")

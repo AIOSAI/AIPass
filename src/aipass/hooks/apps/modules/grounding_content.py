@@ -45,7 +45,7 @@ STARTUP_REGROUND_INSTRUCTION = (
 
 
 #: Ceiling for the rendered branch block — the branch prompt plus its header.
-#: Patrick ruled the layer contract on 2026-09-15 (DPLAN-0347): 9,000 chars, one
+#: The owner ruled the layer contract on 2026-09-15 (DPLAN-0347): 9,000 chars, one
 #: under the 10,000 the harness persists behind a 2,000-char preview. A prompt
 #: that crosses that line is not read by the model at all; truncation here is
 #: what keeps the first 9,000 chars of it live.

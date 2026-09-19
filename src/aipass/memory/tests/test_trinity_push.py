@@ -483,7 +483,7 @@ class TestTheMachineFrame:
         assert meta["created"] == tp._today()
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
-        """Patrick's ruling, and what seedgo's checker compares against."""
+        """The owner's ruling, and what seedgo's checker compares against."""
         assert tp.build_doc_metadata({}, "local", "ai_mail")["managed_by"] == "ai_mail"
         assert tp.build_doc_metadata({}, "local", "aipass_site")["managed_by"] == "aipass_site"
 

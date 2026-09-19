@@ -42,10 +42,10 @@ than being deleted, because a cured issue that says how it was cured is worth mo
   Both are help-text defects in this branch's own modules, so the fix is mine to make. (3) Lower stakes,
   same family: the `--json` example under `rollover --help` FLAGS shows `"branches": 17` where the live
   fleet is 22.
-- **The parked symbolic test tier: three files archived 2026-09-07 on Patrick's ruling.** An opus judging
+- **The parked symbolic test tier: three files archived 2026-09-07 on the owner's ruling.** An opus judging
   pass on 2026-09-05 (reported via @devpulse) marked every row of `tests/test_symbolic_module.py`,
   `tests/test_symbolic.py` and `tests/test_symbolic_cli.py` as delete-or-merge candidates on the grounds
-  that the symbolic tier has been parked since 2026-08-14. Patrick ruled 2026-09-07 01:16 ("old tests not
+  that the symbolic tier has been parked since 2026-08-14. The owner ruled 2026-09-07 01:16 ("old tests not
   needed now can all be archived"); the three files moved to `tests/.archive/deleted_2026-09-07_*.py`
   (FPLAN-0491, devpulse), and the three matching rows left `KNOWN_BARE_PACKAGE_STAND_INS` in
   `test_import_isolation.py` as that test's own failure message prescribes. Measured before the move: the

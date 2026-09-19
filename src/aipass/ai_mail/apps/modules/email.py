@@ -91,7 +91,7 @@ def _resolve_branch_path() -> Path:
     unresolvable caller meant `view`/`close`/`reply` quietly operated on the wrong
     citizen's mail — reading another citizen's inbox because of where a terminal
     happened to be standing, which is the same defect as sending as them
-    (Patrick's ruling, 2026-08-21; @devpulse 096c9a42).
+    (the owner's ruling, 2026-08-21; @devpulse 096c9a42).
 
     Raises:
         RuntimeError: propagated from get_current_user() when the caller cannot be
@@ -105,7 +105,7 @@ def _resolve_branch_path() -> Path:
 def caller_refusal() -> str:
     """Return a refusal message when the caller stands outside any branch, else "".
 
-    Patrick's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
+    The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
     ur cwd, and if aimail was run in root it should fail outright." Every verb —
     inbox, view, reply, send, dispatch — refuses rather than resolving to whichever
     citizen the route happens to land on. Reading another citizen's mail because of

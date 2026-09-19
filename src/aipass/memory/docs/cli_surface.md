@@ -33,7 +33,7 @@ The valve itself is in [rollover_pipeline.md](rollover_pipeline.md).
 
 ## An unknown argument exits non-zero
 
-Patrick's standing ruling: an unknown command or argument **fails**. This branch printed the correct refusal
+The owner's standing ruling: an unknown command or argument **fails**. This branch printed the correct refusal
 on all three shapes and then exited **0** — @devpulse's fleet sweep of 2026-09-07 named it as the only branch
 failing every probe. Every door in `main()` returned `None` and the `__main__` block called `main()` without
 passing the result to `sys.exit`, so the refusal was contradicted by the one half a script reads. Fixed in

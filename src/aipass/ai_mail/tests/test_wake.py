@@ -648,7 +648,7 @@ def test_known_model_aliases_has_expected_entries():
 
 
 def test_default_model_is_opus():
-    """Default model should be opus (Patrick ruling 2026-08-01)."""
+    """Default model should be opus (the owner ruling 2026-08-01)."""
     assert DEFAULT_MODEL == "opus"
 
 
@@ -2027,7 +2027,7 @@ class TestIsManager:
         assert "wake skipped, mail delivered" not in src
 
 
-# --- wake-lane rulings, Patrick 2026-09-08 ------------------------------
+# --- wake-lane rulings, the owner 2026-09-08 ------------------------------
 #
 # THESE PINS WERE WRITTEN TO THE 2026-08-30 RULING AND ARE REWRITTEN IN PLACE.
 # That rule was "managers are fable thats it, only manager run fable", and this
@@ -2044,7 +2044,7 @@ def granted(monkeypatch, tmp_path):
     """Point the grant at a written config, and hand back a writer for it.
 
     The real CONFIG_FILE is untracked and may hold anything on the machine
-    running this suite, so a test that read it would be measuring Patrick's
+    running this suite, so a test that read it would be measuring the owner's
     laptop. Every test here writes the grant it means to test.
     """
 
@@ -2102,7 +2102,7 @@ class TestWakeModelPolicy:
 
     def test_nothing_requested_is_the_default_even_for_a_granted_seat(self, granted):
         """The grant is permission to ASK for Fable, not a standing assignment
-        to it. Patrick: everyone runs opus by default when dispatched."""
+        to it. The owner: everyone runs opus by default when dispatched."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@devpulse", None).model == DEFAULT_MODEL
@@ -2144,7 +2144,7 @@ class TestWakeModelPolicy:
 
 
 class TestTheGrantIsReadFromTheUntrackedConfig:
-    """fable_allowed() — Patrick edits the grant, the repo does not ship it.
+    """fable_allowed() — The owner edits the grant, the repo does not ship it.
 
     The direction of every fallback here is the point: a grant that collapsed to
     EMPTY on a bad file would demote @devpulse silently, and the only symptom
@@ -2183,7 +2183,7 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
         assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
 
     def test_a_written_grant_replaces_the_default_entirely(self, monkeypatch, tmp_path):
-        """Patrick moving the seat means the default no longer applies — this is
+        """The owner moving the seat means the default no longer applies — this is
         a replacement, not an addition, or a revoked seat could never be revoked."""
         config = tmp_path / "safety_config.json"
         config.write_text(json.dumps({"fable_allowed": ["@someone_else"]}), encoding="utf-8")
@@ -2224,7 +2224,7 @@ def _tmux_line(calls, verb):
 
 
 class TestUnattendedWakesBypassPermissions:
-    """Ruling 1, Patrick 2026-08-30: "always bypass permissions always, claude
+    """Ruling 1, the owner 2026-08-30: "always bypass permissions always, claude
     alone will nvr work."
 
     @vera's first external wake launched as a bare `claude`, sat in default
@@ -2277,7 +2277,7 @@ class TestUnattendedWakesBypassPermissions:
 
 
 class TestDaemonSessionMarking:
-    """Ruling 3, Patrick 2026-08-30: a daemon-started session must be
+    """Ruling 3, the owner 2026-08-30: a daemon-started session must be
     recognizably daemon work, or a human kills it as a leftover.
 
     He killed @vera's live session mid-run — `daemon-vera-192848` read as his
@@ -2298,7 +2298,7 @@ class TestDaemonSessionMarking:
         assert session.startswith(wake_mod.DAEMON_SESSION_PREFIX)
 
     def test_the_session_name_that_got_killed_cannot_come_back(self, tmp_path, monkeypatch):
-        """`daemon-vera-192848` is not a hypothesis — Patrick read that exact
+        """`daemon-vera-192848` is not a hypothesis — The owner read that exact
         shape as his own leftover tmux and killed it mid-playbook.
 
         The pin above reads DAEMON_SESSION_PREFIX, so it passes for ANY value

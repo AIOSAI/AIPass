@@ -12,7 +12,7 @@
 `tests/parked/` holds work that must survive a clone but must not run — today
 the capture-lane seed, 63 tests for a read-scope terminal that @baud's shipped
 `--capture-room` flags still point at. It lives there because `.archive/` is
-Patrick's disposal zone, cleaned without warning, so nothing durable may sit in
+the owner's disposal zone, cleaned without warning, so nothing durable may sit in
 one.
 
 WHY THIS FILE EXISTS. The park was protected by a naming habit: the house

@@ -21,7 +21,7 @@ desktop has, over a different wire.
 WHY THIS IS NOT THE POLL/CAPTURE LANE THAT WAS BRIEFED FIRST
 ------------------------------------------------------------------------
 Round 18 briefed a capture-and-repaint design: poll `tmux capture-pane`, render
-the text, send keys back. Patrick corrected it four minutes later, and the
+the text, send keys back. The owner corrected it four minutes later, and the
 sentence is worth keeping because it is the whole difference:
 
     repaint-polling shows a PICTURE of the room that updates.
@@ -79,7 +79,7 @@ the offered protocols or the browser fails the handshake, so the accepted value
 is the sentinel name and never the token itself.
 
 Scope is `operate`, without exception: an attached room is a shell prompt on
-Patrick's machine, and there is no reading half to split off.
+the owner's machine, and there is no reading half to split off.
 
 Functions:
     is_available()   - Whether this platform can host a PTY
@@ -454,7 +454,7 @@ def attach_only_command(room: str) -> List[str]:
     or fail. Creating it would mint an empty session under a name the desktop
     believes it owns.
 
-    That is the m12 shape one level down. On 2026-09-04 Patrick opened his
+    That is the m12 shape one level down. On 2026-09-04 the owner opened his
     aipass chat on the laptop and attached from the phone to a blank terminal,
     because `_room_for` rebuilt `baud-<branch>` from the name and `-A` happily
     created it while the live seat sat elsewhere. A builder that cannot create

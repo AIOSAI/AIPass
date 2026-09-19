@@ -98,7 +98,7 @@ stopped existing. Cleanup is an open item; see [known_issues.md](known_issues.md
 
 ## A park in the disposal zone is not a park
 
-Patrick's ruling of 2026-08-18, fleet-wide: `.archive/` is always ignored, no
+The owner's ruling of 2026-08-18, fleet-wide: `.archive/` is always ignored, no
 exceptions, and it is his disposal zone — cleaned without warning. Both of this
 branch's parks lived there. `test_symbolic_parked.py` had nine pins asserting the
 parked implementation was still on disk, and they had been green on every dev

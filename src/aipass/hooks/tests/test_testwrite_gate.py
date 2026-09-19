@@ -7,9 +7,9 @@
 # Modified: 2026-09-10
 # =============================================
 
-"""Tests for testwrite_gate — Patrick's 2026-09-01 no-agent-test-creation ruling.
+"""Tests for testwrite_gate — the owner's 2026-09-01 no-agent-test-creation ruling.
 
-Patrick ruled (devpulse DPLAN-0323) that agents are stripped of self-directed
+The owner ruled (devpulse DPLAN-0323) that agents are stripped of self-directed
 test creation while @seedgo's test_quality v5 pack lands, enforced by a hook
 behind a JSON switch so the way back is a field flip and not a rebuild.
 
@@ -25,7 +25,7 @@ The file is organised by the question each block answers:
 
  1. The switch does all three of its jobs: off blocks, a branch in ``allow``
     passes, ``on`` passes for everyone.
- 2. The ruling stays where Patrick drew it: creation is blocked, editing an
+ 2. The ruling stays where the owner drew it: creation is blocked, editing an
     existing test is not.
  3. Both lanes answer the same. The scripted lane reuses ``bash_writes``, so a
     ``cat > tests/test_x.py`` is refused exactly like a Write.
@@ -172,7 +172,7 @@ class TestTheSwitch:
         assert "drone @hooks testwrite" in reason
 
     def test_the_refusal_names_what_the_ask_must_CARRY(self, project: dict):
-        """Patrick's awareness ruling: blocking without teaching is half a gate.
+        """The owner's awareness ruling: blocking without teaching is half a gate.
 
         The navmap house rule is not "mail @devpulse", it is "mail @devpulse with
         the defect or contract the test pins". Naming the recipient and omitting
@@ -351,7 +351,7 @@ class TestTheFailModeIsObservable:
 
 
 class TestTheAdminSeat:
-    """Patrick's cleanup work must not be blocked — on a verified grant only."""
+    """The owner's cleanup work must not be blocked — on a verified grant only."""
 
     def test_the_verified_admin_seat_may_create(self, project: dict, grant_granted):
         _policy(project)
@@ -365,7 +365,7 @@ class TestTheAdminSeat:
         assert _blocked(_run(project["admin_seat"], file_path=new))
 
     def test_the_admin_seat_passes_even_when_the_policy_is_unreadable(self, project: dict, grant_granted):
-        """Checked BEFORE the policy read, so a broken file cannot lock Patrick out."""
+        """Checked BEFORE the policy read, so a broken file cannot lock the owner out."""
         (project["root"] / ".aipass" / "test_write_policy.json").write_text("{broken", encoding="utf-8")
         new = str(project["root"] / "src" / "aipass" / "devpulse" / "tests" / "test_new.py")
         assert _run(project["admin_seat"], file_path=new)["exit_code"] == 0

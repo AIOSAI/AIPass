@@ -7,7 +7,7 @@
 
 ## Admin Lane (`admin=True`)
 
-Patrick's ruling (DPLAN-0288): @devpulse — and only @devpulse — holds an admin
+The owner's ruling (DPLAN-0288): @devpulse — and only @devpulse — holds an admin
 grant that lets a dispatch wake **manager-class** citizens. `wake_branch` takes a
 keyword-only `admin` flag that is an *already-decided verdict*, never a request:
 

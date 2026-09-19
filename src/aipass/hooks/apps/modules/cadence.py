@@ -535,7 +535,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
     For standing conditions — states that stay true for days and re-assert on
     every qualifying edit. @devpulse's seat sat over the todos cap long enough
     to write 209 identical lines and trip repeat-signature escalation; the
-    advisory was right and the cadence was the noise (Patrick, 2026-08-19).
+    advisory was right and the cadence was the noise (the owner, 2026-08-19).
 
     Fires when it has never fired, when the period has elapsed, and when the
     turn counter went BACKWARDS — a reset means compact or a new session, and

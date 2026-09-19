@@ -188,7 +188,7 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
 
     # Legacy fix: drop a root-level 'status' block.
     #
-    # It is not relocated into document_metadata any more. Patrick's ruling of
+    # It is not relocated into document_metadata any more. The owner's ruling of
     # 2026-08-25 deleted status.health from the standard outright: it stored a
     # DERIVABLE fact — a second source of truth waiting to go stale, the exact
     # disease this standard cures — and it read "healthy" hardcoded from 2025-11
