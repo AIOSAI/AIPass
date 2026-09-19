@@ -1,6 +1,6 @@
 # Open-source test-quality tooling — external research for the `audit-tests` lane
 
-**Author:** @aipass · **Date:** 2026-08-29 · **Assigned by:** Patrick, dispatched via @devpulse
+**Author:** @aipass · **Date:** 2026-08-29 · **Assigned by:** the owner, dispatched via @devpulse
 **Campaign:** DPLAN-0320 (methodology) / FPLAN-0457 (stage 1) — this doc is external input, not a taxonomy edit.
 **Reads:** `devpulse/docs.local/test_quality/TAXONOMY.md` (rev 2) and `PITFALLS.md`, read-only.
 
@@ -62,7 +62,7 @@ off-the-shelf plugin with the same shape, `pytest-litter`, **passed that same ca
 
 ### 0.1 The commercial neighbours — considered and excluded
 
-*(added 2026-08-29 late evening, after Patrick asked about CodeRabbit and Aikido. Verified against vendor
+*(added 2026-08-29 late evening, after the owner asked about CodeRabbit and Aikido. Verified against vendor
 pricing/docs/licensing pages and, where those were blocked, against analyzer source. Nothing else in this
 document was altered.)*
 

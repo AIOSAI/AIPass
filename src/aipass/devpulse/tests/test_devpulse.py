@@ -47,7 +47,7 @@ class TestCLIRouting:
     def test_unknown_command_returns_false(self, capsys):
         """Unrecognized command returns False AND names the token on stderr.
 
-        Patrick's unknown-argument ruling (fleet sweep 2026-09-07): fail
+        The owner's unknown-argument ruling (fleet sweep 2026-09-07): fail
         non-zero and say which token was refused. Until 09-07 devpulse
         returned False with nothing printed — exit 1, empty stderr.
         """
@@ -184,7 +184,7 @@ class TestReleaseNotifyRouting:
     """
 
     def test_both_spellings_route_to_the_same_work(self):
-        """The module file is release_notify.py; Patrick types release-notify."""
+        """The module file is release_notify.py; the owner types release-notify."""
         with patch.object(release_notify_module, "_notify", return_value=True) as work:
             for spelling in ("release-notify", "release_notify"):
                 assert release_notify_module.handle_command(spelling, ["v2.8.4"]) is True

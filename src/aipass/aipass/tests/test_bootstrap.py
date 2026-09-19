@@ -1375,7 +1375,7 @@ def test_update_project_tier_files_already_current(tmp_path):
 def test_update_project_skips_files_the_owner_protected(tmp_path):
     """.updateignore outranks every other rule — no write, no backup, no sidecar.
 
-    Patrick, 2026-09-09: "project owners decide what update skips." The pin
+    The owner, 2026-09-09: "project owners decide what update skips." The pin
     covers all three of the file's documented spellings at once: a full
     relative path, a bare filename matched at any depth, and a directory.
     """

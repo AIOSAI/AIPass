@@ -54,7 +54,7 @@ from everything else. It is long on purpose and it stays.
 # FINISHED, never the branch that SENT the work, so this seat used to be woken
 # for every citizen's completion fleet-wide. dispatches.py reads @ai_mail's
 # register — written at send time — and only ids belonging to this seat are
-# delivered. That is Patrick's rule 5, and it is not satisfiable from the feed
+# delivered. That is the owner's rule 5, and it is not satisfiable from the feed
 # alone at any price.
 #
 # KINDS: completions ONLY. The feed also carries "wake" start edges, and this
@@ -69,7 +69,7 @@ from everything else. It is long on purpose and it stays.
 # The round-1 baseline was one process doing two jobs, and its delivery depended
 # on a LISTENER the process could neither see nor keep alive: witnessed live on
 # 2026-08-19, @api (11:22) and @baud (12:34) COMPLETE lines sat unread in a task
-# file while Patrick watched the live session stay silent. The registry said
+# file while the owner watched the live session stay silent. The registry said
 # "armed", the pid was alive, and the idempotence check ("pid alive = covered")
 # re-armed into a lie.
 #
@@ -142,7 +142,7 @@ _DELIVER_KINDS = ("dispatch",)
 # agents mid-work and nothing said so for two and a half hours, although
 # dispatches.overdue() already knew — it was pull-only.
 #
-# Patrick's shape (2026-09-07 15:00): five minutes, not sixty seconds, and the
+# The owner's shape (2026-09-07 15:00): five minutes, not sixty seconds, and the
 # code checks, not the seat — "the whole redesign was to cut cpu and not need
 # tokens to monitor". So: one register read through @ai_mail's door per five
 # minutes, no agent polled, no process armed, and a stdout line only when a

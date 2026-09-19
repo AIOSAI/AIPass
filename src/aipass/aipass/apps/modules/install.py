@@ -372,7 +372,7 @@ def _build_install_prompt(home: Path, bins: dict, doctor_action_items: list[str]
     survives independent of this one run) and any ACTION NEEDED items / a
     skipped git identity, passed through env vars by setup.sh's own
     ``--chat-only`` handoff. Also enriched with the doctor preflight verdict
-    (round-2 addendum 2, Patrick's ruling: doctor runs before hello, and a
+    (round-2 addendum 2, the owner's ruling: doctor runs before hello, and a
     still-broken hook wiring is P1 — passed in as ``doctor_action_items`` so
     it leads the machine-still-needs list). Composition stays here, in this
     one function.
@@ -432,7 +432,7 @@ def _ask_permission_mode() -> str:
 
 
 def _run_doctor_preflight() -> list[str]:
-    """Run 'aipass doctor --fix' before the concierge says hello (Patrick's ruling,
+    """Run 'aipass doctor --fix' before the concierge says hello (the owner's ruling,
     round-2 addendum 2): heals what it can, then reports what's still broken.
 
     Hook wiring is P1 — a still-broken result is printed as a loud, highlighted
@@ -466,7 +466,7 @@ def _end_in_chat(home: Path, bins: dict, dry_run: bool, no_chat: bool) -> None:
     _print_next_steps(home)
 
     # The doctor preflight runs INSIDE the chat path below, so every early
-    # return here skips it. Patrick's ruling (FPLAN-0492 wave 6): a skipped
+    # return here skips it. The owner's ruling (FPLAN-0492 wave 6): a skipped
     # preflight is announced with the command that runs it -- never silent.
     if no_chat:
         console.print("[dim]Skipped the welcome chat (--no-chat). Run 'claude' in this directory anytime.[/dim]")

@@ -9,11 +9,11 @@
 """
 Birth-certificate admin grant for devpulse (DPLAN-0288 / FPLAN-0401).
 
-Patrick's ruling: devpulse — and only devpulse — holds an admin privilege
+The owner's ruling: devpulse — and only devpulse — holds an admin privilege
 that lets it dispatch ANY agent, manager-class citizens included. The grant
 rides on devpulse's EXISTING birth certificate (``artifacts/
 birth_certificate.json``, SYSTEM-minted at spawn, in spawn's
-``_NEVER_UPDATE_FILES``, untracked by git): Patrick's ceremony adds a
+``_NEVER_UPDATE_FILES``, untracked by git): the owner's ceremony adds a
 ``privileges`` block and an HMAC-SHA256 ``signature`` computed with a key
 that lives OUTSIDE every repo (``~/.aipass/admin_grant.key``).
 
@@ -27,7 +27,7 @@ must pass, every refusal is named, missing key = lane dark:
   5. registry — devpulse entry carries ``admin: true``
 
 This module is the CEREMONY TOOLING and the reference implementation of the
-contract. It does not run the ceremony — Patrick does, via
+contract. It does not run the ceremony — the owner does, via
 ``drone @devpulse admin_grant``. @ai_mail mirrors the same contract for the
 dispatch lane (their code, their tests).
 

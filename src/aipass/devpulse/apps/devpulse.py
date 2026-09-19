@@ -135,7 +135,7 @@ def print_help():
 def route_command(command: str, args: list[str], modules: list[Any]) -> bool:
     """Route command to appropriate module.
 
-    An unknown command or flag is refused BY NAME (Patrick's standing ruling:
+    An unknown command or flag is refused BY NAME (the owner's standing ruling:
     fail with a message naming the token, never silently, never a default).
     Until 2026-09-07 this returned False with nothing printed — exit 1, empty
     stdout and stderr — which the fleet sweep of that morning classified as

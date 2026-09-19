@@ -491,7 +491,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     Plan mode (``apply=False``) performs ZERO filesystem writes: no mkdir, no
     manifest stamp, no trust enrolment. Every decision is a read. This is what
     ``aipass init update --dry-run`` runs, and what makes the preview
-    trustworthy enough to paste to Patrick for a go.
+    trustworthy enough to paste to the owner for a go.
 
     Args:
         target: Directory containing the AIPass project to update.
@@ -547,7 +547,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
         """Add one file to the plan and queue whatever write it implies.
 
         ``.updateignore`` outranks everything, including the seed rule and the
-        hash rule (Patrick, 2026-09-09): if the owner has claimed a file, the
+        hash rule (the owner, 2026-09-09): if the project owner has claimed a file, the
         update has no opinion about it at all -- no write, no backup, no
         sidecar, and no drift reported against it.
         """
@@ -709,7 +709,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     elif hooks_path.exists():
         record(".aipass/hooks.json", hooks_path, sm.ACTION_CURRENT, "no template available — nothing to compare")
 
-    # --- Retired managed files: renamed, never unlinked (Patrick, DPLAN-0264) ---
+    # --- Retired managed files: renamed, never unlinked (the owner, DPLAN-0264) ---
 
     for rel in _STALE_MANAGED_FILES:
         stale_path = target / rel
@@ -756,7 +756,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     file_writes = bool(writes or retires or symlinks or handlers)
     pending = file_writes or stamp_pending
     # Stamp-only: nothing in the project changes but the manifest's record of
-    # which AIPass last looked at it. Patrick, 2026-09-10 (DPLAN-0337 R1): this
+    # which AIPass last looked at it. The owner, 2026-09-10 (DPLAN-0337 R1): this
     # one case applies without a go, because the receipt — not the go — is the
     # contract, and a go spent on a plan that touches no file is a go that
     # teaches people to approve without reading. Derived from the same queues

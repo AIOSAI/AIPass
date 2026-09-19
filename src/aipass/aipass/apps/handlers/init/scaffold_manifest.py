@@ -308,7 +308,7 @@ def sidecar_path(path: Path) -> Path:
 def disabled_path(path: Path) -> Path:
     """Where a retired managed file is renamed to.
 
-    RENAME, NEVER UNLINK (Patrick, DPLAN-0264): a retired file the manager can
+    RENAME, NEVER UNLINK (the owner, DPLAN-0264): a retired file the manager can
     still see is a decision they can reverse; a deleted one is a surprise.
     """
     return path.with_name(f"{path.stem}(disabled){path.suffix}")

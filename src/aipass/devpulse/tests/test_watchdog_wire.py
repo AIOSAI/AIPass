@@ -1167,7 +1167,7 @@ def test_a_live_monitor_inside_its_timeout_is_silent(tmp_path, capsys, monkeypat
 
 
 def test_the_register_is_read_every_five_minutes_not_every_tick(tmp_path, monkeypatch):
-    """Patrick, 2026-09-07 15:00: five minutes, not sixty seconds, and the
+    """The owner, 2026-09-07 15:00: five minutes, not sixty seconds, and the
     code checks — the redesign exists to cut cpu. One read at sign-in, none
     per tick at the default cadence; every tick only when a test asks for it."""
     assert wire.DEAD_CHECK_SECONDS == 300.0

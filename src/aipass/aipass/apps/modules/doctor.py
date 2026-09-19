@@ -1210,7 +1210,7 @@ def _check_scaffold() -> List[CheckResult]:
 
     Read-only by design, including under ``--fix``. Applying a scaffold update
     is a decision (it can replace files a manager wrote), not a repair, and
-    DPLAN-0335 puts that decision with Patrick or devpulse. Doctor's whole job
+    DPLAN-0335 puts that decision with the owner or devpulse. Doctor's whole job
     here is to report the drift and name the command that previews it.
     """
     from aipass.aipass.apps.handlers.init import scaffold_manifest as sm
@@ -1377,7 +1377,7 @@ def run_doctor(verbose: bool = False, interactive: bool = False, fix: bool = Fal
 def run_doctor_preflight(fix: bool = True) -> tuple[int, List[str]]:
     """Run doctor automatically in the install tail, before the concierge says hello.
 
-    Patrick's ruling (round-2 addendum 2): doctor must run as part of install,
+    The owner's ruling (round-2 addendum 2): doctor must run as part of install,
     not be offered later as a chat option — and hook wiring is P1, so a
     still-broken hooks/wire-verify result is surfaced separately for the
     caller to put at the TOP of the ACTION NEEDED block.

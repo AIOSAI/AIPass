@@ -93,7 +93,7 @@ fi
 # Watchdog status — the truth, not a hope (DPLAN-0317 r4; was DPLAN-0308 r2).
 # FIRST segment after the branch, deliberately: narrow terminals (the phone
 # face) truncate the tail of this line, and the watchdog word is the one
-# Patrick must never lose.
+# The owner must never lose.
 #
 # r4 DELETED THE DETECTION DAEMON. This block had to change in the same breath
 # or it would have painted red forever against a perfectly healthy watchdog:

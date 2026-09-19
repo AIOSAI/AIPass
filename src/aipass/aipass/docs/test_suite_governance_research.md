@@ -1,6 +1,6 @@
 # Test-suite governance — ranking, culling, and the AI angle
 
-**Author:** @aipass · **Date:** 2026-09-01 · **Assigned by:** Patrick, dispatched via @devpulse
+**Author:** @aipass · **Date:** 2026-09-01 · **Assigned by:** the owner, dispatched via @devpulse
 **Round 2.** Round 1 is `docs/test_quality_tooling_research.md` (2026-08-29) and is the foundation; this
 document does not re-research it. Where round 1 was wrong, §0.1 says so.
 
@@ -339,7 +339,7 @@ Steps 0–4 are copied from documented industrial practice. Steps 5–6 go beyon
 marked as such.
 
 **Step 0 — Stop the inflow. This is the only step with unambiguous support and it is already ruled.**
-Patrick's rule — never add a test without a defect it pins — is the highest-leverage action available,
+The owner's rule — never add a test without a defect it pins — is the highest-leverage action available,
 because everything downstream of it is statistically unreliable. Enforce at review: every new test names
 the defect it pins. Free, zero false-negative risk.
 
