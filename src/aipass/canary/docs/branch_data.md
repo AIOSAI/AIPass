@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Where this branch writes
 
 Everything this branch puts on disk, and which of it means anything. Short
@@ -41,9 +43,9 @@ a sub-agent drops during a test.
 ## logs/
 
 Prax log output *and* dispatch transcripts, which is worth knowing before
-reading anything there. `dispatch_stdout.log`, `dispatch_stderr.log` and
-`dispatch_wake.log` are written by the mail branch when work arrives here — they
-are not this branch's own output. `note.log` is: the note module logs its
+reading anything there. `dispatch_stdout.log`, `dispatch_stderr.log`,
+`dispatch_wake.log` and the `.dispatch_env` snapshot are written by the mail
+branch when work arrives here — they are not this branch's own output. `note.log` is: the note module logs its
 refusals and its I/O failures there.
 
 The entry point's own logger call sites — an import fallback, a module that

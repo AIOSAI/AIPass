@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # The note module
 
 An append-only note store: `note add` writes one line, `note list` reads them
@@ -12,7 +14,9 @@ stays because the behaviour it pins is worth keeping around.
 
 - **Where:** `docs.local/notes.jsonl`, inside this branch. `docs.local/` is
   ignored by the repository, and a test pins that by reading the ignore file
-  itself rather than trusting the claim.
+  itself rather than trusting the claim. It is a repo-level rule read from a
+  branch suite, so where no repo root (no `.git`) sits above the branch, as in
+  a copy of `src/aipass/` alone, the test skips and names why.
 - **Format:** UTF-8 JSON Lines. Each record is exactly `{"text": ...,
   "timestamp": ...}`, an ISO-8601 local time with its UTC offset, terminated by
   a newline. Exactly those keys: a record carrying an extra key is not a record.
@@ -52,10 +56,10 @@ One survived on the first pass — the terminator guard, because both unterminat
 cases broke the JSON anyway once their final byte was dropped. A valid record
 plus a trailing space with no newline convicts it now.
 
-A later pass by the reviewer found the completeness gap that remains: the
-exactly-these-two-keys half of the format rule has a missing-key case and a
-not-a-record case, but no superset case, so a record carrying an extra key would
-be accepted by a weakened check without any test going red. Recorded here rather
-than repaired, because the gap is the finding.
+The exactly-these-two-keys rule has a case for each half. A missing key is the
+subset half; `extra_key` is the superset half, and it is the only one that
+measures exactness: a check weakened to "every required key present" still
+refuses a missing key, but accepts an extra one. With the check weakened that
+way, `extra_key` goes red on both `list` and `add`.
 
 [<- Back to the branch README](../README.md)
