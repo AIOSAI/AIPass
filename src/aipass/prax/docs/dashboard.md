@@ -104,22 +104,7 @@ declared policy. Fixed 2026-08-13 — `template_pusher.DEPRECATED_QUICK_STATUS_K
 now holds only `pending_bulletins`, and a key qualifies for it only when nobody
 writes it.
 
-**The fix reached the writer, not the adviser.** `template_differ.py` carries its
-own copy of that list and it still reads
-`["pending_bulletins", "commons_mentions"]`. The differ never writes, so nothing
-is deleted — but `diff-template` still *recommends* deleting a live key.
-Reproduced 2026-08-25 against prax's own dashboard:
-
-```
-  PRAX (needs_update)
-    + ai_mail section
-    ~ quick_status: remove commons_mentions
-```
-
-@flow writes `commons_mentions`; prax's own `calculate_quick_status` carries it
-through untouched. So the advice contradicts the invariant the writers already
-honour, and anyone who acts on it by hand does the deletion the pusher was fixed
-not to do. Two copies of one policy list is the defect underneath; a single
-shared constant is the fix. Not changed here — this pass documents, it does not
-rewrite handlers.
+`template_differ.py` reads the same list from the pusher (one constant, pinned in
+`tests/test_dashboard_merge.py`), so `diff-template` recommends only what
+`push-template` would do.
 

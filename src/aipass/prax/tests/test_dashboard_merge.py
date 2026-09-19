@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_dashboard_merge.py
 # Description: quick_status has many writers — none may delete another's key
@@ -244,6 +243,16 @@ class TestPushTemplateIsNotAWreckingBall:
     def test_commons_mentions_is_not_deprecated(self):
         pusher = _load(PUSHER_PATH)
         assert "commons_mentions" not in pusher.DEPRECATED_QUICK_STATUS_KEYS
+
+    def test_the_differ_reads_the_pushers_list_not_its_own_copy(self):
+        """The adviser carried a second copy of the policy and kept recommending
+        the deletion of flow's live key for weeks after the writer was fixed
+        (docs/dashboard.md, 2026-08-25). One list, the pusher's, or the advice
+        and the write disagree again."""
+        pusher = _load(PUSHER_PATH)
+        differ = _load("aipass.prax.apps.handlers.dashboard.template_differ")
+        assert differ.DEPRECATED_QUICK_STATUS_KEYS is pusher.DEPRECATED_QUICK_STATUS_KEYS
+        assert "commons_mentions" not in differ.DEPRECATED_QUICK_STATUS_KEYS
 
     def test_structural_update_preserves_foreign_key(self, tmp_path):
         pusher = _load(PUSHER_PATH)
