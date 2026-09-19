@@ -30,7 +30,7 @@ is in place AND the real ``memory_files`` module is registered.
 # update_metadata — REMOVED 2026-08-25
 # ---------------------------------------------------------------------------
 # Its eight tests went with it. The function's only job was writing
-# `document_metadata.status.<field>`, and Patrick's ruling deleted the status
+# `document_metadata.status.<field>`, and the owner's ruling deleted the status
 # block from the trinity standard: health is computed by the checker at run
 # time, never stored. Its one production caller (line_counter.update_line_count)
 # stamped a health date through it; nothing else in the fleet imported it.

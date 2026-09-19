@@ -90,7 +90,7 @@ def _cpe(cmd, stderr=b""):
 
 
 # The resolver matches sessions against our own uid, so build the fixtures from it
-# rather than hard-coding 1000 — CI does not run as Patrick. Windows has no
+# rather than hard-coding 1000 — CI does not run as the owner. Windows has no
 # os.getuid at all, so fall back to a fixed uid there and pin the resolver to the
 # same value below (module-level getuid would kill collection on Windows).
 _UID = str(os.getuid()) if hasattr(os, "getuid") else "1000"
@@ -574,7 +574,7 @@ class TestSuspendGating:
 
 # =============================================
 # ROOT CAUSE 1 (incident 2026-08-02) — the grace window was control-verb-blind.
-# Patrick chatting with @devpulse is a different PROCESS from the control bot,
+# The owner chatting with @devpulse is a different PROCESS from the control bot,
 # so presence has to cross processes via a shared stamp file.
 # =============================================
 
@@ -646,7 +646,7 @@ class TestCrossProcessHumanPresence:
         assert bot._read_inbound_stamp() == 0.0
 
     def test_chat_with_another_bot_cancels_the_suspend_cycle(self, tmp_path, _patch_base_bot_deps):
-        """THE incident regression: Patrick talks to @devpulse, the control bot must stay awake."""
+        """THE incident regression: The owner talks to @devpulse, the control bot must stay awake."""
         bot = _make_bot(tmp_path, _patch_base_bot_deps)
         bot._suspend_heartbeat_active = True
         bot._suspend_chat_id = 7
@@ -1026,7 +1026,7 @@ class TestSuspendEnabledFlag:
 
 # =============================================
 # adaptive cadence (devpulse addendum 2026-08-02) — Jul 30-Aug 1's short beats
-# were accidental (spurious wakes), but that duty-cycle IS the behaviour Patrick
+# were accidental (spurious wakes), but that duty-cycle IS the behaviour the owner
 # experienced as chat-behind-suspend working. Recreate it deliberately.
 # =============================================
 

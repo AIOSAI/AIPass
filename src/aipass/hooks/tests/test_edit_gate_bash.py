@@ -1,15 +1,15 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.0.0
-# Description: Tests for the admin exemption and the scripted (Bash) cross-project lane
+# Version: 1.3.0
+# Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-09-10
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for edit_gate's scripted lane and the devpulse admin exemption.
 
-Patrick's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
+The owner's ruling, 2026-08-30 (devpulse compass 322): the cross-project write
 fence stays for every agent and devpulse is the sole exemption — "It is only you
 who can reach outwards. Nobody else."
 
@@ -82,7 +82,7 @@ def _names(targets, *parts: str) -> bool:
     """True when some target ends in these components, in any OS's spelling.
 
     THE CONTRACT, ruled 2026-08-31: the target list stays OS-NATIVE. These are
-    the Path objects edit_gate hands to _find_project_root, which globs the real
+    the Path objects edit_gate hands to write_ownership.project_of, which globs the real
     filesystem for *_REGISTRY.json — a list canonicalised to POSIX spelling
     would be unwalkable on Windows, so the fence would go dark in exactly the
     place this whole train was fixing. 1.2.0 normalises separators on the way
@@ -130,7 +130,7 @@ def grant_withheld():
 
 
 class TestAdminExemptionToolLane:
-    """devpulse's Edit into a sibling project — the write Patrick overruled."""
+    """devpulse's Edit into a sibling project — the write the owner overruled."""
 
     @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit", "NotebookEdit"])
     def test_verified_admin_passes(self, sibling_projects: dict, grant_granted, tool: str):
@@ -218,9 +218,17 @@ class TestAdminIdentityIsVerifiedNotClaimed:
         assert _blocked(result)
 
     def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict):
+        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too."""
         from aipass.hooks.apps.handlers.security import edit_gate
 
-        with patch.object(edit_gate.importlib, "import_module", side_effect=ImportError("no ai_mail")):
+        real = edit_gate.importlib.import_module
+
+        def _no_rail(name: str):
+            if name.endswith("admin_seat") or name.startswith("aipass.ai_mail"):
+                raise ImportError("no ai_mail")
+            return real(name)
+
+        with patch.object(edit_gate.importlib, "import_module", side_effect=_no_rail):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
@@ -233,7 +241,7 @@ class TestAdminIdentityIsVerifiedNotClaimed:
 
 
 class TestAdminExemptionStaysNarrow:
-    """Patrick exempted the OUTWARD reach. Nothing else moved."""
+    """The owner exempted the OUTWARD reach. Nothing else moved."""
 
     def test_inbox_writes_are_still_refused_for_the_admin_seat(self, sibling_projects: dict, grant_granted):
         inbox = str(Path(sibling_projects["admin_seat"]) / ".ai_mail.local" / "inbox.json")
@@ -313,6 +321,31 @@ class TestScriptedLaneCatches:
         assert "sed -i" in _reason(result)
         assert "drone @devpulse feedback send" in _reason(result)
 
+    # The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc): own files only, on this lane too.
+    # Until then the shell lane read the project boundary alone: hooks could sed another branch.
+
+    def test_sed_into_another_branch(self, registered_projects: dict):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        result = _run(registered_projects["hooks"], command=f"sed -i s/a/b/ {target}")
+        assert _blocked(result)
+        assert "Cross-branch write blocked (sed -i): 'hooks' cannot write to 'memory'" in _reason(result)
+
+    def test_redirection_into_a_project_level_file(self, registered_projects: dict):
+        target = (registered_projects["aipass"] / "notes.md").as_posix()
+        result = _run(registered_projects["hooks"], command=f"echo x > {target}")
+        assert _blocked(result)
+        assert "Project-level write blocked" in _reason(result)
+
+    def test_tee_into_the_managers_branch_from_an_ordinary_agent(self, registered_projects: dict):
+        target = (Path(registered_projects["vera_seat"]) / "brand.md").as_posix()
+        assert _blocked(_run(registered_projects["writer"], command=f"echo x | tee {target}"))
+
+    def test_cp_down_into_a_nested_project(self, registered_projects: dict, grant_withheld):
+        target = (Path(registered_projects["baud_seat"]) / "app.py").as_posix()
+        result = _run(registered_projects["hooks"], command=f"cp ./app.py {target}")
+        assert _blocked(result)
+        assert "Cross-project" in _reason(result)
+
 
 class TestScriptedLaneDoesNotOverreach:
     """A gate that refuses correct commands teaches agents to route around it."""
@@ -366,6 +399,29 @@ class TestScriptedLaneDoesNotOverreach:
         loose.mkdir()
         assert _run(str(loose), command="sed -i s/a/b/ /tmp/whatever.txt")["exit_code"] == 0
 
+    def test_an_interpreter_reading_another_branch_is_allowed(self, registered_projects: dict):
+        """Inside one project the branch fence convicts on write grammar only.
+
+        An interpreter's held paths cannot be told from reads, and reading
+        another branch is the daily loop — the ruling allows it. The residual
+        (an interpreter that DOES write another branch) is published in
+        docs/edit_gate.md; the project fence still reads held paths.
+        """
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        for command in (f"python3 -c \"print(open('{target}').read())\"", f"awk '/def /' {target}", f"cat {target}"):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
+
+    def test_seedgo_and_the_manager_write_across_branches_from_a_shell(self, registered_projects: dict):
+        memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
+        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 0
+        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 0
+
+    def test_writing_your_own_branch_stays_allowed(self, registered_projects: dict):
+        own = (Path(registered_projects["hooks"]) / "docs" / "x.md").as_posix()
+        for command in (f"echo x > {own}", f"sed -i s/a/b/ {own}", "mkdir -p ./docs.local/probe"):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
+
 
 class TestShellWritesToMemoryAreRefused:
     """DPLAN-0342 row 3: a memory file is written where its caps are measured, never from a shell.
@@ -417,6 +473,29 @@ class TestShellWritesToMemoryAreRefused:
         assert _blocked(result)
         assert "Read tool, cat or jq" in _reason(result)
 
+    def test_the_cure_drops_the_fleet_clauses_where_there_is_no_fleet(self, sibling_projects: dict):
+        """This gate ships to projects `aipass init` creates, and they have no @memory.
+
+        Two clauses of the cure sentence are AIPass-only: that a cap is measured
+        on the Edit/Write lane, and that a `drone @memory` verb is the other
+        door. Sent to a project without the fleet they name a service that is
+        not there and a verb that will refuse the caller — a refusal whose cure
+        does not work is one agents route around instead of reporting
+        (feedback c273274e, 2026-09-16).
+        """
+        from unittest.mock import patch
+
+        target = "aipass.hooks.apps.handlers.security.edit_gate._memory_service_reachable"
+        with patch(target, return_value=False):
+            reason = _reason(_run(sibling_projects["plain_seat"], command="sed -i s/a/b/ .trinity/local.json"))
+
+        # Still refused, and still says where the write belongs.
+        assert "local.json via sed -i" in reason
+        assert "Edit or Write tool" in reason
+        # The two clauses that would be false there.
+        assert "drone @memory" not in reason
+        assert "@memory's caps are measured" not in reason
+
 
 class TestShellMemoryRuleDoesNotOverreach:
     """Reads, drone verbs and every other file stay open. A rule that refuses correct commands gets routed around."""
@@ -428,14 +507,27 @@ class TestShellMemoryRuleDoesNotOverreach:
             "jq . .trinity/local.json > docs/trinity_copy.json",
             "wc -c .trinity/local.json .trinity/observations.json",
             "drone @memory lint",
-            "echo x > .trinity/passport.json",
             "echo x > docs/local.json",
             "echo x > observations.json",
+            "echo x > docs/passport.json",
         ],
-        ids=["cat-jq", "jq-elsewhere", "wc", "drone-memory", "passport", "local-json-elsewhere", "bare-name"],
+        ids=["cat-jq", "jq-elsewhere", "wc", "drone-memory", "local-json-elsewhere", "bare-name", "passport-elsewhere"],
     )
     def test_reads_verbs_and_other_files_are_allowed(self, sibling_projects: dict, command: str):
         assert _run(sibling_projects["plain_seat"], command=command)["exit_code"] == 0, command
+
+    def test_a_shell_write_to_a_passport_is_refused_like_the_other_two(self, sibling_projects: dict):
+        """DPLAN-0347 row 4 inverts this: passport.json was the one .trinity file any lane could write.
+
+        It was allowed here for a reason that no longer holds — @memory capped no
+        passport field, so there was nothing to measure. The identity block is
+        injected on every cadence beat, and the largest passport in the fleet had
+        reached 5,461 chars against a 4,000 budget nothing read. The refusal names
+        all three files now.
+        """
+        result = _run(sibling_projects["plain_seat"], command="echo x > .trinity/passport.json")
+        assert _blocked(result)
+        assert "passport.json" in _reason(result)
 
 
 class TestBashWritesParser:
@@ -817,7 +909,7 @@ class TestTargetSpellingIsNotPartOfTheContract:
     def test_the_target_list_stays_os_native(self):
         """The ruling, pinned: normalise on the way IN, never on the way out.
 
-        edit_gate hands these straight to _find_project_root, which globs the
+        edit_gate hands these straight to write_ownership.project_of, which globs the
         real filesystem for *_REGISTRY.json. A list canonicalised to one
         spelling would be unwalkable on the other OS — the fence would go dark
         in precisely the place this train was fixing.

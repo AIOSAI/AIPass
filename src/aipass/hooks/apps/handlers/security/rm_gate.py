@@ -128,7 +128,7 @@ def _caller_branch(cwd: str) -> str:
 def _record(cmd: str, cwd: str, deletions: int, blocked: bool) -> None:
     """Write down every raw rm this gate sees — one line per deleting clause.
 
-    Patrick, 2026-08-14: "if something deletes, it should be a record of it."
+    The owner, 2026-08-14: "if something deletes, it should be a record of it."
     The command is logged as the agent wrote it; quote-stripping is how matching
     works, not what happened. INFO by design (compass #273): a permitted delete is
     chosen behaviour, and the engine already records the block at WARNING — this

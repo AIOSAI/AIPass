@@ -51,7 +51,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 CONSOLE = err_console
 
-# The one seat that reaches outwards. Patrick, 2026-08-30, compassed as devpulse
+# The one seat that reaches outwards. The owner, 2026-08-30, compassed as devpulse
 # entry 322: "It is only you who can reach outwards. Nobody else."
 # Named here for the log line only — WHO is decided by the verified rail below,
 # never by this string matching a directory.

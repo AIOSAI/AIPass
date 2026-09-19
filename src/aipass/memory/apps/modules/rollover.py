@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.7.1
+# Version: 0.10.0
 # Created: 2025-11-16
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -22,10 +22,9 @@ Purpose:
     All domain logic lives in handlers.
 """
 
-import json
 import os
 import sys
-from typing import List, NamedTuple
+from typing import List
 
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -57,13 +56,85 @@ from aipass.memory.apps.handlers.rollover.orchestrator import (
 from aipass.memory.apps.handlers.rollover import todo_report
 from aipass.memory.apps.handlers.repo_root import module_file
 
+# The `config` verbs moved to modules/rollover_config.py when this module reached
+# the seedgo length standard, and the `--json` emitter moved on again to
+# modules/rollover_json.py when THAT module reached it. Both stayed in the
+# modules tier because they are display code and handlers may not print; each
+# answers `handle_command` for its own name only, so this module keeps owning
+# the `config` word. Every name is re-exported here, unchanged, because the CLI
+# and the tests reach all of them through `rollover.<name>`. The dependency runs
+# one way: neither of those modules imports this one.
+from aipass.memory.apps.modules.rollover_config import (
+    _CONFIG_SUBCOMMANDS,
+    _MAX_COUNT,
+    _MIN_COUNT,
+    _VERB_CONFIG,
+    _VERB_CONFIG_GET,
+    _VERB_CONFIG_SET,
+    _VERB_CONFIG_SET_DEFAULT,
+    _handle_config,
+    _resolve_branch,
+    _show_branch_limits,
+    _show_defaults,
+    _show_overrides,
+    _validate_count,
+    _validate_type,
+    handle_config_get,
+    handle_config_set,
+    handle_config_set_default,
+    print_config_help,
+    print_config_introspection,
+)
+from aipass.memory.apps.modules.rollover_json import (
+    _DISPLAY_TYPES,
+    _ENTRY_TYPES,
+    _Json,
+    _READ_ONLY_TYPES,
+    _emit,
+    _project_default,
+    _project_overrides,
+    _project_row,
+    _refuse,
+)
+
+__all__ = [
+    "_CONFIG_SUBCOMMANDS",
+    "_DISPLAY_TYPES",
+    "_ENTRY_TYPES",
+    "_Json",
+    "_MAX_COUNT",
+    "_MIN_COUNT",
+    "_READ_ONLY_TYPES",
+    "_VERB_CONFIG",
+    "_VERB_CONFIG_GET",
+    "_VERB_CONFIG_SET",
+    "_VERB_CONFIG_SET_DEFAULT",
+    "_emit",
+    "_handle_config",
+    "_project_default",
+    "_project_overrides",
+    "_project_row",
+    "_refuse",
+    "_resolve_branch",
+    "_show_branch_limits",
+    "_show_defaults",
+    "_show_overrides",
+    "_validate_count",
+    "_validate_type",
+    "handle_config_get",
+    "handle_config_set",
+    "handle_config_set_default",
+    "print_config_help",
+    "print_config_introspection",
+]
+
 
 # =============================================================================
 # COMMAND HANDLERS
 # =============================================================================
 
 _SUBCOMMANDS = {
-    "run": "Execute rollover for files exceeding limits, plus one branch's todo pad",
+    "run": "Execute rollover for files exceeding limits (fleet-wide), plus one branch's todo pad",
     "status": "Show rollover statistics for all branches",
     "check": "Check which files need rollover (dry run, fleet-wide), plus one branch's todo pad",
     "report-lines": "Report physical line counts per memory file (read-only)",
@@ -78,6 +149,23 @@ SUBCOMMANDS = _SUBCOMMANDS
 # line alone is scoped. The scope is unchanged on purpose - this says it.
 FLEET_WIDE_NOTE = "The file list is fleet-wide: --branch scopes only the todo pad line below."
 
+# `rollover run` rolls the pad FIRST, so its line sits above the file list. The
+# run is fleet-wide on purpose: @hooks' PreCompact passes --branch for the pad
+# and relies on the same call to drain every branch's files, and a project that
+# never compacts (Vera Studio's residents) only drains through someone else's
+# compaction. Scoping the files to --branch would stop that without a word, so
+# the scope stays and the output says it where it happens.
+FLEET_WIDE_RUN_NOTE = (
+    "The file list is fleet-wide: --branch scopes only the todo pad line above; every branch's files below are rolled."
+)
+
+# Printed under the files rollover cannot drain. Never the phrase @hooks'
+# PreCompact greps for: another run changes nothing for these files.
+UNDRAINABLE_NOTE = (
+    "Rollover drains lists only. These need their container migrated to the 3.0.0 list shape - "
+    "another run changes nothing."
+)
+
 # `sync-lines` stopped writing anything when the health stamp was deleted from
 # the standard on 2026-08-25: its one write was a `status.last_health_check`
 # date, and the line count it "synced" was computed, returned and dropped. The
@@ -91,32 +179,8 @@ FLEET_WIDE_NOTE = "The file list is fleet-wide: --branch scopes only the todo pa
 # rewrites 22 branches' files is the same lie in the other direction.
 RENAMED_VERBS = {"sync-lines": "report-lines"}
 
-# `config` is the verb surface over rollover limits — the rollover module owns
-# rollover config, so nothing has to hand-edit memory.config.json (DPLAN-0302).
-_CONFIG_SUBCOMMANDS = {
-    "get": "Show effective limits — all branches, or one with @branch",
-    "set": "Set one branch's limit: set @branch <type> <count>",
-    "set-default": "Set a global default limit: set-default <type> <count>",
-}
-
-# The only three entry types `config set` writes. Display order.
-_ENTRY_TYPES = ("sessions", "key_learnings", "observations")
-
-# Shown by `config get`, never written by `config set` in v1 (like
-# auto_compact_cap). The todo roll reads this count for one branch at a time.
-_READ_ONLY_TYPES = ("todos",)
-_DISPLAY_TYPES = _ENTRY_TYPES + _READ_ONLY_TYPES
-
-# A limit of 0 rolls over every entry immediately; past 100 rollover is moot.
-_MIN_COUNT = 1
-_MAX_COUNT = 100
-
 # Verb names as they appear in the `verb` field of every JSON payload. One
 # constant per name so the payload and the routing cannot drift apart.
-_VERB_CONFIG = "config"
-_VERB_CONFIG_GET = "config get"
-_VERB_CONFIG_SET = "config set"
-_VERB_CONFIG_SET_DEFAULT = "config set-default"
 _VERB_ROLLOVER = "rollover"
 _VERB_ROLLOVER_PUSH = "rollover push"
 
@@ -208,7 +272,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     `--json` rides in any slot on the config verbs and on `rollover push`,
     and is stripped before positional parsing. A help flag still outranks
-    it — `config set @b sessions 25 --help --json` prints help and writes
+    it — `config set @b sessions 12 --help --json` prints help and writes
     neither the config nor a payload.
 
     Backward-compatible top-level commands (routed from entry point):
@@ -288,6 +352,7 @@ def print_help() -> None:
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits, plus ONE branch's todo pad")
+    console.print("              The files rolled are fleet-wide; only the todo pad follows --branch.")
     console.print("  [cyan]status[/cyan]      Show rollover statistics for all branches")
     console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run), plus ONE branch's todo pad")
     console.print("              The file list is fleet-wide; only the todo pad follows --branch.")
@@ -306,6 +371,8 @@ def print_help() -> None:
     console.print()
     console.print("[bold]LIMITS:[/bold]")
     console.print("  v2 entry-count based (sessions, key_learnings, observations) from config")
+    console.print("  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status")
+    console.print("  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape")
     console.print("  todos: count only (rollover.defaults.local.todos.count) — own branch, never the fleet walk")
     console.print()
     console.print("[bold]TODO ROLL (one branch, file only, never vectors):[/bold]")
@@ -318,626 +385,6 @@ def print_help() -> None:
     console.print("  2. Extract oldest entries")
     console.print("  3. Generate embeddings via fastembed")
     console.print("  4. Store vectors in local + global ChromaDB")
-    console.print()
-
-
-# =============================================================================
-# MACHINE OUTPUT — THE --json SURFACE
-# =============================================================================
-
-
-class _Json(NamedTuple):
-    """Where one verb's answer goes, and the name it stamps on it.
-
-    Attributes:
-        verb: The published verb name carried in every payload.
-        on: True for machine output; False leaves every human rendering
-            exactly as it was.
-    """
-
-    verb: str
-    on: bool
-
-
-def _emit(payload: dict) -> None:
-    """Write EXACTLY one JSON document to stdout.
-
-    Routed through the shared console like every other line this branch
-    prints, but with Rich's three text behaviours turned OFF — they each
-    corrupt a machine payload:
-
-    - ``soft_wrap=True``: the console is width-80 with ``is_terminal=False``,
-      so by default it hard-wraps a long payload onto two lines, and a wrap
-      landing inside a string value inserts a newline INTO the value.
-    - ``markup=False``: a ``[...]`` token inside a string is otherwise eaten
-      as a style name (how @daemon's lowercase ``[skip]`` markers vanished
-      from the screen while tests on the returned string stayed green).
-    - ``highlight=False``: the repr highlighter would inject ANSI styling the
-      moment this ran attached to a terminal.
-
-    All three corruptions are invisible to a test that asserts on the string
-    handed to the printer rather than on what reached the pipe — which is
-    exactly how they survive. The tests here read the pipe.
-
-    ``ensure_ascii`` stays at its default, unlike ``_write_config_file``
-    which deliberately turns it off — opposite jobs.  That one edits a file an
-    operator reads; this one crosses a pipe into a subprocess of unknown
-    locale.  Escaping the em-dashes the refusal sentences carry means this
-    write can never raise UnicodeEncodeError, and ``json.loads`` hands the
-    caller back the exact character either way.
-    """
-    console.print(json.dumps(payload), markup=False, soft_wrap=True, highlight=False)
-
-
-def _refuse(ctx: _Json, message: str, suggestion: str | None = None) -> None:
-    """Emit one refusal — as a payload when asked, else on the human path.
-
-    ONE wording serves both surfaces.  @api keys on these sentences, so a
-    second copy written for machines would be a contract free to drift.
-    ``suggestion`` is always present in the payload, null where the refusal
-    genuinely has none.
-
-    Args:
-        ctx: The verb name and whether machine output was requested.
-        message: The refusal sentence.
-        suggestion: The remedy line, when the refusal has one.
-    """
-    if ctx.on:
-        _emit({"ok": False, "verb": ctx.verb, "error": message, "suggestion": suggestion})
-        return
-
-    error(message, suggestion=suggestion)
-
-
-def _project_row(row: dict, with_cap: bool = False, read_only: bool = False) -> dict:
-    """Project one resolved limit row from ``config_loader`` for a payload.
-
-    A thin projection on purpose: the resolution rules live in
-    ``config_loader._resolve_limits`` and must not be re-implemented here,
-    or the machine surface becomes a second, divergent answer.
-
-    Args:
-        row: One entry from ``get_effective_limits``.
-        with_cap: Include ``auto_compact_cap`` when the row carries one.
-        read_only: Mark a type ``config set`` cannot write (todos in v1).
-
-    Returns:
-        The published per-entry-type shape.
-    """
-    projected: dict = {
-        "count": row.get("count"),
-        "default_count": row.get("default_count"),
-        "is_override": bool(row.get("is_override")),
-        "source": row.get("source"),
-    }
-    cap = row.get("auto_compact_cap")
-    if with_cap and cap is not None:
-        projected["auto_compact_cap"] = cap
-    if read_only:
-        projected["read_only"] = True
-    return projected
-
-
-def _project_default(row: dict, read_only: bool = False) -> dict:
-    """Project one global default limit — count, plus a cap when set, plus a read-only mark."""
-    projected: dict = {"count": row.get("count")}
-    cap = row.get("auto_compact_cap")
-    if cap is not None:
-        projected["auto_compact_cap"] = cap
-    if read_only:
-        projected["read_only"] = True
-    return projected
-
-
-def _project_overrides(limits: dict) -> dict:
-    """Project only the entry types that actually deviate for one branch.
-
-    Same rule the human OVERRIDES block applies, so the two surfaces list
-    the same rows rather than two different notions of "override".
-    """
-    return {
-        entry_type: _project_row(limits.get(entry_type, {}), read_only=entry_type in _READ_ONLY_TYPES)
-        for entry_type in _DISPLAY_TYPES
-        if limits.get(entry_type, {}).get("is_override")
-    }
-
-
-# =============================================================================
-# CONFIG VERBS — ROUTING
-# =============================================================================
-
-
-def _handle_config(args: List[str]) -> bool:
-    """Route the `config` verb. Always returns True — this module owns the word.
-
-    Args:
-        args: Tokens after `config`.
-
-    Returns:
-        True — every path either displays, refuses, or writes.
-    """
-    # No args → introspection (seedgo standard)
-    if not args:
-        print_config_introspection()
-        return True
-
-    # A help flag ANYWHERE wins — asking about `set` must never write.
-    # No config subcommand takes free text, so a bare `help` counts too.
-    # This is evaluated BEFORE --json: `set ... --help --json` is still a
-    # question, so it prints help and writes neither config nor payload.
-    if wants_help(args, allow_bare_word=True):
-        print_config_help()
-        return True
-
-    # Machine output is read and REMOVED before positional parsing, so
-    # `set @memory sessions 25 --json` parses identically to the same line
-    # without it, whichever slot the flag rode in.
-    json_mode = wants_json(args)
-    args = strip_json_flag(args)
-    if not args:
-        print_config_introspection()
-        return True
-
-    sub = args[0]
-
-    if sub == "get":
-        config_get(args[1:], _Json(_VERB_CONFIG_GET, json_mode))
-        return True
-
-    if sub == "set":
-        config_set(args[1:], _Json(_VERB_CONFIG_SET, json_mode))
-        return True
-
-    if sub == "set-default":
-        config_set_default(args[1:], _Json(_VERB_CONFIG_SET_DEFAULT, json_mode))
-        return True
-
-    _refuse(
-        _Json(_VERB_CONFIG, json_mode),
-        f"Unknown subcommand: '{sub}'",
-        suggestion="Available: " + ", ".join(_CONFIG_SUBCOMMANDS),
-    )
-    return True
-
-
-# =============================================================================
-# CONFIG VERBS — VALIDATION
-# =============================================================================
-
-
-def _resolve_branch(raw: str, ctx: _Json) -> str | None:
-    """Match *raw* against the registry, or refuse.
-
-    Registry is truth. Matching is case-INSENSITIVE because the registry
-    carries uppercase names (BACKUP, DAEMON) while per_branch keys are
-    lowercase; the refusal echoes the branch exactly as the operator typed it.
-
-    Args:
-        raw: A `@branch` or bare branch token.
-        ctx: Verb name and machine-output mode for the refusal.
-
-    Returns:
-        The lowercase branch key, or None when the refusal was emitted.
-    """
-    name = raw[1:] if raw.startswith("@") else raw
-
-    try:
-        branches = detector._read_registry()
-    except Exception as exc:
-        logger.warning(f"[rollover] Failed to read registry: {exc}")
-        _refuse(ctx, f"Failed to read registry: {exc}")
-        return None
-
-    known = {str(b.get("name", "")).lower() for b in branches}
-    if name.lower() not in known:
-        logger.warning(f"[rollover] Unknown branch requested: {name}")
-        _refuse(
-            ctx,
-            f"Unknown branch: @{name}",
-            suggestion="Registry is truth — run 'drone systems' to list branches",
-        )
-        return None
-
-    return name.lower()
-
-
-def _validate_type(entry_type: str, ctx: _Json) -> bool:
-    """Refuse an entry type `config set` cannot write — unknown, or display-only in v1."""
-    if entry_type in _ENTRY_TYPES:
-        return True
-
-    if entry_type in _READ_ONLY_TYPES:
-        _refuse(
-            ctx,
-            f"'{entry_type}' is display-only in v1: config get shows its count, config set cannot change it",
-            suggestion="Settable types: " + ", ".join(_ENTRY_TYPES),
-        )
-        return False
-
-    _refuse(
-        ctx,
-        f"Unknown entry type: '{entry_type}'",
-        suggestion="Valid types: " + ", ".join(_ENTRY_TYPES),
-    )
-    return False
-
-
-def _validate_count(raw: str, ctx: _Json) -> int | None:
-    """Parse and bound-check a limit, emitting its own refusal.
-
-    Args:
-        raw: The count token as typed.
-        ctx: Verb name and machine-output mode for the refusal.
-
-    Returns:
-        The count, or None when the refusal was emitted.
-    """
-    try:
-        count = int(raw)
-    except ValueError:
-        logger.warning(f"[rollover] Non-numeric count rejected: {raw!r}")
-        _refuse(
-            ctx,
-            f"Count must be a whole number: '{raw}'",
-            suggestion="Example: drone @memory config set @devpulse sessions 25",
-        )
-        return None
-
-    if count < _MIN_COUNT:
-        _refuse(
-            ctx,
-            f"Count must be at least {_MIN_COUNT} (got {count})",
-            suggestion="A limit of 0 would roll over every entry immediately",
-        )
-        return None
-
-    if count > _MAX_COUNT:
-        _refuse(
-            ctx,
-            f"Count must not exceed {_MAX_COUNT} (got {count})",
-            suggestion=f"{_MAX_COUNT} is the cap — larger limits defeat rollover entirely",
-        )
-        return None
-
-    return count
-
-
-# =============================================================================
-# CONFIG VERBS — GET
-# =============================================================================
-
-
-def _fmt_count(value: object) -> str:
-    """Render a limit for display — an absent limit says so, never shows 0."""
-    return "unset" if value is None else str(value)
-
-
-def _show_defaults(defaults: dict) -> None:
-    """Print the global default limits block."""
-    console.print("[bold]DEFAULTS[/bold] [dim](drone @memory config set-default <type> <count>)[/dim]")
-    for entry_type in _DISPLAY_TYPES:
-        row = defaults.get(entry_type, {})
-        cap = row.get("auto_compact_cap")
-        suffix = "" if cap is None else f"  [dim]auto_compact_cap {cap} (read-only)[/dim]"
-        if entry_type in _READ_ONLY_TYPES:
-            suffix = "  [dim](read-only in v1)[/dim]"
-        console.print(f"  [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count'))}{suffix}")
-    console.print()
-
-
-def _show_overrides(overrides: dict) -> None:
-    """Print every branch whose effective limits deviate from the defaults."""
-    if not overrides:
-        console.print("[green]>[/green] All branches at defaults — no per-branch overrides")
-        console.print()
-        return
-
-    console.print(f"[bold]OVERRIDES[/bold] [dim]({len(overrides)} branch(es) deviating from defaults)[/dim]")
-    for branch, limits in overrides.items():
-        console.print(f"  [bold]@{branch}[/bold]")
-        for entry_type in _DISPLAY_TYPES:
-            row = limits.get(entry_type, {})
-            if not row.get("is_override"):
-                continue
-            console.print(
-                f"    [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count'))} "
-                f"[yellow][OVERRIDE][/yellow] [dim](default {_fmt_count(row.get('default_count'))})[/dim]"
-            )
-    console.print()
-
-
-def _show_branch_limits(branch: str, limits: dict) -> None:
-    """Print one branch's EFFECTIVE limits, each marked default-or-override.
-
-    Markers are UPPERCASE on purpose: Rich reads `[default]` as a style name
-    and deletes it silently, so a lowercase marker would look right in the
-    source and be invisible on screen.
-    """
-    console.print(f"[bold]@{branch}[/bold] [dim](effective limits — what the rollover engine applies)[/dim]")
-    console.print()
-
-    for entry_type in _DISPLAY_TYPES:
-        row = limits.get(entry_type, {})
-        marker = "[yellow][OVERRIDE][/yellow]" if row.get("is_override") else "[green][DEFAULT][/green]"
-        console.print(
-            f"  [cyan]{entry_type:<14}[/cyan] {_fmt_count(row.get('count')):<6} {marker} "
-            f"[dim](default {_fmt_count(row.get('default_count'))}, resolved from {row.get('source')})[/dim]"
-        )
-        cap = row.get("auto_compact_cap")
-        if cap is not None:
-            console.print(f"                 [dim]auto_compact_cap {cap} — read-only in v1[/dim]")
-        if entry_type in _READ_ONLY_TYPES:
-            console.print("                 [dim]read-only in v1 — the todo roll reads it, config set does not[/dim]")
-
-    console.print()
-    console.print("[dim]Change with: drone @memory config set @" + branch + " sessions <count>[/dim]")
-    console.print()
-
-
-def config_get(args: List[str], ctx: _Json) -> None:
-    """Show rollover limits — defaults plus deviations, or one branch.
-
-    Args:
-        args: Optional `@branch` (or bare branch name) in the first slot.
-        ctx: Verb name and whether to answer as JSON instead of on screen.
-    """
-    from aipass.memory.apps.handlers.json import config_loader
-
-    # Resolve BEFORE the banner: a refusal that prints a title panel first
-    # reads as a report that then failed, rather than a request declined.
-    branch = None
-    if args:
-        branch = _resolve_branch(args[0], ctx)
-        if branch is None:
-            return
-
-    if not ctx.on:
-        console.print()
-        console.print(
-            Panel.fit("[bold cyan]Memory - Rollover Limits[/bold cyan]", border_style="cyan", box=box.ROUNDED)
-        )
-        console.print()
-
-    if branch is not None:
-        limits = config_loader.get_effective_limits(branch)
-        if ctx.on:
-            _emit(
-                {
-                    "ok": True,
-                    "verb": ctx.verb,
-                    "branch": branch,
-                    "limits": {
-                        entry_type: _project_row(
-                            limits.get(entry_type, {}), with_cap=True, read_only=entry_type in _READ_ONLY_TYPES
-                        )
-                        for entry_type in _DISPLAY_TYPES
-                    },
-                }
-            )
-        else:
-            _show_branch_limits(branch, limits)
-        json_handler.log_operation("config_get", {"branch": branch, "json": ctx.on})
-        return
-
-    defaults = config_loader.get_default_limits()
-    overrides = config_loader.get_branches_with_overrides()
-
-    if ctx.on:
-        _emit(
-            {
-                "ok": True,
-                "verb": ctx.verb,
-                "defaults": {
-                    entry_type: _project_default(defaults.get(entry_type, {}), read_only=entry_type in _READ_ONLY_TYPES)
-                    for entry_type in _DISPLAY_TYPES
-                },
-                "overrides": {name: _project_overrides(limits) for name, limits in overrides.items()},
-            }
-        )
-    else:
-        _show_defaults(defaults)
-        _show_overrides(overrides)
-
-    json_handler.log_operation("config_get", {"branches_deviating": len(overrides), "json": ctx.on})
-
-
-# =============================================================================
-# CONFIG VERBS — SET
-# =============================================================================
-
-
-def config_set(args: List[str], ctx: _Json) -> None:
-    """Write one branch's rollover limit override.
-
-    Args:
-        args: `@branch <type> <count>`.
-        ctx: Verb name and whether to answer as JSON instead of on screen.
-    """
-    from aipass.memory.apps.handlers.json import config_loader
-
-    if len(args) < 3:
-        _refuse(
-            ctx,
-            "config set needs: @branch <type> <count>",
-            suggestion="Example: drone @memory config set @devpulse sessions 25",
-        )
-        return
-
-    branch = _resolve_branch(args[0], ctx)
-    if branch is None:
-        return
-
-    entry_type = args[1]
-    if not _validate_type(entry_type, ctx):
-        return
-
-    count = _validate_count(args[2], ctx)
-    if count is None:
-        return
-
-    result = config_loader.set_branch_limit(branch, entry_type, count)
-    if not result.get("success"):
-        _refuse(ctx, result.get("error", "Unknown error"))
-        return
-
-    if ctx.on:
-        _emit(
-            {
-                "ok": True,
-                "verb": ctx.verb,
-                "branch": result["branch"],
-                "entry_type": result["entry_type"],
-                "count": result["count"],
-                "pushed": result["pushed"],
-            }
-        )
-    else:
-        console.print()
-        console.print(f"[green]>[/green] @{branch} {entry_type} limit set to {count}")
-        console.print("[dim]Reset every branch to defaults with: drone @memory rollover push[/dim]")
-        console.print()
-
-    json_handler.log_operation(
-        "config_set", {"branch": branch, "entry_type": entry_type, "count": count, "json": ctx.on}
-    )
-
-
-def config_set_default(args: List[str], ctx: _Json) -> None:
-    """Write one global default rollover limit, leaving per_branch alone.
-
-    Args:
-        args: `<type> <count>`.
-        ctx: Verb name and whether to answer as JSON instead of on screen.
-    """
-    from aipass.memory.apps.handlers.json import config_loader
-
-    if len(args) < 2:
-        _refuse(
-            ctx,
-            "config set-default needs: <type> <count>",
-            suggestion="Example: drone @memory config set-default sessions 25",
-        )
-        return
-
-    entry_type = args[0]
-    if not _validate_type(entry_type, ctx):
-        return
-
-    count = _validate_count(args[1], ctx)
-    if count is None:
-        return
-
-    result = config_loader.set_default_limit(entry_type, count)
-    if not result.get("success"):
-        _refuse(ctx, result.get("error", "Unknown error"))
-        return
-
-    if ctx.on:
-        _emit(
-            {
-                "ok": True,
-                "verb": ctx.verb,
-                "entry_type": result["entry_type"],
-                "count": result["count"],
-                "pushed": result["pushed"],
-            }
-        )
-    else:
-        console.print()
-        console.print(f"[green]>[/green] Default {entry_type} limit set to {count}")
-        console.print("[dim]per_branch untouched — apply fleet-wide with: drone @memory rollover push[/dim]")
-        console.print()
-
-    json_handler.log_operation("config_set_default", {"entry_type": entry_type, "count": count, "json": ctx.on})
-
-
-# =============================================================================
-# CONFIG VERBS — INTROSPECTION & HELP
-# =============================================================================
-
-
-def print_config_introspection() -> None:
-    """Display config-verb introspection (seedgo standard)."""
-    console.print()
-    console.print("[bold cyan]config Verb - Rollover Limits[/bold cyan]")
-    console.print("Reads and writes the rollover entry-count limits in memory.config.json")
-    console.print()
-
-    console.print("[yellow]Connected Handlers:[/yellow]")
-    console.print("  [cyan]handlers/json/[/cyan]     [dim]config_loader.py[/dim]")
-    console.print("  [cyan]handlers/monitor/[/cyan]  [dim]detector.py (registry — branch names)[/dim]")
-    console.print()
-
-    console.print("[yellow]Subcommands:[/yellow]")
-    for sub, desc in _CONFIG_SUBCOMMANDS.items():
-        console.print(f"  [green]{sub:<14}[/green] {desc}")
-    console.print()
-
-    console.print("[yellow]Flags:[/yellow]")
-    console.print("  [green]--json[/green]         One JSON document on stdout instead of the rendered view")
-    console.print()
-
-    console.print("[yellow]Next:[/yellow]")
-    console.print("  [green]drone @memory config get[/green]                       [dim]# Defaults + deviations[/dim]")
-    console.print("  [green]drone @memory config get @devpulse[/green]             [dim]# One branch[/dim]")
-    console.print("  [green]drone @memory config set @devpulse sessions 25[/green] [dim]# Override[/dim]")
-    console.print("  [green]drone @memory config get --json[/green]                [dim]# Machine surface[/dim]")
-    console.print("  [green]drone @memory config --help[/green]                    [dim]# Full usage guide[/dim]")
-    console.print()
-
-
-def print_config_help() -> None:
-    """Display config-verb help."""
-    console.print()
-    console.print(
-        Panel.fit(
-            "[bold cyan]config Verb - Rollover Limit Settings[/bold cyan]",
-            border_style="cyan",
-            box=box.ROUNDED,
-        )
-    )
-    console.print()
-    console.print("[bold]USAGE:[/bold]")
-    console.print("  drone @memory config get                        Defaults + branches that deviate")
-    console.print("  drone @memory config get @<branch>              One branch's effective limits")
-    console.print("  drone @memory config set @<branch> <type> <n>   Override one branch")
-    console.print("  drone @memory config set-default <type> <n>     Change the global default")
-    console.print()
-    console.print("[bold]--json — THE MACHINE SURFACE:[/bold]")
-    console.print("  Every verb above takes [cyan]--json[/cyan] in ANY slot; it is stripped before")
-    console.print("  positional parsing, so `set @b sessions 25 --json` parses like `set @b sessions 25`.")
-    console.print("  Exactly ONE JSON document reaches stdout — no panels, no banners, no Rich.")
-    console.print("  A help flag OUTRANKS it: `set ... --help --json` prints this page and writes nothing.")
-    console.print()
-    console.print("  Every payload carries [cyan]ok[/cyan] and [cyan]verb[/cyan]. [cyan]ok[/cyan] is the signal,")
-    console.print("  because refusals exit 0 — a refusal is [cyan]ok: false[/cyan] plus [cyan]error[/cyan] and")
-    console.print("  [cyan]suggestion[/cyan], carrying the SAME sentences the human path prints.")
-    console.print()
-    console.print("[bold]ENTRY TYPES:[/bold]")
-    console.print("  [cyan]sessions[/cyan]        local.json -> sessions")
-    console.print("  [cyan]key_learnings[/cyan]   local.json -> key_learnings")
-    console.print("  [cyan]observations[/cyan]    observations.json -> observations")
-    console.print(
-        "  [cyan]todos[/cyan]           local.json -> todos  [dim](count shown by get, read-only in v1)[/dim]"
-    )
-    console.print()
-    console.print(f"[bold]BOUNDS:[/bold] a whole number, {_MIN_COUNT}-{_MAX_COUNT} inclusive")
-    console.print(
-        f"  {_MIN_COUNT - 1} would roll over every entry immediately; past {_MAX_COUNT} rollover is defeated entirely."
-    )
-    console.print()
-    console.print("[bold]EFFECTIVE LIMITS:[/bold]")
-    console.print("  Resolution is per FILE KEY, not per entry type — exactly what the")
-    console.print("  rollover engine does. Once per_branch -> <branch> -> local exists,")
-    console.print("  the default local block is never consulted for that branch again.")
-    console.print("  A value is marked [yellow][OVERRIDE][/yellow] when it differs from the default,")
-    console.print("  [green][DEFAULT][/green] when it matches.")
-    console.print()
-    console.print("[bold]SET-DEFAULT DOES NOT PUSH:[/bold]")
-    console.print("  set-default writes defaults only and leaves per_branch untouched.")
-    console.print("  drone @memory rollover push stays the one explicit fleet-wide reset.")
-    console.print()
-    console.print("[bold]READ-ONLY:[/bold] auto_compact_cap and the todos count are displayed but not settable in v1.")
     console.print()
 
 
@@ -970,6 +417,15 @@ def _todo_report(report: dict) -> None:
         warning(text)
         return
     console.print(text, markup=False, highlight=False, soft_wrap=True)
+
+
+def _print_undrainable(items: list) -> None:
+    """Print the files over a limit that rollover cannot drain; nothing when there are none."""
+    if not items:
+        return
+    listing = "\n".join(f"  ! {item}" for item in items)
+    header = f"{len(items)} files over their limit that rollover cannot drain (fleet-wide):"
+    warning(f"{header}\n{listing}", UNDRAINABLE_NOTE)
 
 
 def run_rollover(branch: str | None = None) -> bool:
@@ -1007,11 +463,14 @@ def run_rollover(branch: str | None = None) -> bool:
         return False
 
     triggers_count = result.get("triggers_count", 0)
+    undrainable = result.get("undrainable", [])
     if triggers_count == 0:
         console.print("[green]>[/green] No files need rollover")
+        _print_undrainable(undrainable)
         return True
 
-    console.print(f"[green]>[/green] Found {triggers_count} files ready for rollover")
+    console.print(f"[green]>[/green] Found {triggers_count} files ready for rollover (fleet-wide)")
+    console.print(f"[dim]{FLEET_WIDE_RUN_NOTE}[/dim]", soft_wrap=True)
     console.print()
 
     # Display individual results
@@ -1046,6 +505,8 @@ def run_rollover(branch: str | None = None) -> bool:
         console.print()
         for fail in failed:
             error(f"{fail['trigger']} - {fail['stage']}: {fail['error']}")
+
+    _print_undrainable(undrainable)
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
 
@@ -1304,6 +765,7 @@ def show_status() -> None:
     console.print(f"[cyan]Branches:[/cyan] {stats['total_branches']}")
     console.print(f"[cyan]Files checked:[/cyan] {stats['files_checked']}")
     console.print(f"[cyan]Ready for rollover:[/cyan] {stats['files_ready']}")
+    console.print(f"[cyan]Over, and rollover cannot drain them:[/cyan] {stats.get('files_undrainable', 0)}")
     console.print()
 
     # Per-branch details
@@ -1317,9 +779,13 @@ def show_status() -> None:
             for memory_type, file_stats in branch_stats.items():
                 ready = file_stats["ready"]
                 v2_reason = file_stats.get("v2_reason", "")
+                # Never "OK": the file is over its limit, and no run will change that.
+                undrainable = file_stats.get("undrainable", [])
 
-                status_marker = "[red]![/red]" if ready else "[green]OK[/green]"
-                status_text = f"READY ({v2_reason})" if ready else "OK"
+                status_marker = "[red]![/red]" if ready or undrainable else "[green]OK[/green]"
+                parts = [f"READY ({v2_reason})"] if ready else []
+                parts += [f"UNDRAINABLE ({reason})" for reason in undrainable]
+                status_text = "; ".join(parts) or "OK"
                 console.print(f"    {status_marker} {memory_type}: {status_text}")
 
             console.print()
@@ -1357,10 +823,12 @@ def _check_fleet_triggers() -> None:
         return
 
     triggers = triggers_result.get("triggers", [])
+    undrainable = triggers_result.get("undrainable", [])
 
     if not triggers:
         console.print("[green]>[/green] No files need rollover")
-        json_handler.log_operation("rollover_check", {"files_needing_rollover": 0})
+        _print_undrainable(undrainable)
+        json_handler.log_operation("rollover_check", {"files_needing_rollover": 0, "undrainable": len(undrainable)})
         return
 
     # The file list is the fleet walk's, whatever --branch named: --branch scopes
@@ -1376,8 +844,11 @@ def _check_fleet_triggers() -> None:
 
     console.print()
     console.print("[dim]Run 'drone @memory rollover' to process these files[/dim]")
+    _print_undrainable(undrainable)
     console.print()
-    json_handler.log_operation("rollover_check", {"files_needing_rollover": len(triggers)})
+    json_handler.log_operation(
+        "rollover_check", {"files_needing_rollover": len(triggers), "undrainable": len(undrainable)}
+    )
 
 
 # =============================================================================

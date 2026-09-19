@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_standard.py
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-25
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Trinity standard machinery — the pins that were red before the build.
@@ -345,7 +345,7 @@ class TestRefreshPreservesTheSemantics:
 
 
 class TestNoHealthStamping:
-    """Patrick's ruling: status.health is deleted from the standard."""
+    """The owner's ruling: status.health is deleted from the standard."""
 
     def test_the_rollover_extractor_writes_no_status_block(self, monkeypatch):
         from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
@@ -618,6 +618,28 @@ class TestTemplateVersionReceipt:
         trinity.mkdir()
         assert receipt.read_receipt(trinity) is None
 
+    def test_a_receipt_outside_the_aipass_root_is_neither_stamped_nor_bumped(self, tmp_path, monkeypatch):
+        """The receipt lives in ``.trinity/`` — a branch memory file like its neighbours.
+
+        Both lanes go through one writer, so both are pinned: the push's stamp
+        and the renderer's bump.
+        """
+        from aipass.memory.apps.handlers import write_fence
+        from aipass.memory.apps.handlers.templates import receipt
+
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        trinity = tmp_path / "other_root" / "src" / "x" / ".trinity"
+        trinity.mkdir(parents=True)
+
+        assert receipt.write_receipt(trinity, receipt.STAMPED_BY_PUSH)["success"] is False
+        assert not (trinity / receipt.RECEIPT_NAME).exists()
+
+        (trinity / receipt.RECEIPT_NAME).write_text('{"stamped_by": "reset"}\n', encoding="utf-8")
+        before = (trinity / receipt.RECEIPT_NAME).read_bytes()
+        assert receipt.bump_config_rendered(trinity)["success"] is False
+        assert (trinity / receipt.RECEIPT_NAME).read_bytes() == before
+        assert sorted(path.name for path in trinity.iterdir()) == [receipt.RECEIPT_NAME]
+
 
 # =============================================================================
 # The receipt is wired into the lanes that may write it
@@ -666,7 +688,8 @@ class TestReceiptWiring:
             {"name": "memory"}, "memory", "local", {"defaults": {}}, {"entry_types": {}}, lambda b, m: local
         )
         assert (updated, errors) == (1, [])
-        assert receipt.read_receipt(trinity)["config_rendered"] == "2026-08-26T07:00:00"
+        stamped = receipt.read_receipt(trinity)
+        assert stamped is not None and stamped["config_rendered"] == "2026-08-26T07:00:00"
 
     def test_a_refresh_on_a_branch_with_no_receipt_still_succeeds(self, tmp_path):
         """The bump is a record, not a gate — a missing receipt must not fail the render."""

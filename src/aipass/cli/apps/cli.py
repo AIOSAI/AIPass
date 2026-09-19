@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli.py
 # Description: Entry point for drone @cli — seedgo-compliant module discovery and routing
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-08
+# Modified: 2026-09-17
 # =============================================
 
 """
@@ -39,7 +39,7 @@ from rich import box
 # CLI modules (showcasing our own services!)
 from aipass.cli.apps.modules.display import console, header, error, reset_command_state, resolve_exit
 
-VERSION = "2.1.0"
+VERSION = "2.3.0"
 CLI_ROOT = Path(__file__).parent
 MODULES_DIR = CLI_ROOT / "modules"
 
@@ -189,6 +189,11 @@ def print_help() -> None:
     console.print("  [green]drone @cli display demo[/green]                [dim]# Run display demo[/dim]")
     console.print("  [green]drone @cli templates[/green]                   [dim]# Templates module info[/dim]")
     console.print("  [green]drone @cli templates demo[/green]              [dim]# Run templates demo[/dim]")
+    console.print(
+        "  [green]drone @cli show[/green]                        [dim]# Alias of display (not display show)[/dim]"
+    )
+    console.print("  [green]drone @cli demo[/green]                        [dim]# Runs the display demo[/dim]")
+    console.print("  [green]drone @cli --version[/green]                   [dim]# Print the version[/dim]")
     console.print("  [green]drone @cli --help[/green]                      [dim]# This help message[/dim]")
     console.print()
     console.print("\u2500" * 70)
@@ -204,7 +209,7 @@ def print_help() -> None:
     services_table.add_column("Purpose", style="dim")
 
     services_table.add_row(
-        "display", "header(), success(), error(), warning(), section()", "Terminal output formatting"
+        "display", "header(), success(), error(), warning(), section(), escape()", "Terminal output formatting"
     )
     services_table.add_row("templates", "operation_start(), operation_complete()", "Standard operation patterns")
 
@@ -225,9 +230,14 @@ def print_help() -> None:
     console.print("[dim]  from aipass.cli.apps.modules.templates import operation_start, operation_complete[/dim]")
     console.print()
 
+    console.print("[yellow]Literal square brackets:[/yellow]")
+    console.print("[dim]  from aipass.cli import escape  # for header, success, section, templates[/dim]")
+    console.print("[dim]  error, warning and fatal print values literally: do not escape for them[/dim]")
+    console.print()
+
     console.print("[yellow]Rich console:[/yellow]")
     console.print("[dim]  from aipass.cli.apps.modules.display import console[/dim]")
-    console.print("[dim]  console.print('[bold]Hello[/bold]')  # Rich formatted output[/dim]")
+    console.print("[dim]  console.print('\\[bold]Hello\\[/bold]')  # Rich formatted output[/dim]")
     console.print()
 
     console.print("\u2500" * 70)
@@ -255,7 +265,7 @@ def print_help() -> None:
     console.print()
 
     # Drone compliance — commands line
-    console.print("[dim]Commands: display, templates, demo, --help[/dim]")
+    console.print("[dim]Commands: display, templates, show, demo, --help[/dim]")
     console.print()
 
 

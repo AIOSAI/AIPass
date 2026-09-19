@@ -17,7 +17,7 @@ contract and computes nothing — a gateway whose CLI starts doing work is a
 second public surface. These verbs are the opposite job: an operator writing a
 machine-managed file. Different job, different module.
 
-WHY VERBS AT ALL. Patrick's ruling, on seeing a hand-made AIPASS_ROOTS.json:
+WHY VERBS AT ALL. The owner's ruling, on seeing a hand-made AIPASS_ROOTS.json:
 "jsons are normally created by code, so if they corrupt or get deleted they are
 always rebuilt from default settings from a template directory." The verbs are
 how a declaration gets made without anyone opening an editor, and they refuse at

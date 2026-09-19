@@ -1,12 +1,13 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-01
-# Modified: 2026-08-01
+# Modified: 2026-09-15
 # =============================================
 
-"""Tests for provider_wire — strip-and-readd hook merge kills the double-fire bug (DPLAN-0279)."""
+"""Tests for provider_wire — strip-and-readd hook merge kills the double-fire bug (DPLAN-0279),
+plus the additive settings scalar slot (DPLAN-0347)."""
 
 import json
 from unittest.mock import patch
@@ -14,11 +15,16 @@ from unittest.mock import patch
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.provider_wire import (
+    STATE_DIFFERENT,
+    STATE_MISSING,
+    STATE_SET,
     _build_manifest_hook_entries,
     _platform_bridge_command,
     _strip_and_readd_hooks,
     auto_wire_provider,
+    manifest_settings,
     refresh_provider_hooks,
+    settings_gaps,
 )
 
 
@@ -147,6 +153,43 @@ class TestRefreshProviderHooks:
         assert old_cmd not in stop_dump
         assert _platform_bridge_command(new_cmd) in stop_dump
 
+    def test_install_door_sets_the_manifest_settings_scalar(self, tmp_path) -> None:
+        """The scalars land at INSTALL, not one doctor run later (setup.sh's only wire door)."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"model": "mine"}), encoding="utf-8")
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = refresh_provider_hooks(manifest)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is False
+        assert updated["model"] == "mine"
+        assert "Set includeGitInstructions=false" in actions
+
+    def test_install_door_does_not_overwrite_a_human_value(self, tmp_path) -> None:
+        """An upgrade re-runs install: a value the user set must survive it, reported only."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = refresh_provider_hooks(manifest)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is True
+        assert any("Kept your includeGitInstructions=true" in action for action in actions)
+
     def test_manifest_unreadable_raises_and_settings_untouched(self, tmp_path) -> None:
         """Missing/unreadable manifest raises and settings.json is left byte-for-byte unchanged."""
         manifest = tmp_path / "does_not_exist.json"
@@ -238,3 +281,117 @@ class TestAutoWireProviderHooks:
         assert "Bash(new deny*)" in updated["permissions"]["deny"]
         assert "Edit(existing/**)" in updated["permissions"]["ask"]
         assert "Edit(new/**)" in updated["permissions"]["ask"]
+
+
+# =============================================================================
+# TestSettingsScalarSlot
+# =============================================================================
+
+
+class TestSettingsScalarSlot:
+    """Tests for the settings scalar slot — manifest reader and per-key diff (DPLAN-0347)."""
+
+    def test_only_scalars_survive_the_slot(self) -> None:
+        """Scalars pass through; a nested block typed into the slot is dropped, not merged."""
+        manifest = {
+            "cli": {
+                "claude": {
+                    "settings": {
+                        "includeGitInstructions": False,
+                        "maxThings": 3,
+                        "label": "x",
+                        "hooks": {"Stop": []},
+                        "list": [1, 2],
+                    }
+                }
+            }
+        }
+
+        wanted = manifest_settings(manifest)
+
+        assert wanted == {"includeGitInstructions": False, "maxThings": 3, "label": "x"}
+
+    def test_no_slot_and_a_malformed_slot_both_want_nothing(self) -> None:
+        """A manifest without the slot, or with a non-map in it, asks for no keys at all."""
+        assert manifest_settings({"cli": {"claude": {"hooks": []}}}) == {}
+        assert manifest_settings({"cli": {"claude": {"settings": ["includeGitInstructions"]}}}) == {}
+
+    def test_gap_states_cover_missing_set_and_different(self) -> None:
+        """One row per manifest key, and the provider's own keys are never reported."""
+        wanted = {"a": False, "b": False, "c": False}
+        settings = {"b": False, "c": True, "untouched": "mine"}
+
+        gaps = {gap.key: gap for gap in settings_gaps(wanted, settings)}
+
+        assert set(gaps) == {"a", "b", "c"}
+        assert gaps["a"].state == STATE_MISSING
+        assert gaps["b"].state == STATE_SET
+        assert gaps["c"].state == STATE_DIFFERENT
+        assert gaps["c"].actual is True
+
+    def test_false_is_not_zero(self) -> None:
+        """JSON false and 0 are different provider values — a bool gap must not read as satisfied."""
+        assert settings_gaps({"flag": False}, {"flag": 0})[0].state == STATE_DIFFERENT
+        assert settings_gaps({"count": 0}, {"count": False})[0].state == STATE_DIFFERENT
+
+    def test_absent_key_is_set_and_no_other_key_is_touched(self, tmp_path) -> None:
+        """The wire verb sets what the manifest wants and nothing else in the file moves."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(
+            json.dumps({"model": "mine", "env": {"KEEP": "1"}}),
+            encoding="utf-8",
+        )
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = auto_wire_provider(manifest, interactive=False)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is False
+        assert updated["model"] == "mine"
+        assert updated["env"]["KEEP"] == "1"
+        assert "Set includeGitInstructions=false" in actions
+
+    def test_different_value_is_reported_and_left_alone(self, tmp_path) -> None:
+        """An explicit human value outranks the manifest: reported in the actions, file unchanged."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = auto_wire_provider(manifest, interactive=False)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is True
+        report = [a for a in actions if "includeGitInstructions" in a]
+        assert report == [
+            "Kept your includeGitInstructions=true (manifest wants false) — your value wins, nothing overwritten"
+        ]
+
+    def test_second_run_over_a_wired_file_changes_nothing(self, tmp_path) -> None:
+        """Idempotent: the key is already what the manifest wants, so no action claims a write."""
+        manifest = tmp_path / "provider_manifest.json"
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": {"includeGitInstructions": False}}}}),
+            encoding="utf-8",
+        )
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True)
+        settings_path.write_text(json.dumps({"includeGitInstructions": False}), encoding="utf-8")
+
+        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
+            actions = auto_wire_provider(manifest, interactive=False)
+
+        updated = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert updated["includeGitInstructions"] is False
+        assert not [a for a in actions if "includeGitInstructions" in a]

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_uploads.py
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
@@ -126,6 +125,45 @@ class TestTheServerNamesTheFile:
 
         assert first["path"] != second["path"]
         assert len(list(landing.iterdir())) == 2
+
+    def test_a_name_collision_refuses_and_leaves_the_earlier_file_alone(self, landing: Path) -> None:
+        """
+        A hard error, and ONLY a hard error — never a silent loss either way.
+
+        The O_EXCL create refuses a name already on disk, and the failure path
+        then discarded the destination: on a collision that is the EARLIER
+        upload, not a partial of this one. A write that never created the file
+        has nothing of its own to clean up (todo 13, ruled data loss 09-18).
+        """
+        first = host_uploads.store_image(BytesIO(JPEG))
+        taken = Path(str(first["path"]))
+
+        with patch.object(host_uploads, "_generated_name", lambda extension: taken.name):
+            with pytest.raises(host_uploads.UploadUnavailable):
+                host_uploads.store_image(BytesIO(JPEG))
+
+        assert taken.read_bytes() == JPEG
+        assert list(landing.iterdir()) == [taken]
+
+    def test_a_stream_that_fails_mid_write_leaves_no_partial_file(self, landing: Path) -> None:
+        """
+        The other half of the same line: a file this write DID create is still its mess.
+
+        The body dies after the create (a dropped connection reads as an
+        OSError), so the partial is removed — the collision guard above must
+        not have bought its safety by never cleaning up at all.
+        """
+
+        class DroppedConnection(BytesIO):
+            def read(self, size: Any = -1) -> bytes:
+                if self.tell() > 0:
+                    raise OSError("connection reset by peer")
+                return super().read(size)
+
+        with pytest.raises(host_uploads.UploadUnavailable):
+            host_uploads.store_image(DroppedConnection(PNG + os.urandom(200_000)))
+
+        assert list(landing.iterdir()) == []
 
     def test_the_upload_lands_in_the_upload_directory(self, landing: Path) -> None:
         """One folder, the same one the desktop's own captures use."""
@@ -616,13 +654,13 @@ class TestTheUploadRouteIsGuardedLikeEveryOtherWrite:
 @fastapi_required
 class TestValidationErrorsUseTheDocumentedEnvelope:
     """
-    @baud's finding, 2026-08-14 23:57, from Patrick's first real photo.
+    @baud's finding, 2026-08-14 23:57, from the owner's first real photo.
 
     Everything this server RAISES answers `{"error": {"code", "message"}}`, and
     that is what the phone parses. But validation fires IN FRONT of every
     handler and emitted FastAPI's own `{"detail": [...]}` instead — so a client
     coding to the documented shape lost the sentence on EVERY validation error,
-    on every route. Patrick was holding a phone reading "HTTP 422" while that
+    on every route. The owner was holding a phone reading "HTTP 422" while that
     same response body named the exact field and the exact problem.
 
     Not a bug in one route. A hole in the contract, found because a client

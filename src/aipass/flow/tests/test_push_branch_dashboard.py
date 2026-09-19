@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_push_branch_dashboard.py
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-08-13
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for push_branch_dashboard handler — branch dashboard push."""
@@ -820,7 +820,7 @@ class TestBuildSectionData:
 
 
 class TestBuildSectionDataOpenRecent:
-    """Tests for the bounded open_recent window (Patrick's 5-newest spec)."""
+    """Tests for the bounded open_recent window (the owner's 5-newest spec)."""
 
     @staticmethod
     def _active(count: int):
@@ -1200,3 +1200,154 @@ class TestPushFlowToAllBranchDashboards:
             result = mod.push_flow_to_all_branch_dashboards()
 
         assert result["pushed"] == 1
+
+
+# ═══════════════════════════════════════════════════════════
+# 10. The dashboard caps contract (prax/docs/dashboard_caps.md)
+# ═══════════════════════════════════════════════════════════
+
+
+class TestSubjectCap:
+    """
+    Every subject this writer publishes goes through prax's cap_subject().
+
+    The numbers are read from prax here, never retyped, so this file cannot
+    certify a cap that has since moved: if prax raises SUBJECT_CAP and flow
+    keeps a copy of 120, these pins go red on the copy.
+    """
+
+    def test_open_recent_subject_is_cut_to_the_shared_cap(self):
+        from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
+
+        mod = _import_mod()
+        long_subject = "x" * (SUBJECT_CAP + 80)
+        result = mod._build_section_data([{"id": "FPLAN-0001", "subject": long_subject}], [], 1)
+
+        published = result["open_recent"][0]["subject"]
+        assert len(published) <= SUBJECT_CAP
+        assert published.endswith("...")
+
+    def test_recently_closed_subject_is_cut_to_the_shared_cap(self):
+        from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
+
+        mod = _import_mod()
+        long_subject = "y" * (SUBJECT_CAP + 80)
+        result = mod._build_section_data([], [{"id": "FPLAN-0002", "subject": long_subject}], 1)
+
+        published = result["recently_closed"][0]["subject"]
+        assert len(published) <= SUBJECT_CAP
+        assert published.endswith("...")
+
+    def test_subject_exactly_at_the_cap_is_published_whole(self):
+        """The boundary belongs to the subject — 120 chars is not truncated."""
+        from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
+
+        mod = _import_mod()
+        exact = "z" * SUBJECT_CAP
+        result = mod._build_section_data([{"id": "FPLAN-0001", "subject": exact}], [{"id": "F", "subject": exact}], 1)
+
+        assert result["open_recent"][0]["subject"] == exact
+        assert result["recently_closed"][0]["subject"] == exact
+
+    def test_cut_never_refuses_the_row(self):
+        """Truncate, never refuse: an essay subject still leaves a visible plan."""
+        mod = _import_mod()
+        result = mod._build_section_data([{"id": "FPLAN-0001", "subject": "q" * 400}], [], 1)
+
+        assert len(result["open_recent"]) == 1
+        assert result["open_recent"][0]["plan_id"] == "FPLAN-0001"
+
+    def test_body_under_a_subject_never_reaches_the_glance(self):
+        """cap_subject takes the first line only."""
+        mod = _import_mod()
+        result = mod._build_section_data([{"id": "FPLAN-0001", "subject": "The subject\nthe body\nmore body"}], [], 1)
+
+        assert result["open_recent"][0]["subject"] == "The subject"
+
+    def test_closed_entry_keeps_its_other_fields(self):
+        """Capping the subject must not drop the id or the closed timestamp."""
+        mod = _import_mod()
+        closed = {"id": "FPLAN-0002", "subject": "s" * 300, "closed": "2026-09-15T10:00:00+00:00"}
+        result = mod._build_section_data([], [closed], 1)
+
+        published = result["recently_closed"][0]
+        assert published["id"] == "FPLAN-0002"
+        assert published["closed"] == "2026-09-15T10:00:00+00:00"
+
+
+class TestDashboardCharBudget:
+    """
+    This handler writes the file itself, so it mirrors prax's whole-file budget.
+
+    Warn, never refuse, never trim — a refused save leaves a stale dashboard,
+    and stale is the failure the budget exists to prevent.
+    """
+
+    def test_warns_once_when_over_budget(self, tmp_path):
+        from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET
+
+        mod = _import_mod()
+        branch = tmp_path / "bloated"
+        branch.mkdir()
+        (branch / "DASHBOARD.local.json").write_text(json.dumps({"branch": "BLOATED", "sections": {}}))
+
+        fat = {"managed_by": "flow", "active_plans": 0, "filler": "f" * (DASHBOARD_CHAR_BUDGET + 500)}
+        with patch(f"{_MOD}.logger") as mock_logger:
+            assert mod._write_dashboard_section(branch, "flow", fat) is True
+
+        warnings = [c for c in mock_logger.warning.call_args_list if "over the" in str(c)]
+        assert len(warnings) == 1
+        args = warnings[0][0]
+        assert "bloated" in args
+        assert DASHBOARD_CHAR_BUDGET in args
+
+    def test_over_budget_still_writes_the_file(self, tmp_path):
+        """Warn, never refuse: the dashboard must not go stale."""
+        from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET
+
+        mod = _import_mod()
+        branch = tmp_path / "bloated"
+        branch.mkdir()
+        path = branch / "DASHBOARD.local.json"
+        path.write_text(json.dumps({"branch": "BLOATED", "sections": {}}))
+
+        fat = {"managed_by": "flow", "active_plans": 0, "filler": "f" * (DASHBOARD_CHAR_BUDGET + 500)}
+        with patch(f"{_MOD}.logger"):
+            mod._write_dashboard_section(branch, "flow", fat)
+
+        written = json.loads(path.read_text())
+        assert len(written["sections"]["flow"]["filler"]) == DASHBOARD_CHAR_BUDGET + 500
+
+    def test_no_warning_under_budget(self, tmp_path):
+        mod = _import_mod()
+        branch = tmp_path / "lean"
+        branch.mkdir()
+        (branch / "DASHBOARD.local.json").write_text(json.dumps({"branch": "LEAN", "sections": {}}))
+
+        with patch(f"{_MOD}.logger") as mock_logger:
+            assert mod._write_dashboard_section(branch, "flow", {"managed_by": "flow", "active_plans": 0}) is True
+
+        assert not [c for c in mock_logger.warning.call_args_list if "over the" in str(c)]
+
+    def test_budget_is_measured_in_chars_of_the_rendered_json(self, tmp_path):
+        """
+        The measured size is the rendered text, not the section dict.
+
+        A section just under the budget still pushes the whole file over once
+        the surrounding JSON is counted — that is the number the branch pays.
+        """
+        from aipass.prax.apps.modules.dashboard import DASHBOARD_CHAR_BUDGET
+
+        mod = _import_mod()
+        branch = tmp_path / "edge"
+        branch.mkdir()
+        path = branch / "DASHBOARD.local.json"
+        path.write_text(json.dumps({"branch": "EDGE", "sections": {}}))
+
+        section = {"managed_by": "flow", "active_plans": 0, "filler": "f" * (DASHBOARD_CHAR_BUDGET - 200)}
+        with patch(f"{_MOD}.logger") as mock_logger:
+            mod._write_dashboard_section(branch, "flow", section)
+
+        rendered_size = len(path.read_text())
+        over = [c for c in mock_logger.warning.call_args_list if "over the" in str(c)]
+        assert bool(over) is (rendered_size > DASHBOARD_CHAR_BUDGET)

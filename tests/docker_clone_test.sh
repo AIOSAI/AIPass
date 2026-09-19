@@ -109,7 +109,7 @@ fi
 python3 "$HOOKS_DIR/hook_test.py" --direct --verbose 2>&1 || true
 echo ""
 
-# --- Phase 6: Check settings.json matches Patrick's machine pattern ---
+# --- Phase 6: Check settings.json matches the owner's machine pattern ---
 echo "--- Phase 6: Settings validation ---"
 checks_passed=0
 checks_total=0

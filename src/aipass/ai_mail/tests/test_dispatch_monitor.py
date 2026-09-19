@@ -3485,7 +3485,7 @@ _C_CMD = ["claude", "-c", "-p", "hi"]
 
 
 def test_reconcile_refuses_to_adopt_a_session_landed_on_by_bare_c(tmp_path, pointer_home):
-    """THE RULING (Patrick, 2026-08-20): a -c landing is never written down.
+    """THE RULING (the owner, 2026-08-20): a -c landing is never written down.
 
     -c picks by file mtime. Recording that choice would promote a guess into a
     durable record, and every later dispatch would resume it deliberately — so

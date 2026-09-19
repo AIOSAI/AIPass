@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-13
 # Modified: 2026-09-15
 # =============================================
@@ -9,7 +9,7 @@
 """
 Tests for the config_loader handler (Phase 1 of FPLAN-0271).
 
-Doctrine (Patrick, S193): the JSON file is the runtime authority; code
+Doctrine (the owner, S193): the JSON file is the runtime authority; code
 carries DEFAULT_CONFIG so that file can be regenerated when lost.
 
 Covers:
@@ -20,6 +20,9 @@ Covers:
   6. section()                      -- returns named section or empty dict for unknown.
   7. deep_merge()                   -- nested merge, non-mutation, override precedence.
   8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
+  9. File budgets (FPLAN-0593)     -- worst-case entry/file arithmetic, the per-type
+                                      per-file keep-count ceiling and its co-tenants,
+                                      the clamp on load, and that no shipped default clamps.
 """
 
 import copy
@@ -819,3 +822,294 @@ class TestTodosCountMaterializes:
         assert mod.set_default_limit("todos", 5) == display_only
         assert mod.set_default_limit("wizard", 5) == {"success": False, "error": "Unknown entry type: 'wizard'"}
         assert path.read_bytes() == before
+
+
+# ===========================================================================
+# 9. File budgets (FPLAN-0593) -- a keep-count is a MULTIPLIER on an entry cap
+# ===========================================================================
+
+
+def _budget_module():
+    """Import and return the pure budget-arithmetic module."""
+    return importlib.import_module("aipass.memory.apps.handlers.json.budget")
+
+
+def _entry_limits(mod) -> dict:
+    """The regeneration seed's entry_limits section -- shapes and budgets."""
+    return copy.deepcopy(mod.DEFAULT_CONFIG["entry_limits"])
+
+
+def _shape(mod, entry_type: str) -> dict:
+    """The closed field shape the seed publishes for *entry_type*."""
+    return mod.DEFAULT_CONFIG["entry_limits"]["entry_types"][entry_type]["fields"]
+
+
+def _default_counts(mod) -> dict:
+    """Every entry type at the count the fleet actually ships with."""
+    return {name: row["count"] for name, row in _shipped_rows(mod).items()}
+
+
+def _shipped_rows(mod) -> dict:
+    """The seed's default limits, resolved for a branch with no per_branch entry."""
+    return mod.resolve_limits(_rollover_section(mod), "nobody")
+
+
+class TestWorstEntryChars:
+    """The largest an entry can legally be is MEASURED, never hand-summed."""
+
+    def test_a_bigger_shape_is_a_bigger_entry(self) -> None:
+        """sessions carries the most capped text, todos the least."""
+        mod, bud = _get_module(), _budget_module()
+        sessions = bud.worst_entry_chars(_shape(mod, "sessions"))
+        key_learnings = bud.worst_entry_chars(_shape(mod, "key_learnings"))
+        todos = bud.worst_entry_chars(_shape(mod, "todos"))
+        assert sessions > key_learnings > todos
+
+    def test_it_equals_what_a_real_container_pays_for_one_more_entry(self) -> None:
+        """The number IS the delta, at the indent an entry sits at on disk.
+
+        Pinned against a second serialization rather than a literal: a
+        hand-summed count of braces, quotes and indentation is exactly the
+        arithmetic this function exists to stop anyone doing.
+        """
+        mod, bud = _get_module(), _budget_module()
+        entry = {"number": 999, "date": "x" * 10, "task": "x" * 100, "priority": "x" * 10}
+        one = len(json.dumps({"todos": [entry]}, indent=2, ensure_ascii=False))
+        two = len(json.dumps({"todos": [entry, entry]}, indent=2, ensure_ascii=False))
+        assert bud.worst_entry_chars(_shape(mod, "todos")) == two - one
+
+    def test_a_tag_list_is_measured_at_max_items_and_max_joined_chars(self) -> None:
+        """Ten tags of joined 120 chars cost more than the same text in one."""
+        mod, bud = _get_module(), _budget_module()
+        shape = copy.deepcopy(_shape(mod, "sessions"))
+        shape["tags"] = {"type": "list[str]", "required": False, "max_items": 1, "max_chars": 120}
+        assert bud.worst_entry_chars(_shape(mod, "sessions")) > bud.worst_entry_chars(shape)
+
+    def test_an_unpublished_shape_is_not_guessed_at(self) -> None:
+        assert _budget_module().worst_entry_chars({}) == 0
+
+
+class TestWorstFileChars:
+    """A file's worst case is its entries plus the structure they sit in."""
+
+    def test_it_sums_only_the_types_that_live_in_that_file(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        entry_types = _entry_limits(mod)["entry_types"]
+        counts = _default_counts(mod)
+        observations = bud.worst_file_chars("observations.json", counts, entry_types)
+        expected = bud.FILE_STRUCTURE_ALLOWANCE["observations.json"] + 15 * bud.worst_entry_chars(
+            _shape(mod, "observations")
+        )
+        assert observations == expected
+
+    def test_the_auto_compact_sessions_are_budgeted_on_top_of_the_keep_count(self) -> None:
+        """The 3 auto-compact sessions are EXTRA; a ceiling that skips them under-counts."""
+        mod, bud = _get_module(), _budget_module()
+        entry_types = _entry_limits(mod)["entry_types"]
+        counts = _default_counts(mod)
+        per_session = bud.worst_entry_chars(_shape(mod, "sessions"))
+        expected = (
+            bud.FILE_STRUCTURE_ALLOWANCE["local.json"]
+            + (counts["sessions"] + 3) * per_session
+            + counts["key_learnings"] * bud.worst_entry_chars(_shape(mod, "key_learnings"))
+            + counts["todos"] * bud.worst_entry_chars(_shape(mod, "todos"))
+        )
+        assert bud.worst_file_chars("local.json", counts, entry_types) == expected
+        assert bud.AUTO_COMPACT_EXTRA["sessions"] == 3
+
+    def test_an_unusable_count_is_zero_entries_not_a_crash(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        entry_types = _entry_limits(mod)["entry_types"]
+        broken = {"sessions": None, "key_learnings": "15", "todos": True, "observations": -4}
+        assert (
+            bud.worst_file_chars("observations.json", broken, entry_types)
+            == (bud.FILE_STRUCTURE_ALLOWANCE["observations.json"])
+        )
+
+
+class TestCountCeilingCoTenancy:
+    """local.json is SHARED, so no type's ceiling is a property of that type."""
+
+    def test_raising_key_learnings_lowers_the_sessions_ceiling(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        counts = _default_counts(mod)
+        roomy = bud.count_ceiling("sessions", counts, limits["entry_types"], limits["file_budgets"])
+        crowded = bud.count_ceiling(
+            "sessions",
+            {**counts, "key_learnings": counts["key_learnings"] + 5},
+            limits["entry_types"],
+            limits["file_budgets"],
+        )
+        assert crowded < roomy
+
+    def test_emptying_the_file_raises_it(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        counts = _default_counts(mod)
+        alone = {**counts, "key_learnings": 0, "todos": 0}
+        assert bud.count_ceiling("sessions", alone, limits["entry_types"], limits["file_budgets"]) > bud.count_ceiling(
+            "sessions", counts, limits["entry_types"], limits["file_budgets"]
+        )
+
+    def test_a_sole_tenant_has_no_company(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        entry_types = _entry_limits(mod)["entry_types"]
+        counts = _default_counts(mod)
+        assert bud.co_tenants("observations.json", counts, entry_types, exclude="observations") == {}
+        assert bud.co_tenants("local.json", counts, entry_types, exclude="sessions") == {
+            "key_learnings": counts["key_learnings"],
+            "todos": counts["todos"],
+        }
+
+    def test_the_ceiling_at_the_edge_is_the_largest_count_that_still_fits(self) -> None:
+        """One more entry than the ceiling busts the budget; the ceiling itself does not."""
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        counts = _default_counts(mod)
+        ceiling = bud.count_ceiling("sessions", counts, limits["entry_types"], limits["file_budgets"])
+        budget_chars = limits["file_budgets"]["local.json"]["max_chars"]
+        assert (
+            bud.worst_file_chars("local.json", {**counts, "sessions": ceiling}, limits["entry_types"]) <= budget_chars
+        )
+        assert (
+            bud.worst_file_chars("local.json", {**counts, "sessions": ceiling + 1}, limits["entry_types"])
+            > budget_chars
+        )
+
+    def test_a_budget_too_small_for_one_entry_still_reports_one(self) -> None:
+        """Zero would roll every entry away on sight -- that is a config to fix, not a limit."""
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        assert (
+            bud.count_ceiling("sessions", _default_counts(mod), limits["entry_types"], {"local.json": {"max_chars": 1}})
+            == 1
+        )
+
+    def test_nothing_measurable_refuses_nothing(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        counts = _default_counts(mod)
+        assert (
+            bud.count_ceiling("wizard", counts, limits["entry_types"], limits["file_budgets"]) == bud.UNBOUNDED_CEILING
+        )
+        assert bud.count_ceiling("sessions", counts, limits["entry_types"], {}) == bud.UNBOUNDED_CEILING
+
+
+class TestClampOnLoad:
+    """A hand-edited over-budget count is LOWERED at the resolver, and said so."""
+
+    @staticmethod
+    def _over_budget(mod, count: int = 40) -> dict:
+        return _rollover_section(mod, {"guinea": {"local": {"sessions": {"count": count}}}})
+
+    def test_the_count_is_lowered_to_the_ceiling(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        row = mod.resolve_limits(self._over_budget(mod), "guinea", limits)["sessions"]
+        counts = {name: r["count"] for name, r in mod.resolve_limits(self._over_budget(mod), "guinea").items()}
+        assert row["count"] == bud.count_ceiling("sessions", counts, limits["entry_types"], limits["file_budgets"])
+        assert row["count"] < 40
+
+    def test_what_the_operator_wrote_is_still_readable(self) -> None:
+        mod = _get_module()
+        row = mod.resolve_limits(self._over_budget(mod), "guinea", _entry_limits(mod))["sessions"]
+        assert row["requested_count"] == 40
+
+    def test_a_count_that_fits_is_left_exactly_as_written(self) -> None:
+        mod = _get_module()
+        row = mod.resolve_limits(self._over_budget(mod, 5), "guinea", _entry_limits(mod))["sessions"]
+        assert (row["count"], row["requested_count"]) == (5, 5)
+
+    def test_the_warning_names_both_numbers_the_file_its_budget_and_the_company(self) -> None:
+        mod = _get_module()
+        mod.resolve_limits(self._over_budget(mod), "guinea", _entry_limits(mod))
+        said = " ".join(str(call) for call in mod.logger.warning.call_args_list)
+        assert "40" in said and "local.json" in said and "25,000" in said and "todos" in said
+
+    def test_without_ceiling_data_there_is_no_clamp(self) -> None:
+        """The resolver promises no I/O, so a caller that has not loaded the
+        budgets gets the number as written rather than a silent extra read."""
+        mod = _get_module()
+        assert mod.resolve_limits(self._over_budget(mod), "guinea")["sessions"]["count"] == 40
+
+    def test_the_clamp_reaches_the_effective_limits_read(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        config = copy.deepcopy(mod.DEFAULT_CONFIG)
+        config["rollover"]["per_branch"] = {"guinea": {"local": {"sessions": {"count": 40}}}}
+        monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, config))
+        row = mod.get_effective_limits("guinea")["sessions"]
+        assert row["count"] < 40 and row["requested_count"] == 40
+
+    def test_the_clamp_reaches_the_todo_pad(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        config = copy.deepcopy(mod.DEFAULT_CONFIG)
+        config["rollover"]["per_branch"] = {"guinea": {"local": {"todos": {"count": 400}}}}
+        monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, config))
+        assert 0 < mod.get_todos_count("guinea") < 400
+
+    def test_every_ceiling_is_measured_against_the_same_company(self) -> None:
+        """Clamping one type must not silently buy room for the next one in iteration order."""
+        mod = _get_module()
+        rollover = _rollover_section(
+            mod,
+            {"guinea": {"local": {"sessions": {"count": 40}, "key_learnings": {"count": 40}, "todos": {"count": 10}}}},
+        )
+        rows = mod.resolve_limits(rollover, "guinea", _entry_limits(mod))
+        assert rows["sessions"]["count"] < 40
+        assert rows["key_learnings"]["count"] < 40
+
+
+class TestShippedDefaultsDoNotClamp:
+    """FPLAN-0593 changes NOTHING for a fleet sitting on the defaults."""
+
+    def test_every_shipped_default_is_under_its_own_ceiling(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        counts = _default_counts(mod)
+        for entry_type, count in counts.items():
+            ceiling = bud.count_ceiling(entry_type, counts, limits["entry_types"], limits["file_budgets"])
+            assert count <= ceiling, f"{entry_type} ships at {count} but its ceiling is {ceiling}"
+
+    def test_resolving_the_seed_changes_no_count(self) -> None:
+        mod = _get_module()
+        clamped = mod.resolve_limits(_rollover_section(mod), "nobody", _entry_limits(mod))
+        assert {name: row["count"] for name, row in clamped.items()} == _default_counts(mod)
+        assert all(row["count"] == row["requested_count"] for row in clamped.values())
+
+    def test_the_defaults_fit_their_files_with_room_to_spare(self) -> None:
+        mod, bud = _get_module(), _budget_module()
+        limits = _entry_limits(mod)
+        counts = _default_counts(mod)
+        for file_key, spec in limits["file_budgets"].items():
+            if file_key == "passport.json":
+                continue
+            assert bud.worst_file_chars(file_key, counts, limits["entry_types"]) <= spec["max_chars"]
+
+
+class TestFileBudgetAccessor:
+    """config_loader owns config reads, so the budgets are read through it."""
+
+    def test_it_serves_the_three_configured_budgets(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG)))
+        budgets = mod.get_file_budgets()
+        assert budgets["local.json"]["max_chars"] == 25000
+        assert budgets["observations.json"]["max_chars"] == 15000
+        assert budgets["passport.json"]["max_string_chars"] == 600
+
+    def test_a_caller_cannot_edit_the_fleet_budgets_by_mutating_what_it_got(self, tmp_path: Path, monkeypatch) -> None:
+        mod = _get_module()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG)))
+        mod.get_file_budgets()["local.json"]["max_chars"] = 1
+        assert mod.get_file_budgets()["local.json"]["max_chars"] == 25000
+
+    def test_ceilings_read_the_configured_budget_not_a_literal(self, tmp_path: Path, monkeypatch) -> None:
+        """Halve local.json's budget and every local.json ceiling must move."""
+        mod = _get_module()
+        config = copy.deepcopy(mod.DEFAULT_CONFIG)
+        config["entry_limits"]["file_budgets"]["local.json"]["max_chars"] = 12500
+        monkeypatch.setattr(mod, "_CONFIG_PATH", _write_config(tmp_path, config))
+        tightened = mod.get_count_ceilings()
+        assert tightened["sessions"]["ceiling"] < 15
+        assert tightened["observations"]["ceiling"] >= 15, "observations.json's budget did not move"

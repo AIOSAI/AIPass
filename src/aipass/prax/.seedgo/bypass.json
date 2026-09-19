@@ -193,7 +193,7 @@
     {
       "file": "apps/handlers/json/json_handler.py",
       "standard": "naming",
-      "reason": "Shim pattern \u2014 module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by Patrick's ruling (2026-09-03), hashed by seedgo. Matches the identical bypass in spawn/, canary/ and memory/."
+      "reason": "Shim pattern \u2014 module-level names are BOUND METHODS of the fleet json service's JsonHandle, not constants. Lowercase is correct for callable bindings, and the file is byte-identical in all 18 branches by the owner's ruling (2026-09-03), hashed by seedgo. Matches the identical bypass in spawn/, canary/ and memory/."
     }
   ],
   "notes": {

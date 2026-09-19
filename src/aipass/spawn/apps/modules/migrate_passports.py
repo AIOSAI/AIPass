@@ -12,7 +12,7 @@ Thin CLI module that parses arguments and delegates to the migration handler.
 All implementation logic lives in apps/handlers/passport_migration.py.
 
 DRY RUN IS THE DEFAULT. ``--confirm`` is the only thing that writes, and the
-live fleet run is Patrick's own GO — this module makes the safe direction the
+live fleet run is the owner's own GO — this module makes the safe direction the
 one you get by typing less.
 """
 
@@ -128,7 +128,7 @@ def handle_migrate_passports(args: list[str]) -> int:
         return 1
 
     # Every invocation is recorded, dry runs included — a dry run is the
-    # measurement that precedes Patrick's GO, and it leaves no other trace.
+    # measurement that precedes the owner's GO, and it leaves no other trace.
     json_handler.log_operation(
         "migrate_passports",
         data={
@@ -140,7 +140,7 @@ def handle_migrate_passports(args: list[str]) -> int:
     )
 
     _print_receipt(receipt)
-    # A REFUSAL EXITS NON-ZERO (Patrick's standing ruling, fleet refusal sweep
+    # A REFUSAL EXITS NON-ZERO (the owner's standing ruling, fleet refusal sweep
     # 2026-09-07). Zero scanned is the same refusal the receipt already prints in
     # words: discovery matched nothing, so nothing was judged. It used to exit 0,
     # which made "I searched the wrong root" indistinguishable from "your fleet is

@@ -1,723 +1,132 @@
 [← Back to AIPass](../../../README.md)
 
-# Drone
+# DRONE
 
-**Purpose:** Command router and symbolic addressing for AIPass. Resolves `@branch` names to paths at runtime via `AIPASS_REGISTRY.json`, routes commands to module entry points, manages git workflows, and discovers available commands across the system.
+**Purpose:** The command router for AIPass. Resolves an `@name` to a real path at runtime, routes the command there, and owns every git operation behind a tier-based access gate — the one interface through which the whole fleet reaches git.
 **Module:** `aipass.drone`
 **Version:** 1.1.0
 **Created:** 2026-03-05
 
 ---
 
-## Overview
-
-### What I Do
-- Resolve `@branch` symbolic names to absolute paths via `AIPASS_REGISTRY.json`
-- Route commands to registered branches and internal modules
-- Manage git workflows: tier-based access (global read-only, owner write), commit, diff, log, sync, merge
-- Discover and scan available commands across the system
-- Provide `drone systems` introspection of all registered components
-- Support external AIPass projects via dual registry lookup and module routing
-
----
-
 ## Quick Start
 
 ```bash
-drone systems                     # See all registered branches
+drone systems                     # Every registered branch and module
 drone @seedgo audit aipass        # Route a command to a branch
-drone @flow --help                # Show help for any branch
-drone scan @memory                # Discover available commands
+drone @flow --help                # The full reference for any target
+drone @git status                 # Read-only git, available to every branch
 ```
 
 ---
 
-## Commands / Usage
+## What It Does
 
-Drone provides a CLI for terminal use and a Python API for programmatic access.
+- **Routes everything.** `drone @<target> <command>` reaches any registered branch or internal
+  module. A branch is dispatched as a subprocess; a module runs in-process. Which lane is taken is
+  decided before the call, never discovered by failing one.
+- **Resolves `@names`.** Symbolic addressing against the project registry, with external projects
+  merged in, so the same command works from a repo that is not this one.
+- **Owns git.** Read verbs for every branch, write verbs for the project's registry-declared owner,
+  a door for repositories that are not AIPass, and one audit line per use of it.
+- **Deletes, and records it.** `drone rm` is the only sanctioned delete path in the fleet, and
+  every delete and every refusal lands in an audit store and in the logs.
+- **Discovers.** Commands are read from the branches themselves, so the inventory is generated
+  rather than written down.
 
-### CLI
+Not a task runner, not a scheduler, and never a writer of another branch's files.
 
-```bash
-# Core routing
-drone @seedgo audit aipass       # Route "audit aipass" to seedgo
-drone @module --help             # Show help for any module
-drone systems                    # List all registered modules and branches
+---
 
-# Git workflow — global tier (all branches)
-drone @git status                # Git status scoped to branch directory
-drone @git diff                  # Show git diff for your branch
-drone @git diff --staged         # Show staged changes
-drone @git log                   # Show recent git log (default: 10)
-drone @git log 20                # Show last 20 commits
-drone @git show <ref>            # Show a commit
-drone @git show <ref> <path>     # Read a file's contents AT that commit
-drone @git remote                # List remotes + urls (credentials redacted)
-drone @git lock                  # Check lock status
-drone @git tag --list            # List all tags (newest first)
-drone @git branches              # List remote branches
-drone @git issue list            # Passthrough to gh issue list
-drone @git issue view 42         # Passthrough to gh issue view 42
-drone @git run list              # Passthrough to gh run list
-drone @git workflow list         # Passthrough to gh workflow list
+## Live Inventory
 
-# Git read doors — machine output (--json rides in ANY slot)
-drone @git status --json         # {ok, branch, scope, files[], total, message}
-drone @git log 20 --json         # {ok, commits[{sha, subject}], count, message}
-drone @git show <ref> --json     # {ok, ref, path, content, message}
-drone @git remote --json         # {ok, remotes[{name,fetch,push,redacted}], count}
+The list of modules and commands is **generated from the code that runs them**, so it is not
+written down here and cannot go stale:
 
-# Git workflow — owner tier (the project's registry-declared owner)
-drone @git commit "message"      # Commit whatever is already staged
-drone @git commit "msg" --all    # Stage ALL repo changes and commit
-drone @git commit "msg" f1 f2    # Stage only f1 f2, then commit
-drone @git checkout dev          # Switch to dev branch
-drone @git checkout main         # Switch to main branch
-drone @git pr "desc"             # Push current branch and create PR to main
-drone @git dev-pr "desc"         # Push dev and create PR to main
-drone @git merge <PR#>           # Merge a PR and sync local main
-drone @git delete-branch <name>  # Delete a remote branch (not main/dev)
-drone @git close-pr <number>     # Close a PR by number
-drone @git sync                  # Pull latest (branch-aware: main or dev)
-drone @git sync --autostash      # Sync with autostash for dirty trees
-drone @git smart-sync            # Fetch + detect divergence + rebase
-drone @git prune-temp            # Delete merged citizen/* temp branches
-drone @git unlock --force        # Force-release the PR lock
-drone @git tag v2.6.1            # Create + push annotated release tag (see Tag lanes)
+- `drone @drone` — the self-map: every discovered module with its one-line description.
+- `drone @drone --help` — the routing surface: the built-ins, the flags, the timeout override.
+- `drone @git --help` — every git verb, its tier, the machine surface and the external-repo door,
+  including each refusal exactly as it prints.
+- `drone rm --help` — the delete rules, the carve-outs and the stale-temp sweep.
 
-# External-repo door — admin seat only (see External-repo door)
-drone @git status --repo projects/baud          # Read another repo's tree
-drone @git commit "msg" --all --repo projects/baud
-drone @git push --repo projects/baud            # Push that repo's checked-out branch
-drone @git tag v0.2.0 --repo projects/baud
-drone @git fix                   # Auto-fix stuck rebase / detached HEAD
-drone @git fix --dry-run         # Detect issues without fixing
+---
 
-# Command discovery
-drone scan @branch               # Discover available commands in a branch
-drone activate @branch           # Scan + register all commands as shortcuts
-drone list                       # List registered custom command shortcuts
-drone remove <name>              # Remove a custom command shortcut
+## How To Reach Me
 
-# Utilities
-drone rm <path> [<path>...]      # Contained safe-delete (project + tmp only)
-drone rm --stale 10d --dry-run .. # List staging temps (*.tmp in a *_json/ folder) older than 10 days
-drone rm --stale 10d ..           # ...and delete them (see Stale mode)
-drone @flow list --drone-timeout 90   # Override subprocess timeout (default 600s)
-                                      # Must come AFTER @target — anywhere after it works
-drone --version                  # Show version (v1.1.0)
-drone --help                     # Show usage information
-```
+- Mail: `drone @ai_mail email @drone "Subject" "Body"` — a route that resolves to the wrong place,
+  a refusal you believe is wrong, a verb you need that does not exist.
+- **A refusal is a message, not a wall.** Every git refusal names the caller and the reason, and
+  the two species mean different things: *not authorized* is about who you are, *cannot run here*
+  is about which repository you are standing in. Quote the line you got.
+- Write access to git belongs to the project's registry-declared owner, and it is earned from the
+  registry rather than granted by name. If you need something committed, mail the owner.
 
-### Python API
+---
 
-```python
-from aipass.drone import resolve_branch, list_branches, route_command
+## Commands
 
-# Resolve @name to absolute path
-path = resolve_branch("@seedgo")
-
-# List registered branches — status defaults to "active", it is not "all"
-active = list_branches()                      # 24 today; the default IS a filter
-by_type = list_branches(branch_type="core")   # 0 today — see note below
-
-# Route a command to a branch
-result = route_command("@seedgo", "audit", args=["aipass", "@drone"])
-print(result.stdout)      # Command output
-print(result.exit_code)   # 0 on success
-```
-
-`list_branches()` returns **24** today, and that is not the 18 rows of `AIPASS_REGISTRY.json`: `get_all_branches()` merges the primary registry (18 entries, all `status: "active"`, none carrying a type field) with the external tier declared in `AIPASS_ROOTS.json` (6 — `@wren`, `@research`, `@vera`, `@verify`, `@writer`, `@my_agent`). `list_branches(branch_type=...)` is a live parameter with nothing to match: none of the 24 carries a type field, so the type filter always returns `[]`, and any status but `active` returns `[]` too. One precision the earlier wording missed — the filter reads `branch.get("type")`, not `branch_type`, so it names a key no code reads. Documented as it behaves, not as it reads — remeasured 2026-09-05.
-
-### Registry Management
-
-```python
-from aipass.drone import set_registry_path, get_registry_path, reset_registry_path
-
-# Use a custom registry location
-set_registry_path("/path/to/AIPASS_REGISTRY.json")
-reset_registry_path()                     # back to normal resolution
-
-# Or set via environment variable
-# export AIPASS_REGISTRY=/path/to/registry.json
-```
-
-Path resolution order (`get_registry_path()` → `find_registry()`): explicit `set_registry_path()` → **`AIPASS_REGISTRY`** env var → walk up from cwd, skipping any registry whose `metadata.id` conflicts with the nearest passport's `citizenship.registry_id` → `AIPASS_HOME` → walk up from the drone package → package-relative default. The env var is `AIPASS_REGISTRY`, not `AIPASS_REGISTRY_PATH` — the latter name appeared here until 2026-08-25 and was never read by any code.
-
-### Error Handling
-
-```python
-from aipass.drone import resolve_branch, BranchNotFoundError, CommandExecutionError
-
-try:
-    path = resolve_branch("@nonexistent")
-except BranchNotFoundError:
-    print("Branch not found in registry")
-
-try:
-    result = route_command("@seedgo", "audit", args=["aipass"], timeout=120)
-except CommandExecutionError as e:
-    print(f"Command failed: {e}")
-```
+There is no command list on this page, deliberately: a hand-typed copy of a branch's own help
+output rots the next time a verb is added. The generated surface is the one above under **Live
+Inventory**, and it is always current.
 
 ---
 
 ## Architecture
 
-### 3-Layer Pattern
-
-```
-drone/
-├── cli.py                         # pip entry point (drone command)
-├── __init__.py                    # Public API exports (v1.1.0)
-├── apps/
-│   ├── drone.py                   # Core entry + CLI routing
-│   ├── modules/                   # Orchestrators (business logic)
-│   │   ├── config.py              # Registry path resolution
-│   │   ├── resolver.py            # Branch resolution (@name → path)
-│   │   ├── router.py              # Command routing via subprocess
-│   │   ├── discovery.py           # Module and command discovery
-│   │   ├── module_registry.py     # Internal module routing
-│   │   ├── registry.py            # Registry query operations
-│   │   ├── commands.py            # Custom command shortcut orchestrator
-│   │   ├── git_module.py          # Git workflow (tier-based access, 24 commands)
-│   │   ├── scan.py                # Branch command scanning
-│   │   ├── rm.py                  # Contained safe-delete orchestrator
-│   │   └── broker.py             # Broker daemon orchestrator (sandbox delete)
-│   ├── handlers/                  # Implementation details
-│   │   ├── executor.py            # Safe subprocess execution (timeout, no shell)
-│   │   ├── exceptions.py          # Exception hierarchy (10 exception types)
-│   │   ├── router_handler.py      # Routing implementation + caller identity resolution
-│   │   ├── registry_handler.py    # Registry file ops + dual registry lookup
-│   │   ├── discovery_handler.py   # Discovery implementation + help parsing
-│   │   ├── module_registry_handler.py  # Module loading (internal + external)
-│   │   ├── generic_adapter.py     # StringIO capture for external modules
-│   │   ├── help_flags.py          # wants_help() — whole-sequence help detection (rule E)
-│   │   ├── json_flags.py          # wants_json() / strip_json_flag() — --json in any slot
-│   │   ├── module_root.py         # Resolve a module's __file__ without an import-time cwd read
-│   │   ├── rm_handler.py          # Path containment checks + deletion + stale-temp sweep
-│   │   ├── deletion_log.py        # Deletion record — JSONL store + prax line (both lanes)
-│   │   ├── routing_config.json    # External module declarations
-│   │   ├── broker/
-│   │   │   ├── daemon.py          # Broker daemon (unix socket, openat2, audit)
-│   │   │   ├── client.py          # Broker client (inherited fd transport)
-│   │   │   ├── path_resolver.py   # openat2 RESOLVE_BENEATH path resolution
-│   │   │   └── protocol.py       # Typed JSON-line IPC (BrokerRequest/Response)
-│   │   ├── json/
-│   │   │   └── json_handler.py    # Binds prax's json service to this branch — fleet shim, byte-identical
-│   │   ├── scanning/
-│   │   │   ├── scanner.py         # Help parsing + modules/ file scanning
-│   │   │   └── formatters.py      # Rich output for scan results
-│   │   ├── command_registry/
-│   │   │   ├── ops.py             # Command shortcut CRUD
-│   │   │   ├── lookup.py          # Greedy multi-word matching
-│   │   │   └── formatters.py      # Rich output for command lists
-│   │   └── git/
-│   │       ├── lock_handler.py              # Atomic lockfile (O_CREAT|O_EXCL)
-│   │       ├── pr_handler.py                # ORPHANED — superseded by dev_pr_handler, no production caller
-│   │       ├── diff_handler.py              # Scoped git diff (--staged support)
-│   │       ├── log_handler.py               # Scoped git log (configurable count)
-│   │       ├── show_handler.py              # Read history at a commit (repo-wide, NOT branch-scoped)
-│   │       ├── remote_handler.py            # List remotes (credentials redacted)
-│   │       ├── commit_handler.py            # Commit changes (--all, selective files, or pre-staged)
-│   │       ├── checkout_handler.py          # Branch switching (main/dev guard)
-│   │       ├── dev_pr_handler.py            # Push dev and create PR to main
-│   │       ├── branches_handler.py          # List remote branches
-│   │       ├── delete_branch_handler.py     # Delete remote branch (main/dev protected)
-│   │       ├── close_pr_handler.py          # Close PR by number (gh pr close)
-│   │       ├── status_handler.py            # Scoped git status (subprocess)
-│   │       ├── sync_handler.py              # Safe main sync (--autostash support)
-│   │       ├── repo_context.py              # Which repo is underfoot — AIPass's own or external
-│   │       └── tag_handler.py               # Release tagging (two lanes: AIPass main, external HEAD)
-│   └── plugins/
-│       ├── devpulse_ops/          # Privileged git operations (auth-gated)
-│       │   ├── auth.py            # Passport-based identity gate (owner tier earned per-repo)
-│       │   ├── merge_plugin.py    # PR merge (--merge) + local sync
-│       │   ├── sync_plugin.py     # Smart sync (fetch, divergence detect, rebase)
-│       │   └── fix_plugin.py      # Auto-fix stuck rebase / detached HEAD
-│       └── hook_sounds/                   # DISABLED — moved to hooks branch (drone @hooks hooksound on/off)
-│           ├── __init__.py.disabled
-│           └── hook_sounds_plugin.py.disabled
-├── integrations/                  # Present on disk, README only — no .py, nothing routes to it
-├── docs/                          # Public documentation
-├── docs.local/                    # Investigation reports and policies
-├── artifacts/                     # Live acceptance test scripts
-└── tests/                         # 1182 test functions across 31 files; pytest expands to 1264 cases
-```
-
-### Routing Flow
-
-1. **CLI input** → `drone.py:main()`
-2. **Built-in commands** checked first: `systems`, `scan`, `activate`, `list`, `remove`, `rm`
-3. **`@target` routing** → branch resolution via `AIPASS_REGISTRY.json` → subprocess dispatch
-4. **Module routing** → a registered module that is not a branch here is routed internally, **decided before any branch call** (`branch_exists()`), never discovered by failing one
-5. **Bare module names** → auto-discovered from `apps/modules/*.py`, routed via `importlib`
-6. **Custom commands** → greedy multi-word matching against `drone_command_registry.json`
-
-The `@target` lane has **no module fallback on the error path.** A `BranchNotFoundError` from a branch that the registry *does* list is a real fault and fails loud — `resolve_branch()` also refuses a registry path that escapes the project root, and the old fallback answered that security refusal by quietly running the module instead.
-
-One fallback deliberately survives, and only in the **custom-command** lane (`_handle_custom_command()`, `apps/drone.py:376`): a registered shortcut whose target is a module but not a branch here falls back to module routing, logged at INFO. That lane resolves its target from `drone_command_registry.json` rather than the argv, so the look-before-route check the `@target` lane uses does not apply to it. Unverified whether it should — it has never been measured for happy-path firing the way `@git status` was.
-
-### Module System
-
-Drone routes to two kinds of modules:
-
-| Type | Modules | Routing |
-|------|---------|---------|
-| Internal | `git` | `importlib` import → `handle_command()` |
-| External | `seedgo`, `cli`, `spawn` | `generic_adapter.capture_main()` via `routing_config.json` |
-
-External modules are declared in `apps/handlers/routing_config.json` with entry points, descriptions, and versions.
-
-### Caller Identity
-
-Every routed command is attributed to a caller, stamped into `AIPASS_CALLER_BRANCH` and the `[CALLER:X]` log tag. `resolve_caller_identity()` in `router_handler.py` weighs two signals:
-
-| Signal | Question it answers | Precedence |
-|--------|--------------------|------------|
-| `AIPASS_BRANCH_NAME` | Who this process **is** (assigned at spawn) | Wins |
-| cwd `.trinity/passport.json` | Who lives **where** the process stands (inferred) | Fallback |
-| cwd `*_REGISTRY.json` | Which **project** the process is in — never a citizen | Last resort |
-
-Assigned identity beats location: an agent that cds into another branch is still itself. Nothing here grants authority — git's owner tier reads passports directly.
-
-**The provenance travels with the name.** `resolve_caller_identity_signal()` returns a `CallerIdentity(name, source)` where source is `assigned` | `passport` | `project`, and `execute_branch_command()` stamps it as **`AIPASS_CALLER_IDENTITY_SOURCE`** alongside `AIPASS_CALLER_BRANCH`. `resolve_caller_identity()` still returns the bare name for attribution sites (the `[CALLER:X]` tag, the deletion record); anything that must *decide* on an identity takes the signal.
-
-Why it exists: these two cases arrived byte-identical downstream, and they are not the same claim.
-
-| Case | `CALLER_BRANCH` | Source | What it is |
-|---|---|---|---|
-| agent assigned `@commons`, standing in `/tmp` | `commons` | `assigned` | a **credential** — valid from any directory (S102) |
-| nobody assigned, standing at the repo root | `aipass` | `project` | a **directory name** that collides with the citizen `@aipass` |
-
-The second sent a dispatch out as `@aipass` on 2026-08-21; ai_mail's contact lookup found the real citizen row and stamped it "verified", and the wake-back woke the wrong branch — 11 turns, $1.41, and nothing warned (DPLAN-0315 item 3). A consumer cannot re-derive this: it is a different process with a different cwd. Unstamped, ai_mail's identity fence had to refuse **both**, which re-broke the very S102 case it protects.
-
-**Log severity is chosen by what the outcome means, not by how unusual it looks:**
-
-| Situation | Level | Why |
-|-----------|-------|-----|
-| Assigned identity vs a **passport** naming someone else | `WARNING` | Two citizens claim one process — genuinely abnormal, stays loud |
-| Assigned identity while standing in a **project** root | `INFO` | Not a conflict. A project name is location, not a rival claim of identity — the ordinary shape of every long-lived service |
-| No passport and no registry found | `INFO` | An anonymous caller is a correct outcome. Attribution reads `unknown`; whoever refuses work for want of an identity owns the page |
-
-Identity messages are logged **once per process per signature**. Neither signal can change under a running process, so a repeat restates the first. Suppression is per-process only, so a real conflict recurring across separate invocations still accumulates and still escalates. The per-call `[CALLER:X]` tag and stamp are never suppressed — every call stays individually attributable.
-
-There is no public reset for the dedupe set: production never needs to forget what it has already logged. The test suite clears `_LOGGED_IDENTITY_SIGNATURES` directly from an autouse fixture in `tests/conftest.py`.
-
-### Git Access Tiers
-
-Auth centralized via `verify_git_access()` in `apps/plugins/devpulse_ops/auth.py`. Two tiers:
-
-| Tier | Who | Commands |
-|------|-----|----------|
-| **Global** | All branches | `status`, `diff`, `log`, `show`, `remote`, `lock`, `branches`, `tag --list`, `issue`, `run`, `workflow` |
-| **Owner** | The project's registry-declared owner — **earned, never hardcoded** (devpulse in AIPass) | `pr`, `commit`, `checkout`, `dev-pr`, `delete-branch`, `prune-temp`, `close-pr`, `sync`, `unlock`, `merge`, `smart-sync`, `fix`, `tag` |
-
-- Auth is checked once at the top of `git_module.handle_command()` before any handler is called
-- A refusal names the caller and why it was refused — see the two refusal species below; only the authority species names `citizen_class` and the tier required
-- **A command in neither tier is unreachable, not merely ungated** — `verify_git_access()` refuses anything it cannot find in a tier as `Unknown git command`, so registering a verb in `_COMMANDS` and wiring it to a handler does not make it callable. `prune-temp` shipped that way and no caller could reach it (found in the APLAN-0003 audit, tier ruled by @devpulse). `test_every_registered_command_holds_a_tier` now asserts the rule rather than the instance
-
-### Two refusal species — authority vs capability
-
-Owner tier refuses for two reasons that are not interchangeable, and conflating them cost a false page *and* a real hole (commit `2b7e6bcc`).
-
-| | **Authority** | **Capability** |
-|---|---|---|
-| What happened | the caller is not, or cannot be shown to be, this repo's owner | the caller **is** the proven owner, but the verb is not translated for this repo |
-| Where it is decided | any of the four owner checks — `citizen_class: manager`, registry readable, registry tenancy, listed with `owner: true` + passport path-binding | only **after** all four pass |
-| Log level | `ERROR` — fault-shaped, someone should look | `WARNING` — by design, nothing is broken |
-| Message | `Branch 'x' is not authorized for 'pr': <reason>` | `Branch 'x' cannot run 'pr' in this repo: <reason>` |
-| `AIPASS_GIT_AUTH_MODE=warn` | **lifts it** — rolling back the authority migration is exactly that switch's job (F59 6.1) | **does not lift it**, and cannot: the capability branch raises before `warn_only` is ever read |
-
-Why the wording differs: a proven owner sent to audit their passport is a false trail — they never had an authority problem. Why the rollback is scoped: one flag tested against every refusal species also lifted this wall, and `pr` ran to completion inside an external repo. A rollback named for one migration has no business re-arming a half-run of our merge flow in someone else's repository.
-
-**Which verbs refuse outside AIPass:** `dev-pr`, `pr`, `close-pr`, `merge`, `smart-sync`, `fix`, `delete-branch` — they assume a `dev` branch, our PR conventions, or `pyproject` versioning, so against an arbitrary repo they would half-run and leave a mess. `commit` and `sync` were translated in DPLAN-0281 P2, `tag` in DPLAN-0290 item 1; the refusal names those three so a manager who hits the wall learns what they *can* use.
-
-**WARNING is not silence.** @trigger's `watch_branch_log_warnings` feeds branch-log WARNINGs into the escalation digest — ten occurrences of one signature in 60 minutes mails @devpulse. A capability wall walked into repeatedly still reaches an operator, as a digest rather than a page here.
-
-### Subprocess timeouts
-
-Routed commands run with a timeout resolved in this order — **explicit flag > per-command policy > default**:
-
-| Layer | Value | Where |
-|-------|-------|-------|
-| Default | **600s** | `DEFAULT_TIMEOUT` in `apps/handlers/executor.py` |
-| Per-command policy | **none — the table ships empty** | `TIMEOUT_OVERRIDES` in the same file |
-| Explicit | whatever you pass | `--drone-timeout <n>` |
-| Extension quantum | **120s** | `IDLE_GRACE` in the same file |
-| Hard ceiling | **1800s** | `MAX_TIMEOUT` in the same file |
-
-The default was raised 30 → 60 on 2026-08-13 (Patrick's ruling): two known runners finish around 31s and were tripping the old default. It was raised again 60 → 600 on 2026-08-27, after two live kills in one morning — the fleet-wide trinity push died at 60s mid-alphabet (it needs about five minutes; the re-fire used `--drone-timeout 900`), and an `@all` mail broadcast was killed at 60s *after* all 18 messages had been delivered. Patrick's ruling: *"it is configured wrong — it should not be timing out before it completes; processing time is fine, increase the allowed timeout so things can actually complete."*
-
-**The timeout is a hang guard, not a performance budget.** It is sized for the worst *legitimate* case. Per-verb budgets were considered and rejected: an integer per command cannot tell `email @seedgo` from `email @all`, which is one verb with two very different worst cases.
-
-**`TIMEOUT_OVERRIDES` is empty on purpose.** It held three entries — `memory process-plans` 120s, `memory rollover` 100s, `flow close` 90s — and every one of them was written to *raise* above the old 60s default. Against a 600s base the same numbers invert into *caps*: the three commands we know are slow would get the least time in the fleet. The mechanism stays, because a per-command policy is a decision, not a floor — it still wins even if it is *lower* than the default (`resolve_timeout` has no `max()`, and a test pins that). Only the now-harmful data is gone.
-
-**Output extends life.** Nothing is killed before the base timeout, however silent it is. If the child has produced output within the last `IDLE_GRACE` (120s) when the deadline arrives, the deadline moves out by another `IDLE_GRACE` instead of killing — repeatedly, while it keeps talking, up to `MAX_TIMEOUT` (1800s), which nothing can pass. A child that has said *nothing at all* never extends: silence is not output.
-
-**The ceiling caps extension, never the base.** If a number above `MAX_TIMEOUT` is asked for — an operator's `--drone-timeout 3600`, or a future `TIMEOUT_OVERRIDES` entry — that number is honoured in full; the ceiling only bounds how far *extension* can push a deadline past it. A ceiling that quietly became a maximum would kill work earlier than the number that was actually requested, which is the failure this whole change exists to end.
-
-**A killed child is chased down and reported.** The kill path is a ladder — `terminate()`, wait, then `kill()`, then wait again to reap — and the one rung that can leave something behind says so: a child still unreaped after `SIGKILL` logs a **WARNING** naming its pid, because a zombie held for the lifetime of this process is otherwise invisible. Every other rung logs at debug; none of them is silent.
-
-*The honest edge:* a long **silent** computation gets only the base 600s. Extension is earned by talking, so a quiet 15-minute job still needs `--drone-timeout`. This adds no new false-kill mode — silence never *shortens* anything, it just does not lengthen it.
-
-**Two lanes take no timeout, and now say so.** Module routing runs in-process and interactive commands (`monitor`, `audit`, `watchdog`, `status`, and the `cli`/`backup` branches) inherit the terminal — neither is captured, so neither can be timed. The flag still *parses* there, so before this an operator's number vanished in silence: `drone @seedgo audit aipass --drone-timeout 5` ran unbounded and said nothing. Both lanes now emit a WARNING to the log and to stderr naming the number and the reason. A silently discarded cap is the same species of defect as a silent kill.
-
-**An explicit `--drone-timeout N` means exactly N.** `route_command()` passes `extend_on_output=False` whenever the operator named a number, because a deliberate tight cap that silently stretches is worse than no cap. The routing log line states the extension state next to the timeout.
-
-**A killed command still reports what it did.** The timeout error replays the child's partial stdout and stderr under `--- partial stdout (N bytes) ---` banners, truncated to the last 4000 characters *and told so when truncated*, and the chained `subprocess.TimeoutExpired` carries the same bytes on `.output` / `.stderr`. This is the other half of the `@all` broadcast defect: every message was delivered, and the old error said only *"Command timed out after 60s"* because the child's captured output was discarded with the exception.
-
-The signature defaults of `execute_command()` and `execute_branch_command()` reference `DEFAULT_TIMEOUT` rather than restating the number, so the layers cannot silently disagree. `tests/test_executor.py::TestDefaultTimeoutValue` pins the number itself and asserts all three layers agree.
-
-**Where `--drone-timeout` goes:** anywhere **after** the `@target`, including after the routed command and its arguments. It is stripped from the argument list before routing, so the target branch never sees it.
-
-```bash
-drone @flow list --drone-timeout 90     # ✅ after the command
-drone @flow --drone-timeout 90 list     # ✅ between target and command
-drone --drone-timeout 90 @flow list     # ❌ before the target — drone: unknown command '--drone-timeout'
-```
-
-### Help flags — explain, never execute
-
-A help flag **anywhere** in a command means explain, never execute (DPLAN-0291 rule E). Every module's `handle_command()` calls `wants_help()` from `apps/handlers/help_flags.py` before dispatching:
-
-- `--help` / `-h` — exact match, honoured in **any** position, including the subcommand slot
-- bare `help` — position 0 only, since later positions are legitimate values (a path to delete, a branch to look up)
-
-Modules that own `help` as a real verb pass `bare_help=False`; `discovery` does, so `drone @discovery help @seedgo` keeps working while `... help @seedgo --help` still explains.
-
-The check lives **inside** each `handle_command()`, not in the router, because every module also has a standalone `__main__` path that takes raw argv and never touches the router. One predicate, ten call sites — the gate previously existed as ten copies of the same two lines, which is how ten modules drifted into the same bug at once.
-
-Why it mattered: the old gate read only `command` or `args[0]`, so `drone rm notes.md --help` **deleted notes.md** and then tried to delete a file named `--help`. `tests/test_help_flag_safety.py` mocks every dispatch target and asserts it was never called — no live verb is fired to prove the trap.
-
-### Reading history — `show`
-
-`show` sits at global tier because reading history is not a write. It is deliberately **not** scoped to the caller's branch directory the way `status`, `diff` and `log` are: those scope for convenience, hiding other branches' noise, whereas scoping `show` would refuse the case it exists for — one citizen auditing another's past. Auditing a deletion means reading what was deleted, and the present-tense verbs cannot.
-
-Both the ref and the optional path are refused before any argv is built if git would read them as a flag (empty or leading `-`), the same guard the tag lanes use.
-
-### Machine output — `--json` on the read doors
-
-`status`, `log`, `show` and `remote` answer in prose by default and in one JSON document with `--json`. The flag rides in **any slot** and is stripped before positional parsing, so `log --json 20` parses exactly like `log 20`. A help flag outranks it: `status --help --json` is still a question.
-
-Every document carries an `ok` verdict, **including refusals** — a caller that asked for JSON can parse why it failed rather than getting a bare sentence it has to guess at. The exit code still goes non-zero, so a shell script reading only `$?` is told the same truth.
-
-Consumers were previously scraping the rendered output (@api's host lane carried ~385 lines of it, keyed on the *shape* of a status row). That migration has since completed: checked 2026-09-05, `api/apps/handlers/host/git_reads.py` takes the document (12 `--json` call sites, a `_document()` helper honouring the document's own `ok`) and reads no rendered drone row anywhere — its remaining line-splitting parses patch text. The ~385-line figure is history and is not re-checkable in the current tree. Prose output is unchanged by design — every existing reader keeps working — but new callers should take the document.
-
-**`status --json` reports git's two porcelain columns, which the rendered view cannot.** The columns are index then worktree, and they are different facts: `M ` is a staged modification, ` M` an unstaged one. The rendered row shows one right-aligned letter and always has, so those two collapse into the same `   M` on screen — a consumer reading the rendered row sees every staged change as unstaged. The document carries `status` verbatim plus `index` and `worktree` split out:
-
-```json
-{"status": "M ", "path": "src/x.py", "index": "M", "worktree": " "}
-```
-
-### Where a repository points — `remote`
-
-`remote` is global tier: listing remotes writes nothing. It exists because there was no door for the question at all — @api's host lane read `.git/config` as an INI file and hand-rolled its own worktree-following to locate it. Shelling the question through git resolves a worktree's common directory for free.
-
-**Credentials never travel.** An `http(s)` URL configured with credentials is answered with its *entire* userinfo component replaced by `***`, and the raw value reaches no return, no log line and no audit record. The whole component goes, not just a password: the common personal-access-token form is `https://<TOKEN>@host/path`, where the secret sits in the username slot.
-
-SSH forms are left alone deliberately — in `git@github.com:a/b.git` the `git@` is the standard account name, not a secret, and redacting it would mangle every ordinary remote to hide nothing.
-
-A repository with no remote is a real answer (`ok: true`, `count: 0`), not an error. Remeasured 2026-09-05 across the four roots declared in `AIPASS_ROOTS.json`: **one** (`wren`) is a git repo with no remote configured and exercises this path; a second (`Demo`) has no `.git` at all, so `remote` there answers `ok: false` on a non-zero return, not `count: 0`. The earlier "two projects have none" collapsed those two different answers into one.
-
-### Deleting — every delete leaves a record
-
-`drone rm` is the fleet's only sanctioned delete path (raw recursive `rm` is gate-blocked), which makes it the choke point where the record belongs. Patrick's ruling: *"if something deletes, there should be a record of it."*
-
-Two channels, written by `handlers/deletion_log.py`:
-
-| Channel | Where | What it is for |
-|---|---|---|
-| JSONL store | `<project>/.ai_central/deletions.jsonl` | machine-readable, findable months later |
-| prax line | normal logs, **INFO** | flows through observability without knowing this file exists |
-
-The prax line is emitted **first**. If the store write fails it is reported at ERROR and the delete still proceeds — losing the log must not turn into losing the delete, and the event has already reached the logs either way.
-
-A record carries: `timestamp`, `lane`, `outcome`, `caller`, `cwd`, `requested` (what was typed), `path` (resolved), `reason`, `kind`, `size_bytes`, `entry_count`, `measured`. A stale-mode record carries two more, `mode: "stale"` and `age` (as typed, `10d`), and its prax line names both; a plain delete's record keeps exactly the twelve, byte for byte.
-
-Four things worth knowing:
-
- - **Refusals are records too.** A blocked delete leaves no other trace of what was attempted, which is exactly what makes it worth finding later. Refused paths are deliberately *not* measured — the guard just said that tree is off-limits, so nothing goes and reads inside it.
- - **Measurement happens before the delete.** After `rmtree` there is nothing left to ask how big it was. Directory walks stop at `_MEASURE_ENTRY_CAP` and say so via `measured: "capped"` rather than paying an unbounded walk.
- - **Severity is INFO on both channels** (compass #273). A deletion through the sanctioned path is chosen behaviour, not a fault. The guards keep their own WARNING when they refuse — that is the guard speaking, and it is a separate line from the record.
- - **The record follows the deletion's project, not the process's.** `deletion_log_path()` takes an optional `project_root`, and the broker passes the `repo_root` it was constructed with. A daemon can serve a repository it is not standing in; resolving the store from cwd there files the record under the standing project instead — which is exactly how 211 sandbox deletions came to sit in this ledger (see Known Issues). `AIPASS_DELETION_LOG` still outranks both, so the test and container seam cannot be defeated by a lane naming its own root. `rm` passes nothing and keeps the cwd walk, which is correct for it: the operator IS standing in the project they are deleting from.
- - **Identity is resolved, never guessed.** `resolve_caller_identity()` — the same passport/registry resolver routing and git attribution use, not a fifth one and not path-shape matching. Unresolvable callers are recorded as `unknown`; a wrong-but-plausible name on a deletion record is worse than an honest gap.
-
-**Known gap in the `caller` field — read it with this in mind.** The resolver's last resort before `unknown` is the *project*, not a citizen: with no `AIPASS_BRANCH_NAME` assigned and no `.trinity/passport.json` anywhere up the tree, it derives a name from the registry that answered (for AIPass, the `AIPASS_REGISTRY.json` filename → `aipass`). A delete run from the repo root therefore records `caller: "aipass"` — a directory, not the citizen who typed it. The live store carries **33** such records out of 916 total, and **23** of the 33 carry `devpulse` somewhere in the path — but 22 of those are `/tmp` session scratch directories, and exactly **1** is literally inside `src/aipass/devpulse/` (remeasured 2026-09-05; this said "8 such records, one of them a deletion inside @devpulse's own tree" on 08-27 — the count grew and the earlier phrasing over-read a path substring, the defect itself did not change). Nothing is fabricated: `aipass` is a true statement about *where* the process stood, and the same `CallerIdentity.source` distinction documented under Caller Identity applies (`project`, not `passport` or `assigned`). But a reader auditing a deletion months later wants the citizen, and for those records the ledger cannot supply one. Not fixed here — writing it down beats a reader inferring a person from a project name.
-
-Both of drone's delete lanes feed it: `rm` (`handlers/rm_handler.py`) and `broker` (`handlers/broker/daemon.py`, which deletes on behalf of an HMAC-authenticated requester and therefore passes that identity in rather than reading its own cwd). The broker's protocol audit log is unchanged — that records requests and error codes; this records deletions.
-
-`AIPASS_DELETION_LOG` relocates the store (tests, containers). It cannot silence the prax line.
-
-Bounded at 2 MB with one rotation, because a delete log that grows forever becomes the runaway log the monitoring lane exists to catch.
-
-### Sibling-branch guard — outermost `.trinity` wins
-
-The guard refuses deletes inside another citizen's tree, and it finds the owning citizen by walking up for `.trinity/`. It takes the **outermost** hit within the project, not the innermost, because `.trinity/` is not proof of a citizen: @spawn ships a complete branch skeleton under `templates/`, passport and all.
-
-Innermost-wins produced two bugs from one mimicry — refusals named `aipass_framework`, which is a template with no mailbox to appeal to, and @spawn was locked out of its own `templates/` because a skeleton's name never matches the branch you are standing in. Same mimicry sent the commit gate running pytest inside the template; outermost-citizen-wins is the mapping that fixed it there (`e934099f`), applied here.
-
-Safe because nothing above a branch carries `.trinity/` — not the project root, not `src/`, not `src/aipass/` — so the outermost hit inside the project *is* the citizen. The walk stops at the project boundary.
-
-### A folder that contains a citizen
-
-The sibling guard walks **up** from the target, so it only sees a citizen the target sits *inside*. Nothing above a branch carries `.trinity/`, so a target above the branches passed it. From any branch, `drone rm ..` is `src/aipass/` and `drone rm ../..` is `src/`. Both also passed containment, and rmtree would have taken every branch, `.trinity/` and all (measured 2026-09-11 with the guards alone; DPLAN-0338 follow-up).
-
-`check_contained_citizens()` walks **down** and refuses at the first foreign citizen, naming it:
-
-```
-Protected: path contains citizen ai_mail/ (…/src/aipass/ai_mail) — another branch's tree
-```
-
-- **Bounded.** The walk is sorted and stops at the first foreign `.trinity/`. The live `..` answers in about a millisecond.
-- **The caller's own tree is pruned whole**, template skeleton included (outermost-wins makes the skeleton the caller's). A target already inside a branch returns at once, because the sibling guard has answered for everything below it.
-- **Unchanged:** targets inside the caller's own branch, and targets in the system temp dir, where a `.trinity/` is test scaffolding, not a citizen. Stale mode is unaffected; it never reaches this lane.
-- **A symlink is not a citizen.** rmtree unlinks the link and never touches what it points at.
-- **A folder the walk cannot list refuses the delete.** A guard that could not look must not report clear.
-- **Whether you may delete the folder you are standing in is the host's call, not ours.** POSIX allows it, so `drone rm ..` from a branch completes. Windows holds the current directory open without delete sharing and refuses with `WinError 32` (CI run 34686193857) — the fence's verdict is identical on both hosts, and what fails there is the removal. The message and the record now name where the process was standing and say to run it from outside. The suite marks the end-to-end case `deletable_cwd`, which Windows skips, and pins the verdict itself beside it on every OS.
-- Refusals are recorded like every other refusal. A caller standing outside every branch finds every citizen foreign.
-
-Same change, same lane: the delete now acts on the **resolved** path, the one every guard judged. Before, it acted on the path as typed. `drone rm ..` handed rmtree `spawn/..`, which emptied the tree and then failed its last `rmdir`, because `spawn` was gone by then. The ledger recorded `failed` for a delete that had happened.
-
-### Stale mode — `drone rm --stale`
-
-`drone rm --stale AGE [--dry-run] DIR [DIR...]` sweeps staging temps: the `*.tmp` a staged write (temp + fsync + rename) leaves behind when its process is killed between the two (DPLAN-0338). It is a second, narrower lane on the same verb; without `--stale` the verb is unchanged.
-
-| Rule | What it means |
+Three layers. `apps/drone.py` is the entry point and the routing decision tree: built-ins first,
+then `@target` resolution, then the module lane. `apps/modules/` holds one orchestrator per
+concern — `resolver` and `config` for addressing, `router` for dispatch, `registry` and
+`module_registry` for what exists, `discovery` and `scan` for what a branch can do, `commands` for
+shortcuts, `git_module` for the whole git surface, `rm` for contained deletes and `broker` for the
+daemon that performs them on request. `apps/handlers/` holds the implementation, grouped one
+directory per concern: `git/` (a handler per verb), `broker/` (socket daemon, client, protocol and
+the server-side path resolver), `scanning/`, `command_registry/` and the json shim every branch
+shares. `apps/plugins/devpulse_ops/` sits outside the three layers on purpose: auth-gated
+administration, not routing.
+
+The directory tree and this branch's gotchas live in its prompt
+(`.aipass/aipass_local_prompt.md`) — one place, so they cannot disagree with themselves.
+
+---
+
+## Documentation
+
+Depth lives in [docs/](docs/), one file per module or handler group:
+
+| Doc | What it covers |
 |---|---|
-| AGE | A whole number and a unit: `10d` (days), `36h` (hours), `90m` (minutes). Anything else is refused with a message naming the three forms. Zero is refused too, because an age of zero matches a write in flight, and unlinking its temp fails that write's rename |
-| Candidate | A **regular file** (never a symlink, never a directory) whose name ends `.tmp`, whose **parent** folder's name ends `_json`, and whose mtime is older than now minus AGE. Nothing else is touched |
-| DIR | Must resolve under the **project root**; the system temp roots the plain lane allows are not swept. Must be outside the carve-outs. The walk never enters a carve-out directory and never follows a symlink. Overlapping DIRs walk each folder once |
-| Sibling fence | **Crossed, in this mode only, by design.** A stale staging temp is no citizen's work: the real json beside it is intact whatever happens to the temp. One weekly job has to sweep every branch's json folder in one call. The name + folder + age restriction is the fence instead. The plain verb still refuses the same file |
-| Record | Every delete and every refusal goes to both channels with `mode` and `age`. `requested` is the DIR as typed; `path` is the file |
-| `--dry-run` | Lists every candidate with its age and size and deletes nothing, so it records nothing either. Its refusals still print and still fail the run |
-| Output | One summary line at the end: folders scanned, files matched (with their bytes), files deleted, bytes freed, refusals. Exit 0 when nothing was refused, including when nothing matched. Exit 1 on any refusal, including a folder the walk could not read |
-
-**`--stale` is recognised in any slot, in any spelling that starts with it.** The plain lane reads every token as a path to delete, so a flag that slipped past detection would not fail; it would delete. Standing in @api, `drone rm api_json --stale 10d` is a stale sweep, not a removal of `api_json`. `--stale=10d` is read. `--staleness`, a repeated `--stale`, and any other `-` token in stale mode (most likely a mistyped `--dry-run`) are refused before anything is walked.
-
-Proved 2026-09-11 from this directory, dry run only. The first real sweep is @prax's scheduled job (DPLAN-0338 wave 2):
-
-```
-$ drone rm --stale 10d --dry-run ../..
-rm --stale 10d (dry run): folders scanned 1539, files matched 706 (35602375 bytes), files deleted 0, bytes freed 0, refusals 0
-```
-
-706 = prax_json 655 + memory_json 36 + trigger_json 13 + seedgo_json 2, all old-era `tmpXXXXXXXX.tmp`. The new-era dot-prefixed temps started on 09-04, so all of them are under ten days old and none match yet; 461 younger temps were skipped. Two of the seedgo temps hold 21.9 MB of the 35.6 MB. From a branch, `../..` is `src/`, not `src/aipass/`. `src/` holds only `aipass/`, so the set is the same.
-
-### The broker's path resolution — two lanes, one contract
-
-`resolve_beneath()` re-resolves an agent-supplied path server-side, so the broker never trusts the string it was handed. Linux x86-64 gets `openat2(2)` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS`, where the kernel enforces containment. Every other host walks the path one component at a time, opening each relative to its parent's fd with `O_NOFOLLOW` — the only fd-based way to say "and no symlinks" without that syscall.
-
-Both lanes must answer the same question: *which path did I just verify?* Until 2026-09-12 the walk answered it by reading `/proc/self/fd/<fd>`. `/proc` is Linux furniture, so the fallback raised `FileNotFoundError` on exactly the hosts it exists for — every broker path resolution on macOS (CI run 34686193857; seedgo's `host_portability`, the 47th standard). The same spelling in the openat2 lane is correct and stays: nothing off Linux ever reaches it.
-
-The walk now answers portably, and keeps the property that made it worth having:
-
-- **The leaf is measured, not opened** — `lstat` relative to its verified parent's fd. A symlink there is refused exactly as `O_NOFOLLOW` refuses one above it, and a fifo cannot block an open that never happens.
-- **The path is proved before it is returned.** It is assembled from the real base plus the verified components and handed back only if it `lstat`s to the same `(device, inode)` the walk verified. Swap a component under the walk and the caller gets an error instead of a path nobody checked — the anti-swap property the `/proc` readlink bought, bought another way.
-- **The flags come from `os`, never from a written-down number.** `0o0400000` is `O_NOFOLLOW` on Linux and `O_NOCTTY` on macOS: the literal would have quietly traversed the symlinks it was there to block, which is a worse bug than the crash it sat behind.
-- **A host with neither `O_NOFOLLOW` nor `dir_fd` support is refused**, not served unverified.
-
-### External-repo door — `--repo <path>`
-
-Git in a repo that is not AIPass (`projects/baud` inside the tree, a clone outside it) goes through one door, held by @devpulse's admin grant (DPLAN-0344, Patrick 2026-09-13). `status`, `diff`, `log`, `commit`, `push` and `tag` take `--repo <path>` (or `--repo=<path>`) in any slot. `apps/handlers/git/repo_door.py` answers four questions in this order, and every exit writes one line to `.ai_central/git_repo_door.jsonl` beside the deletion log (caller, cwd, verb, args, repo, HEAD before and after, exit code), refusals included:
-
-1. **Who** — @ai_mail's verified-caller rail, `is_verified_admin_caller()`: the 5-leg grant, asked on every use, never cached. `@git` runs inside drone rather than as a routed child, so the door first stamps `AIPASS_CALLER_CWD`, `AIPASS_CALLER_BRANCH` and `AIPASS_CALLER_IDENTITY_SOURCE` the way the router stamps a child (fresh, same resolver) and restores them after. `verify_git_access()` is not consulted, because its owner tier answers for the repo you stand in. A project manager standing in its own repo is refused by name.
-2. **The flag** — a bare `--repo`, or two of them, is refused rather than falling through to the standing repo.
-3. **Which verb** — anything outside the six is refused. `issue`, `run` and `workflow` never reach the door: their `--repo OWNER/NAME` is gh's own flag.
-4. **Which repo** — absolute, or relative to the AIPass root (never the cwd). It must exist, be a directory, be a git top level, and not be AIPass: refused if `AIPASS_REGISTRY.json` sits at its top level, or if it is the caller's own root (a clean clone has no registry).
-
-No lock. The AIPass PR lock would stall AIPass's train for someone else's repo, and a lock file inside the target is an untracked file the next `commit --all` there would stage; git's own `index.lock` serialises the writes. `commit` never pushes. `push` pushes the checked-out branch to `origin` under the same name, never forced. `commit --all` runs the same lint and test gate it runs anywhere. The refusal texts are constants in `repo_door.py`, and `drone @git --help` renders those same constants. Pinned by `TestRepoDoorRefusals` and `TestRepoDoorHappyPath` in `tests/test_git_access.py`, the happy path against a real repo with a real bare origin.
-
-### Tag lanes — AIPass vs an external repo
-
-`tag` is one verb with two release lanes, chosen by the repo the command will actually run in (`repo_context.is_aipass_repo()` — the root holds `AIPASS_REGISTRY.json` or it doesn't). The gate that used to refuse `tag` from a `projects/*` seat is gone: it now translates.
-
-| | AIPass repo | External project seat |
-|---|---|---|
-| What gets tagged | `origin/main` | that repo's current **HEAD**, any branch |
-| Version guard | `pyproject.toml` + `src/aipass/__init__.py` on origin/main must both match | **none** — manifests and cadence belong to the repo owner |
-| Name rule | `vX.Y.Z` | anything `git check-ref-format` accepts (`v0.1.0-rc1`, `2026.08.1`, …) |
-| Duplicate guard | refuses if the tag exists locally or on the remote | same, and the remote check's exit code is verified — an unreachable remote refuses instead of tagging blind |
-| Push | `git push origin <tag>` | same, to that repo's own origin |
-
-Both lanes create **annotated** tags. Names that git would read as a flag (empty, leading `-`) are refused before any argv is built.
-
-Why no version guard outside AIPass: an external repo has its own manifests (baud carries three) and its own release lane. Reading ours out of someone else's tree would be an invented rule, so version discipline stays with the repo owner (DPLAN-0290 item 1, Patrick's ruling).
-
-Both lanes are covered by `tests/test_tag_handler.py`, where `TestAipassSeatUnchanged` pins the AIPass lane argv-for-argv so translation elsewhere cannot move it. The external lane was additionally proven end to end against a throwaway repo with a real bare origin — real tag, real push, both duplicate halves — by a local acceptance script in `artifacts/` (that directory is git-ignored, so it is not in a clone).
-
-### gh Passthrough Rendering
-
-`issue`, `run`, and `workflow` pass straight through to the `gh` CLI. One exception: `issue view <n>`.
-
-gh's default view is a GraphQL query that requests `repository.issue.projectCards` — a Projects-classic field GitHub now rejects outright. The call returned the deprecation notice and **no issue at all** (exit 1), and `--comments` failed the same way.
-
-`_rewrite_issue_view()` in `git_module.py` renders the same view from pinned `--json` fields plus a `--template`, so the dead field is never requested. `--comments` becomes a requested field rather than a flag (it conflicts with `--json`). Callers who already chose a rendering — `--json`, `--jq`, `--template`, `--web` — keep their own invocation untouched; unrelated flags like `--repo` are preserved. No other issue subcommand is rewritten.
-
-`run view --log` and `--log-failed` have a fallback. gh 2.45 finds each step's log by file name inside the run's log archive, and GitHub's archive now holds job-level files only (run 34730939542: `0_seedgo-audit.txt`, `1_test (3.10).txt`, no step files), so gh printed nothing and exited 0. When `run view` with a log flag comes back empty with a clean exit, drone reads the jobs API through `gh api`: each job's full log (only the failed jobs for `--log-failed`), every line led by the job name and a tab, with a notice on stderr saying so. `-R/--repo`, `--job` and `--attempt` are honoured, and a job whose log the API refuses fails the command by name (`TestRunLogFallback` in `tests/test_git_module.py`).
-
-### Dev Branch Model
-
-All work happens on `dev`. Only devpulse has write access. Agents build and report; devpulse commits.
-
-**Flow:** work on dev → stack changes → `drone @git dev-pr "desc"` → merge PR → `drone @git sync` (realigns dev from main)
-
-**`pr` vs `dev-pr`:** `pr` works from any branch — on main it auto-creates a temp branch from the description slug (`main:<slug>`), on other branches it pushes directly. Does NOT use `-u` so main's upstream tracking stays on `origin/main`. `dev-pr` is specific to the dev→main workflow.
-
-Enforcement layers:
-- Git gate (PreToolUse hook) blocks ALL raw git/gh commands
-- Drone tier system restricts write commands to the project's registry-declared owner
-- Prompt instructions tell agents they have zero git access
-
----
-
-## Interactive Commands
-
-By default, drone captures subprocess output (both pipes, drained concurrently) with the resolved timeout — 600s unless `--drone-timeout` says otherwise, extended while the child keeps producing output up to a 1800s ceiling (see Subprocess timeouts). This is safe for AI-to-AI routing but strips Rich colors, buffers progress bars, and kills long-running commands.
-
-Commands in the interactive tuple bypass capture and inherit the terminal directly — enabling live Rich output, colors, and no timeout.
-
-**Interactive mode is a property of BRANCH (subprocess) routing only.** It means "inherit the terminal instead of capturing the subprocess", and `_handle_module()` runs in-process and takes no interactive parameter — so a module target never receives it and never could. `@seedgo`, `@cli` and `@spawn` are both module and branch, so an interactive command against them takes the subprocess lane and renders live. `git` is a module and **never** a branch: `drone @git status` matched `INTERACTIVE_COMMANDS`, skipped the module fast path, and raised `BranchNotFoundError` on every call by design — a fallback firing on the **happy path**, which is worse than one firing on failure because it trains everyone to ignore the channel it fires on. It was 1335 of 1337 lines in `system_logs/drone_drone.log`, burying the one real WARNING in there at 0.08% concentration — and the cure holds: measured 2026-09-05, the current log carries 1352 of those lines in its first 1353, the last of them stamped 2026-08-21 21:31:56, and not one in the eleven days since (DPLAN-0315, Patrick's ruling: *"there should be no fallback full stop... if our intended action or process fail, it fail loud"*). The target is now checked for a branch before the interactive lane is taken.
-
-**Always interactive** — these presentational commands always inherit the terminal for Rich color on a TTY, plain when piped:
-
-| Pattern        | Reason                                      |
-|----------------|---------------------------------------------|
-| `@branch`      | No-args introspection (branch overview)     |
-| `@branch --help` | Help output with Rich formatting          |
-| `@branch -h`   | Short help flag (same as --help)            |
-
-**Per-command allowlist** (in `apps/drone.py`):
-
-| Command      | Reason                                      |
-|--------------|---------------------------------------------|
-| `monitor`    | Prax real-time monitoring (live TUI)        |
-| `audit`      | Seedgo audit (Rich progress bars)           |
-| `watchdog`   | Devpulse watchdog (live monitoring)         |
-| `status`     | Branch status with Rich formatted output    |
-
-**Per-branch allowlist** — all commands from these branches get interactive mode:
-
-| Branch   | Reason                                        |
-|----------|-----------------------------------------------|
-| `cli`    | User-facing CLI with Rich formatted output    |
-| `backup` | Snapshot/restore progress needs a live terminal |
-
-To add: edit `INTERACTIVE_COMMANDS` or `INTERACTIVE_BRANCHES` in `apps/drone.py`.
-
----
-
-## Plugin System
-
-Plugins live in `apps/plugins/{name}/` — outside the 3-layer structure by design.
-
-### devpulse_ops
-
-Auth-gated operations for system administration. `auth.py` walks CWD for `.trinity/passport.json`, then earns owner tier from four facts in the caller's own project registry: `citizen_class: manager`, registry tenancy, an `owner: true` entry, and path-binding of the passport to the recorded home. No hardcoded caller list — the owner is devpulse in AIPass and whoever owns elsewhere.
-
-| Plugin | Command | Purpose |
-|--------|---------|---------|
-| `merge_plugin` | `merge` | Straight-merge a PR and sync local main |
-| `sync_plugin` | `smart-sync` | Fetch + detect divergence + rebase |
-| `fix_plugin` | `fix` | Auto-fix stuck rebase / detached HEAD |
-
-### hook_sounds (DISABLED)
-
-Moved to hooks branch as `drone @hooks hooksound on/off`. Plugin file renamed to `.disabled`.
-
----
-
-## External Project Support
-
-Infrastructure modules (seedgo, cli, git, spawn) work from external AIPass projects without per-project registration.
-
-**Dual registry lookup:** `registry_handler.py` merges local project registry with `AIPASS_HOME` registry. Local entries win on name collision.
-
-**Module routing, not a fallback:** an external seat reaches `seedgo`, `cli`, `spawn` and `git` because `is_module()` is checked *before* any branch call (see Routing Flow) — the module lane is chosen, not discovered by failing the branch lane. Rich output from AIPass, functional output from external projects. The one surviving error-path fallback lives in the custom-command lane only.
-
-**AIPASS_HOME hints:** When `AIPASS_HOME` is not set and the local registry lacks core branches, drone shows setup hints:
-```
-Tip: set AIPASS_HOME=/path/to/AIPass to access all branches
-```
+| [docs/routing_and_resolution.md](docs/routing_and_resolution.md) | The routing decision tree, the two kinds of module, registry resolution, the Python API, interactive commands, the help-flag rule, external projects |
+| [docs/caller_identity.md](docs/caller_identity.md) | Who a routed command is attributed to, why provenance travels with the name, and what each log level means |
+| [docs/subprocess_timeouts.md](docs/subprocess_timeouts.md) | The deadline ladder: the default, the idle grace, the ceiling, and why output extends life |
+| [docs/git_access.md](docs/git_access.md) | The two tiers, how owner tier is earned per repo, the two refusal species, the dev branch model, the plugins |
+| [docs/git_interface.md](docs/git_interface.md) | What each verb does: scoping, the `--json` machine surface, remote redaction, the commit subject cap, the pre-commit lane, tag lanes, gh passthrough |
+| [docs/external_repo_door.md](docs/external_repo_door.md) | `--repo <path>`: the admin-seat door into a repository that is not AIPass, and its ledger |
+| [docs/rm_and_the_record.md](docs/rm_and_the_record.md) | The delete record, the sibling-branch guard, the contains-a-citizen fence, and stale mode |
+| [docs/broker.md](docs/broker.md) | The broker delete lane and its server-side path verification on every host |
+| [docs/testing.md](docs/testing.md) | How the suite is run and judged, the standards lanes, the mutation bar |
 
 ---
 
 ## Integration Points
 
 ### Depends On
-- `AIPASS_REGISTRY.json` — Branch registry (read for resolution)
-- `gh` CLI — GitHub operations (PR creation, merge)
-- Python stdlib (`pathlib`, `sys`, `subprocess`, `json`, `threading`)
+- `AIPASS_REGISTRY.json` and `AIPASS_ROOTS.json` — branch resolution and the external tier
+- `.trinity/passport.json` — the identity git authority reads
+- the `gh` CLI — GitHub operations
+- `aipass.prax` — structured logging, and the json service the local shim binds
+- `aipass.cli` — Rich console formatting
+- Python stdlib: `pathlib`, `subprocess`, `importlib`, `json`, `threading`
 
 ### Provides To
-- All branches — command routing via `drone @target command`
-- All branches — module/branch discovery via `drone systems`
-- External modules — `generic_adapter.capture_main()` for subprocess-free routing
-- `aipass.seedgo` — routed via `drone @seedgo`
-- `aipass.cli` — routed via `drone @cli`
-- `aipass.spawn` — routed via `drone @spawn`
+- Every branch — command routing, module and branch discovery, and the only interface to git
+- `aipass.seedgo`, `aipass.cli`, `aipass.spawn` — in-process module routing declared in
+  `apps/handlers/routing_config.json`
+- `@devpulse` — the write verbs, the PR lock and the external-repo door
+- The whole fleet — the sanctioned delete path and its audit trail
 
 ---
 
-## Testing
-
-**1359 tests pass, 0 skip on Linux**, across 31 test files — measured 2026-09-13 from both rootdirs (`python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` from the repo root). Counted the seedgo readme rule's way: **1244 `def test_` functions**, which parametrization expands to **1359 collected cases** — the number the rows below carry. Every file on disk appears in exactly one row, so the rows sum to 1359 (eleven of them carry `deletable_cwd`, which Windows skips and Linux runs):
-
-| Area | Files | Tests |
-|------|-------|-------|
-| Core routing | `test_resolver.py`, `test_router.py`, `test_activation.py`, `test_registry.py` | 188 |
-| Git operations | `test_git_access.py`, `test_git_module.py`, `test_tag_handler.py`, `test_devpulse_plugins.py`, `test_system_pr.py` | 361 |
-| Handlers | `test_registry_handler.py`, `test_discovery.py`, `test_executor.py` | 156 |
-| Commit gate | `test_commit_gate_branch_mapping.py` | 3 |
-| Infrastructure | `test_module_registry.py`, `test_config.py`, `test_generic_adapter.py` | 76 |
-| Features | `test_rm.py`, `test_commands.py`, `test_scan.py` | 198 |
-| Deletion record | `test_deletion_log.py` | 38 |
-| Broker | `test_broker.py` | 69 |
-| Standards | `test_cli_routing.py` | 81 |
-| Help-flag safety | `test_help_flag_safety.py` | 36 |
-| Module routing (no detour) | `test_module_route_no_detour.py` | 6 |
-| Caller identity provenance | `test_caller_identity_provenance.py` | 17 |
-| Machine output (`--json` doors, `remote`) | `test_git_json_and_remote.py` | 53 |
-| External roots (declared-roots tier) | `test_external_roots.py` | 28 |
-| Dead-cwd hermeticity | `test_import_dead_cwd.py`, `test_no_cwd_sweep.py` | 38 |
-| Registry case sweep | `test_registry_case_sweep.py` | 8 |
-| Bypass anchors | `test_bypass_anchors.py` | 3 |
-
-**What moved since the 08-27 table, and why it is worth saying:** that table named five files that no longer exist — `test_contracts.py`, `test_error_resilience.py`, `test_init_provisioning.py`, `test_scaffold.py`, `test_json_durability.py`, all moved to `tests/.archive/` on 09-02 and 09-04 by the fleet json sweep (DPLAN-0325) — a sixth, `test_json_handler.py`, followed it on 09-07 when DPLAN-0323 consolidated the shim twins, which is where 14 of the old 1272 went — and omitted five that do exist (`test_bypass_anchors.py`, `test_external_roots.py`, `test_import_dead_cwd.py`, `test_no_cwd_sweep.py`, `test_registry_case_sweep.py`). Its "JSON log durability" row scored a file that had been archived, and its Standards row of 100 counted four files that are gone. A per-file table drifts silently in exactly this direction: rows for the departed keep reporting, and arrivals are invisible.
-
-Run tests: `cd src/aipass/drone && python -m pytest tests/ -q`. From the repo root, `python -m pytest src/aipass/drone/tests -c pyproject.toml --rootdir=. -q` — 1359 passed in 130s on 2026-09-13.
-
----
-
-## Status
-
-Measured 2026-09-08, all numbers from this tree tonight:
-
-| What | Measured | How |
-|---|---|---|
-| Tests | 1359 pass, 0 skip on Linux, 31 files (1244 `def test_` functions) — remeasured 2026-09-13 | `python -m pytest tests/ -q`, both rootdirs |
-| Seedgo audit | 100 on every CI-scored category (remeasured 2026-09-13); pytest_quality 99, its one row the `Self_Skip` capability probe in `test_rm.py`, ruled to stay by @devpulse on 2026-09-12 | `drone @seedgo audit aipass @drone`, `drone @seedgo audit pytest_quality @drone` |
-| Version | `1.1.0` — `__init__.py`, `drone --version`, this README agree; `apps/drone.py`'s header does not (see Known Issues) | `drone --version` |
-| Registered targets | 18 registry entries + 6 external roots = 24 from `list_branches()`; `drone systems` renders them as 1 infrastructure + 17 services + 7 branches | `drone systems` |
-| json handler | the fleet shim, sha256 `3456b766…`, 1724 bytes — bound to prax's service, byte-identical fleet-wide | `sha256sum` |
-| Deletion store | 949 records, 37 of them attributed to the project name rather than a citizen; 211 forged by another branch's suite plus the one annotation row that documents them (see Known Issues) | `.ai_central/deletions.jsonl` |
-
-## Known Issues
-
-- `pr_handler.py` is orphaned — `create_pr()` has no production caller (superseded by `dev_pr_handler.create_branch_pr()`); its 7 callers are all in `tests/test_git_module.py`
-- `update_command()` and `command_exists()` in `ops.py` are tested CRUD API but unused from production
-- Piping drone output into a truncating reader (`| head`) yields inconsistent exit codes (0, 1, or 243) — no BrokenPipe handling anywhere in the tree. Cosmetic, but blocks `drone ... | head` inside `set -e` scripts
-- Several bypass rules in `.seedgo/bypass.json` are **line-scoped** and drift whenever code above them moves — adding a function to `drone.py` this session pushed four write sites down and dropped the audit to 99% until the rule was refreshed. The drift is a feature in one respect: it proves the rule is still load-bearing
-- `apps/drone.py`'s file header says **`Version: 1.2.1`** (line 4) while the runtime constant 42 lines below is `VERSION = "1.1.0"` (line 46) — the header is the one that is wrong (`__init__.py`, the README and `drone --version` all agree on 1.1.0). The 08-25 entry recorded this mismatch as `1.1.1`; remeasured 2026-09-05 it is `1.2.1`, so the header has moved twice while the constant stood still. Cosmetic, but a version header that disagrees with its own module is exactly what a truth pass exists to catch. A code fix, out of scope for a README-only pass
-- Pyright's `json` package-shadowing warning could **not** be reproduced again on 2026-09-05 (`pyright apps/handlers/json/json_handler.py` → 0 errors, 0 warnings, 0 informations), the same result as 2026-08-25 — and the subject has changed underneath it since: that file is now the 1724-byte fleet shim, not drone's own handler. It may still surface from an editor opening this directory standalone, without the root config. Left listed rather than deleted, marked unreproduced twice — no evidence it was never real
-- **The live deletion store holds 211 records forged by a sandbox suite** — the *writer* is fixed as of 2026-09-06, the *records* are still there pending Patrick's ruling. Of 943 records in `.ai_central/deletions.jsonl`, 211 have paths under `/tmp/pytest-of-patrick/`, all `broker` lane, caller `testbranch`, 2026-08-14 through 2026-09-05. The source was never drone's own suite (drone's autouse `_isolate_deletion_log` fixture has always held): it is `@ai_mail`'s `tests/test_dispatch_monitor.py::test_child_inherits_broker_fd`, which starts a real `BrokerDaemon` against a synthetic repo under `tmp_path`. The daemon deleted inside that sandbox correctly — but `deletion_log_path()` resolved the *store* by walking up from the CWD, so the record was filed against whichever project the process stood in. `record_deletion()` already took a `caller` for exactly this reason (the broker knows its requester better than cwd does); the same reasoning had never been applied to the store's location. Both lanes now name their project: `deletion_log_path(project_root)`, passed by the daemon from its `repo_root`. Patrick ruled on 2026-09-07: annotate, do not delete. The 211 rows stand exactly as written and one record-shaped annotation row was appended after them — same 12 keys, `lane` and `outcome` both `annotation`, `entry_count` 211 — so a reader who reaches the store finds the correction in the store's own language rather than in a document they would have to know to look for. A ledger someone edits to look right is worth less than one with a documented wrong patch in it. The annotation row has no writer and no test pinning it: it was appended by hand, once, with @devpulse's sanction, and nothing in the code path can produce another
-- **Fixed 2026-09-11 — the plain verb now fences above the branches.** `drone rm ..` and `drone rm ../..` from a branch passed containment and the sibling fence (which walks UP and finds no `.trinity/` above `src/aipass/`), and rmtree would have taken every branch. Found during DPLAN-0338 wave 1b by calling the guards directly; no delete was run. Cured in its follow-up: a project folder that contains another citizen is now refused, naming the first one (see *A folder that contains a citizen*)
-- `repo_door` is imported on its own line in `git_module.py`, outside the handler import block, on purpose. seedgo's `dead_code` rule matches imports with a single-line pattern (`[^#\n]*`), so a name that appears only inside a parenthesised multi-line import scored `repo_door.py` unreferenced: Dead_Code 98, Overall 99, and CI gates at 100. A dead_code bypass is whole-standard only, which would hide real dead code, so the line moved instead. Reported to @seedgo 2026-09-13; rejoin the block once the rule reads multi-line imports
-- Recurring sync errors when working tree is dirty — operational, not code bugs
-
----
-
-**Seedgo:** 100% | **Tests:** 1359 pass, 0 skip | **Last Updated:** 2026-09-13
+**Last Updated:** 2026-09-15
 
 ---
 [← Back to AIPass](../../../README.md)

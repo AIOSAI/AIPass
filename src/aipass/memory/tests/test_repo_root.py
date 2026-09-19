@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Pins for ``handlers/repo_root.py`` — one repo-root answer, never the cwd.
@@ -30,6 +30,7 @@ So the pins here come in two species, deliberately:
 
 import importlib
 import inspect
+import os
 import re
 import subprocess
 import sys
@@ -61,7 +62,7 @@ _SOURCES = sorted(
 # the right answer to it. Named here so the sweep refuses everything else.
 _CALLER_CWD_SITES = {
     "detector.py",
-    "memory_watcher.py",
+    # memory_watcher.py left 2026-09-18: it reads the detector's scope, no cwd of its own.
     # DPLAN-0345: `rollover run` / `check` roll the todo pad of the branch the
     # CALLER stands in - drone's AIPASS_CALLER_CWD, the process cwd only when
     # no launcher stamped one. A question about the caller, never the root.
@@ -226,6 +227,33 @@ class TestNoLaneKeepsAPrivateCopyOfTheAnswer:
         assert not offenders, (
             f"{len(offenders)} lane(s) implement the walk themselves instead of delegating: {offenders}"
         )
+
+    def test_the_write_fence_stands_on_this_source_tree_not_the_callers_directory(self, tmp_path):
+        """The fence's root is this module's answer. A cwd — even one holding a registry — never moves it.
+
+        The 2026-09-17 defect in one sentence: where a caller happened to stand
+        decided what memory would write. A fence whose root came from the caller
+        would move to Vera Studio the moment someone stood in Vera Studio. So the
+        probe stands in a directory that HAS an ``AIPASS_REGISTRY.json``, names
+        it as the caller's cwd too, and the fence must not notice either.
+        """
+        elsewhere = tmp_path / "another_repo"
+        elsewhere.mkdir()
+        (elsewhere / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+        probe = (
+            "import sys\n"
+            f"sys.path.insert(0, {_src_root()!r})\n"
+            "from aipass.memory.apps.handlers import write_fence\n"
+            "print(write_fence.ROOT)\n"
+        )
+        env = {**os.environ, "AIPASS_CALLER_CWD": str(elsewhere)}
+
+        result = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, cwd=str(elsewhere), env=env
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert Path(result.stdout.strip().splitlines()[-1]) == rr.find_repo_root(caller="test")
 
     def test_no_lane_falls_back_to_the_process_directory(self):
         """`return Path.cwd()` is the exact construct that broke CI twice."""
@@ -647,7 +675,9 @@ class TestTheFilterHasOneImplementationForFourWalks:
         ("module_name", "sites"),
         [
             ("aipass.memory.apps.handlers.monitor.detector", 1),
-            ("aipass.memory.apps.handlers.monitor.memory_watcher", 1),
+            # ZERO since 2026-09-18: the watcher reads the rollover scope instead of
+            # walking its own, so a registry glob reappearing here is a second walk.
+            ("aipass.memory.apps.handlers.monitor.memory_watcher", 0),
             ("aipass.memory.apps.handlers.monitor.registry_scope", 2),
         ],
     )
@@ -1011,7 +1041,10 @@ class TestTheStackReadIsReproducibleAfterAll:
     )
 
     def test_the_shipped_guard_imports_clean_in_the_world_that_kills_the_old_one(self):
-        probe = f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}import aipass.memory.apps.handlers\nprint('OK')\n"
+        probe = (
+            f"import sys\nsys.path.insert(0, {_src_root()!r})\n{self._WORLD}"
+            "import aipass.memory.apps.handlers\nprint('OK')\n"
+        )
         result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
         assert result.returncode == 0, (
             "handlers/__init__.py could not be imported with os.path.realpath denied — "

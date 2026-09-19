@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-05-15
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -20,13 +20,25 @@ Checks:
 6. Command list presence (commands/usage section is not empty)
 7. Test count accuracy (claimed count vs actual def test_ functions)
 8. Markdown link validity (relative links point to existing paths)
+
+ADVISORY, NON-SCORED (check_branch_info, DPLAN-0347):
+- docs/ index: every docs/*.md reachable from the branch README
+- named paths: branch-rooted paths the README claims that are absent
+- rot bait: count claims, dated status headings, a Commands section that
+  re-types --help
+- sections: the eight ## sections of README_SECTIONS, names exact, order
+  fixed (DPLAN-0351) - missing, renamed, out of order, or a stranger
+
+Nothing in that lane carries a score, a pass or a violation. See the section
+banner at the foot of this module for why it is that channel and not a ninth
+check.
 """
 
 import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -622,3 +634,437 @@ def check_command_list(lines: List[str], file_path: str, bypass_rules: list | No
         }
 
     return {"name": "Command list presence", "passed": False, "message": "Commands/Usage section is empty"}
+
+
+# =============================================================================
+# ADVISORY LANE — docs index + rot bait (DPLAN-0347, boardroom thread 16)
+# =============================================================================
+#
+# WHY THIS IS NOT A CHECK
+# -----------------------
+# The room's contract makes the README the FACE for strangers plus an index of
+# docs/, with the depth in docs/ (one file per module or handler group) and the
+# live inventory in `drone @<branch>` / `--help`. Today 17 of 18 branches have
+# no docs index at all. `readme` is a SCORED standard and CI gates every branch
+# at 100 (.github/scripts/seedgo_audit.py, THRESHOLD = 100), so a ninth SCORED
+# check would put the whole fleet red on the commit that landed it — the exact
+# mistake of 2026-09-13, when a renderer change reded 17 of 18 branches. The
+# ruling is "advisory, then ratchet".
+#
+# WHY check_branch_info() AND NOT THE OTHER TWO CHANNELS
+# ------------------------------------------------------
+#   * `ADVISORY = True` is a MODULE flag: branch_audit drops the whole standard
+#     out of the gating average. On a scored standard that would move every
+#     branch's average — the opposite of the requirement.
+#   * `check_branch_observe()` carries a would-be score and writes a dated
+#     series to branch_observe_log.json, but audit_display renders NOTHING from
+#     it. These findings exist to be READ by the owner doing the diet, per
+#     branch, so a channel with no renderer cannot carry them. Observe is for a
+#     check that already scored and was de-scored pending a ruling
+#     (log_structure); this one has never scored.
+#   * `check_branch_info()` is rendered for every branch at any score
+#     (audit_display._render_info_lines, deliberately shown even at 100), and
+#     carries no score and no pass/fail, so nothing here can move a number.
+#
+# Every line is prefixed "(advisory)" because info lines are stored and
+# re-rendered ONE AT A TIME (audit artifact, audit_display): a line quoted on
+# its own must still arrive marked as advice, not as a finding.
+
+#: docs/*.md added or deleted must bust the audit's incremental cache, or the
+#: index line is served stale from a run that predates the new file. README.md
+#: is already watched by _collect_watch_files; docs/ was not.
+BRANCH_INPUTS = ("docs/*.md",)
+
+_DOCS_DIRNAME = "docs"
+
+#: Nouns whose count in a README rots the moment code lands. Deliberately NOT
+#: a duplicate of check 7: that check scores whether a TEST count is accurate
+#: today; this one says the number should not live in the face at all, because
+#: `drone @<branch>` regenerates it from code and never goes stale.
+_ROT_COUNT_RE = re.compile(
+    r"\b(\d[\d,]*)\s+(tests?|rules?|standards?|modules?|handlers?|checkers?|checks?"
+    r"|commands?|branches|files?|lines?|entries|hooks?|packs?)\b",
+    re.IGNORECASE,
+)
+
+_DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+
+#: A heading (or a bold label at line start) that names a moment rather than a
+#: capability. "Last Updated" is exempt: check 3 REQUIRES it.
+_STATUS_LABEL_RE = re.compile(
+    r"^\s*(?:#{1,6}\s+|\*{0,2})(status|latest audit|current status|current state|audit results?|recent audit)\b",
+    re.IGNORECASE,
+)
+
+_HEADING_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$")
+
+#: A markdown link, for the SPANS of its target. _extract_relative_links above
+#: answers "which paths are linked"; this lane needs "where in the text the
+#: link targets sit", so it can leave them to check 8 instead of telling one
+#: dead link twice. The scored helper keeps its own copy: this row does not
+#: reach into the lane that carries the number.
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+
+#: A path-shaped token: at least one "/" and a file extension. Directories are
+#: NOT collected — check 4 already scores directories named in the tree block.
+_PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.([A-Za-z0-9]{1,6})")
+
+#: Extensions a real repository path ends in. An allowlist, not a denylist:
+#: without it "anthropic/claude-3.5" and "apps/handlers/.archive/" read as
+#: files that do not exist.
+_PATH_EXTENSIONS = frozenset(
+    {
+        "bash", "cfg", "csv", "css", "html", "ini", "js", "json", "lock", "md",
+        "py", "service", "sh", "sql", "toml", "ts", "txt", "xml", "yaml", "yml",
+    }
+)  # fmt: skip
+
+#: Segments that mark an illustrative path in prose ("/path/to/registry.json").
+_PLACEHOLDER_SEGMENTS = frozenset({"path", "to", "your", "example", "examples", "foo", "bar", "tmp"})
+
+#: A line in a Commands section that invokes the branch rather than describing
+#: it. Written as a pattern, not as a tuple of string prefixes: a source
+#: literal of the form "python -m " reads to the help_text standard as advice
+#: telling a user to run python, which is exactly what that standard exists to
+#: catch. This one is a detector, and it reads as one.
+_INVOCATION_RE = re.compile(r"^(?:drone|python3?)\s+\S")
+
+#: Below this, a Commands section is a pointer rather than a copy of --help.
+_COMMAND_LIST_MIN = 3
+
+#: How many names one info line carries before it says "and N more". A silent
+#: cap would hand back an unactionable count (inert.py learned this the hard way).
+_SAMPLE_LIMIT = 6
+
+#: The README face: eight ## sections, names exact, order fixed (DPLAN-0351).
+#: The fleet's de facto order, carried exactly by 6 of 18 READMEs on the day it
+#: was written down. Advisory for the reason the docs index is: scored, it would
+#: red 12 branches on the commit that landed it.
+README_SECTIONS: Tuple[str, ...] = (
+    "Quick Start",
+    "What It Does",
+    "Live Inventory",
+    "How To Reach Me",
+    "Commands",
+    "Architecture",
+    "Documentation",
+    "Integration Points",
+)
+
+
+def check_branch_info(branch_path: str) -> List[str]:
+    """Non-scored advisory lines: the docs/ index, named paths, rot bait, and the eight sections.
+
+    Never returns a score, a pass or a violation — see the section banner for
+    why this channel and not the scored lane.
+
+    Args:
+        branch_path: Branch root to inspect.
+
+    Returns:
+        Zero or more advisory lines. Empty when the branch has no README, no
+        docs/ directory and nothing that rots — silence is the clean state.
+    """
+    branch_root = Path(branch_path)
+    readme_path = branch_root / "README.md"
+    if not readme_path.is_file():
+        return []
+    try:
+        content = readme_path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.info("[readme] cannot read README for advisory lines at %s: %s", readme_path, e)
+        return []
+
+    readme_lines = content.split("\n")
+    lines: List[str] = []
+    lines.extend(_docs_index_lines(branch_root, content))
+    lines.extend(_named_path_lines(branch_root, content))
+    lines.extend(_rot_bait_lines(branch_root, content))
+    lines.extend(_section_order_lines(readme_lines, _fence_mask(readme_lines)))
+    if lines:
+        json_handler.log_operation(
+            "readme_advisory_lines",
+            {"branch": branch_root.name, "count": len(lines), "standard": "readme"},
+        )
+    return lines
+
+
+def _safe(text: str) -> str:
+    """README text made safe to hand a Rich console.
+
+    Info lines are printed through Rich markup, so a heading like
+    "## Status [2026-09-07]" would be swallowed as a style tag — the sample
+    would vanish from the very line that exists to quote it.
+    """
+    return text.replace("[", "(").replace("]", ")")
+
+
+def _sample(names: List[str]) -> str:
+    """Up to _SAMPLE_LIMIT names, with the remainder counted, never hidden."""
+    head = ", ".join(_safe(n) for n in names[:_SAMPLE_LIMIT])
+    extra = len(names) - _SAMPLE_LIMIT
+    return f"{head} and {extra} more" if extra > 0 else head
+
+
+def _fence_mask(lines: List[str]) -> List[bool]:
+    """Per-line True when the line is inside (or is) a fenced code block.
+
+    Without this a bash comment inside a ```fence``` reads as a markdown
+    heading: "# Audit" in seedgo's own Commands block ended the section scan
+    four lines in, and the section measured 4 invocations instead of 31.
+    """
+    mask: List[bool] = []
+    inside = False
+    for line in lines:
+        if line.lstrip().startswith(("```", "~~~")):
+            inside = not inside
+            mask.append(True)
+            continue
+        mask.append(inside)
+    return mask
+
+
+def _docs_index_lines(branch_root: Path, content: str) -> List[str]:
+    """One line on whether every docs/*.md is reachable from the README.
+
+    A docs file counts as indexed when a relative markdown link resolves to it
+    OR the literal path "docs/<name>" appears in the README: either one makes
+    it findable by a reader and by grep, and a checker that demanded link
+    syntax would report a true index as broken. docs/README.md is additionally
+    covered by a link to the docs/ directory itself — that is how a directory
+    index renders.
+
+    No docs/ directory, or no *.md in it, is SILENCE: a branch that keeps its
+    depth in the README has nothing to index yet, and saying so every audit
+    would be noise on 17 branches.
+    """
+    docs_dir = branch_root / _DOCS_DIRNAME
+    if not docs_dir.is_dir():
+        return []
+    try:
+        docs_files = sorted(docs_dir.glob("*.md"))
+    except OSError as e:
+        logger.info("[readme] cannot list %s: %s", docs_dir, e)
+        return []
+    if not docs_files:
+        return []
+
+    targets = set()
+    for _text, link_path in _extract_relative_links(content):
+        bare = link_path.split("#")[0].strip()
+        if not bare:
+            continue
+        try:
+            targets.add((branch_root / bare).resolve())
+        except OSError as e:
+            logger.info("[readme] cannot resolve README link %s: %s", bare, e)
+
+    dir_linked = docs_dir.resolve() in targets
+    unlinked = []
+    for doc in docs_files:
+        rel = f"{_DOCS_DIRNAME}/{doc.name}"
+        if doc.resolve() in targets or rel in content:
+            continue
+        if doc.name == "README.md" and dir_linked:
+            continue
+        unlinked.append(rel)
+
+    if not unlinked:
+        return [f"readme docs index (advisory): all {len(docs_files)} docs/*.md linked from README"]
+    return [
+        f"readme docs index (advisory): {len(unlinked)} of {len(docs_files)} docs/*.md not linked from "
+        f"README — {_sample(unlinked)}"
+    ]
+
+
+def _named_path_lines(branch_root: Path, content: str) -> List[str]:
+    """One line naming branch-rooted paths the README claims that are absent.
+
+    SCOPE, stated because the boundary is the whole point: only a token whose
+    first segment is a real top-level entry of THIS branch. A path relative to
+    somewhere deeper ("handlers/chroma_client.py"), a neighbour's file
+    ("lifecycle/auto_fix.py", which lives in @hooks) and an illustration
+    ("src/main.py") are all left alone — an audit of one branch cannot tell a
+    stale reference from a neighbour's real file, and guessing produced 16 to
+    38 false lines per branch in the measurement that set this rule.
+
+    Targets of markdown links are skipped: check 8 scores those already.
+    Directories are skipped: check 4 scores the ones named in the tree.
+    """
+    try:
+        tops = {entry.name for entry in branch_root.iterdir()}
+    except OSError as e:
+        logger.info("[readme] cannot list branch root %s: %s", branch_root, e)
+        return []
+
+    link_spans = [(m.start(2), m.end(2)) for m in _MARKDOWN_LINK_RE.finditer(content)]
+    missing: List[str] = []
+    seen = set()
+    for match in _PATH_TOKEN_RE.finditer(content):
+        token = match.group(0)
+        if token in seen or match.group(1).lower() not in _PATH_EXTENSIONS:
+            continue
+        if any(start <= match.start() < end for start, end in link_spans):
+            continue
+        parts = token.split("/")
+        if token.startswith("/") or parts[0] not in tops:
+            continue
+        if any(p in _PLACEHOLDER_SEGMENTS for p in parts):
+            continue
+        if any(p.startswith(".") or p.endswith("_json") or _is_runtime_artifact(branch_root / p) for p in parts[:-1]):
+            continue
+        seen.add(token)
+        if not (branch_root / token).exists():
+            missing.append(token)
+
+    if not missing:
+        return []
+    return [
+        f"readme paths (advisory): {len(missing)} branch-rooted path(s) named in README but absent — "
+        f"{_sample(sorted(missing))}"
+    ]
+
+
+def _rot_bait_lines(branch_root: Path, content: str) -> List[str]:
+    """The three shapes of README content that rot on their own.
+
+    Counts, dated status sections and a copy of --help all stay true only
+    while someone re-types them. The contract moves each one to a source that
+    regenerates: the live self-map, a plan, `--help`.
+    """
+    lines = content.split("\n")
+    mask = _fence_mask(lines)
+    return [
+        *_count_claim_lines(content),
+        *_dated_heading_lines(lines, mask),
+        *_command_list_lines(branch_root, lines, mask),
+    ]
+
+
+def _count_claim_lines(content: str) -> List[str]:
+    """One line counting the README's own count claims."""
+    claims = [f'"{m.group(1)} {m.group(2)}"' for m in _ROT_COUNT_RE.finditer(content)]
+    if not claims:
+        return []
+    head = ", ".join(claims[:4])
+    return [
+        f"readme rot bait (advisory): {len(claims)} count claim(s) that go stale — e.g. {head}. "
+        f"The live count is drone @<branch> and --help, generated from code"
+    ]
+
+
+def _dated_heading_lines(lines: List[str], mask: List[bool]) -> List[str]:
+    """One line naming headings that pin the README to a moment.
+
+    A heading carrying a date, or one labelled Status / Latest Audit, is a
+    snapshot: true the day it was written and unfalsifiable afterwards. The
+    "Last Updated" line is exempt — check 3 requires it.
+    """
+    dated = []
+    for number, line in enumerate(lines, start=1):
+        if mask[number - 1]:
+            continue
+        lowered = line.lower()
+        if "last updated" in lowered or "created:" in lowered:
+            continue
+        heading = _HEADING_RE.match(line)
+        has_date = bool(_DATE_RE.search(line))
+        labelled = bool(_STATUS_LABEL_RE.match(line))
+        if (heading and (has_date or labelled)) or (labelled and has_date):
+            dated.append(f"L{number} {line.strip()[:44]}")
+    if not dated:
+        return []
+    head = "; ".join(_safe(d) for d in dated[:3])
+    return [
+        f"readme rot bait (advisory): {len(dated)} dated/status heading(s) — {head}. "
+        f"A dated section is a snapshot; status belongs on the dashboard, history in a plan"
+    ]
+
+
+def _command_list_lines(branch_root: Path, lines: List[str], mask: List[bool]) -> List[str]:
+    """One line when the Commands/Usage section re-types what --help prints.
+
+    Reported, not scored, and it does NOT ask for the section's removal:
+    checks 2 and 6 still require a non-empty Commands/Usage heading. The
+    contract is a POINTER to `drone @<branch> --help` instead of a list that
+    drifts the next time a command is added.
+    """
+    heading_index = None
+    level = 3
+    for index, line in enumerate(lines):
+        heading = _HEADING_RE.match(line)
+        if heading and not mask[index] and re.search(r"(commands|usage)", heading.group(2), re.IGNORECASE):
+            heading_index, level = index, len(heading.group(1))
+            break
+    if heading_index is None:
+        return []
+
+    branch = branch_root.name.lower()
+    invocations = 0
+    for index in range(heading_index + 1, len(lines)):
+        line = lines[index]
+        heading = _HEADING_RE.match(line)
+        if heading and not mask[index] and len(heading.group(1)) <= level:
+            break
+        stripped = line.strip().lstrip("-*| ").strip().strip("`")
+        if stripped.startswith("$ "):
+            stripped = stripped[2:]
+        if _INVOCATION_RE.match(stripped) or f"`drone @{branch}" in line:
+            invocations += 1
+
+    if invocations < _COMMAND_LIST_MIN:
+        return []
+    return [
+        f"readme rot bait (advisory): Commands section lists {invocations} invocation(s) that duplicate "
+        f"drone @{branch} --help. Keep a pointer, drop the list (checks 2 and 6 still want the section)"
+    ]
+
+
+def _section_order_lines(lines: List[str], mask: List[bool]) -> List[str]:
+    """One line on the README's ## sections against README_SECTIONS: silence when all eight stand in order.
+
+    A ## heading that is not one of the eight but shares its first word with a
+    missing one is a rename ("What I Do", "Integration", "How to reach me");
+    any other is a stranger. Order is read over the eight as found, a rename
+    counted where it stands. H1, H3 and fenced lines are not sections.
+    """
+    found = [
+        match.group(2).strip()
+        for index, line in enumerate(lines)
+        if not mask[index] and (match := _HEADING_RE.match(line)) and len(match.group(1)) == 2
+    ]
+    by_word = {name.split()[0].lower(): name for name in README_SECTIONS if name not in found}
+    renames: List[str] = []
+    strangers: List[str] = []
+    order: List[str] = []
+    for heading in found:
+        words = heading.split()
+        target = None if heading in README_SECTIONS else by_word.pop(words[0].lower() if words else "", None)
+        if heading in README_SECTIONS or target:
+            order.append(target or heading)
+            if target:
+                renames.append(f"'{heading}' to '{target}'")
+        else:
+            strangers.append(heading)
+    missing = [name for name in README_SECTIONS if name in by_word.values()]
+    swaps = [
+        f"{first} before {second}"
+        for first, second in zip(order, order[1:])
+        if README_SECTIONS.index(first) > README_SECTIONS.index(second)
+    ]
+    parts = [
+        f"{label}{', '.join(names)}"
+        for label, names in (
+            ("missing ", missing),
+            ("rename ", renames),
+            ("order: ", swaps),
+            ("not one of the eight: ", strangers),
+        )
+        if names
+    ]
+    if not parts:
+        return []
+    return [
+        f"readme sections (advisory): {_safe('; '.join(parts))} — the face is eight ## sections, "
+        f"names exact, order fixed: drone @seedgo standard readme"
+    ]

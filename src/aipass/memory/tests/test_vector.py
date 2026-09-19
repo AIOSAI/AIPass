@@ -19,7 +19,7 @@ All tests use mocks/tmp_path -- no live fastembed or ONNX access.
 """
 
 # ---------------------------------------------------------------------------
-# PARKED 2026-08-14 — @devpulse's ruling, following Patrick's symbolic-tier park.
+# PARKED 2026-08-14 — @devpulse's ruling, following the owner's symbolic-tier park.
 # vector/embedder.py had exactly two importers, symbolic/storage.py and
 # symbolic/retriever.py, and both went into tests/parked/symbolic_20260814/.
 # The live lane runs vector/embed_subprocess.py by path instead — it is

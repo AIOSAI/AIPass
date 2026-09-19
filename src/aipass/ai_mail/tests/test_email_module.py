@@ -1160,7 +1160,7 @@ class TestResolveBranchPath:
         """POLICY CHANGE 2026-08-21: an unresolvable caller no longer collapses to
         _AI_MAIL_DIR. That substitution pointed view/close/reply at @ai_mail's own
         mailbox, so a caller standing outside any branch read and archived another
-        citizen's mail with no signal (Patrick's ruling via @devpulse, 096c9a42)."""
+        citizen's mail with no signal (the owner's ruling via @devpulse, 096c9a42)."""
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email.get_current_user",
             lambda: (_ for _ in ()).throw(RuntimeError("no branch")),

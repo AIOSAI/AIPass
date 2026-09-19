@@ -36,7 +36,7 @@ WHAT IS NOT ONE PARSEABLE OBJECT IS UNAVAILABLE, never a verdict. If --json
 ever stops being honoured — an older @memory on a fresh clone, a flag renamed,
 a banner printed ahead of the payload — this lane gets prose back and answers
 503. That is the honest report: after a write, "I cannot tell whether it
-happened" is the truth, and a 200 would be a lie about Patrick's config. It is
+happened" is the truth, and a 200 would be a lie about the owner's config. It is
 also why the flag is appended in ONE place, _route, rather than at five call
 sites where one could quietly be forgotten.
 

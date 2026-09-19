@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_engine.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Tests for hook engine dispatch logic
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for hook engine dispatch logic."""
@@ -853,6 +853,23 @@ class TestErrorResilience:
         assert not log_file.exists()
         assert diag_logger.error.call_count == 1
         assert "log write failed" in diag_logger.error.call_args[0][0]
+
+    def test_no_mock_named_directory_survives_in_the_branch_root(self):
+        """A Mock handed to a filesystem call names a directory after its repr.
+
+        The cure for the known instance is in the test above (a real tmp path
+        instead of a bare Mock LOG_FILE, because append_jsonl calls
+        Path(...).parent.mkdir). This is the detector, and it is deliberately a
+        property of the TREE rather than of one call site: the next leak will
+        come from a different test, and the only thing every version of this
+        mistake has in common is the directory it leaves behind.
+
+        Found by @seedgo, 2026-09-16: MagicMock/LOG_FILE/ had sat in this branch
+        root since 2026-07-10 with nothing pointing at it.
+        """
+        root = Path(__file__).resolve().parent.parent
+        leaked = sorted(p.name for p in root.iterdir() if "mock" in p.name.lower())
+        assert leaked == [], f"a mock repr reached a filesystem call: {leaked}"
 
 
 class TestDataStructureContracts:
@@ -1745,3 +1762,147 @@ class TestOneDocumentPerEvent:
             doc = json.loads(_post_tool_use(outputs))
         assert (doc["decision"], doc["reason"]) == ("block", "lint")
         assert sum("conflicts" in c.args[0] for c in log.warning.call_args_list) == 2
+
+
+_LEDGER = "aipass.hooks.apps.modules.injection_ledger"
+_STORE = "aipass.hooks.apps.handlers.config.ledger_store"
+
+
+class TestInjectionLedger:
+    """DPLAN-0347, hooks row 3: what a seat was told at turn N is a record, not a memory.
+
+    Warn-only, so every pin here is about the record being TRUE — grouped by the
+    token siblings share, carrying what the merge delivered — and about the
+    ledger never costing a dispatch its output.
+    """
+
+    @pytest.fixture
+    def ledger(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.modules import injection_ledger
+
+        monkeypatch.setattr(injection_ledger.ledger_store, "_LEDGER_DIR", tmp_path)
+        transcript = tmp_path / "transcript.jsonl"
+        transcript.write_text("x" * 321, encoding="utf-8")
+        payload = {"session_id": "sess-1", "transcript_path": str(transcript)}
+        return injection_ledger, payload
+
+    def test_siblings_of_one_turn_fold_to_one_row_even_when_a_turn_number_lags(self, ledger):
+        """temporal never consults cadence, so it can read the previous turn's number."""
+        mod, payload = ledger
+        for hook, lagging_turn in (("temporal", 4), ("tier0_kernel", 5), ("navmap", 5)):
+            with patch("aipass.hooks.apps.modules.cadence.current_turn", return_value=lagging_turn):
+                mod.record("UserPromptSubmit", [(hook, "h", f"{hook} text")], f"{hook} text", payload)
+
+        rows = mod.ledger_store.read_turns("sess-1")
+        assert len(rows) == 1
+        assert rows[0]["token"] == 321 and rows[0]["turn"] == 5
+        assert set(rows[0]["hooks"]) == {"temporal", "tier0_kernel", "navmap"}
+
+    def test_a_new_token_is_a_new_row(self, ledger):
+        mod, payload = ledger
+        mod.record("UserPromptSubmit", [("temporal", "h", "t1")], "t1", payload)
+        with open(payload["transcript_path"], "a", encoding="utf-8") as fh:
+            fh.write("more")
+        mod.record("UserPromptSubmit", [("temporal", "h", "t2")], "t2", payload)
+        assert [row["token"] for row in mod.ledger_store.read_turns("sess-1")] == [321, 325]
+
+    def test_plain_tool_event_stdout_is_not_recorded_as_context(self, ledger):
+        """Plain PostToolUse stdout goes to the user, not the model."""
+        mod, payload = ledger
+        assert mod.record("PostToolUse", [("auto_fix", "h", "note")], "note", payload) is None
+        assert mod.ledger_store.read_turns("sess-1") == []
+
+    def test_the_record_keeps_what_the_merge_delivered_beside_what_was_produced(self, ledger):
+        mod, payload = ledger
+        outputs = [
+            ("auto_fix_diagnostics", "h", _context("D" * 2000)),
+            ("post_compact_regrounding", "h", _context("R" * 9000)),
+        ]
+        entry = mod.record("PostToolUse", outputs, _context("R" * 9000), payload)
+        assert (entry["total"], entry["delivered"]) == (11000, 9000)
+
+    def test_an_injection_over_the_persist_line_warns_and_is_still_recorded(self, ledger):
+        mod, payload = ledger
+        with patch(f"{_STORE}.logger") as log:
+            entry = mod.record("UserPromptSubmit", [("big", "h", "X" * 10_001)], "X" * 10_001, payload)
+        assert entry["hooks"]["big"]["chars"] == 10_001
+        assert any("persist line" in c.args[0] for c in log.warning.call_args_list)
+
+    def test_a_write_that_fails_warns_and_never_raises(self, ledger, tmp_path, monkeypatch):
+        mod, payload = ledger
+        monkeypatch.setattr(mod.ledger_store, "_LEDGER_DIR", tmp_path / "no" / "such" / "dir")
+        with patch(f"{_STORE}.logger") as log:
+            assert mod.record("UserPromptSubmit", [("temporal", "h", "t")], "t", payload) is None
+        assert any("NOT written" in c.args[0] for c in log.warning.call_args_list)
+
+    def test_a_session_id_that_is_not_a_filename_writes_nothing(self, ledger, tmp_path):
+        """The id becomes a path. With a real directory to climb out of, an
+        unchecked id would land a file OUTSIDE the ledger dir — so the pin
+        builds that directory first, or it would pass on a failed open."""
+        mod, payload = ledger
+        (tmp_path / "aipass-ledger-x").mkdir()
+        hostile = {**payload, "session_id": "x/../../escaped"}
+        assert mod.record("UserPromptSubmit", [("temporal", "h", "t")], "t", hostile) is None
+        assert not (tmp_path.parent / "escaped.jsonl").exists()
+
+    def test_the_engine_records_a_dispatch_and_a_ledger_crash_never_costs_the_output(self, ledger, mock_logger):
+        mod, payload = ledger
+        config = {"hooks_enabled": True, "UserPromptSubmit": {"temporal": {"enabled": True, "handler": "x.handle"}}}
+        ran = {"exit_code": 0, "stdout": "Temporal: now", "stderr": "", "elapsed_ms": 1}
+        with (
+            patch("aipass.hooks.apps.modules.engine._log"),
+            patch("aipass.hooks.apps.modules.engine._run_handler", return_value=ran),
+            patch("aipass.hooks.apps.handlers.config.loader.trust_break_banner", return_value=None),
+            patch("aipass.hooks.apps.handlers.config.loader.never_enrolled_banner", return_value=None),
+        ):
+            assert dispatch("UserPromptSubmit", json.dumps(payload), config) == ("Temporal: now", 0)
+            assert mod.ledger_store.read_turns("sess-1")[0]["hooks"]["temporal"]["chars"] == len("Temporal: now")
+            with patch(f"{_LEDGER}.record", side_effect=RuntimeError("boom")):
+                assert dispatch("UserPromptSubmit", json.dumps(payload), config) == ("Temporal: now", 0)
+        assert any("injection_ledger failed" in c.args[0] for c in mock_logger.warning.call_args_list)
+
+    def test_the_verb_prints_one_line_per_turn(self, ledger, capsys):
+        mod, payload = ledger
+        mod.record("UserPromptSubmit", [("tier0_kernel", "h", "K" * 30)], "K" * 30, payload)
+        mod.record("UserPromptSubmit", [("temporal", "h", "T" * 4)], "T" * 4, payload)
+        with patch(f"{_LEDGER}.json_handler"):
+            assert mod.handle_command("ledger", ["--session", "sess-1"]) is True
+        out = capsys.readouterr().out
+        assert "1 injection moment(s)" in out
+        assert "total=34" in out and "tier0_kernel=30" in out and "temporal=4" in out
+
+    def test_a_harness_wake_is_marked_so_an_audit_can_count_them(self, ledger, capsys):
+        """DPLAN-0348: the 33 idle wakes of 09-16 were counted from transcripts. The row says it now."""
+        mod, payload = ledger
+        wake = {**payload, "prompt": "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"}
+        mod.record("UserPromptSubmit", [("temporal", "h", "T")], "T", wake)
+        with open(payload["transcript_path"], "a", encoding="utf-8") as fh:
+            fh.write("more")
+        mod.record("UserPromptSubmit", [("temporal", "h", "T")], "T", {**payload, "prompt": "typed"})
+
+        assert [row.get("automated") for row in mod.ledger_store.read_turns("sess-1")] == [True, False]
+        with patch(f"{_LEDGER}.json_handler"):
+            mod.handle_command("ledger", ["--session", "sess-1"])
+        rows = [line for line in capsys.readouterr().out.splitlines() if "UserPromptSubmit" in line]
+        assert "automated" in rows[0] and "automated" not in rows[1]
+
+    def test_a_bare_read_is_the_callers_own_session_even_when_a_neighbour_wrote_last(self, ledger, capsys, monkeypatch):
+        """Every citizen has a live session, so the newest ledger is usually someone else's."""
+        import os
+
+        mod, payload = ledger
+        mod.record("UserPromptSubmit", [("temporal", "h", "MINE")], "MINE", payload)
+        neighbour = {**payload, "session_id": "sess-2"}
+        mod.record("UserPromptSubmit", [("navmap", "h", "N" * 77)], "N" * 77, neighbour)
+        os.utime(mod.ledger_store.ledger_path("sess-2"), (4_000_000_000, 4_000_000_000))
+
+        monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-1")
+        with patch(f"{_LEDGER}.json_handler"):
+            mod.handle_command("ledger", [])
+        out = capsys.readouterr().out
+        assert "sess-1 (this session)" in out and "temporal=4" in out and "navmap" not in out
+
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
+        with patch(f"{_LEDGER}.json_handler"):
+            mod.handle_command("ledger", [])
+        assert "sess-2 (most recently written, NOT this session)" in capsys.readouterr().out

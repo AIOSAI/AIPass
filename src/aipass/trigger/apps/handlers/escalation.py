@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: escalation.py
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-08
-# Modified: 2026-08-11
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Escalation Digest Lane (DPLAN-0283 WS-A)
 Medic answers an error ONCE: it dispatches the owning branch and then goes
 quiet — backoff, a mute, or a suppression keeps it quiet. That is correct for
 agents and blind for humans. An error that keeps firing AFTER its owner was
-told, or while a branch is muted, is invisible to Patrick forever. Warnings
+told, or while a branch is muted, is invisible to the owner forever. Warnings
 are worse: they have never had an escalation path at all.
 
 This lane counts repetition and mails the operator when repetition means
@@ -22,7 +22,7 @@ nothing got fixed:
       -> ONE email to the digest recipient (a manager: email, never a wake)
       -> per-signature cooldown so the same noise cannot spam the mailbox
 
-RULES (Patrick, S193 / DPLAN-0283):
+RULES (the owner, S193 / DPLAN-0283):
     - A mute stops re-DISPATCHING. It must NEVER stop the COUNTING, and it
       must never stop a digest — a mute is how a branch says "I am building",
       not how the system goes dark for the human.
@@ -30,6 +30,14 @@ RULES (Patrick, S193 / DPLAN-0283):
       stays silent here too unless escalate_suppressed is turned on.
     - Counting is unconditional; only the SENDING is gated. A signature that
       never escalates is still fully auditable in the state file.
+
+COUNTING UNIT vs MAIL UNIT:
+    A signature is the counting unit: one normalized condition. The mail unit
+    is the THREAD — level, branch and module, exactly what the subject names.
+    Every signature under one subject upserts the same open message, and its
+    body carries the roster of the others. On 2026-09-17 one module's warnings
+    named a different branch and field each time, so a per-signature key
+    opened 29 threads under two subjects. Closing the thread re-arms it.
 
 Thresholds, window, cooldown and recipient are operator settings and live in
 trigger_json/custom_config/trigger.config.json — not in code. See
@@ -69,6 +77,10 @@ ESCALATION_LOG = TRIGGER_ROOT / "logs" / "escalation.jsonl"
 # How much of a message is kept for the digest body / state file.
 MAX_MESSAGE_CHARS = 400
 MAX_SAMPLE_CHARS = 500
+
+# How many sibling signatures a thread's digest lists before it summarises.
+MAX_ROSTER_LINES = 15
+MAX_ROSTER_MESSAGE_CHARS = 160
 
 # Email send callback (set by the module layer — handlers never import modules).
 _send_email: Optional[Callable[..., bool]] = None
@@ -241,6 +253,47 @@ def compute_signature(level: str, branch: str, module: str, message: str) -> str
     """
     raw = f"{level.upper()}|{branch.upper()}|{module}|{_normalize(message)}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
+
+
+def thread_key(level: str, branch: str, module: str) -> str:
+    """Return the digest thread a signature's mail lands in.
+
+    The subject's identity, not the signature: every signature under one
+    subject upserts the same open message in the recipient's inbox.
+
+    Args:
+        level: Log level (WARNING / ERROR)
+        branch: Owning branch name
+        module: Module that logged the line
+
+    Returns:
+        Upsert key, e.g. 'escalation:WARNING:memory:captured_memory_files'
+    """
+    return f"escalation:{level.upper()}:{branch.lower()}:{module}"
+
+
+def _thread_siblings(
+    signatures: Dict[str, Any], signature: str, entry: Dict[str, Any]
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """Return the other signatures sharing *entry*'s thread, newest first.
+
+    Args:
+        signatures: The full signature map
+        signature: The signature being escalated (excluded)
+        entry: Its state entry
+
+    Returns:
+        [(signature, entry), ...] ordered most recently seen first
+    """
+    key = thread_key(entry.get("level", ""), entry.get("branch", ""), entry.get("module", ""))
+    siblings = [
+        (sig, other)
+        for sig, other in signatures.items()
+        if sig != signature
+        and thread_key(other.get("level", ""), other.get("branch", ""), other.get("module", "")) == key
+    ]
+    siblings.sort(key=lambda kv: _seen_order(kv[1]), reverse=True)
+    return siblings
 
 
 def _empty_state() -> Dict[str, Any]:
@@ -524,7 +577,8 @@ def _record(
             outcome = "counted"
 
             if window_count >= threshold:
-                outcome = _evaluate_digest(signature, entry, cfg, window_count, window_seconds, now)
+                siblings = _thread_siblings(signatures, signature, entry)
+                outcome = _evaluate_digest(signature, entry, cfg, window_count, window_seconds, now, siblings)
 
             _prune(signatures, int(cfg.get("max_signatures", 500)))
             atomic_write_json(STATE_FILE, state)
@@ -543,6 +597,7 @@ def _evaluate_digest(
     window_count: int,
     window_seconds: int,
     now: float,
+    siblings: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
 ) -> str:
     """Apply cooldown + eligibility to an over-threshold signature, then send.
 
@@ -553,6 +608,7 @@ def _evaluate_digest(
         window_count: Occurrences inside the window
         window_seconds: Window length in seconds
         now: Current epoch time
+        siblings: Other signatures in the same thread, for the digest roster
 
     Returns:
         Outcome string: sent / send_failed / cooldown / not_eligible
@@ -595,7 +651,7 @@ def _evaluate_digest(
         return "not_eligible"
 
     recipient = str(cfg.get("digest_recipient", "@devpulse"))
-    subject, body = build_digest(signature, entry, window_count, window_seconds, reason, recipient)
+    subject, body = build_digest(signature, entry, window_count, window_seconds, reason, recipient, siblings)
 
     if _send_email is None:
         logger.warning(
@@ -607,11 +663,12 @@ def _evaluate_digest(
         )
         return "send_failed"
 
-    # Keyed on the SIGNATURE, never on the rendered subject: the subject carries
-    # the repeat count and changes every digest, so it would stop matching on the
-    # first update and start a fresh thread each time. One signature, one message
-    # in @devpulse's inbox, a counter that climbs.
-    upsert_key = f"escalation:{signature}"
+    # Keyed on the THREAD — the subject's identity minus its repeat count. Never
+    # the rendered subject (the count changes every digest, so it would stop
+    # matching on the first update), and never the signature: one module's
+    # warnings can name a different branch or field each time, and a
+    # per-signature key opened 29 messages under two subjects on 2026-09-17.
+    upsert_key = thread_key(level, branch, entry.get("module", ""))
     upsert_result: Dict[str, Any] = {}
 
     try:
@@ -688,11 +745,14 @@ def build_digest(
     window_seconds: int,
     reason: str,
     recipient: str,
+    siblings: Optional[List[Tuple[str, Dict[str, Any]]]] = None,
 ) -> tuple:
     """Build the digest subject and body.
 
     Investigation must be able to start from the mail alone: signature, count,
-    window, branch, log path and the last sample lines all travel with it.
+    window, branch, log path and the last sample lines all travel with it. The
+    mail is the whole thread, so the other signatures under its subject are
+    listed too, in the order given.
 
     Args:
         signature: Repeat signature
@@ -701,6 +761,7 @@ def build_digest(
         window_seconds: Window length in seconds
         reason: Why this repeat is escalation-worthy
         recipient: Digest recipient address
+        siblings: Other signatures in the same thread, already ordered
 
     Returns:
         (subject, body)
@@ -713,7 +774,25 @@ def build_digest(
     samples = entry.get("samples", [])
     sample_block = "\n".join(f"  {line}" for line in samples) if samples else "  (no samples captured)"
 
+    siblings = siblings or []
     subject = f"[REPEAT] {level} x{window_count} @{branch.lower()} / {module}"
+    if siblings:
+        subject += f" ({len(siblings) + 1} signatures)"
+
+    roster_block = ""
+    if siblings:
+        roster = [
+            f"  {sig}  x{other.get('total_count', 0)}  last {other.get('last_seen', 'unknown')}  "
+            f"{str(other.get('message', ''))[:MAX_ROSTER_MESSAGE_CHARS]}"
+            for sig, other in siblings[:MAX_ROSTER_LINES]
+        ]
+        if len(siblings) > MAX_ROSTER_LINES:
+            roster.append(f"  ... and {len(siblings) - MAX_ROSTER_LINES} more — drone @trigger escalation list")
+        roster_lines = "\n".join(roster)
+        roster_block = f"""
+Other signatures in this thread ({len(siblings)}), newest first
+{roster_lines}
+"""
 
     body = f"""Repeat signature escalation — nothing here has been fixed.
 
@@ -733,7 +812,7 @@ Message
 
 Last {len(samples)} sample line(s)
 {sample_block}
-
+{roster_block}
 ---
 This is an EMAIL, not a dispatch — nothing was woken, nothing is waiting on a
 reply. Medic still handles owner dispatch; this lane only reports repetition

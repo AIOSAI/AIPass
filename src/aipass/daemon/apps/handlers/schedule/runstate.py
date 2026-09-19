@@ -189,7 +189,7 @@ def _is_once_due(schedule: dict, completed: Optional[str], now: datetime) -> boo
 # =============================================
 
 # Per-job, read from the job's ``schedule`` block alongside ``type`` and
-# ``time``. ABSENT NOW MEANS ON (DPLAN-0332, Patrick 2026-09-08), superseding
+# ``time``. ABSENT NOW MEANS ON (DPLAN-0332, The owner 2026-09-08), superseding
 # ruling 6 of 09-07 which made it opt-in: every enabled job in the fleet left it
 # unset, so when the timer vanished for 23h on 09-07 nothing recovered. A job
 # whose late run is worthless sets it to false.
@@ -205,7 +205,7 @@ CATCH_UP_FIELD = "catch_up"
 #          detection, no queue, no drain.
 # True   = the DPLAN-0332 lane.
 #
-# FALSE, and it stays False until Patrick and @devpulse run the controlled live
+# FALSE, and it stays False until the owner and @devpulse run the controlled live
 # proof from their seat. @devpulse's ruling 2026-09-08 12:15, after I flipped it
 # and the very next timer tick (12:04:30-12:04:39) fired @vera a second time that
 # day with a header whose "Last run 2026-09-07 09:46" was FALSE — she had run at

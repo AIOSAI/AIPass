@@ -69,7 +69,7 @@ GIT_ACCESS_TIERS: dict[str, dict] = {
     },
 }
 
-# Owner-tier is earned, not listed (DPLAN-0281, Patrick ruling). A caller holds it
+# Owner-tier is earned, not listed (DPLAN-0281, the owner's ruling). A caller holds it
 # iff ALL of these hold — devpulse-in-AIPass qualifies through the general rule,
 # with no special case, and any project's manager qualifies in their own repo:
 #   1. passport citizen_class == manager

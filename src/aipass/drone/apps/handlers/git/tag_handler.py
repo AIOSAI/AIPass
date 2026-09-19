@@ -51,7 +51,7 @@ def _tag_external(name: str, repo_root: Path) -> dict:
     """Tag an external repo's current HEAD and push the tag to its own origin.
 
     No version guard: an external repo's manifests and release cadence belong to
-    its owner (DPLAN-0290 item 1, Patrick's ruling). The name is validated by
+    its owner (DPLAN-0290 item 1, the owner's ruling). The name is validated by
     ``git check-ref-format`` rather than our ``vX.Y.Z`` rule, so a project that
     ships ``v0.1.0-rc1`` or ``2026.08.1`` is not told its own convention is wrong.
     """

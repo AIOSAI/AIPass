@@ -102,7 +102,7 @@ That version fails on the rename. The skip version disappears on it.
 
 ### Build the world — do not assert both of them
 
-**Patrick's ruling, 2026-09-08.** The cure for a machine-dependent skip is a
+**The owner's ruling, 2026-09-08.** The cure for a machine-dependent skip is a
 **fixture-built world**: make the thing the test needs, then assert one answer.
 It is *not* "assert both worlds". A test that asks the machine what it is and
 then asserts something different in each arm has not removed the dependency — it

@@ -3,12 +3,13 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for registry_ops: template registry CRUD, auto-healing, discovery, edge cases."""
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,12 +20,46 @@ import pytest
 # ---------------------------------------------------------------------------
 
 _MOD = "aipass.flow.apps.handlers.template.registry_ops"
+# The PLAN registry writer: same function name, different module, no test
+# class of its own. Its lock cases ride in TestSaveRegistry below.
+_PLAN_REG_MOD = "aipass.flow.apps.handlers.registry.save_registry"
+
+# Captured before any test patches os.open: the stand-in below delegates here.
+_REAL_OS_OPEN = os.open
 
 
 def _import_mod():
     import aipass.flow.apps.handlers.template.registry_ops as mod
 
     return mod
+
+
+def _deny_exclusive_creates(lock_path: Path, denials: int | None):
+    """An os.open stand-in that answers the way Windows does mid-release.
+
+    Windows answers an exclusive create against a lock another writer is still
+    removing (delete-pending) with PermissionError, not FileExistsError; Linux
+    cannot show that, so it is manufactured. The first ``denials`` exclusive
+    creates of ``lock_path`` are denied (None = never clears); everything else
+    reaches the real os.open.
+
+    Returns:
+        (side_effect, attempts, raised): attempts counts every exclusive create
+        of lock_path; raised holds each PermissionError handed out.
+    """
+    attempts: list[int] = []
+    raised: list[PermissionError] = []
+
+    def fake_open(path, flags, *args, **kwargs):
+        if flags & os.O_EXCL and str(path) == str(lock_path):
+            attempts.append(len(attempts) + 1)
+            if denials is None or len(attempts) <= denials:
+                denial = PermissionError(13, "Access is denied")
+                raised.append(denial)
+                raise denial
+        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+
+    return fake_open, attempts, raised
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +342,73 @@ class TestSaveRegistry:
         mod.save_registry(data)
 
         mock_json_handler.assert_called()
+
+    def test_plan_registry_save_retries_a_delete_pending_denial(self, tmp_path, monkeypatch):
+        """handlers/registry/save_registry.py: a Windows delete-pending denial on
+        the lock is a held lock, retried on the same budget, and the write lands.
+
+        It used to give up on the first denial (PermissionError is an OSError)
+        and the registry write was lost.
+        """
+        import aipass.flow.apps.handlers.registry.save_registry as plan_reg
+
+        monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
+        target = tmp_path / "fplan_registry.json"
+        lock = target.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
+        data = {"plans": {"7": {"subject": "landed", "status": "open"}}, "next_number": 8}
+
+        with (
+            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+        ):
+            result = plan_reg.save_registry(data, registry_file="fplan_registry.json")
+
+        assert result is True
+        assert len(attempts) == 2
+        saved = json.loads(target.read_text(encoding="utf-8"))
+        assert saved["plans"]["7"]["subject"] == "landed"
+        assert not lock.exists()
+
+    def test_plan_registry_save_fails_honestly_at_the_budget(self, tmp_path, monkeypatch, mock_logger):
+        """handlers/registry/save_registry.py: a denial that never clears fails
+        after exactly the budget, the caller returns False and logs the denial,
+        and the helper's PermissionError is chained to the last denial.
+        """
+        import aipass.flow.apps.handlers.registry.save_registry as plan_reg
+
+        monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
+        target = tmp_path / "fplan_registry.json"
+        before = {"plans": {}, "next_number": 1}
+        target.write_text(json.dumps(before), encoding="utf-8")
+        lock = target.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+
+        with (
+            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+        ):
+            result = plan_reg.save_registry({"plans": {"1": {}}, "next_number": 2}, registry_file=target.name)
+
+        assert result is False
+        assert len(attempts) == plan_reg._LOCK_RETRIES
+        assert json.loads(target.read_text(encoding="utf-8")) == before
+        # The logged arguments themselves, never str(call): a call's repr doubles
+        # every backslash, so a Windows path is never a substring of it.
+        logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+        assert str(lock) in logged
+        assert f"{plan_reg._LOCK_RETRIES} attempts" in logged
+
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
+        with (
+            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
+            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+            pytest.raises(PermissionError) as excinfo,
+        ):
+            plan_reg._acquire_lock(lock)
+
+        assert excinfo.value.__cause__ is raised[-1]
+        assert len(attempts) == plan_reg._LOCK_RETRIES
 
 
 # =============================================================================

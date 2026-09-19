@@ -24,7 +24,7 @@ Audit Plans (APLANs) are **living documents** -- track ongoing health, issues, i
 
 **APLANs never trimmed, rarely closed.** They accumulate history. When branch gets major overhaul, start fresh APLAN + archive old one.
 
-**APLANs STAY OPEN -- do not close on task completion.** (Patrick ruling, 2026-08-13.) Dispatch checklists + task footers saying "close your plan" do NOT apply to APLANs -- that instruction is for the task's FPLAN/PPLAN, never this document. Closing an APLAN archives the branch's living health record; a closed APLAN is a bug, not a completion. If one gets closed by mistake, restore it.
+**APLANs STAY OPEN -- do not close on task completion.** (The owner's ruling, 2026-08-13.) Dispatch checklists + task footers saying "close your plan" do NOT apply to APLANs -- that instruction is for the task's FPLAN/PPLAN, never this document. Closing an APLAN archives the branch's living health record; a closed APLAN is a bug, not a completion. If one gets closed by mistake, restore it.
 
 **Keep items current.** Check boxes when work done. Add ! issues as found. Update metrics when you verify. Document should always reflect reality.
 

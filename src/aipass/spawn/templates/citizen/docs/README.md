@@ -1,10 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Docs
 
-Tracked public reference for the `{{BRANCHNAME}}` branch.
-
-This README plus any finished, durable documentation meant to be read by other
-branches or by a human — setup guides, architecture notes, policy write-ups. It
-is committed, so write it as if it ships.
-
-Near-empty is the correct steady state, not a gap to fill: work in progress,
-research and dated one-offs belong in `docs.local/`.
+Tracked public reference for the `{{BRANCHNAME}}` branch: one page per module or handler group, in the shape `drone @seedgo standard docs_page` shows, each listed below on a line of its own. Drafts and research go in `docs.local/`, which is untracked.

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_content.py
 # Description: Trinity Memory-File Standards Content
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-25
 # Modified: 2026-09-15
 # =============================================
@@ -75,15 +75,22 @@ def get_trinity_standards() -> str:
         "",
         "─" * 70,
         "",
-        "[bold cyan]CANONICAL ENTRY SHAPES:[/bold cyan]",
+        "[bold cyan]CANONICAL ENTRY SHAPES — WHERE THEY LIVE:[/bold cyan]",
         "",
-        "  [dim]sessions[/dim]       {number:int, date:str, summary:str,",
-        "                  status:str} + optional tags:list[str]",
-        "  [dim]key_learnings[/dim]  {number:int, date:str, key:str, value:str}",
-        "  [dim]todos[/dim]          {number:int, date:str, task:str}",
-        "                  + optional priority:str — no status",
-        "  [dim]observations[/dim]   {number:int, date:str, note:str,",
-        "                  tags:list[str]}",
+        "  Not restated here, on purpose. The shape of every entry type —",
+        "  field names, types, which are required, and the per-field caps —",
+        "  is [dim]entry_limits.entry_types.<type>.fields[/dim] in @memory's",
+        "  [dim]memory.config.json[/dim]. The checker resolves that map at run",
+        "  time ([dim]trinity_groups.entry_shapes()[/dim], per_branch overrides",
+        "  merged), so what is enforced and what is published cannot differ.",
+        "",
+        "  This module carried a prose copy until 2026-09-15. A copy nothing",
+        "  measures is a second source of truth: it stays right only while",
+        "  someone re-types it, and the day @memory closes a field the copy",
+        "  teaches the old shape to the agent reading it.",
+        "",
+        "  A missing or unusable map is a VIOLATION, never a default — the",
+        "  fail-closed row names the config key it could not read.",
         "",
         "─" * 70,
         "",

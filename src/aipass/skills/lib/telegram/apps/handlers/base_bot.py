@@ -1941,7 +1941,7 @@ class BaseBot:
         self.send_message(chat_id, f"woke {branch}")
 
     def _handle_control_kill(self, chat_id: int, branch_arg: str) -> None:
-        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 Patrick ruling).
+        """/kill <branch> control verb — plain kill, no graceful-stop nuance (v1 the owner's ruling).
 
         A destructive verb never picks its own target: a bare /kill shared the
         same `or "aipass"` default as /start and would have killed @aipass's
@@ -2236,7 +2236,7 @@ class BaseBot:
         while the agents keep working behind the password wall. No root, no
         sudoers grant, no polkit rule, and nothing sleeps — so unlike /suspend
         there is no wake, grace-window or reachability story to get wrong.
-        Patrick's ruling #217 retired suspend from daily use in favour of this.
+        The owner's ruling #217 retired suspend from daily use in favour of this.
 
         The verb itself lives in the `screen_lock` skill (DPLAN-0300) so the host
         API can lock without importing this bot; we are its first consumer and
@@ -2427,7 +2427,7 @@ class BaseBot:
         Counts a control verb handled in-process AND any allowed-user message
         stamped by a sibling bot process. The old check saw only the former,
         which is why chatting with @devpulse did not stop the machine
-        re-suspending under Patrick's hands (incident 2026-08-02).
+        re-suspending under the owner's hands (incident 2026-08-02).
         """
         return self._last_control_command_at >= since or self._read_inbound_stamp() >= since
 
@@ -3178,7 +3178,7 @@ class BaseBot:
     # DORMANT: PRESENCE POINTER (DPLAN-0226)
     # Discovery replaced by CC-native ~/.claude/sessions.
     # Guard half (presence_gate) stays LIVE in @hooks.
-    # Kept per Patrick's directive — do not delete.
+    # Kept per the owner's directive — do not delete.
     # =============================================
 
     # def _find_presence_file(self) -> Path | None:

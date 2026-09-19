@@ -23,7 +23,7 @@ session files handle cleanup on exit).
 Skips true sub-agents (Explore/general-purpose/Plan/etc.) and
 dispatched/daemon session types.
 
-ENFORCING since 2026-08-18 (Patrick: "flip it"). Ruling (a) rides with the
+ENFORCING since 2026-08-18 (the owner: "flip it"). Ruling (a) rides with the
 flip: one brain means one INTERACTIVE brain, so a background occupant never
 gates — it is a job, not a seat, and there is no per-job bg stop in the CLI, so
 blocking on one would be unsatisfiable. _OBSERVE_ONLY remains as the switch
@@ -51,7 +51,7 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 _ALLOW = {"exit_code": 0, "stdout": ""}
 _NON_BLOCKING_SESSION_TYPES = frozenset({"dispatched", "daemon"})
 
-# Flipped 2026-08-18 on Patrick's ruling (DPLAN-0310, "flip it"): enforcement ON.
+# Flipped 2026-08-18 on the owner's ruling (DPLAN-0310, "flip it"): enforcement ON.
 # Ruling (a) rides with it below — one brain means one INTERACTIVE brain.
 _OBSERVE_ONLY = False
 
@@ -190,7 +190,7 @@ def handle(hook_data: dict) -> dict:
         if occupant is None:
             return _ALLOW
 
-        # Ruling (a), DPLAN-0310 (Patrick, 2026-08-18): one brain = one INTERACTIVE
+        # Ruling (a), DPLAN-0310 (the owner, 2026-08-18): one brain = one INTERACTIVE
         # brain. A bg session is a job, not a seat — it never gates, because there is
         # no per-job bg stop in the CLI and an unsatisfiable block only teaches
         # routing around the gate. Known seam (owner to close): find_occupant returns

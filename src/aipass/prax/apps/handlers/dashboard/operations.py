@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: operations.py
 # Description: Dashboard Operations Handler
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-02-25
-# Modified: 2026-08-13
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -23,10 +23,53 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 from aipass.prax.apps.handlers.json import json_handler  # noqa: E402
-from aipass.prax.apps.handlers.repo_root import resolved_file
+from aipass.prax.apps.handlers.repo_root import resolved_file  # noqa: E402
 
 # Resolve prax root from this file's location
 _PRAX_ROOT = resolved_file(Path(__file__)).parents[3]  # .../prax/
+
+# --------------------------------------------------------------------------
+# Dashboard size limits — one number per limit, read by every section writer.
+#
+# DPLAN-0347, boardroom thread 16: a dashboard is a glance, and every branch
+# reads its own on every greeting. The numbers live here so the refresh path,
+# the devpulse plugin and @flow's push writer cut at the same place instead of
+# carrying copies that drift apart. External branches import them from
+# aipass.prax.apps.modules.dashboard, which re-exports them; handlers are
+# internal. Chars, never bytes or tokens: len() over the rendered text, the
+# number wc -m reports.
+# --------------------------------------------------------------------------
+
+# Longest plan or commit subject a dashboard section may carry.
+SUBJECT_CAP = 120
+
+# Rendered dashboard size that earns a warning — never a refusal, never a trim.
+DASHBOARD_CHAR_BUDGET = 6000
+
+# What a cut subject ends with; counted inside SUBJECT_CAP, never added to it.
+TRUNCATION_MARKER = "..."
+
+
+def cap_subject(text: str) -> str:
+    """The first line of ``text``, cut to SUBJECT_CAP chars, marker included.
+
+    Truncate, never refuse: refusing a subject drops the plan from the glance,
+    and the full text is one ``drone @flow list`` or ``git log -1`` away.
+    Refusing an essay at authorship is @flow's create, not this writer's job.
+
+    Args:
+        text: Raw subject; may be empty, padded, or carry a body after line 1.
+
+    Returns:
+        At most SUBJECT_CAP chars, empty only if ``text`` held no first line.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return ""
+    first = stripped.splitlines()[0].strip()
+    if len(first) <= SUBJECT_CAP:
+        return first
+    return first[: SUBJECT_CAP - len(TRUNCATION_MARKER)].rstrip() + TRUNCATION_MARKER
 
 
 def get_dashboard_path(branch_path: Path) -> Path:
@@ -104,7 +147,18 @@ def save_dashboard(branch_path: Path, data: Dict) -> bool:
     """
     data["last_updated"] = datetime.now().isoformat()
     dashboard_path = get_dashboard_path(branch_path)
-    dashboard_path.write_text(json.dumps(data, indent=2))
+    rendered = json.dumps(data, indent=2)
+    if len(rendered) > DASHBOARD_CHAR_BUDGET:
+        # Warn, never refuse and never trim: a refused save leaves a stale
+        # dashboard, and stale is the failure the grounding hook already names —
+        # zero new mail reported while three sit in the inbox (DPLAN-0347).
+        logger.warning(
+            "Dashboard for %s is %d chars, over the %d budget — every greeting on that branch pays it",
+            branch_path.name,
+            len(rendered),
+            DASHBOARD_CHAR_BUDGET,
+        )
+    dashboard_path.write_text(rendered)
     return True
 
 

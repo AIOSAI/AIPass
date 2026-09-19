@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.7.0
+# Version: 0.8.0
 # Created: 2025-11-16
-# Modified: 2026-08-13
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -32,6 +32,8 @@ from datetime import datetime
 # Handler imports (relative within package)
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
+from aipass.memory.apps.handlers.monitor.detector import undrainable_in
+from aipass.memory.apps.handlers.write_fence import fence_write
 from aipass.prax.apps.modules.logger import get_system_logger
 
 logger = get_system_logger()
@@ -64,11 +66,14 @@ def create_rollover_backup(file_path: Path) -> Dict[str, Any]:
             backup_dir = file_path.parent.parent / ".backup"
         else:
             backup_dir = file_path.parent / ".backup"
-        backup_dir.mkdir(exist_ok=True)
-
         # Backup filename: rollover_backup.json (always overwrites)
         backup_name = f"rollover_backup_{file_path.name}"
         backup_path = backup_dir / backup_name
+        # A refused backup stops the rollover: the caller already reads a failed backup as "do not proceed"
+        refusal = fence_write(backup_path, lane="rollover_backup")
+        if refusal is not None:
+            return {"success": False, "error": f"Backup failed: {refusal}"}
+        backup_dir.mkdir(exist_ok=True)
 
         # Copy file
         shutil.copy2(file_path, backup_path)
@@ -103,6 +108,10 @@ def restore_from_backup(file_path: Path) -> Dict[str, Any]:
 
         if not backup_path.exists():
             return {"success": False, "error": "No backup found to restore from"}
+
+        refusal = fence_write(file_path, lane="rollover_restore")
+        if refusal is not None:
+            return {"success": False, "error": f"Restore failed: {refusal}"}
 
         # Restore from backup
         shutil.copy2(backup_path, file_path)
@@ -511,6 +520,16 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.error(f"[extractor] Failed to persist order repair: {e}")
                 return {"success": False, "error": f"Failed to write file: {e}"}
+        # "No entries exceed v2 limits" is a claim about the file, and for a
+        # container held as a dict it was false on every run: 250 over, zero
+        # drainable. Say which it is.
+        undrainable = undrainable_in(data, file_limits)
+        if undrainable:
+            return {
+                "success": True,
+                "skipped": True,
+                "message": f"nothing drainable - {'; '.join(undrainable)}; rollover drains lists only",
+            }
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
 
     # No metadata stamping here. Rollover used to write a

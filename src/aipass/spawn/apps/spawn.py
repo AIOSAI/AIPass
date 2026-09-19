@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn.py
 # Description: Entry point CLI for drone @spawn
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -47,9 +47,14 @@ def print_help():
     )
     console.print("  [green]update[/green] <@branch> --apply      Update single branch (execute changes)")
     console.print("  [green]update[/green] <class> --all --apply  Update all branches of a class")
-    console.print("  [green]delete[/green] <@branch>              Archive and deregister branch")
-    console.print("  [green]sync-registry[/green]                 Repair registry against filesystem")
-    console.print("  [green]regenerate-registry[/green]           Regenerate template registry hashes")
+    console.print("  [green]create[/green] @existing              Adopt a directory that already carries a passport")
+    console.print("  [green]delete[/green] <@branch> --yes        Archive and deregister (omit --yes to confirm)")
+    console.print("  [green]sync-registry[/green]                 Report registry against filesystem (read-only)")
+    console.print("  [green]sync-registry[/green] --fix           Rebuild tracking, register strays, repair ids")
+    console.print(
+        "  [green]sync-registry[/green] --check         Owner/identity health only, never writes (add --json)"
+    )
+    console.print("  [green]regenerate-registry[/green] \\[class]   Regenerate template registry hashes (or --all)")
     console.print(
         "  [green]migrate-passports[/green]             Migrate every fleet passport to schema 2.0 "
         "(preview; add --confirm)"
@@ -67,6 +72,7 @@ def print_help():
     console.print(
         "  [green]repair[/green] --relocate @branch <path> Move branch + update registry (preview; add --apply)"
     )
+    console.print("  [dim]         add --relocate-artifacts to carry the branch's vector store with it[/dim]")
     console.print("  [green]grant-admin[/green]                    Ceremony: write admin:true onto the devpulse entry")
     console.print()
     console.print("[bold cyan]CITIZEN CLASSES:[/bold cyan]")
@@ -90,6 +96,12 @@ def print_help():
     console.print("  [green]--apply[/green]     Execute changes (update/repair are preview-only by default)")
     console.print("  [green]--dry-run[/green]   Preview changes without modifying files (default for update/repair)")
     console.print("  [green]--trace[/green]     Enable verbose logging")
+    console.print("  [green]--root[/green]      Another project root (migrate-passports, export-seeds)")
+    console.print("  [green]--only[/green]      Restrict to one branch (migrate-passports, export-seeds)")
+    console.print("  [green]--confirm[/green]   Execute a passport migration or seed export (preview by default)")
+    console.print("  [green]--yes[/green]       Skip the delete confirmation prompt")
+    console.print("  [green]--json[/green]      Machine-readable output (sync-registry --check)")
+    console.print("  [green]--version[/green]   Print the version string")
     console.print()
     console.print("[yellow]Examples:[/yellow]")
     console.print()

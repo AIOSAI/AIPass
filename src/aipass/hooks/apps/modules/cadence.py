@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: cadence.py
-# Version: 2.4.1
+# Version: 2.7.0
 # Description: Per-session turn counter for prompt injection cadence (DPLAN-0200)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-06-08
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Turn counter for prompt injection cadence — fires loaders every Nth turn.
@@ -45,19 +45,61 @@ HELP_COMMANDS = [
 DEFAULTS = {
     "enabled": True,
     "period": 5,
+    # How far up the transcript (bytes) a completed post-compact re-ground still
+    # stands in for the turn-0 fire-all. 0 turns the stand-in off. Calibrated on
+    # the 09-16 ledgers (DPLAN-0348): the double ground sat 126,258 bytes after
+    # the backstop's last part; the two long autonomous stretches 308,557 and 587,488.
+    # This value is what a clone runs on: cadence_config.json, where an operator
+    # overrides it, is gitignored (**/*_json/).
+    "regroup_fresh_bytes": 150000,
     "loaders": {
         "tier0": {"period": 5, "offset": 0},
         "navmap": {"period": 5, "offset": 0},
         "identity": {"period": 5, "offset": 0},
         "branch": {"offset": 0},
         "email": {"period": 5},
+        "alert": {"period": 5},
     },
 }
 
 MAIL_LOADER = "email"
 
+#: The loaders that ground a seat — what the post-compact backstop carries, and
+#: what a completed backstop stands in for at turn 0 (DPLAN-0348).
+GROUNDING_LOADERS = frozenset({"tier0", "navmap", "identity", "branch"})
+
+#: How a turn the harness sent opens when the payload has no `source` field. A
+#: task-notification (Monitor expiry, background Bash exit) arrives as a prompt
+#: starting with its tag; measured at offset 0 on 120 of 120 notification turns.
+_AUTOMATED_PROMPT_PREFIXES = ("<task-notification>", "[SYSTEM NOTIFICATION")
+
+#: The degraded fail mode (DPLAN-0347, ruled by the room 2026-09-15: "degraded:
+#: kernel only + warning"). When turns cannot be counted, these fire and every
+#: other loader is WITHHELD. Not open — that forced turn 0 on every prompt and
+#: fired all loaders, ~21k chars a turn. Not closed — dark, and post-compact
+#: re-grounding with it. The kernel is the floor, and its banner names what was
+#: withheld and why.
+#:
+#: "alert" and "email" ride with the kernel on purpose. The ruling cut the
+#: grounding bill — navmap, branch and identity, ~18k a beat — and these two are
+#: not grounding: they are the channels that say something needs this session,
+#: tiny (an alert body is capped at 300, the mail banner is ~130) and silent
+#: unless there is something to say. A degraded session is exactly when they
+#: must not go quiet. Drop them here to make the mode literally kernel-only;
+#: nothing else reads this set.
+DEGRADED_LOADERS = frozenset({"tier0", "alert", MAIL_LOADER})
+
+#: The one loader whose degraded line logs at WARNING. Every withheld loader
+#: logs at info, so a degraded turn costs one WARNING, not one per loader.
+DEGRADED_REPORTER = "tier0"
+
 _turn: int | None = None
 _config: dict | None = None
+#: Why the turn counter fell back to 0, when it did. Turn 0 fires EVERY loader,
+#: so a fallback is the whole cadence going open — the fleet pays ~21k chars a
+#: turn and nothing says why (DPLAN-0347, hooks row 1). Set beside _turn so the
+#: memoised answer carries its own provenance.
+_turn_degraded: str | None = None
 
 
 def _deep_merge(base: dict, updates: dict) -> dict:
@@ -109,6 +151,31 @@ def _get_turn_token(hook_data: dict) -> int:
         return 0
 
 
+def is_automated(hook_data: dict | None) -> bool:
+    """True when the harness, not a person, sent this UserPromptSubmit (DPLAN-0348).
+
+    Since Claude Code 2.1.271 every Monitor dies at 30 minutes and wakes the seat
+    with a task-notification turn, and prompt hooks fire on it as if someone
+    typed: 33 wakes in 15 idle hours on 09-16, seven of them paying the full
+    grounding stack.
+
+    The payload's `source` decides when present: "system" is automated, any
+    other value is not. The 2.1.273 schema declares it, but no live payload
+    carried it (six measured on 09-16), so without it the prompt decides by how
+    it OPENS, never by containing a marker: a person quoting one mid-sentence
+    keeps their grounding. A missing or empty prompt reads as human, so a
+    payload change fails toward counting the turn, not toward going dark.
+    """
+    data = hook_data or {}
+    source = data.get("source")
+    if isinstance(source, str) and source:
+        return source == "system"
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str):
+        return False
+    return prompt.lstrip().startswith(_AUTOMATED_PROMPT_PREFIXES)
+
+
 def _lock(fd) -> None:
     """Acquire exclusive lock (no-op on Windows)."""
     if fcntl is not None:
@@ -150,16 +217,54 @@ def _should_increment(stored_turn: int, stored_token: int, token: int, fd) -> bo
     return True
 
 
+def _read_turn_uncounted(path: Path) -> int:
+    """The stored turn for an automated prompt: read under the lock, never written.
+
+    Nothing is written, the token included. A stored token equal to the next
+    real turn's would debounce that turn away, and a truncating write here would
+    cancel a queued post-compact re-ground. That second one is a behaviour
+    change (DPLAN-0348): until then any UserPromptSubmit, a task-notification
+    included, stopped the remaining parts. A notification is not the turn the
+    queue waits for, so the parts now keep landing through it.
+    """
+    global _turn_degraded
+    if not path.exists():
+        return -1
+    fd = None
+    try:
+        fd = open(path, encoding="utf-8")  # noqa: SIM115
+        _lock(fd)
+        content = fd.read()
+        _close_fd(fd)
+        fd = None
+        stored = json.loads(content).get("turn", -1) if content.strip() else -1
+        return stored if isinstance(stored, int) else -1
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        _turn_degraded = f"cadence state file {path} could not be read: {exc}"
+        logger.warning("[HOOKS] cadence: state read failed on an automated turn, turn falls back to 0: %s", exc)
+        if fd is not None:
+            _close_fd(fd)
+        return 0
+
+
 def _load_and_increment(hook_data: dict) -> int:
-    """Load turn counter, increment exactly once per real turn. Multi-process safe."""
-    global _turn
+    """Load turn counter, increment exactly once per real turn. Multi-process safe.
+
+    A turn the harness sent (is_automated) is read, not counted.
+    """
+    global _turn, _turn_degraded
     if _turn is not None:
         return _turn
 
     path = _state_path()
     if path is None:
+        _turn_degraded = "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to count in"
         _turn = 0
         return 0
+
+    if is_automated(hook_data):
+        _turn = _read_turn_uncounted(path)
+        return _turn
 
     token = _get_turn_token(hook_data)
     fd = None
@@ -189,11 +294,41 @@ def _load_and_increment(hook_data: dict) -> int:
         return new_turn
 
     except (OSError, json.JSONDecodeError) as exc:
-        logger.info("[HOOKS] cadence: state access failed: %s", exc)
+        _turn_degraded = f"cadence state file {path} could not be read or written: {exc}"
+        logger.warning("[HOOKS] cadence: state access failed, turn falls back to 0: %s", exc)
         if fd is not None:
             _close_fd(fd)
         _turn = 0
         return 0
+
+
+def degraded_reason() -> str | None:
+    """Why this process cannot count turns, or None when cadence is healthy.
+
+    Meaningful after should_fire() has run in this process — that is what reads
+    the state. The kernel's banner quotes it so the session learns the cause.
+    """
+    return _turn_degraded
+
+
+def _degraded_fire(loader_name: str) -> bool:
+    """The degraded fail mode's answer for one loader, logged once per turn at WARNING.
+
+    A degraded read used to force turn 0, and turn 0 fires every loader, so the
+    session paid the whole grounding bill on every prompt (0 real occurrences in
+    1,190 cadence decisions on 2026-09-15/16 — rare, and expensive when it hits).
+    """
+    fires = loader_name in DEGRADED_LOADERS
+    log = logger.warning if loader_name == DEGRADED_REPORTER else logger.info
+    log(
+        "[HOOKS] cadence DEGRADED loader=%s %s: turns cannot be counted, so only %s fire and every other "
+        "loader is withheld until this is cured — %s",
+        loader_name,
+        "fires" if fires else "WITHHELD",
+        ", ".join(sorted(DEGRADED_LOADERS)),
+        _turn_degraded,
+    )
+    return fires
 
 
 def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
@@ -212,12 +347,32 @@ def should_fire(loader_name: str, hook_data: dict | None = None) -> bool:
     if period <= 0:
         return True
 
+    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    session_short = session_id[:8] if session_id else "none"
+
+    # Before the turn-0 clause: on 09-16 that clause fired 20,310 chars on a
+    # harness wake at 09:30. An automated turn is no beat for any loader. The
+    # channels still speak on one: mail announces through should_fire_mail, and
+    # an alert's arrival never asks cadence (persistent_alert); should_fire("alert")
+    # only decides a repeat, and a turn that does not count is not its beat.
+    if is_automated(hook_data):
+        logger.info("[HOOKS] cadence skipped loader=%s automated turn session=%s", loader_name, session_short)
+        return False
+
     turn = _load_and_increment(hook_data or {})
+    if _turn_degraded is not None:
+        return _degraded_fire(loader_name)
+
+    if turn == 0 and loader_name in GROUNDING_LOADERS and _grounded_by_regroup(hook_data or {}, config):
+        logger.info(
+            "[HOOKS] cadence suppressed loader=%s turn=0: the post-compact re-ground already delivered it session=%s",
+            loader_name,
+            session_short,
+        )
+        return False
 
     fired = turn == 0 or (turn % period) == offset
 
-    session_id = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    session_short = session_id[:8] if session_id else "none"
     action = "fired" if fired else "skipped"
     logger.info(
         "[HOOKS] cadence %s loader=%s turn=%d period=%d offset=%d session=%s",
@@ -302,10 +457,9 @@ def should_fire_mail(new_count: int, hook_data: dict | None = None) -> bool:
         return True
 
     path = _mail_state_path()
-    if path is None:
-        return True
-
     turn = _load_and_increment(hook_data or {})
+    if path is None or _turn_degraded is not None:
+        return _degraded_fire(MAIL_LOADER)
     last_fired = _read_last_mail_turn(path)
 
     # turn < last_fired means the counter was reset under us (compact / new session);
@@ -333,6 +487,15 @@ ADVISORY_PERIOD = 10
 # this long in practice, and a throttle that silently degrades to "every time"
 # is the bug being fixed, not a fallback.
 ADVISORY_SECONDS = 600
+
+
+def turn_token(hook_data: dict) -> int:
+    """The per-turn token for *hook_data*: identical in every sibling process of one turn.
+
+    Public for the injection ledger, which groups by it (DPLAN-0347, hooks row 3).
+    Read-only — it stats the transcript and touches no cadence state.
+    """
+    return _get_turn_token(hook_data)
 
 
 def current_turn() -> int | None:
@@ -372,7 +535,7 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
     For standing conditions — states that stay true for days and re-assert on
     every qualifying edit. @devpulse's seat sat over the todos cap long enough
     to write 209 identical lines and trip repeat-signature escalation; the
-    advisory was right and the cadence was the noise (Patrick, 2026-08-19).
+    advisory was right and the cadence was the noise (the owner, 2026-08-19).
 
     Fires when it has never fired, when the period has elapsed, and when the
     turn counter went BACKWARDS — a reset means compact or a new session, and
@@ -382,6 +545,11 @@ def should_fire_advisory(name: str, period: int = ADVISORY_PERIOD) -> bool:
     """
     path = _advisory_state_path(name)
     if path is None:
+        logger.warning(
+            "[HOOKS] cadence FAIL-OPEN advisory=%s: it fires EVERY time — "
+            "no CLAUDE_CODE_SESSION_ID in the environment, so there is no state file to throttle in",
+            name,
+        )
         return True
 
     turn = current_turn()
@@ -548,6 +716,97 @@ def window_opened_at(hook_data: dict | None = None) -> float | None:
     if isinstance(opened_at, bool) or not isinstance(opened_at, (int, float)):
         return None
     return opened_at
+
+
+def _regroup_done_path(session_id: str) -> Path:
+    return _GUARD_DIR / f"aipass-regroup-done-{session_id}.json"
+
+
+def stamp_regroup_complete(hook_data: dict | None = None) -> None:
+    """Record that the post-compact backstop handed out its FINAL part (DPLAN-0348).
+
+    Before this the backstop recorded nothing, so the next prompt's turn-0
+    fire-all sent the same grounding again: 21,688 chars at 09:03 on 09-16, then
+    20,310 at 09:30. Its own file, like the window stamp, because the counter's
+    file is truncated on every real turn. It carries the window, so a new
+    compaction re-arms the fire-all, and the transcript size at completion, so
+    the stand-in lapses with distance. "used_token" names the prompt that spent it.
+    """
+    session_id = (hook_data or {}).get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    window = window_opened_at(hook_data)
+    token = _get_turn_token(hook_data or {})
+    if not session_id or window is None or token <= 0:
+        logger.info(
+            "[HOOKS] cadence: regroup completion NOT stamped (session=%s window=%s token=%d), fire-all stays",
+            session_id[:8] or "none",
+            window,
+            token,
+        )
+        return
+    try:
+        stamp = {"window": window, "token": token, "used_token": None}
+        _regroup_done_path(session_id).write_text(json.dumps(stamp), encoding="utf-8")
+    except OSError as exc:
+        logger.info("[HOOKS] cadence: regroup completion stamp write FAILED session=%s: %s", session_id[:8], exc)
+        return
+    logger.info("[HOOKS] cadence: regroup complete, stamped token=%d session=%s", token, session_id[:8])
+
+
+def _stands_in(stamp: dict, window: float | None, token: int, distance: int) -> bool:
+    """Whether *stamp* covers a turn-0 prompt at *token* in *window*. Pure, so each rule reads alone."""
+    stamped = stamp.get("token")
+    used = stamp.get("used_token")
+    return (
+        window is not None
+        and stamp.get("window") == window
+        and isinstance(stamped, int)
+        and token > 0
+        and 0 <= token - stamped <= distance
+        and used in (None, token)
+    )
+
+
+def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
+    """True when a completed post-compact re-ground stands in for this turn-0 fire-all.
+
+    All three must hold, or the answer is False and the fire-all runs as it
+    always has. The stamp is for THIS window: a second compaction re-arms, and
+    compaction then a prompt with no tool call between never had a stamp at all
+    (DPLAN-0276's dead zone). This prompt sits within regroup_fresh_bytes of the
+    completion: grounding far up the transcript is not grounding. And the stamp
+    is unspent, or spent by this same prompt: each loader is its own process, so
+    every sibling shares the token and gets one answer, and a later turn 0 fires.
+    """
+    distance = config.get("regroup_fresh_bytes", 0)
+    session_id = hook_data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if isinstance(distance, bool) or not isinstance(distance, int) or distance <= 0 or not session_id:
+        return False
+    path = _regroup_done_path(session_id)
+    if not path.exists():
+        return False
+    window = window_opened_at(hook_data)
+    token = _get_turn_token(hook_data)
+    fd = None
+    try:
+        fd = open(path, "r+", encoding="utf-8")  # noqa: SIM115
+        _lock(fd)
+        content = fd.read()
+        stamp = json.loads(content) if content.strip() else {}
+        grounded = isinstance(stamp, dict) and _stands_in(stamp, window, token, distance)
+        if grounded and stamp.get("used_token") is None:
+            stamp["used_token"] = token
+            fd.seek(0)
+            fd.truncate()
+            fd.write(json.dumps(stamp))
+            fd.flush()
+        _close_fd(fd)
+        fd = None
+        return grounded
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.info("[HOOKS] cadence: regroup completion stamp unreadable, the fire-all stands: %s", exc)
+        if fd is not None:
+            _close_fd(fd)
+        return False
 
 
 def consume_regroup_pending(hook_data: dict | None = None) -> bool:

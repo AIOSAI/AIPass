@@ -404,7 +404,7 @@ class TestRefuseDeletion:
 
     @pytest.mark.usefixtures("_patch_roots")
     def test_refuse_home_patrick(self):
-        results = safe_delete(["/home/patrick"])
+        results = safe_delete(["/home/someone"])
         assert results[0][1] is False
 
     @pytest.mark.usefixtures("_patch_roots")

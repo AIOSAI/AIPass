@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: normalize.py
 # Description: Memory File Schema Normalizer
-# Version: 0.4.0
+# Version: 0.5.0
 # Created: 2026-01-22
-# Modified: 2026-08-12
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -95,7 +95,12 @@ def _sort_container_newest_first(container: list, container_name: str, changes: 
     guardrail used to skip the whole container silently on a single bad entry).
 
     Returns the reordered list, or None when the container carries no numbers
-    at all — the legitimate shape for todos, which is not a defect.
+    at all. That was written when a numberless todo was the legitimate shape;
+    the closed field shape (FPLAN-0593) made ``number`` required on every entry
+    type, todos included, so a container with none is LEGACY rather than
+    intended. Still not a defect to handle here: this function orders entries
+    and does not judge them, and the write gate is where a missing required
+    field is named. Leaving it unordered is the honest answer either way.
     """
     numbers = [_read_entry_number(entry) for entry in container]
     slots = [i for i, number in enumerate(numbers) if number is not None]
@@ -183,7 +188,7 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
 
     # Legacy fix: drop a root-level 'status' block.
     #
-    # It is not relocated into document_metadata any more. Patrick's ruling of
+    # It is not relocated into document_metadata any more. The owner's ruling of
     # 2026-08-25 deleted status.health from the standard outright: it stored a
     # DERIVABLE fact — a second source of truth waiting to go stale, the exact
     # disease this standard cures — and it read "healthy" hardcoded from 2025-11
@@ -233,6 +238,9 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
 
     # Write if changes made and not dry run
     if changes and not dry_run:
+        refusal = write_fence.fence_write(file_path, lane="normalize_memory_file")
+        if refusal is not None:
+            return {"success": False, "error": refusal}
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)

@@ -96,7 +96,7 @@ name, and such a path always carries a literal anyway.
 
 THE IGNORE LIST IS SHIPPED AS A CONSTANT AND NEVER READ AT AUDIT TIME, and that
 is a deliberate trade with a stated price. The needles below were DERIVED from
-`/home/patrick/Projects/AIPass/.gitignore` by reading it line by line -
+the AIPass repository's `.gitignore` by reading it line by line -
 `.trinity/`, `.ai_mail.local/`, `logs/`, `projects/*`, `**/*_json/`,
 `DASHBOARD.local.json` and the rest - and then frozen here. The pack is portable;
 it lifts onto any Python project and must not go asking that project's VCS for

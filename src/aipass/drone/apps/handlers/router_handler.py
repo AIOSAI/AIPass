@@ -338,7 +338,7 @@ def resolve_caller_identity_signal(cwd: Path | None) -> CallerIdentity:
         else:
             # Not a conflict: a project name is not a rival claim of identity.
             # The old message called this one anyway AND named a passport that
-            # was never there — /home/patrick/Projects/AIPass holds no
+            # was never there — the AIPass repo root holds no
             # .trinity/passport.json, only AIPASS_REGISTRY.json — so it sent
             # readers hunting for evidence that does not exist. INFO, once.
             _log_identity_once(

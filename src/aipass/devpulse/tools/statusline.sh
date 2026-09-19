@@ -93,7 +93,7 @@ fi
 # Watchdog status — the truth, not a hope (DPLAN-0317 r4; was DPLAN-0308 r2).
 # FIRST segment after the branch, deliberately: narrow terminals (the phone
 # face) truncate the tail of this line, and the watchdog word is the one
-# Patrick must never lose.
+# The owner must never lose.
 #
 # r4 DELETED THE DETECTION DAEMON. This block had to change in the same breath
 # or it would have painted red forever against a perfectly healthy watchdog:
@@ -105,7 +105,18 @@ fi
 # Green watchdog:in ONLY when BOTH hold:
 #   1. a live wire is registered for THIS session (registry pid alive + session match)
 #   2. that wire is actually ticking (heartbeat fresher than 15s)
-# Anything less is red — an armed-looking dead watchdog is the failure this line exists to expose.
+# A wire that looks armed and is not ticking is red — that corpse is the failure
+# this line exists to expose.
+#
+# Since Claude Code 2.1.271 the wire is the one-shot `baseline --once` under
+# background Bash (wrapper "background"); the Monitor tool lost `persistent` and
+# kills every watch at 30 minutes (DPLAN-0348). Both wrappers paint green. The
+# continuous wire refuses background Bash before it registers, so a registered
+# "background" wire is always a one-shot.
+#
+# NO wire is the designed resting state now — nothing out, nothing armed — so it
+# paints dim `idle`, not red. Red on every quiet hour trains the eye to skip red.
+# What this line cannot see: work that is out with no wire armed reads `idle` too.
 WD_HB="/tmp/aipass-watchdog-active"
 WD_REG="$HOME/Projects/AIPass/src/aipass/devpulse/.watchdog/watchdog_active.json"
 wd_session=$(echo "$input" | jq -r '.session_id // empty')
@@ -120,7 +131,7 @@ fi
 wd_wire=0
 if [ -f "$WD_REG" ] && [ -n "$wd_session" ]; then
     wd_wire_pid=$(jq -r --arg s "$wd_session" \
-        '[.watches[]? | select(.type=="baseline_wire" and (.metadata.session // "")==$s and (.metadata.wrapper // "")=="monitor") | .pid] | first // empty' \
+        '[.watches[]? | select(.type=="baseline_wire" and (.metadata.session // "")==$s and ((.metadata.wrapper // "")=="monitor" or (.metadata.wrapper // "")=="background")) | .pid] | first // empty' \
         "$WD_REG" 2>/dev/null)
     if [ -n "$wd_wire_pid" ] && [ -d "/proc/$wd_wire_pid" ]; then
         wd_wire=1
@@ -136,7 +147,7 @@ elif [ "$wd_beat" = 1 ]; then
     # Another session is signed in — sign in here to take over.
     out+=" ${DIM}│${RST} ${RED}watchdog:ELSEWHERE${RST}"
 else
-    out+=" ${DIM}│${RST} ${RED}watchdog:OUT${RST}"
+    out+=" ${DIM}│${RST} ${DIM}watchdog:idle${RST}"
 fi
 
 # Separator

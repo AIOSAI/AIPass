@@ -506,7 +506,7 @@ class TestTheMismatchMessageIsReadableOnBothPlatforms:
         Windows path reaches the real formatting on any platform - which is what
         makes CI's failure provable from here.
         """
-        windows_cwd = r"C:\Users\patrick\Projects\AIPass\src\aipass\ai_mail"
+        windows_cwd = r"C:\Projects\AIPass\src\aipass\ai_mail"
         path = pointer_path(branch)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(

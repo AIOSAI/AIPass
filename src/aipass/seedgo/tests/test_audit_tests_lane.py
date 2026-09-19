@@ -1416,7 +1416,7 @@ class TestUnknownArgumentRefusal:
         printed = _capture_output(monkeypatch, verb)
 
         # Raises since 2026-09-07: the printed "exit code: 7" and the code the
-        # process leaves with are one number, not two (Patrick's standing
+        # process leaves with are one number, not two (the owner's standing
         # ruling, fleet sweep 2026-09-07).
         with pytest.raises(CommandRefused) as refused:
             verb._refuse_unknown_argument("--nonsense", ["@backup", "--nonsense"])

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_update.py
 # Description: Tests for spawn update orchestrator
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for the spawn update module.
@@ -581,10 +581,90 @@ class TestNeverUpdateGuard:
         assert result["pruned"] == 0
 
 
+class TestMarkdownIsReportedAndNeverWritten:
+    """`.md` drift: update says what it sees and writes nothing (DPLAN-0347).
+
+    Until now an existing `.md` hit no arm at all — not the `.py` skip, not the
+    `.json` merge — so a branch could drift from the template for months with no
+    line anywhere to read it in. The cure is a REPORT, not a write: the fleet
+    README diet is owner judgment by ruling, and an unguarded overwrite here is
+    what DPLAN-0199 (issue #636) was.
+    """
+
+    def _update(self, template_dir, mock_registry, dry_run=True):
+        from aipass.spawn.apps.handlers.update_ops import update_branch
+
+        with (
+            patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=template_dir),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=mock_registry),
+        ):
+            return update_branch("test_branch", dry_run=dry_run)
+
+    def _states(self, result):
+        return {entry["branch_path"]: entry["state"] for entry in result["_md_detail"]}
+
+    def test_an_edited_readme_reports_as_differs(self, template_dir, branch_dir, mock_registry):
+        """The branch fixture's README is hand-edited — the fleet's own condition."""
+        result = self._update(template_dir, mock_registry)
+
+        assert self._states(result)["README.md"] == "differs"
+        assert result["md_differs"] == 1
+
+    def test_a_readme_still_as_the_template_renders_it_reports_as_matches(
+        self, template_dir, branch_dir, mock_registry
+    ):
+        """Rendered, not raw: the comparison resolves placeholders first."""
+        (branch_dir / "README.md").write_text("# TEST_BRANCH\nTemplate readme\n")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert self._states(result)["README.md"] == "matches"
+        assert result["md_differs"] == 0
+        assert result["md_matches"] == 1
+
+    def test_a_missing_md_is_added_and_reports_as_absent(self, template_dir, branch_dir, mock_registry):
+        """A missing file is still an addition — the report names why it was written."""
+        (branch_dir / "README.md").unlink()
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert self._states(result)["README.md"] == "absent"
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == "# TEST_BRANCH\nTemplate readme\n"
+
+    def test_an_apply_never_rewrites_an_existing_md(self, template_dir, branch_dir, mock_registry):
+        """--apply is the dangerous world, so the pin lives there: byte-identical after."""
+        before = (branch_dir / "README.md").read_text(encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry, dry_run=False)
+
+        assert (branch_dir / "README.md").read_text(encoding="utf-8") == before
+        assert result["md_differs"] == 1
+        assert not list(branch_dir.glob("README.md.*backup*")), "a .md was backed up, which means it was written"
+
+    def test_an_unreadable_md_is_reported_as_unreadable_not_guessed(self, template_dir, branch_dir, mock_registry):
+        """Undecodable bytes are their own answer — never reported as drift."""
+        (branch_dir / "README.md").write_bytes(b"\xff\xfe\x00broken")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert self._states(result)["README.md"] == "unreadable"
+        assert result["md_unreadable"] == 1
+        assert result["md_differs"] == 0
+
+    def test_an_owner_protected_md_is_not_even_compared(self, template_dir, branch_dir, mock_registry):
+        """`.updateignore` still runs first: protected means unseen, not reported."""
+        (branch_dir / ".updateignore").write_text("README.md\n", encoding="utf-8")
+
+        result = self._update(template_dir, mock_registry)
+
+        assert result["owner_protected"] == 1
+        assert "README.md" not in self._states(result)
+
+
 class TestUpdateIgnoreIsTheOwnersDecision:
     """`.updateignore` at a branch root — the owner decides what update skips.
 
-    Patrick's ruling 2026-09-09: "project owners decide what update skips."
+    The owner's ruling 2026-09-09: "project owners decide what update skips."
     @vera's todo 25 is the case: a preview proposed merging template boilerplate
     into her passport and she did not apply, because the tool could not tell her
     passport from a template.

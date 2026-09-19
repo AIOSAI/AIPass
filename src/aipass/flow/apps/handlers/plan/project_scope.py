@@ -11,7 +11,7 @@ Project Scope Resolution
 
 Answers one question: **which project does this path belong to?**
 
-Patrick's ruling (2026-08-22): A PROJECT IS ITS REGISTER. Not its repository
+The owner's ruling (2026-08-22): A PROJECT IS ITS REGISTER. Not its repository
 marker, not the presence of citizens, not nesting depth. A directory is a
 project root if and only if it holds a project register -- a
 ``<NAME>_REGISTRY.json`` whose top level carries a ``branches`` key. That is

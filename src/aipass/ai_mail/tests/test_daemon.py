@@ -1033,6 +1033,156 @@ def test_write_pid_file_corrupt_pid_file(tmp_path, monkeypatch):
     assert int(pid_file.read_text().strip()) == os.getpid()
 
 
+# ---- _write_pid_file: the Windows delete-pending denial -------------
+#
+# Windows answers an exclusive create against a pid file another process is
+# still releasing (delete pending) with PermissionError, not FileExistsError.
+# POSIX unlinks the name at once, so no Linux or macOS run can produce it:
+# every case below MANUFACTURES the Windows answer by scripting os.open.
+
+_REAL_OS_OPEN = os.open
+
+
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """time.monotonic that moves only when the code sleeps - no real waiting."""
+    clock = {"now": 1000.0, "sleeps": 0}
+
+    def fake_sleep(seconds):
+        clock["now"] += seconds
+        clock["sleeps"] += 1
+
+    monkeypatch.setattr(daemon_mod.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(daemon_mod.time, "sleep", fake_sleep)
+    return clock
+
+
+def _denial(path):
+    """The Windows delete-pending answer, as Python raises it (EACCES)."""
+    return PermissionError(13, "Access is denied", str(path))
+
+
+def _scripted_pid_open(pid_file, script, calls):
+    """os.open that answers the pid file from *script*, then for real.
+
+    A script step is an exception to raise, a callable run before the real
+    create (it may raise), or None for the real create. Other paths open for real.
+    """
+
+    def fake_open(path, flags, mode=0o777, *args, **kwargs):
+        if str(path) != str(pid_file):
+            return _REAL_OS_OPEN(path, flags, mode, *args, **kwargs)
+        calls.append(flags)
+        step = script.pop(0) if script else None
+        if isinstance(step, BaseException):
+            raise step
+        if callable(step):
+            step()
+        return _REAL_OS_OPEN(path, flags, mode, *args, **kwargs)
+
+    return fake_open
+
+
+def test_write_pid_file_first_create_denied_once_then_lands(tmp_path, monkeypatch, fake_clock):
+    """The first create, denied once (a previous daemon's file still releasing), is polled and lands."""
+    pid_file = tmp_path / "daemon.pid"
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    calls = []
+    monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [_denial(pid_file)], calls))
+
+    assert _write_pid_file() is True
+    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert len(calls) == 2
+    assert fake_clock["sleeps"] == 1
+
+
+def test_write_pid_file_retake_denied_once_then_lands(tmp_path, monkeypatch, fake_clock):
+    """The create right after unlinking a stale pid file - our own delete still pending - is polled and lands."""
+    pid_file = tmp_path / "daemon.pid"
+    pid_file.write_text("999999", encoding="utf-8")
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    calls = []
+    # real (exists) -> denied (the unlink we just made is still pending) -> real
+    monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, _denial(pid_file)], calls))
+
+    assert _write_pid_file() is True
+    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert len(calls) == 3
+
+
+def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkeypatch, fake_clock):
+    """Unlinking a stale pid file someone else already deleted is denied too; the create waits the release out."""
+    pid_file = tmp_path / "daemon.pid"
+    pid_file.write_text("999999", encoding="utf-8")
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    real_unlink = daemon_mod.Path.unlink
+
+    def unlink_denied(self, missing_ok=False):
+        if self == pid_file:
+            raise _denial(self)
+        return real_unlink(self, missing_ok=missing_ok)
+
+    def pending_delete_completes():
+        real_unlink(pid_file)
+        raise _denial(pid_file)
+
+    monkeypatch.setattr(daemon_mod.Path, "unlink", unlink_denied)
+    monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, pending_delete_completes], []))
+
+    assert _write_pid_file() is True
+    assert int(pid_file.read_text().strip()) == os.getpid()
+
+
+def test_write_pid_file_denial_that_never_clears_raises_at_budget(tmp_path, monkeypatch, fake_clock):
+    """A denial that outlasts the wait raises - naming the wait, the denial as cause - and never loops forever."""
+    pid_file = tmp_path / "daemon.pid"
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    denial = _denial(pid_file)
+    attempts = []
+
+    def always_denied(path, flags, mode=0o777, *args, **kwargs):
+        if str(path) != str(pid_file):
+            return _REAL_OS_OPEN(path, flags, mode, *args, **kwargs)
+        attempts.append(path)
+        if len(attempts) > 10_000:
+            raise AssertionError("retried past any budget - the wait is not bounded")
+        raise denial
+
+    monkeypatch.setattr(daemon_mod.os, "open", always_denied)
+    start = fake_clock["now"]
+
+    with pytest.raises(PermissionError) as excinfo:
+        _write_pid_file()
+
+    assert excinfo.value is not denial
+    assert excinfo.value.__cause__ is denial
+    assert f"{daemon_mod.PID_DENIED_WAIT_SECONDS}s" in str(excinfo.value)
+    assert fake_clock["now"] - start >= daemon_mod.PID_DENIED_WAIT_SECONDS
+    assert not pid_file.exists()
+
+
+def test_run_daemon_starts_after_a_denied_pid_create(tmp_path, monkeypatch, fake_clock):
+    """The daemon starts after one delete-pending denial: the pid file is on disk when config loads."""
+    pid_file = tmp_path / "daemon.pid"
+    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    monkeypatch.setattr(daemon_mod, "SHUTDOWN", True)
+    monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [_denial(pid_file)], []))
+    pid_at_start = []
+
+    def config_after_pid():
+        pid_at_start.append(pid_file.read_text().strip())
+        return {"poll_interval_seconds": 0, "kill_switch_path": str(tmp_path / "pause"), "autonomous_branches": []}
+
+    monkeypatch.setattr(daemon_mod, "load_config", config_after_pid)
+
+    run_daemon()
+
+    assert pid_at_start == [str(os.getpid())]
+    assert not pid_file.exists()  # a clean stop removes its own pid file
+
+
 # ---- _remove_pid_file tests ------------------------------------
 
 

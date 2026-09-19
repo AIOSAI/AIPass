@@ -1,6 +1,6 @@
 """Tests for the deletion record — every drone delete leaves a trace.
 
-Patrick's ruling (via DPLAN night round): "if something deletes, there should
+The owner's ruling (via DPLAN night round): "if something deletes, there should
 be a record of it." ``drone rm`` is the fleet's only sanctioned delete path —
 raw recursive rm is gate-blocked — so the record is written where the deleting
 happens, not where the CLI is parsed.

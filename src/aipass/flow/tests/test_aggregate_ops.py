@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 
 import pytest
 from pathlib import Path
@@ -10,6 +11,37 @@ from unittest.mock import patch
 
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.plan.aggregate_ops"
+
+# Captured before any test patches os.open: the stand-in below delegates here.
+_REAL_OS_OPEN = os.open
+
+
+def _deny_exclusive_creates(lock_path: Path, denials: int | None):
+    """An os.open stand-in that answers the way Windows does mid-release.
+
+    Windows answers an exclusive create against a lock another writer is still
+    removing (delete-pending) with PermissionError, not FileExistsError; Linux
+    cannot show that, so it is manufactured. The first ``denials`` exclusive
+    creates of ``lock_path`` are denied (None = never clears); everything else
+    reaches the real os.open.
+
+    Returns:
+        (side_effect, attempts, raised): attempts counts every exclusive create
+        of lock_path; raised holds each PermissionError handed out.
+    """
+    attempts: list[int] = []
+    raised: list[PermissionError] = []
+
+    def fake_open(path, flags, *args, **kwargs):
+        if flags & os.O_EXCL and str(path) == str(lock_path):
+            attempts.append(len(attempts) + 1)
+            if denials is None or len(attempts) <= denials:
+                denial = PermissionError(13, "Access is denied")
+                raised.append(denial)
+                raise denial
+        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+
+    return fake_open, attempts, raised
 
 
 # ─── Import helpers ──────────────────────────────────────
@@ -134,6 +166,50 @@ class TestSaveBranchRegistry:
         bad_path = blocker / "sub" / "registry.json"
         result = save_branch_registry(bad_path, {"plans": {}})
         assert result is False
+
+    def test_delete_pending_denial_is_retried_and_write_lands(self, tmp_path):
+        """A Windows delete-pending denial on the lock is a held lock: retried on
+        the same budget, and the registry reaches disk. It used to give up on the
+        first denial (PermissionError is an OSError) and lose the auto-close.
+        """
+        save_branch_registry = _import("save_branch_registry")
+        reg_file = tmp_path / "registry.json"
+        lock = reg_file.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
+        data = {"plans": {"3": {"status": "closed"}}, "next_number": 4}
+
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+            result = save_branch_registry(reg_file, data)
+
+        assert result is True
+        assert len(attempts) == 2
+        saved = json.loads(reg_file.read_text(encoding="utf-8"))
+        assert saved["plans"]["3"]["status"] == "closed"
+        assert not lock.exists()
+
+    def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
+        """A denial past the budget: exactly the budget of attempts, the caller
+        returns False and logs the chained PermissionError, nothing is written.
+        """
+        import aipass.flow.apps.handlers.plan.aggregate_ops as mod
+
+        reg_file = tmp_path / "registry.json"
+        before = {"plans": {}, "next_number": 1}
+        reg_file.write_text(json.dumps(before), encoding="utf-8")
+        lock = reg_file.with_suffix(".lock")
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
+
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+            result = mod.save_branch_registry(reg_file, {"plans": {"1": {}}})
+
+        assert result is False
+        assert len(attempts) == mod._LOCK_RETRIES
+        assert json.loads(reg_file.read_text(encoding="utf-8")) == before
+        logged = [arg for c in mock_logger.error.call_args_list for arg in c.args]
+        denial = next((arg for arg in logged if isinstance(arg, PermissionError)), None)
+        assert denial is not None, logged
+        assert str(lock) in str(denial)
+        assert denial.__cause__ is raised[-1]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -378,6 +454,51 @@ class TestSaveCentral:
         bad_file = bad_dir / "PLANS.central.json"
         result = save_central(bad_file, bad_dir, {})
         assert result is False
+
+    def test_delete_pending_denial_is_retried_and_write_lands(self, tmp_path):
+        """save_central's lock takes the same retry: a delete-pending denial is
+        waited out and PLANS.central.json holds the new data.
+        """
+        save_central = _import("save_central")
+        central_dir = tmp_path / ".ai_central"
+        central_file = central_dir / "PLANS.central.json"
+        lock = central_file.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
+        data = {"active_plans": [{"plan_id": "FPLAN-0001"}], "branches": {}}
+
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+            result = save_central(central_file, central_dir, data)
+
+        assert result is True
+        assert len(attempts) == 2
+        assert json.loads(central_file.read_text(encoding="utf-8")) == data
+        assert not lock.exists()
+
+    def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
+        """A denial past the budget: exactly the budget of attempts, save_central
+        returns False and logs the denial, and the old file is untouched.
+        """
+        import aipass.flow.apps.handlers.plan.aggregate_ops as mod
+
+        central_dir = tmp_path / ".ai_central"
+        central_dir.mkdir()
+        central_file = central_dir / "PLANS.central.json"
+        before = {"active_plans": [], "branches": {}}
+        central_file.write_text(json.dumps(before), encoding="utf-8")
+        lock = central_file.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+            result = mod.save_central(central_file, central_dir, {"active_plans": [{}], "branches": {}})
+
+        assert result is False
+        assert len(attempts) == mod._LOCK_RETRIES
+        assert json.loads(central_file.read_text(encoding="utf-8")) == before
+        # The logged arguments themselves, never str(call): a call's repr doubles
+        # every backslash, so a Windows path is never a substring of it.
+        logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+        assert str(lock) in logged
+        assert f"{mod._LOCK_RETRIES} attempts" in logged
 
 
 # ═══════════════════════════════════════════════════════════

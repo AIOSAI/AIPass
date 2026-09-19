@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aipass.py
 # Description: AIPASS branch entry point — thin command router
-# Version: 0.4.1
+# Version: 0.5.0
 # Created: 2026-04-16
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -39,7 +39,7 @@ from aipass.cli.apps.modules import console, error
 from aipass.prax import logger
 
 try:
-    import tomllib  # Python 3.11+
+    import tomllib  # type: ignore[import-not-found]  # Python 3.11+, absent on 3.10
 except ModuleNotFoundError:  # pragma: no cover — Python 3.10
     try:
         import tomli as tomllib  # type: ignore[no-redef]
@@ -59,8 +59,8 @@ _PUBLIC_COMMANDS = {
     "doctor": "System health — structure, registry, hooks, tests",
     "handoff": "Launch your CLI in a new session",
     "help": "README-backed Q&A — ask about any branch",
-    "init": "Guided setup for new users (10 stages, resumable)",
-    "install": "One-command bootstrap — clone + setup + init",
+    "init": "Guided setup — 'init run' walks the 10 stages, resumable",
+    "install": "One-command bootstrap — clone, setup.sh, hooks, welcome chat",
     "new": "Create a project inside AIPass",
     "profile": "Show/edit user profile",
     "read": "View a branch README, rendered in the terminal",
@@ -201,7 +201,7 @@ def print_help(modules: List[Any] | None = None) -> None:
         "  [green]doctor[/green]                       [dim]System health — structure, registry, hooks, tests[/dim]"
     )
     console.print("  [green]doctor --fix[/green]                 [dim]Remediation report with repair commands[/dim]")
-    console.print("  [green]doctor --json[/green]                [dim]JSON output for structure scan[/dim]")
+    console.print("  [green]doctor --fix --json[/green]          [dim]The remediation report as JSON[/dim]")
     console.print("  [green]doctor --cross-os[/green]            [dim]Cross-OS pre-flight check[/dim]")
     console.print(
         "  [green]feedback[/green] [dim]\\[on|off][/dim]            [dim]Toggle the feedback reminder pulse[/dim]"
@@ -210,12 +210,8 @@ def print_help(modules: List[Any] | None = None) -> None:
         "  [green]handoff[/green] [dim]\\[launch][/dim]             [dim]Launch your CLI in a new session[/dim]"
     )
     console.print("  [green]help <question>[/green]              [dim]Search branch documentation (Q&A)[/dim]")
-    console.print(
-        "  [green]init[/green]                         [dim]Guided setup for new users (10 stages, resumable)[/dim]"
-    )
-    console.print(
-        "  [green]install[/green]                      [dim]One-command bootstrap — clone + setup.sh + hooks[/dim]"
-    )
+    console.print("  [green]init run[/green]                     [dim]The 10-stage guided setup, resumable[/dim]")
+    console.print("  [green]install[/green]                      [dim]Bootstrap — clone, setup.sh, hooks, chat[/dim]")
     console.print("  [green]new <name>[/green]                   [dim]Create a project inside AIPass[/dim]")
     console.print(
         "  [green]adopt <name>[/green]                 "
@@ -226,8 +222,10 @@ def print_help(modules: List[Any] | None = None) -> None:
         "  [green]read <branch>[/green]                [dim]View a branch README, rendered in the terminal[/dim]"
     )
     console.print(
-        "  [green]trust[/green] [dim]\\[path][/dim]                [dim]Trust registry — enroll/revoke projects[/dim]"
+        "  [green]trust[/green] [dim]\\[path][/dim]                 "
+        "[dim]Trust registry — show it, or enroll a project[/dim]"
     )
+    console.print("  [green]revoke <path>[/green]                [dim]Remove a project from the trust registry[/dim]")
     console.print("  [green]--version[/green]                    [dim]Show version[/dim]")
     console.print()
 
@@ -236,7 +234,7 @@ def print_help(modules: List[Any] | None = None) -> None:
     console.print("  [green]aipass help what does drone do[/green]      [dim]Search documentation[/dim]")
     console.print("  [green]aipass new myapp --template python[/green]  [dim]Create a Python project[/dim]")
     console.print("  [green]aipass adopt myapp --dry-run[/green]        [dim]Preview adopting projects/myapp[/dim]")
-    console.print("  [green]aipass init[/green]                         [dim]Start guided setup[/dim]")
+    console.print("  [green]aipass init run[/green]                     [dim]Start guided setup[/dim]")
     console.print()
 
 

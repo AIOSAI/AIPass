@@ -547,7 +547,7 @@ class TestHandleCommandUnknown:
         This test used to assert the opposite: the module printed its own
         "Unknown subcommand: foobar" and returned True, which told trigger.py
         the command had been handled — so a refusal exited 0 and no caller
-        could branch on it (Patrick's standing ruling, FPLAN-0492). Returning
+        could branch on it (the owner's standing ruling, FPLAN-0492). Returning
         False routes the refusal through the ONE gate, which names the whole
         invocation and exits 1.
         """

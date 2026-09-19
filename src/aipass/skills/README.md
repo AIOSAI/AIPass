@@ -1,638 +1,123 @@
 [← Back to AIPass](../../../README.md)
 
-# Skills
+# SKILLS
 
-**Purpose:** Capability framework for AI agents in AIPass. Skills are discoverable, validatable, and executable units of capability that any AI agent can use.
+**Purpose:** Capability framework for AI agents. A skill is a self-contained unit of capability — instructions an agent reads, and optionally code it can execute — discovered, validated and run the same way wherever it lives.
 **Module:** `skills`
 **Created:** 2026-03-07
-**Last Updated:** 2026-09-14
 
 ---
 
 ## Quick Start
 
 ```bash
-# List all available skills
-drone @skills list
-
-# Get details about a skill
-drone @skills info telegram
-
-# Run a skill
-drone @skills run inbox_check
-
-# Create a new skill
-drone @skills create my-skill --with-handler
-
-# Check if a skill's requirements are met
-drone @skills validate telegram
+drone @skills list                        # every skill this machine can see
+drone @skills info system_status          # what a skill is, and how to call it
+drone @skills run system_status summary   # run one
+drone @skills create my-skill --full      # scaffold your own
 ```
 
-## Overview
-
-## Three Tiers
-
-### 1. Markdown Only
-A `SKILL.md` file with instructions. The AI reads the instructions and follows them. No code required.
-```
-my-skill/
-  SKILL.md
-```
-
-### 2. With Handler
-A `SKILL.md` plus a `handler.py` that the system can execute programmatically.
-```
-my-skill/
-  SKILL.md
-  handler.py
-```
-
-### 3. Full 3-Layer
-A `SKILL.md` plus a full AIPass 3-layer app structure for complex skills.
-```
-my-skill/
-  SKILL.md
-  handler.py
-  apps/
-    __init__.py
-    modules/
-      __init__.py
-    handlers/
-      __init__.py
-```
-
-Built-in examples: `drone_commands` and `telegram` are full-tier; `github` is
-markdown-only; the rest carry a `handler.py`.
-
-## Creating a Skill
-
-```bash
-# Markdown only (default)
-drone @skills create my-skill
-
-# With handler
-drone @skills create my-skill --with-handler
-
-# Full 3-layer
-drone @skills create my-skill --full
-```
-
-Skills are created in `.aipass/skills/` in the current project directory.
-
-## Running a Skill
-
-```bash
-# Run a handler-based skill
-drone @skills run my-skill action-name key=value
-
-# Run a markdown skill (displays instructions)
-drone @skills run my-skill
-
-# List all available skills
-drone @skills list
-
-# Get details about a skill
-drone @skills info my-skill
-
-# Check requirements
-drone @skills validate my-skill
-```
-
-## The Off-Switch
-
-A skill can be disconnected from AIPass and reconnected later. The setting
-persists across restarts and reboots (`skills_json/switch_state.json`).
-
-```bash
-drone @skills off telegram "retired 2026-08-18"   # disconnect
-drone @skills switch                              # who is on, who is off
-drone @skills on telegram                         # reconnect
-```
-
-**OFF** means three things, not one:
-
-1. Every systemd user unit the skill declares is **stopped**.
-2. Those units are **disabled and masked**, so nothing can respawn them — not a
-   manual `systemctl start`, not a dependency, not a script.
-3. `drone @skills run <name>` **refuses** in one line that carries the recorded
-   reason, before the skill's handler is imported. Stopping units only quiets the machine; this is what makes the
-   skill dark.
-
-**ON** reverses all three: unmask, enable, start. A unit that does not come back
-is reported rather than assumed — the switch never prints "dark" over a live
-process, or "running" over a dead one.
-
-A skill declares what belongs to it in its own SKILL.md frontmatter:
-
-```yaml
-switch:
-  systemd_user:
-    - telegram-bot@base
-```
-
-A skill that declares nothing still toggles; it simply owns no processes to
-stop. If `switch_state.json` is ever unreadable, skills **refuse to run** rather
-than defaulting to on — defaulting to on would restart exactly what someone
-deliberately switched off. Design record: `DPLAN-0306`.
-
-## SKILL.md Format
-
-```yaml
----
-name: skill-name
-description: One-line description
-version: 1.0.0
-tags: [category1, category2]
-when_to_use:              # Trigger phrases — when an agent should reach for this
-  - phrase
-requires:
-  pip: []        # Python packages needed
-  bins: []       # CLI tools needed
-  config: []     # Env vars / config keys needed
-has_handler: false
-switch:                   # Optional — what the off-switch owns (see above)
-  systemd_user: []
----
-# Skill Name
-
-## What This Does
-...
-
-## Steps
-...
-```
-
-## Search Paths
-
-Skills are discovered in this order (first match wins for same name):
-
-1. **Project**: `.aipass/skills/` in the current working directory
-2. **Global**: `~/.aipass/skills/` in the user's home directory
-3. **Built-in**: `src/aipass/skills/lib/` in the AIPass codebase
-
-## Commands / Usage
-
-```bash
-drone @skills list                         # Show all discovered skills
-drone @skills info <name>                  # Display SKILL.md contents
-drone @skills run <name> [action] [args]   # Execute a skill's handler
-drone @skills create <name>                # Scaffold new skill (markdown only)
-drone @skills create <name> --with-handler # Scaffold with handler.py
-drone @skills create <name> --full         # Scaffold with full 3-layer structure
-drone @skills validate <name>              # Check if skill requirements are met
-drone @skills on <name>                    # Reconnect a skill and start its processes
-drone @skills off <name> [reason]          # Disconnect a skill and stop its processes
-drone @skills switch [name]                # Show each skill's on/off state
-drone @skills --help                       # Show help
-drone @skills --version, -V                # Show version
-```
-
-Every command above was run against this branch on 2026-09-05 and matches
-`drone @skills --help`.
-
----
-
-## Directory Structure
-
-```
-src/aipass/skills/
-  apps/
-    skills.py              # Entry point (handle_command)
-    modules/
-      discovery.py         # Find skills across search paths
-      loader.py            # Load SKILL.md + handlers
-      runner.py            # Execute skills
-      creator.py           # Scaffold new skills
-      validator.py         # Check skill requirements
-      switch.py            # Per-skill off-switch (on / off / switch)
-    handlers/
-      json/                # json_handler.py — the fleet shim (see The JSON Handler)
-      discovery_handler.py # Search paths, SKILL.md scanning, frontmatter parsing
-      module_paths.py      # Dead-cwd-safe module location (stdlib only)
-      loader_handler.py    # Full SKILL.md parse, dynamic handler import
-      runner_handler.py    # Handler dispatch + markdown-only output
-      creator_handler.py   # Skill creation logic (name validation, orchestration)
-      switch_handler.py    # Off-switch state, declaration parsing, systemd actuation
-      registry.py          # Skill registry management
-      validator.py         # Check requirements
-      template.py          # Skill templates
-    integrations/          # External integration point (empty)
-    plugins/               # Plugin extensions (empty)
-  lib/                     # Built-in skills (branch_health, drone_commands, github, inbox_check, screen_lock, system_status, telegram)
-  templates/               # Skill creation templates (markdown_only, with_handler, full)
-  skills_json/             # JSON tracking directory (incl. switch_state.json)
-  dropbox/                 # External storage sync
-  docs/                    # Branch documentation
-  tools/                   # Branch tooling (verify_branch.py, suspend grants)
-  artifacts/               # Birth certificate and branch artifacts
-  logs/                    # prax log output
-  .trinity/                # Branch identity and memory
-  tests/                   # Branch suite: 342 test functions in 14 files
-                           #   (pytest expands to 362 cases)
-```
-
-Counted 2026-09-14, after the telegram retirement. That 342 is the branch
-suite alone — the figure the seedgo readme rule checks, `def test_` under
-`tests/`.
-
-Two skills carry suites of their own: `lib/telegram/tests/` is 28 files holding
-1103 `def test_` functions expanding to 1114 cases, and `lib/screen_lock/tests/`
-adds 42 (recounted 2026-09-13, after lock_state landed). All three together
-collect 1518: 404 pass and the 1114 telegram cases are **skipped**, because
-Telegram is retired (see Status) — the same numbers from the branch root
-(`pytest .`) and from the repo root, recounted 2026-09-14.
-
----
-
-## The JSON Handler
-
-`apps/handlers/json/json_handler.py` is **not an implementation**. Since
-DPLAN-0325 (landed 2026-09-03) it is the fleet's canonical shim: 1724 bytes,
-byte-identical in all eighteen branches, sha256
-`3456b7660698fa9d2a1f9352523f3a0aa75c3d862bcf6222ce4be280513cf0b7`. seedgo
-checks it by hash, so nothing branch-specific may be added to it.
-
-It **binds** the one json service — `aipass.prax.json_handler`, owned by @prax —
-and adds nothing. Binding rather than wrapping is load-bearing: the service
-names the calling module from frame 2, so a wrapper would attribute every entry
-this branch logs to the wrapper's own file.
-
-```python
-from aipass.skills.apps.handlers.json import json_handler
-
-json_handler.log_operation("skill_executed", {"name": name})
-```
-
-Consequences worth knowing before you touch it:
-
-- **There is no `SKILLS_JSON_DIR` and no `atomic_write_json`.** Both retired
-  with the old handler. Code that needs this branch's json directory asks the
-  service — `json_handler.get_json_path(module, json_type).parent` — which
-  recomputes it per call rather than capturing it at import.
-- **Tests redirect with `AIPASS_TEST_LOG_DIR`, never by patching an attribute.**
-  The shim has no attributes to patch, and that is the point. Both conftests set
-  the seam; the autouse `mock_infrastructure` fixture scopes it per test.
-- The retired handler is kept at `apps/handlers/json/.archive/` as the record.
-  Nothing imports out of `.archive/`.
-
-## Running Where The Working Directory Is Gone
-
-Every skills module imports without a readable current directory.
-
-`ntpath.realpath` calls `os.getcwd()` on its first lines **unconditionally** —
-before it checks whether the path is even relative. `posixpath.realpath` reads
-the cwd only for relative paths, which is why this stayed invisible on Linux.
-`Path.resolve()` routes through realpath, so on Windows any
-`Path(__file__).resolve()` *reached at import* is an import-time crash for a
-process whose directory was deleted or whose network share dropped. Not
-"degrades" — cannot import.
-
-This matters more here than in most branches: skill units run in host processes
-nobody in this branch chose — the telegram relay, cron-fired lanes, hook
-subprocesses — and those are exactly the processes likely to hold a dead or
-foreign working directory.
-
-Every module-level location goes through one helper:
-
-```python
-from aipass.skills.apps.handlers.module_paths import module_file
-
-_BRANCH_ROOT = module_file(__file__).parents[3]
-```
-
-`module_file()` is **stdlib-only on purpose**: importing prax would put the
-logger's own construction — which reads the cwd — onto the very path the helper
-protects. When resolve fails it reports once per path on stderr and returns the
-unresolved absolute spelling, which loses symlink normalisation and nothing
-else.
-
-Two sites guard themselves inline instead, because they run where the helper
-cannot be imported: `apps/skills.py` (the block runs *before* any aipass import
-by design, removing the shadowing path that would resolve `aipass`) and
-`tools/verify_branch.py` (ships inside spawn's agent template, where `aipass`
-is not importable at all).
-
-The handlers guard walks frames with `sys._getframe` rather than
-`inspect.stack()`. inspect materialises a FrameInfo per frame, and
-`getmodule()` calls `os.path.realpath` at `inspect.py:1009` outside any try —
-so the guard needed a readable cwd before a single line of its own code ran,
-and every module in this branch imports through it.
-
-The worlds themselves are defined once, in `tests/dead_cwd_world.py`. They
-patch pathlib's pre-3.11 `_NormalAccessor` as well as the module name: that
-accessor **captured** its copies of `os.getcwd` and `os.path.realpath` when
-pathlib was first imported, so on Python 3.10 a bare module rebind patches a
-name nothing reads again and the world never arms. Two of these pins were
-vacuously green on the 3.10 CI leg for exactly that reason. There is no 3.10 on
-this machine, so the capture is rebuilt locally on whatever interpreter is
-running and the discrimination is falsifiable here rather than derived.
-
-That rebuilt accessor captures a **sentinel** for realpath, not the host's.
-An instrument must not import behaviour it is not testing: the question it
-asks is "did the patch reach the captured attribute", and a live capture makes
-the answer depend on the dialect — on nt the accessor reads the cwd on its own
-account, so a world that reached nothing still answers *raised* and the probe
-convicts the host. The same file carries `posixpath`- and `ntpath`-shaped
-realpaths written **by name and by behaviour**, never by aliasing the dialect's
-own `realpath` (off Windows `ntpath.realpath` is a wrapper around `abspath` and
-leaves an absolute path alone, so an nt world built by aliasing never arms).
-Every accessor pin runs under both dialects and must return the same verdict;
-one shape that is *supposed* to differ is held alongside them, so a litmus that
-reached nothing cannot pass quietly. Where a claim really is per-platform — a
-relative arming path raises in both dialects, an absolute one only on nt — it
-is written as a two-row table with both rows measured here and a pin requiring
-the live host to agree with its own row.
-
-Pinned by `tests/test_dead_cwd_imports.py`, which imports every skills module
-in a child process under two denial worlds (deny `getcwd`; deny `realpath`),
-plus a healthy baseline. Both worlds carry a control proving the world is live,
-and a control proving that control can say no.
-
-Two runtime paths are covered there too, because skill units resolve them in
-those same host processes: skill **discovery** drops the project search path
-when there is no current directory and keeps serving global and builtin skills,
-while skill **creation** refuses outright — it writes, and a target that cannot
-be computed must not be guessed at.
-
----
-
-## The system_status Skill Off Linux
-
-`lib/system_status/handler.py` asked `/proc` three times — `meminfo`, `uptime`
-and the process table — so on the macOS runner `memory`, `uptime` and
-`processes` each answered `success: False` every run, and `summary` reported
-`success: True` over a disk line plus an Errors trailer (FPLAN-0554, runs
-34704362515 and 34707099650). The four cases in `tests/test_runner.py` carried
-`skipif(sys.platform == "win32")`, a guard that named the one platform that was
-never the problem.
-
-All three now ask **psutil** — `virtual_memory()`, `boot_time()`, `pids()` —
-which is a declared dependency of this project (`psutil>=5.9`) and answers on
-Linux, macOS and Windows. Disk was always portable (`shutil.disk_usage`) and is
-untouched. Two things that are not obvious:
-
-- **`summary` fails when a section fails.** It returns `success: False` with
-  `error` naming the missing sections, and still hands back the sections that
-  did answer. The old shape put the failures in an `Errors:` trailer inside
-  `output` and kept `success: True`, which is a caller reading a disk line as a
-  system report.
-- **No psutil means a refusal, not a partial.** The three actions return
-  `success: False` naming the install recipe; `disk` still answers.
-
-The macOS half is manufactured on this Linux box in `tests/test_runner.py`, and
-the psutil stand-in is part of the world rather than a shortcut around it:
-psutil's *Linux* backend reads `/proc` through plain `open()`, so denying
-`/proc` with the real psutil in place would have manufactured a failure no Mac
-can have — there psutil answers from the kernel. The world is
-`sys.platform == "darwin"` + every `/proc` read refused + a stand-in shaped like
-macOS's `virtual_memory` (no `buffers`, no `cached`), with three controls: the
-denial is live, the denial can still say yes, and the process table is gone too.
-Against the pre-cure handler 11 of these cases go red on behaviour; 8 mutants
-were killed.
-
-**Why the audit read 100 over it.** At the time the audit corpus was `apps/`
-(plus `tests/` for the branch-level arms) and never entered `lib/`, where all
-seven built-in skills live — so `Host_Portability` read **100** while the skill
-was red on every macOS run. Reported the same morning; @seedgo ruled that `lib/`
-joins the corpus **for `host_portability` only** (the per-file audit stays
-`apps/`, so tier-2 `handler.py` files are not scored for architecture). The
-widened rule scored this branch 97 — see the next section.
-
-## The Telegram Skill On A Host Without tmux Or systemd
-
-When `host_portability` started reading `lib/` it found 12 calls in the telegram
-skill running `tmux` or `systemctl` with no probe and no `FileNotFoundError`
-handler (`base_bot.py` 7, `bot_factory.py` 3, `tmux_manager.py` 2). A missing
-binary raises out of exec, before there is a return code to check. One of them
-was a real escape, not a technicality: `tmux_manager.session_exists` is called
-**above** the `try` in `send_message`, `kill_session` and `get_session_pane`, so
-their own `except Exception` never saw it and all three raised on a host without
-tmux.
-
-Every call site now catches the exec failure where it sits and returns a
-verdict:
-
-- `session_exists` answers False, so `kill_session` has nothing to kill,
-  `get_session_pane` is None and `send_message` is False. `_send_rename` logs.
-- `inject_message` and `_kill_tmux_session` return False.
-- `/start` and `/kill` reply `tmux not found on this machine.` — the same words
-  the has-session probe above them already used.
-- `launch_mirror_session` returns False when tmux is gone at `new-session` or at
-  either `send-keys`. A session nobody typed into is not a mirror session, and
-  the old code would have returned True over it.
-- `/suspend` on a host with no `systemctl` disarms the alarm it armed and says
-  `systemctl is not installed on this host.` The polkit advice cannot work
-  there. A suspend that systemd *refused* still gets the polkit text,
-  byte-identical.
-
-No `shutil.which` probe was added. Every unit that exercises these functions
-mocks `subprocess.run`; a probe beside the call would make those units measure
-the runner's package list, which is the defect @api cured in `3ef3d571`.
-Catching at the call is driven by the same mock the units already hold.
-
-Pinned by 13 cases across five existing telegram test files. All 13 fail against
-the pre-cure handlers, and 11 mutants — one per clause, plus the mirror session
-claiming success and the suspend message reverting to polkit — all go red.
-
-The skill is still switched **OFF** (since 2026-08-18, retired 2026-09-14), so
-nothing live changed.
-Its three `/proc` reads in `base_bot.py` are not scored: each sits inside
-`except OSError` and degrades honestly. One is still worth knowing as behaviour —
-the bot-lock check guards its `/proc/<pid>/cmdline` read with
-`sys.platform != "win32"`, so on macOS the PID-reuse verification is silently
-skipped and the lock trusts liveness alone. That waits for a switch-on plan.
-
----
-
-## machine_vitals() — The Published Read
-
-`lib/system_status/handler.py` publishes `machine_vitals()`: one dict of the
-machine's vitals for in-process callers (FPLAN-0561 row 1; every clause was
-ruled in DPLAN-0341). The host API proxies it verbatim on `/v1/machine` and
-BAUD's phone draws it. The meaning lives here and nowhere downstream — which
-sensor is the CPU, which rows are nonsense, what an absence is called.
-
-```python
-from aipass.skills.lib.system_status import handler
-vitals = handler.machine_vitals()
-```
-
-- **Shape.** `{"ok": True, "schema": 1, "sampled_at": <ISO-8601 UTC>}` plus
-  eight sections: `cpu`, `load`, `memory`, `swap`, `temp`, `fan`, `network`,
-  `processes`. Every section carries `available`, `reason`, `sentence` and
-  `detail` beside its own values, and every value key is always present — `None`
-  when the host cannot give it, never a zero. It never raises for a reading: a
-  call that raises costs its own section (`read_failed`), never its siblings.
-- **Whole-function refusal** is `{"ok": False, "reason": ..., "detail": ...}`,
-  and only for two codes: `psutil_missing` (detail is the install recipe) and
-  `switched_off`. The off-switch is consulted inside the function, because this
-  door is imported directly and never passes the runner's gate; an unreadable
-  switch state fails closed, exactly as the runner does.
-- **Reason codes** — a closed set, one sentence each in `REASONS`:
-
-| Code | When |
-|------|------|
-| `platform` | The OS has no such reading. psutil defines `sensors_temperatures` and `sensors_fans` only on Linux (temperatures also on FreeBSD); load on Windows is emulated and reads 0 until warm, so it is not drawn |
-| `no_sensor` | The function exists but reported nothing to read from |
-| `no_allowlisted_sensor` | Chips were reported, none on the allowlist; `seen` names them |
-| `read_failed` | The call raised; `detail` carries the error |
-| `warming` | A rate needs two samples — the first call in a process |
-| `no_range` | The fan's rpm is real, but its min/max is missing, unreadable, or not a range; `current` is still published, `range` and `percent_of_range` are `None` |
-| `switched_off` | Refusal only |
-| `psutil_missing` | Refusal only |
-
-- **The cpu section carries the cores.** Beside `percent` and `window_s`:
-  `cores`, one busy percent per logical CPU in index order; `logical` and
-  `physical`, from `cpu_count()` and `cpu_count(logical=False)`; `mhz` and
-  `mhz_max`, the frequency now and its ceiling from `cpu_freq()` (FPLAN-0586).
-  One read takes **one** sample, `cpu_times(percpu=True)`, and the headline
-  percent is summed from the same per-CPU deltas as the cores — 3 busy seconds
-  of 5 ticked is 60, where the mean of the bars would say 37.5 — so the
-  headline and the bars agree by construction. Guest time comes back out of
-  each total and iowait is idle, the same accounting as before. `percent` and
-  `cores` are `None` while warming, and also when the CPU count changed between
-  the two samples (hotplug) or a CPU did not tick between them; the counts and
-  the frequency are instant readings, so they are published even then. psutil's
-  `/proc/cpuinfo` fallback reports the ceiling as `0.0` and an offline policy as
-  all zeros: both are `None`. A `cpu_freq()` that raises (psutil's Linux reader
-  raises `NotImplementedError` or `OSError` when a cpufreq file is missing)
-  costs the frequency only — `mhz` is `None` and `detail` names the error, while
-  the percent and the cores still answer. A host whose psutil has no
-  `cpu_freq` at all gets `None` too.
-- **The skill owns its baselines.** CPU percent and network rate come from
-  `cpu_times()` and `net_io_counters()` samples held in this module, each with
-  `window_s`. Never `psutil.cpu_percent(interval=None)`: its baseline is a psutil
-  module global keyed by thread id, so any other caller in the process moves the
-  window without saying so.
-- **An allowlist, not a threshold.** CPU temperature is `coretemp` /
-  `Package id 0` (the hottest `Core N` when there is no package row), with
-  `high` and `critical` from the sensor. Fans come from `applesmc`. Every other
-  applesmc temperature row stays off — on the MacBook this was built on, five
-  read -127 and a pair drifted from -34.25 to -30.0 inside twenty minutes — and
-  so does `BAT0`, a battery. Keyed by chip and label, never by position; growing
-  a list is a change to `TEMP_ALLOWLIST` / `FAN_ALLOWLIST`, never to a face.
-- **The fan range is a read-only sysfs read, Linux only.** psutil reports a
-  fan's label and rpm, not its range. The chip is found by the `name` file beside
-  its fan input — never a `hwmonN` index, which is boot order — walking the
-  directories the way psutil does (on this box `hwmon2/name` does not exist and
-  the name is at `hwmon2/device/name`). It opens `name`, `fanN_label`,
-  `fanN_min` and `fanN_max`, read-only, and nothing else: `fanN_manual` and
-  `fanN_output` are root-writable and never opened. `percent_of_range` is
-  clamped to 0–100 and the range is carried beside it, so a fan sitting at its
-  floor (0%, as it does here at idle) is distinguishable from a fan with no scale.
-- **Cost, measured here:** about 19 ms warm, 12 ms of it psutil's own
-  temperature sweep; the fan range adds about 2 ms, and the per-CPU sample,
-  the counts and the frequency add under 1 ms (0.85 ms, 2026-09-13).
-
-Pinned by `tests/test_machine_vitals.py`, 41 functions expanding to 57 cases,
-against stand-ins only: psutil, the monotonic clock and the hwmon tree are all
-manufactured, so the file is green on a host with no sensor chips. The
-read-only pin records every `open`, `io.open` and `os.open` under the tree and
-raises on a write mode or a fan control file, with a control proving the guard
-is armed and can still say yes. 20 mutants, one per clause, all go red; the
-per-core read added 17 more, all red, and 15 cases in the file fail against
-the handler that read one aggregate. The stand-in psutil is four logical CPUs with
-different loads, CPU 2 spending half its idle time in iowait, and the Windows
-field set (no guest, no iowait) is manufactured beside it. The text
-actions and their 29 `test_runner.py` functions are unchanged; making them
-renderings of this dict is a later row.
-
----
+## What It Does
+
+A skill comes in one of three tiers, and the tier is simply how much of it is
+code. The smallest is a `SKILL.md` file alone: frontmatter describing the skill
+and a body of instructions an agent reads and follows. Add a `handler.py` and
+the same skill becomes executable — the runner imports it and dispatches an
+action. Add a full three-layer app beside it and a skill is an application in
+its own right, which is what the shipped Telegram bridge is.
+
+Skills are found by scanning three search paths in order — the project's own
+`.aipass/skills/`, the user's global `~/.aipass/skills/`, then the built-ins
+under `lib/` — and the first match for a name wins, so a project can shadow a
+built-in without editing it. Before running anything, a skill can be asked
+whether its requirements are actually met on this machine: Python packages,
+binaries on PATH, config keys. Each skill also has an off-switch that survives a
+reboot; switching one off stops the processes it declares, blocks their respawn,
+and makes the runner refuse to start it.
+
+The skills that ship with AIPass live in `lib/`: branch health, drone command
+reference, GitHub, inbox check, screen lock, system status and the retired
+Telegram bridge.
+
+## Live Inventory
+
+`drone @skills` prints the live self-map — the modules wired to the entry point.
+`drone @skills --help` is the reference: every verb and flag, the search paths,
+and worked examples. Both are produced by the code itself, so neither can drift
+from what the branch actually does.
+
+## How To Reach Me
+
+- Mail: `drone @ai_mail email @skills "Subject" "Body"` for a question, `drone @ai_mail dispatch @skills "Subject" "Body"` when the branch must act. A sleeping agent never reads plain mail.
+- **A skill that reports its requirements met but fails to run, or an off-switch that does not stop what it declares, is a defect here, not a fault in your branch.** Say which skill, which tier, and which search path it was found under.
+- Owner rulings and architecture questions go to @devpulse, not here.
+
+## Commands
+
+The verb list is deliberately not copied into this file. A hand-typed list rots
+the day a flag changes, and this branch already prints an authoritative one — see
+Live Inventory above, and ask the branch itself.
+
+## Architecture
+
+The entry point `apps/skills.py` does nothing but route: it hands a verb to one
+of six thin modules under `apps/modules/` — discovery, loader, runner, creator,
+validator and switch — and each of those delegates the real work to a handler
+under `apps/handlers/`. Discovery scans the search paths and parses frontmatter;
+the loader parses a full `SKILL.md` and imports a handler dynamically; the runner
+dispatches an action or renders a markdown-only skill; the creator stamps a new
+skill from a template; the validator checks requirements; the switch owns the
+on/off state and its systemd actuation. Two handlers are infrastructure rather
+than a verb: `module_paths.py`, which locates a module without ever reading the
+working directory, and the `json/` shim, which binds the fleet's one JSON
+service.
+
+Built-in skills live under `lib/`, one directory each, and the templates the
+creator stamps live under `templates/`. The directory tree is not drawn here:
+it lives in the branch prompt, `.aipass/aipass_local_prompt.md`, where it is
+re-derived from the real tree and read on every prompt.
+
+## Documentation
+
+| Page | What is in it |
+|------|---------------|
+| [docs/skill_contract.md](docs/skill_contract.md) | The three tiers, the `SKILL.md` format, the search paths, creating a skill |
+| [docs/off_switch.md](docs/off_switch.md) | What OFF means, what it stops, how it fails closed |
+| [docs/runner_notes.md](docs/runner_notes.md) | How a skill is executed, and the doors that bypass the runner |
+| [docs/system_status.md](docs/system_status.md) | The system_status skill and `machine_vitals()`, the published read |
+| [docs/telegram.md](docs/telegram.md) | The retired Telegram bridge: what retirement means here |
+| [docs/dead_cwd.md](docs/dead_cwd.md) | Importing without a readable working directory |
+| [docs/json_handler.md](docs/json_handler.md) | Why the JSON handler is a shim, and what may not be added to it |
+
+The same index, with the pages beside each other, is in [docs/](docs/).
 
 ## Integration Points
 
 ### Depends On
-- **@prax** — a hard dependency, two ways: `from aipass.prax import logger` is
-  the only logging system, and the json shim binds `aipass.prax.json_handler`
-  (see The JSON Handler). Both are reached through prax's entry point, never
-  through its internals.
-- Python stdlib, as imported across `apps/` on 2026-09-05: `datetime`,
-  `importlib`, `json`, `linecache`, `os`, `pathlib`, `shutil`, `subprocess`,
-  `sys`, `tempfile`, `time`, `typing`
-- PyYAML — **optional**. Frontmatter is parsed with `yaml` when importable;
-  otherwise a built-in fallback parser handles it (`discovery_handler.py`)
-- `systemctl --user` — only for the off-switch, and only for skills that
-  declare units
-- Filesystem: reads SKILL.md files from project, global, and built-in search paths
+
+- **@prax** — a hard dependency, two ways: it is the only logging system, and
+  the JSON shim binds prax's json service. Both through its entry point, never
+  its internals.
+- **@cli** — terminal rendering for every line this branch prints.
+- Python stdlib, plus **PyYAML** as an optional accelerator: frontmatter is
+  parsed with `yaml` when it is importable and by a built-in fallback parser
+  when it is not.
+- `systemctl --user` — only for the off-switch, and only for a skill that
+  declares units.
 
 ### Provides To
-- All modules — skill discovery, loading, validation, and execution
-- **@api** — `machine_vitals()`, imported in-process from
-  `aipass.skills.lib.system_status.handler` for the `/v1/machine` route
-  (FPLAN-0561), the same way the lock verb imports `screen_lock`
-- **@api** — `lock_state()`, imported in-process from
-  `aipass.skills.lib.screen_lock.handler`: whether the screen is locked, for
-  the `/v1/lock` read beside the lock verb (FPLAN-0585 row 2, not built yet)
-- AI agents — discoverable capability units via `drone @skills`
-- Projects — local skill scaffolding via `drone @skills create`
+
+- **Agents** — discoverable capability units, through `drone`.
+- **Projects** — local skill scaffolding, written into the project's own
+  `.aipass/skills/`.
+- **@api** — `machine_vitals()` from the system_status skill, relayed on the
+  host API's machine route and drawn by the phone monitor; and `lock_state()`
+  from the screen_lock skill, beside the lock verb. Both are imported
+  in-process, so both consult the off-switch themselves.
 
 ---
 
-## Status / Known issues
-
-Everything below was measured on this branch on 2026-09-07. Anything this
-branch could not exercise is marked unverified rather than left standing green.
-
-**Working, exercised tonight:** `list`, `info`, `validate`, `switch`, `run`,
-`--help`, `--version`. The off-switch's three doors were exercised, not just
-read: `drone @skills run telegram` refuses with the OFF message while the units
-stay masked. Suite 404 passing and 1114 telegram cases skipped (re-counted 2026-09-14), identical from the
-branch root and the repo root. seedgo audit 100 on every CI-scored category.
-
-**Retired — the telegram skill (Patrick ruling 2026-09-14).** Telegram is
-skipped and ignored by all. The work stays in place, disabled — nothing was
-deleted, moved or renamed — and it does nothing:
-
-- `drone @skills run telegram <anything>` refuses in one line: *Skill 'telegram'
-  is switched OFF and will not run (Telegram is retired - Patrick ruling
-  2026-09-14: ...)*. The reason is the off-switch's own record; it has been OFF
-  since 2026-08-18, and its five `telegram-bot@` units stay masked.
-- `lib/telegram/apps/handlers/notifier.py` asks the switch itself before it
-  sends. @daemon's scheduler lifecycle pings import it in-process and never
-  pass the runner's gate, so until 2026-09-14 they were still being delivered
-  with the skill switched off (its log shows two sends on each of 09-13 and
-  09-14). Off, or an unreadable switch state, now sends nothing.
-- Every test under `lib/telegram/tests/` is **skipped, never fixed**:
-  `pytest_collection_modifyitems` in that directory's existing `conftest.py`
-  marks each case skipped with the ruling as the reason. A skip marker rather
-  than `collect_ignore`, so all 1114 cases still show up as skipped. That
-  covers seedgo's runtime-probe finding (`test_log_streamer.py` wrote
-  `~/.aipass/telegram_bots/last_inbound.json`), which is not cured.
-- Lifting it is `drone @skills on telegram` plus deleting that hook.
-
-**Known issue — one bypass carried, not a clean 100.**
-`.seedgo/bypass.json` waives `json_structure` for
-`apps/handlers/module_paths.py`. That helper is stdlib-only on purpose and must
-never import the json seam; seedgo's `_is_prelogging_bootstrap` used to exempt
-it automatically, because the exemption is granted to whatever the logging
-substrate imports and the *old* json_handler imported it. The canonical shim
-imports nothing branch-local, so the chain now stops at the shim and the
-exemption lapsed. skills is the only branch in the fleet carrying a
-`module_paths.py`, so no other branch is affected. The bypass carries the full
-measurement and comes out when seedgo's clause learns a module-scope importer.
-
-**Closed 2026-09-06 — the CI hang.** On 2026-09-04 the Linux 3.10 leg stalled
-inside `lib/telegram/tests/test_suspend.py` and was cancelled at the 30-minute
-cap; the same leg had passed in 8 minutes an hour earlier. Cause: those tests
-patched `base_bot.time.time`, and because `base_bot.time` *is* the stdlib
-`time` module, the fake clock was process-global. It returns epoch 1000.0, so
-any deadline another thread captured beforehand read ~56 years away and that
-thread waited forever. Cured with a seam — `from time import time as _now` —
-and all 32 wall-clock reads in `base_bot.py` moved onto it, so the 23 test
-patch sites now reach one module and nothing else.
-
-**Known issue — five deployed bots still keep config in the secret store.**
-Since 2026-09-07 only the token is written there (`config.SECRET_FIELDS`), but
-the bots created before that carry all ten keys in their secret document. They
-load and run, and warn by name on every load. `drone @skills run telegram
-migrate-config` reports what would move — measured 2026-09-07: api 6 keys, base
-6, devpulse 7, prax_monitor 5, scheduler 6, and `telethon_config` correctly
-untouched because api_id/api_hash are real secrets. `--apply` splits them for
-real. Not run, and moot since the 2026-09-14 retirement.
-
----
-
-*Last Updated: 2026-09-14*
+**Last Updated:** 2026-09-15
 
 ---
 [← Back to AIPass](../../../README.md)

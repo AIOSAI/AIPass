@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_token_store.py
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-17
 # =============================================
 
 """
@@ -41,6 +40,7 @@ import json
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -554,6 +554,96 @@ class TestTheLockIsRealNotDecorative:
         assert host_tokens.store_path().exists()
         assert json.loads(host_tokens.store_path().read_text(encoding="utf-8"))["tokens"]
 
+    def test_a_lock_being_deleted_is_waited_for_and_the_revoke_lands(self, store: Path) -> None:
+        """
+        CI 35192484222, Windows: the answer that killed a revoke.
+
+        An exclusive create against a lock another writer is still removing
+        (delete pending) answers ACCESS DENIED on Windows, not FILE EXISTS. The
+        loop caught only the second, so the revoke thread died on the first and
+        a revoked credential stayed live. Manufactured here once, on any host.
+        """
+        record, raw = host_tokens.issue_token("pixel-8", scope="read")
+        lock_file = str(host_tokens.lock_path())
+        real_open = os.open
+        lock_attempts = []
+
+        def delete_pending_once(path: Any, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
+            if path == lock_file:
+                lock_attempts.append(flags)
+                if len(lock_attempts) == 1:
+                    raise PermissionError(13, "Permission denied", path)
+            return real_open(path, flags, mode, **kwargs)
+
+        with patch.object(host_tokens.os, "open", new=delete_pending_once):
+            assert host_tokens.revoke_token(record["id"]) is True
+
+        assert len(lock_attempts) == 2
+        assert _record(record["id"])["revoked"] is True
+        assert host_tokens.verify_token(raw) is None
+        assert not host_tokens.lock_path().exists()
+
+    def test_an_access_denial_that_never_clears_still_fails_at_the_deadline(self, store: Path) -> None:
+        """
+        Waiting out a delete is not forgiving a permissions problem.
+
+        A directory this process cannot write answers the same PermissionError
+        forever. It is polled inside the wait and never past it, and what is
+        raised still carries the denial: fail honestly, never retry forever.
+        """
+        wait = 0.1
+        lock_file = str(host_tokens.lock_path())
+        real_open = os.open
+        lock_attempts = []
+
+        def always_denied(path: Any, flags: int, mode: int = 0o777, **kwargs: Any) -> int:
+            if path == lock_file:
+                lock_attempts.append(flags)
+                if len(lock_attempts) > 1000:
+                    raise RuntimeError("the lock loop retried past its deadline")
+                raise PermissionError(13, "Permission denied", path)
+            return real_open(path, flags, mode, **kwargs)
+
+        started = time.monotonic()
+        with patch.object(host_tokens.os, "open", new=always_denied):
+            with pytest.raises(OSError) as raised:
+                with host_tokens._store_lock(wait=wait):
+                    pytest.fail("the lock was reported taken")
+        elapsed = time.monotonic() - started
+
+        assert len(lock_attempts) > 1
+        assert elapsed >= wait
+        assert isinstance(raised.value.__cause__, PermissionError)
+        assert f"{wait}s" in str(raised.value)
+
+    def test_a_lock_that_cannot_be_removed_is_said_out_loud(self, store: Path) -> None:
+        """
+        A release refused ACCESS DENIED has not found the lock already gone.
+
+        The lock is still on disk and every write after it waits for it, so it
+        is a warning, never a debug line claiming it vanished. Still never
+        raised: a release that throws masks whatever the body was doing.
+        """
+        lock_path = host_tokens.lock_path()
+
+        def denied(path: Any, **kwargs: Any) -> None:
+            raise PermissionError(13, "Permission denied", path)
+
+        with patch.object(host_tokens.os, "unlink", new=denied), patch(PATCH_TOKENS_LOGGER) as log:
+            host_tokens._drop_lock(lock_path)
+
+        assert log.warning.call_count == 1
+        message, *values = log.warning.call_args.args
+        assert str(lock_path) in message % tuple(values)
+
+    def test_a_lock_already_gone_at_release_stays_quiet(self, store: Path) -> None:
+        """The ordinary outcome of a stale-lock break racing a release: debug, not a warning."""
+        with patch(PATCH_TOKENS_LOGGER) as log:
+            host_tokens._drop_lock(host_tokens.lock_path())
+
+        assert log.warning.call_count == 0
+        assert log.debug.call_count == 1
+
 
 class TestTheLockSurvivesAFailedWrite(object):
     """A raised exception mid-write must not leave the lock held."""
@@ -648,8 +738,8 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     """
     Where a raw token lands when the caller does not choose.
 
-    Patrick found three raw bearer receipts in his home root on 2026-08-19 —
-    ~/patrick.token and two siblings, 43 bytes each, from the August phone
+    The owner found three raw bearer receipts in his home root on 2026-08-19 —
+    ~/<owner>.token and two siblings, 43 bytes each, from the August phone
     setup. The mechanism was never wrong (raw never printed, 0600 file); the
     HELP TEXT said `--out ~/pixel.token` and whoever follows the docs mints a
     secret into their home directory. The default lives beside the hashed store
@@ -703,12 +793,12 @@ class TestTheReceiptHasAHomeAndTheLabelIsFenced:
     def test_an_ordinary_label_with_spaces_still_works(self, store: Path) -> None:
         """The fence refuses what is DANGEROUS, not what is untidy.
 
-        Labels are human names ("Patrick's old phone"). Refusing a space would
+        Labels are human names ("Someone's old phone"). Refusing a space would
         make the fence a naming policy, which is not what it is for.
         """
-        receipt = host_tokens.receipt_path("Patrick's old phone")
+        receipt = host_tokens.receipt_path("Someone's old phone")
 
-        assert receipt.name == "Patrick's old phone.token"
+        assert receipt.name == "Someone's old phone.token"
         assert receipt.parent == (store / "host_api").resolve()
 
     @pytest.mark.skipif(sys.platform == "win32", reason="symlink creation needs privilege on Windows")

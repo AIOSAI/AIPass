@@ -292,7 +292,7 @@ class TestControlSessionsListing:
 class TestControlBotAipassBranchName:
     """
     The deployed base bot's persisted config sets branch_name="aipass" (it is
-    the same bot_id="base" process Patrick messages as "the AIPASS bot chat" —
+    the same bot_id="base" process the owner messages as "the AIPASS bot chat" —
     there is no separate bot/service). It must be treated as a control bot,
     not a plain branch bot, across all three verbs plus the command list.
     """

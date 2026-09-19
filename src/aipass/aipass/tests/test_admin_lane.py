@@ -66,7 +66,7 @@ def build_world(
     if cert_present:
         cert: dict[str, object] = {"owner": ADMIN_HOLDER, "type": "birth_certificate"}
         if granted:
-            cert["privileges"] = {"admin": True, "granted_by": "patrick"}
+            cert["privileges"] = {"admin": True, "granted_by": "owner"}
         if signed:
             cert["signature"] = "deadbeef"
         cert_path.write_text(json.dumps(cert), encoding="utf-8")

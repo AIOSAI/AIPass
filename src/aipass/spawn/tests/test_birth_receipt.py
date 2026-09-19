@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_birth_receipt.py
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
-# Version: 1.0.1
+# Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-19
 # =============================================
 
 """Birth receipt lane tests (DPLAN-0318 marker 7).
@@ -30,6 +30,13 @@ MEMORY_RECEIPT_SOURCE = (
 )
 SPAWN_TEMPLATES = Path(__file__).resolve().parents[1] / "templates"
 GOLD_DIR = Path(__file__).resolve().parents[2] / "memory" / "templates"
+FLEET = Path(__file__).resolve().parents[2]
+
+#: @seedgo's published README cap (DPLAN-0347, ruled by the owner 2026-09-15 16:02).
+SEEDGO_CONTEXT_PACK = FLEET / "seedgo" / "apps" / "handlers" / "context_standards" / "pack.json"
+
+#: @memory's whole-file budgets for the three .trinity files, plus its per-string cap.
+MEMORY_CONFIG = FLEET / "memory" / "memory_json" / "custom_config" / "memory.config.json"
 
 
 # =============================================================================
@@ -278,6 +285,163 @@ def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path):
     assert result["success"] is True
     written = json.loads((target / ".trinity" / receipt_ops.RECEIPT_NAME).read_text(encoding="utf-8"))
     assert written["stamped_by"] == receipt_ops.STAMPED_BY_BIRTH
+
+
+# =============================================================================
+# THE BIRTH CONTRACT — A NEWBORN STARTS INSIDE EVERY CAP (DPLAN-0347)
+# =============================================================================
+
+
+def _readme_cap() -> int:
+    """@seedgo's cap, read from its pack manifest at assert time."""
+    pack = json.loads(SEEDGO_CONTEXT_PACK.read_text(encoding="utf-8"))
+    return int(pack["caps"]["README.md"]["max_chars"])
+
+
+def _prompt_cap() -> int:
+    """@hooks' cap, read off the module that enforces it at render time."""
+    from aipass.hooks.apps.modules import grounding_content
+
+    return int(getattr(grounding_content, "BRANCH_CHAR_BUDGET"))
+
+
+def _dashboard_cap() -> int:
+    """@prax's cap, read off its exported name."""
+    from aipass.prax.apps.modules import dashboard
+
+    return int(getattr(dashboard, "DASHBOARD_CHAR_BUDGET"))
+
+
+def _memory_file_budgets() -> dict:
+    """@memory's per-file budgets for .trinity, straight out of its config."""
+    config = json.loads(MEMORY_CONFIG.read_text(encoding="utf-8"))
+    return config["entry_limits"]["file_budgets"]
+
+
+def _newborn_budget() -> dict:
+    """Every startup file's cap, keyed by branch-relative path.
+
+    Read from the FOUR owners every time it is called — seedgo's pack, hooks'
+    module, memory's config, prax's module. Nothing here is a literal, which is
+    the contract: an owner that moves a cap moves this pin with it, and a cap
+    copied into spawn would go stale silently instead.
+    """
+    budgets = _memory_file_budgets()
+    return {
+        "README.md": _readme_cap(),
+        ".aipass/aipass_local_prompt.md": _prompt_cap(),
+        ".trinity/local.json": int(budgets["local.json"]["max_chars"]),
+        ".trinity/observations.json": int(budgets["observations.json"]["max_chars"]),
+        ".trinity/passport.json": int(budgets["passport.json"]["max_chars"]),
+        "DASHBOARD.local.json": _dashboard_cap(),
+    }
+
+
+def _strings(node) -> list:
+    """Every string leaf in a loaded JSON document, keys excluded."""
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [s for value in node.values() for s in _strings(value)]
+    if isinstance(node, list):
+        return [s for item in node for s in _strings(item)]
+    return []
+
+
+def test_a_newborn_is_born_inside_every_owners_cap(tmp_path):
+    """The birth contract (DPLAN-0347, FPLAN-0593 Phase 3).
+
+    spawn is not the source of the fleet's README fat — a citizen is born at
+    ~2k and grows to a 46k median on its own — but the day the template drifts
+    past a cap, every newborn starts in violation. This is the pin that makes
+    that a red instead of a discovery six months later.
+    """
+    from aipass.spawn.apps.modules.core import _spawn_agent
+
+    result = _spawn_agent(str(tmp_path / "budgeted"), role="Test", purpose="birth budget")
+    assert result["success"] is True
+
+    over = []
+    for rel, cap in _newborn_budget().items():
+        chars = len((tmp_path / "budgeted" / rel).read_text(encoding="utf-8"))
+        if chars > cap:
+            over.append(f"{rel}: {chars}/{cap}")
+    assert over == [], f"a newborn is born over cap: {over}"
+
+
+def test_every_newborn_passport_string_is_inside_memorys_per_string_cap(tmp_path):
+    """The file budget is one number; a single runaway string is the other."""
+    from aipass.spawn.apps.modules.core import _spawn_agent
+
+    _spawn_agent(str(tmp_path / "stringy"), role="Test", purpose="passport strings")
+    cap = int(_memory_file_budgets()["passport.json"]["max_string_chars"])
+    passport = json.loads((tmp_path / "stringy" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
+
+    over = [f"{len(s)}/{cap}: {s[:40]}" for s in _strings(passport) if len(s) > cap]
+    assert over == [], f"newborn passport strings over @memory's per-string cap: {over}"
+
+
+def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
+    """A directory with no dashboard is not a branch (DPLAN-0347).
+
+    @flow's writer stopped CREATING a missing DASHBOARD.local.json (2.1.0), so
+    the question is what birth relies on. Measured: neither @flow nor @prax —
+    the dashboard ships in the template and lands rendered at mint, which is why
+    flow's change costs a newborn nothing. This pin is what would go red if the
+    file ever left the template and birth started depending on another branch.
+    """
+    from aipass.spawn.apps.modules.core import _spawn_agent
+
+    _spawn_agent(str(tmp_path / "dashed"), role="Test", purpose="dashboard at birth")
+
+    raw = (tmp_path / "dashed" / "DASHBOARD.local.json").read_text(encoding="utf-8")
+    assert "{{" not in raw, "the newborn's dashboard still carries unrendered placeholders"
+    assert json.loads(raw)["branch"] == "DASHED"
+
+
+def _docs_page_cap() -> int:
+    """@seedgo's docs/*.md cap, read from the same pack manifest at assert time."""
+    pack = json.loads(SEEDGO_CONTEXT_PACK.read_text(encoding="utf-8"))
+    return int(pack["caps"]["docs/*.md"]["max_chars"])
+
+
+def test_the_stamped_docs_index_copies_no_cap_and_points_at_the_standard():
+    """The docs index every newborn is born with names no number seedgo owns (DPLAN-0351).
+
+    A cap typed into a template is stamped into every branch and keeps saying so
+    after its owner moves it. The index names the standard instead, and the
+    standard reads the cap live.
+    """
+    cap = _docs_page_cap()
+    index = (SPAWN_TEMPLATES / "citizen" / "docs" / "README.md").read_text(encoding="utf-8")
+
+    for spelling in (f"{cap:,}", str(cap)):
+        assert spelling not in index, f"the stamped docs index copies seedgo's cap as {spelling!r}"
+    assert "drone @seedgo standard docs_page" in index
+
+
+def test_every_cap_is_read_from_its_owner_and_never_copied_into_this_file():
+    """A hand-copied cap is the failure this pin exists for.
+
+    Each number lives with the branch that enforces it; a literal here would
+    keep passing after its owner moved, which is precisely how three README
+    counts in my own docs once drifted apart. So: every cap must resolve to a
+    positive int through an owner's door, and none of those values may appear
+    as a literal anywhere in this module.
+    """
+    budget = _newborn_budget()
+    assert len(budget) == 6, f"a startup file lost its cap door: {sorted(budget)}"
+    for rel, cap in budget.items():
+        assert isinstance(cap, int) and cap > 0, f"{rel} resolved to {cap!r} instead of a positive cap"
+
+    source = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    literals = {
+        node.value
+        for node in ast.walk(source)
+        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool)
+    }
+    copied = sorted((set(budget.values()) | {_docs_page_cap()}) & literals)
+    assert copied == [], f"cap values hand-copied into this test: {copied}"
 
 
 def test_adoption_never_restamps_a_receipt_another_lane_wrote(tmp_path):

@@ -12,7 +12,7 @@ Trigger Config Loader
 Single entry point for reading trigger's operator-editable settings from
 trigger_json/custom_config/trigger.config.json.
 
-Doctrine (Patrick, S193): configs live inside JSONs, not inside code. The
+Doctrine (the owner, S193): configs live inside JSONs, not inside code. The
 file on disk is the RUNTIME AUTHORITY the operator edits. DEFAULT_CONFIG
 exists so that file can be REGENERATED when it goes missing — it is the
 regeneration seed, not a rival source of truth. What ships as default here

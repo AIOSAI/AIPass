@@ -50,7 +50,10 @@ def test_the_class_registry_declares_two_classes_and_the_collector_finds_both():
         for node in ast.parse(source).body
         if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "CITIZEN_CLASSES" for t in node.targets)
     )
-    from_source = sorted(key.value for key in declared.keys)
+    assert isinstance(declared, ast.Dict), "CITIZEN_CLASSES is no longer a dict literal"
+    keys = [key for key in declared.keys if isinstance(key, ast.Constant)]
+    assert len(keys) == len(declared.keys), "a CITIZEN_CLASSES key is not a literal"
+    from_source = sorted(str(key.value) for key in keys)
 
     assert len(from_source) == 2, f"class_registry.py declares {from_source}, not the two documented classes"
     assert from_source == ["manager", "specialist"], from_source
@@ -345,3 +348,135 @@ class TestExpectedMintPaths:
         (target / "kept.md").write_text("kept\n", encoding="utf-8")
 
         assert verify_mint(template, target, {}, "minted") == ["artifacts/birth_certificate.json"]
+
+    def test_the_docs_page_skeleton_is_never_stamped_into_a_newborn(self, tmp_path):
+        """The skeleton @seedgo renders lives beside the citizen tree, never in it (DPLAN-0351).
+
+        Everything under templates/citizen/ is copied into every newborn, and a
+        skeleton stamped as a docs/ page would be a placeholder page scored in
+        every branch. Beside the tree, no walk reaches it: not the copy, not the
+        manifest a mint is verified against, not the update engine that walks it.
+        """
+        import json
+
+        from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE as skeleton
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        template_dir = get_template_dir()
+        assert skeleton.is_file(), f"the skeleton is missing: {skeleton}"
+        assert template_dir not in skeleton.parents, "the skeleton sits inside the stamped tree"
+
+        manifest = json.loads((template_dir / ".spawn" / ".template_registry.json").read_text(encoding="utf-8"))
+        claimed = [entry["path"] for entry in manifest["files"].values()]
+        assert not [rel for rel in claimed if rel.endswith(skeleton.name)], "the manifest claims the skeleton"
+
+        target = tmp_path / "skeleton_free"
+        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+        assert sorted(p.name for p in (target / "docs").iterdir()) == ["README.md"]
+        assert not list(target.rglob(skeleton.name)), "a newborn carries the skeleton"
+
+    def test_a_newborns_docs_index_has_the_index_shape(self, tmp_path):
+        """docs/README.md is born as back-link, title, one line - and no pages yet (DPLAN-0351)."""
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "indexed"
+        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+
+        index = (target / "docs" / "README.md").read_text(encoding="utf-8")
+        lines = [line for line in index.splitlines() if line.strip()]
+        assert lines[0] == README_BACK_LINK
+        assert lines[1] == "# Docs"
+        assert len(lines) == 3, f"the index carries more than its one purpose line: {lines[2:]}"
+        assert not lines[2].startswith(NOT_PROSE), f"the purpose line is not prose: {lines[2]!r}"
+        assert "{{" not in lines[2] and "INDEXED" in lines[2], "the branch placeholder was not rendered"
+
+    def test_a_newborns_readme_has_the_fleet_shape(self, tmp_path):
+        """H1 the branch in capitals, seedgo's eight sections in order, a dated foot between rules.
+
+        The section list is read from seedgo's readme_check at assert time, never
+        copied here: when seedgo moves the shape, this pin moves with it.
+        """
+        import datetime
+
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "shaped"
+        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+
+        readme = (target / "README.md").read_text(encoding="utf-8")
+        assert "{{" not in readme, "the newborn README still carries unrendered placeholders"
+        lines = [line.strip() for line in readme.splitlines() if line.strip()]
+
+        assert [line for line in lines if line.startswith("# ")] == ["# SHAPED"]
+        sections = [line[3:] for line in lines if line.startswith("## ")]
+        assert sections == _seedgo_readme_sections(), f"off seedgo's README shape: {sections}"
+
+        assert lines[-3] == "---" and lines[-1] == "---", f"the foot is not between two rules: {lines[-3:]}"
+        assert lines[-2].startswith("**Last Updated:** "), f"no Last Updated line at the foot: {lines[-2]!r}"
+        datetime.date.fromisoformat(lines[-2].removeprefix("**Last Updated:** "))
+
+    def test_every_link_in_a_newborns_readme_resolves_where_it_lands(self, tmp_path):
+        """seedgo's check 8, on the newborn: no relative link may dangle wherever the citizen is minted."""
+        import re
+
+        from aipass.spawn.apps.modules.core import _spawn_agent
+
+        target = tmp_path / "deep" / "linked"
+        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        assert result["success"] is True, result.get("error")
+
+        readme = (target / "README.md").read_text(encoding="utf-8")
+        links = [link for link in re.findall(r"\]\(([^)#]+)\)", readme) if not link.startswith(("http", "mailto"))]
+        assert links, "the newborn README links nowhere - it should at least index docs/"
+        dangling = [link for link in links if not (target / link).exists()]
+        assert dangling == [], f"links that dangle in a newborn: {dangling}"
+
+
+# =============================================================================
+# The docs page skeleton - the one source @seedgo's docs_page standard renders
+# =============================================================================
+
+README_BACK_LINK = "[<- Back to the README](../README.md)"
+
+SEEDGO_STANDARDS = (
+    Path(aipass.spawn.__file__).resolve().parents[1] / "seedgo" / "apps" / "handlers" / "aipass_standards"
+)
+SEEDGO_README_CHECK = SEEDGO_STANDARDS / "readme_check.py"
+
+
+def _seedgo_readme_sections() -> list:
+    """seedgo's README_SECTIONS, parsed out of its source at call time - the one list."""
+    import ast
+
+    for node in ast.parse(SEEDGO_README_CHECK.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "README_SECTIONS" and node.value:
+            return list(ast.literal_eval(node.value))
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "README_SECTIONS" for t in node.targets):
+            return list(ast.literal_eval(node.value))
+    raise AssertionError(f"seedgo no longer declares README_SECTIONS in {SEEDGO_README_CHECK}")
+
+
+# What the standard's purpose check refuses as the first line under the H1.
+NOT_PROSE = ("#", "-", "*", "|", ">", "```", "[", "---")
+
+OPTIONAL_SECTIONS = ["## Why it is this way", "## What is not verified", "## Related"]
+
+
+def test_the_docs_page_skeleton_has_the_shape_seedgo_scores():
+    """Back-link, one H1, a prose purpose line, depth <= 3, the three fixed names last and in order."""
+    from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE
+
+    lines = [line for line in DOCS_PAGE_TEMPLATE.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert lines[0] == README_BACK_LINK
+    assert [line for line in lines if line.startswith("# ")] == [lines[1]], "the skeleton needs exactly one H1, first"
+    assert not lines[2].startswith(NOT_PROSE), f"the purpose paragraph is not prose: {lines[2]!r}"
+    assert not [line for line in lines if line.startswith("####")], "the skeleton nests deeper than ###"
+    assert any(line.startswith("### ") for line in lines), "the skeleton never shows the third level"
+
+    sections = [line for line in lines if line.startswith("## ")]
+    assert [line for line in sections if line in OPTIONAL_SECTIONS] == OPTIONAL_SECTIONS
+    assert sections[-3:] == OPTIONAL_SECTIONS, "the fixed-name sections must close the page"

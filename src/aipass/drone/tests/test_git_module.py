@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — lock, status, sync, PR, and routing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-21
-# Modified: 2026-04-21
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for the @git module — lock, status, sync, PR, and routing."""
@@ -27,6 +27,7 @@ from aipass.drone.apps.handlers.git.lock_handler import (
 )
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.handlers.git.sync_handler import sync_main
+from aipass.drone.apps.handlers.git.commit_handler import SUBJECT_CAP
 from aipass.drone.apps.handlers.git.pr_handler import (
     _diagnose_push_failure,
     _has_credential_helper,
@@ -88,6 +89,51 @@ class TestLockAcquire:
         result = acquire_lock("@memory")
         assert result["success"] is False
         assert "blocked" in result["message"].lower()
+
+    @staticmethod
+    def _deny_lock_create(attempts: list[str]):
+        """os.open that answers the lock's exclusive create the way Windows does
+        for a lock another process is mid-removing (delete pending): ACCESS
+        DENIED, not FILE EXISTS. Every other open goes to the real os.open."""
+        real_open = os.open
+
+        def fake_open(path, flags, mode=0o777, **kwargs):
+            if Path(path).name == ".git_pr.lock":
+                attempts.append(path)
+                raise PermissionError(13, "Permission denied", path)
+            return real_open(path, flags, mode, **kwargs)
+
+        return fake_open
+
+    def test_a_create_denied_mid_release_answers_blocked_not_an_exception(self, lock_dir: Path) -> None:
+        """The Windows race: a release in flight denies the acquire's create.
+
+        It used to escape acquire_lock as an uncaught PermissionError, out of the
+        door every PR crosses. It answers blocked instead, once — the door never
+        waits — and names the denial, so a repo root that is truly unwritable
+        still surfaces rather than passing for a busy lock.
+        """
+        attempts: list[str] = []
+        with patch("aipass.drone.apps.handlers.git.lock_handler.os.open", new=self._deny_lock_create(attempts)):
+            result = acquire_lock("@memory")
+
+        assert result["success"] is False
+        assert result["message"].startswith("Lock blocked:")
+        assert "retry" in result["message"]
+        assert "Permission denied" in result["message"]
+        assert len(attempts) == 1
+        assert not (lock_dir / ".git_pr.lock").exists()
+
+    def test_a_create_denied_names_the_holder_when_the_lock_still_reads(self, lock_dir: Path) -> None:
+        """A denied create against a lock file that still reads is that holder's
+        lock: the same blocked answer the FileExistsError arm gives."""
+        (lock_dir / ".git_pr.lock").write_text(json.dumps({"branch": "@api", "pid": 1}), encoding="utf-8")
+        attempts: list[str] = []
+        with patch("aipass.drone.apps.handlers.git.lock_handler.os.open", new=self._deny_lock_create(attempts)):
+            result = acquire_lock("@memory")
+
+        assert result == {"success": False, "message": "Lock blocked: already held by @api"}
+        assert len(attempts) == 1
 
 
 class TestLockRelease:
@@ -701,6 +747,47 @@ class TestPRHandler:
         pathspec_idx = commit_cmd.index("--")
         pathspec = commit_cmd[pathspec_idx + 1]
         assert "src/aipass/api" in pathspec.replace(os.sep, "/"), f"pathspec should target branch_dir, got: {pathspec}"
+
+    def test_essay_description_refused_before_the_lock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A PR commit lands in the same oneline log, so it obeys the same cap.
+
+        The refusal comes before acquire_lock: a refused subject that has taken
+        the repo-wide PR lock blocks every other citizen while it teaches.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        essay = "x" * (SUBJECT_CAP + 1)
+        lock_mock = MagicMock(return_value={"success": True, "message": ""})
+
+        with (
+            patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run") as mock_run,
+            patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", lock_mock),
+        ):
+            result = create_pr("api", essay, tmp_path / "src" / "aipass" / "api")
+
+        assert result["success"] is False
+        assert str(SUBJECT_CAP) in result["message"]
+        assert lock_mock.call_count == 0, "a refused subject must not take the PR lock"
+        assert mock_run.call_count == 0
+
+    def test_short_description_reaches_the_lock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The cap refuses essays only — a normal description walks straight past it."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        lock_mock = MagicMock(return_value={"success": False, "message": "Lock blocked: already held by @memory"})
+
+        with (
+            patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_nothing_staged),
+            patch("aipass.drone.apps.handlers.git.pr_handler.acquire_lock", lock_mock),
+        ):
+            result = create_pr("api", "the subject cap refusal", tmp_path / "src" / "aipass" / "api")
+
+        assert lock_mock.call_count == 1
+        assert "blocked" in result["message"].lower()
 
 
 class TestDiagnosePushFailure:

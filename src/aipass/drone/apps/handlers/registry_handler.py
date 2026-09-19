@@ -94,7 +94,7 @@ def _registry_matches_credential(registry_path: Path) -> bool:
     8fb38c96, WREN 9d11c395. Routing every external root through this check
     would refuse all of them, always, for being what they are.
 
-    The authority a walk could never attach is Patrick blessing
+    The authority a walk could never attach is the owner blessing
     AIPASS_ROOTS.json. That file is the credential, and @memory's reader is the
     only thing that reads it.
 
@@ -401,7 +401,7 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
     # This is also the isolation seam the other two sources already have: the
     # AIPASS_HOME source is switched off by unsetting its env var, and without
     # an equivalent here the real machine's declared roots leaked into every
-    # enumeration test the moment Patrick blessed the file. A third source with
+    # enumeration test the moment the owner blessed the file. A third source with
     # no way to scope it is a third source that cannot be tested around.
     if repo_root is None:
         try:

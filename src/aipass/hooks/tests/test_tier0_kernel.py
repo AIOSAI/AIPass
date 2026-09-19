@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_tier0_kernel.py
-# Version: 1.0.0
+# Version: 1.2.0
 # Description: Tests for tier0_kernel prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/prompt/tier0_kernel.py."""
@@ -74,6 +74,9 @@ class TestTier0KernelHandler:
         aipass_dir = tmp_path / ".aipass"
         aipass_dir.mkdir()
         (aipass_dir / "tier0_kernel.md").write_text("content", encoding="utf-8")
+        # A whole stamped tree: a kernel with no navmap beside it is a degraded
+        # tree now, and this test is about the empty payload, not the banner.
+        (aipass_dir / "tier1_navmap.md").write_text("navmap", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
         with patch.dict("os.environ", {"AIPASS_HOME": str(tmp_path)}):
@@ -143,3 +146,170 @@ class TestTier0KernelHandler:
                 handle({"some": "data"})
 
         mock.should_fire.assert_called_once_with("tier0", {"some": "data"})
+
+
+class TestDegradedGroundingIsLoud:
+    """DPLAN-0347, hooks row 1: the kernel carries the news when grounding this seat was promised did not load.
+
+    Both directions are pinned, because the silent side is the one that was
+    measured: four of four stamped projects on the machine this shipped from
+    carry no branch prompt and no passport by design, and a banner there on
+    every beat would be a permanent false alarm.
+    """
+
+    @staticmethod
+    def _stamped(root, *, kernel=True, navmap=True):
+        aipass_dir = root / ".aipass"
+        aipass_dir.mkdir(parents=True, exist_ok=True)
+        if kernel:
+            (aipass_dir / "tier0_kernel.md").write_text("KERNEL", encoding="utf-8")
+        if navmap:
+            (aipass_dir / "tier1_navmap.md").write_text("NAVMAP", encoding="utf-8")
+        return root
+
+    def test_a_whole_stamped_project_that_is_not_a_branch_hears_nothing(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._stamped(tmp_path / "project")
+        monkeypatch.chdir(project)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(_mock_cadence(True)):
+            result = handle({"cwd": str(project)})
+
+        assert result["stdout"] == "KERNEL"
+
+    def test_the_per_user_aipass_dir_above_a_tree_promises_nothing(self, tmp_path, monkeypatch):
+        """The Windows CI layout on every host: the cwd sits under a home that holds ~/.aipass.
+
+        On the Windows runner the temp dir is under home, so this was the shape of
+        every tmp_path there, and the walk counted ~/.aipass as a stamped tree
+        (2026-09-16). The control below keeps a REAL stamped tree under the same
+        home loud, so the skip cannot pass by silencing everything.
+
+        The silent side is asserted on the walk itself, not on the handler's
+        stdout: tmp_path may sit under the REAL home too, and the walk keeps
+        climbing past this fake home to whatever lies above. Asserting silence
+        would make the pin a property of the host it runs on.
+        """
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+        from aipass.hooks.apps.modules.grounding_content import _find_project_dir
+
+        home = tmp_path / "home"
+        (home / ".aipass").mkdir(parents=True)
+        (home / ".aipass" / "trusted_projects.json").write_text("{}", encoding="utf-8")
+        loose = home / "scratch" / "work"
+        loose.mkdir(parents=True)
+        for var in ("HOME", "USERPROFILE"):
+            monkeypatch.setenv(var, str(home))
+        monkeypatch.chdir(loose)
+        found = _find_project_dir()
+        assert found is None or home not in found.parents, f"the per-user dir was read as a stamped tree: {found}"
+
+        stamped = self._stamped(home / "project", kernel=False)
+        monkeypatch.chdir(stamped)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(_mock_cadence(True)):
+            out = handle({"cwd": str(stamped)})["stdout"]
+        assert out.startswith("[GROUNDING DEGRADED") and "kernel: this tree is AIPass-stamped" in out
+
+    def test_a_branch_missing_its_prompt_gets_the_kernel_and_the_reason(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._stamped(tmp_path / "project")
+        seat = project / "src" / "pkg" / "seat"
+        (seat / ".trinity").mkdir(parents=True)
+        (seat / ".trinity" / "passport.json").write_text('{"identity": {"role": "r"}}', encoding="utf-8")
+        monkeypatch.chdir(seat)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(_mock_cadence(True)):
+            result = handle({"cwd": str(seat)})
+
+        out = result["stdout"]
+        assert out.startswith("[GROUNDING DEGRADED")
+        assert "branch: seat is a branch but .aipass/aipass_local_prompt.md is missing" in out
+        assert "Carried: identity, kernel, navmap." in out
+        assert out.endswith("KERNEL"), "the kernel still goes out, after the banner"
+
+    def test_a_corrupt_passport_is_named_with_the_parse_error(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._stamped(tmp_path / "project")
+        seat = project / "src" / "pkg" / "seat"
+        (seat / ".aipass").mkdir(parents=True)
+        (seat / ".aipass" / "aipass_local_prompt.md").write_text("PROMPT", encoding="utf-8")
+        (seat / ".trinity").mkdir()
+        (seat / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.chdir(seat)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(_mock_cadence(True)):
+            result = handle({"cwd": str(seat)})
+
+        assert "identity: loading it raised JSONDecodeError" in result["stdout"]
+
+    def test_a_missing_kernel_still_says_why_instead_of_going_quiet(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._stamped(tmp_path / "project", kernel=False)
+        monkeypatch.chdir(project)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(_mock_cadence(True)):
+            result = handle({"cwd": str(project)})
+
+        assert result["stdout"].startswith("[GROUNDING DEGRADED")
+        assert "kernel: this tree is AIPass-stamped but .aipass/tier0_kernel.md is missing" in result["stdout"]
+        assert result["sound"] == "tier0 kernel"
+
+    def test_the_banner_never_carries_the_home_directory(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from aipass.hooks.apps.modules import grounding_content
+
+        with patch.object(grounding_content, "load_kernel", side_effect=OSError(f"denied: {Path.home()}/x")):
+            _, failures = grounding_content.grounding_report({"cwd": str(tmp_path)})
+
+        assert failures and str(Path.home()) not in failures[0]
+        assert "~/x" in failures[0]
+
+
+class TestCadenceDegradedMode:
+    """DPLAN-0347 row 1, the room's ruling: when cadence cannot count, the kernel fires alone and says so."""
+
+    @staticmethod
+    def _project(root):
+        aipass_dir = root / ".aipass"
+        aipass_dir.mkdir(parents=True)
+        (aipass_dir / "tier0_kernel.md").write_text("KERNEL", encoding="utf-8")
+        (aipass_dir / "tier1_navmap.md").write_text("NAVMAP", encoding="utf-8")
+        return root
+
+    def test_a_degraded_cadence_puts_the_reason_on_the_kernel(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._project(tmp_path / "project")
+        monkeypatch.chdir(project)
+        cadence = _mock_cadence(True)
+        cadence.degraded_reason.return_value = "no CLAUDE_CODE_SESSION_ID in the environment"
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(cadence):
+            result = handle({"cwd": str(project)})
+
+        out = result["stdout"]
+        assert out.startswith("[GROUNDING DEGRADED")
+        assert "Carried: kernel." in out, "navmap loaded but is withheld, so it is not carried"
+        assert "navmap, branch, identity: WITHHELD" in out and "CLAUDE_CODE_SESSION_ID" in out
+        assert out.endswith("KERNEL")
+
+    def test_a_cadence_that_will_not_import_still_gets_the_kernel_out_with_the_cause(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._project(tmp_path / "project")
+        monkeypatch.chdir(project)
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(error=ImportError("no cadence")):
+            result = handle({"cwd": str(project)})
+
+        assert "the cadence module raised ImportError: no cadence" in result["stdout"]
+        assert result["stdout"].endswith("KERNEL")
+
+    def test_a_healthy_cadence_adds_nothing(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.prompt.tier0_kernel import handle
+
+        project = self._project(tmp_path / "project")
+        monkeypatch.chdir(project)
+        cadence = _mock_cadence(True)
+        cadence.degraded_reason.return_value = None
+        with patch.dict("os.environ", {"AIPASS_HOME": ""}), _patch_cadence(cadence):
+            assert handle({"cwd": str(project)})["stdout"] == "KERNEL"

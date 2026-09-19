@@ -225,7 +225,7 @@ class TestHooksSound:
         """
         The boundary, stated as a fact about this file's source.
 
-        Patrick's ruling: api is api. The flag's location is @hooks' knowledge —
+        The owner's ruling: api is api. The flag's location is @hooks' knowledge —
         it is declared once, at aipass/hooks/apps/sound.py, and a second copy
         here is a second truth that drifts the first time they move it. This
         lane had one: a module constant holding the file name and a helper

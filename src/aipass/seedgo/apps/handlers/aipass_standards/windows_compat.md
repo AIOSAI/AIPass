@@ -51,6 +51,141 @@ without platform guard.
 - `__init__.py` files
 - Non-`.py` files
 
+### What a Linux seat cannot observe — pin it by shape
+Two Windows reds in one week (CI 35192484222, CI 35416653326) had the same
+cause: the code or test was wrong on Windows and **right by accident on POSIX**,
+because the POSIX value is a degenerate case of the thing being handled.
+
+- **States Windows has and POSIX lacks.** Delete-pending, sharing violations,
+  a file held open by another process: POSIX unlinks a name at once, so a
+  `PermissionError` handler for them is dead code on Linux and never runs.
+- **Spellings Windows produces and POSIX does not.** Backslash separators and
+  drive letters: `repr()` doubles a backslash, `as_posix()` turns it, a regex
+  treats it as an escape. On a POSIX path each of those is the identity — there
+  is nothing to double, turn or escape — so the test passes by having no input
+  for the bug.
+
+A green Linux run proves nothing about either. When a behaviour only differs on
+Windows, the rule that guards it reads the SHAPE statically; it cannot wait for
+a run to go red. The two advisories below are that rule, one per class.
+
+One half of the spelling class CAN be made observable on Linux: a literal
+backslash in pytest's base temp (`pytest --basetemp='<tmp>/x\probe'`) puts one
+in every `tmp_path`, so a path compared against a repr goes red on the Linux
+seat too (flow reproduced CI 35416653326 that way, 2026-09-18; its suite is
+1011 passed under it once cured). It does not reach `as_posix()` — a POSIX
+backslash is a character, not a separator, so `as_posix()` still equals
+`str()` — nor drive letters, nor any state class. Run it as a cheap extra lane,
+not as a replacement for the static read.
+
+### Advisory — exclusive creates that lose the delete-pending race
+Not scored. Reported on the audit's info channel (`check_branch_info`) as
+`windows_compat lock race (advisory): <file>:<line> ...`, one line per site.
+
+On Windows, `os.open(path, O_CREAT | O_EXCL)` (or `open(path, "x")`) against a
+file another thread or process is still deleting ("delete pending") raises
+`PermissionError` (errno 13), not `FileExistsError`. POSIX removes the name at
+once, so no Linux or macOS run can show it. CI 35192484222: api's token store
+lock caught `FileExistsError` only, the revoke thread died, and a revoked
+credential stayed live.
+
+Read from the `try` that owns the `FileExistsError` handler:
+- **Escape:** no handler on it, or on any `try` around it in the same function,
+  takes a PermissionError (`PermissionError`, `OSError`, `Exception`, bare).
+- **Gives up:** the `try` is in a loop, `FileExistsError` retries, and the
+  handler that takes PermissionError always returns, raises or breaks.
+
+Not flagged: a single-shot `except OSError` that fails the same way "exists"
+does; a path rebuilt from a name the loop rebinds (a fresh file each attempt);
+a create inside a `sys.platform` / `os.name` guard.
+
+Known misses: flags held in a variable, a create behind a wrapper function, a
+PermissionError caught by a `try` outside the retry loop. Known false positive:
+a single-shot create of a file nothing ever deletes, with a
+`FileExistsError`-only handler — none in the fleet on 2026-09-17; bypass it.
+
+Fix: treat PermissionError on the create as "held, try again" inside the wait,
+and surface it once the wait is spent:
+```python
+except FileExistsError:
+    time.sleep(POLL)
+except PermissionError as e:  # Windows delete-pending
+    if time.monotonic() >= deadline:
+        raise OSError(f"lock at {path} still denied after {wait}s: {e}") from e
+    time.sleep(POLL)
+```
+
+Corpus is the scored lane's (`apps/**/*.py`), so the ratchet to a scored rule
+moves no file. Measured at introduction: 18 exclusive creates fleet-wide, 8
+advisory lines (flow 5, ai_mail 2, drone 1).
+Re-measured 2026-09-18 after flow (bdd60273) and ai_mail (d4e4018f) cured: 1
+line left, drone's git lock.
+
+### Advisory — a path asserted against the repr of a mock call
+Not scored. Info channel, as
+`windows_compat mock repr path (advisory): tests/<file>:<line> ...`.
+
+`str(call(...))`, `str(m.call_args)`, `repr(m.call_args_list)` and
+`str(c.args)` are reprs, and repr doubles each backslash. A Windows path
+`C:\Users\x\a.lock` is spelled `C:\\Users\\x\\a.lock` in that text, so
+`str(lock) in logged` fails there and passes on POSIX. CI 35416653326: three of
+flow's lock tests joined `str(c) for c in mock_logger.error.call_args_list` and
+asserted the lock path in it.
+
+Flagged, per function with a name-flow pass: `in` / `not in` / `==` / `!=`, or
+`.count/.find/.index/.startswith/.endswith`, with REPR TEXT on one side (the
+str / repr / f-string of a call record, a call list, or an args container,
+carried through joins, slices, case changes and names) and PATH TEXT on the
+other (str / `os.fspath` / an f-string of `tmp_path`, `tmpdir`, `Path(...)`,
+`tempfile` and `os.path` results, or anything built from them with `/`,
+`.with_suffix()`, `.parent`, ...). `in` is red on Windows; `not in` is vacuous
+there — it passes without checking anything.
+
+Not flagged: the real message one level inside the args (`c.args[0]`,
+`m.call_args[0][0]`, `str(arg) for arg in c.args`) — that is the cure; a path
+side repr cannot change (`.name`, `.stem`, `.suffix`, `.as_posix()`,
+`Path("one_part")`); a side the test already escaped (`repr(str(p))`,
+`.replace(...)`); a test under a platform skipif or `sys.platform` guard.
+
+Helpers in the same module are read by what they return, a tuple return
+element by element (`home, foreign = self._fenced_world(tmp_path, ...)`); a
+helper whose returns disagree in kind stays opaque. `self.` / `cls.` /
+`ClassName.` receivers and bare names reach them, nothing else.
+
+Known misses: a path reached only through a fixture (module or conftest), an
+attribute (`self.lock`), a helper from another module, or a helper whose path
+arrives through a parameter not named `tmp_path` / `tmpdir`; `%` / `.format()`
+of a path; `p.as_posix() in logged` (also red on Windows when the product
+logged `str(p)` — which spelling the product used is not in the test).
+
+Same mechanism, not detected: `str()` of an `OSError` built with a filename
+(`PermissionError(13, msg, path)`) renders that filename with repr, so
+`str(path) in str(exc)` is red on Windows the same way. Measured 2026-09-19: 20
+such constructions in tests, 11 in apps, none red on Windows CI 35426157867 —
+named here, not built.
+
+Fix — compare against the logged arguments, never the call's repr:
+```python
+logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+assert str(lock) in logged
+```
+
+Corpus is `tests/**/*.py` — a test-side shape, in a lane the scored audit never
+walks. Measured at introduction (2026-09-18): the three incident lines at
+bdd60273, 0 after flow's cure (c0fedb17), 0 elsewhere in 570 test files. A
+name-guessing arm (`*_path`, `*_dir`, `*lock` params, `self.*`) added 0; an
+any-operand arm added 14 lines, all literal text with no backslash (verbs,
+signatures, `"cp /branch/..."` steps) — 0 of 14 real, so neither shipped.
+
+Widened 2026-09-19 after CI 35426157867 (memory's marker-7 test, the paths
+returned by a helper): of 19 sinks with a repr haystack and an opaque needle,
+2 needles (one line) were paths — both memory's — and 17 were words or counts.
+Same-module helper returns convert exactly those 2; the fleet stays at 0 lines
+across 570 test files with 238 helpers now read. A name-guessing arm would have
+caught `home` but not `foreign`, and fixture reading converts none of the 19.
+Path needles into haystacks the pass cannot read: 105, of which 9 sit in a
+function that touches `call_args`; all 9 read the real args (the cure).
+
 ---
 
 ## Code Examples

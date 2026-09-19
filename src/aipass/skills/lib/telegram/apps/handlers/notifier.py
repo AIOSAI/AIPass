@@ -53,7 +53,7 @@ def send_telegram_notification(
     Returns:
         True if sent successfully, False otherwise
     """
-    # Telegram is retired (Patrick ruling 2026-09-14) and switched off. This door
+    # Telegram is retired (the owner's ruling 2026-09-14) and switched off. This door
     # is imported directly - @daemon's lifecycle pings call it in-process and
     # never pass the runner's gate, and they were still being delivered - so it
     # asks the switch itself, as machine_vitals does. Off, or a switch state that

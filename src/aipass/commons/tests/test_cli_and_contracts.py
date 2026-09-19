@@ -242,7 +242,7 @@ def test_route_command_returns_bool():
 
 
 # ===========================================================================
-# Exit Status: a printed refusal exits non-zero (Patrick's ruling 2026-09-07)
+# Exit Status: a printed refusal exits non-zero (the owner's ruling 2026-09-07)
 # ===========================================================================
 
 

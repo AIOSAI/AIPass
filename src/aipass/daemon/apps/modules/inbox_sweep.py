@@ -14,7 +14,7 @@ inbox stays invisible indefinitely. This sweep looks at every branch mailbox
 and wakes the owner of any inbox holding NEW mail older than 24h.
 
 HAND TOOL ONLY since 2026-09-10 (DPLAN-0337 R2). Nothing scheduled calls this:
-Patrick deleted the daily 09:00 job - up to five wakes a morning was token
+The owner deleted the daily 09:00 job - up to five wakes a morning was token
 waste, and the nightly rounds (drone @daemon rotation) now take each citizen's
 inbox to zero, one citizen a night. The command stays for anyone to run by hand;
 --dry-run is the cheap look.

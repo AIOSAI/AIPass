@@ -1196,7 +1196,7 @@ class TestAutoNamer:
 
 class TestPickerOffersChatsNotProcesses:
     """The 2026-08-18 loss: Ctrl+C removes the dead chat's session file, so the
-    conversation Patrick wanted was the one thing a PID list could not show —
+    conversation the owner wanted was the one thing a PID list could not show —
     while three bg leftovers were offered as if they were his chats."""
 
     def _boot(self, tmp_path, live, choice, projects_root=None):

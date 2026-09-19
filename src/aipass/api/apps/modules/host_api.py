@@ -17,7 +17,7 @@ Per FPLAN-0411's D0 line, this branch owns the pipe and never the meaning: the
 server carries transport, auth and protocol, and every future read or verb is a
 pass-through to the branch that owns the data or the machinery.
 
-The loopback gate has been open since 2026-08-14, Patrick's ruling on the Phase 5
+The loopback gate has been open since 2026-08-14, the owner's ruling on the Phase 5
 security review: the server binds one address this machine holds, never a
 wildcard. What the help says about it is read from LOOPBACK_ONLY, not written here.
 

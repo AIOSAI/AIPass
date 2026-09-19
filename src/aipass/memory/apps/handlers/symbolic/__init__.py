@@ -6,7 +6,7 @@
 # Category: memory/handlers/symbolic
 #
 # CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-08-14): PARKED by Patrick's ruling — implementation moved to
+#   - v1.0.0 (2026-08-14): PARKED by the owner's ruling — implementation moved to
 #     tests/parked/symbolic_20260814/, this package now refuses on import
 #   - v0.1.0 (2026-02-04): Initial version - Fragmented Memory Phase 1
 # =============================================
@@ -21,7 +21,7 @@ WHY THIS IS PARKED
     ``Delete`` without recording what was removed or why — an unauditable deletion
     in a memory system. The tier was never wired into any live lane (no hook entry,
     no caller in rollover/extractor/auto_process/search/verify), so nothing depends
-    on it. Patrick's ruling, 2026-08-14: park it, revivable, and point at the piece
+    on it. The owner's ruling, 2026-08-14: park it, revivable, and point at the piece
     that is actually active.
 
 WHERE THE ACTIVE PIECE IS
@@ -51,7 +51,7 @@ which says nothing about why; this one says who parked it, when, and what to use
 """
 
 _PARKED_MESSAGE = (
-    "The symbolic fragments tier is PARKED (Patrick's ruling, 2026-08-14) and cannot be imported.\n"
+    "The symbolic fragments tier is PARKED (the owner's ruling, 2026-08-14) and cannot be imported.\n"
     "  Why:    unused tier; the Agent Memory Atlas review (2026-08-14) flagged its AUDN\n"
     "          deduplicator for acting on an LLM Delete verdict with no record of what\n"
     "          was removed or why. Parked, not removed.\n"

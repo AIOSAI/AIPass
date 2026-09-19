@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for the apps.modules package gateway re-exports
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-19
 # =============================================
 
 """Tests for spawn's modules-package gateway (DPLAN-0319 wave 3).
@@ -92,6 +92,34 @@ class TestGatewayImportPath:
         assert result.returncode == 0, f"gateway refused an outside caller:\n{result.stderr}"
         assert result.stdout.split() == ["citizen", "True"]
 
+    def test_the_docs_page_door_is_public_and_answers_an_outside_caller(self, tmp_path):
+        """@seedgo's docs_page render reads the skeleton through this door (DPLAN-0351)."""
+        from aipass.spawn.apps import modules
+
+        assert "docs_page_template" in modules.__all__
+
+        probe = tmp_path / "probe_docs_page_from_outside.py"
+        probe.write_text(
+            textwrap.dedent(
+                """
+                from aipass.spawn.apps.modules import docs_page_template
+
+                print(docs_page_template().splitlines()[0])
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
+
+        result = subprocess.run(
+            [sys.executable, str(probe)],
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+
+        assert result.returncode == 0, f"the docs page door refused an outside caller:\n{result.stderr}"
+        assert result.stdout.strip() == "[<- Back to the README](../README.md)"
+
 
 # =============================================================================
 # Re-export, never a reimplementation
@@ -112,6 +140,35 @@ class TestGatewayIsTheHandlerItself:
         from aipass.spawn.apps.handlers.class_registry import refuse_legacy_class as handler
 
         assert gateway is handler
+
+    def test_docs_page_template_is_the_handler_callable(self):
+        from aipass.spawn.apps.modules import docs_page_template as gateway
+        from aipass.spawn.apps.handlers.docs_page import docs_page_template as handler
+
+        assert gateway is handler
+
+    def test_docs_page_template_reads_the_file_on_every_call(self, tmp_path, monkeypatch):
+        """No cached copy: an edit to the skeleton reaches the next render unchanged."""
+        from aipass.spawn.apps.handlers import docs_page
+        from aipass.spawn.apps.modules import docs_page_template
+
+        skeleton = tmp_path / "docs_page.md"
+        monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", skeleton)
+
+        skeleton.write_text("# First\n", encoding="utf-8")
+        assert docs_page_template() == "# First\n"
+        skeleton.write_text("# Second\n", encoding="utf-8")
+        assert docs_page_template() == "# Second\n"
+
+    def test_docs_page_template_raises_when_the_skeleton_is_gone(self, tmp_path, monkeypatch):
+        """Unreachable is said, never papered over with a fallback shape."""
+        from aipass.spawn.apps.handlers import docs_page
+        from aipass.spawn.apps.modules import docs_page_template
+
+        monkeypatch.setattr(docs_page, "DOCS_PAGE_TEMPLATE", tmp_path / "absent.md")
+
+        with pytest.raises(OSError):
+            docs_page_template()
 
 
 class TestSignaturesAreStable:
@@ -138,6 +195,13 @@ class TestSignaturesAreStable:
         assert param.default is inspect.Parameter.empty
         assert param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
         assert param.annotation == (str | None), "None must stay callable — seedgo passes a missing class straight in"
+        assert sig.return_annotation is str
+
+    def test_docs_page_template_signature(self):
+        from aipass.spawn.apps.modules import docs_page_template
+
+        sig = inspect.signature(docs_page_template)
+        assert list(sig.parameters) == [], "seedgo calls the door bare on every render"
         assert sig.return_annotation is str
 
 

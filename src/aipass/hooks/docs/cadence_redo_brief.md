@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Cadence REDO brief — DPLAN-0200 WS-B (FPLAN-0249 reopen)
 
 Your cadence build passed 435 tests but is **BROKEN in the live environment** — confirmed by direct observation + 3 research sub-agents. The 435 tests lied because they modeled the **wrong execution model**. Fix-forward: commit 2bccf03 stays, build on top, no history surgery.
@@ -15,7 +17,7 @@ The counter must advance **exactly once per real user turn** regardless of how m
 - **STDIN FIELDS (corrected — the doc is WRONG):** UserPromptSubmit stdin = `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `prompt`. The field is `prompt`, NOT `user_prompt`; `session_id` IS present. Thread the token from `engine.py`'s parsed dict into `should_fire(loader_name, hook_data)`. Keep the `session_id`-keyed /tmp filename as the partition key (already correct). The `_turn` module cache may remain as an intra-process micro-opt but must NOT be the dedup authority.
 - **Correct cadence_investigation.md** outdated claims (user_prompt, no-session_id, single-process).
 
-## FIX 2 — PRAX-VISIBLE FIRE/SKIP LOGGING (Patrick wants to SEE it in the monitor)
+## FIX 2 — PRAX-VISIBLE FIRE/SKIP LOGGING (the owner wants to SEE it in the monitor)
 Cadence already imports prax `system_logger`, and `system_logs/hooks_cadence.log` is ALREADY tailed live by `drone @prax monitor run` as `[HOOKS]`. The gap: `should_fire` logs nothing on the decision. Emit ONE structured INFO line at the `should_fire` choke point (covers all loaders, one site):
 
 ```
@@ -24,10 +26,10 @@ Cadence already imports prax `system_logger`, and `system_logs/hooks_cadence.log
 
 Use `.info` (SystemLogger has no `.debug`). ALSO gate/dedup the "counter reset" log — it spammed ~8x per cluster; confirm PreCompact reset fires EXACTLY once and logs once.
 
-## FIX 3 — ACTION-GATED SOUND (the false signal Patrick HEARD)
-Right now `speak("global prompt")` / `speak("branch prompt")` is the FIRST line of each loader, BEFORE the `should_fire` check — so piper announces every turn even when the loader SKIPS injection. The voice lies. Patrick's rule: **if global/branch SKIP, they must be SILENT — sound ONLY on actual injection.**
+## FIX 3 — ACTION-GATED SOUND (the false signal the owner HEARD)
+Right now `speak("global prompt")` / `speak("branch prompt")` is the FIRST line of each loader, BEFORE the `should_fire` check — so piper announces every turn even when the loader SKIPS injection. The voice lies. The owner's rule: **if global/branch SKIP, they must be SILENT — sound ONLY on actual injection.**
 
-Build the **system-wide** version (Patrick wants it right for ALL hooks): handlers return an explicit `sound` key in their result dict, e.g. `{"stdout": content, "sound": "global prompt", "exit_code": 0}`; the engine plays it at `engine.py:208` inside the `if result["stdout"]:` block (or whenever the `sound` key is present) — ONE integration point, every hook auto action-gated + self-identifying. Remove the scattered leading `speak()` calls from the loaders. Preserve the gates/notifications that legitimately emit empty stdout (let them set the `sound` key explicitly). `is_muted()` still short-circuits.
+Build the **system-wide** version (the owner wants it right for ALL hooks): handlers return an explicit `sound` key in their result dict, e.g. `{"stdout": content, "sound": "global prompt", "exit_code": 0}`; the engine plays it at `engine.py:208` inside the `if result["stdout"]:` block (or whenever the `sound` key is present) — ONE integration point, every hook auto action-gated + self-identifying. Remove the scattered leading `speak()` calls from the loaders. Preserve the gates/notifications that legitimately emit empty stdout (let them set the `sound` key explicitly). `is_muted()` still short-circuits.
 
 Sound architecture for reference: `hooks/apps/sound.py` `speak()`/`play()` → piper → aplay; mute flag `/tmp/aipass-hooks-muted`.
 

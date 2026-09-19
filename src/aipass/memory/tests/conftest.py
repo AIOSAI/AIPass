@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/conftest.py
 # Date: 2026-03-24
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: memory/tests
 # =============================================
 
@@ -33,6 +33,10 @@ from unittest.mock import MagicMock
 # safe and lets mock_infrastructure measure the true sandbox off the live service.
 from aipass.prax import json_handler as _prax_json_service
 
+# The write fence, captured once at collection so its logger is the real one and
+# no test's sys.modules stand-in can shadow it (see the fixture below).
+from aipass.memory.apps.handlers import write_fence as _write_fence
+
 # The branch shim's own file, so the service can resolve memory's json directory
 # the way the shim does, without importing (and caching) the memory json package
 # at collection.
@@ -41,6 +45,24 @@ _SHIM_FILE = str(Path(__file__).resolve().parents[1] / "apps" / "handlers" / "js
 # Nothing under .archive/ is a test: the old handler and the subsumed tests live
 # there as gitignored disposal (DPLAN-0325). Keep pytest from discovering them.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture(autouse=True)
+def _the_write_fence_stands_at_pytests_temp_root(tmp_path_factory, monkeypatch):
+    """Point the write fence at pytest's base temp dir for every test.
+
+    Production has exactly one root: the AIPass checkout this code lives in.
+    Almost every test here builds its branches under ``tmp_path``, which is
+    OUTSIDE that root, so a fence reading the real root would refuse them all.
+    The base temp dir holds every ``tmp_path`` this process hands out, so tmp
+    writes pass and a test that writes the real repo is REFUSED — that is the
+    hygiene the fence exists for, not a false positive. A test that trips it is
+    reported, never cured by widening the fence.
+
+    The fence's own pins narrow this further to a fake root inside
+    ``tmp_path``; their monkeypatch runs after this one and wins.
+    """
+    monkeypatch.setattr(_write_fence, "ROOT", tmp_path_factory.getbasetemp().resolve())
 
 
 @pytest.fixture(autouse=True)

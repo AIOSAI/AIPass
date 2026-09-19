@@ -122,7 +122,7 @@ def feed_file(repo_root: Path | None = None) -> Path:
             if (parent / marker).exists():
                 return repo_root / resolved.relative_to(parent)
 
-    # NO FALLBACK (Patrick's ruling, 2026-08-21). Returning the live path here
+    # NO FALLBACK (the owner's ruling, 2026-08-21). Returning the live path here
     # would hand a caller who explicitly asked for `repo_root` the PRODUCTION
     # feed instead — the exact defect fixed earlier the same evening, where two
     # tests read the real 216-line feed from inside tmp_path. A warning does not

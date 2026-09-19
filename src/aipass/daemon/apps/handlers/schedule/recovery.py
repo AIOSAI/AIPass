@@ -9,11 +9,11 @@
 """
 Schedule recovery — what the scheduler owes the fleet after it was away.
 
-DPLAN-0332, Patrick 2026-09-08. The scheduler's timer was uninstalled for 23
+DPLAN-0332, The owner 2026-09-08. The scheduler's timer was uninstalled for 23
 hours on 09-07; @vera's 10:00 window and @daemon's 09:00 inbox-sweep closed
 unrun and nothing noticed, because a MISSED line needs a tick to write it.
 
-THE RULE THIS FILE ENCODES, in Patrick's words: "a missed schedule gets
+THE RULE THIS FILE ENCODES, in the owner's words: "a missed schedule gets
 identified, added to a queued run, then reissued one by one, not all at once -
 imagine 10 missed events all firing at once." And: "down 10 days, Vera misses
 10 events - she does ONE, is told we have been away 10 days with the list, and
@@ -299,7 +299,7 @@ QUEUE_FIELD = "catch_up_queue"
 #: Runstate key holding the one catch-up currently in flight fleet-wide.
 IN_FLIGHT_FIELD = "catch_up_in_flight"
 
-#: Patrick's ceiling: "I think 60min cool down then it retires the next." The
+#: The owner's ceiling: "I think 60min cool down then it retires the next." The
 #: COMPLETION of the previous catch-up is the trigger; this is the backstop for
 #: when nothing ever reports (dead monitor, reboot mid-drain).
 DRAIN_CEILING_MINUTES = 60
@@ -326,7 +326,7 @@ def catch_up_enabled(schedule: dict) -> bool:
 def _within_max_age(schedule: dict, instant: str, now: datetime) -> bool:
     """Is this missed window young enough to be worth firing?
 
-    Unlimited by default: Patrick's ten-day case wants exactly one wake however
+    Unlimited by default: The owner's ten-day case wants exactly one wake however
     long it has been. A job that sets the bound is saying its own late run stops
     being useful after N hours.
     """
@@ -455,7 +455,7 @@ def _branch_is_awake(owner: str) -> bool:
 def drain_ready(runstate: dict, now: Optional[datetime] = None) -> Optional[dict]:
     """The one catch-up entry that may fire on this tick, or None.
 
-    THE TWO GATES, both of them Patrick's. One catch-up in flight fleet-wide,
+    THE TWO GATES, both of them the owner's. One catch-up in flight fleet-wide,
     because "imagine 10 missed events all firing at once". And the next fires
     when the previous COMPLETED, with 60 minutes as the ceiling rather than the
     rhythm — his event-driven rule of 09-07.
@@ -532,7 +532,7 @@ def record_attempt(entry: dict, now: Optional[datetime] = None) -> bool:
 # THE WAKE HEADER — why you are awake
 # =============================================
 #
-# Patrick, 2026-09-08: "temporal awareness is a thing ... in the information
+# The owner, 2026-09-08: "temporal awareness is a thing ... in the information
 # provided to the agent say: you have missed 10 days, the machine was off. A
 # reboot is different." And the principle this adds to the culture: THE SYSTEM
 # INFORMS, THE AGENT REASONS. The header states facts about time and stops. It
@@ -594,7 +594,7 @@ def catch_up_header(entry: dict, job: dict, state: dict, now: Optional[datetime]
 
     The last sentence is the load-bearing one. Without "do not replay each day"
     an agent handed ten dates may reasonably try to do ten days of work, which
-    is the exact failure Patrick named: "it's not gonna just run each one".
+    is the exact failure the owner named: "it's not gonna just run each one".
     """
     if now is None:
         now = datetime.now()

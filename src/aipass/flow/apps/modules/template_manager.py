@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_manager.py
 # Description: Template registry management module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-18
-# Modified: 2026-03-18
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -70,6 +70,11 @@ MODULE_NAME = "template_manager"
 # these — a command we do not own must fall through to the next module, help
 # flag or not.
 TEMPLATE_COMMANDS = ("templates", "register", "unregister", "scan")
+
+# What the help table prints for this module. Read by flow.py's module_verbs():
+# the filename-derived short name would be "template", a verb that does not
+# exist, because this module owns four verbs rather than one.
+COMMAND_VERBS = TEMPLATE_COMMANDS
 
 # =============================================
 # INTROSPECTION

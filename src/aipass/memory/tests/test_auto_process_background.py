@@ -11,7 +11,7 @@ Tests for moving auto_process off the prompt lane (DPLAN-0295 item 1).
 
 auto_process ran SYNCHRONOUSLY on the first UserPromptSubmit of every session —
 measured 78.5s to 120.5s with a backlog, and the cause of the 30s-timeout losses
-Patrick hit live. Its stdout is always empty, so by Patrick's test (compass #272)
+The owner hit live. Its stdout is always empty, so by the owner's test (compass #272)
 it never belonged on the prompt lane at all.
 
 Covers:

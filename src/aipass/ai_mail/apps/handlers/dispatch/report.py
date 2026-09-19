@@ -10,7 +10,7 @@
 
 v1.0.0 — FPLAN-0452 P1
 
-Patrick's rules 3 and 4 (DPLAN-0317): the COMPLETING AGENT pushes the news
+The owner's rules 3 and 4 (DPLAN-0317): the COMPLETING AGENT pushes the news
 outward, and what it pushes is a REPORT, not a ping — which agent, when
 dispatched, how long it took, whether it wrote its memories, what mail it sent
 and to whom.
@@ -121,7 +121,7 @@ def emails_sent(branch_path: Path, dispatch_id: Optional[str]) -> List[Dict[str,
     was live when it was written, so attribution is by AUTHORSHIP. The earlier
     proposal — scanning ``sent/`` by mtime against the run window — attributes
     by TIME, which credits the agent with anything else that wrote the mailbox
-    during its run. Patrick's ruling, on @ai_mail's reasoning: two sources
+    during its run. The owner's ruling, on @ai_mail's reasoning: two sources
     answering one question is the shape that cost $1.41 on 2026-08-20.
 
     Returns an empty list when *dispatch_id* is None — an unregistered run

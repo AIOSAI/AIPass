@@ -162,7 +162,7 @@ def test_drone_auth_has_no_hardcoded_caller_list():
     The old ALLOWED_CALLERS constant read as though seedgo and spawn held git
     write — they never did; verify_git_access ignored it. Its absence is
     load-bearing: this test failing means someone reintroduced a name-based
-    gate, which is exactly the special-casing the Patrick ruling removed.
+    gate, which is exactly the special-casing the owner ruling removed.
     """
     from aipass.drone.apps.plugins.devpulse_ops import auth
 

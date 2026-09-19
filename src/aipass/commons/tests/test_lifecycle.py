@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.commons.apps.handlers.database import db as db_module
 from aipass.commons.apps.handlers.database.db import init_db, close_db
 
 
@@ -311,3 +312,65 @@ class TestFullLifecycle:
         assert mention is not None
         assert mention["mentioner_agent"] == "ALICE"
         assert mention["post_id"] == post_id
+
+
+# ===========================================================================
+# Branch-root resolution — .trinity/ or .aipass/ marker walk (P1, @devpulse)
+#
+# .trinity/ is gitignored, so a fresh clone has no branch-root marker,
+# _find_branch_root() returns None, and _get_db_path() used to silently fall
+# through to ~/.aipass/commons.db — a wrong-path SUCCESS. Fix: accept the
+# git-tracked .aipass/ as a co-marker, and fail loudly (CommonsRootNotFound)
+# instead of falling back to the home directory.
+# ===========================================================================
+
+
+class TestBranchRootResolution:
+    """Covers the fresh-clone marker walk and the fail-honestly behaviour."""
+
+    def test_resolves_with_aipass_marker_only(self, tmp_path):
+        """Fresh clone: only .aipass/ present (no .trinity/) must still resolve."""
+        (tmp_path / ".aipass").mkdir()
+        start = tmp_path / "apps" / "handlers" / "database"
+        start.mkdir(parents=True)
+
+        result = db_module._find_branch_root(start)
+        assert result == tmp_path.resolve()
+
+    def test_resolves_with_trinity_marker_only(self, tmp_path):
+        """No regression: .trinity/ alone still resolves."""
+        (tmp_path / ".trinity").mkdir()
+        start = tmp_path / "apps" / "handlers" / "database"
+        start.mkdir(parents=True)
+
+        result = db_module._find_branch_root(start)
+        assert result == tmp_path.resolve()
+
+    def test_no_marker_in_ancestry_returns_none(self, tmp_path):
+        """No .trinity/ and no .aipass/ anywhere in the ancestry -> None."""
+        start = tmp_path / "deep" / "nested" / "dir"
+        start.mkdir(parents=True)
+
+        result = db_module._find_branch_root(start)
+        assert result is None
+
+    def test_get_db_path_none_without_markers_or_env(self, monkeypatch):
+        """No resolvable root and AIPASS_ROOT unset -> _get_db_path() is None."""
+        monkeypatch.delenv("AIPASS_ROOT", raising=False)
+        monkeypatch.setattr(db_module, "_find_branch_root", lambda start_path=None: None)
+
+        assert db_module._get_db_path() is None
+
+    def test_get_db_raises_commons_root_not_found(self, monkeypatch):
+        """get_db() fails honestly (no home-directory fallback) when the root
+        cannot be resolved, naming both markers and the AIPASS_ROOT override."""
+        monkeypatch.delenv("AIPASS_ROOT", raising=False)
+        monkeypatch.setattr(db_module, "DB_PATH", None)
+
+        with pytest.raises(db_module.CommonsRootNotFound) as exc_info:
+            db_module.get_db()
+
+        message = str(exc_info.value)
+        assert ".trinity" in message
+        assert ".aipass" in message
+        assert "AIPASS_ROOT" in message

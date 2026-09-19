@@ -8,7 +8,7 @@
 
 """Owner-protected files: the ``.updateignore`` contract at a BRANCH root.
 
-Patrick's ruling (2026-09-09 00:41): *"maybe a .spawnignore just like
+The owner's ruling (2026-09-09 00:41): *"maybe a .spawnignore just like
 .backupignore and .gitignore, same fashion? project owners decide what update
 skips."* It shipped under the name ``.updateignore`` because **two doors honour
 one file**: ``aipass init update`` at project roots (DPLAN-0335, landed

@@ -1,6 +1,6 @@
 """Tests for project_scope — "a project is its register".
 
-The rule under test is Patrick's ruling of 2026-08-22: a directory is a project
+The rule under test is the owner's ruling of 2026-08-22: a directory is a project
 root iff it holds a ``<NAME>_REGISTRY.json`` carrying a ``branches`` key.
 Neither half is decoration — the live tree contains files that match the name
 and are not registers, and projects that hold a register and nothing else.

@@ -4,7 +4,7 @@ The dev container (`aipass-test:latest`) exists to test the CURRENT DEV BRANCH a
 cold machine: real GitHub clone, one-command install, no local state. The runner is
 `tests/docker_dev_verify.sh`; this file is the contract for what a run must prove.
 
-**Discipline (Patrick's rules, 2026-08-28):**
+**Discipline (the owner's rules, 2026-08-28):**
 - Trust nothing — pytest green is NEVER proof; the container measures reality.
 - Focus the target test, then have an independent sub-agent verify the same claim.
 - Iterate: run → fix → push → run again. The script clones from GitHub, so every
@@ -12,7 +12,7 @@ cold machine: real GitHub clone, one-command install, no local state. The runner
 - When a check goes red, find the one root cause before counting the reds
   (one bootstrap refusal once cascaded into 8 FAILs).
 
-## The one flow (Patrick's ruling 2026-08-28: "we can't be making up different flow every test"; standardized 2026-09-07)
+## The one flow (the owner's ruling 2026-08-28: "we can't be making up different flow every test"; standardized 2026-09-07)
 
 There is exactly one docker test flow. Every container test in this repo is this
 flow with a different `/verify.sh`; nobody invents a second one per test.
@@ -121,4 +121,4 @@ docker run --rm -v "$AIPASS_HOME/tests/docker_dev_verify.sh":/verify.sh:ro \
 - [ ] Fire an independent sub-agent (opus/sonnet, never fable) to re-run the
       container and verify the passport/memory claims from scratch — the run
       that produced the green does not get to be its own verifier.
-- [ ] Only then report satisfaction; Patrick does his live tests after that.
+- [ ] Only then report satisfaction; the owner does his live tests after that.

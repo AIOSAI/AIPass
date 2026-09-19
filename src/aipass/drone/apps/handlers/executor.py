@@ -26,14 +26,14 @@ from aipass.drone.apps.handlers.json import json_handler
 from aipass.prax import logger
 
 
-# Raised 30 -> 60 on 2026-08-13 (Patrick's ruling). Two known runners finish
+# Raised 30 -> 60 on 2026-08-13 (The owner's ruling). Two known runners finish
 # around 31s and were tripping the old default. The evening before showed
 # fleet-wide what a quiet default costs: a 30s UserPromptSubmit timeout
 # discarded a hooks context for weeks because the real work legitimately took
 # longer (DPLAN-0285). A default that kills work at N when work takes N+1 fails
 # silently, which is the expensive way to fail.
 #
-# Raised 60 -> 600 on 2026-08-27 (Patrick's ruling: "it is configured wrong —
+# Raised 60 -> 600 on 2026-08-27 (The owner's ruling: "it is configured wrong —
 # it should not be timing out before it completes; processing time is fine,
 # increase the allowed timeout so things can actually complete"). Two live
 # kills in one morning made the same point twice:

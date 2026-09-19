@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "description": "Single source of truth for provider-level settings per CLI. Doctor reads this to verify user setup.",
+  "version": "1.1.0",
+  "description": "Single source of truth for provider-level settings per CLI. Doctor reads this to verify user setup. cli.<cli>.settings is the scalar slot: top-level keys of the PERSONAL settings file that AIPass wants, merged additively by the wire verb — an explicit human value is reported, never overwritten.",
   "cli": {
     "claude": {
       "hooks": [
@@ -154,6 +154,9 @@
         "AIPASS_HOME": "{{REPO_ROOT}}",
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         "CLAUDE_CODE_DISABLE_AGENT_VIEW": "1"
+      },
+      "settings": {
+        "includeGitInstructions": false
       },
       "permissions": {
         "deny": [

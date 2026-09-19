@@ -829,7 +829,7 @@ else
     echo "Skipping Claude hooks (bridge not found at src/aipass/hooks/apps/handlers/bridges/claude.py)"
 fi
 
-# --- Enroll this install in the hook trust registry (Patrick's ruling, compass #221) ---
+# --- Enroll this install in the hook trust registry (the owner's ruling, compass #221) ---
 # The hook engine only loads .aipass/hooks.json for projects listed in
 # ~/.aipass/trusted_projects.json. That gate exists to stop a FOREIGN project's
 # hostile hooks.json from running — it was never meant to distrust the config

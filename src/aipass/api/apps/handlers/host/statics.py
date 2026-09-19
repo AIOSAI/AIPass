@@ -34,7 +34,7 @@ anything.
 For a normal document that is a stale page. For THIS document it is worse: the
 entry is un-hashed and it NAMES the content-hashed bundles. A stale entry
 therefore fetches OLD assets, correctly and quietly, and the app looks like it
-simply did not deploy. Patrick hit it live on 2026-08-19 — his first reload
+simply did not deploy. The owner hit it live on 2026-08-19 — his first reload
 served a round-3 bundle and an acceptance round recorded a false FAIL. @baud
 measured the missing header; the cost landed on someone else.
 

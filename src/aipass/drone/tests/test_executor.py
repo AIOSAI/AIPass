@@ -491,7 +491,7 @@ class TestShellSecurity:
 class TestDefaultTimeoutValue:
     """The default is 600s, pinned in every layer that can express it.
 
-    Patrick's ruling 2026-08-27: *"it is configured wrong — it should not be
+    The owner's ruling 2026-08-27: *"it is configured wrong — it should not be
     timing out before it completes; processing time is fine, increase the
     allowed timeout so things can actually complete."* Two live kills in one
     morning: a fleet-wide trinity push died at the 60s default mid-alphabet
@@ -668,7 +668,7 @@ class TestTimeoutErrorMessage:
 
 
 class TestOutputExtendsLife:
-    """Patrick's ruling 2026-08-27: legitimate work completes, hung work dies.
+    """The owner's ruling 2026-08-27: legitimate work completes, hung work dies.
 
     The shape: generous base + output-extends-life + hard ceiling. Nothing is
     killed before the base. A child still talking when the base expires buys

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -115,8 +115,25 @@ def _entry(number: int, **fields) -> dict:
     return base
 
 
+_NUMBER = {"type": "int", "required": True}
+_DATE = {"type": "str", "required": True, "max_chars": 10}
+_TAGS = {"type": "list[str]", "required": False, "max_items": 10, "max_chars": 120}
+
+
+def _fields(**text: dict) -> dict:
+    """A closed field map in the shape of entry_limits.entry_types.<type>.fields."""
+    return {"number": _NUMBER, "date": _DATE, **text}
+
+
 def _config(max_chars: int = 300, todos_count: int = 10) -> dict:
-    """Minimal config with the four entry types the standard names and the todo pad size."""
+    """Minimal config with the four entry types the standard names and the todo pad size.
+
+    Each type carries its closed ``fields`` map, because that map is the only
+    source of an entry's shape since 1.2.0 of the push: without it the push
+    falls back to the module-level rules cache, and a test then passes or fails
+    on whether an earlier test on the same xdist worker happened to warm that
+    cache from the real config (macOS run 35050261305, class-scoped worker).
+    """
     return {
         "rollover": {
             "defaults": {
@@ -131,10 +148,47 @@ def _config(max_chars: int = 300, todos_count: int = 10) -> dict:
         },
         "entry_limits": {
             "entry_types": {
-                "sessions": {"container": "sessions", "field": "summary", "max_chars": max_chars, "kind": "list"},
-                "key_learnings": {"container": "key_learnings", "field": "value", "max_chars": 200, "kind": "list"},
-                "todos": {"container": "todos", "field": "task", "max_chars": 100, "kind": "list"},
-                "observations": {"container": "observations", "field": "note", "max_chars": 300, "kind": "list"},
+                "sessions": {
+                    "container": "sessions",
+                    "field": "summary",
+                    "max_chars": max_chars,
+                    "kind": "list",
+                    "fields": _fields(
+                        summary={"type": "str", "required": True, "max_chars": max_chars},
+                        status={"type": "str", "required": True, "max_chars": 40},
+                        tags=_TAGS,
+                    ),
+                },
+                "key_learnings": {
+                    "container": "key_learnings",
+                    "field": "value",
+                    "max_chars": 200,
+                    "kind": "list",
+                    "fields": _fields(
+                        key={"type": "str", "required": True, "max_chars": 80},
+                        value={"type": "str", "required": True, "max_chars": 200},
+                    ),
+                },
+                "todos": {
+                    "container": "todos",
+                    "field": "task",
+                    "max_chars": 100,
+                    "kind": "list",
+                    "fields": _fields(
+                        task={"type": "str", "required": True, "max_chars": 100},
+                        priority={"type": "str", "required": False, "max_chars": 10},
+                    ),
+                },
+                "observations": {
+                    "container": "observations",
+                    "field": "note",
+                    "max_chars": 300,
+                    "kind": "list",
+                    "fields": _fields(
+                        note={"type": "str", "required": True, "max_chars": 300},
+                        tags={**_TAGS, "required": True},
+                    ),
+                },
             },
             "per_branch": {},
         },
@@ -429,7 +483,7 @@ class TestTheMachineFrame:
         assert meta["created"] == tp._today()
 
     def test_managed_by_is_the_exact_branch_directory_name(self):
-        """Patrick's ruling, and what seedgo's checker compares against."""
+        """The owner's ruling, and what seedgo's checker compares against."""
         assert tp.build_doc_metadata({}, "local", "ai_mail")["managed_by"] == "ai_mail"
         assert tp.build_doc_metadata({}, "local", "aipass_site")["managed_by"] == "aipass_site"
 
@@ -1005,7 +1059,11 @@ class TestTodosMoveToTheBacklog:
     # -- the shape ---------------------------------------------------------------
 
     def test_the_canonical_todo_shape_has_no_status(self):
-        assert tp.ENTRY_RULES["todos"] == {
+        # Read from the config now, not from a literal in trinity_push
+        # (FPLAN-0593): the shape has one home and this is where the push
+        # picks it up. A `status` key reappearing in memory.config.json would
+        # fail here, which is the point.
+        assert tp.entry_rules("todos") == {
             "required": {"number": "int", "date": "str", "task": "str"},
             "optional": {"priority": "str"},
         }
@@ -1338,3 +1396,70 @@ class TestTodosMoveToTheBacklog:
 
         assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
         assert f"40 todo(s) moved to {backlog}" in note["summary"]
+
+
+# =============================================================================
+# THE SHAPE COMES FROM THE CONFIG (FPLAN-0593)
+# =============================================================================
+
+
+class TestEntryRulesReadTheConfig:
+    """ENTRY_RULES was a second copy of a contract that lives in memory.config.json.
+
+    Three copies of one shape — here, the config, and @seedgo's trinity_groups
+    — is three chances for a push to prune an entry the write gate would have
+    accepted. These pin that this module now derives its split rather than
+    holding one.
+    """
+
+    def test_every_section_derives_a_required_and_optional_split(self):
+        for section in ("sessions", "key_learnings", "todos", "observations"):
+            rules = tp.entry_rules(section)
+            assert rules is not None, section
+            assert set(rules) == {"required", "optional"}
+            assert "number" in rules["required"] and "date" in rules["required"]
+
+    def test_an_unknown_section_stays_unknown(self):
+        assert tp.entry_rules("nope") is None
+        assert tp.entry_problems("nope", {"number": 1}) == ["unknown section 'nope'"]
+
+    def test_a_resolved_type_definition_wins_over_the_global_config(self):
+        """The push hands its own caps in, so a per_branch override is honoured."""
+        cap_spec = {
+            "field": "task",
+            "max_chars": 100,
+            "fields": {
+                "number": {"type": "int", "required": True},
+                "date": {"type": "str", "required": True},
+                "task": {"type": "str", "required": True},
+                "colour": {"type": "str", "required": False},
+            },
+        }
+        rules = tp.entry_rules("todos", cap_spec)
+        assert rules is not None
+        assert rules["optional"] == {"colour": "str"}
+        entry = {"number": 1, "date": "2026-09-15", "task": "t", "colour": "red"}
+        assert tp.entry_problems("todos", entry, cap_spec) == []
+        # …and without that override the same entry is out of shape.
+        assert any("colour" in p for p in tp.entry_problems("todos", entry))
+
+    def test_the_todo_defect_walker_reads_the_same_derived_shape(self):
+        cap_spec = {
+            "field": "task",
+            "max_chars": 100,
+            "fields": {
+                "number": {"type": "int", "required": True},
+                "date": {"type": "str", "required": True},
+                "task": {"type": "str", "required": True},
+                "colour": {"type": "str", "required": False},
+            },
+        }
+        entry = {"number": 1, "date": "2026-09-15", "task": "t", "colour": "red"}
+        assert tp.todo_defect(entry, cap_spec) is None
+        assert tp.todo_defect(entry, {"field": "task", "max_chars": 100}) == tp.DEFECT_UNKNOWN
+
+    def test_the_global_fallback_is_cached_not_re_read_per_entry(self):
+        """734 entries must not be 734 config reads; the push path never touches it."""
+        tp._RULES_CACHE.clear()
+        assert tp.entry_rules("todos") is not None
+        assert set(tp._RULES_CACHE) == {"sessions", "key_learnings", "todos", "observations"}

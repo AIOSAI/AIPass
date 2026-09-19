@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
@@ -69,10 +69,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from aipass.prax import logger
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
-from aipass.memory.apps.handlers.json.memory_files import read_memory_file, write_memory_file
+from aipass.memory.apps.handlers.json.entry_limits import check_entry_shape, load_entry_limits
+from aipass.memory.apps.handlers.json.memory_files import read_memory_file, violation_line, write_memory_file
 from aipass.memory.apps.handlers.monitor import registry_scope
 
 MODULE_NAME = "todo_roll"
@@ -80,9 +81,21 @@ MODULE_NAME = "todo_roll"
 BACKUP_DIR = ".backup"
 TODO_DIR = "todo"
 BACKLOG_FILE = "backlog.json"
+# Where records past the ceiling go. A SIBLING of the backlog, not a deletion:
+# the backlog is the only copy of a rolled todo and is never vectorised, so
+# "trim" here means move deeper, exactly as the house rule says — rename or
+# move to an archive, never delete. Same document shape, so the file can be
+# read with the same reader and, if it ever needs to, poured back.
+ARCHIVE_FILE = "backlog.archive.json"
 MANAGED_BY = "memory"
 TRINITY_DIR = ".trinity"
 LOCAL_FILE = "local.json"
+
+# The entry type and container as memory.config.json spells them. Named rather
+# than inlined: the shape check reads the fleet's own config, and a typo here
+# would silently find no rules and report an illegal entry as clean.
+TODO_TYPE = "todos"
+TODO_CONTAINER = "todos"
 
 REASON_OVERFLOW = "overflow"
 REASON_NON_CANONICAL = "non-canonical"
@@ -443,7 +456,10 @@ def _write_document(path: Path, document: dict[str, Any]) -> str | None:
 
 
 def _ensure_parent(path: Path) -> str | None:
-    """Create *path*'s directory; returns the failure, or None."""
+    """Create *path*'s directory; returns the failure, or None. Never outside the AIPass root."""
+    refusal = write_fence.fence_write(path, lane="todo_roll")
+    if refusal is not None:
+        return refusal
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -567,11 +583,13 @@ def append_to_backlog(
         pad: The whole pad as it stands before the prune; its numbers reach ``high_water``.
 
     Returns:
-        ``{"success", "appended", "path", "error"}``. On failure the pad must
-        not be touched.
+        ``{"success", "appended", "archived", "path", "error"}``. On failure
+        the pad must not be touched. ``archived`` is how many records the trim
+        moved to the sibling archive on the way past, and is never a reason
+        this returns failure.
     """
     path = Path(backlog_path)
-    result: dict[str, Any] = {"success": False, "appended": 0, "path": path, "error": None}
+    result: dict[str, Any] = {"success": False, "appended": 0, "archived": 0, "path": path, "error": None}
     if reason not in REASONS:
         result["error"] = f"unknown roll reason '{reason}' - one of {', '.join(REASONS)}"
         return result
@@ -614,6 +632,137 @@ def append_to_backlog(
 
     result["success"] = True
     result["appended"] = len(records)
+
+    # Bound the working file at the one moment it grows. A failed trim NEVER
+    # fails the append: by here the records are safely on disk and the caller
+    # is about to prune the pad on the strength of that. The failure mode of a
+    # trim is "the backlog stays long", which is a state, not a loss.
+    trimmed = trim_backlog(path, branch_dir)
+    result["archived"] = trimmed["archived"]
+    if not trimmed["success"]:
+        logger.warning(f"[todo_roll] @{branch_dir} appended {len(records)}, backlog not trimmed: {trimmed['error']}")
+    return result
+
+
+def archive_path_for(backlog_path: Path) -> Path:
+    """The archive file that sits beside *backlog_path*."""
+    return Path(backlog_path).with_name(ARCHIVE_FILE)
+
+
+def trim_backlog(backlog_path: Path, branch_dir: str, *, ceiling: int | None = None) -> dict[str, Any]:
+    """Move the OLDEST records past *ceiling* out of the backlog and into its archive.
+
+    WHAT FALLS OFF THE END GOES SOMEWHERE. A backlog is the only copy of a
+    rolled todo — it is never vectorised, by a ruling this branch made and
+    @devpulse endorsed ("a todo in a vector is a debt nobody is billed for") —
+    so a trim that dropped records would delete the last copy of open work
+    nobody was told about. This moves them to :data:`ARCHIVE_FILE` instead.
+    Nothing is destroyed at any point, and the bound is on the WORKING file:
+    ``todo backlog`` stays readable while the history stays whole.
+
+    THE ORDER IS THE SAME CONTRACT AS THE ROLL. Append to the archive, replace
+    it atomically, read it back and compare every record — and only then write
+    the shortened backlog. A record may briefly sit in both files; it must
+    never sit in neither.
+
+    OLDEST IS FILE ORDER, not number. Records are appended in roll order, and
+    that is the only honest reading of "oldest" for a file whose entries carry
+    a ``rolled`` timestamp but whose todo numbers were never sequential across
+    branches.
+
+    ``high_water`` is NOT lowered by a trim: it is stamped from numbers, lives
+    in ``document_metadata`` and exists precisely so a number is never
+    re-issued after its record is gone from the working file.
+
+    NOT REACHABLE BY ``todo restore``. A restore reads the backlog only, so an
+    archived record cannot be put back on a pad by that verb. That is stated
+    rather than solved: at 100 records deep a todo is history, and building a
+    second restore lane is a decision for whoever needs one.
+
+    Args:
+        backlog_path: The backlog file.
+        branch_dir: The branch directory name, for a new archive's metadata.
+        ceiling: Records to keep; read from config when None. ``None`` from
+            config means NO TRIM — never a trim to zero.
+
+    Returns:
+        ``{"success", "archived", "kept", "archive", "error"}``. ``success``
+        is True when nothing needed doing.
+    """
+    path = Path(backlog_path)
+    archive = archive_path_for(path)
+    result: dict[str, Any] = {"success": True, "archived": 0, "kept": None, "archive": archive, "error": None}
+
+    keep = config_loader.get_backlog_ceiling() if ceiling is None else ceiling
+    if keep is None or isinstance(keep, bool) or not isinstance(keep, int) or keep < 1:
+        return result
+
+    current = read_backlog(path)
+    if current["error"] or not current["exists"]:
+        result["kept"] = 0 if not current["exists"] else None
+        if current["error"]:
+            result["success"] = False
+            result["error"] = current["error"]
+        return result
+
+    entries = list(current["entries"])
+    result["kept"] = len(entries)
+    if len(entries) <= keep:
+        return result
+
+    overflow = entries[: len(entries) - keep]
+    kept = entries[len(entries) - keep :]
+
+    stored = read_backlog(archive)
+    if stored["error"]:
+        result.update(success=False, error=f"archive unreadable at {archive}: {stored['error']}")
+        return result
+    document = (
+        copy.deepcopy(stored["document"])
+        if stored["exists"]
+        else {"document_metadata": {"managed_by": MANAGED_BY, "branch": branch_dir}, "entries": []}
+    )
+    owner = document["document_metadata"].get("branch")
+    if owner is not None and owner != branch_dir:
+        result.update(success=False, error=f"archive at {archive} belongs to '{owner}', not '{branch_dir}' - refused")
+        return result
+
+    expected = document["entries"] + overflow
+    document["entries"] = expected
+    failure = _ensure_parent(archive) or _write_document(archive, document)
+    if failure:
+        result.update(success=False, error=f"NOTHING TRIMMED - archive not written at {archive}: {failure}")
+        return result
+    mismatch = _verify_backlog(archive, expected, [], document["document_metadata"])
+    if mismatch:
+        logger.error(f"[todo_roll] Archive read-back failed at {archive}: {mismatch}")
+        result.update(success=False, error=f"NOTHING TRIMMED - archive read-back failed at {archive}: {mismatch}")
+        return result
+
+    shortened = copy.deepcopy(current["document"])
+    shortened["entries"] = kept
+    failure = _write_document(path, shortened) or _verify_backlog(
+        path, kept, [], shortened.get("document_metadata", {})
+    )
+    if failure:
+        logger.error(f"[todo_roll] @{branch_dir} {len(overflow)} record(s) archived, backlog not shortened: {failure}")
+        result.update(
+            success=False,
+            archived=len(overflow),
+            error=(
+                f"{len(overflow)} record(s) are in the archive but the backlog was NOT shortened ({failure}) - "
+                "they are in both files, never in neither"
+            ),
+        )
+        return result
+
+    result.update(archived=len(overflow), kept=len(kept))
+    logger.info(f"[todo_roll] @{branch_dir} archived {len(overflow)} backlog record(s) past {keep} to {archive}")
+    json_handler.log_operation(
+        "trim_backlog",
+        {"branch": branch_dir, "archived": len(overflow), "kept": len(kept), "ceiling": keep},
+        module_name=MODULE_NAME,
+    )
     return result
 
 
@@ -752,6 +901,39 @@ def _rendered_todos_meta(
     return meta, None
 
 
+def shape_problems(entry: Any, branch: str) -> list[str]:
+    """Every way *entry* sits outside the todo shape, one readable line per rule.
+
+    The backlog is the ONLY copy of a rolled todo and the contract forbids
+    reshaping it, so a record that was written before a rule existed — a
+    ``status`` field, a ``task`` over its cap — comes back verbatim and the
+    write gate refuses it. That refusal is correct and stays. What was missing
+    is what it SAYS: two seats hit this the same night and reshaped five records
+    by hand, because the only way to learn which field was wrong was to attempt
+    the write, read one refusal, fix one field and attempt again.
+
+    This is that check, run BEFORE anything is written, naming every broken rule
+    at once. It REPORTS ONLY. Whether an over-cap task should be cut to fit or
+    carried verbatim is an open question (todo 251) and is deliberately not
+    answered here: under either answer this text is the same, so the half that
+    does not depend on the ruling is the half that got built.
+
+    The rules come from ``entry_limits`` and the sentences from the write
+    gate's own renderer — a second copy of either would be a pre-flight check
+    that disagreed with the gate it is meant to predict.
+
+    Args:
+        entry: The todo as it would land on the pad.
+        branch: Branch directory name, for its per_branch caps.
+
+    Returns:
+        One line per violation, empty when the entry is legal.
+    """
+    limits = load_entry_limits(branch)
+    hits = check_entry_shape(TODO_TYPE, TODO_CONTAINER, "0", entry, limits)
+    return [violation_line(hit) for hit in hits]
+
+
 def restore_todo(
     branch: str,
     number: int,
@@ -833,6 +1015,20 @@ def restore_todo(
         tab_floor=floor_from_tab(data.get("todos_meta")),
     )
     restored = {key: (fresh if key == "number" else copy.deepcopy(value)) for key, value in record["entry"].items()}
+
+    # Pre-write: the gate would refuse this anyway, one field at a time. Refuse
+    # here instead, naming every broken rule at once and touching nothing.
+    problems = shape_problems(restored, target["name"])
+    if problems:
+        result["error"] = (
+            f"NOTHING RESTORED - #{number} is not the shape a todo may take: {'; '.join(problems)}. "
+            "The backlog is the only copy of it and is never reshaped by this verb, so the record stays "
+            "exactly as it is; the pad and the backlog are untouched. Write the work onto your pad as a "
+            "new todo in the shape above - the backlog keeps the original"
+        )
+        logger.warning(f"[todo_roll] @{target['name']} restore #{number} refused pre-write: {'; '.join(problems)}")
+        return result
+
     pad = dict(data)
     pad["todos"] = [restored] + list(todos)
     meta, problem = _rendered_todos_meta(target["name"], pad["todos"], backlog, data.get("todos_meta"))

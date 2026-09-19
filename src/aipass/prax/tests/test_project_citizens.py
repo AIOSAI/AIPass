@@ -11,7 +11,7 @@
 
 prax learned two shapes: ``src/aipass/*`` branches from AIPASS_REGISTRY.json,
 and external Vera-class projects under ``~/Projects/``. In-repo citizens at
-``projects/<proj>/src/<mod>/<name>`` were never learned, so Patrick's live
+``projects/<proj>/src/<mod>/<name>`` were never learned, so the owner's live
 ``monitor run baud`` answered "BAUD is not a known branch — nothing will be
 shown."
 

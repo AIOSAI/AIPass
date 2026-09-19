@@ -49,7 +49,7 @@ THE GATE, AND WHY IT IS STILL HERE
 This exec was held shut until 2026-08-14. The shipped m12 binary did not know the
 flag, and on that build an unknown argument did not error — it fell through to
 tauri and OPENED A WINDOW, so a call from here would have hung the request until
-something killed it. Patrick rebuilt, ran the release binary himself, and this
+something killed it. The owner rebuilt, ran the release binary himself, and this
 branch re-verified from its own seat: exit 0, one JSON envelope, 17 branches, no
 window. The gate is open.
 
@@ -66,7 +66,7 @@ first hit wins:
     1. the configured baud_bin (host-api set-config --baud-bin)
     2. ~/.aipass/baud/bin/baud-cli, where `aipass baud install` lands it
     3. the checkout's built baud-cli
-    4. the checkout's built desktop baud, the file Patrick's launcher execs
+    4. the checkout's built desktop baud, the file the owner's launcher execs
     5. baud-cli on PATH
     6. baud on PATH
 A configured binary that is gone or not executable is REFUSED by name, never
@@ -146,7 +146,7 @@ from aipass.api.apps.handlers.json import json_handler
 from aipass.api.apps.handlers.host import config as host_config
 from aipass.api.apps.handlers.host.reads import repo_root
 
-# Opened 2026-08-14 on Patrick's rebuild, re-verified from this branch. Kept as an
+# Opened 2026-08-14 on the owner's rebuild, re-verified from this branch. Kept as an
 # operational kill switch: set False to refuse honestly, never to fake a fleet.
 SNAPSHOT_READY = True
 
@@ -159,7 +159,7 @@ HEADLESS_BINARY = "baud-cli"
 # Where `aipass baud install` lands the headless binary, under the home directory.
 INSTALLED_BINARY_RELATIVE = Path(".aipass") / "baud" / "bin" / HEADLESS_BINARY
 
-# The path Patrick's launcher execs. Coupled to @baud's build layout on purpose —
+# The path the owner's launcher execs. Coupled to @baud's build layout on purpose —
 # running a DIFFERENT file than the desktop is the failure this avoids — and it
 # fails loudly rather than drifting if they ever move it.
 DEFAULT_BINARY_RELATIVE = Path("projects") / "baud" / "app" / "src-tauri" / "target" / "release" / "baud"
@@ -825,7 +825,7 @@ def end_room(branch: str, project: str) -> Dict[str, Any]:
     """
     End one named room in one named project, through @baud's headless door.
 
-    The ONE door that ends a session (Patrick, 2026-08-10). @baud proved the
+    The ONE door that ends a session (the owner, 2026-08-10). @baud proved the
     single-mechanism claim rather than asking to be trusted on it: the flag and
     the desktop button both reach the same kill, with the resolved project as an
     argument to the shared half, so the headless path cannot reach a different

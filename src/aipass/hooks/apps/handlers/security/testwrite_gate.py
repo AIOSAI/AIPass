@@ -8,7 +8,7 @@
 # Modified: 2026-09-07
 # =============================================
 
-"""Enforces Patrick's 2026-09-01 ruling: agents do not create tests for now.
+"""Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
 
 The ruling (devpulse DPLAN-0323): while @seedgo's test_quality v5 pack lands,
 agents are stripped of self-directed test creation. The corpus that ruling is
@@ -35,7 +35,7 @@ ORDER OF QUESTIONS, and each one is load-bearing:
     corrupt policy cannot brick ordinary work, only test creation.
  2. Is this the admin seat? Verified through the same 5-leg grant rail
     edit_gate uses (``modules/admin_seat``), consulted BEFORE the policy so
-    that cleanup work with Patrick survives a broken policy file.
+    that cleanup work with the owner survives a broken policy file.
  3. What does the policy say? See ``modules/testgate_policy`` for the
     fail-closed ruling and why it differs from bash_writes' allow-and-log.
 
@@ -217,7 +217,7 @@ def _refuse_creation(targets: list[Path], policy: Any, branch: str, lane: str) -
     reason = (
         f"New test file blocked ({lane}): agents do not create tests right now.\n"
         f"{named}\n\n"
-        "Patrick's ruling, 2026-09-01 (DPLAN-0323): self-directed test creation is off across "
+        "The owner's ruling, 2026-09-01 (DPLAN-0323): self-directed test creation is off across "
         "the fleet while @seedgo's test_quality v5 pack lands. Editing an EXISTING test to fix "
         "a red is still allowed — this is about the corpus growing, not about freezing it.\n\n"
         f"Policy: {policy.path}\n"

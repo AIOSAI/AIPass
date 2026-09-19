@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-04-16
-# Modified: 2026-08-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -52,7 +52,7 @@ from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_wt,
 )
 from aipass.aipass.apps.handlers.module_root import module_file
-from aipass.aipass.shared.registry_discovery import registries_in
+from aipass.aipass.shared.registry_discovery import find_registry, registries_in
 
 try:
     import questionary as _questionary  # type: ignore[import-untyped]
@@ -157,7 +157,23 @@ def _write_local_json(data: dict) -> None:
 
 
 def _get_test_write_policy_path() -> Path:
-    """Resolve the test-write policy file from CWD (user's project)."""
+    """Resolve the test-write policy file from the project root, cwd as fallback.
+
+    The policy belongs to the PROJECT — @hooks' gate walks UP to find it — so a
+    path keyed on bare cwd stamps a shadow copy into whatever directory the caller
+    happened to stand in. Measured twice in the framework tree, where a suite run
+    from a branch directory created src/aipass/aipass/.aipass/test_write_policy.json
+    beside the real root one (removed by DPLAN-0337 R5, recreated 2026-09-15).
+    A second policy up the tree is not harmless: it is the file the gate reads
+    first, so a stale copy quietly outranks the fleet's live ruling.
+
+    The registry IS the project boundary (find_registry: env var, then walk up from
+    cwd). No registry means a fresh install that has not been seated yet — there,
+    cwd is the project root by definition, so the old behaviour is the fallback.
+    """
+    registry = find_registry()
+    if registry is not None:
+        return registry.parent / ".aipass" / "test_write_policy.json"
     return Path.cwd() / ".aipass" / "test_write_policy.json"
 
 
@@ -168,7 +184,7 @@ def _get_test_write_policy_path() -> Path:
 #
 # agent_test_writing is the STRING "off", never a boolean: their validator
 # refuses true/false. allow is ALWAYS empty here: it is the canary-exemption
-# list and entries land there only by a Patrick/devpulse ruling, so an init that
+# list and entries land there only by an owner/devpulse ruling, so an init that
 # pre-seeded one would grant an exemption nobody granted.
 _TEST_WRITE_POLICY_DEFAULT = {
     "_comment": (
@@ -183,7 +199,7 @@ _TEST_WRITE_POLICY_DEFAULT = {
     "allow": [],
     "block_test_edits": False,
     "note": (
-        "Patrick ruled 2026-09-01 (devpulse DPLAN-0323): agents are stripped of "
+        "The owner ruled 2026-09-01 (devpulse DPLAN-0323): agents are stripped of "
         "self-directed test creation while @seedgo's test_quality v5 pack lands, because "
         "the corpus being culled (tests written to satisfy a checker rather than to pin a "
         "defect) regrows faster than a standards pack can cull it. OFF blocks CREATION of "
@@ -1015,7 +1031,7 @@ def print_help() -> None:
         "  [green]aipass init update \\[target][/green]          [dim]# apply the scaffold plan + git auth[/dim]"
     )
     console.print(
-        "  [green]aipass init update --dry-run[/green]         [dim]# print the plan, write nothing (exit 2 = pending)[/dim]"
+        "  [green]aipass init update --dry-run[/green]         [dim]# print the plan, write nothing (exit 2)[/dim]"
     )
     console.print("  [green]aipass init update --json[/green]            [dim]# the same plan, machine-readable[/dim]")
     console.print()
@@ -1244,7 +1260,7 @@ def _handle_init_update(args: list[str]) -> int:
                     f"so no go is needed. Run: aipass init update {target}[/dim]"
                 )
             else:
-                console.print("[dim]Preview only — nothing written. Apply needs Patrick's or devpulse's go.[/dim]")
+                console.print("[dim]Preview only — nothing written. Apply needs the owner's or devpulse's go.[/dim]")
         auth_rc = _run_git_auth_provisioning(target, dry_run=True)
         if auth_rc != 0:
             return auth_rc

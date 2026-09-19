@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_identity.py
-# Version: 1.1.0
-# Description: Tests for identity prompt handler (cadence-gated since 1.1.0)
+# Version: 1.3.0
+# Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/prompt/identity.py.
@@ -65,7 +65,8 @@ class TestCadenceGate:
         assert "devpulse Identity" in result["stdout"]
         assert result["sound"] == "identity"
 
-    def test_fires_anyway_when_cadence_check_raises(self, tmp_path, monkeypatch):
+    def test_is_withheld_when_cadence_check_raises(self, tmp_path, monkeypatch, caplog):
+        """The degraded fail mode (DPLAN-0347): identity waits, the kernel fires alone and says why."""
         from aipass.hooks.apps.handlers.prompt.identity import handle
 
         self._write_passport(tmp_path)
@@ -77,8 +78,8 @@ class TestCadenceGate:
 
         result = handle({"cwd": str(tmp_path)})
 
-        assert "devpulse Identity" in result["stdout"]
-        assert result["exit_code"] == 0
+        assert result == {"stdout": "", "exit_code": 0}
+        assert "identity DEGRADED loader=identity" in caplog.text
 
 
 # Schema 1.0.0 shape — principles live at the TOP LEVEL. Live on every passport
@@ -431,3 +432,64 @@ class TestPersonalityAndAntiTraits:
 
         assert len(out) <= IDENTITY_CHAR_BUDGET
         assert out.count("Facet ") == 6
+
+
+class TestIdentityBudgetIsEnforced:
+    """DPLAN-0347 row 2: IDENTITY_CHAR_BUDGET stops being documentation.
+
+    It was declared on 2026-09-08 and read by nothing: the facet budget alone
+    kept the block small, and only for passports that carry facets. Every other
+    field — purpose, traits, principles, what_i_do — was unbounded, and the
+    largest passport in the fleet had already reached 5,461 chars against a
+    4,000 budget nobody enforced.
+    """
+
+    @staticmethod
+    def _render(tmp_path: Path, passport_data: dict) -> str:
+        from aipass.hooks.apps.handlers.prompt.identity import handle
+
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "passport.json").write_text(json.dumps(passport_data), encoding="utf-8")
+        return handle({"cwd": str(tmp_path)})["stdout"]
+
+    @staticmethod
+    def _fat_passport() -> dict:
+        return {
+            "branch_info": {"branch_name": "fat", "path": "src/aipass/fat", "email": "@fat"},
+            "identity": {
+                "role": "r" * 400,
+                "purpose": "p" * 2000,
+                "traits": ["t" * 200] * 12,
+                "what_i_do": ["d" * 400] * 4,
+                "what_i_dont_do": ["n" * 400] * 3,
+                "principles": ["c" * 300] * 9,
+            },
+        }
+
+    def test_a_passport_with_no_facets_is_capped_too(self, tmp_path):
+        from aipass.hooks.apps.modules.grounding_content import IDENTITY_CHAR_BUDGET
+
+        out = self._render(tmp_path, self._fat_passport())
+
+        assert len(out) <= IDENTITY_CHAR_BUDGET + 1, f"rendered {len(out)} chars"
+        assert f"cut at {IDENTITY_CHAR_BUDGET} chars" in out
+
+    def test_the_cut_names_the_passport_it_came_from(self, tmp_path):
+        """A block that simply stops reads as corrupted; a marker turns it into a pointer."""
+        out = self._render(tmp_path, self._fat_passport())
+
+        assert str(tmp_path / ".trinity" / "passport.json") in out
+
+    def test_the_head_of_the_block_survives_the_cut(self, tmp_path):
+        """Identity, path and email come first on purpose: the cut takes the tail, never the name."""
+        out = self._render(tmp_path, self._fat_passport())
+
+        assert out.splitlines()[1] == "# fat Identity"
+        assert "Path: src/aipass/fat" in out
+
+    def test_a_normal_passport_renders_whole(self, tmp_path):
+        out = self._render(tmp_path, SAMPLE_PASSPORT)
+
+        assert "cut at" not in out
+        assert "Principles: Fail honestly * Memory is everything" in out

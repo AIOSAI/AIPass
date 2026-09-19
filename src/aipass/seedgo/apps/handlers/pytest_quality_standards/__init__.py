@@ -10,7 +10,7 @@
 
 Generic by construction: the checkers read a project's tests with `ast` and
 nothing else, so this directory lifts onto any Python project. That is the whole
-reason it is not folded into `aipass_standards` (DPLAN-0323, Patrick's ruling).
+reason it is not folded into `aipass_standards` (DPLAN-0323, the owner's ruling).
 
 NAMED `pytest_quality_standards` AND NOT `tests_standards` ON PURPOSE. Packs are
 keyed by their directory name minus the `_standards` suffix, and `audit tests` is

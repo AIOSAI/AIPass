@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: note.py
 # Description: Note store command - drone @canary note add|list
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-09-15
 # =============================================
 
 """Append-only note store: add a note, list the notes.
@@ -44,6 +44,12 @@ def print_help() -> None:
     console.print("[bold cyan]Usage:[/bold cyan]")
     console.print("  [green]drone @canary note add TEXT[/green]   Append one note (text + timestamp)")
     console.print("  [green]drone @canary note list[/green]       Print notes in order, with index and timestamp")
+    console.print("  [green]drone @canary note[/green]            No subcommand: the module's own map and store path")
+    console.print()
+
+    console.print("[yellow]Reaching this page:[/yellow]")
+    console.print("  [cyan]note help[/cyan], [cyan]note --help[/cyan], [cyan]note -h[/cyan] - and --help or -h")
+    console.print("  anywhere in the arguments, so 'note add --help' prints this page and stores nothing")
     console.print()
     console.print("[yellow]Refusals (exit 2):[/yellow]")
     console.print("  A store that will not parse is named and left exactly as it is - never reset")

@@ -9,7 +9,7 @@
 """
 Telegram skill test configuration.
 
-Telegram is retired (Patrick ruling 2026-09-14): every test under this
+Telegram is retired (the owner's ruling 2026-09-14): every test under this
 directory is skipped at collection by pytest_collection_modifyitems below.
 
 Sets up sys.path so that aipass.* (installed package) is importable from tests
@@ -73,10 +73,10 @@ if "telethon" not in sys.modules:
     sys.modules["telethon.errors"] = _telethon_errors
 
 
-# Telegram is retired (Patrick ruling 2026-09-14): skipped and ignored by all.
+# Telegram is retired (the owner's ruling 2026-09-14): skipped and ignored by all.
 # The work stays in place, disabled, and its tests are skipped - never fixed. A
 # skip marker, not collect_ignore, so every case still shows up as skipped.
-_TELEGRAM_RETIRED = "Telegram is retired - Patrick ruling 2026-09-14: its tests are skipped, never fixed"
+_TELEGRAM_RETIRED = "Telegram is retired - the owner's ruling 2026-09-14: its tests are skipped, never fixed"
 _TELEGRAM_TESTS = Path(__file__).resolve().parent
 
 

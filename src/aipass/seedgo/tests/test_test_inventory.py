@@ -9,7 +9,7 @@
 """
 Pins for the ranked test inventory. Every test here names a DEFECT.
 
-Patrick's standing rule governs this file: never add a test without a defect it
+The owner's standing rule governs this file: never add a test without a defect it
 pins. The tool is a report about test bloat, so a pile of instruments defending
 it would be the joke telling itself. What is pinned is what a future change
 could plausibly break, and several of these reproduce a defect that was real

@@ -289,7 +289,7 @@ class TestAdminIsUnreachableNotJustUnset:
 
 
 class TestTheContractSpeaksNoVendorWords:
-    """Gate 1, Patrick's ruling: the branch config decides what it runs."""
+    """Gate 1, the owner's ruling: the branch config decides what it runs."""
 
     def test_wake_takes_no_model_argument(self) -> None:
         """The parameter does not exist — there is nothing to leave unset."""
@@ -848,7 +848,7 @@ class TestTheVerbRouteTableIsExactlyThreeThings:
         """
         wake, kill, lock. A fourth briefly existed and was cut.
 
-        /v1/verbs/keys shipped under the Round 18 capture design and Patrick
+        /v1/verbs/keys shipped under the Round 18 capture design and the owner
         superseded it four minutes later: keystrokes ride the attach PTY, not a
         send-keys proxy. This test is what makes leaving it mounted impossible —
         a superseded surface that still answers is the second door.
@@ -1010,7 +1010,7 @@ class TestTheClientIsNeverTrusted:
 
 class TestOneTerminalReachesAnyAgent:
     """
-    Patrick's one-terminal ruling, 2026-08-16: "the flow is ONE terminal; it
+    The owner's one-terminal ruling, 2026-08-16: "the flow is ONE terminal; it
     hosts the agent I choose, no matter where I spawn it. The terminal is not
     linked to a project... Baud is an aipass tenant in projects/, vera is
     outside, external - that should NOT matter. When you block you create
@@ -1115,7 +1115,7 @@ class TestOneTerminalReachesAnyAgent:
 
         My read of the ruling, stated so it can be overruled: if the phone
         shows BAUD's cards and can attach to them, a kill button that refuses
-        "not my project" is the friction Patrick named. The mechanism was
+        "not my project" is the friction the owner named. The mechanism was
         always safe for it — @baud's door takes the project and resolves the
         room itself, so this server never names a room.
         """

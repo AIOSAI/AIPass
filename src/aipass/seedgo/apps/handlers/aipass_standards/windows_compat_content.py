@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_content.py
 # Description: Windows Compatibility Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-10
-# Modified: 2026-05-10
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -89,6 +89,24 @@ def get_windows_compat_standards() -> str:
         "  [green]Good -- hasattr guard for signal constants:[/green]",
         '  [dim]if hasattr(signal, "SIGPIPE"):[/dim]',
         "  [dim]    signal.signal(signal.SIGPIPE, signal.SIG_DFL)[/dim]",
+        "",
+        "[bold cyan]ADVISORY (not scored) -- lock race:[/bold cyan]",
+        "  [dim]os.open(path, O_CREAT | O_EXCL)[/dim] against a file still being deleted",
+        "  raises [red]PermissionError[/red] on Windows, not FileExistsError (CI 35192484222).",
+        "  Info line when the FileExistsError handler's try lets PermissionError escape,",
+        "  or when a retry loop retries on exists but gives up on PermissionError.",
+        "  [green]Fix:[/green] poll PermissionError inside the wait; raise once the wait is spent.",
+        "  [dim]Detail: windows_compat.md (Advisory section)[/dim]",
+        "",
+        "[bold cyan]ADVISORY (not scored) -- mock repr path, tests/:[/bold cyan]",
+        "  [dim]str(lock) in ' '.join(str(c) for c in m.call_args_list)[/dim] -- a call's repr",
+        "  doubles each backslash, so a Windows path is never in it (CI 35416653326).",
+        "  [green]Fix:[/green] compare against the args: [dim]str(arg) for c in ... for arg in c.args[/dim]",
+        "",
+        "[bold cyan]WHY BY SHAPE:[/bold cyan]",
+        "  A Linux run cannot observe a state POSIX lacks (delete pending) or a",
+        "  spelling it never makes (backslash). On a POSIX value the bug has no input,",
+        "  so the test passes. Windows-only behaviour is pinned statically.",
         "",
         "[yellow]SCOPE:[/yellow]",
         "  AUDIT_SCOPE = [bold]all_files[/bold]",

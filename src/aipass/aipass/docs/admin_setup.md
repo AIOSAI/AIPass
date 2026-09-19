@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Admin setup
 
 *How the admin lane works, and how to light it on your machine.*

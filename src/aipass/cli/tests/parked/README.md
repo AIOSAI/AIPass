@@ -2,7 +2,7 @@
 
 A park is a tracked home for code we deliberately stopped running but may want back.
 
-**Why here and not `.archive/`.** Patrick's ruling, 2026-08-18, fleet-wide: `.archive/` is
+**Why here and not `.archive/`.** The owner's ruling, 2026-08-18, fleet-wide: `.archive/` is
 always ignored, no exceptions, and it is his disposal zone — cleaned without warning. Bytes
 kept there do not ship in a clone and are not safe from cleaning, so "archived, revivable"
 said about an `.archive/` directory is a promise only this machine is keeping. This park was

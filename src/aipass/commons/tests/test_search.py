@@ -13,8 +13,12 @@ Tests cover:
 - search_ops._parse_search_args() -- pure argument parsing
 - search_ops.run_search() / run_log_export() -- orchestration with mocked DB
 - search_queries helper imports (coverage)
+- search_queries._quote_fts5_query() -- literal-phrase escaping for FTS5 MATCH
+- search_queries.search_posts() end-to-end against a real FTS5 index
 - log_export._format_comment_tree() -- pure tree formatting
 """
+
+import sqlite3
 
 from unittest.mock import patch, MagicMock
 
@@ -23,6 +27,11 @@ from unittest.mock import patch, MagicMock
 from aipass.commons.apps.handlers.search.search_ops import _parse_search_args, run_search
 
 # Coverage imports -- search_queries (covers the module for seedgo)
+from aipass.commons.apps.handlers.search.search_queries import (
+    _quote_fts5_query,
+    search_posts,
+    sync_post_to_fts,
+)
 
 # Coverage imports -- log_export
 from aipass.commons.apps.handlers.search.log_export import _format_comment_tree
@@ -200,3 +209,74 @@ def test_format_comment_tree_negative_score():
     lines = _format_comment_tree(comments)
     assert "-5" in lines[0]
     assert "+(-5)" not in lines[0]
+
+
+# =============================================================================
+# _quote_fts5_query tests
+#
+# search_posts()/search_comments() feed the raw user query straight into
+# `WHERE ... MATCH ?`. FTS5 treats that string as its own query language, so
+# "FPLAN-0593" gets parsed as a bare "-0593" NOT-clause and raises
+# "fts5: syntax error near '-'"/"no such column: 0593" instead of matching
+# the literal text. _quote_fts5_query() wraps every whitespace-separated
+# token in a double-quoted FTS5 phrase (doubling any embedded quote, per the
+# FTS5 escaping rule) so the query is always read as literal text.
+# =============================================================================
+
+
+def test_quote_fts5_query_hyphenated_term():
+    """A hyphenated identifier must not be parsed as an FTS5 NOT operator."""
+    assert _quote_fts5_query("FPLAN-0593") == '"FPLAN-0593"'
+
+
+def test_quote_fts5_query_plain_single_word():
+    """A single ordinary word is simply wrapped as one literal phrase token."""
+    assert _quote_fts5_query("hello") == '"hello"'
+
+
+def test_quote_fts5_query_multi_word():
+    """Each word becomes its own quoted phrase, joined back with spaces (implicit AND)."""
+    assert _quote_fts5_query("hello world") == '"hello" "world"'
+
+
+def test_quote_fts5_query_embedded_double_quote():
+    """An embedded double-quote must be doubled per the FTS5 escaping rule, not left bare."""
+    assert _quote_fts5_query('a"b') == '"a""b"'
+
+
+# =============================================================================
+# search_posts end-to-end -- reproduces DPLAN defect: hyphenated queries
+# (e.g. plan IDs like "FPLAN-0593") must be found, not raise an FTS5 syntax
+# error.
+# =============================================================================
+
+
+def _seed_agent_and_post(conn: sqlite3.Connection, title: str, content: str) -> int:
+    """Insert a test agent and a post, syncing it into the FTS index, return the post id."""
+    conn.execute(
+        "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
+        ("SEARCH_FIX_BRANCH", "Search Fix Branch"),
+    )
+    cursor = conn.execute(
+        "INSERT INTO posts (title, content, room_name, author) VALUES (?, ?, ?, ?)",
+        (title, content, "general", "SEARCH_FIX_BRANCH"),
+    )
+    conn.commit()
+    post_id: int = cursor.lastrowid  # type: ignore[assignment]
+    sync_post_to_fts(conn, post_id, title, content, "SEARCH_FIX_BRANCH", "general")
+    conn.commit()
+    return post_id
+
+
+def test_search_posts_hyphenated_query_end_to_end(initialized_db: sqlite3.Connection) -> None:
+    """Searching a real DB for a hyphenated plan ID must find the post, not raise fts5 syntax error."""
+    post_id = _seed_agent_and_post(
+        initialized_db,
+        "Plan update",
+        "Status notes for FPLAN-0593 landed tonight.",
+    )
+
+    results = search_posts(initialized_db, "FPLAN-0593")
+
+    assert len(results) == 1
+    assert results[0]["id"] == post_id

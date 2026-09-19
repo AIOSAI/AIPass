@@ -333,7 +333,7 @@ class TestLaneDarkMeansNoWidening:
     """A dark lane closes both halves, end to end.
 
     These simulate the grant failing rather than asserting the real world has no
-    key — Patrick's ceremony has since happened, so the key exists and the world
+    key — the owner's ceremony has since happened, so the key exists and the world
     answers True. What must stay true is that a FAILING grant widens nothing.
     """
 

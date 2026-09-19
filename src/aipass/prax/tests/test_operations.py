@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-15
 # =============================================
 
 """Unit tests for aipass.prax.apps.handlers.dashboard.operations.
@@ -218,6 +218,94 @@ class TestSaveDashboard:
 
         result = ops.save_dashboard(branch_dir, {"branch": "RV"})
         assert result is True
+
+
+class TestDashboardCharBudget:
+    """Over the budget the save warns — it never refuses and never trims.
+
+    DPLAN-0347: the dashboard is read on every greeting, so its size is a cost
+    every branch pays. A refused save would leave a stale dashboard, and stale is
+    the failure already on the board: zero new mail reported with three waiting.
+    """
+
+    def _oversized(self, chars: int) -> dict:
+        """A dashboard whose rendered JSON is comfortably past the budget."""
+        return {"branch": "BIG", "sections": {"flow": {"subject": "x" * chars}}}
+
+    def test_a_dashboard_over_the_budget_warns_with_the_measured_number(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        ops = _load_ops()
+        branch_dir = tmp_path / "big"
+        branch_dir.mkdir()
+        log = MagicMock()
+        monkeypatch.setattr(ops, "logger", log)
+
+        assert ops.save_dashboard(branch_dir, self._oversized(ops.DASHBOARD_CHAR_BUDGET)) is True
+
+        template, *values = log.warning.call_args.args
+        rendered = template % tuple(values)
+        written = (branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8")
+        assert "big" in rendered
+        assert str(len(written)) in rendered, "the warning must carry the measured size"
+        assert str(ops.DASHBOARD_CHAR_BUDGET) in rendered
+
+    def test_the_oversized_dashboard_is_still_written_whole(self, tmp_path, monkeypatch):
+        """Never refuse, never trim: a warned dashboard is a complete dashboard."""
+        from unittest.mock import MagicMock
+
+        ops = _load_ops()
+        branch_dir = tmp_path / "whole"
+        branch_dir.mkdir()
+        monkeypatch.setattr(ops, "logger", MagicMock())
+        data = self._oversized(ops.DASHBOARD_CHAR_BUDGET)
+
+        ops.save_dashboard(branch_dir, data)
+
+        loaded = json.loads((branch_dir / "DASHBOARD.local.json").read_text(encoding="utf-8"))
+        assert loaded["sections"]["flow"]["subject"] == data["sections"]["flow"]["subject"]
+
+    def test_a_dashboard_under_the_budget_is_silent(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
+
+        ops = _load_ops()
+        branch_dir = tmp_path / "small"
+        branch_dir.mkdir()
+        log = MagicMock()
+        monkeypatch.setattr(ops, "logger", log)
+
+        ops.save_dashboard(branch_dir, {"branch": "SMALL", "sections": {}})
+
+        assert log.warning.call_count == 0
+
+
+class TestCapSubject:
+    """One cut, one number, shared by every writer that publishes a subject."""
+
+    def test_an_essay_is_cut_to_the_cap_including_the_marker(self):
+        ops = _load_ops()
+        capped = ops.cap_subject("FPLAN-0593 " + "startup floor fleet-wide " * 20)
+
+        assert len(capped) <= ops.SUBJECT_CAP
+        assert capped.endswith(ops.TRUNCATION_MARKER)
+
+    def test_a_subject_at_the_cap_is_untouched(self):
+        """The boundary belongs to the subject, not to the marker."""
+        ops = _load_ops()
+        exact = "x" * ops.SUBJECT_CAP
+
+        assert ops.cap_subject(exact) == exact
+
+    def test_only_the_first_line_survives(self):
+        ops = _load_ops()
+
+        assert ops.cap_subject("feat(x): short\n\nWHY: the essay lives here\n") == "feat(x): short"
+
+    def test_empty_and_blank_subjects_stay_empty(self):
+        ops = _load_ops()
+
+        assert ops.cap_subject("") == ""
+        assert ops.cap_subject("   \n") == ""
 
 
 # =============================================

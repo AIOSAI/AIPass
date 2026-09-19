@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-25
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -231,7 +231,8 @@ class TestRenderTabTodos:
         mod = _get_module()
         tab = mod.render_tab("todos", PAD_ROLLOVER_CFG, SAMPLE_ENTRY_LIMITS_CFG, "memory")
         assert tab == (
-            "⟦ pad of 7 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤150 chars · draft to 120 · next #? ⟧"
+            "⟦ pad of 7 · oldest roll to .backup/todo/<branch>/backlog.json · task ≤150 chars · draft to 120"
+            " · next #? ⟧"
         )
 
     def test_no_configured_pad_size_says_nothing_rolls(self):
@@ -523,6 +524,47 @@ class TestRefreshAllTabs:
         obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
         assert "observations_meta" in obs_data
         assert "rollover ON" in obs_data["observations_meta"]
+
+    def test_a_branch_outside_the_aipass_root_is_never_stamped(self, tmp_path, monkeypatch):
+        """The meta line promises "oldest archived to @memory" — only true inside the AIPass root.
+
+        So a render for a file outside it writes NOTHING: not the tabs, not the
+        receipt beside them. Vera Studio's files carried that promise for a
+        project whose rollover memory was never supposed to run.
+        """
+        from aipass.memory.apps.handlers import write_fence
+
+        mod = _get_module()
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        branch_dir = tmp_path / "other_root" / "src" / "x"
+        trinity = branch_dir / ".trinity"
+        trinity.mkdir(parents=True)
+        (trinity / "local.json").write_text(json.dumps(self._make_local_data(), indent=2), encoding="utf-8")
+        (trinity / "observations.json").write_text(json.dumps(self._make_obs_data(), indent=2), encoding="utf-8")
+        (trinity / ".template_version.json").write_text('{"stamped_by": "memory push"}\n', encoding="utf-8")
+        before = {path.name: path.read_bytes() for path in trinity.iterdir()}
+
+        def mock_get_path(branch, mem_type):
+            p = Path(branch["path"]) / ".trinity" / f"{mem_type}.json"
+            return p if p.exists() else None
+
+        mock_config = {"rollover": SAMPLE_ROLLOVER_CFG, "entry_limits": SAMPLE_ENTRY_LIMITS_CFG}
+        with (
+            patch("aipass.memory.apps.handlers.json.config_loader.load", return_value=mock_config),
+            patch(
+                "aipass.memory.apps.handlers.monitor.detector._read_registry",
+                return_value=[{"name": "x", "path": str(branch_dir)}],
+            ),
+            patch(
+                "aipass.memory.apps.handlers.monitor.detector._get_memory_file_path",
+                side_effect=mock_get_path,
+            ),
+        ):
+            result = mod.refresh_all_tabs(["x"])
+
+        assert result["updated"] == 0
+        assert len(result["errors"]) == 2, result
+        assert {path.name: path.read_bytes() for path in trinity.iterdir()} == before
 
     def test_key_order_after_refresh(self, tmp_path):
         """After refresh, keys are in canonical order."""

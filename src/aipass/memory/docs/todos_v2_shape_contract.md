@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # todos v2 shape contract (DPLAN-0345, FPLAN-0590 rows 3-4)
 
 This is the relay for @seedgo (FPLAN-0590 row 6). It records what @memory's code enforces and renders, and which seedgo lines still hold the old truth. Everything below was read from disk on 2026-09-15, and the line numbers are from that read. Paths are relative to `src/aipass/memory/` unless stated otherwise.

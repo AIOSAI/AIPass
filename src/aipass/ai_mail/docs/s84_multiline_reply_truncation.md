@@ -1,4 +1,8 @@
+[<- Back to the README](../README.md)
+
 # S84: Multi-line Reply Body Truncation — Root Cause & Fix
+
+Why a multi-line reply or send body arrives whole: the S84 truncation, its root cause, and the argument handling that fixed it.
 
 ## Bug
 

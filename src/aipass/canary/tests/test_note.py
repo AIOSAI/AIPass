@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_note.py
 # Description: Tests for the note store - add, list, and refusing a store that will not parse
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-12
-# Modified: 2026-09-12
+# Modified: 2026-09-19
 # =============================================
 
 """Tests for `drone @canary note`.
@@ -40,6 +40,10 @@ CORRUPT_STORES = {
     "valid_record_then_space_no_terminator": VALID_LINE.rstrip(b"\n") + b" ",
     "json_but_not_a_record": VALID_LINE + b"[1, 2, 3]\n",
     "missing_timestamp": b'{"text": "a"}\n',
+    # The superset half of "exactly these keys": a subset check (every
+    # required key present) still refuses missing_timestamp above, so only
+    # an extra key measures exactness - mutant M11, 2026-09-16.
+    "extra_key": b'{"text": "a", "timestamp": "2026-09-12T15:00:00-07:00", "tag": "x"}\n',
     "non_string_text": b'{"text": 7, "timestamp": "2026-09-12T15:00:00-07:00"}\n',
     "blank_line_inside": VALID_LINE + b"\n" + VALID_LINE,
     "not_utf8": b"\xff\xfe\xfd\n",
@@ -79,8 +83,21 @@ def test_default_store_is_in_this_branch_under_docs_local():
 
 
 def test_docs_local_is_ignored_by_the_repo_gitignore():
-    """docs.local/ is what keeps the store out of git - pin the rule itself."""
-    gitignore = store.BRANCH_ROOT.parents[2] / ".gitignore"
+    """docs.local/ is what keeps the store out of git - pin the rule itself.
+
+    A repo-level contract read from a branch suite, so the dependency is
+    declared: no repo root above the branch is a skip that says why. The root
+    is known by its .git, not its .gitignore, so a checkout that lost the
+    ignore file still fails here.
+    """
+    repo_root = store.BRANCH_ROOT.parents[2]
+    if not (repo_root / ".git").exists():
+        pytest.skip(
+            f"no repo root at {repo_root} (no .git): a copy of src/aipass/ alone, "
+            "such as seedgo's audit-tests sandbox, excludes it by design"
+        )
+
+    gitignore = repo_root / ".gitignore"
 
     assert "docs.local/" in gitignore.read_text(encoding="utf-8").splitlines()
 

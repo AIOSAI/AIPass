@@ -486,7 +486,7 @@ class TestMonitoringQueue:
 class TestDropReportWording:
     """The drop report is read by the operator on screen, not by a developer.
 
-    Patrick's ruling (2026-08-08): monitor lines name their subsystem in plain words
+    The owner's ruling (2026-08-08): monitor lines name their subsystem in plain words
     and say WHAT happened, the IMPACT, and whether data is safe — never a bare
     exception repr. These pin the wording so it cannot regress to the old
     'Dropping events (...): Full()' line.

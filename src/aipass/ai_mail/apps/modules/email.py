@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: email.py
 # Description: Email Orchestration Module
-# Version: 3.4.0
+# Version: 3.5.0
 # Created: 2025-12-02
-# Modified: 2026-08-20
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -91,7 +91,7 @@ def _resolve_branch_path() -> Path:
     unresolvable caller meant `view`/`close`/`reply` quietly operated on the wrong
     citizen's mail — reading another citizen's inbox because of where a terminal
     happened to be standing, which is the same defect as sending as them
-    (Patrick's ruling, 2026-08-21; @devpulse 096c9a42).
+    (the owner's ruling, 2026-08-21; @devpulse 096c9a42).
 
     Raises:
         RuntimeError: propagated from get_current_user() when the caller cannot be
@@ -105,7 +105,7 @@ def _resolve_branch_path() -> Path:
 def caller_refusal() -> str:
     """Return a refusal message when the caller stands outside any branch, else "".
 
-    Patrick's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
+    The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
     ur cwd, and if aimail was run in root it should fail outright." Every verb —
     inbox, view, reply, send, dispatch — refuses rather than resolving to whichever
     citizen the route happens to land on. Reading another citizen's mail because of
@@ -149,10 +149,12 @@ COMMANDS:
 USAGE:
   ai_mail email @recipient "subject" "message" [--dispatch] [--reply-to @branch]
   ai_mail send @recipient "subject" "message"   (same as email)
-  ai_mail inbox | view <id> | reply <id> "msg" | close <id> | sent | contacts
+  ai_mail inbox | view <id> | view latest | reply <id> "msg" | close <id> | sent | contacts
 
 FLAGS:
   --dispatch        Mark as dispatch task (adds dispatch header)
+  --from @branch    Send as a named sender — the explicit identity override
+                    used when caller detection cannot see who is calling
   --reply-to        Redirect replies to a different branch
   --no-memory-save  Skip memory update requirement in dispatch header
   --upsert-key KEY  Repeat signature: rewrite the recipient's open message

@@ -12,7 +12,7 @@
 ``Unknown branch email: @baud (available: 17 branches)``. That message is
 false: @baud is a registered citizen of the hosted project ``projects/baud``,
 reachable by @devpulse's admin lane. The refusal is *correct* — fleet-to-project
-initiation is walled by Patrick's ruling, replies only (DPLAN-0288) — but the
+initiation is walled by the owner's ruling, replies only (DPLAN-0288) — but the
 stated reason was not, so @api spent the next five minutes hunting an addressing
 bug that did not exist and left two stray ping mails in @baud's inbox.
 

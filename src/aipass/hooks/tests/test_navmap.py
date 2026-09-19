@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_navmap.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Description: Tests for navmap prompt handler
 # Branch: hooks
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/prompt/navmap.py."""
@@ -99,7 +99,8 @@ class TestNavmapHandler:
         assert result["exit_code"] == 0
         assert "sound" not in result
 
-    def test_fires_anyway_on_cadence_error(self, tmp_path, monkeypatch):
+    def test_is_withheld_on_cadence_error(self, tmp_path, monkeypatch):
+        """The degraded fail mode (DPLAN-0347): the kernel fires alone and says why."""
         from aipass.hooks.apps.handlers.prompt.navmap import handle
 
         aipass_dir = tmp_path / ".aipass"
@@ -111,8 +112,7 @@ class TestNavmapHandler:
             with _patch_cadence(error=ImportError("no cadence")):
                 result = handle({})
 
-        assert result["exit_code"] == 0
-        assert "navmap content" in result["stdout"]
+        assert result == {"stdout": "", "exit_code": 0}
 
     def test_external_project_gets_own_file(self, tmp_path, monkeypatch):
         from aipass.hooks.apps.handlers.prompt.navmap import handle

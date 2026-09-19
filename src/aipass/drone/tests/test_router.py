@@ -801,9 +801,9 @@ class TestIdentityMessageSeverity:
     def test_project_root_message_does_not_claim_a_passport(self, temp_test_dir: Path, monkeypatch):
         """The old line named evidence that was never there.
 
-        It said 'the passport at cwd /home/patrick/Projects/AIPass says aipass'.
+        It said 'the passport at cwd <repo-root> says aipass'.
         That directory holds no .trinity/passport.json — the name came from the
-        registry. Patrick's ruling: say plainly what happened.
+        registry. The owner's ruling: say plainly what happened.
         """
         root = self._plant_registry(temp_test_dir / "AIPass")
         assert not (root / ".trinity" / "passport.json").exists()
@@ -828,7 +828,7 @@ class TestIdentityMessageSeverity:
         assert "commons" in warnings and "AIPASS" in warnings
 
     def test_detection_failure_does_not_warn(self, temp_test_dir: Path, monkeypatch):
-        """Patrick running a monitor from ~ is a normal operator action."""
+        """The owner running a monitor from ~ is a normal operator action."""
         nowhere = temp_test_dir / "nowhere"
         nowhere.mkdir()
         monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)

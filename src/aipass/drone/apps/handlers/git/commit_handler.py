@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commit_handler.py
 # Description: Commit handler with scoped staging
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-12
-# Modified: 2026-09-13
+# Modified: 2026-09-15
 # =============================================
 
 """Commit handler with scoped staging."""
@@ -14,6 +14,11 @@ import subprocess
 from pathlib import Path
 
 from aipass.prax import logger
+
+# A commit subject and a plan subject are the same glance — the dashboard's
+# last_commit_msg, the oneline log, the PR list — so they are the same number.
+# Read prax's cap here; never copy the digits into drone (DPLAN-0347).
+from aipass.prax.apps.modules.dashboard import SUBJECT_CAP
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 
@@ -21,6 +26,56 @@ from aipass.drone.apps.handlers.git.lock_handler import find_repo_root
 # runs ~202s — a cap below a green suite's real runtime turns the gate into a
 # false red that blocks every commit touching that branch.
 TEST_GATE_TIMEOUT = 600
+
+# The refusal IS the rule, in plain words. Every commit door renders this one
+# text, so the shape is taught the same way wherever it is refused.
+SUBJECT_REFUSAL = (
+    "Commit subject is {length} chars; the cap is {cap}.\n"
+    "\n"
+    "The first line IS the subject — keep it under about 80 chars in\n"
+    "type(scope): what form. Then a blank line, then the why in the body.\n"
+    "A body of any length is fine and wanted.\n"
+    "\n"
+    "git log --oneline, the dashboard and the PR list all show the subject,\n"
+    "so an essay there is read at every glance; in the body it is read once,\n"
+    "by whoever needs it, and the record still keeps every word.\n"
+    "\n"
+    "Nothing was committed."
+)
+
+
+def commit_subject(message: str) -> str:
+    """The subject line of *message* — what the oneline log and dashboards show.
+
+    Leading blank lines are stripped first, which is what git's own message
+    cleanup does before it takes line one, and what prax's ``cap_subject``
+    reads: the same line is measured here and rendered there.
+
+    Args:
+        message: The full commit message; may be empty or body-only.
+
+    Returns:
+        The first non-empty line, stripped; "" when there is no such line.
+    """
+    stripped = (message or "").strip()
+    if not stripped:
+        return ""
+    return stripped.splitlines()[0].strip()
+
+
+def subject_refusal(message: str) -> str | None:
+    """Refusal text when *message*'s subject is over the cap, else ``None``.
+
+    Args:
+        message: The full commit message about to be handed to git.
+
+    Returns:
+        The rendered refusal, or ``None`` when the subject fits.
+    """
+    subject = commit_subject(message)
+    if len(subject) <= SUBJECT_CAP:
+        return None
+    return SUBJECT_REFUSAL.format(length=len(subject), cap=SUBJECT_CAP)
 
 
 def _find_branch_for_path(filepath: str, repo_root: Path) -> tuple[str, Path] | None:
@@ -145,7 +200,15 @@ def commit_changes(
     *repo_root* defaults to the repo the caller stands in. The external-repo door
     names another one, and gets exactly the commit that repo's own seat gets —
     same staging, same lint and test gate on --all. Commit never pushes.
+
+    An over-cap subject is refused FIRST, before any staging, lint or test run:
+    the shape of the message is knowable without touching the repo, and a
+    refusal that has already spent three minutes of pytest teaches nothing.
     """
+    refusal = subject_refusal(message)
+    if refusal is not None:
+        return {"stdout": "", "stderr": refusal, "exit_code": 1}
+
     if repo_root is None:
         repo_root = find_repo_root()
 

@@ -121,7 +121,7 @@ class TestTheGate:
 
     It used to be closed because the shipped m12 binary did not know the flag and
     would fall through to tauri and open a GUI window, hanging the request. That
-    hazard is GONE: Patrick rebuilt, ran the release binary himself, and I
+    hazard is GONE: the owner rebuilt, ran the release binary himself, and I
     re-verified from this branch — exit 0, one JSON envelope, 17 branches, no
     window. The constant stays in the code as an operational kill switch, so the
     refusal path below is still real behaviour worth pinning.
@@ -200,7 +200,7 @@ class TestBinaryResolution:
 
     (1) the configured baud_bin, refused by name when unusable; (2) the installed
     ~/.aipass/baud/bin/baud-cli; (3) the checkout's baud-cli; (4) the checkout's
-    desktop baud, the file Patrick's launcher execs; (5) baud-cli on PATH; (6)
+    desktop baud, the file the owner's launcher execs; (5) baud-cli on PATH; (6)
     baud on PATH. The desktop binary links GTK even for --snapshot, which is why
     the headless one outranks it wherever both could be found.
     """

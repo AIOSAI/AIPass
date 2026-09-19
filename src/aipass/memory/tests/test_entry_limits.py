@@ -50,6 +50,10 @@ def _fresh_entry_limits(monkeypatch):
         "aipass.memory.apps.handlers.json.json_handler",
         "aipass.memory.apps.handlers.json.config_loader",
         "aipass.memory.apps.handlers.json.entry_limits",
+        # The public gateway binds the handler's function OBJECTS at import
+        # time. Left cached, it would hand back the PREVIOUS test's entry_limits
+        # and the identity pins below would compare two different modules.
+        "aipass.memory.apps.modules.limits",
     ):
         monkeypatch.delitem(sys.modules, name, raising=False)
     yield
@@ -373,3 +377,196 @@ class TestMalformedJson:
         assert result["enabled"] is True
         assert result["enforce"] is True
         assert len(result["entry_types"]) == 4
+
+
+# ===========================================================================
+# 6. draft_percent is a CONFIG KEY, not a module constant (FPLAN-0593 Phase 5)
+# ===========================================================================
+
+
+class TestTheDraftPercentComesFromTheConfig:
+    """The number an agent drafts to has one source, and it is the config.
+
+    It was ``entry_limits.DRAFT_PERCENT = 80`` until FPLAN-0593 Phase 5. Because
+    a module constant is not readable as configuration, @seedgo mirrored it as
+    ``_DRAFT_PERCENT = 80`` in ``trinity_groups.py`` and pinned the mirror
+    against @memory's ``draft_target()`` — which is a copy that happens to be
+    tested, not a source. Publishing the key is what lets that mirror retire.
+
+    These pins measure the property, not the number: move the key and the target
+    moves with it. A test asserting 80 would pass just as happily against a
+    hardcoded constant, which is the exact thing being ended.
+    """
+
+    def test_the_published_percent_is_the_config_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        config_path = _write_config(tmp_path, _full_config(draft_percent=65))
+        mod, loader = _get_modules()
+        monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
+
+        assert mod.draft_percent() == 65
+
+    def test_the_draft_target_moves_with_the_key(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The whole point: one key, every cap's target derived from it."""
+        config_path = _write_config(tmp_path, _full_config(draft_percent=50))
+        mod, loader = _get_modules()
+        monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
+
+        assert mod.draft_target(300) == 150
+        assert mod.draft_target(200) == 100
+        assert mod.draft_target(100) == 50
+
+    def test_the_target_is_floored_never_rounded_up(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A target ABOVE the cap would invite the write the cap refuses."""
+        config_path = _write_config(tmp_path, _full_config(draft_percent=99))
+        mod, loader = _get_modules()
+        monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
+
+        assert mod.draft_target(101) == 99
+        assert mod.draft_target(101) < 101
+
+    def test_the_old_module_constant_is_gone(self) -> None:
+        """Named explicitly: a surviving constant is a second source of truth.
+
+        @seedgo's retirement note points at this name. If it comes back, the
+        mirror it is meant to replace becomes correct again by accident.
+        """
+        mod, _ = _get_modules()
+
+        assert not hasattr(mod, "DRAFT_PERCENT"), "DRAFT_PERCENT is back — the config key is no longer the only source"
+
+    @pytest.mark.parametrize("bad", [0, -5, 101, "80", True, None, [80]])
+    def test_an_unusable_percent_serves_the_seed_rather_than_removing_the_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: object
+    ) -> None:
+        """Narrow the draft target, never delete it.
+
+        A truncated or hand-edited config must not leave the fleet with no
+        target to aim at — that would be a cap with nothing below it, which is
+        how an agent finds the wall instead of the line.
+        """
+        config_path = _write_config(tmp_path, _full_config(draft_percent=bad))
+        mod, loader = _get_modules()
+        monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
+
+        assert mod.draft_percent() == 80
+
+    def test_a_config_with_no_draft_percent_at_all_still_answers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The key is new; every config written before Phase 5 lacks it."""
+        config_path = _write_config(tmp_path, _full_config())
+        mod, loader = _get_modules()
+        monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
+
+        assert mod.draft_percent() == 80
+        assert mod.draft_target(300) == 240
+
+
+# ===========================================================================
+# 7. The public gateway: apps/modules/limits.py is a door, not a copy
+# ===========================================================================
+
+
+_GATEWAY_CONTRACT = (
+    "load_entry_limits",
+    "load_file_budgets",
+    "fields_for",
+    "changed_entries",
+    "check_file_budget",
+    "draft_percent",
+    "draft_target",
+    "REASON_UNKNOWN_FIELD",
+    "REASON_FIELD_OVER_CAP",
+    "REASON_FILE_OVER_BUDGET",
+)
+
+_GATEWAY_INTERNAL = ("_field_violation", "_check_list_field", "_walk_strings", "_type_matches", "config_loader")
+
+
+def _get_gateway():
+    """Import and return (limits gateway, entry_limits) — both fresh, same generation."""
+    entry_limits = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    limits = importlib.import_module("aipass.memory.apps.modules.limits")
+    return limits, entry_limits
+
+
+class TestTheLimitsGatewayIsADoorNotACopy:
+    """``apps/handlers/`` is private implementation; ``apps/modules/`` is the door.
+
+    @seedgo's ``check_handler_independence`` sends cross-branch callers to a
+    branch's ``modules`` package. Today @hooks reaches past that into
+    ``handlers/json/entry_limits.py`` by dotted path and @seedgo guard-imports
+    ``draft_target`` from it — not because they went around the rule, but
+    because no door existed to reach for. ``apps/modules/fleet.py`` is the same
+    pattern for the same reason.
+    """
+
+    @pytest.mark.parametrize("name", _GATEWAY_CONTRACT)
+    def test_every_contract_name_is_the_same_object_as_the_handler_s(self, name: str) -> None:
+        """Identity, not equality. A wrapper that merely AGREES today is the defect this ends."""
+        limits, entry_limits = _get_gateway()
+
+        assert getattr(limits, name) is getattr(entry_limits, name)
+
+    def test_dunder_all_is_exactly_the_contract(self) -> None:
+        limits, _ = _get_gateway()
+
+        assert tuple(limits.__all__) == _GATEWAY_CONTRACT
+
+    @pytest.mark.parametrize("name", _GATEWAY_INTERNAL)
+    def test_the_internals_stay_behind_the_door(self, name: str) -> None:
+        """Named one by one: a later re-export would silently widen what I must not break."""
+        limits, _ = _get_gateway()
+
+        assert not hasattr(limits, name), f"{name} is internal and must not be part of the public gateway"
+
+    def test_it_answers_only_its_own_command(self) -> None:
+        """A module that claims a command it does not own swallows another module's work."""
+        limits, _ = _get_gateway()
+
+        assert limits.handle_command("rollover", []) is False
+        assert limits.handle_command("lint", ["fields"]) is False
+
+    @pytest.mark.parametrize("args", [[], ["--help"], ["-h"], ["help"]])
+    def test_the_bare_command_and_every_help_spelling_introspect(
+        self, capsys: pytest.CaptureFixture, args: list
+    ) -> None:
+        limits, _ = _get_gateway()
+
+        assert limits.handle_command("limits", args) is True
+        assert "limits Module" in capsys.readouterr().out
+
+    def test_an_unknown_subcommand_is_named_and_exits_nonzero(self, capsys: pytest.CaptureFixture) -> None:
+        """Claimed and REPORTED — never a silent no-op that looks like success.
+
+        Both streams are read: the refusal routes to stderr under @seedgo's
+        output-routing standard, and the exit code is what tells a caller the
+        difference between "described the contract" and "did not understand you".
+        """
+        from aipass.cli.apps.modules import reset_command_state, resolve_exit
+
+        limits, _ = _get_gateway()
+        reset_command_state()
+
+        assert limits.handle_command("limits", ["nonsense"]) is True
+        assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"
+        captured = capsys.readouterr()
+        assert "nonsense" in captured.out + captured.err
+
+    def test_the_command_surface_reads_but_never_writes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The pin that keeps this a door: changing a cap is ``config set``, not this.
+
+        Introspection prints the live ``draft_percent()``, so this does not
+        claim the CLI computes nothing — it claims the CLI never writes. A
+        gateway that could move a cap would be a second write surface for the
+        numbers the whole fleet is measured against.
+        """
+        limits, entry_limits = _get_gateway()
+        writes: list = []
+        for name in ("set_branch_limit", "set_default_limit", "save", "push_defaults_to_per_branch"):
+            if hasattr(entry_limits.config_loader, name):
+                monkeypatch.setattr(entry_limits.config_loader, name, lambda *a, _n=name, **k: writes.append(_n) or {})
+
+        limits.handle_command("limits", [])
+
+        assert not writes, f"the gateway's CLI wrote config: {writes}"

@@ -1505,7 +1505,7 @@ def bootstrap_from_jsonl(max_sessions: int = 8) -> None:
     for i, jsonl_path in enumerate(sessions, 1):
         # Derive branch name from parent directory
         branch_dir = jsonl_path.parent.name
-        # Layout: -home-patrick-Projects-AIPass-src-aipass-<branch>
+        # Layout: -home-someone-Projects-AIPass-src-aipass-<branch>
         branch_name = branch_dir.rsplit("-aipass-", 1)[-1].replace("-", "_").upper()
 
         file_size_kb = jsonl_path.stat().st_size / 1024
