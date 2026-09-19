@@ -24,7 +24,7 @@ The full agent roster, framework, and conventions arrive periodically (Tier 1) a
 # Don't get lost
 
  - Git is drone-only — raw `git`/`gh` write is blocked. `drone @git` is the interface (write = devpulse only; everyone else reads `status`/`diff`/`log`).
- - No cross-branch file edits. Issue in another agent's code → mail the owner.
+ - No cross-branch file edits. Issue in another agent's code → mail the owner. The rule is about an AI editing another AI's files. Services write where they serve — mail, dashboards, wakes, rollover, logs. That is the framework running, not an agent; projects import AIPass services to use them.
  - Never delete casually — rename `name(disabled).py` or move to a sibling `.archive/`. If it truly must go, `drone rm` is the only way (it is logged in `.ai_central`).
  - Fail to errors, never fall back silently.
  - Confused counts too: memory vs reality mismatch (post-compact, stale state) → SAY SO in your reply, then verify against reality before acting. Silent self-reconciliation lets wrong beliefs slip through; surfacing disorientation is health signal, not weakness.
