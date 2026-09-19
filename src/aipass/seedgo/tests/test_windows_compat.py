@@ -3,7 +3,7 @@
 # Description: Tests for windows_compat_check.py
 # Version: 1.0.0
 # Created: 2026-05-14
-# Modified: 2026-09-17
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for windows_compat_check — both POSIX-import detection and test-file skipif enforcement."""
@@ -790,3 +790,150 @@ def test_lock_race_advisory_respects_line_bypass(tmp_path):
 
     assert check_branch_info(str(branch)) == []
     handler.load_bypass_rules.assert_called_once_with(str(branch))
+
+
+# ===========================================================================
+# ADVISORY: a path asserted against the repr of a mock call
+# (CI 35416653326 — three flow tests: str(lock) in " ".join(str(c) for c in ...))
+# ===========================================================================
+
+_INCIDENT_REPR = (
+    "def test_denial(tmp_path, mock_logger):\n"
+    "    central_dir = tmp_path / '.ai_central'\n"
+    "    lock = (central_dir / 'PLANS.central.json').with_suffix('.lock')\n"
+    "    logged = ' '.join(str(c) for c in mock_logger.error.call_args_list)\n"
+    "    assert str(lock) in logged\n"
+    "    assert '3 attempts' in logged\n"
+)
+
+
+def _repr_paths(source):
+    import ast
+
+    from aipass.seedgo.apps.handlers.aipass_standards.mock_repr_path import find_mock_repr_paths
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import _platform_guarded_lines
+
+    tree = ast.parse(source)
+    return find_mock_repr_paths(tree, _platform_guarded_lines(tree))
+
+
+def _test_fn(*body):
+    return "def test_x(tmp_path, m):\n    p = tmp_path / 'a.lock'\n" + "".join(f"    {line}\n" for line in body)
+
+
+def test_mock_repr_incident_shape_flagged_once():
+    found = _repr_paths(_INCIDENT_REPR)
+    assert [line for line, _ in found] == [5]
+    assert "red on Windows" in found[0][1]
+
+
+def test_mock_repr_flow_cure_reading_the_real_args_is_clean():
+    cured = _INCIDENT_REPR.replace(
+        "str(c) for c in mock_logger.error.call_args_list",
+        "str(arg) for c in mock_logger.error.call_args_list for arg in c.args",
+    )
+    assert _repr_paths(cured) == []
+
+
+def test_mock_repr_real_message_one_level_inside_args_is_clean():
+    source = _test_fn(
+        "assert str(p) in m.call_args[0][0]",
+        "assert str(p) in m.call_args.args[0]",
+        "assert str(p) in m.call_args_list[0].kwargs['msg']",
+        "assert any(str(p) in c.args[0] for c in m.call_args_list)",
+        "assert str(p) in str(m.call_args[0][0])",
+    )
+    assert _repr_paths(source) == []
+
+
+def test_mock_repr_record_and_container_reprs_flagged():
+    source = _test_fn(
+        "assert f'{tmp_path}' in str(m.call_args)",
+        "assert str(p) in str(m.call_args.args)",
+        "assert str(p.parent) in repr(m.call_args_list)",
+        "args, kwargs = m.call_args",
+        "assert str(p) in str(args)",
+    )
+    assert [line for line, _ in _repr_paths(source)] == [3, 4, 5, 7]
+
+
+def test_mock_repr_loop_and_comprehension_elements_flagged():
+    source = _test_fn(
+        "printed = [str(c) for c in m.print.call_args_list]",
+        "assert any(str(p) in s for s in printed)",
+        "for c in m.call_args_list:",
+        "    assert str(p) in str(c)",
+        "assert any(os.fspath(p) in f'{c}' for c in m.mock_calls)",
+        "for line in printed:",
+        "    assert str(p) in line",
+    )
+    assert [line for line, _ in _repr_paths(source)] == [4, 6, 7, 9]
+
+
+def test_mock_repr_not_in_is_vacuous_and_search_methods_flagged():
+    source = _test_fn(
+        "text = ' '.join(map(str, m.call_args_list)).lower()",
+        "assert str(p) not in text",
+        "assert text.count(str(p)) == 1",
+        "assert text == str(p)",
+    )
+    found = _repr_paths(source)
+    assert [line for line, _ in found] == [4, 5, 6]
+    assert "vacuous on Windows" in found[0][1]
+    assert ".count()" in found[1][1]
+
+
+def test_mock_repr_path_sides_repr_cannot_change_are_clean():
+    source = _test_fn(
+        "logged = ' '.join(str(c) for c in m.call_args_list)",
+        "assert p.name in logged",
+        "assert p.as_posix() in logged",
+        "assert str(Path('single.lock')) in logged",
+        "assert repr(str(p)) in logged",
+        "assert str(p).replace('\\\\', '\\\\\\\\') in logged",
+        "assert str(p) in logged.replace('\\\\\\\\', '\\\\')",
+        "assert 'files ready' in logged",
+    )
+    assert _repr_paths(source) == []
+
+
+def test_mock_repr_platform_skips_are_clean():
+    source = (
+        "import sys, pytest\n\n"
+        "@pytest.mark.skipif(sys.platform == 'win32', reason='posix paths')\n"
+        + _test_fn("assert str(p) in str(m.call_args)")
+        + "\n@pytest.mark.skipif(os.name == 'nt', reason='posix paths')\n"
+        "class TestPosix:\n"
+        "    def test_y(self, tmp_path, m):\n"
+        "        assert str(tmp_path) in str(m.call_args)\n"
+        "\ndef test_z(tmp_path, m):\n"
+        "    if sys.platform != 'win32':\n"
+        "        assert str(tmp_path) in str(m.call_args)\n"
+    )
+    assert _repr_paths(source) == []
+
+
+def test_mock_repr_advisory_line_reads_tests_and_never_scores(tmp_path):
+    branch = _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/test_lock.py")
+    _advisory_branch(tmp_path, _INCIDENT_REPR, rel="apps/handlers/helper.py")
+    _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/.archive/test_old.py")
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info, check_module
+
+    assert check_branch_info(str(branch)) == [
+        "windows_compat mock repr path (advisory): tests/test_lock.py:5 a path is searched for in a mock call's "
+        "repr - repr doubles each Windows backslash, red on Windows"
+    ]
+    assert check_module(str(branch / "tests" / "test_lock.py"))["score"] == 100
+
+
+def test_mock_repr_advisory_respects_line_bypass(tmp_path):
+    import sys
+
+    branch = _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/test_lock.py")
+    handler = sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"]
+    handler.load_bypass_rules.return_value = [
+        {"file": "tests/test_lock.py", "standard": "windows_compat", "lines": [5], "reason": "test"}
+    ]
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
+
+    assert check_branch_info(str(branch)) == []

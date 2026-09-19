@@ -138,6 +138,11 @@
       "reason": "Pure AST detector — takes a parsed tree and returns (line, text) pairs: no I/O, no operation to log. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch. Same shape as skip_dirs.py above."
     },
     {
+      "file": "apps/handlers/aipass_standards/mock_repr_path.py",
+      "standard": "json_structure",
+      "reason": "Pure AST detector, same shape as exclusive_create_race.py above: a parsed tree in, (line, text) pairs out, no I/O. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch."
+    },
+    {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "reason": "Pure predicate — wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."

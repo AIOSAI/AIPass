@@ -51,6 +51,33 @@ without platform guard.
 - `__init__.py` files
 - Non-`.py` files
 
+### What a Linux seat cannot observe — pin it by shape
+Two Windows reds in one week (CI 35192484222, CI 35416653326) had the same
+cause: the code or test was wrong on Windows and **right by accident on POSIX**,
+because the POSIX value is a degenerate case of the thing being handled.
+
+- **States Windows has and POSIX lacks.** Delete-pending, sharing violations,
+  a file held open by another process: POSIX unlinks a name at once, so a
+  `PermissionError` handler for them is dead code on Linux and never runs.
+- **Spellings Windows produces and POSIX does not.** Backslash separators and
+  drive letters: `repr()` doubles a backslash, `as_posix()` turns it, a regex
+  treats it as an escape. On a POSIX path each of those is the identity — there
+  is nothing to double, turn or escape — so the test passes by having no input
+  for the bug.
+
+A green Linux run proves nothing about either. When a behaviour only differs on
+Windows, the rule that guards it reads the SHAPE statically; it cannot wait for
+a run to go red. The two advisories below are that rule, one per class.
+
+One half of the spelling class CAN be made observable on Linux: a literal
+backslash in pytest's base temp (`pytest --basetemp='<tmp>/x\probe'`) puts one
+in every `tmp_path`, so a path compared against a repr goes red on the Linux
+seat too (flow reproduced CI 35416653326 that way, 2026-09-18; its suite is
+1011 passed under it once cured). It does not reach `as_posix()` — a POSIX
+backslash is a character, not a separator, so `as_posix()` still equals
+`str()` — nor drive letters, nor any state class. Run it as a cheap extra lane,
+not as a replacement for the static read.
+
 ### Advisory — exclusive creates that lose the delete-pending race
 Not scored. Reported on the audit's info channel (`check_branch_info`) as
 `windows_compat lock race (advisory): <file>:<line> ...`, one line per site.
@@ -91,6 +118,52 @@ except PermissionError as e:  # Windows delete-pending
 Corpus is the scored lane's (`apps/**/*.py`), so the ratchet to a scored rule
 moves no file. Measured at introduction: 18 exclusive creates fleet-wide, 8
 advisory lines (flow 5, ai_mail 2, drone 1).
+Re-measured 2026-09-18 after flow (bdd60273) and ai_mail (d4e4018f) cured: 1
+line left, drone's git lock.
+
+### Advisory — a path asserted against the repr of a mock call
+Not scored. Info channel, as
+`windows_compat mock repr path (advisory): tests/<file>:<line> ...`.
+
+`str(call(...))`, `str(m.call_args)`, `repr(m.call_args_list)` and
+`str(c.args)` are reprs, and repr doubles each backslash. A Windows path
+`C:\Users\x\a.lock` is spelled `C:\\Users\\x\\a.lock` in that text, so
+`str(lock) in logged` fails there and passes on POSIX. CI 35416653326: three of
+flow's lock tests joined `str(c) for c in mock_logger.error.call_args_list` and
+asserted the lock path in it.
+
+Flagged, per function with a name-flow pass: `in` / `not in` / `==` / `!=`, or
+`.count/.find/.index/.startswith/.endswith`, with REPR TEXT on one side (the
+str / repr / f-string of a call record, a call list, or an args container,
+carried through joins, slices, case changes and names) and PATH TEXT on the
+other (str / `os.fspath` / an f-string of `tmp_path`, `tmpdir`, `Path(...)`,
+`tempfile` and `os.path` results, or anything built from them with `/`,
+`.with_suffix()`, `.parent`, ...). `in` is red on Windows; `not in` is vacuous
+there — it passes without checking anything.
+
+Not flagged: the real message one level inside the args (`c.args[0]`,
+`m.call_args[0][0]`, `str(arg) for arg in c.args`) — that is the cure; a path
+side repr cannot change (`.name`, `.stem`, `.suffix`, `.as_posix()`,
+`Path("one_part")`); a side the test already escaped (`repr(str(p))`,
+`.replace(...)`); a test under a platform skipif or `sys.platform` guard.
+
+Known misses: a path reached only through an ordinary-named fixture, an
+attribute (`self.lock`) or a helper's return value; `%` / `.format()` of a path;
+`p.as_posix() in logged` (also red on Windows when the product logged
+`str(p)` — which spelling the product used is not in the test).
+
+Fix — compare against the logged arguments, never the call's repr:
+```python
+logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+assert str(lock) in logged
+```
+
+Corpus is `tests/**/*.py` — a test-side shape, in a lane the scored audit never
+walks. Measured at introduction (2026-09-18): the three incident lines at
+bdd60273, 0 after flow's cure (c0fedb17), 0 elsewhere in 570 test files. A
+name-guessing arm (`*_path`, `*_dir`, `*lock` params, `self.*`) added 0; an
+any-operand arm added 14 lines, all literal text with no backslash (verbs,
+signatures, `"cp /branch/..."` steps) — 0 of 14 real, so neither shipped.
 
 ---
 

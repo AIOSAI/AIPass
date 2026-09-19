@@ -1,19 +1,20 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-05-10
-# Modified: 2026-09-17
+# Modified: 2026-09-18
 # =============================================
 
 """Windows Compatibility Standards Checker Handler."""
 
 import ast
 from pathlib import Path
-from typing import Dict
+from typing import Callable, Dict
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.aipass_standards.exclusive_create_race import find_exclusive_create_races
+from aipass.seedgo.apps.handlers.aipass_standards.mock_repr_path import find_mock_repr_paths
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -591,56 +592,64 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
 
 
 # =============================================================================
-# ADVISORY: exclusive creates that lose the Windows delete-pending race
+# ADVISORY: what a Linux seat cannot observe about Windows, pinned by shape
 # =============================================================================
 #
-# CI 35192484222 (Windows): api's token store lock caught FileExistsError only,
-# a create against a lock mid-removal answered PermissionError, and the revoke
-# thread died. The detector and its measured false-positive boundary live in
-# exclusive_create_race.py.
+# Two arms, one reason: each Windows red this week passed on Linux because the
+# Linux value is a degenerate case -- no delete-pending state for PermissionError
+# to come from, no backslash for repr to double. No Linux run can go red on
+# either, so the shape is read statically.
+#
+# * lock race -- CI 35192484222: api's token store lock caught FileExistsError
+#   only; a create against a lock mid-removal answered PermissionError and the
+#   revoke thread died. Detector: exclusive_create_race.py. Corpus is the scored
+#   lane's (apps/**/*.py minus __init__.py and skip dirs), so the ratchet to a
+#   scored rule moves no file in or out.
+# * mock repr path -- CI 35416653326: three of flow's tests asserted str(lock)
+#   in " ".join(str(c) for c in mock.call_args_list); repr spelled C:\\Users
+#   where the path said C:\Users. Detector: mock_repr_path.py. A test-side
+#   shape, so its corpus is tests/**/*.py -- a lane the scored audit never
+#   walks, which makes this channel its only home, not a waypoint.
 #
 # check_branch_info(), not check_module(): a new scored arm inside a gating
 # standard reds every branch holding a hit on the commit that lands it (the
-# 09-13 lesson), and 5 branches hold one today. Info lines carry no score and
-# render at any score. The ratchet is one line: extend all_violations in
-# check_module() with find_exclusive_create_races() once the owners cure.
+# 09-13 lesson). Info lines carry no score and render at any score. The
+# lock-race ratchet is one line: extend all_violations in check_module() with
+# find_exclusive_create_races() once the owners cure.
 #
-# Corpus is the scored lane's: apps/**/*.py minus __init__.py and skip dirs,
-# so the ratchet moves no file in or out. The branch's windows_compat bypass
-# rules silence a line here exactly as they will once it scores. The info
-# channel is handed no rules, so this reads them itself -- which also means
-# `audit --no-bypass` does not reach these lines.
+# The branch's windows_compat bypass rules silence a line here exactly as they
+# would once it scores. The info channel is handed no rules, so this reads them
+# itself -- which also means `audit --no-bypass` does not reach these lines.
 
 _LOCK_RACE_LABEL = "windows_compat lock race (advisory)"
+_MOCK_REPR_LABEL = "windows_compat mock repr path (advisory)"
 
 
-def _advisory_corpus(branch_root: Path) -> list[Path]:
-    apps = branch_root / "apps"
-    if not apps.is_dir():
+def _corpus(branch_root: Path, top: str) -> list[Path]:
+    """Every .py under one top-level directory, minus disabled files and skip dirs."""
+    base = branch_root / top
+    if not base.is_dir():
         return []
     return [
         f
-        for f in sorted(apps.rglob("*.py"))
-        if f.name != "__init__.py"
-        and not is_disabled_file(f.name)
+        for f in sorted(base.rglob("*.py"))
+        if not is_disabled_file(f.name)
         and not any(part in SOURCE_SKIP_DIRS for part in f.relative_to(branch_root).parts)
     ]
 
 
-def check_branch_info(branch_path: str) -> list[str]:
-    """Non-scored lines: exclusive creates a Windows delete-pending state breaks.
+def _advisory_corpus(branch_root: Path) -> list[Path]:
+    return [f for f in _corpus(branch_root, "apps") if f.name != "__init__.py"]
 
-    Args:
-        branch_path: Branch root to inspect.
 
-    Returns:
-        One "(advisory)" line per offending create; empty when clean.
-    """
-    branch_root = Path(branch_path)
-    corpus = _advisory_corpus(branch_root)
-    if not corpus:
-        return []
-    bypass_rules = load_bypass_rules(branch_path)
+def _advisory_lines(
+    branch_root: Path,
+    corpus: list[Path],
+    finder: Callable[[ast.Module, set[int]], list[tuple[int, str]]],
+    label: str,
+    bypass_rules: list,
+) -> list[str]:
+    """One "<label>: <rel>:<line> <desc>" per finding the branch has not bypassed."""
     lines: list[str] = []
     for path in corpus:
         try:
@@ -649,13 +658,38 @@ def check_branch_info(branch_path: str) -> list[str]:
             logger.info("[windows_compat] advisory scan skipped %s: %s", path, e)
             continue
         rel = path.relative_to(branch_root).as_posix()
-        for lineno, desc in find_exclusive_create_races(tree, _platform_guarded_lines(tree)):
-            if is_bypassed(str(path), "windows_compat", lineno, bypass_rules):
-                continue
-            lines.append(f"{_LOCK_RACE_LABEL}: {rel}:{lineno} {desc}")
-    if lines:
+        for lineno, desc in finder(tree, _platform_guarded_lines(tree)):
+            if not is_bypassed(str(path), "windows_compat", lineno, bypass_rules):
+                lines.append(f"{label}: {rel}:{lineno} {desc}")
+    return lines
+
+
+def check_branch_info(branch_path: str) -> list[str]:
+    """Non-scored lines: Windows-only failures no Linux run can observe.
+
+    Args:
+        branch_path: Branch root to inspect.
+
+    Returns:
+        One "(advisory)" line per offending site -- exclusive creates in apps/,
+        paths asserted against a mock call's repr in tests/; empty when clean.
+    """
+    branch_root = Path(branch_path)
+    apps_corpus = _advisory_corpus(branch_root)
+    tests_corpus = _corpus(branch_root, "tests")
+    if not apps_corpus and not tests_corpus:
+        return []
+    bypass_rules = load_bypass_rules(branch_path)
+    races = _advisory_lines(branch_root, apps_corpus, find_exclusive_create_races, _LOCK_RACE_LABEL, bypass_rules)
+    reprs = _advisory_lines(branch_root, tests_corpus, find_mock_repr_paths, _MOCK_REPR_LABEL, bypass_rules)
+    if races or reprs:
         json_handler.log_operation(
             "windows_compat_advisory_lines",
-            {"branch": branch_root.name, "count": len(lines), "standard": "windows_compat"},
+            {
+                "branch": branch_root.name,
+                "lock_race": len(races),
+                "mock_repr": len(reprs),
+                "standard": "windows_compat",
+            },
         )
-    return lines
+    return races + reprs
