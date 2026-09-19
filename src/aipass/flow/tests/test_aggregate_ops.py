@@ -494,7 +494,9 @@ class TestSaveCentral:
         assert result is False
         assert len(attempts) == mod._LOCK_RETRIES
         assert json.loads(central_file.read_text(encoding="utf-8")) == before
-        logged = " ".join(str(c) for c in mock_logger.error.call_args_list)
+        # The logged arguments themselves, never str(call): a call's repr doubles
+        # every backslash, so a Windows path is never a substring of it.
+        logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
         assert f"{mod._LOCK_RETRIES} attempts" in logged
 

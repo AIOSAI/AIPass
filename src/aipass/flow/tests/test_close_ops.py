@@ -435,7 +435,9 @@ class TestClosePlanImplSuccess:
         assert len(attempts) == append_mod._LOCK_RETRIES
         assert not closed_plans.exists()
         assert any("CLOSED_PLANS append failed" in m.get("text", "") for m in result["messages"])
-        warned = " ".join(str(c) for c in mock_logger.warning.call_args_list)
+        # The logged arguments themselves, never str(call): a call's repr doubles
+        # every backslash, so a Windows path is never a substring of it.
+        warned = " ".join(str(arg) for c in mock_logger.warning.call_args_list for arg in c.args)
         assert str(lock) in warned
         assert f"{append_mod._LOCK_RETRIES} attempts" in warned
 

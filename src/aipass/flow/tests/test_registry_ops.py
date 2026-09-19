@@ -393,7 +393,9 @@ class TestSaveRegistry:
         assert result is False
         assert len(attempts) == plan_reg._LOCK_RETRIES
         assert json.loads(target.read_text(encoding="utf-8")) == before
-        logged = " ".join(str(c) for c in mock_logger.error.call_args_list)
+        # The logged arguments themselves, never str(call): a call's repr doubles
+        # every backslash, so a Windows path is never a substring of it.
+        logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
         assert f"{plan_reg._LOCK_RETRIES} attempts" in logged
 
