@@ -401,7 +401,7 @@ class TestMissedWindowLine:
         # says so. Every enabled job in the fleet left this field unset, which is
         # exactly why nothing recovered from the 23-hour gap on 2026-09-08.
         self._tick({"jobs": {}})
-        # Reads the flag: the lane is gated while @devpulse and Patrick run the
+        # Reads the flag: the lane is gated while @devpulse and the owner run the
         # controlled live proof, and the line must tell the truth in BOTH worlds.
         expected = "on — firing late this tick" if runstate_mod.RECOVERY_LANE_LIVE else "off — not firing"
         assert f"catch_up is {expected}" in flat(capsys.readouterr().out)

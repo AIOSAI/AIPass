@@ -10,7 +10,7 @@
 
 APLAN-0016 (S115) measured a skill that `drone @skills switch` reported OFF
 still sending on every prompt — 508 relayed user messages in the ten days after
-Patrick switched telegram off on 2026-08-18. Cause: the hooks bridge invokes
+the owner switched telegram off on 2026-08-18. Cause: the hooks bridge invokes
 this handler BY FILE PATH, so `run_skill` — and the switch gate inside it — is
 never on that path.
 

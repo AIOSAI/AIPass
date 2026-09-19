@@ -134,7 +134,7 @@ IGNORE_FILENAME = ".seedgoignore"
 # Global default — applied to every branch with zero per-branch setup.
 # Agents' tools/ dirs are deliberate throwaway prototyping space (quick
 # scripts for fast answers) — not standards-compliant by design, and that's
-# fine and wanted (Patrick ruling).
+# fine and wanted (the owner ruling).
 DEFAULT_IGNORE_PATTERNS: List[str] = [
     "tools/",
 ]

@@ -11,7 +11,7 @@ Screen Lock skill handler.
 
 Password-locks the graphical session and leaves everything running. No root, no
 sudoers grant, no polkit rule, and nothing sleeps — unlike /suspend there is no
-wake, grace-window or reachability story to get wrong (Patrick's ruling #217).
+wake, grace-window or reachability story to get wrong (the owner's ruling #217).
 
 Extracted from the Telegram control bot (DPLAN-0300) so any caller — the host
 API's verb lane, drone, another skill — can lock the machine without importing

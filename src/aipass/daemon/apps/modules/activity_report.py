@@ -403,7 +403,7 @@ def _resolve_branch(branch_name: str) -> str | None:
 def _refuse(verb: str, token: str, usage: str = "") -> NoReturn:
     """Refuse *token* by name and exit non-zero, through the shared gate.
 
-    Patrick's standing ruling: an unknown command or argument FAILS with a
+    The owner's standing ruling: an unknown command or argument FAILS with a
     non-zero exit and a message naming the token. Printing a refusal and
     returning 0 tells a caller's `&&` that the command succeeded - reported by
     @devpulse's 2026-09-07 fleet sweep against `branch-health`, which rendered

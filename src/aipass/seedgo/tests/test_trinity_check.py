@@ -1302,7 +1302,7 @@ class TestGuidelinesContentIsScored:
 
 
 # ===========================================================================
-# D14b. Versioned backups are LEGAL residents (Patrick's File set ruling)
+# D14b. Versioned backups are LEGAL residents (the owner's File set ruling)
 # ===========================================================================
 
 

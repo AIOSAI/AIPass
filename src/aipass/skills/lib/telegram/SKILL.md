@@ -20,7 +20,7 @@ has_handler: true
 
 # Telegram Bridge
 
-> **Status: switched off, left in place, no longer maintained (Patrick's ruling, 2026-09-14).**
+> **Status: switched off, left in place, no longer maintained (the owner's ruling, 2026-09-14).**
 > AIPass development does not use Telegram any more — BAUD, the phone face, is the
 > notification and control surface now. The skill stays here, switched off, for anyone
 > who wants a Telegram integration of their own: `drone @skills on telegram` lifts the
@@ -66,7 +66,7 @@ drone @skills run telegram migrate-config [bot_id ...] [--apply]
 One bot doubles as a control center: `_is_control_bot()` is true when `branch_name` is `None` (a bare base bot) or `"aipass"` (the deployed control-center config — same `bot_id="base"` process, no separate bot). Only that bot handles these commands; branch bots fall through to the normal command set.
 
 - `/start [branch]` — wake a terminal agent (default branch: `aipass`). Spawns a detached tmux session `aipass-<branch>` in the branch's registered path and launches `claude -c || claude`. No-ops with "already running" if the session exists (one session per branch).
-- `/kill [branch]` — kill the `aipass-<branch>` tmux session outright. No graceful-stop nuance in v1 (Patrick's ruling).
+- `/kill [branch]` — kill the `aipass-<branch>` tmux session outright. No graceful-stop nuance in v1 (the owner's ruling).
 - `/status` — on the control bot, appends a live listing of all `aipass-*` sessions (branch, PID, alive/dead) below the normal status text.
 
 Session names use the `CONTROL_SESSION_PREFIX = "aipass-"` prefix and are managed with direct `subprocess` calls to `tmux` inside `base_bot.py` — **not** `tmux_manager.py`'s `kill_session`/`list_sessions`/`has_tmux`, which remain ported-but-unwired (see table below).
@@ -77,11 +77,11 @@ The command menu is re-registered via BotFather's `setMyCommands` on every start
 
 > **Deployment state, machine config, saga and ops runbook: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).** This section documents the mechanism; that doc documents what is actually switched on.
 
-Control-bot-only. Password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. Per Patrick's ruling #217 this is the daily-driver verb: the machine stays awake 24/7 and `/suspend` is retired from routine use.
+Control-bot-only. Password-locks and darkens the screen while every agent keeps running behind the password wall. No root, no sudoers grant, no polkit rule, nothing sleeps, so none of `/suspend`'s wake/grace/reachability machinery applies. Per the owner's ruling #217 this is the daily-driver verb: the machine stays awake 24/7 and `/suspend` is retired from routine use.
 
 The bot runs as a `systemd --user` service, **outside the graphical session scope** — it has no `XDG_SESSION_ID`, so a bare `loginctl lock-session` has no ambient session to resolve and can refuse. `_resolve_graphical_session()` therefore walks `loginctl list-sessions` and picks the session whose `Type` is `wayland` or `x11`, `State=active`, and `User` equals the bot's own uid (never another user's desktop), then locks it by id. If that path fails or `loginctl` is missing, it falls back to the GNOME ScreenSaver `Lock` method on the session bus via `gdbus`. Only if both fail does it report the failure — a screen that never locked is never acked as locked.
 
-**Live-verified twice on 2026-08-02**, both resolving session `3` (`Type=wayland`, `State=active`, uid 1000): first from a stripped environment with `XDG_SESSION_ID`/`XDG_SESSION_TYPE` unset to reproduce the service context (`LockedHint` `no` → `yes`), then by Patrick's own tap in the control chat through the live `telegram-bot@base.service` after its restart onto v1.5.1. The `gdbus` fallback is covered by mocked tests only — it has never needed to fire on this machine.
+**Live-verified twice on 2026-08-02**, both resolving session `3` (`Type=wayland`, `State=active`, uid 1000): first from a stripped environment with `XDG_SESSION_ID`/`XDG_SESSION_TYPE` unset to reproduce the service context (`LockedHint` `no` → `yes`), then by the owner's own tap in the control chat through the live `telegram-bot@base.service` after its restart onto v1.5.1. The `gdbus` fallback is covered by mocked tests only — it has never needed to fire on this machine.
 
 ## /suspend (DPLAN-0270 P5)
 
@@ -97,7 +97,7 @@ Resume detection has two triggers: a **wall-clock jump** in the poll loop larger
 
 **The grace window** (`SUSPEND_GRACE_WINDOW_SECONDS`, 180s) is measured from the first *successful Telegram poll* after resume, not from resume detection — DNS/network needs 45-60s to come back, and the whole reply chain (poll → inject → model turn → send) has to fit inside the window or the machine re-suspends mid-conversation. Re-arming is also held while any bot has an undelivered pending (`_turn_in_flight()`), so a reply in flight is never cut off.
 
-**Human presence crosses processes.** Every bot process stamps `~/.aipass/telegram_bots/last_inbound.json` on any allowed-user inbound message; the control bot's grace check reads it. The control bot cannot see another bot's traffic in-process, so without this, chatting with `@devpulse` did not register as "human present" and the machine re-suspended under Patrick's hands (incident 2026-08-02). Any inbound message on any bot now cancels the cycle, not just a control verb on the control bot.
+**Human presence crosses processes.** Every bot process stamps `~/.aipass/telegram_bots/last_inbound.json` on any allowed-user inbound message; the control bot's grace check reads it. The control bot cannot see another bot's traffic in-process, so without this, chatting with `@devpulse` did not register as "human present" and the machine re-suspended under the owner's hands (incident 2026-08-02). Any inbound message on any bot now cancels the cycle, not just a control verb on the control bot.
 
 Root-privileged pieces live as reviewable repo files in `tools/suspend/`, installed by `tools/suspend/install_suspend_grants.sh` (never applied directly to `/etc` by an agent):
 - `aipass-suspend-sudoers` — passwordless `rtcwake` for the bot user
@@ -105,7 +105,7 @@ Root-privileged pieces live as reviewable repo files in `tools/suspend/`, instal
 - `aipass-resume-signal` — optional system-sleep resume-stamp hook
 - `aipass-wake-sources.sh` + `aipass-wake-sources.service` — **opt-in only**, via `--with-wake-sources`. Boot-time oneshot that re-masks a spurious ACPI GPE wake source and disables USB wakeup on affected devices (both reset every reboot). Default is *not installed*, and reinstalling the grants never brings it back: masking those wakes made suspend real and trapped the conversation (ruling 2026-08-02, compass #216). Compass #217 later superseded the reasoning — the machine now stays awake 24/7 and `/lock` replaces `/suspend` entirely — but the opt-in default stands, and the unit is disabled on this machine.
 
-**Honest status:** `/suspend` is **retired from daily use and grounded** as of 2026-08-02 (Patrick's ruling, compass #217) — do not live-test it without him. The v1.5.0 rework worked as designed in a live soak, and Patrick still hit the wall: fixed suspend is still suspend, and real sleep is real disconnect. So the machine now stays awake 24/7 and `/lock` is the daily driver. The verb stays shipped and tested as a battery-saver, with `suspend_enabled` as the parking brake; it has still never passed a hands-off overnight soak (DPLAN-0270 test-matrix step T4). Full deployment picture: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).
+**Honest status:** `/suspend` is **retired from daily use and grounded** as of 2026-08-02 (the owner's ruling, compass #217) — do not live-test it without the owner. The v1.5.0 rework worked as designed in a live soak, and the owner still hit the wall: fixed suspend is still suspend, and real sleep is real disconnect. So the machine now stays awake 24/7 and `/lock` is the daily driver. The verb stays shipped and tested as a battery-saver, with `suspend_enabled` as the parking brake; it has still never passed a hands-off overnight soak (DPLAN-0270 test-matrix step T4). Full deployment picture: [`docs/suspend_lock_deployment.md`](docs/suspend_lock_deployment.md).
 
 ## Slash passthrough and the /context relay
 

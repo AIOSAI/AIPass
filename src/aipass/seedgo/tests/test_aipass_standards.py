@@ -274,7 +274,7 @@ def test_naming_is_bypassed_wrong_standard():
 
 
 # ---------------------------------------------------------------------------
-# Tests -- json_structure_content custom_config doctrine (Patrick ruling S193)
+# Tests -- json_structure_content custom_config doctrine (the owner ruling S193)
 # ---------------------------------------------------------------------------
 
 
@@ -991,7 +991,7 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
 # Two sections lived here: "v4 test_quality retires the handler's items"
 # (DPLAN-0325 part B) and "an item is only scored where the branch ships a
 # subject for it". Both imported test_quality_check, which moved to
-# apps/handlers/aipass_standards/.archive/ when Patrick sealed DPLAN-0323.
+# apps/handlers/aipass_standards/.archive/ when the owner sealed DPLAN-0323.
 # A test whose subject is archived cannot go red; it can only ImportError.
 # Verbatim disposal copy: tests/.archive/deleted_2026-09-07_test_quality_v4.py
 # ---------------------------------------------------------------------------

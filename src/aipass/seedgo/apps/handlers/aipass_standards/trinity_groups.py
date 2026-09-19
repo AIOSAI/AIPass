@@ -97,7 +97,7 @@ _CANONICAL_FILES = (
 
 _FILE_NAMES = {"local": _LOCAL_NAME, "observations": _OBSERVATIONS_NAME}
 
-# A versioned backup is a LEGAL resident of .trinity/ (Patrick's File set ruling):
+# A versioned backup is a LEGAL resident of .trinity/ (the owner's File set ruling):
 # the house convention renames the current file as a version and leaves it in
 # place while the new file is written. The rule is a SHAPE, not a list of the two
 # suffixes minted so far -- the next migration mints its own and must pass without

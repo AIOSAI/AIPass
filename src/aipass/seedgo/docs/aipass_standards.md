@@ -134,7 +134,7 @@ execution over every shim in `tests/test_json_handler_contract.py`.
 ## `test_quality` (v4) left this pack on 2026-09-07
 
 It was the pack's only `APPLIES_TO = tests` checker: a per-branch TEXT scan that awarded an
-item for finding a substring anywhere under `tests/`. Patrick sealed DPLAN-0323 that night —
+item for finding a substring anywhere under `tests/`. The owner sealed DPLAN-0323 that night —
 the scan manufactured tests instead of measuring them, and one json sweep had to add four
 `test_cli_routing.py` files purely to keep its items covered. Checker, content module and
 `.md` are in `apps/handlers/aipass_standards/.archive/`, and no checker declares

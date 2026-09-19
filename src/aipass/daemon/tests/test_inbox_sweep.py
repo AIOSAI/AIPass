@@ -447,7 +447,7 @@ class TestScheduleEntry:
     """Nothing scheduled runs the inbox sweep (DPLAN-0337 R2, 2026-09-10).
 
     Was: daemon's own schedule.json carries an enabled daily inbox-sweep job.
-    Patrick deleted it — up to five wakes every morning — and the nightly rounds
+    The owner deleted it — up to five wakes every morning — and the nightly rounds
     took inbox-to-zero over. The command is a hand tool now, so the pin inverts:
     no job may carry the name, and no job's prompt may run the command.
     """

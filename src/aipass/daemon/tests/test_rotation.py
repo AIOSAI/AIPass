@@ -511,7 +511,7 @@ BUDGET_RULES = (
 
 
 class TestShippedRoundsJob:
-    """Patrick's ruling of 2026-09-10, read off the same file the tick reads."""
+    """The owner's ruling of 2026-09-10, read off the same file the tick reads."""
 
     def test_the_job_is_rounds_and_it_is_on(self):
         job = shipped_rounds_job()
@@ -647,7 +647,7 @@ class TestRoundsNight:
         mock_wake.assert_not_called()
 
 
-# ── the scope ruling (Patrick, 2026-09-10 21:47) ──────
+# ── the scope ruling (The owner, 2026-09-10 21:47) ──────
 
 
 class TestRoundsScope:

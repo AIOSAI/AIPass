@@ -131,7 +131,7 @@ advertises a branch argument it will refuse.
 
 ## Refusals
 
-An unknown command, pack, flag or branch REFUSES by name and exits non-zero (Patrick's
+An unknown command, pack, flag or branch REFUSES by name and exits non-zero (the owner's
 ruling, the 2026-09-07 fleet sweep): exit 7 for an argument nobody recognised, 3 for a target
 with nothing to check, 2 for a lane that could not run. `CommandRefused` lives in
 `apps/modules/__init__.py`; `apps/seedgo.py` turns it into the exit code.

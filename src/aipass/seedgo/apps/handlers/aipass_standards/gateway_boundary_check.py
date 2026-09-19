@@ -13,7 +13,7 @@ through that branch's door. What it may not do is reach into another branch's
 storage and write it by hand: two implementations of one format, drifting
 apart with nobody watching, and the owner's own rules bypassed.
 
-Patrick's directive (2026-08-17), which this standard encodes: "@api should be
+The owner's directive (2026-08-17), which this standard encodes: "@api should be
 only doing api calls. api is api thats it."
 """
 

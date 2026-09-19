@@ -109,7 +109,7 @@ def drain_one(
 ) -> int:
     """Fire at most ONE queued catch-up. Returns 1 if one fired, else 0.
 
-    Patrick's rule, and the reason this function can only ever return 0 or 1:
+    The owner's rule, and the reason this function can only ever return 0 or 1:
     "imagine 10 missed events all firing at once."
     """
     if not RECOVERY_LANE_LIVE:

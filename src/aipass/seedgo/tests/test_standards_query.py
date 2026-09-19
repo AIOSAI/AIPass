@@ -107,7 +107,7 @@ def test_handle_command_unknown_pack():
 
     It returned True until 2026-09-07 and `seedgo.py` turned that into exit 0,
     so a script reading the exit code saw a successful query of a pack that
-    does not exist (Patrick's standing ruling, fleet sweep 2026-09-07).
+    does not exist (the owner's standing ruling, fleet sweep 2026-09-07).
     """
     import pytest
 

@@ -229,7 +229,7 @@
     {
       "file": "apps/handlers/pytest_quality_standards/",
       "standard": "json_structure",
-      "reason": "GENERIC PACK - the whole reason this pack is not folded into aipass_standards is that it lifts onto any Python project (DPLAN-0323, Patrick's ruling). Importing seedgo's json_handler would make that claim false: the pack would carry AIPass with it and could not be dropped into an external repo. The checkers are stdlib-only by construction (ast, pathlib, dataclasses, typing) and the module docstrings say so, so this is a structural property of the pack, not an oversight in one file. Scoped to the pack directory - the seedgo-side glue that reports these results into the audit is NOT covered and uses json_handler normally."
+      "reason": "GENERIC PACK - the whole reason this pack is not folded into aipass_standards is that it lifts onto any Python project (DPLAN-0323, the owner's ruling). Importing seedgo's json_handler would make that claim false: the pack would carry AIPass with it and could not be dropped into an external repo. The checkers are stdlib-only by construction (ast, pathlib, dataclasses, typing) and the module docstrings say so, so this is a structural property of the pack, not an oversight in one file. Scoped to the pack directory - the seedgo-side glue that reports these results into the audit is NOT covered and uses json_handler normally."
     },
     {
       "file": "apps/handlers/pytest_quality_standards/corpus.py",

@@ -126,7 +126,7 @@ class TestErrorCascade:
     THE CONTRACT IS UNCHANGED; THE SHAPE OF THE ANSWER MOVED (FPLAN-0492 wave
     2b). These used to assert `is True` — "actions handled it, router, stop
     looking". `actions` is a retired verb, so every one of these subcommands is
-    an unknown argument, and Patrick's standing ruling says an unknown argument
+    an unknown argument, and the owner's standing ruling says an unknown argument
     exits non-zero naming the token. SystemExit(1) stops the cascade harder than
     a True ever did: nothing after it runs at all. What would still be a defect
     is falling THROUGH to another module, and that is what each of these pins.

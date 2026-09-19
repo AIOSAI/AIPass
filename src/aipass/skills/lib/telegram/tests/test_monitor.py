@@ -351,7 +351,7 @@ class TestSelfExclusion:
         assert streamer_all._filter_lines([f"2026-08-09 09:42:02 | {source} | INFO | x"]) == []
 
     def test_normal_forwarding_survives(self, streamer_all):
-        """The guard must not silence the logs Patrick actually subscribed to."""
+        """The guard must not silence the logs the owner actually subscribed to."""
         lines = [
             "2026-08-09 09:42:02 | captured_seedgo_audit | INFO | audit running",
             "2026-08-09 09:42:03 | captured_prax_monitor_core | ERROR | real failure",

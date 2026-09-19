@@ -152,7 +152,7 @@ then asserts a *property* of the answer.
 ## The ignore list is shipped as a constant
 
 The needles were **derived by reading**
-`/home/patrick/Projects/AIPass/.gitignore` line by line — `.trinity/`,
+the AIPass repository's `.gitignore` line by line — `.trinity/`,
 `.ai_mail.local/`, `logs/`, `projects/*`, `**/*_json/`, `DASHBOARD.local.json`,
 `.archive/`, `docs.local/`, the `*PLAN-*` prefixes, `*.local.md` — and then
 **frozen into the checker**. `.gitignore` is never read at audit time.
@@ -378,7 +378,7 @@ negative is one nobody believes twice.
 
 **Advisory**: it reports a number and never fails a board.
 
-**Scored from the first run.** No shadow-only pass, no `SCORED=False` — Patrick's
+**Scored from the first run.** No shadow-only pass, no `SCORED=False` — The owner's
 ruling is that a rule which cannot repeat its landing must not need to.
 
 A project with no test files reports `not_applicable` rather than zero — zero tests

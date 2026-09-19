@@ -22,7 +22,7 @@ this machine: daemon-tick.timer stopped at 11:46:40 on 2026-09-07 with no
 restart, and no scheduler tick ran for twenty-three hours. Two citizens missed
 their windows.
 
-PATRICK'S RULING, 2026-09-08, and it is narrower than "do not touch the host":
+THE OWNER'S RULING, 2026-09-08, and it is narrower than "do not touch the host":
 tests can't disable processes, they should restore to exact same state before the
 test. The test is fine and good that it can enter something. So TOUCHING THE REAL
 THING IS ALLOWED. Leaving it changed is the defect. This rule is about the

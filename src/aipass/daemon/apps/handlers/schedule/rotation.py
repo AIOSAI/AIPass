@@ -48,7 +48,7 @@ ALWAYS_EXCLUDED = frozenset({"@devpulse"})
 # the switch, the signature check is the safety catch.
 DEFAULT_INCLUDE_MANAGERS = False
 
-# THE SCOPE RULE. Patrick, 2026-09-10 21:47 (DPLAN-0337 R2), marked very important:
+# THE SCOPE RULE. The owner, 2026-09-10 21:47 (DPLAN-0337 R2), marked very important:
 # the rounds are AIPass maintaining its OWN agents. A citizen is served only when its
 # branch lives under this install's src/aipass/. projects/* residents and every
 # declared external root are out whatever their citizen_class — Vera keeps her own

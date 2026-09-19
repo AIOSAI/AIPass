@@ -71,7 +71,7 @@ PAYLOAD_DIR = "payload"
 #: Where adapter packs live.
 HANDLERS_ROOT = module_file(__file__).parents[1]
 
-#: Pack directory suffix. Kept per Patrick's ruling 2026-08-29 19:23 —
+#: Pack directory suffix. Kept per the owner's ruling 2026-08-29 19:23 —
 #: "don't change the command path, it already works".
 PACK_SUFFIX = "_standards"
 

@@ -170,10 +170,10 @@ row where the 30-sample calibration disagreed (haiku NO_ORACLE, opus SMOKE), **v
 Step 1 — hunt for the per-test verdicts (all returned nothing; see *Limits*):
 
 ```bash
-ls -la /home/patrick/Projects/AIPass/src/aipass/seedgo/.seedgo/
-grep -rIl -E 'HAS_ORACLE|TAUTOLOGY|NO_ORACLE' /home/patrick/Projects/AIPass --exclude-dir=.git
-grep -rIl -i 'haiku' /home/patrick/Projects/AIPass --exclude-dir=.git
-find /home/patrick/Projects/AIPass -iname '*haiku*' -o -iname '*triage*' -o -iname '*verdict*'
+ls -la <owner-repo>/src/aipass/seedgo/.seedgo/
+grep -rIl -E 'HAS_ORACLE|TAUTOLOGY|NO_ORACLE' <owner-repo> --exclude-dir=.git
+grep -rIl -i 'haiku' <owner-repo> --exclude-dir=.git
+find <owner-repo> -iname '*haiku*' -o -iname '*triage*' -o -iname '*verdict*'
 # every .json/.jsonl touched since 2026-08-30, scanned for the label:
 for f in $(find . -name '*.json*' -newermt '2026-08-30'); do grep -lq HAS_ORACLE "$f" && echo "$f"; done
 drone @memory search "haiku triage 526 assertion_shape NONE HAS_ORACLE SMOKE NO_ORACLE TAUTOLOGY verdicts"

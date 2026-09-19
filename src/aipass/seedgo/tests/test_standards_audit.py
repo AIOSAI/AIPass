@@ -567,7 +567,7 @@ def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
 
 
 def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
-    """Patrick's ruling: it should have failed AND given the solution."""
+    """The owner's ruling: it should have failed AND given the solution."""
     _wire_branches(monkeypatch, "BACKUP")
 
     _refuse(["-tests", "@backup"])
@@ -698,7 +698,7 @@ def _forwarded(monkeypatch, argv):
 
 
 def test_audit_tests_reaches_the_lane_with_the_target(monkeypatch):
-    """Patrick's ask: `audit tests @backup`, a plain word where a hyphen was.
+    """The owner's ask: `audit tests @backup`, a plain word where a hyphen was.
 
     The hyphen was the whole defect -- `audit -tests @backup` was one keystroke
     from correct and ran the wrong lane. A word cannot be mistyped as a flag.
@@ -997,7 +997,7 @@ def test_audit_context_with_no_branch_audits_every_branch(monkeypatch):
     """`drone @seedgo audit context` is the FLEET table -- no branch argument.
 
     A pack name with nothing after it must not be read as a missing branch: the
-    fleet run is the command Patrick asks for, and the table is one row per
+    fleet run is the command the owner asks for, and the table is one row per
     citizen.
     """
     audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")

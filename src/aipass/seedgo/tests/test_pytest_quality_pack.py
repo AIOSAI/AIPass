@@ -10,7 +10,7 @@
 Pins for the pytest_quality pack: the static corpus reader and the no_oracle
 check. Every test here names the defect or contract it protects.
 
-Patrick's standing rule governs this file - never add a test without a defect it
+The owner's standing rule governs this file - never add a test without a defect it
 pins - and it applies with extra force here, because the standard under test is
 the one that convicts tests which prove nothing. A vacuous pin on the
 vacuous-test detector would be the joke telling itself. Every test below was
@@ -542,7 +542,7 @@ class TestTheFixesFromTheFirstRedFirstPass:
 # =============================================================================
 #
 # Every test below was confirmed RED against a named one-line mutation of
-# assertion_shape_check.py before it shipped, per Patrick's standing rule. The
+# assertion_shape_check.py before it shipped, per the owner's standing rule. The
 # mutation each one catches is named in its docstring, so a future reader can
 # re-run the experiment instead of trusting this comment.
 
@@ -1311,7 +1311,7 @@ class TestUnenteredAssertReachability:
 # =============================================================================
 #
 # Every test below was confirmed RED against a named one-line mutation of
-# mock_drift_check.py before it shipped, per Patrick's standing rule. The
+# mock_drift_check.py before it shipped, per the owner's standing rule. The
 # mutation each one catches is named in its docstring, so a future reader can
 # re-run the experiment instead of trusting this comment.
 #
@@ -1803,7 +1803,7 @@ class TestMockDriftBranchCheck:
 # =============================================================================
 #
 # Every test below was confirmed RED against a named one-line mutation of
-# self_skip_check.py before it shipped, per Patrick's standing rule.
+# self_skip_check.py before it shipped, per the owner's standing rule.
 
 
 def _skip_rows(root: Path) -> list:

@@ -325,7 +325,7 @@ class LogStreamer:
                 new_lines = self._read_new_lines()
                 new_lines = self._filter_lines(new_lines)
                 if new_lines:
-                    # No "forwarding N lines" announcement here, by Patrick's ruling:
+                    # No "forwarding N lines" announcement here, by the owner's ruling:
                     # the forwarded lines are their own evidence. Anything logged in
                     # this loop lands in the bot's own captured log, which a
                     # system-wide streamer watches — that is what fed the loop.

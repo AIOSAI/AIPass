@@ -36,7 +36,7 @@ signals. They still are for the VERDICT: a scored group that failed exits 0,
 because this lane is advisory and a non-zero there would make it a gate nobody
 ruled it to be. What changed is the other half: a refusal (`REFUSAL_CODES` -
 the harness could not run, no units, no adapter, budget spent, an argument
-nobody recognised) leaves with its own code, per Patrick's standing ruling from
+nobody recognised) leaves with its own code, per the owner's standing ruling from
 the 2026-09-07 fleet sweep.
 """
 

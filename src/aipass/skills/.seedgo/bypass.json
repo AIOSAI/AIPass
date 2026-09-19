@@ -174,7 +174,7 @@
     {
       "file": "lib/telegram/apps/handlers/bot_factory.py",
       "standard": "permission_flags",
-      "reason": "TDPLAN-0009 — launch_mirror_session() intentionally uses --dangerously-skip-permissions. Detached tmux mirror sessions have no operator to approve prompts; without it the session hangs forever. Patrick's explicit ask."
+      "reason": "TDPLAN-0009 — launch_mirror_session() intentionally uses --dangerously-skip-permissions. Detached tmux mirror sessions have no operator to approve prompts; without it the session hangs forever. The owner's explicit ask."
     },
     {
       "file": "apps/handlers/discovery_handler.py",

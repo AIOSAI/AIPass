@@ -351,7 +351,7 @@ def print_branch_summary(
     # reader had no way to compute. @devpulse's ruling the same morning, on
     # this branch's own report of it: the honest sentence ships now; aligning
     # the walk to each checker's APPLIES_TO (+136 findings across 12 branches)
-    # is a separate, scheduled fleet change needing Patrick's GO. A score that
+    # is a separate, scheduled fleet change needing the owner's GO. A score that
     # stops overclaiming is a fix, not a change.
     #
     # THE SENTENCE COMES FROM THE PACK since 2026-09-07. It was hardcoded to

@@ -25,7 +25,7 @@ import pytest
 from aipass.skills.lib.screen_lock import handler as screen_lock
 
 # The resolver matches sessions against our own uid, so build the fixtures from it
-# rather than hard-coding 1000 — CI does not run as Patrick. Windows has no
+# rather than hard-coding 1000 — CI does not run as the owner. Windows has no
 # os.getuid at all, so fall back to a fixed uid there and pin the resolver to it.
 _UID = str(os.getuid()) if hasattr(os, "getuid") else "1000"
 
