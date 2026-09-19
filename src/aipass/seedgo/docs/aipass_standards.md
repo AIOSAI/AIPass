@@ -29,7 +29,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | dead_code | branch_level | everywhere | Unreachable functions and dead imports |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
-| docs_page | entry_point | everywhere | Every docs/*.md in one shape: one H1 first, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap — plus advisory back-link, story and defect-prose lines |
+| docs_page | entry_point | everywhere | Every docs/*.md in one shape: a README back-link and one H1, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap, and no retired defect register by name — plus advisory story and defect-prose lines |
 | documentation | all_files | production | Docstrings on public functions |
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
 | error_handling | all_files | everywhere | Try/except patterns, error propagation |
@@ -54,7 +54,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | naming | all_files | everywhere | snake_case, column-0 constants |
 | output_routing | all_files | everywhere | Status output via @cli helpers, not raw console.print |
 | permission_flags | all_files | everywhere | No dangerous permission overrides |
-| readme | entry_point | everywhere | README.md exists and is current — plus the advisory docs-index lane |
+| readme | entry_point | everywhere | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
 | readme_quality | entry_point | everywhere | README content depth and section quality |
 | rich_markup | all_files | production | Literal `[placeholders]` Rich silently eats at render time |
 | ruff *(advisory)* | branch_level | everywhere | Ruff linter compliance — surfaces violations, never gates the score |

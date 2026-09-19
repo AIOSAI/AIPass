@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_content.py
 # Description: README Standards Content
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -23,6 +23,25 @@ def get_readme_standards() -> str:
 [yellow]PURPOSE:[/yellow]
   Every branch README must accurately reflect its current state.
   A stale or incomplete README misleads contributors and AI agents.
+
+[yellow]CANONICAL SECTION ORDER - eight ## sections, names exact, order fixed:[/yellow]
+
+  [bold cyan]1 Quick Start[/bold cyan]         the first commands a newcomer runs
+  [bold cyan]2 What It Does[/bold cyan]        what the branch owns, in a few lines
+  [bold cyan]3 Live Inventory[/bold cyan]      a pointer to drone @<branch> and --help, never a copy
+  [bold cyan]4 How To Reach Me[/bold cyan]     mail, dispatch, the address
+  [bold cyan]5 Commands[/bold cyan]            a pointer to --help, and the few verbs worth naming
+  [bold cyan]6 Architecture[/bold cyan]        the layout and the idea behind it
+  [bold cyan]7 Documentation[/bold cyan]       the docs/ index, one line per page
+  [bold cyan]8 Integration Points[/bold cyan]  what it depends on and what depends on it
+
+  The fleet's de facto order (DPLAN-0351). Back-link, H1 and purpose sit
+  above the first section; ### subsections are free. Every README carries
+  all eight - the advisory line [dim]readme sections[/dim] names the rest.
+
+  The generated AUTO:NAME marker sections are retired: no README carries
+  one, and the live inventory is drone @<branch> and --help, generated
+  from code on every call.
 
 [yellow]CHECK 1 - README EXISTS:[/yellow]
 
@@ -122,6 +141,12 @@ def get_readme_standards() -> str:
     The Last Updated line is exempt - CHECK 3 requires it. The Commands
     line asks for a POINTER, not a deletion: CHECKS 2 and 6 still want
     the section.
+
+  [bold cyan]sections[/bold cyan]
+    The eight ## sections above, names exact, order fixed: what is
+    missing, a rename (a heading sharing its first word with a missing
+    section), the out-of-order pairs, and a ## heading that is not one
+    of the eight. All eight in order is SILENCE.
 
   [dim]Why advisory: readme is scored and CI gates every branch at 100.
   17 of 18 branches have no docs index today, so a ninth scored check

@@ -243,15 +243,19 @@ def test_get_architecture_standards_has_expected_content():
 
 
 def test_get_docs_page_standards_has_expected_content():
-    """get_docs_page_standards names the reader, the five scored checks and the pending exemption."""
+    """get_docs_page_standards names the reader, the six scored checks and where the retired registers live."""
+    from aipass.seedgo.apps.handlers.aipass_standards.docs_page_check import CHECK_NAMES
     from aipass.seedgo.apps.handlers.aipass_standards.docs_page_content import get_docs_page_standards
 
     result = get_docs_page_standards()
     _assert_content_str(result, "docs_page_standards")
     assert "WHO READS A PAGE:" in result
-    for check in ("One H1, first", "Purpose paragraph", "Heading depth", "Links resolve", "Size"):
+    assert len(CHECK_NAMES) == 6
+    for check in CHECK_NAMES:
         assert check in result
     assert "known_issues" in result and "tech_debt" in result
+    assert "retired 2026-09-19" in result and "docs.local" in result
+    assert "pending" not in result and "until he rules" not in result
 
 
 def test_get_cli_standards_has_expected_content():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_check.py
 # Description: README Standards Checker Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -26,6 +26,8 @@ ADVISORY, NON-SCORED (check_branch_info, DPLAN-0347):
 - named paths: branch-rooted paths the README claims that are absent
 - rot bait: count claims, dated status headings, a Commands section that
   re-types --help
+- sections: the eight ## sections of README_SECTIONS, names exact, order
+  fixed (DPLAN-0351) - missing, renamed, out of order, or a stranger
 
 Nothing in that lane carries a score, a pass or a violation. See the section
 banner at the foot of this module for why it is that channel and not a ninth
@@ -36,7 +38,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -734,9 +736,24 @@ _COMMAND_LIST_MIN = 3
 #: cap would hand back an unactionable count (inert.py learned this the hard way).
 _SAMPLE_LIMIT = 6
 
+#: The README face: eight ## sections, names exact, order fixed (DPLAN-0351).
+#: The fleet's de facto order, carried exactly by 6 of 18 READMEs on the day it
+#: was written down. Advisory for the reason the docs index is: scored, it would
+#: red 12 branches on the commit that landed it.
+README_SECTIONS: Tuple[str, ...] = (
+    "Quick Start",
+    "What It Does",
+    "Live Inventory",
+    "How To Reach Me",
+    "Commands",
+    "Architecture",
+    "Documentation",
+    "Integration Points",
+)
+
 
 def check_branch_info(branch_path: str) -> List[str]:
-    """Non-scored advisory lines: the docs/ index, named paths, and rot bait.
+    """Non-scored advisory lines: the docs/ index, named paths, rot bait, and the eight sections.
 
     Never returns a score, a pass or a violation — see the section banner for
     why this channel and not the scored lane.
@@ -758,10 +775,12 @@ def check_branch_info(branch_path: str) -> List[str]:
         logger.info("[readme] cannot read README for advisory lines at %s: %s", readme_path, e)
         return []
 
+    readme_lines = content.split("\n")
     lines: List[str] = []
     lines.extend(_docs_index_lines(branch_root, content))
     lines.extend(_named_path_lines(branch_root, content))
     lines.extend(_rot_bait_lines(branch_root, content))
+    lines.extend(_section_order_lines(readme_lines, _fence_mask(readme_lines)))
     if lines:
         json_handler.log_operation(
             "readme_advisory_lines",
@@ -998,4 +1017,54 @@ def _command_list_lines(branch_root: Path, lines: List[str], mask: List[bool]) -
     return [
         f"readme rot bait (advisory): Commands section lists {invocations} invocation(s) that duplicate "
         f"drone @{branch} --help. Keep a pointer, drop the list (checks 2 and 6 still want the section)"
+    ]
+
+
+def _section_order_lines(lines: List[str], mask: List[bool]) -> List[str]:
+    """One line on the README's ## sections against README_SECTIONS: silence when all eight stand in order.
+
+    A ## heading that is not one of the eight but shares its first word with a
+    missing one is a rename ("What I Do", "Integration", "How to reach me");
+    any other is a stranger. Order is read over the eight as found, a rename
+    counted where it stands. H1, H3 and fenced lines are not sections.
+    """
+    found = [
+        match.group(2).strip()
+        for index, line in enumerate(lines)
+        if not mask[index] and (match := _HEADING_RE.match(line)) and len(match.group(1)) == 2
+    ]
+    by_word = {name.split()[0].lower(): name for name in README_SECTIONS if name not in found}
+    renames: List[str] = []
+    strangers: List[str] = []
+    order: List[str] = []
+    for heading in found:
+        words = heading.split()
+        target = None if heading in README_SECTIONS else by_word.pop(words[0].lower() if words else "", None)
+        if heading in README_SECTIONS or target:
+            order.append(target or heading)
+            if target:
+                renames.append(f"'{heading}' to '{target}'")
+        else:
+            strangers.append(heading)
+    missing = [name for name in README_SECTIONS if name in by_word.values()]
+    swaps = [
+        f"{first} before {second}"
+        for first, second in zip(order, order[1:])
+        if README_SECTIONS.index(first) > README_SECTIONS.index(second)
+    ]
+    parts = [
+        f"{label}{', '.join(names)}"
+        for label, names in (
+            ("missing ", missing),
+            ("rename ", renames),
+            ("order: ", swaps),
+            ("not one of the eight: ", strangers),
+        )
+        if names
+    ]
+    if not parts:
+        return []
+    return [
+        f"readme sections (advisory): {_safe('; '.join(parts))} — the face is eight ## sections, "
+        f"names exact, order fixed: drone @seedgo standard readme"
     ]

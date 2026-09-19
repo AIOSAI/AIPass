@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: docs_page_check.py
 # Description: Docs Page Standards Checker Handler — one shape for every docs/*.md page
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
 # Modified: 2026-09-19
 # =============================================
@@ -13,10 +13,12 @@ A docs page is a guide a seat reads on arriving at a branch. The README is the
 face; ``docs/`` is the depth; every page has the same shape so a reader, and
 the owner sampling at random, meets one layout page to page.
 
-SCORED — five checks over every ``<branch>/docs/*.md`` (one level, the reach of
+SCORED — six checks over every ``<branch>/docs/*.md`` (one level, the reach of
 readme_check's docs index):
-1. One H1, first — exactly one ``# `` heading outside code fences, with only
-   blank lines, HTML comments and a README back-link above it.
+1. Back-link and one H1 — a README back-link above the purpose paragraph, and
+   exactly one ``# `` heading outside code fences with only blank lines, HTML
+   comments and the back-link above it. One rule for how a page opens: the
+   back-link is the one thing required in the slot this check already read.
 2. Purpose paragraph — the first line under the H1 (back-link lines skipped)
    is prose: not a heading, list, table, quote, fence, rule or lone link.
 3. Heading depth — nothing deeper than ``###``.
@@ -24,14 +26,12 @@ readme_check's docs index):
    page's own directory.
 5. Size — the page is at most the context pack's ``caps["docs/*.md"]`` chars,
    read at call time. An unreadable cap fails the check and names the key.
-
-EXEMPT BY FILE NAME, pending the owner's ruling: a page whose name contains
-``known_issues`` or ``tech_debt``. They are defect registries, not depth; the
-owner rules whether they retire into pads and plans. Until then no rule here,
-scored or advisory, reads them.
+6. Not a register — the page's name does not contain ``known_issues`` or
+   ``tech_debt``. The owner retired the defect registers on 2026-09-19; their
+   content lives in each branch's ``docs.local/``, open items on the pad or in
+   a plan. A register coming back under ``docs/`` is red.
 
 ADVISORY, NON-SCORED (check_branch_info) — nominations, never a number:
-- back-link: a page with no README back-link above its purpose paragraph
 - story: "used to", "previously", <fixed|cured|corrected|retired> ... <date>
   (the arms that hand-sampled at 7/8 or better; history goes to the CHANGELOG)
 - defect prose: an open defect told as a paragraph (the owner's pad holds it)
@@ -56,10 +56,18 @@ BRANCH_INPUTS = ("docs/*.md",)
 _STANDARD = "docs_page"
 _DOCS_DIRNAME = "docs"
 
-#: Name fragments of the pages the owner has not ruled on yet.
-EXEMPT_NAME_PARTS: Tuple[str, ...] = ("known_issues", "tech_debt")
+#: Name fragments of the retired defect registers (the owner, 2026-09-19).
+REGISTER_NAME_PARTS: Tuple[str, ...] = ("known_issues", "tech_debt")
+_RETIRED = "a defect register, retired 2026-09-19: its content lives in docs.local/, open items on the pad"
 
-CHECK_NAMES: Tuple[str, ...] = ("One H1, first", "Purpose paragraph", "Heading depth", "Links resolve", "Size")
+CHECK_NAMES: Tuple[str, ...] = (
+    "Back-link and one H1",
+    "Purpose paragraph",
+    "Heading depth",
+    "Links resolve",
+    "Size",
+    "Not a register",
+)
 
 _MAX_DEPTH = 3
 _SAMPLE_LIMIT = 6
@@ -106,10 +114,10 @@ class Page(NamedTuple):
 # =============================================================================
 
 
-def is_exempt(page_path: Path) -> bool:
-    """True for a page the owner has not ruled on (known_issues / tech_debt)."""
-    name = page_path.name.lower()
-    return any(part in name for part in EXEMPT_NAME_PARTS)
+def is_register(page_path: Path) -> bool:
+    """True for a retired defect register by name, however spelt: known_issues, Known-Issues, tech debt."""
+    name = re.sub(r"[-\s]", "_", page_path.name.lower())
+    return any(part in name for part in REGISTER_NAME_PARTS)
 
 
 def _fence_mask(lines: List[str]) -> List[bool]:
@@ -136,14 +144,14 @@ def read_page(page_path: Path) -> Tuple[Optional[Page], str]:
 
 
 def docs_pages(branch_root: Path, bypass_rules: list | None = None) -> List[Path]:
-    """The scored corpus: ``docs/*.md``, one level, minus exempt and bypassed pages."""
+    """The scored corpus: ``docs/*.md``, one level, minus bypassed pages."""
     docs_dir = branch_root / _DOCS_DIRNAME
     if not docs_dir.is_dir():
         return []
     return [
         page
         for page in sorted(docs_dir.glob("*.md"))
-        if page.is_file() and not is_exempt(page) and not is_bypassed(str(page), _STANDARD, None, bypass_rules)
+        if page.is_file() and not is_bypassed(str(page), _STANDARD, None, bypass_rules)
     ]
 
 
@@ -184,8 +192,26 @@ def _h1_lines(page: Page) -> List[int]:
     ]
 
 
-def h1_first(page: Page) -> str:
-    """Rule 1: exactly one H1, and nothing but blanks, comments and a back-link above it."""
+def _above_purpose(page: Page) -> List[str]:
+    """The lines above the purpose paragraph: before the H1, and back-link lines under it."""
+    h1s = _h1_lines(page)
+    if not h1s:
+        return []
+    head = page.lines[: h1s[0]]
+    for i in range(h1s[0] + 1, len(page.lines)):
+        if page.lines[i].strip() and not is_backlink_line(page.lines[i], page):
+            break
+        head.append(page.lines[i])
+    return head
+
+
+def has_backlink(page: Page) -> bool:
+    """A README back-link sits above the purpose paragraph."""
+    return any(is_backlink_line(line, page) for line in _above_purpose(page))
+
+
+def opening(page: Page) -> str:
+    """Rule 1: exactly one H1 with nothing but blanks, comments and a back-link above it, and the back-link there."""
     h1s = _h1_lines(page)
     if len(h1s) != 1:
         return "no H1" if not h1s else f"{len(h1s)} H1 headings"
@@ -193,6 +219,8 @@ def h1_first(page: Page) -> str:
         line = page.lines[i]
         if page.fenced[i] or not (not line.strip() or _is_comment(line) or is_backlink_line(line, page)):
             return f"line {i + 1} comes before the H1"
+    if not has_backlink(page):
+        return "no README back-link above the purpose paragraph"
     return ""
 
 
@@ -253,6 +281,11 @@ def size_within(page: Page, cap: Optional[int]) -> str:
     return ""
 
 
+def not_a_register(page: Page) -> str:
+    """Rule 6: the page is not a retired defect register."""
+    return _RETIRED if is_register(page.path) else ""
+
+
 # =============================================================================
 # THE SCORE
 # =============================================================================
@@ -276,7 +309,7 @@ def _check(name: str, failures: List[str], measured: int) -> Dict:
 
 
 def check_pages(pages: List[Path], cap: Optional[int], cap_error: str) -> List[Dict]:
-    """The five checks over ``pages``. An unreadable page fails all five."""
+    """The six checks over ``pages``. An unreadable page fails all six."""
     failures: Dict[str, List[str]] = {name: [] for name in CHECK_NAMES}
     for path in pages:
         page, reason = read_page(path)
@@ -285,13 +318,14 @@ def check_pages(pages: List[Path], cap: Optional[int], cap_error: str) -> List[D
             for name in CHECK_NAMES:
                 failures[name].append(f"{label} {reason}")
             continue
-        verdicts = (h1_first(page), purpose_paragraph(page), heading_depth(page), links_resolve(page))
-        for name, verdict in zip(CHECK_NAMES, verdicts + (size_within(page, cap),)):
+        verdicts = (opening(page), purpose_paragraph(page), heading_depth(page), links_resolve(page))
+        for name, verdict in zip(CHECK_NAMES, verdicts + (size_within(page, cap), not_a_register(page))):
             if verdict:
                 failures[name].append(f"{label} ({verdict})")
     checks = [_check(name, failures[name], len(pages)) for name in CHECK_NAMES]
     if cap is None:
-        checks[-1] = {"name": "Size", "passed": False, "message": cap_error or "docs page cap unreadable"}
+        size = CHECK_NAMES.index("Size")
+        checks[size] = {"name": "Size", "passed": False, "message": cap_error or "docs page cap unreadable"}
     return checks
 
 
@@ -304,7 +338,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
             bypasses the standard; a rule on one page takes that page out.
 
     Returns:
-        ``{"passed", "checks", "score", "standard"}`` — five checks.
+        ``{"passed", "checks", "score", "standard"}`` — six checks.
     """
     if is_bypassed(module_path, _STANDARD, bypass_rules=bypass_rules):
         return {
@@ -337,24 +371,6 @@ def external_inputs() -> List[Path]:
 # =============================================================================
 
 
-def _above_purpose(page: Page) -> List[str]:
-    """The lines above the purpose paragraph: before the H1, and back-link lines under it."""
-    h1s = _h1_lines(page)
-    if not h1s:
-        return []
-    head = page.lines[: h1s[0]]
-    for i in range(h1s[0] + 1, len(page.lines)):
-        if page.lines[i].strip() and not is_backlink_line(page.lines[i], page):
-            break
-        head.append(page.lines[i])
-    return head
-
-
-def has_backlink(page: Page) -> bool:
-    """A README back-link sits above the purpose paragraph."""
-    return any(is_backlink_line(line, page) for line in _above_purpose(page))
-
-
 def _prose(page: Page) -> List[Tuple[int, str]]:
     """``(line number, text)`` for prose lines: outside fences and tables, link text stripped."""
     return [
@@ -371,7 +387,7 @@ def story_lines(page: Page) -> List[int]:
 
 def _points_at_registry(line: str) -> bool:
     """A line linking to a known_issues / tech_debt page is a pointer to the register, not a defect told here."""
-    return any(is_exempt(Path(unquote(target.split("#")[0]))) for target in _links(line))
+    return any(is_register(Path(unquote(target.split("#")[0]))) for target in _links(line))
 
 
 def defect_lines(page: Page) -> List[int]:
@@ -383,15 +399,14 @@ def defect_lines(page: Page) -> List[int]:
     ]
 
 
-def _nominations(pages: List[Page]) -> Tuple[List[str], List[str], List[str]]:
-    no_link = [f"docs/{page.path.name}" for page in pages if not has_backlink(page)]
+def _nominations(pages: List[Page]) -> Tuple[List[str], List[str]]:
     story = [f"docs/{page.path.name}:{n}" for page in pages for n in story_lines(page)]
     defects = [f"docs/{page.path.name}:{n}" for page in pages for n in defect_lines(page)]
-    return no_link, story, defects
+    return story, defects
 
 
 def check_branch_info(branch_path: str) -> List[str]:
-    """Non-scored nominations: missing back-links, story lines, defect prose.
+    """Non-scored nominations: story lines and defect prose. The back-link scores under rule 1.
 
     Args:
         branch_path: Branch root to inspect.
@@ -404,13 +419,8 @@ def check_branch_info(branch_path: str) -> List[str]:
     pages = [page for page, _ in (read_page(path) for path in docs_pages(branch_root)) if page is not None]
     if not pages:
         return []
-    no_link, story, defects = _nominations(pages)
+    story, defects = _nominations(pages)
     lines = []
-    if no_link:
-        lines.append(
-            f"docs_page back-link (advisory): {len(no_link)} of {len(pages)} page(s) have no README back-link "
-            f"above the purpose paragraph — {_sample(no_link)}"
-        )
     if story:
         lines.append(f"docs_page story (advisory): {len(story)} line(s) tell history — {_sample(story)}")
     if defects:

@@ -11,6 +11,7 @@ docs_page_check.py, the docs/*.md page shape one layer down (DPLAN-0351)."""
 # =============================================
 
 import pytest
+from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock
 
@@ -590,7 +591,12 @@ def _advisory_branch(tmp_path, readme_text: str, docs: dict | None = None, name:
     return branch_root
 
 
-_PLAIN_README = "# MyBranch\n\nA face for strangers.\n\n*Last Updated: 2099-01-01*\n"
+_PLAIN_README = (
+    "# MYBRANCH\n\nA face for strangers.\n\n"
+    "## Quick Start\n\n## What It Does\n\n## Live Inventory\n\n## How To Reach Me\n\n"
+    "## Commands\n\n## Architecture\n\n## Documentation\n\n## Integration Points\n\n"
+    "*Last Updated: 2099-01-01*\n"
+)
 
 
 def test_docs_index_reports_unlinked_doc(tmp_path):
@@ -866,6 +872,7 @@ def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
     advisory = check_branch_info(str(branch_root))
 
     assert len(advisory) >= 4, "the branch must actually trip the advisory lane"
+    assert any(line.startswith("readme sections (advisory)") for line in advisory)
     assert result["score"] == 100
     assert len(result["checks"]) == 8
     assert all(c["passed"] for c in result["checks"])
@@ -874,14 +881,83 @@ def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
         assert word not in blob
 
 
+# The README face is eight ## sections, names exact, order fixed (DPLAN-0351
+# phase 3): the fleet's de facto order, advisory before it scores.
+
+_EIGHT = (
+    "Quick Start",
+    "What It Does",
+    "Live Inventory",
+    "How To Reach Me",
+    "Commands",
+    "Architecture",
+    "Documentation",
+    "Integration Points",
+)
+
+
+def _sections_line(branch_root):
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
+
+    return [line for line in check_branch_info(str(branch_root)) if line.startswith("readme sections")]
+
+
+def test_readme_sections_the_eight_in_order_are_silent(tmp_path):
+    """A README with the eight in order says nothing: an H3, an H1 and a fenced heading are not sections."""
+    body = "".join(f"## {name}\n\nBody.\n\n" for name in _EIGHT)
+    fenced = "## Architecture\n\n### A detail\n\n```md\n## Quick Start\n```\n\n"
+    body = body.replace("## Architecture\n\nBody.\n\n", fenced)
+    branch_root = _advisory_branch(tmp_path, f"# MYBRANCH\n\nA face.\n\n{body}")
+
+    assert _sections_line(branch_root) == []
+
+
+def test_readme_sections_names_what_is_missing_renamed_out_of_order_and_extra(tmp_path):
+    """One advisory line carries the whole diff a hand wave needs: missing, renames, order, strangers."""
+    readme = (
+        "# MYBRANCH\n\n## What It Does\n\n## Quick Start\n\n## How to reach me\n\n## Commands\n\n"
+        "## Architecture\n\n## Status [live]\n\n## Integration\n\n*Last Updated: 2099-01-01*\n"
+    )
+    branch_root = _advisory_branch(tmp_path, readme)
+
+    (line,) = _sections_line(branch_root)
+
+    assert "(advisory)" in line
+    assert "missing Live Inventory, Documentation" in line
+    assert "'How to reach me' to 'How To Reach Me'" in line and "'Integration' to 'Integration Points'" in line
+    assert "order: What It Does before Quick Start" in line and "Commands before" not in line
+    assert "not one of the eight: Status (live)" in line
+
+
+def test_readme_sections_the_standard_prints_the_order_the_check_reads():
+    """readme.md's Canonical Section Order and the query text carry the checker's eight, in its order."""
+    import re
+    from aipass.seedgo.apps.handlers.aipass_standards import readme_check
+    from aipass.seedgo.apps.handlers.aipass_standards.readme_content import get_readme_standards
+
+    standard = (Path(readme_check.__file__).parent / "readme.md").read_text(encoding="utf-8")
+    block = standard.split("## Canonical Section Order", 1)[1].split("\n## ", 1)[0]
+    listed = tuple(re.findall(r"^\d+\. \*\*(.+?)\*\*", block, re.MULTILINE))
+    rendered = get_readme_standards()
+
+    assert readme_check.README_SECTIONS == _EIGHT == listed
+    assert [rendered.index(name) for name in _EIGHT] == sorted(rendered.index(name) for name in _EIGHT)
+
+
+def test_readme_sections_seedgo_own_readme_is_one_of_the_six_in_order():
+    """An oracle outside the checker: the README this branch ships reads clean."""
+    assert _sections_line(Path(__file__).resolve().parents[1]) == []
+
+
 # ===========================================================================
 # docs_page_check -- the docs/*.md page shape (DPLAN-0351)
 # ===========================================================================
 #
 # The README's depth lives in docs/, and every page there has one shape: a
 # back-link, one H1, a purpose paragraph, topic sections no deeper than ###,
-# links that resolve, and a size under the context pack's cap. Five rules
-# score; back-link, story and defect prose only nominate.
+# links that resolve, a size under the context pack's cap, and a name that is
+# not a retired defect register. Six checks score; story and defect prose
+# only nominate.
 
 _GOOD_PAGE = (
     "[<- Back to the README](../README.md)\n\n"
@@ -917,13 +993,17 @@ def _failed(result):
     return {c["name"]: c["message"] for c in result["checks"] if not c["passed"]}
 
 
-def test_docs_page_a_page_in_the_template_shape_passes_all_five(tmp_path):
-    """The template itself is the zero point: five checks, all green, score 100."""
+_OPENING = "Back-link and one H1"
+
+
+def test_docs_page_a_page_in_the_template_shape_passes_all_six(tmp_path):
+    """The template itself is the zero point: six checks, all green, score 100."""
     entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE})
 
     result = _docs().check_module(str(entry))
 
     assert [c["name"] for c in result["checks"]] == list(_docs().CHECK_NAMES)
+    assert len(result["checks"]) == 6 and result["checks"][0]["name"] == _OPENING
     assert _failed(result) == {}
     assert result["score"] == 100
 
@@ -946,7 +1026,7 @@ def test_docs_page_the_h1_is_one_and_first(tmp_path, text, why):
 
     failed = _failed(_docs().check_module(str(entry)))
 
-    assert "docs/bad.md" in failed["One H1, first"] and why in failed["One H1, first"]
+    assert "docs/bad.md" in failed[_OPENING] and why in failed[_OPENING]
 
 
 def test_docs_page_a_comment_and_a_back_link_may_sit_above_the_h1(tmp_path):
@@ -954,7 +1034,24 @@ def test_docs_page_a_comment_and_a_back_link_may_sit_above_the_h1(tmp_path):
     text = "<!-- generated header -->\n[<- Back to the README](../README.md)\n\n# Page\n\nPurpose.\n"
     entry = _docs_branch(tmp_path / "b", {"page.md": text})
 
-    assert "One H1, first" not in _failed(_docs().check_module(str(entry)))
+    assert _OPENING not in _failed(_docs().check_module(str(entry)))
+
+
+def test_docs_page_a_missing_or_low_back_link_is_red_under_the_opening_check(tmp_path):
+    """Scored since wave 0 put the back-link on every page: above the purpose paragraph, or the page is red.
+
+    The DPLAN-0347 move stamp's link sits below the purpose, which is not the slot.
+    """
+    stamp = "# Stamped\n\nPurpose.\n\nMoved out of README.md. Back to the [README](../README.md)\n"
+    entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE, "bare.md": "# Bare\n\nPurpose.\n", "stamp.md": stamp})
+
+    result = _docs().check_module(str(entry))
+    message = _failed(result)[_OPENING]
+
+    assert "2 of 4" in message and "no README back-link" in message
+    assert "docs/bare.md" in message and "docs/stamp.md" in message and "page.md" not in message
+    assert set(_failed(result)) == {_OPENING}
+    assert not [line for line in _docs().check_branch_info(str(tmp_path / "b")) if "back-link" in line]
 
 
 @pytest.mark.parametrize(
@@ -1038,7 +1135,10 @@ def test_docs_page_an_unreadable_cap_fails_the_size_check_and_says_why(monkeypat
     monkeypatch.setattr(d.budget, "docs_page_cap", lambda: (None, "seedgo: pack.json has no caps['docs/*.md']"))
     entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE})
 
-    assert "caps['docs/*.md']" in _failed(d.check_module(str(entry)))["Size"]
+    result = d.check_module(str(entry))
+
+    assert "caps['docs/*.md']" in _failed(result)["Size"]
+    assert [c["name"] for c in result["checks"]] == list(d.CHECK_NAMES), "the cap verdict replaced another check"
 
 
 def test_docs_page_the_shipped_cap_is_the_context_pack_key():
@@ -1054,15 +1154,27 @@ def test_docs_page_the_shipped_cap_is_the_context_pack_key():
     assert cap not in numbers, "a copy of the cap was written into the checker"
 
 
-def test_docs_page_known_issues_and_tech_debt_pages_are_not_read(tmp_path):
-    """The owner has not ruled on the registries: no rule touches them, scored or advisory."""
-    broken = "no title, used to be broken, known gap, [dead](gone.md)\n#### deep\n"
-    entry = _docs_branch(tmp_path / "b", {"known_issues.md": broken, "tech_debt.md": broken}, other=False)
+def test_docs_page_a_defect_register_under_docs_is_red_by_name(tmp_path):
+    """The owner retired the registers on 2026-09-19; one coming back under docs/ is red, however spelt.
+
+    A register in the template shape is still red: the name is the defect, not the layout.
+    """
+    pages = {
+        "known_issues.md": _GOOD_PAGE,
+        "Tech-Debt.md": _GOOD_PAGE,
+        "old known issues.md": _GOOD_PAGE,
+        "issues_known.md": _GOOD_PAGE,
+    }
+    entry = _docs_branch(tmp_path / "b", pages)
 
     result = _docs().check_module(str(entry))
+    message = _failed(result)["Not a register"]
 
-    assert _failed(result) == {}
-    assert _docs().check_branch_info(str(tmp_path / "b")) == []
+    assert set(_failed(result)) == {"Not a register"}
+    assert "3 of 5" in message and "retired 2026-09-19" in message and "docs.local" in message
+    assert "known_issues.md" in message and "Tech-Debt.md" in message and "old known issues.md" in message
+    assert "issues_known.md" not in message and "other.md" not in message
+    assert result["checks"][-1]["name"] == "Not a register" and result["score"] == 83
 
 
 def test_docs_page_reads_one_level_and_nothing_at_all_is_a_skip(tmp_path):
@@ -1093,21 +1205,9 @@ def test_docs_page_a_bypass_on_one_page_takes_only_that_page_out(tmp_path):
     entry = _docs_branch(tmp_path / "b", {"odd.md": "no title\n", "bad.md": "no title either\n"})
     rules = [{"file": "docs/odd.md", "standard": "docs_page", "reason": "test"}]
 
-    message = _failed(_docs().check_module(str(entry), rules))["One H1, first"]
+    message = _failed(_docs().check_module(str(entry), rules))[_OPENING]
 
     assert "docs/bad.md" in message and "odd.md" not in message
-
-
-def test_docs_page_advisory_nominates_a_missing_or_low_back_link(tmp_path):
-    """The back-link sits above the purpose paragraph. The move stamp's link, below it, is not the slot."""
-    stamp = "# Stamped\n\nPurpose.\n\nMoved out of README.md. Back to the [README](../README.md)\n"
-    entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE, "bare.md": "# Bare\n\nPurpose.\n", "stamp.md": stamp})
-
-    lines = _docs().check_branch_info(str(entry.parent.parent))
-    back = next(line for line in lines if line.startswith("docs_page back-link"))
-
-    assert "(advisory)" in back and "2 of 4" in back
-    assert "docs/bare.md" in back and "docs/stamp.md" in back and "page.md" not in back
 
 
 def test_docs_page_advisory_nominates_story_lines_by_the_high_precision_arms(tmp_path):
@@ -1152,11 +1252,11 @@ def test_docs_page_advisory_nominates_defect_prose_but_not_a_pointer_to_the_regi
 
 def test_docs_page_advisory_lines_never_move_the_score(tmp_path):
     """A page that trips every advisory arm still scores 100: nominations are not findings."""
-    text = "# Page\n\nPurpose.\n\nIt used to break. Known gap: still open.\n"
+    text = "[<- Back](../README.md)\n\n# Page\n\nPurpose.\n\nIt used to break. Known gap: still open.\n"
     entry = _docs_branch(tmp_path / "b", {"page.md": text})
 
     result = _docs().check_module(str(entry))
     advisory = _docs().check_branch_info(str(entry.parent.parent))
 
-    assert len(advisory) == 3 and all("(advisory)" in line for line in advisory)
+    assert len(advisory) == 2 and all("(advisory)" in line for line in advisory)
     assert result["score"] == 100

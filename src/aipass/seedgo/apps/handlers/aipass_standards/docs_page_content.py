@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: docs_page_content.py
 # Description: Docs Page Standards Content — the one shape of a docs/*.md page
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-19
 # Modified: 2026-09-19
 # =============================================
@@ -43,10 +43,13 @@ def get_docs_page_standards() -> str:
   [dim]docs/README.md[/dim] is the index shape: back-link, title, one line,
   then one line per page.
 
-[yellow]SCORED - 5 checks over every docs/*.md (one level):[/yellow]
+[yellow]SCORED - 6 checks over every docs/*.md (one level):[/yellow]
 
-  [bold cyan]1 One H1, first[/bold cyan]      exactly one [dim]# [/dim]heading outside code fences;
-                        only blanks, HTML comments and a README back-link above it
+  [bold cyan]1 Back-link and one H1[/bold cyan]  a README back-link above the purpose paragraph
+                        (on top, or straight under the H1); exactly one [dim]# [/dim]
+                        heading outside code fences; only blanks, HTML comments
+                        and the back-link above it. The move stamp's link,
+                        below the purpose, is not the slot
   [bold cyan]2 Purpose paragraph[/bold cyan]  the first line under the H1 (back-link lines
                         skipped) is prose - not a heading, list, table, quote,
                         fence, rule or lone link
@@ -56,15 +59,21 @@ def get_docs_page_standards() -> str:
   [bold cyan]5 Size[/bold cyan]               at most the context pack's [dim]caps["docs/*.md"][/dim]
                         chars, read at call time. At the cap passes. A cap
                         that cannot be read fails the check and names the key
+  [bold cyan]6 Not a register[/bold cyan]     the page's name does not contain [dim]known_issues[/dim] or
+                        [dim]tech_debt[/dim] (hyphen and space spellings too)
 
-  5 checks, 20 points each. Pass threshold 75%; CI holds every branch at 100.
+  6 checks, ~17 points each. Pass threshold 75%; CI holds every branch at 100.
   No docs/ pages is a skip, not a red.
+
+[yellow]THE DEFECT REGISTERS - retired 2026-09-19:[/yellow]
+
+  The owner retired every docs/known_issues.md and docs/tech_debt.md. Their
+  content lives in each branch's [dim]docs.local/[/dim], untracked; an open item goes
+  on the owner's pad or into a plan. A register coming back under docs/ is
+  red by check 6.
 
 [yellow]ADVISORY - nominations, never a number:[/yellow]
 
-  [bold cyan]back-link[/bold cyan]     no README back-link above the purpose paragraph.
-                 A link further down (the old "Moved out of README.md" stamp)
-                 is not the slot. Advisory until one mechanical wave, then scored.
   [bold cyan]story[/bold cyan]         "used to", "previously", fixed/cured/corrected/retired
                  next to a date - the arms that hand-sampled at 7/8 or better.
                  A dated WHY is a reason and stays; a dated WHAT CHANGED is history.
@@ -72,11 +81,10 @@ def get_docs_page_standards() -> str:
                  "still open", "tracked in APLAN-..."). A line that links to the
                  register is a pointer and is not nominated.
 
-[yellow]EXEMPT BY FILE NAME (pending the owner's ruling):[/yellow]
+[yellow]NOT THE CORPUS:[/yellow]
 
-  A page whose name contains [dim]known_issues[/dim] or [dim]tech_debt[/dim]. They are
-  defect registers, not depth; no rule reads them until he rules. Research and
-  dated one-offs are not docs at all - they live in [dim]docs.local/[/dim], untracked.
+  [dim]docs/**/[/dim] below one level, and [dim]docs.local/[/dim]. Research and dated one-offs
+  are not docs at all - they live in [dim]docs.local/[/dim], untracked.
 
 [yellow]BYPASS:[/yellow]
 

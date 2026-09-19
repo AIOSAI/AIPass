@@ -1,5 +1,5 @@
 # Docs Page Standard
-**Status:** Active v1.0
+**Status:** Active v1.1
 **Date:** 2026-09-19
 
 ---
@@ -34,13 +34,22 @@ Every `<branch>/docs/*.md` page (one level). A page is a guide a seat reads on a
 
 | # | Check | Passes when |
 |---|-------|-------------|
-| 1 | One H1, first | Exactly one `# ` heading outside code fences; only blank lines, HTML comments and a README back-link above it |
+| 1 | Back-link and one H1 | A README back-link above the purpose paragraph (on top, or straight under the H1); exactly one `# ` heading outside code fences; only blank lines, HTML comments and the back-link above it. The DPLAN-0347 move stamp's link, below the purpose, is not the slot |
 | 2 | Purpose paragraph | The first line under the H1 (back-link lines skipped) is prose: not a heading, list, table, quote, fence, rule or lone link |
 | 3 | Heading depth | No heading deeper than `###` |
 | 4 | Links resolve | Every relative link and image target exists, resolved from the page's own directory |
 | 5 | Size | At most the context pack's `caps["docs/*.md"].max_chars`, read at call time; at the cap passes; an unreadable cap fails and names the key |
+| 6 | Not a register | The page's name does not contain `known_issues` or `tech_debt`, hyphen and space spellings included |
 
-Five checks, 20 points each; pass threshold 75%. The CI job holds every branch at 100. A branch with no `docs/*.md` skips all five.
+Six checks, ~17 points each; pass threshold 75%. The CI job holds every branch at 100. A branch with no `docs/*.md` skips all six.
+
+Check 1 carries the back-link rather than a seventh check because it is one rule for how a page opens: check 1 already read the slot above the H1 and allowed a back-link there; scoring made it required. A separate check would red a page with no H1 twice for one defect.
+
+---
+
+## The Defect Registers — Retired 2026-09-19
+
+The owner retired every `docs/known_issues.md` and `docs/tech_debt.md`. Their content lives in each branch's `docs.local/`, untracked; an open item goes on the owner's pad or into a plan. A register coming back under `docs/` is red by check 6.
 
 ---
 
@@ -48,16 +57,14 @@ Five checks, 20 points each; pass threshold 75%. The CI job holds every branch a
 
 Rendered by `check_branch_info()` at any score; never a score, a pass or a violation.
 
-- **back-link** — no README back-link above the purpose paragraph. The DPLAN-0347 move stamp's link, below the purpose, is not the slot. Advisory until one mechanical wave, then scored.
 - **story** — `used to`, `previously`, and fixed/cured/corrected/retired beside a date. These arms hand-sampled at 7/8 or better; the ~50% arms (`no longer`, `was <verb>`, `as of <date>`) are not built. A dated reason stays; a dated change is history.
 - **defect prose** — an open defect told as a paragraph (`known gap`, `still open`, `tracked in APLAN-…`). Link text is not read, and a line linking to the register is a pointer, not a defect.
 
 ---
 
-## Exempt
+## Not the Corpus
 
-- Pages whose name contains `known_issues` or `tech_debt` — defect registers pending the owner's ruling. No rule, scored or advisory, reads them until he rules.
-- `docs/**/` below one level, and `docs.local/` — not the corpus. Research and dated one-offs belong in `docs.local/`.
+- `docs/**/` below one level, and `docs.local/`. Research and dated one-offs belong in `docs.local/`.
 
 ---
 
