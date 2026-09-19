@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.4.1
+# Version: 0.5.0
 # Created: 2025-11-16
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -163,6 +163,19 @@ class RolloverTrigger:
 
     def __str__(self):
         return f"{self.branch}.{self.memory_type} ({self.v2_reason})"
+
+
+@dataclass
+class UndrainableFile:
+    """A file over its limit that rollover cannot drain (a capped container is not a list)."""
+
+    branch: str
+    memory_type: str
+    file_path: Path
+    reasons: List[str]
+
+    def __str__(self):
+        return f"{self.branch}.{self.memory_type} ({'; '.join(self.reasons)})"
 
 
 # =============================================================================
@@ -358,6 +371,77 @@ def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str
 # =============================================================================
 
 
+def _limits_for(file_path: Path) -> tuple[str, str, Dict[str, Any]]:
+    """The v2 limits for one memory file -> ``(branch_name, file_type, file_limits)``.
+
+    per_branch[branch][file_type], falling back to defaults[file_type];
+    ``file_limits`` is ``{}`` when neither has any. `.trinity/local.json` ->
+    ("<branch dir>", "local"); a flat `SEEDGO.observations.json` ->
+    ("seedgo", "observations").
+    """
+    if file_path.parent.name == ".trinity":
+        branch_name = file_path.parents[1].name.lower()
+        file_type = file_path.stem.split(".")[0]
+    else:
+        branch_name = file_path.stem.split(".")[0].lower()
+        file_type = file_path.stem.split(".")[-1]
+
+    cfg = config_loader.section("rollover")
+    file_limits = cfg.get("per_branch", {}).get(branch_name, {}).get(file_type, {})
+    if not file_limits:
+        file_limits = cfg.get("defaults", {}).get(file_type, {})
+    return branch_name, file_type, file_limits
+
+
+# The capped containers, in the order a reason line names them.
+_CAPPED_CONTAINERS = ("sessions", "key_learnings", "observations")
+
+
+def undrainable_in(data: Any, file_limits: Dict[str, Any]) -> List[str]:
+    """Capped containers over their count that rollover cannot drain — held as a dict, not a list.
+
+    Rollover archives the OLDEST entries, and only a list says which those are:
+    newest-first by position, confirmed by each entry's number. A schema 2.0.0
+    dict (``{"KL-001": {...}}``) has neither, so no amount of running drains
+    it. It is not "no excess" and it is not a trigger: it is a file rollover
+    cannot fix, and the only cure is migrating the container to the 3.0.0 list.
+
+    Pure: the detector and the extractor share it, so the two cannot disagree
+    about which containers are drainable.
+
+    Returns:
+        One reason per undrainable container, e.g.
+        ``"250/15 key_learnings held as a dict, not a list (schema 2.0.0)"``.
+    """
+    if not isinstance(data, dict):
+        return []
+    meta = data.get("document_metadata")
+    schema = meta.get("schema_version", "unknown") if isinstance(meta, dict) else "unknown"
+    reasons = []
+    for name in _CAPPED_CONTAINERS:
+        limits = file_limits.get(name)
+        count = limits.get("count") if isinstance(limits, dict) else None
+        container = data.get(name)
+        if count is not None and isinstance(container, dict) and len(container) > count:
+            reasons.append(f"{len(container)}/{count} {name} held as a dict, not a list (schema {schema})")
+    return reasons
+
+
+def undrainable_containers(file_path: Path) -> List[str]:
+    """``undrainable_in`` for one file on disk; ``[]`` when it cannot be read or has no limits.
+
+    Both of those are already reported by ``_should_rollover`` in the same walk
+    (PARSE FAILURE, CONFIG GAP), so they are not reported twice here.
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    _branch, _type, file_limits = _limits_for(file_path)
+    return undrainable_in(data, file_limits)
+
+
 def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
     """
     Check if file should rollover (v2 entry-count based only).
@@ -389,24 +473,7 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
         logger.warning(f"[detector] PARSE FAILURE for {file_path}: {e} — skipping rollover check")
         return (False, current_lines, "3.0.0", "parse failure — skipped")
 
-    # Derive branch name from file path: .trinity/local.json → parent of .trinity
-    if file_path.parent.name == ".trinity":
-        branch_name = file_path.parents[1].name.lower()
-    else:
-        branch_name = file_path.stem.split(".")[0].lower()
-
-    # Determine file type from filename
-    file_type = file_path.stem.split(".")[0] if file_path.parent.name == ".trinity" else file_path.stem.split(".")[-1]
-    # .trinity/local.json → "local"; .trinity/observations.json → "observations"
-
-    cfg = config_loader.section("rollover")
-    per_branch = cfg.get("per_branch", {})
-    defaults = cfg.get("defaults", {})
-
-    # v2 lookup: per_branch[branch][file_type], fallback to defaults[file_type]
-    file_limits = per_branch.get(branch_name, {}).get(file_type, {})
-    if not file_limits:
-        file_limits = defaults.get(file_type, {})
+    branch_name, file_type, file_limits = _limits_for(file_path)
 
     if not file_limits:
         # Neither per_branch NOR defaults have limits for this branch/file_type
@@ -431,10 +498,14 @@ def _should_rollover(file_path: Path) -> tuple[bool, int, str, str]:
             if max_sessions is not None and regular_count > max_sessions:
                 reasons.append(f"{regular_count}/{max_sessions} sessions")
 
+    # A list only. A 2.0.0 dict used to count here while the extractor drains
+    # lists only, so VERA (250/15) and WRITER (63/15) were "ready for rollover"
+    # for weeks and skipped as "No entries exceed v2 limits" on every run. The
+    # dict is reported by undrainable_containers(), never as a trigger.
     max_key_learnings = file_limits.get("key_learnings", {}).get("count")
     if max_key_learnings is not None:
         key_learnings = data.get("key_learnings", [])
-        if isinstance(key_learnings, (list, dict)) and len(key_learnings) > max_key_learnings:
+        if isinstance(key_learnings, list) and len(key_learnings) > max_key_learnings:
             reasons.append(f"{len(key_learnings)}/{max_key_learnings} key_learnings")
 
     max_observations = file_limits.get("observations", {}).get("count")
@@ -457,14 +528,18 @@ def check_all_branches() -> Dict[str, Any]:
     (observations and local) for rollover conditions.
 
     Returns:
-        Dict with success status, triggers list, and count
+        Dict with success status, triggers list, and count, plus
+        ``undrainable``: files over a limit that rollover cannot drain
+        (``UndrainableFile``). Never triggers — running does nothing for them —
+        and never silent: one WARNING per file per walk until it is migrated.
     """
     triggers = []
+    undrainable: List[UndrainableFile] = []
 
     # Read registry
     branches = _read_registry()
     if not branches:
-        return {"success": True, "triggers": [], "count": 0, "message": "No branches in registry"}
+        return {"success": True, "triggers": [], "count": 0, "undrainable": [], "message": "No branches in registry"}
 
     # Check each branch
     for branch in branches:
@@ -494,14 +569,27 @@ def check_all_branches() -> Dict[str, Any]:
                 )
                 triggers.append(trigger)
 
+            reasons = undrainable_containers(file_path)
+            if reasons:
+                stuck = UndrainableFile(
+                    branch=branch_name, memory_type=memory_type, file_path=file_path, reasons=reasons
+                )
+                undrainable.append(stuck)
+                logger.warning(
+                    f"[detector] UNDRAINABLE {stuck} — rollover drains lists only, so this stays over its "
+                    f"limit on every run until the container is migrated to the 3.0.0 list shape"
+                )
+
     json_handler.log_operation(
-        "check_all_branches", {"branches_checked": len(branches), "triggers_found": len(triggers)}
+        "check_all_branches",
+        {"branches_checked": len(branches), "triggers_found": len(triggers), "undrainable": len(undrainable)},
     )
 
     return {
         "success": True,
         "triggers": triggers,
         "count": len(triggers),
+        "undrainable": undrainable,
         "message": f"Found {len(triggers)} rollover triggers" if triggers else "No rollover triggers detected",
     }
 
@@ -611,7 +699,14 @@ def get_rollover_stats() -> Dict[str, Any]:
     Returns:
         Dict with statistics for all branches
     """
-    stats = {"success": True, "total_branches": 0, "files_checked": 0, "files_ready": 0, "branches": {}}
+    stats = {
+        "success": True,
+        "total_branches": 0,
+        "files_checked": 0,
+        "files_ready": 0,
+        "files_undrainable": 0,
+        "branches": {},
+    }
 
     branches = _read_registry()
     stats["total_branches"] = len(branches)
@@ -636,6 +731,10 @@ def get_rollover_stats() -> Dict[str, Any]:
             }
             if v2_reason:
                 stat_entry["v2_reason"] = v2_reason
+            undrainable = undrainable_containers(file_path)
+            if undrainable:
+                stat_entry["undrainable"] = undrainable
+                stats["files_undrainable"] += 1
 
             branch_stats[memory_type] = stat_entry
 

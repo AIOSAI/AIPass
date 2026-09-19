@@ -1520,6 +1520,24 @@ class TestRunRollover:
         result = rollover.run_rollover()
         assert result is True
 
+    def test_the_run_says_its_file_list_is_fleet_wide(self, monkeypatch):
+        """`run --branch @x` reads as scoped; only the pad follows it, and the run says so where it happens."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 1,
+            "success_count": 1,
+            "failed": [],
+            "skipped": [],
+            "results": [],
+        }
+
+        rollover.run_rollover("@memory")
+
+        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        assert "files ready for rollover (fleet-wide)" in printed, printed
+        assert rollover.FLEET_WIDE_RUN_NOTE in printed, printed
+
     def test_returns_false_on_handler_exception(self, monkeypatch):
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["orchestrator"].execute_rollover.side_effect = RuntimeError("boom")
@@ -1668,6 +1686,19 @@ class TestCheckTriggers:
         }
         rollover.check_triggers()
         mocks["error"].assert_called()
+
+    def test_undrainable_files_are_listed_without_the_ready_phrase(self, monkeypatch):
+        """@hooks' PreCompact fires a fleet run on 'ready for rollover', and no run can move these files."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
+        mocks["detector"].check_all_branches.return_value = {"success": True, "triggers": [], "undrainable": [stuck]}
+
+        rollover.check_triggers()
+
+        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        warned = " ".join(str(c) for c in mocks["warning"].call_args_list)
+        assert stuck in warned and "cannot drain" in warned, warned
+        assert "ready for rollover" not in (printed + warned).lower()
 
 
 # ===========================================================================
@@ -2001,6 +2032,40 @@ class TestASkippedTriggerIsNotSilentlyDropped:
         """Nothing broke — 'nothing to do' is a legitimate outcome, just a named one."""
         assert self._run_with_skip()["success"] is True
 
+    def test_an_empty_run_still_carries_the_undrainable_files(self):
+        """A dict-only file is never a trigger, so the no-trigger return is where it must survive."""
+        from aipass.memory.apps.handlers.rollover import orchestrator
+
+        stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
+        walk = {"success": True, "triggers": [], "undrainable": [stuck]}
+        with patch.object(orchestrator.detector, "check_all_branches", return_value=walk):
+            result = orchestrator.execute_rollover()
+
+        assert (result["triggers_count"], result["undrainable"]) == (0, [stuck])
+
+    def test_the_extractor_names_a_dict_instead_of_claiming_no_excess(self, tmp_path, monkeypatch):
+        """'No entries exceed v2 limits' is what VERA's 250/15 printed on every run."""
+        ext, mocks = _import_extractor(monkeypatch)
+        data = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "key_learnings": {f"KL-{n:03d}": "x" for n in range(1, 5)},
+        }
+        file_path = tmp_path / "writer" / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data), encoding="utf-8")
+        mocks["config_loader"].section.return_value = {
+            "defaults": {"local": {"key_learnings": {"count": 3}}},
+            "per_branch": {},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["skipped"] is True
+        assert "exceed" not in result["message"], result["message"]
+        assert "4/3 key_learnings held as a dict" in result["message"], result["message"]
+        mocks["memory_files"].write_memory_file_simple.assert_not_called()
+
 
 class TestASkippedTriggerIsVisibleOnScreen:
     """The handler counting it is only half — the operator has to be able to read it."""
@@ -2037,6 +2102,25 @@ class TestASkippedTriggerIsVisibleOnScreen:
         rollover.run_rollover()
 
         assert "skipped" not in " ".join(str(c) for c in mocks["console"].print.call_args_list)
+
+    def test_an_empty_run_prints_the_undrainable_files(self, monkeypatch):
+        """No triggers used to end on 'No files need rollover' with VERA at 250/15 unsaid."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 0,
+            "success_count": 0,
+            "failed": [],
+            "skipped": [],
+            "results": [],
+            "undrainable": [stuck],
+        }
+
+        rollover.run_rollover()
+
+        warned = " ".join(str(c) for c in mocks["warning"].call_args_list)
+        assert stuck in warned and "cannot drain" in warned, warned
 
 
 # ===========================================================================

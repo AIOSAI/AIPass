@@ -309,6 +309,86 @@ class TestCheckSingleFile:
         assert result["success"] is True
         assert result["should_rollover"] is False
 
+    @staticmethod
+    def _dict_learnings(tmp_path: Path, entries: int) -> Path:
+        """A schema 2.0.0 local.json whose key_learnings is a dict, the shape VERA and WRITER still carry."""
+        trinity = tmp_path / "vera" / ".trinity"
+        trinity.mkdir(parents=True)
+        mem_file = trinity / "local.json"
+        data = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "key_learnings": {f"KL-{n:03d}": f"learning {n}" for n in range(1, entries + 1)},
+        }
+        mem_file.write_text(json.dumps(data), encoding="utf-8")
+        return mem_file
+
+    def test_a_dict_over_its_count_is_undrainable_not_a_trigger(self, tmp_path: Path, monkeypatch):
+        """A dict has no order and no numbers, and the extractor drains lists only.
+
+        It used to count here while the extractor skipped it as "No entries
+        exceed v2 limits": VERA sat at 250/15 "ready for rollover" on every run
+        and every PreCompact fired a fleet run that could not move it.
+        """
+        mem_file = self._dict_learnings(tmp_path, 4)
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        limits = {"per_branch": {}, "defaults": {"local": {"key_learnings": {"count": 3}}}}
+        monkeypatch.setattr(detector.config_loader, "section", lambda name: limits)
+
+        assert detector.check_single_file(mem_file)["should_rollover"] is False
+        assert detector.undrainable_containers(mem_file) == [
+            "4/3 key_learnings held as a dict, not a list (schema 2.0.0)"
+        ]
+
+    def test_a_dict_at_its_count_is_not_undrainable(self, tmp_path: Path, monkeypatch):
+        """Keep-N keeps N, in either shape: at the count there is nothing to drain."""
+        mem_file = self._dict_learnings(tmp_path, 3)
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        limits = {"per_branch": {}, "defaults": {"local": {"key_learnings": {"count": 3}}}}
+        monkeypatch.setattr(detector.config_loader, "section", lambda name: limits)
+
+        assert detector.undrainable_containers(mem_file) == []
+
+    def test_the_fleet_walk_names_a_dict_apart_from_the_triggers_and_warns(self, tmp_path: Path, monkeypatch):
+        """One file, both kinds: the sessions list rolls, the dict is named - and never silently."""
+        trinity = tmp_path / "writer" / ".trinity"
+        trinity.mkdir(parents=True)
+        sessions = [
+            {"number": n, "date": "2026-09-01", "summary": f"s{n}", "status": "completed"} for n in range(4, 0, -1)
+        ]
+        local = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "sessions": sessions,
+            "key_learnings": {f"KL-{n:03d}": "x" for n in range(1, 5)},
+        }
+        (trinity / "local.json").write_text(json.dumps(local), encoding="utf-8")
+        (trinity / "observations.json").write_text(json.dumps({"observations": []}), encoding="utf-8")
+        registry = {"branches": [{"name": "WRITER", "path": str(tmp_path / "writer"), "status": "active"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+        limits = {
+            "local": {"sessions": {"count": 3}, "key_learnings": {"count": 3}},
+            "observations": {"observations": {"count": 3}},
+        }
+        monkeypatch.setattr(detector.config_loader, "section", lambda name: {"per_branch": {}, "defaults": limits})
+        said = []
+        monkeypatch.setattr(detector.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
+
+        result = detector.check_all_branches()
+
+        assert [t.v2_reason for t in result["triggers"]] == ["4/3 sessions"]
+        assert [str(u) for u in result["undrainable"]] == [
+            "WRITER.local (4/3 key_learnings held as a dict, not a list (schema 2.0.0))"
+        ]
+        assert any("UNDRAINABLE WRITER.local" in line for line in said), said
+
     def test_parse_failure_returns_no_rollover(self, tmp_path: Path, monkeypatch):
         """JSON parse failure should return should_rollover=False, not 600-line fallback."""
         mem_file = tmp_path / "BROKEN.local.json"

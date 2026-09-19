@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rollover.py
 # Description: Rollover Orchestration Module
-# Version: 0.9.0
+# Version: 0.10.0
 # Created: 2025-11-16
-# Modified: 2026-09-16
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -134,7 +134,7 @@ __all__ = [
 # =============================================================================
 
 _SUBCOMMANDS = {
-    "run": "Execute rollover for files exceeding limits, plus one branch's todo pad",
+    "run": "Execute rollover for files exceeding limits (fleet-wide), plus one branch's todo pad",
     "status": "Show rollover statistics for all branches",
     "check": "Check which files need rollover (dry run, fleet-wide), plus one branch's todo pad",
     "report-lines": "Report physical line counts per memory file (read-only)",
@@ -148,6 +148,23 @@ SUBCOMMANDS = _SUBCOMMANDS
 # fleet walk (detector.check_all_branches) whatever --branch names; the pad
 # line alone is scoped. The scope is unchanged on purpose - this says it.
 FLEET_WIDE_NOTE = "The file list is fleet-wide: --branch scopes only the todo pad line below."
+
+# `rollover run` rolls the pad FIRST, so its line sits above the file list. The
+# run is fleet-wide on purpose: @hooks' PreCompact passes --branch for the pad
+# and relies on the same call to drain every branch's files, and a project that
+# never compacts (Vera Studio's residents) only drains through someone else's
+# compaction. Scoping the files to --branch would stop that without a word, so
+# the scope stays and the output says it where it happens.
+FLEET_WIDE_RUN_NOTE = (
+    "The file list is fleet-wide: --branch scopes only the todo pad line above; every branch's files below are rolled."
+)
+
+# Printed under the files rollover cannot drain. Never the phrase @hooks'
+# PreCompact greps for: another run changes nothing for these files.
+UNDRAINABLE_NOTE = (
+    "Rollover drains lists only. These need their container migrated to the 3.0.0 list shape - "
+    "another run changes nothing."
+)
 
 # `sync-lines` stopped writing anything when the health stamp was deleted from
 # the standard on 2026-08-25: its one write was a `status.last_health_check`
@@ -335,6 +352,7 @@ def print_help() -> None:
     console.print()
     console.print("[bold]COMMANDS:[/bold]")
     console.print("  [cyan]rollover[/cyan]    Execute rollover for files exceeding limits, plus ONE branch's todo pad")
+    console.print("              The files rolled are fleet-wide; only the todo pad follows --branch.")
     console.print("  [cyan]status[/cyan]      Show rollover statistics for all branches")
     console.print("  [cyan]check[/cyan]       Check which files need rollover (dry run), plus ONE branch's todo pad")
     console.print("              The file list is fleet-wide; only the todo pad follows --branch.")
@@ -353,6 +371,8 @@ def print_help() -> None:
     console.print()
     console.print("[bold]LIMITS:[/bold]")
     console.print("  v2 entry-count based (sessions, key_learnings, observations) from config")
+    console.print("  A container held as a dict (schema 2.0.0) cannot be drained: check, run and status")
+    console.print("  list it as UNDRAINABLE, never as ready, until it is migrated to the 3.0.0 list shape")
     console.print("  todos: count only (rollover.defaults.local.todos.count) — own branch, never the fleet walk")
     console.print()
     console.print("[bold]TODO ROLL (one branch, file only, never vectors):[/bold]")
@@ -399,6 +419,15 @@ def _todo_report(report: dict) -> None:
     console.print(text, markup=False, highlight=False, soft_wrap=True)
 
 
+def _print_undrainable(items: list) -> None:
+    """Print the files over a limit that rollover cannot drain; nothing when there are none."""
+    if not items:
+        return
+    listing = "\n".join(f"  ! {item}" for item in items)
+    header = f"{len(items)} files over their limit that rollover cannot drain (fleet-wide):"
+    warning(f"{header}\n{listing}", UNDRAINABLE_NOTE)
+
+
 def run_rollover(branch: str | None = None) -> bool:
     """
     Execute rollover: ONE branch's todo pad first, then the fleet vector rollover.
@@ -434,11 +463,14 @@ def run_rollover(branch: str | None = None) -> bool:
         return False
 
     triggers_count = result.get("triggers_count", 0)
+    undrainable = result.get("undrainable", [])
     if triggers_count == 0:
         console.print("[green]>[/green] No files need rollover")
+        _print_undrainable(undrainable)
         return True
 
-    console.print(f"[green]>[/green] Found {triggers_count} files ready for rollover")
+    console.print(f"[green]>[/green] Found {triggers_count} files ready for rollover (fleet-wide)")
+    console.print(f"[dim]{FLEET_WIDE_RUN_NOTE}[/dim]", soft_wrap=True)
     console.print()
 
     # Display individual results
@@ -473,6 +505,8 @@ def run_rollover(branch: str | None = None) -> bool:
         console.print()
         for fail in failed:
             error(f"{fail['trigger']} - {fail['stage']}: {fail['error']}")
+
+    _print_undrainable(undrainable)
 
     json_handler.log_operation("rollover_execute", {"triggers": triggers_count, "success_count": success_count})
 
@@ -731,6 +765,7 @@ def show_status() -> None:
     console.print(f"[cyan]Branches:[/cyan] {stats['total_branches']}")
     console.print(f"[cyan]Files checked:[/cyan] {stats['files_checked']}")
     console.print(f"[cyan]Ready for rollover:[/cyan] {stats['files_ready']}")
+    console.print(f"[cyan]Over, and rollover cannot drain them:[/cyan] {stats.get('files_undrainable', 0)}")
     console.print()
 
     # Per-branch details
@@ -744,9 +779,13 @@ def show_status() -> None:
             for memory_type, file_stats in branch_stats.items():
                 ready = file_stats["ready"]
                 v2_reason = file_stats.get("v2_reason", "")
+                # Never "OK": the file is over its limit, and no run will change that.
+                undrainable = file_stats.get("undrainable", [])
 
-                status_marker = "[red]![/red]" if ready else "[green]OK[/green]"
-                status_text = f"READY ({v2_reason})" if ready else "OK"
+                status_marker = "[red]![/red]" if ready or undrainable else "[green]OK[/green]"
+                parts = [f"READY ({v2_reason})"] if ready else []
+                parts += [f"UNDRAINABLE ({reason})" for reason in undrainable]
+                status_text = "; ".join(parts) or "OK"
                 console.print(f"    {status_marker} {memory_type}: {status_text}")
 
             console.print()
@@ -784,10 +823,12 @@ def _check_fleet_triggers() -> None:
         return
 
     triggers = triggers_result.get("triggers", [])
+    undrainable = triggers_result.get("undrainable", [])
 
     if not triggers:
         console.print("[green]>[/green] No files need rollover")
-        json_handler.log_operation("rollover_check", {"files_needing_rollover": 0})
+        _print_undrainable(undrainable)
+        json_handler.log_operation("rollover_check", {"files_needing_rollover": 0, "undrainable": len(undrainable)})
         return
 
     # The file list is the fleet walk's, whatever --branch named: --branch scopes
@@ -803,8 +844,11 @@ def _check_fleet_triggers() -> None:
 
     console.print()
     console.print("[dim]Run 'drone @memory rollover' to process these files[/dim]")
+    _print_undrainable(undrainable)
     console.print()
-    json_handler.log_operation("rollover_check", {"files_needing_rollover": len(triggers)})
+    json_handler.log_operation(
+        "rollover_check", {"files_needing_rollover": len(triggers), "undrainable": len(undrainable)}
+    )
 
 
 # =============================================================================

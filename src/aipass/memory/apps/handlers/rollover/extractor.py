@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: extractor.py
 # Description: Memory Extraction Handler
-# Version: 0.7.0
+# Version: 0.7.1
 # Created: 2025-11-16
-# Modified: 2026-08-13
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -32,6 +32,7 @@ from datetime import datetime
 # Handler imports (relative within package)
 from aipass.memory.apps.handlers.json import json_handler, config_loader
 from aipass.memory.apps.handlers.json.memory_files import read_memory_file_data, write_memory_file_simple
+from aipass.memory.apps.handlers.monitor.detector import undrainable_in
 from aipass.prax.apps.modules.logger import get_system_logger
 
 logger = get_system_logger()
@@ -511,6 +512,16 @@ def _extract_items_v2(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.error(f"[extractor] Failed to persist order repair: {e}")
                 return {"success": False, "error": f"Failed to write file: {e}"}
+        # "No entries exceed v2 limits" is a claim about the file, and for a
+        # container held as a dict it was false on every run: 250 over, zero
+        # drainable. Say which it is.
+        undrainable = undrainable_in(data, file_limits)
+        if undrainable:
+            return {
+                "success": True,
+                "skipped": True,
+                "message": f"nothing drainable - {'; '.join(undrainable)}; rollover drains lists only",
+            }
         return {"success": True, "skipped": True, "message": "No entries exceed v2 limits"}
 
     # No metadata stamping here. Rollover used to write a
