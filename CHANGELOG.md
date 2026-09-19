@@ -9,7 +9,7 @@ PyPI version — not the changelog header.
 
 ---
 
-## [Unreleased]
+## [2026-09-19] — the diet-and-boundary train: the README leaves the startup read fleet-wide and eighteen faces shrink under a 10k cap with `--help` corrected on each, the docs page standard and the eight-section README shape scored by seedgo, the owner's name swept out of everything that ships with a ratchet behind it, memory's runtime write fence and the Vera Studio leak purged, the hooks edit gate reading the registries, the watchdog off the Monitor tool onto a once-wire, and eight citizens' Windows and CI cures (DPLAN-0347 / DPLAN-0348 / DPLAN-0349 / DPLAN-0350 / DPLAN-0351 / FPLAN-0593 / FPLAN-0622 / FPLAN-0628, merged as PR #770, v2.8.11)
 
 ### Added
 
