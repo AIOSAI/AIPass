@@ -51,6 +51,47 @@ without platform guard.
 - `__init__.py` files
 - Non-`.py` files
 
+### Advisory — exclusive creates that lose the delete-pending race
+Not scored. Reported on the audit's info channel (`check_branch_info`) as
+`windows_compat lock race (advisory): <file>:<line> ...`, one line per site.
+
+On Windows, `os.open(path, O_CREAT | O_EXCL)` (or `open(path, "x")`) against a
+file another thread or process is still deleting ("delete pending") raises
+`PermissionError` (errno 13), not `FileExistsError`. POSIX removes the name at
+once, so no Linux or macOS run can show it. CI 35192484222: api's token store
+lock caught `FileExistsError` only, the revoke thread died, and a revoked
+credential stayed live.
+
+Read from the `try` that owns the `FileExistsError` handler:
+- **Escape:** no handler on it, or on any `try` around it in the same function,
+  takes a PermissionError (`PermissionError`, `OSError`, `Exception`, bare).
+- **Gives up:** the `try` is in a loop, `FileExistsError` retries, and the
+  handler that takes PermissionError always returns, raises or breaks.
+
+Not flagged: a single-shot `except OSError` that fails the same way "exists"
+does; a path rebuilt from a name the loop rebinds (a fresh file each attempt);
+a create inside a `sys.platform` / `os.name` guard.
+
+Known misses: flags held in a variable, a create behind a wrapper function, a
+PermissionError caught by a `try` outside the retry loop. Known false positive:
+a single-shot create of a file nothing ever deletes, with a
+`FileExistsError`-only handler — none in the fleet on 2026-09-17; bypass it.
+
+Fix: treat PermissionError on the create as "held, try again" inside the wait,
+and surface it once the wait is spent:
+```python
+except FileExistsError:
+    time.sleep(POLL)
+except PermissionError as e:  # Windows delete-pending
+    if time.monotonic() >= deadline:
+        raise OSError(f"lock at {path} still denied after {wait}s: {e}") from e
+    time.sleep(POLL)
+```
+
+Corpus is the scored lane's (`apps/**/*.py`), so the ratchet to a scored rule
+moves no file. Measured at introduction: 18 exclusive creates fleet-wide, 8
+advisory lines (flow 5, ai_mail 2, drone 1).
+
 ---
 
 ## Code Examples

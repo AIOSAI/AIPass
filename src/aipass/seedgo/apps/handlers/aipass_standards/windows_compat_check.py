@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-10
-# Modified: 2026-05-14
+# Modified: 2026-09-17
 # =============================================
 
 """Windows Compatibility Standards Checker Handler."""
@@ -13,6 +13,9 @@ from pathlib import Path
 from typing import Dict
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.exclusive_create_race import find_exclusive_create_races
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS, is_disabled_file
+from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -585,3 +588,74 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         "score": score,
         "standard": "WINDOWS_COMPAT",
     }
+
+
+# =============================================================================
+# ADVISORY: exclusive creates that lose the Windows delete-pending race
+# =============================================================================
+#
+# CI 35192484222 (Windows): api's token store lock caught FileExistsError only,
+# a create against a lock mid-removal answered PermissionError, and the revoke
+# thread died. The detector and its measured false-positive boundary live in
+# exclusive_create_race.py.
+#
+# check_branch_info(), not check_module(): a new scored arm inside a gating
+# standard reds every branch holding a hit on the commit that lands it (the
+# 09-13 lesson), and 5 branches hold one today. Info lines carry no score and
+# render at any score. The ratchet is one line: extend all_violations in
+# check_module() with find_exclusive_create_races() once the owners cure.
+#
+# Corpus is the scored lane's: apps/**/*.py minus __init__.py and skip dirs,
+# so the ratchet moves no file in or out. The branch's windows_compat bypass
+# rules silence a line here exactly as they will once it scores. The info
+# channel is handed no rules, so this reads them itself -- which also means
+# `audit --no-bypass` does not reach these lines.
+
+_LOCK_RACE_LABEL = "windows_compat lock race (advisory)"
+
+
+def _advisory_corpus(branch_root: Path) -> list[Path]:
+    apps = branch_root / "apps"
+    if not apps.is_dir():
+        return []
+    return [
+        f
+        for f in sorted(apps.rglob("*.py"))
+        if f.name != "__init__.py"
+        and not is_disabled_file(f.name)
+        and not any(part in SOURCE_SKIP_DIRS for part in f.relative_to(branch_root).parts)
+    ]
+
+
+def check_branch_info(branch_path: str) -> list[str]:
+    """Non-scored lines: exclusive creates a Windows delete-pending state breaks.
+
+    Args:
+        branch_path: Branch root to inspect.
+
+    Returns:
+        One "(advisory)" line per offending create; empty when clean.
+    """
+    branch_root = Path(branch_path)
+    corpus = _advisory_corpus(branch_root)
+    if not corpus:
+        return []
+    bypass_rules = load_bypass_rules(branch_path)
+    lines: list[str] = []
+    for path in corpus:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, ValueError) as e:
+            logger.info("[windows_compat] advisory scan skipped %s: %s", path, e)
+            continue
+        rel = path.relative_to(branch_root).as_posix()
+        for lineno, desc in find_exclusive_create_races(tree, _platform_guarded_lines(tree)):
+            if is_bypassed(str(path), "windows_compat", lineno, bypass_rules):
+                continue
+            lines.append(f"{_LOCK_RACE_LABEL}: {rel}:{lineno} {desc}")
+    if lines:
+        json_handler.log_operation(
+            "windows_compat_advisory_lines",
+            {"branch": branch_root.name, "count": len(lines), "standard": "windows_compat"},
+        )
+    return lines

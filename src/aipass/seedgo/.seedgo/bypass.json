@@ -123,6 +123,21 @@
       "reason": "Pure constants module — defines SOURCE_SKIP_DIRS frozenset only, no operations to log."
     },
     {
+      "file": "tests/test_windows_compat.py",
+      "standard": "windows_compat",
+      "reason": "Test file for this standard: its cases write deliberate POSIX patterns ('/tmp/output.log', '/tmp/cache', aplay, shell=True) into tmp_path files as checker input. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
+    },
+    {
+      "file": "tests/test_windows_compat.py",
+      "standard": "log_structure",
+      "reason": "Test input, not a log sink: L383 writes the string Path('/tmp/output.log') into a tmp_path file so windows_compat can flag it. [checklist lane only: the branch audit walks apps/ only, so a re-audit shows this rule as dead -- it is not; the PostToolUse hook checks this file.]"
+    },
+    {
+      "file": "apps/handlers/aipass_standards/exclusive_create_race.py",
+      "standard": "json_structure",
+      "reason": "Pure AST detector — takes a parsed tree and returns (line, text) pairs: no I/O, no operation to log. Its one caller, windows_compat_check.check_branch_info, logs windows_compat_advisory_lines per branch. Same shape as skip_dirs.py above."
+    },
+    {
       "file": "apps/handlers/cli/help_flags.py",
       "standard": "json_structure",
       "reason": "Pure predicate — wants_help() answers a question about a list of strings and returns a bool: no state, no I/O, no operation to log. Measured 2026-08-13: checklist reports 'Missing json_handler import — add: from aipass.<branch>.apps.handlers.json import json_handler (+1 more)', i.e. the standard wants an import AND a log_operation() call. This predicate runs before EVERY seedgo command, so satisfying it would write 'a help flag was looked for' on every invocation and bury the operation log the standard exists to serve. Same shape as skip_dirs.py above."

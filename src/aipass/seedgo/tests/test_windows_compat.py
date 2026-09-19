@@ -3,7 +3,7 @@
 # Description: Tests for windows_compat_check.py
 # Version: 1.0.0
 # Created: 2026-05-14
-# Modified: 2026-05-14
+# Modified: 2026-09-17
 # =============================================
 
 """Tests for windows_compat_check — both POSIX-import detection and test-file skipif enforcement."""
@@ -42,6 +42,10 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", bypass_ignore)
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
+    bypass_handler = MagicMock()
+    bypass_handler.load_bypass_rules = MagicMock(return_value=[])
+    bypass_pkg.bypass_handler = bypass_handler
+    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", bypass_handler)
 
     for mod_name in ["aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check"]:
         monkeypatch.delitem(sys.modules, mod_name, raising=False)
@@ -604,3 +608,185 @@ def test_os_kill_signal0_try_except_no_platform_check_fails(tmp_path):
     result = check_module(str(f))
     assert result["passed"] is False
     assert "os.kill(pid, 0)" in result["checks"][0]["message"]
+
+
+# ===========================================================================
+# ADVISORY: exclusive creates that lose the Windows delete-pending race
+# (CI 35192484222 — api's token store lock caught FileExistsError only)
+# ===========================================================================
+
+_INCIDENT_LOCK = (
+    "import os, time\n\n"
+    "def _store_lock(path):\n"
+    "    descriptor = None\n"
+    "    while descriptor is None:\n"
+    "        try:\n"
+    "            descriptor = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)\n"
+    "        except FileExistsError:\n"
+    "            time.sleep(0.05)\n"
+    "    return descriptor\n"
+)
+
+
+def _races(source):
+    import ast
+
+    from aipass.seedgo.apps.handlers.aipass_standards.exclusive_create_race import find_exclusive_create_races
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import _platform_guarded_lines
+
+    tree = ast.parse(source)
+    return find_exclusive_create_races(tree, _platform_guarded_lines(tree))
+
+
+def _advisory_branch(root, source, rel="apps/handlers/lock.py"):
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    return root
+
+
+def test_lock_race_incident_shape_escapes():
+    races = _races(_INCIDENT_LOCK)
+    assert [line for line, _ in races] == [7]
+    assert "_store_lock()" in races[0][1] and "escapes" in races[0][1]
+
+
+def test_lock_race_permission_error_polled_is_clean():
+    cured = _INCIDENT_LOCK.replace(
+        "    return descriptor\n",
+        "        except PermissionError:\n            time.sleep(0.05)\n    return descriptor\n",
+    )
+    assert _races(cured) == []
+
+
+def test_lock_race_oserror_giving_up_inside_retry_loop_flagged():
+    source = (
+        "import os, time\n\n"
+        "def _acquire_lock(lock_path):\n"
+        "    for attempt in range(10):\n"
+        "        try:\n"
+        "            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)\n"
+        "            return True\n"
+        "        except FileExistsError:\n"
+        "            time.sleep(0.01)\n"
+        "        except OSError:\n"
+        "            return False\n"
+        "    return False\n"
+    )
+    races = _races(source)
+    assert [line for line, _ in races] == [6]
+    assert "gives up" in races[0][1] and "L10" in races[0][1]
+
+
+def test_lock_race_single_shot_oserror_same_outcome_is_clean():
+    source = (
+        "import os\n\n"
+        "def _acquire_lock(lock_file):\n"
+        "    try:\n"
+        "        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)\n"
+        "    except FileExistsError:\n"
+        "        return False\n"
+        "    except OSError:\n"
+        "        return False\n"
+        "    return True\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_fresh_name_per_attempt_is_clean():
+    source = (
+        "import os\n\n"
+        "def _stage(directory, serial):\n"
+        "    for attempt in range(8):\n"
+        "        temp_path = str(directory / f'.{next(serial)}.tmp')\n"
+        "        try:\n"
+        "            fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)\n"
+        "            break\n"
+        "        except FileExistsError:\n"
+        "            if attempt == 7:\n"
+        "                raise\n"
+        "    return fd\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_platform_guarded_is_clean():
+    source = (
+        "import os, sys, time\n\n"
+        "def _store_lock(path):\n"
+        "    if sys.platform != 'win32':\n"
+        "        while True:\n"
+        "            try:\n"
+        "                return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)\n"
+        "            except FileExistsError:\n"
+        "                time.sleep(0.05)\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_outer_try_catching_oserror_is_clean():
+    source = (
+        "import os\n\n"
+        "def acquire(lock):\n"
+        "    try:\n"
+        "        try:\n"
+        "            os.open(lock, os.O_CREAT | os.O_EXCL)\n"
+        "        except FileExistsError:\n"
+        "            return False\n"
+        "    except OSError:\n"
+        "        return False\n"
+        "    return True\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_open_x_mode_escapes():
+    source = (
+        "def write_pid(pid_file, pid):\n"
+        "    try:\n"
+        "        with open(pid_file, 'x', encoding='utf-8') as fh:\n"
+        "            fh.write(str(pid))\n"
+        "    except FileExistsError:\n"
+        "        return False\n"
+        "    return True\n"
+    )
+    assert [line for line, _ in _races(source)] == [3]
+
+
+def test_lock_race_create_without_exists_handler_is_ignored():
+    source = "import os\n\ndef create(p):\n    return os.open(p, os.O_CREAT | os.O_EXCL)\n"
+    assert _races(source) == []
+
+
+def test_lock_race_advisory_line_never_reaches_the_score(tmp_path):
+    branch = _advisory_branch(tmp_path, _INCIDENT_LOCK)
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info, check_module
+
+    assert check_branch_info(str(branch)) == [
+        "windows_compat lock race (advisory): apps/handlers/lock.py:7 exclusive create in _store_lock() catches "
+        "FileExistsError only - a Windows delete-pending PermissionError escapes where 'exists' is handled"
+    ]
+    result = check_module(str(branch / "apps" / "handlers" / "lock.py"))
+    assert result["score"] == 100 and result["passed"] is True
+
+
+def test_lock_race_advisory_corpus_is_apps_only(tmp_path):
+    for rel in ("tests/lock_probe.py", "apps/handlers/.archive/old_lock.py", "tools/lock_tool.py"):
+        _advisory_branch(tmp_path, _INCIDENT_LOCK, rel=rel)
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
+
+    assert check_branch_info(str(tmp_path)) == []
+
+
+def test_lock_race_advisory_respects_line_bypass(tmp_path):
+    import sys
+
+    branch = _advisory_branch(tmp_path, _INCIDENT_LOCK)
+    handler = sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"]
+    handler.load_bypass_rules.return_value = [
+        {"file": "apps/handlers/lock.py", "standard": "windows_compat", "lines": [7], "reason": "test"}
+    ]
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
+
+    assert check_branch_info(str(branch)) == []
+    handler.load_bypass_rules.assert_called_once_with(str(branch))
