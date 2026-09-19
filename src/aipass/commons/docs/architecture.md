@@ -53,9 +53,13 @@ tables (`posts_fts`, `comments_fts`) kept in sync by triggers so search is a
 query rather than a scan. The schema is flattened into a single file,
 `apps/handlers/database/schema.sql`, applied on first run.
 
-The database file is resolved by walking up from the package to the branch's
-`.trinity/` marker. That marker is gitignored, which is the cause of the
-fresh-checkout defect recorded in [known_issues.md](known_issues.md).
+The database file is resolved by walking up from the package to the branch root,
+accepting either a `.trinity/` or an `.aipass/` directory as the marker.
+`.trinity/` is gitignored and `.aipass/` is tracked, so a fresh checkout still
+resolves to the right file. If neither marker is found and `AIPASS_ROOT` is
+unset, `get_db()` raises `CommonsRootNotFound` naming both markers rather than
+opening an empty database somewhere else -- see
+[known_issues.md](known_issues.md) for the defect that behaviour replaced.
 
 ## Special mechanics
 

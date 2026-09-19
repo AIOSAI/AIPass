@@ -34,20 +34,27 @@ from aipass.commons.apps.handlers.module_root import module_file
 # =============================================================================
 
 
-def _find_branch_root() -> Optional[Path]:
+def _find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
     """
-    Walk up from this file to find the commons branch root.
+    Walk up from a starting path to find the commons branch root.
 
-    Looks for .trinity/ directory as the branch root marker.
+    Accepts the branch root if EITHER .trinity/ OR .aipass/ is a directory
+    there. .trinity/ is checked first, but .aipass/ is git-tracked (unlike
+    .trinity/, which is gitignored) so it is what resolves this on a fresh
+    clone that has never run and so has no .trinity/ yet.
+
+    Args:
+        start_path: Directory to start the walk from. Defaults to this
+            file's own directory (module_file(__file__).parent).
 
     Returns:
         Path to branch root (src/aipass/commons/), or None if not found.
     """
     # module_file() rather than a bare .resolve(): DB_PATH calls this at module
     # scope, so on Windows a bare resolve reads cwd at import time.
-    current = module_file(__file__).parent
+    current = start_path if start_path is not None else module_file(__file__).parent
     for _ in range(10):
-        if (current / ".trinity").is_dir():
+        if (current / ".trinity").is_dir() or (current / ".aipass").is_dir():
             return current
         parent = current.parent
         if parent == current:
@@ -56,17 +63,18 @@ def _find_branch_root() -> Optional[Path]:
     return None
 
 
-def _get_db_path() -> Path:
+def _get_db_path() -> Optional[Path]:
     """
     Resolve the database file path.
 
     Resolution order:
-    1. Walk up from __file__ to find branch root → {branch_root}/commons.db
+    1. Walk up from __file__ to find branch root (.trinity/ or .aipass/
+       marker) → {branch_root}/commons.db
     2. AIPASS_ROOT environment variable → {AIPASS_ROOT}/src/aipass/commons/commons.db
-    3. Fallback → ~/.aipass/commons.db
 
     Returns:
-        Path to the commons.db file.
+        Path to the commons.db file, or None if neither resolves. Callers
+        must not silently fall back to a guessed location — see get_db().
     """
     branch_root = _find_branch_root()
     if branch_root:
@@ -76,10 +84,20 @@ def _get_db_path() -> Path:
     if aipass_root:
         return Path(aipass_root) / "src" / "aipass" / "commons" / "commons.db"
 
-    return Path.home() / ".aipass" / "commons.db"
+    return None
 
 
 DB_PATH = _get_db_path()
+
+
+class CommonsRootNotFound(RuntimeError):
+    """Raised when the commons branch root cannot be resolved.
+
+    Deferred to use-time (see get_db()) rather than raised at import time,
+    so that importing the package never fails on its own.
+    """
+
+
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # Retry configuration for locked-database scenarios
@@ -144,8 +162,21 @@ def get_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
     Returns:
         sqlite3.Connection with Row factory and foreign keys enabled.
+
+    Raises:
+        CommonsRootNotFound: If db_path is not given and the commons branch
+            root could not be resolved (no .trinity/ or .aipass/ marker found
+            walking up from this file, and AIPASS_ROOT is unset).
     """
     path = db_path or DB_PATH
+    if path is None:
+        raise CommonsRootNotFound(
+            "Could not resolve the commons database path: walked up from "
+            f"{module_file(__file__).parent} looking for a '.trinity/' or "
+            "'.aipass/' directory and found neither. Set the AIPASS_ROOT "
+            "environment variable to the repo root, or run from inside a "
+            "checked-out AIPass branch."
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
 
     def _connect() -> sqlite3.Connection:
@@ -188,6 +219,10 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     Returns:
         sqlite3.Connection to the initialized database.
     """
+    # Resolved once here and reused below: get_db() raises CommonsRootNotFound
+    # before returning if this would be None, so by the time we log it is
+    # guaranteed to be the real path get_db() just opened.
+    resolved_path = db_path or DB_PATH
     conn = get_db(db_path)
 
     # Load and execute flattened schema
@@ -210,7 +245,7 @@ def init_db(db_path: Optional[Path] = None) -> sqlite3.Connection:
     _register_branches(conn)
 
     logger.info("[commons.db] Database initialized successfully")
-    json_handler.log_operation("db_init", {"db_path": str(db_path or DB_PATH), "success": True})
+    json_handler.log_operation("db_init", {"db_path": str(resolved_path), "success": True})
     return conn
 
 

@@ -60,7 +60,8 @@ commons/
  - `handle_command` answers handled, not succeeded. A module that printed a refusal still returns True; the exit code is decided by cli's `resolve_exit`. Clean 0, refusal 2, unclaimed 1.
  - Refusals come from cli's `error()`, which marks the command failed. Using `warning()` for a refusal prints but exits 0 — the wrong code.
  - Caller identity resolves `AIPASS_CALLER_CWD` first, then real PWD, then `AIPASS_CALLER_BRANCH`. Run drone from your own branch or the trail names the project, not you.
- - The DB path is found by walking up to `.trinity/`, which is gitignored. On a fresh clone the marker is absent and an empty database opens in the home directory reporting success.
+ - The DB path is found by walking up for `.trinity/` or `.aipass/` — the second is tracked, so a fresh clone resolves. Neither found and no `AIPASS_ROOT` → `get_db()` raises `CommonsRootNotFound`. There is no home-directory fallback; `DB_PATH` can be `None` and importing still works.
+ - Search is literal, not an FTS5 expression: each token is quoted into a phrase before `MATCH`. Hand `MATCH` a raw query again and a hyphen becomes an operator.
  - Registry lookup tries `AIPASS_REGISTRY.json` first, then the caller's own `*_REGISTRY.json` — external citizens have identity here. Trade counterparties resolve from the main registry only.
  - Patch the attribute, never the module, in tests: a bare module patch becomes a MagicMock that invents whatever production lost. `autospec=True` on every `json_handler` patch is why the suite notices.
  - Only a post's author can pin, unpin or delete it. SYSTEM is the one exception for pins.

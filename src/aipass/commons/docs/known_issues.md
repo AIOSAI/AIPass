@@ -40,12 +40,26 @@ here.
    `aipass.prax.json_handler`; this branch's own pre-sweep handler is parked in
    `apps/handlers/json/.archive/`.
 
-3. **A fresh checkout can open an empty database.** `handlers/database/db.py`
-   finds the branch root by walking up for `.trinity/`, which is gitignored. On a
-   clone where that marker is absent the walk falls through and commons opens an
-   empty database in the home directory while reporting success.
-
 ## Cured, kept here because the shape recurs
+
+- **A fresh checkout opened an empty database and reported success.**
+  `handlers/database/db.py` found the branch root by walking up for `.trinity/`,
+  which is gitignored, so on a clone the walk fell through to
+  `~/.aipass/commons.db` -- a brand new empty database that every command then
+  reported success against. Cured twice over: the walk now also accepts
+  `.aipass/`, a tracked directory every branch ships, so a clone resolves to the
+  right file; and the home-directory fallback is gone, replaced by
+  `CommonsRootNotFound` raised from `get_db()` naming both markers and the
+  `AIPASS_ROOT` override. The raise is deferred to use time, not import time --
+  `DB_PATH` may be `None` and the package still imports.
+
+- **A hyphen in a search query was read as an FTS5 operator.** `search
+  "FPLAN-0593"` exited 2 with `no such column: 0593`: the raw query string went
+  straight into `MATCH`, so FTS5 parsed hyphens, quotes and `*` as its own
+  expression language. Two occurrences sat in `logs/search_ops.log` before anyone
+  read them. Cured by quoting each whitespace-separated token into an FTS5
+  literal phrase in one shared helper called by both `search_posts` and
+  `search_comments`. No operator syntax was ever promised to callers.
 
 - **`--help` named fewer verbs than the dispatcher routed.** Seven live verbs --
   `whoami`, `database`, `unreact`, `reactions`, `unpin`, `push-central` and the
