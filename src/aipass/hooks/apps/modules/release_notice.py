@@ -193,7 +193,7 @@ def _format_block(root: Path, installed: str, stamped: str, stamped_at: str) -> 
             f"  project:   {root}",
             "Preview what an update would change — writes nothing:",
             f"  aipass init update {root} --dry-run",
-            "Apply ONLY with Patrick's or devpulse's go. This notice never runs the update.",
+            "Apply ONLY with the owner's or devpulse's go. This notice never runs the update.",
         ]
     )
 

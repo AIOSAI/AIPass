@@ -462,7 +462,7 @@ def start_log_watcher() -> Any:
         check for an observer take their existing not-started path.
     """
     logger.info(
-        "[TRIGGER] system_logs is watched by %s — centralized observer not started (Patrick's ruling, 2026-08-14)",
+        "[TRIGGER] system_logs is watched by %s — centralized observer not started (the owner's ruling, 2026-08-14)",
         SYSTEM_LOGS_OWNER,
     )
     return None

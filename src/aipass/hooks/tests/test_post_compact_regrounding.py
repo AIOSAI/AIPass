@@ -456,7 +456,7 @@ class TestReleaseNoticeModule:
     def test_it_never_tells_the_agent_to_apply_on_its_own(self, tmp_path):
         """Patrick's rule, 2026-09-09: apply only on his or devpulse's go."""
         out = _notice(_make_project(tmp_path / "proj", stamped="2.8.1"))
-        assert "Apply ONLY with Patrick's or devpulse's go" in out
+        assert "Apply ONLY with the owner's or devpulse's go" in out
         assert "--dry-run" in out
 
     def test_the_stamp_shows_the_date_not_the_full_timestamp(self, tmp_path):

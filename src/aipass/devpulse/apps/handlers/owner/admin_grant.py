@@ -121,7 +121,7 @@ def generate_key(key_path: Path = DEFAULT_KEY_PATH, force: bool = False) -> tupl
 def mint_grant(
     cert_path: Path = DEFAULT_CERT_PATH,
     key_path: Path = DEFAULT_KEY_PATH,
-    granted_by: str = "patrick",
+    granted_by: str = "owner",
 ) -> tuple[bool, str]:
     """Add the admin privilege block to the birth certificate and sign it.
 

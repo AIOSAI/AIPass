@@ -280,7 +280,7 @@ def kill_room(branch: str, project: str) -> Dict[str, Any]:
         raise VerbUnavailable(
             "Ending a session is switched off on this host (verbs.KILL_SEAM_READY is False). "
             f"The door it routes to: {KILL_SEAM_ASK}. No session is ended by another route — "
-            "@baud's is the one door (Patrick, 2026-08-10)."
+            "@baud's is the one door (the owner, 2026-08-10)."
         )
 
     # The branch NAME, not the '@address' form — @baud's door takes names and

@@ -45,7 +45,7 @@ Covers imports required by the seedgo test scanner:
 import pytest as _parked
 
 _parked.skip(
-    "symbolic fragments tier PARKED 2026-08-14 (Patrick's ruling) — "
+    "symbolic fragments tier PARKED 2026-08-14 (the owner's ruling) — "
     "active piece is Compass; revive via tests/parked/symbolic_20260814/README.md",
     allow_module_level=True,
 )

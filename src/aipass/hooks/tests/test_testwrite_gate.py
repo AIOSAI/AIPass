@@ -287,7 +287,7 @@ class TestTheFailModeIsObservable:
         """
         reason = _reason(_run(project["seat"], file_path=project["new_test"]))
         assert "DPLAN-0323" in reason
-        assert "Patrick" in reason
+        assert "owner" in reason
         assert "EDITING an existing test is untouched" in reason
 
     @pytest.mark.parametrize(

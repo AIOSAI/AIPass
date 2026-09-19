@@ -1109,7 +1109,7 @@ class TestInitUpdateGitAuth:
         printed = self._printed(mock_console)
         assert "Stamp only: no file would change, so no go is needed" in printed
         assert f"Run: aipass init update {target}" in printed
-        assert "Apply needs Patrick's or devpulse's go" not in printed
+        assert "Apply needs the owner's or devpulse's go" not in printed
 
     def test_a_plan_that_writes_a_file_still_asks_for_the_go(self, tmp_path: Path) -> None:
         """The other half of R1: one file write and today's sentence stands."""
@@ -1123,7 +1123,7 @@ class TestInitUpdateGitAuth:
 
         assert rc == 2
         printed = self._printed(mock_console)
-        assert "Apply needs Patrick's or devpulse's go" in printed
+        assert "Apply needs the owner's or devpulse's go" in printed
         assert "no go is needed" not in printed
 
     def test_json_carries_stamp_only_for_a_managers_agent(self, tmp_path: Path) -> None:

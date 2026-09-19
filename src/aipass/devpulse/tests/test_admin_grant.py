@@ -129,7 +129,7 @@ def test_mint_signs_and_preserves_existing_fields(world):
     _ceremony(world)
     cert = json.loads(world["cert"].read_text(encoding="utf-8"))
     assert cert["privileges"]["admin"] is True
-    assert cert["privileges"]["granted_by"] == "patrick"
+    assert cert["privileges"]["granted_by"] == "owner"
     assert cert["signature"]["algo"] == "hmac-sha256"
     # Original SYSTEM-minted identity untouched
     assert cert["creator"] == "SYSTEM"

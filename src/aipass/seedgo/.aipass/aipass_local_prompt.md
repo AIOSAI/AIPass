@@ -25,7 +25,7 @@ seedgo readme update @branch                     # README auto-update
 
 All modules also accept the filename form: `standards_audit`, `standards_query`, `diagnostics_audit`, `readme_update`.
 
-An unknown command, pack, flag or branch REFUSES by name and exits non-zero (Patrick's ruling, 2026-09-07 fleet sweep) — code 7 for an argument nobody recognised, 3 for a target with nothing to check, 2 for a lane that could not run.
+An unknown command, pack, flag or branch REFUSES by name and exits non-zero (the owner's ruling, 2026-09-07 fleet sweep) — code 7 for an argument nobody recognised, 3 for a target with nothing to check, 2 for a lane that could not run.
 
 ## Hook Architecture
 

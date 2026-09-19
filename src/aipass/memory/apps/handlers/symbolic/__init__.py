@@ -51,7 +51,7 @@ which says nothing about why; this one says who parked it, when, and what to use
 """
 
 _PARKED_MESSAGE = (
-    "The symbolic fragments tier is PARKED (Patrick's ruling, 2026-08-14) and cannot be imported.\n"
+    "The symbolic fragments tier is PARKED (the owner's ruling, 2026-08-14) and cannot be imported.\n"
     "  Why:    unused tier; the Agent Memory Atlas review (2026-08-14) flagged its AUDN\n"
     "          deduplicator for acting on an LLM Delete verdict with no record of what\n"
     "          was removed or why. Parked, not removed.\n"

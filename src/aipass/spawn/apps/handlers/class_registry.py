@@ -77,7 +77,7 @@ FORBIDDEN_CLASSES = frozenset({"admin"})
 _FORBIDDEN_REASON = {
     "admin": (
         "'admin' is not a citizen class and never will be — it is a devpulse-only "
-        "registry privilege (DPLAN-0288), granted once by Patrick's ceremony "
+        "registry privilege (DPLAN-0288), granted once by the owner's ceremony "
         "(drone @spawn grant-admin), never minted from a template."
     ),
 }
