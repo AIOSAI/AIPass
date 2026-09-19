@@ -2,8 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_rollover_pipeline.py
 # Date: 2026-04-25
-# Version: 1.2.1
-# Modified: 2026-09-15
+# Version: 1.3.0
+# Modified: 2026-09-18
 # Category: memory/tests
 # =============================================
 
@@ -349,7 +349,9 @@ def _import_line_counter(monkeypatch):
 class TestStoreVectorsSubprocess:
     """Test store_vectors_subprocess calls subprocess and returns dict."""
 
-    def test_success_returns_parsed_json(self, monkeypatch):
+    def test_success_returns_parsed_json(self, monkeypatch, tmp_path):
+        # tmp_path, not tempfile.gettempdir(): a local store is a branch write,
+        # and the write fence (2026-09-18) admits only the root it stands on.
         orch, _ = _import_orchestrator(monkeypatch)
         expected = {"success": True, "collection": "test_col", "total_vectors": 5}
         mock_result = MagicMock()
@@ -363,12 +365,37 @@ class TestStoreVectorsSubprocess:
                 embeddings=[[0.1, 0.2]],
                 documents=["doc1"],
                 metadatas=[{"key": "val"}],
-                db_path=str(Path(tempfile.gettempdir()) / "test.chroma"),
+                db_path=str(tmp_path / "test.chroma"),
             )
 
         assert result["success"] is True
         assert result["collection"] == "test_col"
         mock_run.assert_called_once()
+
+    def test_a_local_store_outside_the_aipass_root_never_starts_the_subprocess(self, monkeypatch, tmp_path):
+        """The write that put rolled-over vectors into Vera Studio's `.chroma` dirs.
+
+        Refused in THIS process, before the subprocess starts: the child is the
+        thing that writes, so a refusal it would have to report back is already
+        too late. The global store (db_path None) is memory's own and unfenced.
+        """
+        from aipass.memory.apps.handlers import write_fence
+
+        orch, _ = _import_orchestrator(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+
+        with patch.object(subprocess, "run") as mock_run:
+            result = orch.store_vectors_subprocess(
+                branch="X",
+                memory_type="local",
+                embeddings=[[0.1]],
+                documents=["doc1"],
+                metadatas=[{}],
+                db_path=str(tmp_path / "other_root" / "src" / "x" / ".chroma"),
+            )
+
+        assert result["success"] is False
+        mock_run.assert_not_called()
 
     def test_nonzero_returncode_returns_failure(self, monkeypatch):
         orch, _ = _import_orchestrator(monkeypatch)
@@ -574,6 +601,31 @@ class TestGetBranchLocalChromaPath:
 
         result = orch.get_branch_local_chroma_path("BRANCH")
         assert result == chroma_dir
+
+    def test_a_branch_outside_the_aipass_root_gets_no_chroma_directory(self, monkeypatch, tmp_path):
+        """No path handed out, no directory made — the auto-create was the first write."""
+        from aipass.memory.apps.handlers import write_fence
+
+        orch, mocks = _import_orchestrator(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        branch_dir = tmp_path / "other_root" / "src" / "x"
+        branch_dir.mkdir(parents=True)
+        mocks["detector"]._read_registry.return_value = [{"name": "X", "path": str(branch_dir)}]
+
+        assert orch.get_branch_local_chroma_path("X") is None
+        assert not (branch_dir / ".chroma").exists()
+
+    def test_an_existing_foreign_chroma_directory_is_not_handed_out_either(self, monkeypatch, tmp_path):
+        """Existing is not permission: the store call would write straight into it."""
+        from aipass.memory.apps.handlers import write_fence
+
+        orch, mocks = _import_orchestrator(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        branch_dir = tmp_path / "other_root" / "src" / "x"
+        (branch_dir / ".chroma").mkdir(parents=True)
+        mocks["detector"]._read_registry.return_value = [{"name": "X", "path": str(branch_dir)}]
+
+        assert orch.get_branch_local_chroma_path("X") is None
 
 
 # ===========================================================================
@@ -2383,6 +2435,29 @@ class TestTodoRoll:
         ]
         entries = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in entries] == [1, 2]
+
+    def test_a_backlog_outside_the_aipass_root_is_refused_and_the_pad_kept(self, tr, tmp_path, monkeypatch):
+        """The backlog's directory is made BEFORE the gated write, so it needs its own fence.
+
+        Without it the gate still refuses the file — and leaves an empty
+        ``.backup/todo/<branch>/`` behind in the other project, which is a
+        write. The pad is untouched either way: nothing is pruned until the
+        backlog reads back.
+        """
+        from aipass.memory.apps.handlers import write_fence
+
+        home = tmp_path / "aipass"
+        monkeypatch.setattr(write_fence, "ROOT", home)
+        local = _mint_pad(home, [_todo(n) for n in range(1, 13)])
+        before = local.read_bytes()
+        foreign_backup = tmp_path / "other_root" / ".backup"
+
+        result = tr.roll_todos("guinea", local_path=local, backup_root=foreign_backup)
+
+        assert result["success"] is False
+        assert "NOTHING PRUNED" in result["error"]
+        assert local.read_bytes() == before
+        assert not (foreign_backup / "todo").exists()
 
     def test_the_backlog_is_the_nested_document(self, tr, tmp_path):
         local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])

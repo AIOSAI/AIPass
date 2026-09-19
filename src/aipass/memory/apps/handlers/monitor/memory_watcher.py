@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-26
-# Modified: 2026-03-06
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -47,7 +47,7 @@ except ImportError:
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count  # noqa: E402
 from aipass.memory.apps.handlers.monitor.detector import check_single_file  # noqa: E402
 from aipass.memory.apps.handlers import repo_root
-from aipass.memory.apps.handlers.repo_root import exactly_named, exists_exactly  # noqa: E402
+from aipass.memory.apps.handlers.repo_root import exists_exactly  # noqa: E402
 from aipass.prax.apps.modules.logger import get_system_logger  # noqa: E402
 from aipass.memory.apps.handlers.json import json_handler  # noqa: E402
 from aipass.memory.apps.handlers.json import config_loader  # noqa: E402
@@ -349,80 +349,30 @@ def _find_repo_root() -> Path:
     return repo_root.find_repo_root(caller="memory_watcher")
 
 
-def _paths_from_registry(registry_path: Path, root: Path) -> list[Path]:
-    """Read branch paths from a single registry file."""
-    import json
-
-    if not registry_path.exists():
-        return []
-
-    try:
-        with open(registry_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            branches = data.get("branches", [])
-
-            paths = []
-            for branch in branches:
-                raw_path = branch.get("path", "")
-                branch_path = Path(raw_path)
-                if not branch_path.is_absolute():
-                    branch_path = root / raw_path
-                if branch_path.exists():
-                    paths.append(branch_path)
-
-            return paths
-    except Exception as e:
-        logger.warning(f"[memory_watcher] Failed to read registry {registry_path}: {e}")
-        return []
-
-
 def _get_branch_paths() -> list[Path]:
     """
-    Get all branch paths from AIPass registry + external project registries.
+    Branch paths the watcher may roll over: the rollover scope, nothing else.
 
-    Reads persisted known_registries.json AND does the cwd walk so
-    external-project branches are always reachable regardless of caller cwd.
+    Delegates to ``detector._read_registry()`` (2026-09-18) — one fleet, one
+    definition. This lane used to keep its own walk: the core registry, every
+    registry persisted in known_registries.json, then the caller's cwd, which
+    it persisted in turn. That is how a caller standing in another repository
+    widened a lane that rewrites files, and why residents reached it only if
+    somebody's cwd had once named them. The detector's scope names residents
+    by declaration, fences callers to the AIPass root, and remembers nothing.
 
     Returns:
-        List of Path objects for each branch
+        Existing branch directories, deduplicated, in registry order
     """
-    import os
+    from aipass.memory.apps.handlers.monitor import detector
 
-    from aipass.memory.apps.handlers.monitor.detector import load_known_registries, persist_registry
-
-    repo_root = _find_repo_root()
-    paths = _paths_from_registry(repo_root / "AIPASS_REGISTRY.json", repo_root)
-    seen = {p.resolve() for p in paths}
-    aipass_registry = (repo_root / "AIPASS_REGISTRY.json").resolve()
-
-    def _add_from_registry(reg: Path) -> None:
-        for p in _paths_from_registry(reg, reg.parent):
-            if p.resolve() not in seen:
-                paths.append(p)
-                seen.add(p.resolve())
-
-    for reg in load_known_registries():
-        if reg.resolve() != aipass_registry:
-            _add_from_registry(reg)
-
-    caller_cwd = (
-        Path(os.environ.get("AIPASS_CALLER_CWD", "")).resolve() if os.environ.get("AIPASS_CALLER_CWD") else Path.cwd()
-    )
-
-    cwd_found: list[Path] = []
-    for parent in [caller_cwd] + list(caller_cwd.parents):
-        # EXACT CASE -- detector's twin of this walk, and the consequence here
-        # is that a folded match's "branches" become paths this watcher ROLLS
-        # OVER, i.e. rewrites. See repo_root.exactly_named.
-        for reg in exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
-            if reg.resolve() != aipass_registry:
-                cwd_found.append(reg)
-        if cwd_found:
-            break
-
-    for reg in cwd_found:
-        _add_from_registry(reg)
-        persist_registry(reg)
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    for branch in detector._read_registry():
+        branch_path = Path(branch.get("path", ""))
+        if branch.get("path") and branch_path.exists() and branch_path.resolve() not in seen:
+            paths.append(branch_path)
+            seen.add(branch_path.resolve())
 
     return paths
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Marker 7 — the memory lane, and the rulings that came with it.
@@ -36,7 +36,7 @@ from pathlib import Path
 
 import pytest
 from _pytest.outcomes import Skipped  # what pytest.skip() raises — caught here, never raised
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 # Imported at MODULE level on purpose. conftest's autouse fixture replaces
 # `aipass.memory.apps.handlers.json` with a MagicMock package for the duration
@@ -50,6 +50,8 @@ from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.memory.apps.handlers.templates import template_bump
 from aipass.memory.apps.handlers.rollover import normalizer
 from aipass.memory.apps.handlers.json import entry_limits
+from aipass.memory.apps.handlers.json import memory_files
+from aipass.memory.apps.handlers import write_fence
 from aipass.memory.apps.handlers.tracking import line_counter
 from aipass.memory.apps.handlers.templates import spawn_pusher
 from aipass.memory.apps.modules import rollover
@@ -258,6 +260,126 @@ class TestOneFleetOneDefinition:
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for p in rolled if home not in p.parents and p != home]
         assert not outside, f"rollover would write outside this repo: {outside}"
+
+    # -- THE WRITE FENCE (2026-09-18) -----------------------------------------
+    #
+    # The scope pins above hold the FLEET to this repo, and on 2026-09-17 07:47
+    # that was not enough: one `drone @memory` call from Vera Studio's cwd
+    # persisted that project's registry, and every rollover after it WROTE four
+    # Vera Studio branches' memories, backups and local stores. The scope was
+    # the only thing standing between a write lane and another repo, and a
+    # scope is a list anyone's cwd could add to. The ruling that followed: memory
+    # may READ another project, never WRITE one — so the refusal lives at the
+    # write, where no scope decision can route around it.
+
+    @staticmethod
+    def _fenced_world(tmp_path, monkeypatch):
+        """A fake AIPass root and a foreign project beside it, with the fence on the first."""
+        home = tmp_path / "aipass"
+        home.mkdir()
+        monkeypatch.setattr(write_fence, "ROOT", home)
+        foreign = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text('{\n  "sessions": []\n}\n', encoding="utf-8")
+        return home, foreign
+
+    def test_a_write_into_another_root_is_refused_and_the_file_is_untouched(self, tmp_path, monkeypatch):
+        """The minimum pin: the gate most .trinity writers share says no, and means it.
+
+        Refused means four things, each asserted: a failure the caller already
+        knows how to read, the foreign bytes unchanged, no temp file left beside
+        them, and an ERROR naming BOTH the path and the root — a refusal that
+        does not say which fence it hit cannot be argued with.
+        """
+        home, foreign = self._fenced_world(tmp_path, monkeypatch)
+        before = foreign.read_bytes()
+        said = MagicMock()
+        monkeypatch.setattr(write_fence, "logger", said)
+
+        result = memory_files.write_memory_file(foreign, {"sessions": [{"number": 1, "summary": "rewritten"}]})
+
+        assert result["success"] is False
+        assert memory_files.write_memory_file_simple(foreign, {"sessions": []}) is False
+        assert foreign.read_bytes() == before
+        assert sorted(p.name for p in foreign.parent.iterdir()) == ["local.json"], "a temp file was left behind"
+        errors = " ".join(str(call) for call in said.error.call_args_list)
+        assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors
+
+    def test_a_refused_write_is_recorded_in_the_operation_log(self, tmp_path, monkeypatch):
+        """A refusal only the console saw is gone the moment the console is."""
+        _home, foreign = self._fenced_world(tmp_path, monkeypatch)
+        recorder = sys.modules["aipass.memory.apps.handlers.json.json_handler"]
+
+        memory_files.write_memory_file(foreign, {"sessions": []})
+
+        recorded = [call for call in recorder.log_operation.call_args_list if call.args[0] == "write_fence_refused"]
+        assert recorded, recorder.log_operation.call_args_list
+        assert recorded[0].args[1]["path"] == str(foreign.resolve())
+
+    def test_a_write_inside_the_root_still_succeeds(self, tmp_path, monkeypatch):
+        """Positive control. A fence that refuses everything also passes the pin above."""
+        home, _foreign = self._fenced_world(tmp_path, monkeypatch)
+        inside = home / "src" / "x" / ".trinity" / "local.json"
+        inside.parent.mkdir(parents=True)
+
+        result = memory_files.write_memory_file(inside, {"sessions": []})
+
+        assert result["success"] is True, result
+        assert json.loads(inside.read_text(encoding="utf-8")) == {"sessions": []}
+
+    def test_a_symlink_inside_the_root_does_not_carry_a_write_out_of_it(self, tmp_path, monkeypatch):
+        """The fence judges where the bytes LAND, not how the path is spelled."""
+        home, foreign = self._fenced_world(tmp_path, monkeypatch)
+        before = foreign.read_bytes()
+        door = home / "src" / "door"
+        door.parent.mkdir(parents=True)
+        try:
+            door.symlink_to(foreign.parent.parent, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"this filesystem cannot make a symlink ({exc}) -- nothing to pin")
+
+        result = memory_files.write_memory_file(door / ".trinity" / "local.json", {"sessions": []})
+
+        assert result["success"] is False
+        assert foreign.read_bytes() == before
+
+    def test_the_verdict_is_containment_not_a_shared_prefix(self, tmp_path):
+        """The pure predicate, alone: ``/x/aipass_other`` is not inside ``/x/aipass``.
+
+        A string ``startswith`` passes that sibling — the classic fence bug, and
+        the exact spelling `the push never reaches` above uses for its own
+        measurement, which is fine for a measurement and wrong for a gate.
+        """
+        root = tmp_path / "aipass"
+
+        assert write_fence.outside_root(root, root) is None
+        assert write_fence.outside_root(root / "src" / "x" / ".trinity" / "local.json", root) is None
+        sibling = write_fence.outside_root(tmp_path / "aipass_other" / "x", root)
+        assert sibling is not None and str(tmp_path / "aipass_other" / "x") in sibling and str(root) in sibling
+        assert write_fence.outside_root(tmp_path, root) is not None
+
+    def test_a_filesystem_root_anchor_admits_nothing(self, tmp_path):
+        """``repo_root``'s last resort is the filesystem root, and ``/`` contains everything.
+
+        On an installed wheel with no registry above it, ``SOURCE_ROOT`` finds no
+        ``src/`` and resolves to ``parents[-1]``. A fence anchored there would
+        pass every write on the machine — open exactly where nobody is looking.
+        """
+        anchor = Path(tmp_path.anchor)
+        target = tmp_path / "other_root" / ".trinity" / "local.json"
+
+        refusal = write_fence.outside_root(target, anchor)
+
+        assert refusal is not None and str(anchor) in refusal
+        assert write_fence.outside_root(anchor, anchor) is not None
+
+    def test_the_spawn_template_push_cannot_write_outside_the_root(self, tmp_path, monkeypatch):
+        """The one .trinity writer that is not a branch: spawn's seed templates."""
+        _home, foreign = self._fenced_world(tmp_path, monkeypatch)
+        before = foreign.read_bytes()
+
+        assert spawn_pusher._write_json(foreign, {"sessions": []}) is False
+        assert foreign.read_bytes() == before
 
     def test_the_push_and_the_scope_module_resolve_the_same_fleet(self, live_fleet):
         """Repointed 2026-08-28: the shared constant is gone, the agreement is not.

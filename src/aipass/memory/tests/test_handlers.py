@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_handlers.py
 # Date: 2026-03-31
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: memory/tests
 # =============================================
 
@@ -343,6 +343,45 @@ class TestCreateRolloverBackup:
         result = ext.restore_from_backup(mem_file)
         assert result["success"] is False
 
+    @staticmethod
+    def _foreign_memory_file(tmp_path, monkeypatch) -> Path:
+        """A branch file in a project beside a fake AIPass root the fence stands on."""
+        from aipass.memory.apps.handlers import write_fence
+
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        mem_file = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"
+        mem_file.parent.mkdir(parents=True)
+        mem_file.write_text('{"original": true}', encoding="utf-8")
+        return mem_file
+
+    def test_a_backup_outside_the_aipass_root_is_refused_and_creates_nothing(self, monkeypatch, tmp_path):
+        """The 2026-09-17 species: rollover made `.backup/` dirs inside Vera Studio's branches.
+
+        A refused backup must also stop the rollover — the orchestrator already
+        treats a failed backup as "do not proceed", so the refusal reuses that
+        contract rather than inventing one.
+        """
+        ext, _ = _import_extractor(monkeypatch)
+        mem_file = self._foreign_memory_file(tmp_path, monkeypatch)
+
+        result = ext.create_rollover_backup(mem_file)
+
+        assert result["success"] is False
+        assert not (mem_file.parent.parent / ".backup").exists()
+
+    def test_a_restore_outside_the_aipass_root_is_refused_and_the_file_untouched(self, monkeypatch, tmp_path):
+        ext, _ = _import_extractor(monkeypatch)
+        mem_file = self._foreign_memory_file(tmp_path, monkeypatch)
+        backup_dir = mem_file.parent.parent / ".backup"
+        backup_dir.mkdir()
+        (backup_dir / "rollover_backup_local.json").write_text('{"restored": true}', encoding="utf-8")
+        before = mem_file.read_bytes()
+
+        result = ext.restore_from_backup(mem_file)
+
+        assert result["success"] is False
+        assert mem_file.read_bytes() == before
+
 
 # ===========================================================================
 # Tests: tracking/line_counter.py
@@ -425,6 +464,24 @@ class TestNormalizeMemoryFile:
         norm, _ = _import_normalize(monkeypatch)
         result = norm.normalize_memory_file(tmp_path / "nope.json")
         assert result["success"] is False
+
+    def test_a_file_outside_the_aipass_root_is_read_never_rewritten(self, monkeypatch, tmp_path):
+        """Memory may READ another project: the dry run still reports. It may never WRITE one."""
+        from aipass.memory.apps.handlers import write_fence
+
+        norm, _ = _import_normalize(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        f = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"
+        f.parent.mkdir(parents=True)
+        self._write_json(f, {"document_metadata": {}, "status": {"health": "healthy"}, "sessions": []})
+        before = f.read_bytes()
+
+        looked = norm.normalize_memory_file(f, dry_run=True)
+        result = norm.normalize_memory_file(f)
+
+        assert looked["success"] is True and looked["changes"], "the read half must still work"
+        assert result["success"] is False
+        assert f.read_bytes() == before
 
     def test_moves_root_limits_then_strips(self, monkeypatch, tmp_path):
         """Root limits merged into metadata, then stripped (limits live in config now)."""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_detector.py
 # Description: Tests for rollover trigger detection handler
-# Version: 1.2.1
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for the rollover trigger detection module (apps/handlers/monitor/detector).
@@ -719,6 +719,23 @@ class TestRecreateTrinityFile:
         assert data["document_metadata"]["document_name"] == "api.OBSERVATIONS"
         assert "limits" not in data["document_metadata"]
 
+    def test_a_branch_outside_the_aipass_root_is_never_reseeded(self, tmp_path: Path, monkeypatch):
+        """The template seed carries the "archived to @memory" promise into the file it makes.
+
+        That promise is only true of files inside the AIPass root, so the seed
+        is refused outside it — and refused before the ``.trinity/`` directory
+        is made, because making it is already a write.
+        """
+        from aipass.memory.apps.handlers import write_fence
+        from aipass.memory.apps.handlers.monitor import detector
+
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        branch_dir = tmp_path / "other_root" / "src" / "x"
+        branch_dir.mkdir(parents=True)
+
+        assert detector._recreate_trinity_file(branch_dir, "x", "local") is None
+        assert not (branch_dir / ".trinity").exists()
+
     def test_check_all_branches_recreates_missing(self, tmp_path: Path, monkeypatch):
         """check_all_branches should auto-recreate missing .trinity files."""
         from aipass.memory.apps.handlers.monitor import detector
@@ -872,173 +889,125 @@ class TestTodosAreCountOnly:
 
 
 # ===========================================================================
-# Known registries (persist / load / discovery)
+# Known registries -- RETIRED 2026-09-18; the caller walk remembers nothing
 # ===========================================================================
 
 
 class TestKnownRegistries:
-    """Tests for load_known_registries() and persist_registry()."""
+    """``known_registries.json`` is retired: a caller's cwd is never remembered.
 
-    def test_load_returns_empty_when_file_missing(self, tmp_path: Path, monkeypatch):
-        """No known_registries.json → empty list."""
+    It was a list that grew by where people stood. On 2026-09-17 07:47 one
+    ``drone @memory`` call from Vera Studio's cwd added that project's registry,
+    and from then on every rollover walk — from ANY cwd — wrote four Vera Studio
+    branches' memories. It also held three pytest tmp paths, written by a test
+    whose patch landed on a stale module, and a deleted scratchpad probe.
+    Nothing legitimate was left in it: @baud reaches the fleet as a declared
+    resident through ``registry_scope``, never through this file.
+
+    The caller walk still runs, because an agent standing in a project inside
+    the AIPass root is a real caller — but what it finds is scoped to THIS
+    call, and anything outside the root is dropped through the write fence's
+    own predicate before it can reach a lane that writes.
+    """
+
+    def test_the_persistence_api_is_gone(self):
+        """No file to read, no function to write it — the door, not just the habit."""
         from aipass.memory.apps.handlers.monitor import detector
 
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "nope.json")
+        for name in ("persist_registry", "load_known_registries", "_KNOWN_REGISTRIES_PATH"):
+            assert not hasattr(detector, name), f"detector.{name} is back — a caller's cwd would outlive the call"
 
-        result = detector.load_known_registries()
-
-        assert result == []
-
-    def test_persist_creates_file_and_stores_path(self, tmp_path: Path, monkeypatch):
-        """persist_registry should create the file and store the absolute path."""
+    def test_a_caller_registry_is_forgotten_the_moment_the_caller_leaves(self, tmp_path: Path, monkeypatch):
+        """Behavioural: a second walk from a neutral directory sees nothing the first one found."""
         from aipass.memory.apps.handlers.monitor import detector
 
-        kr_path = tmp_path / "known_registries.json"
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", kr_path)
+        home = tmp_path / "aipass_home"
+        home.mkdir()
+        monkeypatch.setattr(detector, "_REPO_ROOT", home)
+        visited = tmp_path / "visited"
+        visited.mkdir()
+        (visited / "VISITED_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
+        neutral = tmp_path / "neutral"
+        neutral.mkdir()
 
-        ext_reg = tmp_path / "EXT_REGISTRY.json"
-        ext_reg.write_text('{"branches":[]}', encoding="utf-8")
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(visited))
+        assert [path.name for path in detector._find_caller_registries()] == ["VISITED_REGISTRY.json"]
 
-        detector.persist_registry(ext_reg)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(neutral))
+        assert detector._find_caller_registries() == []
 
-        assert kr_path.exists()
-        data = json.loads(kr_path.read_text(encoding="utf-8"))
-        assert str(ext_reg.resolve()) in data["registries"]
-
-    def test_persist_deduplicates(self, tmp_path: Path, monkeypatch):
-        """Persisting the same registry twice should not create duplicates."""
+    @staticmethod
+    def _home_with_memory(tmp_path: Path, monkeypatch) -> Path:
+        """A fake AIPass root holding one core branch, with detector AND fence standing on it."""
+        from aipass.memory.apps.handlers import write_fence
         from aipass.memory.apps.handlers.monitor import detector
 
-        kr_path = tmp_path / "known_registries.json"
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", kr_path)
-
-        ext_reg = tmp_path / "EXT_REGISTRY.json"
-        ext_reg.write_text('{"branches":[]}', encoding="utf-8")
-
-        detector.persist_registry(ext_reg)
-        detector.persist_registry(ext_reg)
-
-        data = json.loads(kr_path.read_text(encoding="utf-8"))
-        assert len(data["registries"]) == 1
-
-    def test_load_filters_nonexistent_paths(self, tmp_path: Path, monkeypatch):
-        """load_known_registries filters out paths that no longer exist."""
-        from aipass.memory.apps.handlers.monitor import detector
-
-        kr_path = tmp_path / "known_registries.json"
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", kr_path)
-
-        existing = tmp_path / "REAL_REGISTRY.json"
-        existing.write_text('{"branches":[]}', encoding="utf-8")
-
-        kr_path.write_text(
-            json.dumps(
-                {
-                    "registries": [str(existing), "/nonexistent/GHOST_REGISTRY.json"],
-                }
-            ),
-            encoding="utf-8",
+        home = tmp_path / "aipass"
+        home.mkdir()
+        (home / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "memory", "path": "src/memory"}]}), encoding="utf-8"
         )
+        monkeypatch.setattr(detector, "_REPO_ROOT", home)
+        monkeypatch.setattr(write_fence, "ROOT", home)
+        return home
 
-        result = detector.load_known_registries()
+    def test_a_caller_registry_outside_the_root_never_enters_the_write_scope(self, tmp_path: Path, monkeypatch):
+        """THE 07:47 CALL, replayed: standing in another repo adds nothing to rollover.
 
-        assert len(result) == 1
-        assert result[0] == existing
-
-    def test_load_handles_malformed_json(self, tmp_path: Path, monkeypatch):
-        """Malformed known_registries.json → empty list, not crash."""
+        Logged once, at INFO — standing in another repo is expected, not a
+        fault, and a WARNING on every call from there would be noise nobody reads.
+        """
         from aipass.memory.apps.handlers.monitor import detector
 
-        kr_path = tmp_path / "known_registries.json"
-        kr_path.write_text("NOT JSON", encoding="utf-8")
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", kr_path)
+        self._home_with_memory(tmp_path, monkeypatch)
+        foreign = tmp_path / "vera_like"
+        (foreign / "src" / "vera").mkdir(parents=True)
+        (foreign / "VERA-LIKE_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "vera", "path": "src/vera"}]}), encoding="utf-8"
+        )
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(foreign / "src" / "vera"))
 
-        result = detector.load_known_registries()
+        assert detector._find_caller_registries() == []
+        names = [branch["name"] for branch in detector._read_registry()]
 
-        assert result == []
+        assert names == ["memory"]
+        said = [str(call) for call in detector.logger.info.call_args_list if "VERA-LIKE_REGISTRY.json" in str(call)]
+        assert len(said) == 2, f"one INFO line per walk, two walks ran: {said}"
+        assert not [str(call) for call in detector.logger.warning.call_args_list if "VERA-LIKE" in str(call)]
 
-    def test_find_caller_registries_includes_known(self, tmp_path: Path, monkeypatch):
-        """_find_caller_registries should include registries from known_registries.json."""
+    def test_a_caller_registry_inside_the_root_is_still_read(self, tmp_path: Path, monkeypatch):
+        """Positive control: the fence narrows the walk to this root, it does not delete it."""
         from aipass.memory.apps.handlers.monitor import detector
 
-        kr_path = tmp_path / "known_registries.json"
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", kr_path)
-
-        ext_project = tmp_path / "ext_project"
-        ext_project.mkdir()
-        ext_reg = ext_project / "MYPROJECT_REGISTRY.json"
-        ext_reg.write_text('{"branches":[]}', encoding="utf-8")
-
-        kr_path.write_text(
-            json.dumps(
-                {
-                    "registries": [str(ext_reg)],
-                }
-            ),
-            encoding="utf-8",
+        home = self._home_with_memory(tmp_path, monkeypatch)
+        guest = home / "projects" / "guest"
+        (guest / "src" / "guest").mkdir(parents=True)
+        (guest / "GUEST_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "guest", "path": "src/guest"}]}), encoding="utf-8"
         )
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(guest))
 
-        aipass_reg = tmp_path / "AIPASS_REGISTRY.json"
-        aipass_reg.write_text('{"branches":[]}', encoding="utf-8")
-        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        names = [branch["name"] for branch in detector._read_registry()]
 
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
+        assert names == ["memory", "guest"]
 
-        result = detector._find_caller_registries()
-
-        resolved_paths = [r.resolve() for r in result]
-        assert ext_reg.resolve() in resolved_paths
-
-    def test_read_registry_discovers_external_branches_via_known(self, tmp_path: Path, monkeypatch):
-        """_read_registry should find external branches via known_registries.json
-        even when cwd is AIPass root (the core bug from #664)."""
+    def test_an_inside_registry_naming_a_branch_outside_the_root_does_not_offer_it(self, tmp_path: Path, monkeypatch):
+        """A registry is data; an absolute path in it can point anywhere."""
         from aipass.memory.apps.handlers.monitor import detector
 
-        core_dir = tmp_path / "aipass"
-        core_dir.mkdir()
-        core_reg = core_dir / "AIPASS_REGISTRY.json"
-        core_reg.write_text(
-            json.dumps(
-                {
-                    "branches": [{"name": "memory", "path": "src/memory"}],
-                }
-            ),
-            encoding="utf-8",
+        home = self._home_with_memory(tmp_path, monkeypatch)
+        guest = home / "projects" / "guest"
+        guest.mkdir(parents=True)
+        elsewhere = tmp_path / "elsewhere" / "b"
+        elsewhere.mkdir(parents=True)
+        (guest / "GUEST_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "b", "path": str(elsewhere)}]}), encoding="utf-8"
         )
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(guest))
 
-        ext_project = tmp_path / "myproject"
-        ext_project.mkdir()
-        ext_branch = ext_project / "src" / "mybranch"
-        ext_branch.mkdir(parents=True)
-        ext_reg = ext_project / "MYPROJECT_REGISTRY.json"
-        ext_reg.write_text(
-            json.dumps(
-                {
-                    "branches": [{"name": "mybranch", "path": "src/mybranch"}],
-                }
-            ),
-            encoding="utf-8",
-        )
+        names = [branch["name"] for branch in detector._read_registry()]
 
-        kr_path = tmp_path / "known_registries.json"
-        kr_path.write_text(
-            json.dumps(
-                {
-                    "registries": [str(ext_reg)],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-        monkeypatch.setattr(detector, "_REPO_ROOT", core_dir)
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", kr_path)
-        monkeypatch.setenv("AIPASS_CALLER_CWD", str(core_dir))
-
-        branches = detector._read_registry()
-
-        names = [b["name"] for b in branches]
-        assert "memory" in names
-        assert "mybranch" in names
+        assert names == ["memory"]
 
 
 class TestTheCallerCwdWalkReadsNamesNotSpellings:
@@ -1053,14 +1022,15 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
     hypothetical: flow's plan counters and ``.spawn/.template_registry.json``
     sit in every branch. And a folded match here is not merely read once:
 
-    * it is ``persist_registry()``'d into known_registries.json PERMANENTLY, so
-      one run on a folding filesystem leaves the wrong file in the fleet's
-      state forever, and
+    * it was ``persist_registry()``'d into known_registries.json PERMANENTLY, so
+      one run on a folding filesystem left the wrong file in the fleet's state
+      forever — retired 2026-09-18 with the file itself (``TestKnownRegistries``),
+      so the walk now remembers nothing past the call, and
     * the ``break`` after the first hit means a spurious NEARER match stops the
       walk before the real registry above it is ever seen.
 
     Refusing, admitting and forgetting — the other three walks each do one of
-    those. This one does all three.
+    those. This one did all three; forgetting is now the only one it can't.
 
     See ``case_insensitive_filesystem`` in conftest for why the condition is
     injected rather than skipped off-platform.
@@ -1071,7 +1041,6 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
         """A caller standing in someone else's repo, with the bait beside the real file."""
         from aipass.memory.apps.handlers.monitor import detector
 
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "known_registries.json")
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
         (tmp_path / "aipass_home").mkdir()
 
@@ -1095,15 +1064,6 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
 
         assert found == ["FOREIGN_REGISTRY.json"]
 
-    def test_a_lowercase_counter_file_is_never_persisted(self, caller_tree, case_insensitive_filesystem):
-        """The part that outlives the run. State written once is believed forever."""
-        from aipass.memory.apps.handlers.monitor import detector
-
-        detector._find_caller_registries()
-
-        persisted = json.loads(detector._KNOWN_REGISTRIES_PATH.read_text(encoding="utf-8"))["registries"]
-        assert not any("flow_json_registry.json" in entry for entry in persisted)
-
     def test_bait_nearer_than_the_real_registry_does_not_end_the_walk(
         self, tmp_path, monkeypatch, case_insensitive_filesystem
     ):
@@ -1115,7 +1075,6 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
         """
         from aipass.memory.apps.handlers.monitor import detector
 
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "known_registries.json")
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
         (tmp_path / "aipass_home").mkdir()
 

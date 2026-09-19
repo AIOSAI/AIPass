@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: tests/test_watcher.py
 # Date: 2026-04-25
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: memory/tests
 # =============================================
 
@@ -594,13 +594,13 @@ class TestTheBranchPathWalkReadsNamesNotSpellings:
     @pytest.fixture
     def caller_tree(self, tmp_path, monkeypatch):
         from aipass.memory.apps.handlers.monitor import detector
-        from aipass.memory.apps.handlers.monitor import memory_watcher
 
         home = tmp_path / "aipass_home"
         home.mkdir()
         (home / "AIPASS_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
-        monkeypatch.setattr(memory_watcher, "_find_repo_root", lambda: home)
-        monkeypatch.setattr(detector, "_KNOWN_REGISTRIES_PATH", tmp_path / "known_registries.json")
+        # The watcher walks the ROLLOVER scope now (2026-09-18), so the root it
+        # stands on is the detector's; its own _find_repo_root only finds plans.
+        monkeypatch.setattr(detector, "_REPO_ROOT", home)
 
         foreign = tmp_path / "foreign_project"
         (foreign / "src" / "real").mkdir(parents=True)
@@ -627,6 +627,48 @@ class TestTheBranchPathWalkReadsNamesNotSpellings:
 
         assert "real" in names, "the genuine branch was lost while excluding the impostor"
         assert "bait" not in names
+
+    def test_a_caller_outside_the_aipass_root_contributes_nothing_to_roll_over(self, caller_tree, monkeypatch):
+        """The watcher's half of 2026-09-17: its walk also PERSISTED the caller's registry.
+
+        With the fence standing on the fake home, the foreign project beside it
+        is another repository, and everything it lists stays out of a lane that
+        normalizes and rolls over what it is handed.
+        """
+        from aipass.memory.apps.handlers import write_fence
+        from aipass.memory.apps.handlers.monitor import memory_watcher
+
+        monkeypatch.setattr(write_fence, "ROOT", caller_tree.parent / "aipass_home")
+
+        assert memory_watcher._get_branch_paths() == []
+
+    def test_a_declared_resident_reaches_the_watcher_with_nothing_remembered(self, tmp_path, monkeypatch):
+        """@baud was in this lane only because known_registries.json happened to name it.
+
+        Retiring that file would have quietly dropped a resident from the watcher
+        while rollover kept it — two write lanes, two fleets, the split
+        ``registry_scope`` exists to end. The watcher reads the rollover scope
+        instead, so residents arrive through their declaration and nothing else.
+        """
+        from aipass.memory.apps.handlers.monitor import detector
+        from aipass.memory.apps.handlers.monitor import memory_watcher
+
+        home = tmp_path / "aipass_home"
+        branch = home / "projects" / "guest" / "src" / "guest"
+        (branch / ".trinity").mkdir(parents=True)
+        (home / "AIPASS_REGISTRY.json").write_text('{"branches":[]}', encoding="utf-8")
+        (home / "projects" / "guest" / "GUEST_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": "guest", "path": "src/guest", "status": "active"}]}), encoding="utf-8"
+        )
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"residency": "resident"}}), encoding="utf-8"
+        )
+        neutral = tmp_path / "neutral"
+        neutral.mkdir()
+        monkeypatch.setattr(detector, "_REPO_ROOT", home)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(neutral))
+
+        assert [path.name for path in memory_watcher._get_branch_paths()] == ["guest"]
 
 
 class TestTheTrinityMatchIsAFilenameNotAPattern:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_roll.py
 # Description: Todo pad roll-off to .backup/todo/<branch>/backlog.json, file only, verified before the pad is pruned
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Todo Roll Handler (DPLAN-0345 row 1, FPLAN-0590)
@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from aipass.prax import logger
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import check_entry_shape, load_entry_limits
@@ -456,7 +456,10 @@ def _write_document(path: Path, document: dict[str, Any]) -> str | None:
 
 
 def _ensure_parent(path: Path) -> str | None:
-    """Create *path*'s directory; returns the failure, or None."""
+    """Create *path*'s directory; returns the failure, or None. Never outside the AIPass root."""
+    refusal = write_fence.fence_write(path, lane="todo_roll")
+    if refusal is not None:
+        return refusal
     try:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:

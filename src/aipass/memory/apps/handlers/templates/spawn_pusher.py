@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: spawn_pusher.py
 # Description: Spawn Template Sync Handler
-# Version: 0.1.1
+# Version: 0.2.0
 # Created: 2026-03-15
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -28,7 +28,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.repo_root import module_file
@@ -118,7 +118,9 @@ def _read_json(path: Path) -> dict | None:
 
 
 def _write_json(path: Path, data: dict) -> bool:
-    """Write dict as pretty-printed JSON. Returns True on success."""
+    """Write dict as pretty-printed JSON. Returns True on success. Never outside the AIPass root."""
+    if write_fence.fence_write(path, lane="spawn_pusher") is not None:
+        return False
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)

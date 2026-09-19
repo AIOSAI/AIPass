@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_files.py
 # Description: Memory File Safe I/O Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-17
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -37,6 +37,7 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.write_fence import fence_write
 
 logger = get_system_logger()
 
@@ -354,7 +355,12 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         - Writes to temp file first
         - Only renames if write succeeds
         - Original file unchanged if write fails
+        - Refused outright outside the AIPass root (write_fence)
     """
+    refusal = fence_write(file_path, lane="write_memory_file")
+    if refusal is not None:
+        return {"success": False, "error": refusal}
+
     if not isinstance(data, dict):
         return {"success": False, "error": f"Data must be dict, got {type(data).__name__}"}
 

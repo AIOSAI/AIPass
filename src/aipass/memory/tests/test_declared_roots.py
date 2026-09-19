@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_declared_roots.py
 # Description: Pins the declared-roots anchor and the external tier it opens
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-18
 # =============================================
 
 """Repos outside this one join the fleet by DECLARATION, never by being nearby.
@@ -198,7 +198,7 @@ class TestDeclarationOrderSurvivesToTheDoor:
         )
         assert [path.name for path in rs.declared_roots(machine)] == ["wren", "Demo"]
 
-    def test_a_root_declared_twice_keeps_its_FIRST_position(self, machine):
+    def test_a_root_declared_twice_keeps_its_first_position(self, machine):
         """Dedup by first occurrence — a later duplicate cannot promote a root."""
         _write(
             machine / rs.DECLARED_ROOTS,
@@ -465,24 +465,34 @@ class TestTheLiveMachineIsReachable:
         assert all(item["residency"] == rs.RESIDENCY_EXTERNAL for item in found.values())
         assert all(item["email"] for item in found.values()), "external citizens must be addressable"
 
-    def test_no_live_external_citizen_declares_a_residency(self):
-        """The measurement the GO acted on, kept as a live guard.
+    def test_no_live_external_citizen_declares_a_residency_it_does_not_hold(self):
+        """The measurement the GO acted on, kept as a live guard — narrowed on evidence.
 
-        If this ever goes red it means the schema campaign happened after all,
-        and the presence rule can be revisited on evidence rather than memory.
+        It first asserted that NO external citizen declared a residency at all,
+        so that the day one did, the presence rule could be revisited on
+        evidence rather than memory. That day was 2026-09-18 22:13: @vera's own
+        migration stamped ``residency: external`` into her passport. The
+        tripwire did its job, and the evidence says the rule stands — the
+        external tier never reads the declaration (membership is presence), and
+        an honest ``external`` agrees with it.
+
+        What would still matter is a declaration that CONTRADICTS presence: an
+        external citizen claiming ``core`` or ``resident``. Nothing honours that
+        today, and this is the line that goes red before anything does.
         """
         projects = rs.find_repo_root().parent
-        declared = []
+        contradicting = []
         for repo in ("wren", "Vera-Studio", "Demo", "feel_good_app"):
             root = projects / repo
             if not root.is_dir():
                 continue
             for registry in root.glob("*_REGISTRY.json"):
                 for item in rs.read_registry_branches(registry, name_from="name"):
-                    if rs.declared_residency(item["path"]) is not None:
-                        declared.append(item["name"])
-        assert not declared, (
-            f"external citizens now declare a residency: {declared} -- the presence rule can be revisited"
+                    declared = rs.declared_residency(item["path"])
+                    if declared not in (None, rs.RESIDENCY_EXTERNAL):
+                        contradicting.append((item["name"], declared))
+        assert not contradicting, (
+            f"external citizens declare a residency they do not hold: {contradicting} -- revisit the presence rule"
         )
 
 
@@ -578,7 +588,7 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
 
         assert [path.name for path in kept] == ["AIPASS_REGISTRY.json", "WREN_REGISTRY.json"]
 
-    def test_the_suffix_has_to_END_the_name_not_merely_appear_in_it(self):
+    def test_the_suffix_has_to_end_the_name_not_merely_appear_in_it(self):
         """A backup beside the registry is not a registry.
 
         ``in`` instead of ``endswith`` reads ``AIPASS_REGISTRY.json.bak`` as the

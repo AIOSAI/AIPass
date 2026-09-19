@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: detector.py
 # Description: Rollover Trigger Detection Handler
-# Version: 0.5.0
+# Version: 0.6.0
 # Created: 2025-11-16
 # Modified: 2026-09-18
 # =============================================
@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 from dataclasses import dataclass
 
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
@@ -61,58 +61,21 @@ def _find_repo_root() -> Path:
 
 
 _REPO_ROOT = _find_repo_root()
-_MEMORY_ROOT = module_file(__file__).parents[3]
-_KNOWN_REGISTRIES_PATH = _MEMORY_ROOT / "memory_json" / "known_registries.json"
-
-
-def load_known_registries() -> List[Path]:
-    """Load persisted external registry paths from known_registries.json.
-
-    Returns only paths that currently exist on disk.
-    """
-    if not _KNOWN_REGISTRIES_PATH.exists():
-        return []
-    try:
-        data = json.loads(_KNOWN_REGISTRIES_PATH.read_text(encoding="utf-8"))
-        return [Path(p) for p in data.get("registries", []) if Path(p).exists()]
-    except Exception as e:
-        logger.warning(f"[detector] Failed to read known_registries.json: {e}")
-        return []
-
-
-def persist_registry(registry_path: Path) -> None:
-    """Persist a newly discovered external registry so future runs find it."""
-    current: List[str] = []
-    if _KNOWN_REGISTRIES_PATH.exists():
-        try:
-            data = json.loads(_KNOWN_REGISTRIES_PATH.read_text(encoding="utf-8"))
-            current = data.get("registries", [])
-        except Exception as e:
-            logger.warning(f"[detector] Failed to parse known_registries.json, starting fresh: {e}")
-    resolved = str(registry_path.resolve())
-    if resolved not in current:
-        current.append(resolved)
-        _KNOWN_REGISTRIES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _KNOWN_REGISTRIES_PATH.write_text(
-            json.dumps({"registries": current}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        logger.info(f"[detector] Persisted external registry: {resolved}")
 
 
 def _find_caller_registries() -> List[Path]:
-    """Find all external project registries (persisted + cwd-reachable)."""
+    """Registries reachable from the caller's cwd, inside the AIPass root, for THIS call only.
+
+    Nothing found here is remembered. Until 2026-09-18 every hit was persisted
+    into known_registries.json, so one call from Vera-Studio's cwd on 09-17 put
+    four branches of another project into every later rollover, from any cwd.
+    A registry outside the root is read past, logged once per walk at INFO, and
+    never returned: @memory may read another project, never write one.
+    """
     import os
 
     aipass_registry = (_REPO_ROOT / "AIPASS_REGISTRY.json").resolve()
-    registries: List[Path] = []
-    seen: set[Path] = set()
-
-    for reg in load_known_registries():
-        resolved = reg.resolve()
-        if resolved != aipass_registry and resolved not in seen:
-            registries.append(reg)
-            seen.add(resolved)
+    fence_root = Path(write_fence.ROOT).resolve()
 
     caller_cwd = (
         Path(os.environ.get("AIPASS_CALLER_CWD", "")).resolve() if os.environ.get("AIPASS_CALLER_CWD") else Path.cwd()
@@ -124,23 +87,23 @@ def _find_caller_registries() -> List[Path]:
         # It runs from the CALLER'S directory -- an arbitrary repo -- and a
         # folding filesystem serves any lowercase *_registry.json there:
         # flow's plan counters, .spawn/.template_registry.json, bait in every
-        # branch. A match here is not merely read, it is persist_registry()'d
-        # into known_registries.json permanently, and the `break` below means a
+        # branch. A match here was once persisted into known_registries.json
+        # permanently (retired 2026-09-18), and the `break` below means a
         # spurious nearer hit STOPS the walk before the real registry above it
-        # is ever seen. Refusing, admitting, and forgetting -- this one does all
-        # three. See repo_root.exactly_named.
+        # is ever seen. See repo_root.exactly_named.
         for reg in repo_root.exactly_named(sorted(parent.glob("*_REGISTRY.json")), "_REGISTRY.json"):
             if reg.resolve() != aipass_registry:
                 cwd_found.append(reg)
         if cwd_found:
             break
 
+    registries: List[Path] = []
     for reg in cwd_found:
-        resolved = reg.resolve()
-        if resolved not in seen:
-            registries.append(reg)
-            seen.add(resolved)
-        persist_registry(reg)
+        refusal = write_fence.outside_root(reg.resolve(), fence_root)
+        if refusal is not None:
+            logger.info(f"[detector] Caller registry {reg} left out of scope: {refusal}")
+            continue
+        registries.append(reg)
 
     return registries
 
@@ -231,9 +194,11 @@ def _read_registry() -> List[Dict[str, Any]]:
     registry — discovery is deliberately generous and classification is what
     makes it safe.
 
-    Caller discovery is unchanged and still runs after the residents — an
-    external project calling in from its own tree is a different mechanism
-    with a different purpose, and is NOT residency-classified.
+    Caller discovery still runs after the residents — a project calling in
+    from its own tree is a different mechanism with a different purpose, and
+    is NOT residency-classified. Since 2026-09-18 it is fenced instead: only a
+    registry inside the AIPass root is read, only its branches inside the root
+    are offered, and nothing a caller's cwd found outlives the call.
 
     Registry paths are relative — resolved against their respective project root.
 
@@ -253,11 +218,17 @@ def _read_registry() -> List[Dict[str, Any]]:
             branches.append(branch)
             seen_paths.add(branch.get("path"))
 
+    fence_root = Path(write_fence.ROOT).resolve()
     for reg_path in _find_caller_registries():
         for branch in _read_single_registry(reg_path, reg_path.parent):
-            if branch.get("path") not in seen_paths:
-                branches.append(branch)
-                seen_paths.add(branch.get("path"))
+            if branch.get("path") in seen_paths:
+                continue
+            refusal = write_fence.outside_root(Path(branch["path"]).resolve(), fence_root)
+            if refusal is not None:
+                logger.info(f"[detector] Branch {branch.get('name')} in {reg_path} left out of scope: {refusal}")
+                continue
+            branches.append(branch)
+            seen_paths.add(branch.get("path"))
 
     return branches
 
@@ -320,7 +291,13 @@ _TEMPLATE_MAP = {
 
 
 def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str) -> Path | None:
-    """Recreate a missing .trinity file from canonical template."""
+    """Recreate a missing .trinity file from canonical template (never outside the AIPass root)."""
+    trinity_dir = branch_path / ".trinity"
+    file_path = trinity_dir / f"{memory_type}.json"
+    # The seed carries the "archived to @memory" promise; refused before the mkdir, which is already a write
+    if write_fence.fence_write(file_path, lane="recreate_trinity_file") is not None:
+        return None
+
     template_path = _TEMPLATE_MAP.get(memory_type)
     if not template_path or not template_path.exists():
         logger.warning(f"[detector] No template for {memory_type}")
@@ -346,9 +323,7 @@ def _recreate_trinity_file(branch_path: Path, branch_name: str, memory_type: str
 
     data = _walk(template)
 
-    trinity_dir = branch_path / ".trinity"
     trinity_dir.mkdir(parents=True, exist_ok=True)
-    file_path = trinity_dir / f"{memory_type}.json"
 
     try:
         file_path.write_text(

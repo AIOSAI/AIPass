@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: receipt.py
 # Description: Per-branch .template_version.json receipt writer
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-25
-# Modified: 2026-08-25
+# Modified: 2026-09-18
 # =============================================
 
 """Template Version Receipt
@@ -38,6 +38,7 @@ from typing import Any
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.write_fence import fence_write
 
 RECEIPT_NAME = ".template_version.json"
 
@@ -94,7 +95,9 @@ def read_receipt(trinity_dir: Path) -> dict[str, Any] | None:
 
 
 def _write(path: Path, payload: dict[str, Any]) -> bool:
-    """Atomic write: tmp file then replace, same contract as the config writer."""
+    """Atomic write: tmp file then replace, same contract as the config writer. Never outside the AIPass root."""
+    if fence_write(path, lane="template_receipt") is not None:
+        return False
     tmp = path.with_suffix(path.suffix + ".tmp")
     try:
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: normalize.py
 # Description: Memory File Schema Normalizer
-# Version: 0.4.1
+# Version: 0.5.0
 # Created: 2026-01-22
-# Modified: 2026-09-16
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax.apps.modules.logger import get_system_logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -238,6 +238,9 @@ def normalize_memory_file(file_path: Path, dry_run: bool = False) -> Dict[str, A
 
     # Write if changes made and not dry run
     if changes and not dry_run:
+        refusal = write_fence.fence_write(file_path, lane="normalize_memory_file")
+        if refusal is not None:
+            return {"success": False, "error": refusal}
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)

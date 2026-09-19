@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
 # Modified: 2026-09-18
 # =============================================
@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 
-from aipass.memory.apps.handlers import repo_root
+from aipass.memory.apps.handlers import repo_root, write_fence
 from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 
@@ -106,6 +106,12 @@ def store_vectors_subprocess(
     Returns:
         Dict with success status and storage details
     """
+    # A branch-local store is refused HERE, before the child that would write it starts
+    if db_path:
+        refusal = write_fence.fence_write(db_path, lane="store_vectors_local")
+        if refusal is not None:
+            return {"success": False, "error": refusal}
+
     # Convert numpy arrays to lists for JSON serialization
     embeddings_serializable = [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
 
@@ -209,6 +215,9 @@ def get_branch_local_chroma_path(branch_name: str) -> Path | None:
             branch_path = Path(branch.get("path", ""))
             if branch_path.exists():
                 chroma_path = branch_path / ".chroma"
+                # Existing is not permission: the local store writes into whatever is handed out
+                if write_fence.fence_write(chroma_path, lane="local_chroma") is not None:
+                    return None
                 # Auto-create .chroma directory if missing
                 if not chroma_path.exists():
                     chroma_path.mkdir(parents=True, exist_ok=True)
