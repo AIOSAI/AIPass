@@ -147,10 +147,22 @@ side repr cannot change (`.name`, `.stem`, `.suffix`, `.as_posix()`,
 `Path("one_part")`); a side the test already escaped (`repr(str(p))`,
 `.replace(...)`); a test under a platform skipif or `sys.platform` guard.
 
-Known misses: a path reached only through an ordinary-named fixture, an
-attribute (`self.lock`) or a helper's return value; `%` / `.format()` of a path;
-`p.as_posix() in logged` (also red on Windows when the product logged
-`str(p)` — which spelling the product used is not in the test).
+Helpers in the same module are read by what they return, a tuple return
+element by element (`home, foreign = self._fenced_world(tmp_path, ...)`); a
+helper whose returns disagree in kind stays opaque. `self.` / `cls.` /
+`ClassName.` receivers and bare names reach them, nothing else.
+
+Known misses: a path reached only through a fixture (module or conftest), an
+attribute (`self.lock`), a helper from another module, or a helper whose path
+arrives through a parameter not named `tmp_path` / `tmpdir`; `%` / `.format()`
+of a path; `p.as_posix() in logged` (also red on Windows when the product
+logged `str(p)` — which spelling the product used is not in the test).
+
+Same mechanism, not detected: `str()` of an `OSError` built with a filename
+(`PermissionError(13, msg, path)`) renders that filename with repr, so
+`str(path) in str(exc)` is red on Windows the same way. Measured 2026-09-19: 20
+such constructions in tests, 11 in apps, none red on Windows CI 35426157867 —
+named here, not built.
 
 Fix — compare against the logged arguments, never the call's repr:
 ```python
@@ -164,6 +176,15 @@ bdd60273, 0 after flow's cure (c0fedb17), 0 elsewhere in 570 test files. A
 name-guessing arm (`*_path`, `*_dir`, `*lock` params, `self.*`) added 0; an
 any-operand arm added 14 lines, all literal text with no backslash (verbs,
 signatures, `"cp /branch/..."` steps) — 0 of 14 real, so neither shipped.
+
+Widened 2026-09-19 after CI 35426157867 (memory's marker-7 test, the paths
+returned by a helper): of 19 sinks with a repr haystack and an opaque needle,
+2 needles (one line) were paths — both memory's — and 17 were words or counts.
+Same-module helper returns convert exactly those 2; the fleet stays at 0 lines
+across 570 test files with 238 helpers now read. A name-guessing arm would have
+caught `home` but not `foreign`, and fixture reading converts none of the 19.
+Path needles into haystacks the pass cannot read: 105, of which 9 sit in a
+function that touches `call_args`; all 9 read the real args (the cure).
 
 ---
 

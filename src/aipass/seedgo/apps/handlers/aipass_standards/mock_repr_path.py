@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: mock_repr_path.py
 # Description: Windows compat - a path asserted against the repr of a mock call (advisory arm, tests)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-18
-# Modified: 2026-09-18
+# Modified: 2026-09-19
 # =============================================
 
 r"""
@@ -44,13 +44,21 @@ Deliberately NOT flagged:
   or a repr text passed through ``.replace(...)``.
 * A test inside a ``sys.platform`` / ``os.name`` guard or skipif.
 
+Helpers: a function or method defined in the same module is read by what it
+returns (CI 35426157867 -- memory's ``home, foreign = self._fenced_world(tmp_path,
+...)``).  A tuple return binds element by element; a helper whose returns
+disagree in kind (a path on one branch, a word on another) is read as opaque.
+
 Known misses, named rather than hidden: a path the test reaches only through a
-fixture with an ordinary name (``def test_x(self, branch):``), an attribute
-(``self.lock``) or a helper's return value -- the flow pass reads names bound
-in the function and the two tmp fixtures, nothing else.  A ``%``-format or
-``.format()`` of a path is read as opaque.  ``lock.as_posix() in logged`` is
-not flagged although it fails on Windows too when the product logged
-``str(lock)``: which spelling the product used is not in the test.
+fixture (a parameter with an ordinary name, ``def test_x(self, branch):``,
+whether the fixture lives in the module or a conftest), an attribute
+(``self.lock``), a helper from another module, or a helper whose path arrives
+through a parameter not named ``tmp_path`` / ``tmpdir`` -- the flow pass reads
+names bound in the function, the two tmp fixtures and same-module helper
+returns, nothing else.  A ``%``-format or ``.format()`` of a path is read as
+opaque.  ``lock.as_posix() in logged`` is not flagged although it fails on
+Windows too when the product logged ``str(lock)``: which spelling the product
+used is not in the test.
 
 Pure: takes a parsed tree, never touches the disk.
 """
@@ -83,6 +91,13 @@ _TEXT_KEEPERS = frozenset({"lower", "upper", "casefold", "strip", "lstrip", "rst
 _SEARCH_METHODS = frozenset({"count", "find", "index", "rfind", "rindex", "startswith", "endswith"})
 
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+#: A helper's return kind sits in the env under "<name>()" -- never an
+#: identifier, so it cannot collide with a bound name. A tuple return is its
+#: element kinds joined by ",", "-" for an element that is none of ours.
+_HELPER_SUFFIX = "()"
+_NO_KIND = "-"
+
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
@@ -149,7 +164,7 @@ def _classify_call(node: ast.Call, env: dict[str, str]) -> str | None:
             return first if first in (CALLS, REPRS) else None
         if func.id in _PATH_CLASSES:
             return None if _single_part_constant(node.args) else PATH
-        return None
+        return _helper_kind(func.id, env)
     if not isinstance(func, ast.Attribute):
         return None
     if name[-1:] and name[-1] in _PATH_CLASSES:
@@ -171,7 +186,36 @@ def _classify_call(node: ast.Call, env: dict[str, str]) -> str | None:
         return PATH
     if name[-1:] == ("mktemp",) and name[:1] == ("tmp_path_factory",):
         return PATH
-    return None
+    return _helper_kind(func.attr, env) if _own_receiver(func.value) else None
+
+
+def _own_receiver(node: ast.expr) -> bool:
+    """``self.`` / ``cls.`` / ``ClassName.`` -- a call that can reach a helper in this module."""
+    return isinstance(node, ast.Name) and (node.id in ("self", "cls") or node.id[:1].isupper())
+
+
+def _helper_kind(name: str, env: dict[str, str]) -> str | None:
+    """A same-module helper's single return kind; None for a tuple or an unknown name."""
+    kind = env.get(name + _HELPER_SUFFIX)
+    return kind if kind and "," not in kind else None
+
+
+def _tuple_kinds(value: ast.expr, env: dict[str, str]) -> list[str | None] | None:
+    """Element kinds of a tuple literal or of a helper call returning one; None otherwise."""
+    if isinstance(value, (ast.Tuple, ast.List)):
+        return [classify(elt, env) for elt in value.elts]
+    if not isinstance(value, ast.Call):
+        return None
+    func = value.func
+    name = ""
+    if isinstance(func, ast.Name):
+        name = func.id
+    elif isinstance(func, ast.Attribute) and _own_receiver(func.value):
+        name = func.attr
+    kind = env.get(name + _HELPER_SUFFIX, "")
+    if "," not in kind:
+        return None
+    return [None if part == _NO_KIND else part for part in kind.split(",")]
 
 
 def classify(node: ast.expr, env: dict[str, str]) -> str | None:
@@ -242,6 +286,18 @@ def _bindings(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[ast.ex
     return sorted(bindings, key=lambda b: (b[1].lineno, b[1].col_offset))
 
 
+def _bind_value(target: ast.expr, value: ast.expr, iterated: bool, env: dict[str, str]) -> None:
+    """Bind one assignment; a tuple target over a tuple value binds element by element."""
+    if not iterated and isinstance(target, (ast.Tuple, ast.List)):
+        kinds = _tuple_kinds(value, env)
+        if kinds is not None and len(kinds) == len(target.elts):
+            for elt, element_kind in zip(target.elts, kinds):
+                _bind(elt, element_kind, env)
+            return
+    kind = classify(value, env)
+    _bind(target, _element_kind(kind) if iterated else kind, env)
+
+
 def function_env(func: ast.FunctionDef | ast.AsyncFunctionDef, outer: dict[str, str]) -> dict[str, str]:
     """Names bound in one function, classified; fixture params and the enclosing env seed it."""
     env = dict(outer)
@@ -253,11 +309,48 @@ def function_env(func: ast.FunctionDef | ast.AsyncFunctionDef, outer: dict[str, 
     for _ in range(4):
         before = dict(env)
         for target, value, iterated in bindings:
-            kind = classify(value, env)
-            _bind(target, _element_kind(kind) if iterated else kind, env)
+            _bind_value(target, value, iterated, env)
         if env == before:
             break
     return env
+
+
+def _return_kind(func: ast.FunctionDef | ast.AsyncFunctionDef, table: dict[str, str]) -> str | None:
+    """What a helper returns, encoded for the env; None when its returns disagree or are none of ours."""
+    env = function_env(func, table)
+    encoded: set[str | None] = set()
+    for node in _own_statements(func):
+        if not isinstance(node, ast.Return):
+            continue
+        if isinstance(node.value, ast.Tuple):
+            parts = [classify(elt, env) for elt in node.value.elts]
+            encoded.add(",".join(part or _NO_KIND for part in parts) if any(parts) else None)
+        else:
+            encoded.add(classify(node.value, env) if node.value is not None else None)
+    return encoded.pop() if len(encoded) == 1 else None
+
+
+def helper_table(tree: ast.Module) -> dict[str, str]:
+    """Return kinds of every non-test function in the module, keyed "<name>()".
+
+    A name defined twice with different kinds is dropped: which one a call
+    reaches is not in the tree. Three passes let a helper read another helper.
+    """
+    defs: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, _SCOPES) and not node.name.startswith("test"):
+            defs.setdefault(node.name, []).append(node)
+    table: dict[str, str] = {}
+    for _ in range(3):
+        before = dict(table)
+        for name, funcs in defs.items():
+            kinds = {_return_kind(func, before) for func in funcs}
+            kind = kinds.pop() if len(kinds) == 1 else None
+            if kind:
+                table[name + _HELPER_SUFFIX] = kind
+        if table == before:
+            break
+    return table
 
 
 def _pairs(node: ast.Compare) -> Iterator[tuple[ast.expr, ast.cmpop, ast.expr]]:
@@ -308,7 +401,8 @@ def _functions(node: ast.AST, outer: dict[str, str], skipped: bool) -> Iterator[
     """Every function with its classified env and whether a platform skip covers it."""
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.ClassDef):
-            yield from _functions(child, {}, skipped or _platform_skipped(child.decorator_list))
+            helpers = {k: v for k, v in outer.items() if k.endswith(_HELPER_SUFFIX)}
+            yield from _functions(child, helpers, skipped or _platform_skipped(child.decorator_list))
         elif isinstance(child, _SCOPES):
             env = function_env(child, outer)
             here = skipped or _platform_skipped(child.decorator_list)
@@ -347,7 +441,7 @@ def find_mock_repr_paths(tree: ast.Module, platform_guarded: set[int]) -> list[t
         (line, description) per offending comparison, in source order.
     """
     found: dict[int, str] = {}
-    for func, env, skipped in _functions(tree, {}, False):
+    for func, env, skipped in _functions(tree, helper_table(tree), False):
         if skipped:
             continue
         for stmt in getattr(func, "body", []):

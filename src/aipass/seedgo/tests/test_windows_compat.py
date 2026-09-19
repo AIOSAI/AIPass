@@ -937,3 +937,68 @@ def test_mock_repr_advisory_respects_line_bypass(tmp_path):
     from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
 
     assert check_branch_info(str(branch)) == []
+
+
+# CI 35426157867 — memory's marker-7 test: the paths came back from a helper
+# (home, foreign = self._fenced_world(tmp_path, ...)), which the flow pass read
+# as opaque, so the advisory nominated nothing.
+_HELPER_RETURN = (
+    "from unittest.mock import MagicMock\n"
+    "\n"
+    "class TestFence:\n"
+    "    @staticmethod\n"
+    "    def _world(tmp_path, monkeypatch):\n"
+    "        home = tmp_path / 'aipass'\n"
+    "        foreign = tmp_path / 'other_root' / 'local.json'\n"
+    "        return home, foreign\n"
+    "\n"
+    "    def test_refused(self, tmp_path, monkeypatch):\n"
+    "        home, foreign = self._world(tmp_path, monkeypatch)\n"
+    "        said = MagicMock()\n"
+    "        errors = ' '.join(str(call) for call in said.error.call_args_list)\n"
+    "        assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors\n"
+)
+
+
+def test_mock_repr_path_returned_by_a_same_module_helper_flagged():
+    found = _repr_paths(_HELPER_RETURN)
+    assert [line for line, _ in found] == [14]
+    assert "red on Windows" in found[0][1]
+
+
+def test_mock_repr_helper_cure_joining_the_rendered_args_is_clean():
+    cured = _HELPER_RETURN.replace("str(call) for call in", "str(arg) for call in").replace(
+        "call_args_list)", "call_args_list for arg in call.args)"
+    )
+    assert _repr_paths(cured) == []
+
+
+def test_mock_repr_helper_returns_read_by_kind_not_by_call():
+    source = (
+        "def _lock(tmp_path):\n"
+        "    return tmp_path / 'a.lock'\n"
+        "\n"
+        "def _word():\n"
+        "    return 'refused'\n"
+        "\n"
+        "def _logged(m):\n"
+        "    return ' '.join(str(c) for c in m.call_args_list)\n"
+        "\n"
+        "def _either(tmp_path, flag):\n"
+        "    if flag:\n"
+        "        return tmp_path / 'x'\n"
+        "    return 'x'\n"
+        "\n"
+        "def test_x(tmp_path, m):\n"
+        "    lock = _lock(tmp_path)\n"
+        "    logged = ' '.join(str(c) for c in m.call_args_list)\n"
+        "    assert str(lock) in logged\n"
+        "    assert _word() in logged\n"
+        "    assert str(tmp_path) in _logged(m)\n"
+        "    assert str(_either(tmp_path, True)) in logged\n"
+        "    a, b = tmp_path / 'a', 'word'\n"
+        "    assert b in logged\n"
+        "    assert str(a) in logged\n"
+        "    assert str(obj._lock(tmp_path)) in logged\n"
+    )
+    assert [line for line, _ in _repr_paths(source)] == [18, 20, 24]
