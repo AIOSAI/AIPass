@@ -976,6 +976,27 @@ class TestDigestEmail:
         assert "trigger.config.json" in body
         assert "warning_threshold" in body
 
+    def test_a_second_signature_in_the_module_names_the_first(self, lane, outbox) -> None:
+        """The lane hands the digest its siblings; the thread body must not forget them."""
+        first = _fire_warning(lane, times=3)["signature"]
+        _fire_warning(lane, times=3, message="queue consumer stalled")
+
+        assert len(outbox) == 2
+        assert first in outbox[1]["message"]
+        assert WARNING_EVENT["message"] in outbox[1]["message"]
+        assert outbox[1]["subject"].endswith("(2 signatures)")
+
+    def test_siblings_are_matched_on_level_branch_and_module_only(self, lane, outbox) -> None:
+        """Another module's or another level's signatures are other threads, never listed."""
+        _fire_warning(lane, times=1, module="elsewhere", message="unrelated module warning")
+        _fire_error(lane, times=1, module="watcher", message="same module, error level")
+        _fire_warning(lane, times=3)
+
+        body = outbox[0]["message"]
+        assert "unrelated module warning" not in body
+        assert "same module, error level" not in body
+        assert "(2 signatures)" not in outbox[0]["subject"]
+
 
 # ---------------------------------------------------------------------------
 # State file resilience
@@ -1404,6 +1425,31 @@ class TestDigestBody:
         _subject, body = lane.build_digest("sig", entry, 5, 3600, "no registered owner", "@devpulse")
 
         assert "(no samples captured)" in body
+
+    def test_sibling_signatures_ride_in_the_thread(self, lane) -> None:
+        """One thread per subject: the other signatures under it are named in the body."""
+        sibling = {**self._entry(), "message": "drive quota exceeded", "total_count": 12}
+
+        subject, body = lane.build_digest(
+            "abc123def456", self._entry(), 9, 3600, "medic off", "@devpulse", siblings=[("fff000111222", sibling)]
+        )
+
+        assert subject == "[REPEAT] ERROR x9 @backup / drive (2 signatures)"
+        assert "fff000111222" in body
+        assert "x12" in body
+        assert "drive quota exceeded" in body
+
+    def test_sibling_roster_is_capped_and_says_how_many_it_left_out(self, lane) -> None:
+        """A module with hundreds of variants must not grow the mail without bound."""
+        siblings = [(f"sib{index:09d}", {**self._entry(), "message": f"variant {index}"}) for index in range(25)]
+
+        subject, body = lane.build_digest("abc123def456", self._entry(), 9, 3600, "medic off", "@devpulse", siblings)
+
+        assert subject.endswith("(26 signatures)")
+        assert "sib000000000" in body
+        assert f"sib{lane.MAX_ROSTER_LINES - 1:09d}" in body
+        assert f"sib{lane.MAX_ROSTER_LINES:09d}" not in body
+        assert f"and {25 - lane.MAX_ROSTER_LINES} more" in body
 
 
 class TestTrailLogger:

@@ -10,7 +10,10 @@
 
 Three things have to hold, and only the first is obvious:
 
-1. The escalation send carries ``escalation:<signature>``.
+1. The escalation send carries the THREAD key, ``escalation:<LEVEL>:<branch>:<module>``
+   — what the subject names, never the signature. On 2026-09-17 a per-signature
+   key opened 29 threads under two subjects: one module's warnings named a
+   different branch and field each time, so each was its own signature.
 2. The adapter FORWARDS that key to ai_mail. Its signature ends in ``**kwargs``,
    so a key threaded by the wrong name is swallowed with no error and no upsert —
    delivery still returns True and the inbox keeps stacking. That is the
@@ -192,15 +195,17 @@ class TestAdapterForwardsTheKey:
 
 
 class TestEscalationCarriesTheKey:
-    """One signature, one key, forever — regardless of what the subject says."""
+    """One subject, one thread, one key — however many signatures feed it."""
 
-    def test_digest_send_carries_the_signature_key(self, monkeypatch, lane) -> None:
+    def test_digest_send_carries_the_thread_key(self, monkeypatch, lane) -> None:
+        """Level, branch and module — the subject's identity — and not the signature."""
         box: List[Dict[str, Any]] = []
         monkeypatch.setattr(lane, "_send_email", lambda **kw: bool(box.append(kw)) or True)
 
         decision = _fire(lane, times=2)
 
-        assert box[0]["upsert_key"] == f"escalation:{decision['signature']}"
+        assert box[0]["upsert_key"] == "escalation:WARNING:backup:drive"
+        assert decision["signature"] not in box[0]["upsert_key"]
 
     def test_key_is_stable_across_repeats(self, monkeypatch, lane) -> None:
         """The subject carries the repeat count and changes; the key must not."""
@@ -222,16 +227,113 @@ class TestEscalationCarriesTheKey:
 
         assert box[0]["upsert_key"] != box[0]["subject"]
 
-    def test_distinct_signatures_get_distinct_keys(self, monkeypatch, lane) -> None:
-        """Two different conditions must not collapse into one message."""
+    def test_distinct_signatures_in_one_module_share_one_key(self, monkeypatch, lane) -> None:
+        """Two signatures under one subject are one thread. Two keys were the 09-17 defect."""
+        box: List[Dict[str, Any]] = []
+        monkeypatch.setattr(lane, "_send_email", lambda **kw: bool(box.append(kw)) or True)
+
+        first = _fire(lane, times=2)["signature"]
+        lane.record_warning(**{**WARNING_EVENT, "message": "a completely different warning"})
+        second = lane.record_warning(**{**WARNING_EVENT, "message": "a completely different warning"})
+
+        assert first != second["signature"]
+        assert len(box) == 2
+        assert len({call["upsert_key"] for call in box}) == 1
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"module": "upload"},
+            {"branch": "flow"},
+        ],
+        ids=["other-module", "other-branch"],
+    )
+    def test_a_different_subject_gets_a_different_key(self, monkeypatch, lane, override) -> None:
+        """Unrelated subjects must not collapse into one message."""
         box: List[Dict[str, Any]] = []
         monkeypatch.setattr(lane, "_send_email", lambda **kw: bool(box.append(kw)) or True)
 
         _fire(lane, times=2)
         for _ in range(2):
-            lane.record_warning(**{**WARNING_EVENT, "message": "a completely different warning"})
+            lane.record_warning(**{**WARNING_EVENT, **override})
 
         assert len({call["upsert_key"] for call in box}) == 2
+
+    def test_a_different_level_gets_a_different_key(self, monkeypatch, lane) -> None:
+        """An ERROR and a WARNING from one module are two subjects, so two threads."""
+        box: List[Dict[str, Any]] = []
+        monkeypatch.setattr(lane, "_send_email", lambda **kw: bool(box.append(kw)) or True)
+        # Eligibility is medic's business and not under test here.
+        monkeypatch.setattr(lane, "_is_error_eligible", lambda *_args: (True, "eligible"))
+
+        _fire(lane, times=2)
+        for _ in range(2):
+            lane.record_error(
+                branch="backup",
+                module="drive",
+                message="disk usage above 90%",
+                log_file="backup.log",
+                fingerprint="fp-disk",
+            )
+
+        assert [call["upsert_key"] for call in box] == [
+            "escalation:WARNING:backup:drive",
+            "escalation:ERROR:backup:drive",
+        ]
+
+    def test_a_burst_of_signatures_opens_one_thread_until_it_is_closed(self, monkeypatch, lane) -> None:
+        """The 2026-09-17 replay: many signatures under one subject, one live message.
+
+        The fake inbox applies ai_mail's documented match rule (same key and not
+        closed rewrites in place), so this pins the key against the rule it feeds.
+        Closing the thread re-arms it: the next escalation opens a fresh one.
+        """
+        inbox: List[Dict[str, Any]] = []
+
+        def _deliver(**kwargs: Any) -> bool:
+            live = [m for m in inbox if m["upsert_key"] == kwargs["upsert_key"] and m["status"] != "closed"]
+            if live:
+                live[0]["updates"] += 1
+                live[0]["subject"] = kwargs["subject"]
+                kwargs["upsert_result"]["upsert_action"] = "updated"
+            else:
+                inbox.append(
+                    {"upsert_key": kwargs["upsert_key"], "status": "new", "updates": 1, "subject": kwargs["subject"]}
+                )
+                kwargs["upsert_result"]["upsert_action"] = "created"
+            return True
+
+        monkeypatch.setattr(lane, "_send_email", _deliver)
+        fields = ["key", "value", "date", "number", "status", "tags", "note", "learning"]
+        for owner in ("verify", "vera", "writer"):
+            for field in fields:
+                for _ in range(2):
+                    lane.record_warning(
+                        branch="memory",
+                        module="captured_memory_files",
+                        message=f"[entry_limits] CARRIED {owner} local.json todos[0] has no '{field}' field",
+                        log_file="memory.log",
+                        raw_line="",
+                    )
+
+        state = json.loads(lane.STATE_FILE.read_text(encoding="utf-8"))
+        assert len(state["signatures"]) == 24
+        assert len(inbox) == 1
+        assert inbox[0]["updates"] == 24
+        assert inbox[0]["subject"].endswith("(24 signatures)")
+
+        inbox[0]["status"] = "closed"
+        for _ in range(2):
+            lane.record_warning(
+                branch="memory",
+                module="captured_memory_files",
+                message="[entry_limits] CARRIED writer local.json todos[0] has no 'owner' field",
+                log_file="memory.log",
+                raw_line="",
+            )
+
+        assert len(inbox) == 2
+        assert inbox[1]["status"] == "new"
 
     def test_upsert_action_lands_in_the_trail(self, monkeypatch, lane) -> None:
         """An in-place update must be auditable — otherwise it looks like a lost digest."""
