@@ -12,7 +12,7 @@ Unknown-Argument Refusal Handler
 Single source of truth for "prax was handed a token it does not define".
 
 Purpose:
-    PATRICK'S STANDING RULING: an unknown command or argument FAILS — non-zero
+    THE OWNER'S STANDING RULING: an unknown command or argument FAILS — non-zero
     exit and a message naming the token. Never default, never silently ignore.
 
     @devpulse's 2026-09-07 fleet CLI sweep caught prax swallowing two of them:

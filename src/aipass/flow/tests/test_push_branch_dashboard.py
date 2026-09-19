@@ -820,7 +820,7 @@ class TestBuildSectionData:
 
 
 class TestBuildSectionDataOpenRecent:
-    """Tests for the bounded open_recent window (Patrick's 5-newest spec)."""
+    """Tests for the bounded open_recent window (the owner's 5-newest spec)."""
 
     @staticmethod
     def _active(count: int):

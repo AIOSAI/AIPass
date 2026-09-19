@@ -975,7 +975,7 @@ class TestRmBrokerRouting:
 # ---------------------------------------------------------------------------
 # The broker is drone's OTHER delete lane — it feeds the same deletion record
 #
-# Patrick's ruling was "if something deletes, there should be a record of it",
+# The owner's ruling was "if something deletes, there should be a record of it",
 # not "if drone rm deletes". The broker performs its own rmtree/unlink, so a
 # record wired only into rm_handler would have a hole exactly the size of the
 # sandboxed lane. Its protocol audit log stays as it was: that records requests

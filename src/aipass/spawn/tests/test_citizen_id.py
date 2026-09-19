@@ -6,7 +6,7 @@
 # Modified: 2026-08-24
 # =============================================
 
-"""Tests for the citizen_id contract (Patrick's ruling, 2026-08-24).
+"""Tests for the citizen_id contract (the owner's ruling, 2026-08-24).
 
 Two ids live near each other and mean different things:
   - ``citizenship.registry_id`` — the id of the REGISTRY holding the citizen.

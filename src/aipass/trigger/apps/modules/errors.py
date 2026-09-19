@@ -217,7 +217,7 @@ def handle_command(command: str, args: list) -> bool:
     # returning True told the entry point "handled", so `errors <nonsense>`
     # named the token and still exited 0 — a refusal that reports success is
     # indistinguishable from a command that worked, and no caller can branch
-    # on it (Patrick's standing ruling, FPLAN-0492). Returning False lets
+    # on it (the owner's standing ruling, FPLAN-0492). Returning False lets
     # trigger.py name the WHOLE invocation and exit 1, which is also the more
     # informative message: `errors <nonsense>`, not `<nonsense>` alone.
     return False

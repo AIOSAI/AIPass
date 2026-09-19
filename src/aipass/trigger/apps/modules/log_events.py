@@ -82,7 +82,7 @@ def start() -> bool:
     if observer:
         logger.info(f"[TRIGGER] Log watcher started, monitoring: {SYSTEM_LOGS_DIR}")
         return True
-    # INFO, not ERROR: since Patrick's 2026-08-14 ruling the centralized
+    # INFO, not ERROR: since the owner's 2026-08-14 ruling the centralized
     # observer always declines — branch_log_events owns system_logs. Logging a
     # chosen behaviour at ERROR would feed my own log watcher an error line on
     # every service start, mint an escalation signature for it, and mail the
@@ -193,7 +193,7 @@ def handle_command(command: str, args: list) -> bool:
             )
             console.print("   Owner: [cyan]branch_log_events[/cyan] — same directory, with branch attribution")
             console.print(f"   [dim]{SYSTEM_LOGS_DIR}[/dim]")
-            console.print("   [dim]Patrick's ruling 2026-08-14 — double-watching minted duplicate signatures[/dim]")
+            console.print("   [dim]The owner's ruling 2026-08-14 — double-watching minted duplicate signatures[/dim]")
     elif command == "stop":
         stop()
         success("Log watcher stopped")

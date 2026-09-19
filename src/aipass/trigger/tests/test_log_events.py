@@ -409,7 +409,7 @@ def test_start_command_names_the_owner_and_says_it_is_a_ruling_not_a_failure():
     """`log_events start` declining is a ruling, and it still exits non-zero.
 
     start_log_watcher() always returns None because branch_log_events owns
-    system_logs (Patrick, 2026-08-14). Both halves of that are pinned here and
+    system_logs (the owner, 2026-08-14). Both halves of that are pinned here and
     they used to be treated as one: the wording must not read as a broken
     watcher ("Failed to start" sends the reader hunting a bug that is a
     decision), AND the refusal must travel on the channel that reaches the

@@ -16,7 +16,7 @@ says when a real passport has fallen behind what its template promises.
 
 This file was schema-tolerant during the DPLAN-0319 window (2.0 template on
 disk, 1.x fleet awaiting the migration GO). The fleet migration ran 2026-08-28
-(22/22, Patrick's GO), the marker test went red on cue, and the schema-1 lane
+(22/22, the owner's GO), the marker test went red on cue, and the schema-1 lane
 (frozen contract, class allowlist, drift helper, marker class and the 1.x-lane
 hermetic test) was removed in the same working set — the canary now judges
 every live passport against the live template's contract, and any passport

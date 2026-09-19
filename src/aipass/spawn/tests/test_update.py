@@ -664,7 +664,7 @@ class TestMarkdownIsReportedAndNeverWritten:
 class TestUpdateIgnoreIsTheOwnersDecision:
     """`.updateignore` at a branch root — the owner decides what update skips.
 
-    Patrick's ruling 2026-09-09: "project owners decide what update skips."
+    The owner's ruling 2026-09-09: "project owners decide what update skips."
     @vera's todo 25 is the case: a preview proposed merging template boilerplate
     into her passport and she did not apply, because the tool could not tell her
     passport from a template.

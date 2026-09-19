@@ -401,7 +401,7 @@ def update_all(dry_run: bool = False, trace: bool = False, citizen_class: str | 
 def _read_citizen_class(branch_dir: Path) -> str:
     """Read a branch's passport.json and resolve it to a template class.
 
-    No fallback (DPLAN-0262, Patrick ruling): a missing passport, corrupt JSON, or
+    No fallback (DPLAN-0262, the owner's ruling): a missing passport, corrupt JSON, or
     unknown citizen_class is a loud hard error naming the passport path and the
     registered classes — never a silent guess at a default class. Silent defaulting
     here is exactly what let real passports drift from their template contract

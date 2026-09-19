@@ -1326,7 +1326,7 @@ class TestCloseAllRefusesUnresolvableRow:
 class TestDryRunEqualsRun:
     """The preview must resolve through the same path as the execution.
 
-    Patrick's success criterion: 'if the dry run accurately tells us what's
+    The owner's success criterion: 'if the dry run accurately tells us what's
     actually gonna happen, then yeah, we're good.' Two paths that merely agree
     today can drift; these pin them to one resolution.
     """

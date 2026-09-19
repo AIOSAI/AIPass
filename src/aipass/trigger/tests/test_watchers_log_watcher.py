@@ -1023,7 +1023,7 @@ class TestWatcherInitializePositions:
 
 
 class TestSystemLogsOwnership:
-    """Patrick's ruling (2026-08-14): one owner for system_logs, not two.
+    """The owner's ruling (2026-08-14): one owner for system_logs, not two.
 
     Both watchers used to register the directory, so one condition minted two
     escalation signatures with different attribution — the branch watcher

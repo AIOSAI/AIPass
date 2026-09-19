@@ -83,7 +83,7 @@ def _load_branch_paths() -> List[Path]:
     return paths
 
 
-# @flow's section contract, their module 2.0.0 (Patrick's ruling, 2026-08-16).
+# @flow's section contract, their module 2.0.0 (the owner's ruling, 2026-08-16).
 # Mirrors flow/apps/handlers/dashboard/push_branch_dashboard.py::_build_section_data —
 # sections.flow has two writers and both assign it wholesale, so a shape either
 # side does not build is a shape the other side silently deletes.

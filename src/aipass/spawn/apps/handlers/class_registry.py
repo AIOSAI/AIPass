@@ -27,7 +27,7 @@ see ``class_for_citizen_number``. An explicit caller-supplied class still wins.
 
 "admin" is the permanent refusal: a devpulse-only registry privilege
 (DPLAN-0288), not a class and not a template. The hospital never issues it,
-only Patrick's ceremony does. See FORBIDDEN_CLASSES.
+only the owner's ceremony does. See FORBIDDEN_CLASSES.
 
 The retired names ("aipass_framework", "project_agent", "builder") REFUSE
 LOUDLY and are never silently remapped — see ``refuse_legacy_class``. A silent

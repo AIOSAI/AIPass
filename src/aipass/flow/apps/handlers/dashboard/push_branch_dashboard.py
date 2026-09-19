@@ -40,7 +40,7 @@ open_recent is the bounded reading window: the 5 newest open plans by created
 date, newest first, capped here in the renderer. Read it with active_plans —
 the count is what stops 5 rows from reading as the whole world.
 
-active_plans is an int COUNT, not a list. Ruling of 2026-08-16 (Patrick, via
+active_plans is an int COUNT, not a list. Ruling of 2026-08-16 (the owner, via
 @devpulse): the full open-plan list is the unbounded context a dashboard must
 never carry, so it left the section entirely and `drone @flow list open` is the
 only full-detail door. The int also matches the shape @prax's refresh already
@@ -456,7 +456,7 @@ def _filter_branch_plans(
     return active_plans, recent_closed, branch_total
 
 
-# How many open plans the bounded window publishes. Patrick's spec: a reader
+# How many open plans the bounded window publishes. the owner's spec: a reader
 # gets its bearings from 5 named plans plus the total, never from 22 rows.
 OPEN_RECENT_LIMIT = 5
 

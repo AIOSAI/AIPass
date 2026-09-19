@@ -23,7 +23,7 @@ NOT read `anchor` (bypass_handler matches on `lines` alone); this test is the
 only thing that does, which is why it lives here rather than in the standard.
 
 The structural fix belongs in the checker - waivers anchored on CONTENT, not
-line numbers - and is queued with @seedgo pending Patrick's GO. This is the
+line numbers - and is queued with @seedgo pending the owner's GO. This is the
 local reference, built the same way @drone built theirs.
 """
 

@@ -19,7 +19,7 @@ drone @prax monitor run --relay          # Mirror to Telegram (prax_monitor bot)
 drone @prax monitor --help               # Monitor usage
 ```
 
-**On request only — there is no monitor service.** Patrick's ruling, 2026-08-18:
+**On request only — there is no monitor service.** The owner's ruling, 2026-08-18:
 *"monitor should only be running on request when i call it. not in background.
 the logs are already running."* Mission Control is an operator console, and
 logging does not depend on it: `system_logs/` and the branch-local logs are
@@ -27,7 +27,7 @@ written by the logging handlers whether or not a monitor is running. Start it
 when you want to watch, quit it when you are done.
 
 The `prax-monitor.service` systemd unit that used to run it always-on is
-**retired and deleted from the repo**, which under Patrick's archive doctrine
+**retired and deleted from the repo**, which under the owner's archive doctrine
 (2026-08-18) is what retired means: *`.archive/` is always ignored, no
 exceptions — and files there are not safe, they get cleaned without warning.*
 So the retirement record lives here, in tracked prose, rather than in an archive

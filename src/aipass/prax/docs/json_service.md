@@ -10,7 +10,7 @@ face, the depth lives here. Back to the [branch README](../README.md).
 ## The fleet json service (DPLAN-0325)
 
 **Prax owns the fleet's one JSON handler implementation.** Boardroom
-`r/boardroom-json-service` post 8, Patrick's ruling 2026-09-03: the fleet's drift
+`r/boardroom-json-service` post 8, the owner's ruling 2026-09-03: the fleet's drift
 no longer matters — one source, every branch follows the one file.
 
 ```python

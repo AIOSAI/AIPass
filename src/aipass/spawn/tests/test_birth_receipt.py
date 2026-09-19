@@ -32,7 +32,7 @@ SPAWN_TEMPLATES = Path(__file__).resolve().parents[1] / "templates"
 GOLD_DIR = Path(__file__).resolve().parents[2] / "memory" / "templates"
 FLEET = Path(__file__).resolve().parents[2]
 
-#: @seedgo's published README cap (DPLAN-0347, ruled by Patrick 2026-09-15 16:02).
+#: @seedgo's published README cap (DPLAN-0347, ruled by the owner 2026-09-15 16:02).
 SEEDGO_CONTEXT_PACK = FLEET / "seedgo" / "apps" / "handlers" / "context_standards" / "pack.json"
 
 #: @memory's whole-file budgets for the three .trinity files, plus its per-string cap.

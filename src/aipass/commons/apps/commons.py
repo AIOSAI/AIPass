@@ -412,7 +412,7 @@ def main() -> int:
     # printed a refusal still returns True, because it DID handle the command.
     # resolve_exit() is the fleet's one door for that distinction - 0 clean,
     # 2 handled-but-refused, 1 unhandled - and error() has already set the flag
-    # it reads (Patrick's ruling 2026-09-07: an unknown argument fails).
+    # it reads (the owner's ruling 2026-09-07: an unknown argument fails).
     handled = route_command(command, remaining_args, modules)
     if handled:
         return resolve_exit(handled)

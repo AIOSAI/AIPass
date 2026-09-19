@@ -11,7 +11,7 @@
 
 DASHBOARD.local.json's quick_status block has several writers. Each one used to
 build a fresh dict and assign it over the whole block, so every writer silently
-deleted the keys it did not know about. Patrick saw the symptom on his devpulse
+deleted the keys it did not know about. The owner saw the symptom on his devpulse
 card: 0 todos while local.json held 9. @flow fixed their push and found the
 mirror here — prax refresh drops their ``commons_mentions`` on every run.
 
@@ -286,7 +286,7 @@ class TestActionRequiredMatchesItsOwnSummary:
 
     Identical counts, opposite flag from the two writers — the same clobber
     species as Finding 1, moved out of a key and into a boolean, and it is the
-    field Patrick's card reads for 'needs attention'.
+    field the owner's card reads for 'needs attention'.
     """
 
     @pytest.mark.parametrize("name,calc", CALCULATORS)

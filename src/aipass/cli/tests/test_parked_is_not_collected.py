@@ -12,7 +12,7 @@
 `tests/parked/` holds `scaffold(disabled).py` — the spawn/seedgo template's
 scaffold smoke test, which never ran in this branch and was moved here rather
 than deleted (DPLAN-0304 item 4). It lives there because `.archive/` is
-Patrick's disposal zone, cleaned without warning, so nothing durable may sit
+The owner's disposal zone, cleaned without warning, so nothing durable may sit
 in one.
 
 WHY THIS FILE EXISTS. A park protected only by a naming habit is protected

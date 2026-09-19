@@ -1320,7 +1320,7 @@ class TestCliCommand:
         help and returned True. Help is what a working command looks like, so
         the refusal exited 0 and never named the token. Returning False routes
         it through the ONE gate in trigger.py, which names the whole invocation
-        and exits 1 (Patrick's standing ruling, FPLAN-0492).
+        and exits 1 (the owner's standing ruling, FPLAN-0492).
         """
         assert cli.module.handle_command("escalation", ["wat"]) is False
 

@@ -170,7 +170,7 @@ class TestEnsureAdmin:
 
 
 class TestGrantAdminCli:
-    """drone @spawn grant-admin — Patrick's one-time ceremony command."""
+    """drone @spawn grant-admin — the owner's one-time ceremony command."""
 
     def test_grants_via_cli(self, tmp_path):
         """--registry points at the root registry; exit 0 and flag written."""

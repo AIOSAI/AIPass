@@ -22,7 +22,7 @@ drone @prax monitor run
 
 ## The unknown-argument gate
 
-Patrick's standing ruling: **an unknown command or argument FAILS** — non-zero
+The owner's standing ruling: **an unknown command or argument FAILS** — non-zero
 exit, a message naming the token, a did-you-mean where one is close. @devpulse's
 fleet CLI sweep (2026-09-07) found prax breaking it in six places, and they
 broke it two different ways:

@@ -8,7 +8,7 @@
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
 
-Patrick, 2026-09-13 23:13 (DPLAN-0344): git write into a repo that is not
+The owner, 2026-09-13 23:13 (DPLAN-0344): git write into a repo that is not
 AIPass — projects/baud inside the tree, Vera-Studio outside it — goes ONLY
 through @devpulse's admin grant. Project managers keep exactly the CWD-bound
 owner tier they already had; nobody gains anything else.

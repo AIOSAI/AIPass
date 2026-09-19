@@ -240,7 +240,7 @@ class TestOpenRecent:
         assert section["open_recent"][-1]["created"] == ""
 
     def test_no_unbounded_list_ships_anywhere_in_the_section(self):
-        """Patrick's ruling, applied to prax's writer too."""
+        """The owner's ruling, applied to prax's writer too."""
         refresh = _load(REFRESH_PATH)
         centrals = _centrals(active=[_plan(f"FPLAN-{i:04d}", "prax", f"2026-08-{i:02d}") for i in range(1, 23)])
         section = refresh._extract_flow_section(centrals, "PRAX")

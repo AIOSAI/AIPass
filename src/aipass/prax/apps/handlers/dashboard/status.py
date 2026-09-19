@@ -79,7 +79,7 @@ def count_active_plans(flow_section: Dict) -> int:
     """Read a plan count out of the flow section, whichever shape it arrived in.
 
     Both writers now publish ``active_plans`` as an INT — @flow's module 2.0.0
-    (2026-08-16, Patrick's ruling) dropped the full open-plan list from the
+    (2026-08-16, the owner's ruling) dropped the full open-plan list from the
     section, and ``active_count`` no longer ships at all.
 
     The list branch stays for the dashboards written before that date: they carry
@@ -106,7 +106,7 @@ def merge_quick_status(existing: "Dict | None", computed: Dict) -> Dict:
 
     quick_status has several writers (prax refresh, @flow's push, write_section).
     Each used to assign a fresh dict over the whole block, so every writer
-    silently deleted the keys it did not know about — Patrick saw a devpulse card
+    silently deleted the keys it did not know about — the owner saw a devpulse card
     reporting 0 todos against a local.json holding 9. The invariant, agreed with
     @flow: no writer deletes a key it did not write.
     """

@@ -558,7 +558,7 @@ def stale_sweep(request: StaleRequest) -> StaleReport:
     enters a carve-out directory and never follows a symlink.
 
     The sibling-branch fence is crossed here and only here, by design
-    (DPLAN-0338, Patrick's go 2026-09-11): a stale staging temp is no citizen's
+    (DPLAN-0338, the owner's go 2026-09-11): a stale staging temp is no citizen's
     work — the real json beside it is intact whatever happens to the temp — and
     one weekly job must sweep every branch's json folder in one call. The name,
     folder and age restriction is the fence instead.

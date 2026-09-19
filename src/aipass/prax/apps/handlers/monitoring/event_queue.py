@@ -120,7 +120,7 @@ class MonitoringQueue:
 
         This line shows up on the operator's Mission Control screen, so it names the
         subsystem in plain words, says what happened, how many events it cost, and
-        whether anything is actually lost — never a bare exception repr (Patrick's
+        whether anything is actually lost — never a bare exception repr (the owner's
         ruling, 2026-08-08). A full queue and an unexpected failure are reported
         separately: calling the second one an overflow would be a comforting lie
         about a real bug.

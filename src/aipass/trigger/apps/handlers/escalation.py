@@ -12,7 +12,7 @@ Escalation Digest Lane (DPLAN-0283 WS-A)
 Medic answers an error ONCE: it dispatches the owning branch and then goes
 quiet — backoff, a mute, or a suppression keeps it quiet. That is correct for
 agents and blind for humans. An error that keeps firing AFTER its owner was
-told, or while a branch is muted, is invisible to Patrick forever. Warnings
+told, or while a branch is muted, is invisible to the owner forever. Warnings
 are worse: they have never had an escalation path at all.
 
 This lane counts repetition and mails the operator when repetition means
@@ -22,7 +22,7 @@ nothing got fixed:
       -> ONE email to the digest recipient (a manager: email, never a wake)
       -> per-signature cooldown so the same noise cannot spam the mailbox
 
-RULES (Patrick, S193 / DPLAN-0283):
+RULES (the owner, S193 / DPLAN-0283):
     - A mute stops re-DISPATCHING. It must NEVER stop the COUNTING, and it
       must never stop a digest — a mute is how a branch says "I am building",
       not how the system goes dark for the human.

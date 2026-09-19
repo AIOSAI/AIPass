@@ -28,7 +28,7 @@ Identity model (DPLAN-0239, settled 2026-07-11):
 
   admin (entry field, ``True`` / absent) — DPLAN-0288
       One seat only: devpulse. Written by ``ensure_admin`` (the sanctioned
-      path, exposed as ``drone @spawn grant-admin``) during Patrick's
+      path, exposed as ``drone @spawn grant-admin``) during the owner's
       ceremony. This flag on its own GRANTS NOTHING — it is leg 5 of a
       five-leg contract (verified caller, cert path, cert content, HMAC
       signature, this flag); the lane stays dark unless all five pass.
@@ -573,7 +573,7 @@ def ensure_project_has_owner(registry_path):
 def ensure_admin(registry_path=None, branch_name=ADMIN_BRANCH):
     """Set ``admin: true`` on the devpulse entry of the root registry.
 
-    The sanctioned write path for Patrick's admin ceremony (DPLAN-0288),
+    The sanctioned write path for the owner's admin ceremony (DPLAN-0288),
     mirroring ``ensure_project_has_owner``: authority is written to the
     REGISTRY ENTRY, never to a passport a branch can edit on itself.
 

@@ -32,7 +32,7 @@ never again require a manual JSON edit:
 5. Orphan location — a row whose recorded location is not where its
    citizen lives: a ghost path left by an old branch move, or a project
    root holding records that belong to the seat inside it. Ruling of
-   2026-08-16 (Patrick, via @devpulse): stale paths are expected debris
+   2026-08-16 (the owner, via @devpulse): stale paths are expected debris
    because branches get tested and moved constantly, so hand-editing the
    JSON is the wrong fix — it does not stick while code still writes the
    stale value. The healer handles the class instead, and a row it cannot

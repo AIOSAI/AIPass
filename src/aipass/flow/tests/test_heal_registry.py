@@ -825,7 +825,7 @@ def _seat(root: Path, rel: str) -> Path:
 
 
 class TestHealOrphanLocations:
-    """Ruling of 2026-08-16 (Patrick, via @devpulse).
+    """Ruling of 2026-08-16 (the owner, via @devpulse).
 
     Stale paths are expected debris — we test and move things constantly — so
     the answer is a healer that fixes the class, never a hand-edit of JSON.

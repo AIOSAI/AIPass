@@ -837,7 +837,7 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
             count = int(candidate)
             break
         except ValueError:
-            # Patrick's standing ruling: an unknown argument FAILS by name. This
+            # The owner's standing ruling: an unknown argument FAILS by name. This
             # used to log a WARNING and carry on with the default 10, so
             # `log not_a_real_count` printed output byte-identical to `log` with
             # an empty stderr and exit 0 — the code knew the token was bad and
