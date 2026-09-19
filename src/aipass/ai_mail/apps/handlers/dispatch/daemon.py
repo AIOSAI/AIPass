@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Dispatch Daemon Handler
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-02-17
-# Modified: 2026-02-17
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -46,6 +46,8 @@ CONFIG_FILE = _AI_MAIL_DIR / "safety_config.json"
 DAEMON_STATE_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "daemon_state.json"
 DAEMON_LOG_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "dispatch_daemon.log"
 DAEMON_PID_FILE = _AI_MAIL_DIR / ".ai_mail.local" / "daemon.pid"
+PID_DENIED_WAIT_SECONDS = 5.0  # Windows delete-pending: how long a denied pid create is polled
+PID_DENIED_POLL_SECONDS = 0.05
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 # Graceful shutdown
@@ -244,18 +246,53 @@ def is_kill_switch_active(config: Dict[str, Any]) -> bool:
     return kill_path.exists()
 
 
-def _write_pid_file() -> bool:
-    """Write current PID to daemon.pid atomically. Returns False if another daemon is running."""
-    DAEMON_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(str(DAEMON_PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+def _create_pid_file() -> bool:
+    """
+    Exclusive-create daemon.pid holding this PID.
+
+    Windows answers a create against a pid file another process is still
+    releasing (delete pending) with ACCESS DENIED, not FILE EXISTS - the
+    name is on its way out, not held. That answer is polled inside
+    PID_DENIED_WAIT_SECONDS. A directory this process truly cannot write
+    answers the same way forever, so past the wait it surfaces as the denial
+    it is. POSIX unlinks the name at once and never gives this answer.
+
+    Returns:
+        True if the pid file was created, False if the name exists.
+
+    Raises:
+        PermissionError: Access stayed denied for the whole wait; the
+            original denial is the cause.
+    """
+    deadline = time.monotonic() + PID_DENIED_WAIT_SECONDS
+    while True:
+        try:
+            fd = os.open(str(DAEMON_PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            return False
+        except PermissionError as e:
+            if time.monotonic() >= deadline:
+                raise PermissionError(
+                    e.errno,
+                    f"daemon.pid create still denied after a {PID_DENIED_WAIT_SECONDS}s wait",
+                    str(DAEMON_PID_FILE),
+                ) from e
+            logger.info("[daemon] PID file create denied (delete pending?), retrying: %s", e)
+            time.sleep(PID_DENIED_POLL_SECONDS)
+            continue
         try:
             os.write(fd, str(os.getpid()).encode("utf-8"))
         finally:
             os.close(fd)
         return True
-    except FileExistsError:
-        logger.info("[daemon] PID file already exists, checking owner")
+
+
+def _write_pid_file() -> bool:
+    """Write current PID to daemon.pid atomically. Returns False if another daemon is running."""
+    DAEMON_PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if _create_pid_file():
+        return True
+    logger.info("[daemon] PID file already exists, checking owner")
 
     # PID file exists — check if the owning process is alive
     try:
@@ -267,18 +304,19 @@ def _write_pid_file() -> bool:
     except (ValueError, OSError):
         logger.info("Corrupt PID file — removing")
 
-    # Stale or corrupt — remove and retry atomically
-    DAEMON_PID_FILE.unlink(missing_ok=True)
+    # Stale or corrupt — remove and retry atomically. Unlink + exclusive
+    # create, never os.replace: replace is last-writer-wins, so two daemons
+    # that both found the stale file would both start. A denied unlink is the
+    # same Windows release in progress (or a reader holding it open); the
+    # create below waits it out or names it.
     try:
-        fd = os.open(str(DAEMON_PID_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        try:
-            os.write(fd, str(os.getpid()).encode("utf-8"))
-        finally:
-            os.close(fd)
+        DAEMON_PID_FILE.unlink(missing_ok=True)
+    except PermissionError as e:
+        logger.info("[daemon] Stale PID file unlink denied, the create decides: %s", e)
+    if _create_pid_file():
         return True
-    except FileExistsError:
-        logger.info("Another daemon raced us for the PID file. Exiting.")
-        return False
+    logger.info("Another daemon raced us for the PID file. Exiting.")
+    return False
 
 
 def _remove_pid_file() -> None:
