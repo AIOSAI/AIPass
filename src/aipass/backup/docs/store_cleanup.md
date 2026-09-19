@@ -1,6 +1,6 @@
-# Store cleanup — what exists and what does not
-
 [<- Back to BACKUP](../README.md)
+
+# Store cleanup — what exists and what does not
 
 Which deletions this branch performs, and the sweeps it advertises but does not implement.
 

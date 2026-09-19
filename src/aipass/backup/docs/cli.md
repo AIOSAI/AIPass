@@ -1,6 +1,6 @@
-# The command surface
-
 [<- Back to BACKUP](../README.md)
+
+# The command surface
 
 How the router behaves, which flags exist, and the two entry forms that are easy
 to miss. The live list of verbs is `drone @backup` and `drone @backup --help` —

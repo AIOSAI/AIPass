@@ -1,6 +1,6 @@
-# The handlers fence
-
 [<- Back to BACKUP](../README.md)
+
+# The handlers fence
 
 The access guard on `apps/handlers/__init__.py`: how kinship is decided, and the rules its own tests must obey.
 

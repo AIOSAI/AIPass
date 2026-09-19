@@ -1,6 +1,6 @@
-# Restore — finding and recovering a version
-
 [<- Back to BACKUP](../README.md)
+
+# Restore — finding and recovering a version
 
 `restore` reads the versioned store. It never writes into it, and it never
 touches the source tree except at the output path you name.

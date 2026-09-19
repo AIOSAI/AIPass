@@ -1,6 +1,6 @@
-# The run ceiling — runaway guard
-
 [<- Back to BACKUP](../README.md)
+
+# The run ceiling — runaway guard
 
 Every run measures its filtered set before copying anything and refuses loudly when it breaches a ceiling.
 

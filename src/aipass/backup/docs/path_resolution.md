@@ -1,6 +1,6 @@
-# Path resolution — no resolve() at import
-
 [<- Back to BACKUP](../README.md)
+
+# Path resolution — no resolve() at import
 
 Why every module-level path goes through one stdlib-only helper, and what that protects against.
 

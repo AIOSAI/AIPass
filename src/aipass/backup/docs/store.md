@@ -1,6 +1,6 @@
-# The .backup/ store
-
 [<- Back to BACKUP](../README.md)
+
+# The .backup/ store
 
 What a registered project gets, what is created when, and who else writes into the same directory.
 

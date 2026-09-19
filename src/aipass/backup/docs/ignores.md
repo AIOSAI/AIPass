@@ -1,6 +1,6 @@
-# Ignore rules — seed, floor, runtime
-
 [<- Back to BACKUP](../README.md)
+
+# Ignore rules — seed, floor, runtime
 
 Three layers decide what gets copied. This page is the whole rule set, including the built-in `*.tmp` floor.
 

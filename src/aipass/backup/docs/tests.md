@@ -1,6 +1,6 @@
-# Running the tests
-
 [<- Back to BACKUP](../README.md)
+
+# Running the tests
 
 How to run the backup suite, and what it needs from the host.
 
