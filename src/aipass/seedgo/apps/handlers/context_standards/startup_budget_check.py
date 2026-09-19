@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup_budget_check.py
 # Description: Startup Budget Standards Checker — the greeting cost of one citizen
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 """Startup Budget Standards Checker — what a greeting costs, in characters.
@@ -173,6 +173,9 @@ GROUP_WEIGHTS: Dict[str, int] = {
 #: prints them. The label is what the column header says.
 README_REL = "README.md"
 PROMPT_REL = ".aipass/aipass_local_prompt.md"
+
+#: The pack.json caps key for every docs/*.md page (DPLAN-0347 ruled 20,000; DPLAN-0351 scores it).
+DOCS_PAGE_KEY = "docs/*.md"
 DASHBOARD_REL = "DASHBOARD.local.json"
 TRINITY_DIR = ".trinity"
 
@@ -309,6 +312,25 @@ def readme_cap() -> Tuple[int | None, str]:
         ``(cap, "")`` or ``(None, reason)`` — the reason names seedgo and the
         exact key that is missing.
     """
+    return _pack_cap(README_REL)
+
+
+def docs_page_cap() -> Tuple[int | None, str]:
+    """The per-page cap on every ``docs/*.md``, read from this pack's pack.json.
+
+    Same key family and same refusal as the README cap. Its reader is
+    ``aipass_standards/docs_page_check`` (DPLAN-0351), which scores the size
+    rule against THIS number at call time — the 20,000 lives in config once,
+    never in the checker.
+
+    Returns:
+        ``(cap, "")`` or ``(None, reason)``.
+    """
+    return _pack_cap(DOCS_PAGE_KEY)
+
+
+def _pack_cap(key: str) -> Tuple[int | None, str]:
+    """``caps[key].max_chars`` from this pack's pack.json, or the reason it is not there."""
     path = pack_manifest_path()
     try:
         manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -316,10 +338,10 @@ def readme_cap() -> Tuple[int | None, str]:
         logger.warning("startup_budget: cannot read %s: %s", path, exc)
         return None, f"seedgo: cannot read its own {path.name} ({type(exc).__name__}: {exc}) — cap not measured"
     caps = manifest.get("caps") if isinstance(manifest, dict) else None
-    entry = caps.get(README_REL) if isinstance(caps, dict) else None
+    entry = caps.get(key) if isinstance(caps, dict) else None
     cap = _as_cap(entry.get("max_chars")) if isinstance(entry, dict) else None
     if cap is None:
-        return None, f"seedgo: {path.name} has no caps['{README_REL}'].max_chars — cap not measured"
+        return None, f"seedgo: {path.name} has no caps['{key}'].max_chars — cap not measured"
     return cap, ""
 
 

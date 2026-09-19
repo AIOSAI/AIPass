@@ -16,7 +16,6 @@ this shelf is committed — write it as if it ships.
 | [checklist_and_hooks.md](checklist_and_hooks.md) | The per-file checklist lane and the PostToolUse hook that runs it |
 | [proof_and_coverage.md](proof_and_coverage.md) | Proof certification, `test_map`, `test-inventory`, `audit-tests`, the weekly shadow cycle |
 | [tech_debt.md](tech_debt.md) | Known issues, each with the measurement behind it; the standing record is APLAN-0005 |
-| [v5_vs_haiku_shadow_diff.md](v5_vs_haiku_shadow_diff.md) | The calibration diff behind the v5 pack's shadow status |
 
 The live inventory of modules, packs and commands is not written down here — it is
 `drone @seedgo` and `drone @seedgo --help`, generated from code.

@@ -16,7 +16,7 @@ pack inventory.
 | `audit/branch_audit.py` | The per-branch scoring engine. `discover_checkers()` loads every `*_check.py` in a pack directory that exports `check_module` or `check_branch`; the branch score is the mean over consulted standards, with `ADVISORY = True` standards kept out of it. |
 | `audit/discovery.py` | Branch discovery, CWD-first registry. |
 | `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
-| `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running 47 checkers. |
+| `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker. |
 | `audit/artifact.py` | The untruncated violation set → `.seedgo/last_audit_<branch>.json`, because the console view is capped and the full set is what you actually debug against. |
 | `module_root.py` | The guarded `module_file()` — the one import-time `__file__` resolve in the branch. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |

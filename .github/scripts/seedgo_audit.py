@@ -1,6 +1,6 @@
 """CI gate: run seedgo standards audit across all branches.
 
-Two gates, one job, one branch list (DPLAN-0347 phase 5):
+Three gates, one job (DPLAN-0347 phase 5, DPLAN-0350):
 
 1. The STARTUP RATCHET holds every branch's README.md and branch prompt at the
    caps their owners publish. It runs FIRST because it is 36 file reads against
@@ -9,7 +9,11 @@ Two gates, one job, one branch list (DPLAN-0347 phase 5):
    size, the cap and the owner, and needs nothing the audit would have printed.
    When it is green (the ordinary case) everything after it runs exactly as it
    did before the ratchet existed.
-2. The STANDARDS AUDIT scores every branch against the aipass pack and holds
+2. The NAME RATCHET (DPLAN-0350) holds the owner's first name and a person's
+   home path at the baseline taken when the sweep finished: a NEW line is red.
+   ADVISORY while NAME_RATCHET_GATES is False - it prints its red and the job
+   carries on. Flipping it is a decision, made here, in one line.
+3. The STANDARDS AUDIT scores every branch against the aipass pack and holds
    the fleet at 100%, with the pack-count tripwire guarding the average itself.
 
 They share the branch list built once below, deliberately: two walks of
@@ -22,15 +26,20 @@ from pathlib import Path
 
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch
 from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
-from aipass.seedgo.apps.handlers.context_standards import startup_ratchet
+from aipass.seedgo.apps.handlers.context_standards import name_ratchet, startup_ratchet
 
 THRESHOLD = 100
+
+# The name ratchet lands advisory (DPLAN-0350): its red prints, the job goes on.
+# True makes a NEW name or home-path line fail this job. @devpulse's call, once
+# the owner has ruled on the exempt set (settings.json, hook logs, suspend/).
+NAME_RATCHET_GATES = False
 
 # Pack-count tripwire (DPLAN-0323 phase 6). A standard must never leave the
 # gate silently: retire a checker, or break its import, and the audit would
 # quietly average one fewer standard, still print 100, and this job would stay
 # green. The number moves ONLY by hand, in the same commit that adds or retires
-# a standard. Today: 47 *_check.py in the aipass pack + the diagnostics checker.
+# a standard. Today: 48 *_check.py in the aipass pack + the diagnostics checker.
 #
 # Counted = every standard the audit CONSULTED: the ones that scored plus the
 # ones that reported not_applicable (measured nothing by design and stay out of
@@ -39,7 +48,7 @@ THRESHOLD = 100
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 48  # calendar_bound added 2026-09-13 (CI red, daemon slot seeder time bomb)
+EXPECTED_STANDARDS = 49  # docs_page added 2026-09-19 (DPLAN-0351, the docs/*.md page shape)
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"
@@ -82,7 +91,28 @@ if not ratchet["passed"]:
 print()
 
 # -----------------------------------------------------------------------------
-# GATE 2 — THE STANDARDS AUDIT
+# GATE 2 — THE NAME RATCHET (DPLAN-0350) - ADVISORY UNTIL NAME_RATCHET_GATES
+# -----------------------------------------------------------------------------
+# Every tracked file (git ls-files) for the owner's first name, and every .md
+# and *_content.py for a person's home path, held at the baseline in
+# context_standards/name_ratchet_baseline.json. The exemptions (the culture
+# doc, changelogs, plans, the hook logs, settings.json, suspend/) live in the
+# module and its docstring, never here. Every printed line is masked.
+names = name_ratchet.run(Path("."))
+for line in names["report"]:
+    print(line)
+if not names["passed"]:
+    verdict = "FAILED" if NAME_RATCHET_GATES else "RED (advisory - not gating yet)"
+    print(f"\nNAME RATCHET {verdict}: {len(names['over'])} file/rule pair(s) above baseline")
+    for line in names["failure_lines"]:
+        print(line)
+    print("\n  Take the name or the home path out of the line. The baseline only ever goes down.")
+    if NAME_RATCHET_GATES:
+        sys.exit(1)
+print()
+
+# -----------------------------------------------------------------------------
+# GATE 3 — THE STANDARDS AUDIT
 # -----------------------------------------------------------------------------
 failed = []
 for branch in branches:

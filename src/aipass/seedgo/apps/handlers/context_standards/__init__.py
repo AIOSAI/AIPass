@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: context standards pack — the startup cost of a citizen
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-15
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 """The context pack. One rule: what a greeting costs, in characters.
@@ -28,6 +28,12 @@ and @hooks for the other. Two files, not six - `.trinity/` and the dashboard are
 gitignored and a clean checkout cannot see them, so a gate on them would measure
 nothing and pass by accident forever.
 
+THE NAME RATCHET (DPLAN-0350, 2026-09-19) rides the same CI job, advisory
+until `NAME_RATCHET_GATES` flips: the owner's first name in any tracked file
+and a person's home path in a `.md` or `*_content.py`, held at the baseline in
+`name_ratchet_baseline.json`. It lives here because a prompt that names the
+owner tells every other seat who its user is - a startup-context defect.
+
 Design: DPLAN-0347 / FPLAN-0593, boardroom thread 16 (converged 2026-09-15).
 """
 
@@ -38,5 +44,6 @@ __version__ = "0.2.0"
 #: outside the tree the dead-code rule can see — and a published module that no
 #: in-tree file names is indistinguishable from an abandoned one. Named here, the
 #: pack says which of its arms are part of it: the checker, found by the audit's
-#: `*_check.py` glob, and the ratchet, imported by the CI runner.
+#: `*_check.py` glob, and the two ratchets, imported by the CI runner.
+from aipass.seedgo.apps.handlers.context_standards import name_ratchet  # noqa: F401  (re-exported)
 from aipass.seedgo.apps.handlers.context_standards import startup_ratchet  # noqa: F401  (re-exported)

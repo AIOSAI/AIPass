@@ -1,11 +1,11 @@
-"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget, the ratchet)."""
+"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget, the two ratchets)."""
 
 # =================== META ====================
 # Name: test_checkers_batch10.py
-# Description: Unit tests for hardcoded_path_check, startup_budget_check and startup_ratchet
-# Version: 1.2.0
+# Description: Unit tests for hardcoded_path_check, startup_budget_check, startup_ratchet and name_ratchet
+# Version: 1.3.0
 # Created: 2026-06-18
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 import json
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 # a monkeypatch on one of their constants is then what moves a row.
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as sb  # noqa: E402
 from aipass.seedgo.apps.handlers.context_standards import startup_ratchet as ratchet  # noqa: E402
+from aipass.seedgo.apps.handlers.context_standards import name_ratchet as names  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -411,7 +412,7 @@ class TestStartupBudgetCapsAreRead:
 
         assert (cell["cap"], cell["chars"], cell["state"]) == (5, 10, "over")
 
-    def test_the_shipped_manifest_carries_patricks_ruled_ten_thousand(self):
+    def test_the_shipped_manifest_carries_the_owners_ruled_ten_thousand(self):
         """The one live-tree pin: the ruled number, where the ratchet will read it.
 
         The user ruled 10,000 on 2026-09-15 at 16:02. The room had proposed
@@ -664,6 +665,37 @@ def _pack_manifest(root, cap):
     return path
 
 
+# ---------------------------------------------------------------------------
+# THE NAME RATCHET (DPLAN-0350) shares these classes: same shape of gate, a
+# count held at a baseline instead of a size held at a cap. The owner's name
+# is never spelled in this file -- every fixture reads it off the module, so
+# the pattern lives in one place and these tests cannot become the next hit.
+# ---------------------------------------------------------------------------
+
+NAME = names.OWNER_NAME
+
+
+def _names(root, files, baseline=None):
+    """Run the name ratchet over a throwaway tree, the file list handed in.
+
+    ``files`` maps repo-relative path -> text. Handing the list in stands for
+    ``git ls-files``; the one test that proves "tracked" means git builds a
+    real repository instead.
+    """
+    for rel, text in files.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    base = root / "baseline.json"
+    base.write_text(json.dumps({"files": baseline or {}}), encoding="utf-8")
+    return names.run(root, files=list(files), baseline_path=base)
+
+
+def _said(result):
+    """Everything the name ratchet would put in a CI log, as one string."""
+    return "\n".join(result["report"] + result["failure_lines"])
+
+
 class TestRatchetRed:
     """What CI prints when a gated file grows past its cap."""
 
@@ -724,6 +756,72 @@ class TestRatchetRed:
         assert _gated_row(result, "README.md")["state"] == "error"
         assert "cannot be read" in result["failure_lines"][0]
 
+    def test_a_new_line_naming_the_owner_is_red_and_the_log_never_names_him(self, tmp_path):
+        """The name ratchet's red says where, and masks what.
+
+        A CI log on a public repo is public: a red that quoted the line would
+        ship the very word it exists to stop. The file and line number are
+        enough to find it, and the mask says what was there.
+        """
+        result = _names(tmp_path, {"src/aipass/probe/README.md": f"intro\nAsk {NAME.title()} first.\n"})
+        said = _said(result)
+
+        assert result["passed"] is False
+        assert "src/aipass/probe/README.md" in said, "the file"
+        assert "L2" in said, "the line"
+        assert names.MASK in said, "what was there, masked"
+        assert "NEW by 1" in said
+        assert NAME not in said.lower(), "the log carried the name it guards"
+
+    def test_the_name_is_matched_in_any_case_and_inside_an_identifier(self, tmp_path):
+        """Substring, case-insensitive: an identifier ships the name as surely as prose.
+
+        Five of the residual lines devpulse counted were test names. A
+        word-boundary match would have passed every one of them.
+        """
+        text = f"def test_the_{NAME}_ruling():\n    pass\nWHO = '{NAME.upper()}'\n"
+
+        result = _names(tmp_path, {"src/aipass/probe/tests/test_x.py": text})
+
+        assert result["counts"] == {"src/aipass/probe/tests/test_x.py": {names.RULE_NAME: 2}}
+        assert result["passed"] is False
+
+    def test_a_real_home_path_in_a_prompt_or_a_content_file_is_red(self, tmp_path):
+        """Three OS spellings of a person's home, in the two file kinds that render.
+
+        A prompt is read by a seat on somebody else's machine and a
+        ``*_content.py`` is printed to one; a home directory there tells the
+        reader whose machine the text was written on.
+        """
+        files = {
+            ".aipass/aipass_local_prompt.md": "Logs live in /home/alice/logs\n",
+            "src/aipass/probe/apps/handlers/x_content.py": 'WHERE = "C:\\\\Users\\\\bob\\\\AppData"\n',
+            "docs/setup.md": "open /Users/carol/Desktop and C:\\Users\\dave\\x\n",
+        }
+
+        result = _names(tmp_path, files)
+
+        assert result["passed"] is False
+        assert {rel: rules.get(names.RULE_HOME) for rel, rules in result["counts"].items()} == {
+            ".aipass/aipass_local_prompt.md": 1,
+            "src/aipass/probe/apps/handlers/x_content.py": 1,
+            "docs/setup.md": 1,
+        }
+
+    def test_a_tracked_path_carrying_the_name_is_red(self, tmp_path):
+        """A file NAME ships too, and it is not something a baseline can hold.
+
+        The baseline is keyed by path; baselining this one would write the name
+        into the baseline. So it is line 0 of the file, masked, and red.
+        """
+        rel = f"docs/{NAME}_notes.md"
+
+        result = _names(tmp_path, {rel: "nothing in here\n"})
+
+        assert result["passed"] is False
+        assert result["hits"][0].line == 0
+        assert NAME not in _said(result).lower()
+
 
 class TestRatchetBoundary:
     """`<=` passes. The boundary is the cap itself, and it is said out loud."""
@@ -764,6 +862,64 @@ class TestRatchetBoundary:
         row = _gated_row(_gate(root), "README.md")
 
         assert row["chars"] == 10 and row["state"] == "under"
+
+    def test_a_file_at_its_baseline_passes_and_one_more_line_is_red(self, tmp_path):
+        """The name ratchet's boundary is the baseline count itself, as with a cap.
+
+        Today's residue is written down and passes; the next line to join it is
+        the red. Two lines against a baseline of two is the fleet on the day
+        the ratchet landed.
+        """
+        rel = "src/aipass/probe/tests/test_x.py"
+        two = f"a = '{NAME}'\nb = '{NAME}'\n"
+
+        held = _names(tmp_path / "held", {rel: two}, baseline={rel: {names.RULE_NAME: 2}})
+        grown = _names(tmp_path / "grown", {rel: two + f"c = '{NAME}'\n"}, baseline={rel: {names.RULE_NAME: 2}})
+
+        assert held["passed"] is True, _said(held)
+        assert grown["passed"] is False
+        assert "3 name line(s), baseline 2" in _said(grown)
+
+    def test_a_home_path_outside_markdown_and_content_files_is_not_this_rule(self, tmp_path):
+        """The home-path rule reads what renders; code is hardcoded_path's lane.
+
+        A ``/home/alice/`` fixture in a test or a handler is the scored
+        hardcoded_path standard's to judge, and two rules redding one line only
+        splits the diagnosis.
+        """
+        result = _names(tmp_path, {"src/aipass/probe/apps/handlers/x.py": 'P = "/home/alice/x"\n'})
+
+        assert result["passed"] is True, _said(result)
+        assert result["hits"] == []
+
+    def test_a_home_path_with_no_trailing_slash_still_names_someone(self, tmp_path):
+        """``/home/alice`` at the end of a table cell names alice as surely as ``/home/alice/``.
+
+        Measured at HEAD before widening: two lines in the telegram port map
+        spelled a home that way, and the brief's slash-terminated shape saw
+        neither.
+        """
+        result = _names(tmp_path, {"docs/map.md": "| log dir | Hardcoded /home/alice in glob |\n"})
+
+        assert result["counts"] == {"docs/map.md": {names.RULE_HOME: 1}}
+
+    def test_a_placeholder_home_segment_is_not_a_person(self, tmp_path):
+        """Docs need examples. ``/home/user/`` names nobody, so it passes.
+
+        Only a segment that could be somebody's login is red; the allowlist is
+        the spellings the fleet's docs use for "your name here" plus the CI
+        runner accounts, which are GitHub's, not a person's.
+        """
+        text = (
+            "/home/user/project and /home/<you>/x and /Users/me/Desktop\n"
+            "C:\\Users\\someone\\x and /home/$USER/x and /home/runner/work/x\n"
+            "C:\\Users\\RUNNER~1\\AppData and /home/{name}/x and /Users/username/x\n"
+            "everything lives under /home/user.\n"
+        )
+
+        result = _names(tmp_path, {"docs/setup.md": text})
+
+        assert result["passed"] is True, _said(result)
 
 
 class TestRatchetReadsTheOwnersCap:
@@ -872,6 +1028,68 @@ class TestRatchetFailsHonestly:
         assert result["passed"] is False
         assert "@hooks" in line and "9,000" not in line and "9000" not in line
 
+    def test_an_unreadable_baseline_is_red_not_an_empty_one(self, tmp_path):
+        """A baseline that will not parse is not "nothing baselined".
+
+        Reading it as empty would red all twenty residual lines at once and
+        teach the reader the gate is noise; reading it as "pass" would stop
+        the ratchet. Neither: the run is red and says which file.
+        """
+        base = tmp_path / "baseline.json"
+        base.write_text("{not json", encoding="utf-8")
+        (tmp_path / "clean.md").write_text("nothing here\n", encoding="utf-8")
+
+        result = names.run(tmp_path, files=["clean.md"], baseline_path=base)
+
+        assert result["passed"] is False
+        assert "baseline.json" in _said(result)
+
+    def test_a_tree_git_cannot_list_is_red_not_clean(self, monkeypatch, tmp_path):
+        """No file list is not a clean tree. "Tracked" is git's answer or nothing."""
+
+        def no_git(*args, **kwargs):
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr(names.subprocess, "run", no_git)
+
+        result = names.run(tmp_path, baseline_path=names.BASELINE_PATH)
+
+        assert result["passed"] is False
+        assert "git ls-files" in _said(result)
+
+    def test_a_directory_that_is_no_checkout_is_red_not_empty(self, tmp_path):
+        """git runs, refuses (not a repository), prints nothing on stdout.
+
+        An empty stdout parses to an empty file list, and an empty list has no
+        hits. The exit code is the only thing that says the list is not real.
+        """
+        import shutil
+
+        if shutil.which("git") is None:
+            pytest.skip("git is not on PATH")
+
+        result = names.run(tmp_path, baseline_path=names.BASELINE_PATH)
+
+        assert result["passed"] is False
+        assert "git ls-files exited" in _said(result)
+
+    def test_a_tracked_file_that_cannot_be_opened_is_red(self, monkeypatch, tmp_path):
+        """A file the ratchet could not read is a file it did not check."""
+        real = names.Path.read_bytes
+
+        def locked(self):
+            if self.name == "locked.md":
+                raise PermissionError("locked")
+            return real(self)
+
+        monkeypatch.setattr(names.Path, "read_bytes", locked)
+
+        result = _names(tmp_path, {"locked.md": "fine\n", "open.md": "fine\n"})
+
+        assert result["passed"] is False
+        assert "locked.md cannot be read" in _said(result)
+        assert result["tally"]["read"] == 1
+
     def test_an_unreadable_cap_is_red_even_when_the_file_is_absent(self, monkeypatch, tmp_path):
         """'We do not know the limit' and 'there is no file' are different facts."""
         monkeypatch.setattr(sb, "hooks_grounding", None)
@@ -942,6 +1160,94 @@ class TestRatchetScope:
         assert (ratchet.STATE_UNDER, ratchet.STATE_OVER) == (sb._STATE_UNDER, sb._STATE_OVER)
         assert (ratchet.STATE_ABSENT, ratchet.STATE_ERROR) == (sb._STATE_ABSENT, sb._STATE_ERROR)
         assert ratchet.FAILING_STATES == (ratchet.STATE_OVER, ratchet.STATE_ERROR), "absent never fails the gate"
+
+    def test_the_owners_history_and_open_calls_are_never_opened(self, tmp_path):
+        """Every exemption in the brief, each at a path that really takes it.
+
+        The culture doc, changelogs and plans are history and stay (the
+        ruling); the hook run logs, settings.json and the suspend tool wait on
+        the owner; batch10 is hardcoded_path's own inputs and this ratchet's
+        tests. Each file here names the owner and none of them is read.
+        """
+        exempt = [
+            ".claude/CLAUDE.md",
+            "CHANGELOG.md",
+            "src/aipass/flow/CHANGELOG.md",
+            "src/aipass/flow/docs/DPLAN-0350_names.md",
+            ".claude/hooks/engine.jsonl",
+            ".claude/hooks/engine_test.log",
+            ".claude/settings.json",
+            "src/aipass/seedgo/tests/test_checkers_batch10.py",
+            "src/aipass/skills/tools/suspend/deep/run.py",
+        ]
+
+        result = _names(tmp_path, {rel: f"{NAME}\n" for rel in exempt})
+
+        assert result["passed"] is True, _said(result)
+        assert result["tally"]["exempt"] == len(exempt)
+        assert result["hits"] == []
+
+    def test_an_exemption_is_that_file_not_its_family(self, tmp_path):
+        """A near miss of an exempt path is an ordinary file and is read.
+
+        An exemption written a character too wide becomes the place the name
+        regrows -- another branch's settings.json, a CLAUDE.md outside
+        ``.claude/``, the next batch of checker tests.
+        """
+        near = [
+            "CLAUDE.md",
+            "src/aipass/probe/.claude/settings.json",
+            "src/aipass/seedgo/tests/test_checkers_batch11.py",
+            "src/aipass/skills/tools/suspended.md",
+            "docs/PLAN.md",
+            "docs/CHANGELOG.md.txt",
+        ]
+
+        result = _names(tmp_path, {rel: f"{NAME}\n" for rel in near})
+
+        assert sorted(result["counts"]) == sorted(near)
+
+    def test_the_pattern_is_the_name_this_files_fixtures_carry(self):
+        """An oracle the module does not control: every other case reads the name
+        off the module, so a wrong name would agree with itself and pass them all.
+
+        This file is exempt precisely because hardcoded_path's inputs above are
+        home paths with the real name in them, and they stay by the ruling. The
+        ratchet's pattern must find them -- fifteen lines on the day it landed.
+        """
+        with open(__file__, encoding="utf-8") as handle:
+            own = handle.read()
+
+        found = [hit for hit in names.scan_text("fixtures.py", own) if hit.rule == names.RULE_NAME]
+
+        assert len(found) >= 10, f"the pattern finds {len(found)} of this file's fixture lines"
+
+    def test_every_exemption_is_named_in_the_checks_doc(self):
+        """The brief: the exemptions are built in AND named in the check's doc."""
+        for pattern in names.EXEMPT_PATHS + names.EXEMPT_NAMES:
+            assert pattern in (names.__doc__ or ""), f"{pattern} is exempt but the doc never says so"
+
+    def test_an_untracked_file_is_never_read(self, tmp_path):
+        """Tracked means ``git ls-files``: scratch that does not ship is not the ratchet's.
+
+        Built as a real repository, because this is the one fact a handed-in
+        file list cannot prove.
+        """
+        import shutil
+        import subprocess
+
+        if shutil.which("git") is None:
+            pytest.skip("git is not on PATH")
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, timeout=60)
+        (tmp_path / "shipped.md").write_text(f"{NAME}\n", encoding="utf-8")
+        (tmp_path / "scratch.md").write_text(f"{NAME}\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(tmp_path), "add", "shipped.md"], check=True, timeout=60)
+        base = tmp_path / "baseline.json"
+        base.write_text(json.dumps({"files": {}}), encoding="utf-8")
+
+        result = names.run(tmp_path, baseline_path=base)
+
+        assert list(result["counts"]) == ["shipped.md"]
 
 
 class TestRatchetFleetWalk:
@@ -1027,3 +1333,37 @@ class TestRatchetReport:
         _gate(root)
 
         assert capsys.readouterr().out == "", "the gate printed instead of returning"
+
+    def test_a_loose_baseline_is_reported_with_the_number_to_write(self, tmp_path):
+        """A ratchet only turns one way when somebody tightens it.
+
+        A file that drops below its baseline passes -- the cure is never red --
+        but the room it leaves is room for a new line nobody would see, so the
+        report names the entry and the number that closes it.
+        """
+        rel = "src/aipass/probe/tests/test_x.py"
+
+        result = _names(tmp_path, {rel: f"a = '{NAME}'\n"}, baseline={rel: {names.RULE_NAME: 3}})
+
+        assert result["passed"] is True
+        assert result["loose"] == [{"rel": rel, "rule": names.RULE_NAME, "count": 1, "allowed": 3}]
+        assert any(rel in line and "write 1" in line for line in result["report"])
+
+    def test_the_name_ratchet_never_prints_and_never_names_the_owner_itself(self, capsys):
+        """The checker is the one file that must know the name -- and is not a hit.
+
+        The module assembles the name from pieces, so its own source scans
+        clean; the shipped baseline carries paths and counts only, so it cannot
+        become the next place the name ships; and the run prints nothing.
+        """
+        module = names.__file__
+        with open(module, encoding="utf-8") as handle:
+            source = handle.read()
+        shipped = names.BASELINE_PATH.read_text(encoding="utf-8")
+
+        baseline, reason = names.load_baseline(names.BASELINE_PATH)
+
+        assert names.scan_text("name_ratchet.py", source) == []
+        assert NAME not in shipped.lower()
+        assert reason == "" and baseline, "the shipped baseline must load"
+        assert capsys.readouterr().out == ""

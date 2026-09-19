@@ -28,6 +28,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | dead_code | branch_level | everywhere | Unreachable functions and dead imports |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
+| docs_page | entry_point | everywhere | Every docs/*.md in one shape: one H1 first, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap — plus advisory back-link, story and defect-prose lines |
 | documentation | all_files | production | Docstrings on public functions |
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
 | error_handling | all_files | everywhere | Try/except patterns, error propagation |

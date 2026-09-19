@@ -1132,6 +1132,23 @@ def test_the_ci_gate_reaches_the_audit_when_the_ratchet_is_green(tmp_path):
     assert "All 0 branches pass" in done.stdout, "the audit's own verdict line"
 
 
+def test_the_name_ratchet_is_advisory_so_its_red_never_fails_the_job(tmp_path):
+    """DPLAN-0350 lands advisory: a red name ratchet prints and the job carries on.
+
+    The fixture tree is not a git checkout, so the name ratchet cannot list
+    what is tracked and is red -- the honest verdict. The pin is that the red
+    reached the log AND the audit's own verdict line still followed it with a
+    zero exit. When @devpulse flips NAME_RATCHET_GATES, this is the test that
+    moves with it.
+    """
+    done = _run_ci_gate(_fixture_fleet(tmp_path))
+
+    assert "NAME RATCHET" in done.stdout and "advisory" in done.stdout, done.stdout
+    assert "git ls-files" in done.stdout, "the red says why"
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "All 0 branches pass" in done.stdout, "the audit ran after the advisory red"
+
+
 def test_the_ci_gate_keeps_its_tripwire_and_its_hundred_percent_threshold():
     """The ratchet was added BESIDE the existing gates, never instead of them.
 

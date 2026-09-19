@@ -1,5 +1,7 @@
 # S84: Multi-line Reply Body Truncation — Root Cause & Fix
 
+Why a multi-line reply or send body arrives whole: the S84 truncation, its root cause, and the argument handling that fixed it.
+
 ## Bug
 
 Reply and send commands silently truncate multi-line message bodies to the first argument.

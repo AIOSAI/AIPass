@@ -19,6 +19,13 @@
       "ruled": "2026-09-15 16:02 - 'readme 10k and off from start up' (DPLAN-0347 Design Decisions, README cap = RULED)",
       "note": "The boardroom proposed 6,000 and FPLAN-0593 still says 6,000 at lines 179 and 221; those lines are STALE. 10,000 is the ruling and this key is the number the audit reads.",
       "ratchet": "GATED since 2026-09-15. startup_ratchet reads THIS key at run time on every CI run - no copy of 10,000 exists in Python or in .github/. Move this number and the gate moves with it."
+    },
+    "docs/*.md": {
+      "max_chars": 20000,
+      "units": "chars",
+      "owner": "seedgo",
+      "ruled": "DPLAN-0347 - every docs/ page under 20,000 chars; DPLAN-0351 (2026-09-19 09:48) put it in the audit",
+      "scored_by": "aipass_standards/docs_page_check reads THIS key through startup_budget_check.docs_page_cap() on every call - no copy of 20,000 exists in the checker. A page AT the cap passes; over is >."
     }
   },
   "ratchet": {

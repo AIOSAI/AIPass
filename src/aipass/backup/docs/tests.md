@@ -2,6 +2,8 @@
 
 [<- Back to BACKUP](../README.md)
 
+How to run the backup suite, and what it needs from the host.
+
 ```bash
 python -m pytest src/aipass/backup/tests -q
 ```

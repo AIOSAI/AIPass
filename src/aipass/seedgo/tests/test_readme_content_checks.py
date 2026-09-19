@@ -1,12 +1,13 @@
 """Tests for readme_check.py — Check 7 (test count accuracy), Check 8 (markdown link
-validity) and the advisory docs-index / rot-bait lane (check_branch_info)."""
+validity) and the advisory docs-index / rot-bait lane (check_branch_info) — and for
+docs_page_check.py, the docs/*.md page shape one layer down (DPLAN-0351)."""
 
 # =================== META ====================
 # Name: test_readme_content_checks.py
-# Description: Unit tests for readme content accuracy checks
-# Version: 1.1.0
+# Description: Unit tests for readme content accuracy checks and the docs page standard
+# Version: 1.2.0
 # Created: 2026-05-15
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 import pytest
@@ -871,3 +872,291 @@ def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
     blob = " ".join(f"{c['name']} {c['message']}" for c in result["checks"]).lower()
     for word in ("docs index", "rot bait", "branch-rooted path", "dated/status", "not linked from readme"):
         assert word not in blob
+
+
+# ===========================================================================
+# docs_page_check -- the docs/*.md page shape (DPLAN-0351)
+# ===========================================================================
+#
+# The README's depth lives in docs/, and every page there has one shape: a
+# back-link, one H1, a purpose paragraph, topic sections no deeper than ###,
+# links that resolve, and a size under the context pack's cap. Five rules
+# score; back-link, story and defect prose only nominate.
+
+_GOOD_PAGE = (
+    "[<- Back to the README](../README.md)\n\n"
+    "# The page\n\n"
+    "What this page is for, in one present-tense sentence.\n\n"
+    "## A topic\n\nBody, and [the other page](other.md).\n\n"
+    "### A detail\n\nMore body.\n\n"
+    "```bash\n# a shell comment is not a second H1\n```\n"
+)
+_OTHER_PAGE = "[<- Back](../README.md)\n\n# Other\n\nThe second page, in one sentence.\n"
+
+
+def _docs():
+    from aipass.seedgo.apps.handlers.aipass_standards import docs_page_check
+
+    return docs_page_check
+
+
+def _docs_branch(root, pages, other=True):
+    """A branch with an entry point, a README and docs/<name> for each page."""
+    (root / "apps").mkdir(parents=True, exist_ok=True)
+    entry = root / "apps" / f"{root.name}.py"
+    entry.write_text("", encoding="utf-8")
+    (root / "README.md").write_text("# Branch\n", encoding="utf-8")
+    (root / "docs").mkdir(exist_ok=True)
+    for name, text in ({"other.md": _OTHER_PAGE} if other else {}).items() | pages.items():
+        (root / "docs" / name).write_text(text, encoding="utf-8")
+    return entry
+
+
+def _failed(result):
+    """{check name: message} for every failing check."""
+    return {c["name"]: c["message"] for c in result["checks"] if not c["passed"]}
+
+
+def test_docs_page_a_page_in_the_template_shape_passes_all_five(tmp_path):
+    """The template itself is the zero point: five checks, all green, score 100."""
+    entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE})
+
+    result = _docs().check_module(str(entry))
+
+    assert [c["name"] for c in result["checks"]] == list(_docs().CHECK_NAMES)
+    assert _failed(result) == {}
+    assert result["score"] == 100
+
+
+@pytest.mark.parametrize(
+    "text, why",
+    [
+        ("Intro line.\n\n# Page\n\nPurpose.\n", "line 1 comes before the H1"),
+        ("# Page\n\nPurpose.\n\n# Second title\n\nMore.\n", "2 H1 headings"),
+        ("## Only a section\n\nBody.\n", "no H1"),
+        (
+            "See the [README](../README.md) for the whole story of this branch and why.\n\n# Page\n\nPurpose.\n",
+            "line 1 comes before the H1",
+        ),
+    ],
+)
+def test_docs_page_the_h1_is_one_and_first(tmp_path, text, why):
+    """One title, at the top. Prose above it, or a second title, is a page with two faces."""
+    entry = _docs_branch(tmp_path / "b", {"bad.md": text})
+
+    failed = _failed(_docs().check_module(str(entry)))
+
+    assert "docs/bad.md" in failed["One H1, first"] and why in failed["One H1, first"]
+
+
+def test_docs_page_a_comment_and_a_back_link_may_sit_above_the_h1(tmp_path):
+    """The bare back-link belongs at the top; an HTML comment is invisible to a reader."""
+    text = "<!-- generated header -->\n[<- Back to the README](../README.md)\n\n# Page\n\nPurpose.\n"
+    entry = _docs_branch(tmp_path / "b", {"page.md": text})
+
+    assert "One H1, first" not in _failed(_docs().check_module(str(entry)))
+
+
+@pytest.mark.parametrize(
+    "under",
+    [
+        "## Bug\n\nBody.",
+        "- a list item",
+        "| a | table |",
+        "> a quote",
+        "```\ncode\n```",
+        "---",
+        "[a lone link](other.md)",
+    ],
+)
+def test_docs_page_the_line_under_the_h1_must_be_prose(tmp_path, under):
+    """A reader arriving at the page is told what it is for before anything else.
+
+    The three red pages in the fleet on landing day opened on a section
+    heading, a section heading and a code fence.
+    """
+    entry = _docs_branch(tmp_path / "b", {"bad.md": f"# Page\n\n{under}\n\nLater prose.\n"})
+
+    failed = _failed(_docs().check_module(str(entry)))
+
+    assert "docs/bad.md" in failed["Purpose paragraph"]
+
+
+def test_docs_page_a_back_link_under_the_h1_is_skipped_on_the_way_to_the_purpose(tmp_path):
+    """Title, back-link, purpose is a legal ordering too -- the survey found both."""
+    text = "# Page\n\n[<- Back to the README](../README.md)\n\nPurpose.\n"
+    entry = _docs_branch(tmp_path / "b", {"page.md": text})
+
+    assert _failed(_docs().check_module(str(entry))) == {}
+
+
+def test_docs_page_a_heading_deeper_than_three_is_red_but_not_inside_a_fence(tmp_path):
+    """Depth 3 is the ceiling; a '####' inside a code sample is not a heading."""
+    fenced = "# Page\n\nPurpose.\n\n```md\n#### sample\n```\n"
+    deep = "# Page\n\nPurpose.\n\n## A\n\n### B\n\n#### C\n\nBody.\n"
+    entry = _docs_branch(tmp_path / "b", {"fenced.md": fenced, "deep.md": deep})
+
+    message = _failed(_docs().check_module(str(entry)))["Heading depth"]
+
+    assert "docs/deep.md" in message and "depth-4" in message
+    assert "fenced.md" not in message
+
+
+def test_docs_page_a_dead_relative_link_is_red_and_named(tmp_path):
+    """Links are read from the page's own directory -- the way GitHub renders them."""
+    text = (
+        "# Page\n\nPurpose, [live](other.md), [up](../README.md), [web](https://example.com), [anchor](#a).\n\n"
+        "![missing image](img/none.png) and [gone](gone.md#part)\n\n"
+        "`[not a link](nowhere.md)`\n\n```\n[also not](nowhere.md)\n```\n"
+    )
+    entry = _docs_branch(tmp_path / "b", {"page.md": text})
+
+    message = _failed(_docs().check_module(str(entry)))["Links resolve"]
+
+    assert "img/none.png" in message and "gone.md#part" in message
+    assert "nowhere.md" not in message and "other.md" not in message
+    assert "#a" not in message.replace("gone.md#part", ""), "an in-page anchor is not a file"
+    assert "example.com" not in message and "README" not in message
+
+
+def test_docs_page_size_reads_the_context_packs_cap_and_at_the_cap_passes(monkeypatch, tmp_path):
+    """The number lives in config once; the checker asks for it on every call."""
+    d = _docs()
+    at = "# P\n\nPurpose.\n"
+    monkeypatch.setattr(d.budget, "docs_page_cap", lambda: (len(at), ""))
+    entry = _docs_branch(tmp_path / "b", {"at.md": at, "over.md": at + "x"}, other=False)
+
+    message = _failed(d.check_module(str(entry)))["Size"]
+
+    assert "docs/over.md" in message and "over by 1" in message
+    assert "at.md" not in message
+
+
+def test_docs_page_an_unreadable_cap_fails_the_size_check_and_says_why(monkeypatch, tmp_path):
+    """No remembered 20,000: a cap nobody can read is a failing check, never a guess."""
+    d = _docs()
+    monkeypatch.setattr(d.budget, "docs_page_cap", lambda: (None, "seedgo: pack.json has no caps['docs/*.md']"))
+    entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE})
+
+    assert "caps['docs/*.md']" in _failed(d.check_module(str(entry)))["Size"]
+
+
+def test_docs_page_the_shipped_cap_is_the_context_pack_key():
+    """The pack.json key exists and reads; the checker holds no copy of the number."""
+    import ast
+    from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as budget
+
+    cap, reason = budget.docs_page_cap()
+    tree = ast.parse(open(_docs().__file__, encoding="utf-8").read())
+    numbers = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, int)}
+
+    assert reason == "" and cap
+    assert cap not in numbers, "a copy of the cap was written into the checker"
+
+
+def test_docs_page_known_issues_and_tech_debt_pages_are_not_read(tmp_path):
+    """The owner has not ruled on the registries: no rule touches them, scored or advisory."""
+    broken = "no title, used to be broken, known gap, [dead](gone.md)\n#### deep\n"
+    entry = _docs_branch(tmp_path / "b", {"known_issues.md": broken, "tech_debt.md": broken}, other=False)
+
+    result = _docs().check_module(str(entry))
+
+    assert _failed(result) == {}
+    assert _docs().check_branch_info(str(tmp_path / "b")) == []
+
+
+def test_docs_page_reads_one_level_and_nothing_at_all_is_a_skip(tmp_path):
+    """docs/*.md only -- the same reach as the README's docs index. No pages, no red."""
+    entry = _docs_branch(tmp_path / "b", {}, other=False)
+    (tmp_path / "b" / "docs" / "nested").mkdir()
+    (tmp_path / "b" / "docs" / "nested" / "deep.md").write_text("no shape at all\n", encoding="utf-8")
+
+    result = _docs().check_module(str(entry))
+
+    assert result["score"] == 100
+    assert all("skipped" in c["message"] for c in result["checks"])
+
+
+def test_docs_page_an_undecodable_page_fails_every_check(tmp_path):
+    """A page the checker cannot read is a page it did not check."""
+    entry = _docs_branch(tmp_path / "b", {}, other=False)
+    (tmp_path / "b" / "docs" / "binary.md").write_bytes(b"\xff\xfe not utf-8 \xff")
+
+    result = _docs().check_module(str(entry))
+
+    assert result["score"] == 0
+    assert all("cannot be read" in c["message"] for c in result["checks"])
+
+
+def test_docs_page_a_bypass_on_one_page_takes_only_that_page_out(tmp_path):
+    """Bypass is per page, by path, like every other standard's per-file rule."""
+    entry = _docs_branch(tmp_path / "b", {"odd.md": "no title\n", "bad.md": "no title either\n"})
+    rules = [{"file": "docs/odd.md", "standard": "docs_page", "reason": "test"}]
+
+    message = _failed(_docs().check_module(str(entry), rules))["One H1, first"]
+
+    assert "docs/bad.md" in message and "odd.md" not in message
+
+
+def test_docs_page_advisory_nominates_a_missing_or_low_back_link(tmp_path):
+    """The back-link sits above the purpose paragraph. The move stamp's link, below it, is not the slot."""
+    stamp = "# Stamped\n\nPurpose.\n\nMoved out of README.md. Back to the [README](../README.md)\n"
+    entry = _docs_branch(tmp_path / "b", {"page.md": _GOOD_PAGE, "bare.md": "# Bare\n\nPurpose.\n", "stamp.md": stamp})
+
+    lines = _docs().check_branch_info(str(entry.parent.parent))
+    back = next(line for line in lines if line.startswith("docs_page back-link"))
+
+    assert "(advisory)" in back and "2 of 4" in back
+    assert "docs/bare.md" in back and "docs/stamp.md" in back and "page.md" not in back
+
+
+def test_docs_page_advisory_nominates_story_lines_by_the_high_precision_arms(tmp_path):
+    """History belongs in the CHANGELOG. Only the arms that hand-sampled at 7/8 or better nominate."""
+    text = (
+        "# Page\n\nPurpose.\n\n"
+        "The gate used to read the old key.\n"  # 5
+        "It previously lived in apps/.\n"  # 6
+        "Cured 2026-09-01 by the owner.\n"  # 7
+        "The loader was fixed.\n"  # 8: no date -- not an arm
+        "| used to | a table cell |\n"  # 9: table -- not prose
+        "```\npreviously in a sample\n```\n"
+    )
+    entry = _docs_branch(tmp_path / "b", {"story.md": text}, other=False)
+
+    story = next(
+        line for line in _docs().check_branch_info(str(entry.parent.parent)) if line.startswith("docs_page story")
+    )
+
+    assert "3 line(s)" in story
+    assert "docs/story.md:5" in story and "docs/story.md:6" in story and "docs/story.md:7" in story
+
+
+def test_docs_page_advisory_nominates_defect_prose_but_not_a_pointer_to_the_register(tmp_path):
+    """An open defect goes to the owner's pad. A line that links to the register only points at it."""
+    text = (
+        "# Page\n\nPurpose.\n\n"
+        "**Known gap:** the ceiling does not clean up a filled store.\n"  # 5
+        "- [known_issues.md](known_issues.md) -- what is still open\n"
+        "See [still open](other.md) for the list.\n"
+    )
+    entry = _docs_branch(tmp_path / "b", {"page.md": text})
+
+    defect = next(
+        line
+        for line in _docs().check_branch_info(str(entry.parent.parent))
+        if line.startswith("docs_page defect prose")
+    )
+
+    assert "1 line(s)" in defect and "docs/page.md:5" in defect
+
+
+def test_docs_page_advisory_lines_never_move_the_score(tmp_path):
+    """A page that trips every advisory arm still scores 100: nominations are not findings."""
+    text = "# Page\n\nPurpose.\n\nIt used to break. Known gap: still open.\n"
+    entry = _docs_branch(tmp_path / "b", {"page.md": text})
+
+    result = _docs().check_module(str(entry))
+    advisory = _docs().check_branch_info(str(entry.parent.parent))
+
+    assert len(advisory) == 3 and all("(advisory)" in line for line in advisory)
+    assert result["score"] == 100

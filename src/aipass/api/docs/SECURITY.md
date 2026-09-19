@@ -1,5 +1,7 @@
 # API Branch — Key Management & Security
 
+Where the API branch keeps keys and OAuth secrets, who reads them, and what keeps them out of the repository.
+
 ## Architecture
 
 All secrets live **outside** the repository at `~/.secrets/aipass/`:

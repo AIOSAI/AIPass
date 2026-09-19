@@ -242,6 +242,18 @@ def test_get_architecture_standards_has_expected_content():
 # ---------------------------------------------------------------------------
 
 
+def test_get_docs_page_standards_has_expected_content():
+    """get_docs_page_standards names the reader, the five scored checks and the pending exemption."""
+    from aipass.seedgo.apps.handlers.aipass_standards.docs_page_content import get_docs_page_standards
+
+    result = get_docs_page_standards()
+    _assert_content_str(result, "docs_page_standards")
+    assert "WHO READS A PAGE:" in result
+    for check in ("One H1, first", "Purpose paragraph", "Heading depth", "Links resolve", "Size"):
+        assert check in result
+    assert "known_issues" in result and "tech_debt" in result
+
+
 def test_get_cli_standards_has_expected_content():
     """get_cli_standards names Rich console.print() as the only approved output path."""
     from aipass.seedgo.apps.handlers.aipass_standards.cli_content import (

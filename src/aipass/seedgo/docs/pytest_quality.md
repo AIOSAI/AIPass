@@ -50,10 +50,9 @@ the escape hatch. One line each here, nothing more — the rule file is the sour
 ## Why it does not gate
 
 Shadow status is a calibration decision, not timidity. `docstring_pin` carries the pack's
-whole false-conviction risk and is unscored for exactly that reason; the population-level
-diff against the calibrated haiku triage is in
-[v5_vs_haiku_shadow_diff.md](v5_vs_haiku_shadow_diff.md), including what a population-level
-comparison cannot tell you.
+whole false-conviction risk and is unscored for exactly that reason. The population-level
+diff against the calibrated haiku triage (Shadow diff #1 in the CHANGELOG) is the evidence,
+and it says what a population-level comparison cannot do: pair the two verdicts row by row.
 
 ---
 
