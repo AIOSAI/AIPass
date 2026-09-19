@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: lock_handler.py
 # Description: Atomic lock management for git PR workflow
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-17
-# Modified: 2026-08-31
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -150,6 +150,7 @@ def acquire_lock(branch_name: str) -> dict:
     """Acquire an atomic lock for git PR workflow.
 
     Uses os.open with O_CREAT | O_EXCL | O_WRONLY for race-free creation.
+    Never waits: a held lock answers blocked at once, naming the holder.
 
     Args:
         branch_name: The branch acquiring the lock (e.g. "@api").
@@ -183,6 +184,24 @@ def acquire_lock(branch_name: str) -> dict:
         holder_info = _read_lock_file(lock_path)
         holder = holder_info.get("branch", "unknown") if holder_info else "unknown"
         msg = f"Lock blocked: already held by {holder}"
+        logger.warning(msg)
+        return {"success": False, "message": msg}
+
+    except PermissionError as exc:
+        # Windows answers an exclusive create against a lock another process is
+        # mid-removing (delete pending) with ACCESS DENIED, not FILE EXISTS. It
+        # used to escape here, out of the door every PR crosses. This door never
+        # waits, so it answers blocked: the holder if the file still reads, else
+        # the denial named - a root that is truly unwritable answers this way
+        # forever, and must not pass for a lock that is merely busy.
+        holder_info = _read_lock_file(lock_path)
+        if holder_info:
+            msg = f"Lock blocked: already held by {holder_info.get('branch', 'unknown')}"
+        else:
+            msg = (
+                f"Lock blocked: create denied ({exc}) - a lock mid-release on Windows, retry; "
+                "if it repeats, the repo root is not writable"
+            )
         logger.warning(msg)
         return {"success": False, "message": msg}
 

@@ -94,6 +94,10 @@ refusal like any other outcome.
 PR lock — a PR commit lands in the same oneline log as any other, and a refusal holding the
 repo-wide lock would block every other citizen while it teaches.
 
+The lock is a non-blocking exclusive create of `.git_pr.lock`, and on Windows a create racing
+another process's release answers access denied rather than file exists, so that arm answers
+`Lock blocked` too — the holder if the file still reads, else the denial named with a retry.
+
 DPLAN-0347 / FPLAN-0593 Phase 3. Pinned by `TestCommitSubjectCap` in `tests/test_git_access.py`
 (including the boundary: a subject exactly at the cap commits) and by two cases in `TestPRHandler`
 in `tests/test_git_module.py`.
