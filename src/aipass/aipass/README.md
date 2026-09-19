@@ -110,8 +110,6 @@ Depth lives in [docs/](docs/), one page per command group:
 | [shared_contract.md](docs/shared_contract.md) | `shared/`, the part of this branch @spawn imports |
 | [known_issues.md](docs/known_issues.md) | Open items, each verified against live code |
 | [probe_hygiene.md](docs/probe_hygiene.md) | How this branch probes the system without mutating it |
-| [test_quality_tooling_research.md](docs/test_quality_tooling_research.md) | Research: the test-quality tooling landscape |
-| [test_suite_governance_research.md](docs/test_suite_governance_research.md) | Research: governing a suite this size |
 
 ## Integration Points
 

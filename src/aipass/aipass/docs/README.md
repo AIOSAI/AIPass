@@ -27,8 +27,3 @@ the depth behind it.
 | [shared_contract.md](shared_contract.md) | `shared/`, the part of this branch @spawn imports |
 | [known_issues.md](known_issues.md) | Open items, each verified against live code |
 | [probe_hygiene.md](probe_hygiene.md) | How this branch probes the system without mutating it |
-| [test_quality_tooling_research.md](test_quality_tooling_research.md) | Research: the test-quality tooling landscape |
-| [test_suite_governance_research.md](test_suite_governance_research.md) | Research: governing a suite this size |
-
-The two research reports are long-form and predate the page cap the rest of this
-directory keeps to — read them with that in mind.
