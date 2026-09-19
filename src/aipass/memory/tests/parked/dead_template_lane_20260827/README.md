@@ -39,7 +39,7 @@ Retired under DPLAN-0318 marker 7, item 3.
 ## Why a tracked park and NOT `.archive/`
 
 They landed in `.archive/dead_template_lane_20260827/` first, and that was
-wrong by this branch's own ruling. Patrick, 2026-08-18, fleet-wide: `.archive/`
+wrong by this branch's own ruling. The owner, 2026-08-18, fleet-wide: `.archive/`
 is the disposal zone — gitignored, cleaned without warning, ships in no clone.
 The reason for keeping these files is that they are *the written record*, and a
 record that exists on exactly one machine is not one. Worse, the pin asserting

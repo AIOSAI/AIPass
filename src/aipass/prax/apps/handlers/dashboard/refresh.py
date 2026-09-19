@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: refresh.py
 # Description: Dashboard Refresh Handler
-# Version: 0.6.1
+# Version: 0.7.0
 # Created: 2026-02-25
-# Modified: 2026-09-11
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 logger = get_direct_logger()
 
 # Same-package imports allowed
-from .operations import create_fresh_dashboard, save_dashboard  # noqa: E402
+from .operations import cap_subject, create_fresh_dashboard, save_dashboard  # noqa: E402
 from .status import calculate_quick_status, merge_quick_status, read_existing_quick_status  # noqa: E402
 
 # Cross-handler imports for central reader
@@ -83,7 +83,7 @@ def _load_branch_paths() -> List[Path]:
     return paths
 
 
-# @flow's section contract, their module 2.0.0 (Patrick's ruling, 2026-08-16).
+# @flow's section contract, their module 2.0.0 (the owner's ruling, 2026-08-16).
 # Mirrors flow/apps/handlers/dashboard/push_branch_dashboard.py::_build_section_data —
 # sections.flow has two writers and both assign it wholesale, so a shape either
 # side does not build is a shape the other side silently deletes.
@@ -146,14 +146,17 @@ def _branch_plan_rows(plans_data: Dict, branch_name: str) -> tuple:
 def _build_open_recent(open_rows: List[Dict]) -> List[Dict]:
     """The bounded window of newest open plans, newest first.
 
-    Byte-identical to @flow's ``_build_open_recent``: the cap lives in the writer,
-    not the reader, and plans with no ``created`` sort last instead of raising.
+    Mirrors @flow's ``_build_open_recent`` decision by decision: the count cap
+    lives in the writer, not the reader, and plans with no ``created`` sort last
+    instead of raising. Subjects are cut to SUBJECT_CAP chars here and in @flow's
+    push — the section has two writers that assign it wholesale, so a cap on one
+    side alone re-inflates on the other side's next plan (DPLAN-0347).
     """
     newest_first = sorted(open_rows, key=lambda p: p.get("created") or "", reverse=True)
     return [
         {
             "plan_id": plan.get("plan_id", ""),
-            "subject": plan.get("subject", ""),
+            "subject": cap_subject(plan.get("subject", "")),
             "created": plan.get("created", ""),
         }
         for plan in newest_first[:OPEN_RECENT_LIMIT]
@@ -196,7 +199,7 @@ def _build_recently_closed(closed_rows: List[Dict]) -> List[Dict]:
     return [
         {
             "id": plan.get("plan_id", ""),
-            "subject": plan.get("subject", ""),
+            "subject": cap_subject(plan.get("subject", "")),
             "closed": plan.get("closed", ""),
         }
         for plan in newest_first[:RECENTLY_CLOSED_LIMIT]

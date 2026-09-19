@@ -23,7 +23,7 @@ def get_host_state_standards() -> str:
     lines = [
         "[bold cyan]CORE PRINCIPLE:[/bold cyan]",
         "  A test may reach the real thing. It may not walk away leaving it",
-        "  changed. Patrick's ruling, 2026-09-08: [italic]tests can't disable",
+        "  changed. The owner's ruling, 2026-09-08: [italic]tests can't disable",
         "  processes, they should restore to exact same state before the test.",
         "  The test is fine and good that it can enter something.[/italic]",
         "  So [bold]touching the host is allowed[/bold]; leaving it changed is",

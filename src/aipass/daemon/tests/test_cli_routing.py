@@ -220,7 +220,7 @@ ACCEPTED = [
 
 
 class TestUnknownArgumentIsRefused:
-    """Patrick's standing ruling, pinned per verb.
+    """The owner's standing ruling, pinned per verb.
 
     An unknown command OR ARGUMENT fails with a non-zero exit and a message
     naming the token. Before wave 2b these twelve surfaces accepted a trailing

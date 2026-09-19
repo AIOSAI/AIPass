@@ -576,7 +576,7 @@ class TestTheNotifierDoor:
 
     @daemon's lifecycle pings import send_telegram_notification and never pass
     the runner's gate, so with telegram switched off they were still delivered
-    (notifier log, 2026-09-13 and 2026-09-14). Telegram is retired (Patrick
+    (notifier log, 2026-09-13 and 2026-09-14). Telegram is retired (the owner's
     ruling 2026-09-14): off means this door sends nothing.
     """
 

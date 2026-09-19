@@ -3,7 +3,7 @@
 # Description: Tests for windows_compat_check.py
 # Version: 1.0.0
 # Created: 2026-05-14
-# Modified: 2026-05-14
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for windows_compat_check — both POSIX-import detection and test-file skipif enforcement."""
@@ -42,6 +42,10 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", bypass_ignore)
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
+    bypass_handler = MagicMock()
+    bypass_handler.load_bypass_rules = MagicMock(return_value=[])
+    bypass_pkg.bypass_handler = bypass_handler
+    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", bypass_handler)
 
     for mod_name in ["aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check"]:
         monkeypatch.delitem(sys.modules, mod_name, raising=False)
@@ -604,3 +608,397 @@ def test_os_kill_signal0_try_except_no_platform_check_fails(tmp_path):
     result = check_module(str(f))
     assert result["passed"] is False
     assert "os.kill(pid, 0)" in result["checks"][0]["message"]
+
+
+# ===========================================================================
+# ADVISORY: exclusive creates that lose the Windows delete-pending race
+# (CI 35192484222 — api's token store lock caught FileExistsError only)
+# ===========================================================================
+
+_INCIDENT_LOCK = (
+    "import os, time\n\n"
+    "def _store_lock(path):\n"
+    "    descriptor = None\n"
+    "    while descriptor is None:\n"
+    "        try:\n"
+    "            descriptor = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)\n"
+    "        except FileExistsError:\n"
+    "            time.sleep(0.05)\n"
+    "    return descriptor\n"
+)
+
+
+def _races(source):
+    import ast
+
+    from aipass.seedgo.apps.handlers.aipass_standards.exclusive_create_race import find_exclusive_create_races
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import _platform_guarded_lines
+
+    tree = ast.parse(source)
+    return find_exclusive_create_races(tree, _platform_guarded_lines(tree))
+
+
+def _advisory_branch(root, source, rel="apps/handlers/lock.py"):
+    target = root / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source, encoding="utf-8")
+    return root
+
+
+def test_lock_race_incident_shape_escapes():
+    races = _races(_INCIDENT_LOCK)
+    assert [line for line, _ in races] == [7]
+    assert "_store_lock()" in races[0][1] and "escapes" in races[0][1]
+
+
+def test_lock_race_permission_error_polled_is_clean():
+    cured = _INCIDENT_LOCK.replace(
+        "    return descriptor\n",
+        "        except PermissionError:\n            time.sleep(0.05)\n    return descriptor\n",
+    )
+    assert _races(cured) == []
+
+
+def test_lock_race_oserror_giving_up_inside_retry_loop_flagged():
+    source = (
+        "import os, time\n\n"
+        "def _acquire_lock(lock_path):\n"
+        "    for attempt in range(10):\n"
+        "        try:\n"
+        "            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)\n"
+        "            return True\n"
+        "        except FileExistsError:\n"
+        "            time.sleep(0.01)\n"
+        "        except OSError:\n"
+        "            return False\n"
+        "    return False\n"
+    )
+    races = _races(source)
+    assert [line for line, _ in races] == [6]
+    assert "gives up" in races[0][1] and "L10" in races[0][1]
+
+
+def test_lock_race_single_shot_oserror_same_outcome_is_clean():
+    source = (
+        "import os\n\n"
+        "def _acquire_lock(lock_file):\n"
+        "    try:\n"
+        "        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)\n"
+        "    except FileExistsError:\n"
+        "        return False\n"
+        "    except OSError:\n"
+        "        return False\n"
+        "    return True\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_fresh_name_per_attempt_is_clean():
+    source = (
+        "import os\n\n"
+        "def _stage(directory, serial):\n"
+        "    for attempt in range(8):\n"
+        "        temp_path = str(directory / f'.{next(serial)}.tmp')\n"
+        "        try:\n"
+        "            fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)\n"
+        "            break\n"
+        "        except FileExistsError:\n"
+        "            if attempt == 7:\n"
+        "                raise\n"
+        "    return fd\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_platform_guarded_is_clean():
+    source = (
+        "import os, sys, time\n\n"
+        "def _store_lock(path):\n"
+        "    if sys.platform != 'win32':\n"
+        "        while True:\n"
+        "            try:\n"
+        "                return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)\n"
+        "            except FileExistsError:\n"
+        "                time.sleep(0.05)\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_outer_try_catching_oserror_is_clean():
+    source = (
+        "import os\n\n"
+        "def acquire(lock):\n"
+        "    try:\n"
+        "        try:\n"
+        "            os.open(lock, os.O_CREAT | os.O_EXCL)\n"
+        "        except FileExistsError:\n"
+        "            return False\n"
+        "    except OSError:\n"
+        "        return False\n"
+        "    return True\n"
+    )
+    assert _races(source) == []
+
+
+def test_lock_race_open_x_mode_escapes():
+    source = (
+        "def write_pid(pid_file, pid):\n"
+        "    try:\n"
+        "        with open(pid_file, 'x', encoding='utf-8') as fh:\n"
+        "            fh.write(str(pid))\n"
+        "    except FileExistsError:\n"
+        "        return False\n"
+        "    return True\n"
+    )
+    assert [line for line, _ in _races(source)] == [3]
+
+
+def test_lock_race_create_without_exists_handler_is_ignored():
+    source = "import os\n\ndef create(p):\n    return os.open(p, os.O_CREAT | os.O_EXCL)\n"
+    assert _races(source) == []
+
+
+def test_lock_race_advisory_line_never_reaches_the_score(tmp_path):
+    branch = _advisory_branch(tmp_path, _INCIDENT_LOCK)
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info, check_module
+
+    assert check_branch_info(str(branch)) == [
+        "windows_compat lock race (advisory): apps/handlers/lock.py:7 exclusive create in _store_lock() catches "
+        "FileExistsError only - a Windows delete-pending PermissionError escapes where 'exists' is handled"
+    ]
+    result = check_module(str(branch / "apps" / "handlers" / "lock.py"))
+    assert result["score"] == 100 and result["passed"] is True
+
+
+def test_lock_race_advisory_corpus_is_apps_only(tmp_path):
+    for rel in ("tests/lock_probe.py", "apps/handlers/.archive/old_lock.py", "tools/lock_tool.py"):
+        _advisory_branch(tmp_path, _INCIDENT_LOCK, rel=rel)
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
+
+    assert check_branch_info(str(tmp_path)) == []
+
+
+def test_lock_race_advisory_respects_line_bypass(tmp_path):
+    import sys
+
+    branch = _advisory_branch(tmp_path, _INCIDENT_LOCK)
+    handler = sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"]
+    handler.load_bypass_rules.return_value = [
+        {"file": "apps/handlers/lock.py", "standard": "windows_compat", "lines": [7], "reason": "test"}
+    ]
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
+
+    assert check_branch_info(str(branch)) == []
+    handler.load_bypass_rules.assert_called_once_with(str(branch))
+
+
+# ===========================================================================
+# ADVISORY: a path asserted against the repr of a mock call
+# (CI 35416653326 — three flow tests: str(lock) in " ".join(str(c) for c in ...))
+# ===========================================================================
+
+_INCIDENT_REPR = (
+    "def test_denial(tmp_path, mock_logger):\n"
+    "    central_dir = tmp_path / '.ai_central'\n"
+    "    lock = (central_dir / 'PLANS.central.json').with_suffix('.lock')\n"
+    "    logged = ' '.join(str(c) for c in mock_logger.error.call_args_list)\n"
+    "    assert str(lock) in logged\n"
+    "    assert '3 attempts' in logged\n"
+)
+
+
+def _repr_paths(source):
+    import ast
+
+    from aipass.seedgo.apps.handlers.aipass_standards.mock_repr_path import find_mock_repr_paths
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import _platform_guarded_lines
+
+    tree = ast.parse(source)
+    return find_mock_repr_paths(tree, _platform_guarded_lines(tree))
+
+
+def _test_fn(*body):
+    return "def test_x(tmp_path, m):\n    p = tmp_path / 'a.lock'\n" + "".join(f"    {line}\n" for line in body)
+
+
+def test_mock_repr_incident_shape_flagged_once():
+    found = _repr_paths(_INCIDENT_REPR)
+    assert [line for line, _ in found] == [5]
+    assert "red on Windows" in found[0][1]
+
+
+def test_mock_repr_flow_cure_reading_the_real_args_is_clean():
+    cured = _INCIDENT_REPR.replace(
+        "str(c) for c in mock_logger.error.call_args_list",
+        "str(arg) for c in mock_logger.error.call_args_list for arg in c.args",
+    )
+    assert _repr_paths(cured) == []
+
+
+def test_mock_repr_real_message_one_level_inside_args_is_clean():
+    source = _test_fn(
+        "assert str(p) in m.call_args[0][0]",
+        "assert str(p) in m.call_args.args[0]",
+        "assert str(p) in m.call_args_list[0].kwargs['msg']",
+        "assert any(str(p) in c.args[0] for c in m.call_args_list)",
+        "assert str(p) in str(m.call_args[0][0])",
+    )
+    assert _repr_paths(source) == []
+
+
+def test_mock_repr_record_and_container_reprs_flagged():
+    source = _test_fn(
+        "assert f'{tmp_path}' in str(m.call_args)",
+        "assert str(p) in str(m.call_args.args)",
+        "assert str(p.parent) in repr(m.call_args_list)",
+        "args, kwargs = m.call_args",
+        "assert str(p) in str(args)",
+    )
+    assert [line for line, _ in _repr_paths(source)] == [3, 4, 5, 7]
+
+
+def test_mock_repr_loop_and_comprehension_elements_flagged():
+    source = _test_fn(
+        "printed = [str(c) for c in m.print.call_args_list]",
+        "assert any(str(p) in s for s in printed)",
+        "for c in m.call_args_list:",
+        "    assert str(p) in str(c)",
+        "assert any(os.fspath(p) in f'{c}' for c in m.mock_calls)",
+        "for line in printed:",
+        "    assert str(p) in line",
+    )
+    assert [line for line, _ in _repr_paths(source)] == [4, 6, 7, 9]
+
+
+def test_mock_repr_not_in_is_vacuous_and_search_methods_flagged():
+    source = _test_fn(
+        "text = ' '.join(map(str, m.call_args_list)).lower()",
+        "assert str(p) not in text",
+        "assert text.count(str(p)) == 1",
+        "assert text == str(p)",
+    )
+    found = _repr_paths(source)
+    assert [line for line, _ in found] == [4, 5, 6]
+    assert "vacuous on Windows" in found[0][1]
+    assert ".count()" in found[1][1]
+
+
+def test_mock_repr_path_sides_repr_cannot_change_are_clean():
+    source = _test_fn(
+        "logged = ' '.join(str(c) for c in m.call_args_list)",
+        "assert p.name in logged",
+        "assert p.as_posix() in logged",
+        "assert str(Path('single.lock')) in logged",
+        "assert repr(str(p)) in logged",
+        "assert str(p).replace('\\\\', '\\\\\\\\') in logged",
+        "assert str(p) in logged.replace('\\\\\\\\', '\\\\')",
+        "assert 'files ready' in logged",
+    )
+    assert _repr_paths(source) == []
+
+
+def test_mock_repr_platform_skips_are_clean():
+    source = (
+        "import sys, pytest\n\n"
+        "@pytest.mark.skipif(sys.platform == 'win32', reason='posix paths')\n"
+        + _test_fn("assert str(p) in str(m.call_args)")
+        + "\n@pytest.mark.skipif(os.name == 'nt', reason='posix paths')\n"
+        "class TestPosix:\n"
+        "    def test_y(self, tmp_path, m):\n"
+        "        assert str(tmp_path) in str(m.call_args)\n"
+        "\ndef test_z(tmp_path, m):\n"
+        "    if sys.platform != 'win32':\n"
+        "        assert str(tmp_path) in str(m.call_args)\n"
+    )
+    assert _repr_paths(source) == []
+
+
+def test_mock_repr_advisory_line_reads_tests_and_never_scores(tmp_path):
+    branch = _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/test_lock.py")
+    _advisory_branch(tmp_path, _INCIDENT_REPR, rel="apps/handlers/helper.py")
+    _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/.archive/test_old.py")
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info, check_module
+
+    assert check_branch_info(str(branch)) == [
+        "windows_compat mock repr path (advisory): tests/test_lock.py:5 a path is searched for in a mock call's "
+        "repr - repr doubles each Windows backslash, red on Windows"
+    ]
+    assert check_module(str(branch / "tests" / "test_lock.py"))["score"] == 100
+
+
+def test_mock_repr_advisory_respects_line_bypass(tmp_path):
+    import sys
+
+    branch = _advisory_branch(tmp_path, _INCIDENT_REPR, rel="tests/test_lock.py")
+    handler = sys.modules["aipass.seedgo.apps.handlers.bypass.bypass_handler"]
+    handler.load_bypass_rules.return_value = [
+        {"file": "tests/test_lock.py", "standard": "windows_compat", "lines": [5], "reason": "test"}
+    ]
+    from aipass.seedgo.apps.handlers.aipass_standards.windows_compat_check import check_branch_info
+
+    assert check_branch_info(str(branch)) == []
+
+
+# CI 35426157867 — memory's marker-7 test: the paths came back from a helper
+# (home, foreign = self._fenced_world(tmp_path, ...)), which the flow pass read
+# as opaque, so the advisory nominated nothing.
+_HELPER_RETURN = (
+    "from unittest.mock import MagicMock\n"
+    "\n"
+    "class TestFence:\n"
+    "    @staticmethod\n"
+    "    def _world(tmp_path, monkeypatch):\n"
+    "        home = tmp_path / 'aipass'\n"
+    "        foreign = tmp_path / 'other_root' / 'local.json'\n"
+    "        return home, foreign\n"
+    "\n"
+    "    def test_refused(self, tmp_path, monkeypatch):\n"
+    "        home, foreign = self._world(tmp_path, monkeypatch)\n"
+    "        said = MagicMock()\n"
+    "        errors = ' '.join(str(call) for call in said.error.call_args_list)\n"
+    "        assert str(foreign.resolve()) in errors and str(home.resolve()) in errors, errors\n"
+)
+
+
+def test_mock_repr_path_returned_by_a_same_module_helper_flagged():
+    found = _repr_paths(_HELPER_RETURN)
+    assert [line for line, _ in found] == [14]
+    assert "red on Windows" in found[0][1]
+
+
+def test_mock_repr_helper_cure_joining_the_rendered_args_is_clean():
+    cured = _HELPER_RETURN.replace("str(call) for call in", "str(arg) for call in").replace(
+        "call_args_list)", "call_args_list for arg in call.args)"
+    )
+    assert _repr_paths(cured) == []
+
+
+def test_mock_repr_helper_returns_read_by_kind_not_by_call():
+    source = (
+        "def _lock(tmp_path):\n"
+        "    return tmp_path / 'a.lock'\n"
+        "\n"
+        "def _word():\n"
+        "    return 'refused'\n"
+        "\n"
+        "def _logged(m):\n"
+        "    return ' '.join(str(c) for c in m.call_args_list)\n"
+        "\n"
+        "def _either(tmp_path, flag):\n"
+        "    if flag:\n"
+        "        return tmp_path / 'x'\n"
+        "    return 'x'\n"
+        "\n"
+        "def test_x(tmp_path, m):\n"
+        "    lock = _lock(tmp_path)\n"
+        "    logged = ' '.join(str(c) for c in m.call_args_list)\n"
+        "    assert str(lock) in logged\n"
+        "    assert _word() in logged\n"
+        "    assert str(tmp_path) in _logged(m)\n"
+        "    assert str(_either(tmp_path, True)) in logged\n"
+        "    a, b = tmp_path / 'a', 'word'\n"
+        "    assert b in logged\n"
+        "    assert str(a) in logged\n"
+        "    assert str(obj._lock(tmp_path)) in logged\n"
+    )
+    assert [line for line, _ in _repr_paths(source)] == [18, 20, 24]

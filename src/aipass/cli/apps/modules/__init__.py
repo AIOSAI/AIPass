@@ -12,6 +12,10 @@ Import these in your branch modules:
     # Operation templates
     from aipass.cli.apps.modules import operation_start, operation_complete
 
+    # A value that may carry square brackets, into a markup-parsing function
+    from aipass.cli.apps.modules import escape
+    success(escape(value))
+
 PATTERN (from Prax):
 - This directory contains PUBLIC API
 - apps/handlers/ contains PRIVATE implementation
@@ -25,6 +29,9 @@ from aipass.cli.apps.modules.display import console, err_console
 
 # Display functions
 from aipass.cli.apps.modules.display import header, success, error, warning, fatal, section
+
+# Literal brackets — header/success/section/templates parse markup, error/warning/fatal do not
+from aipass.cli.apps.modules.display import escape
 
 # Exit-code failure-flag API
 from aipass.cli.apps.modules.display import mark_command_failed, command_failed, reset_command_state, resolve_exit
@@ -43,6 +50,8 @@ __all__ = [
     "warning",
     "fatal",
     "section",
+    # Literal brackets
+    "escape",
     # Exit-code failure-flag API
     "mark_command_failed",
     "command_failed",

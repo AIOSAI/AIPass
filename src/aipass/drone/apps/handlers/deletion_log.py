@@ -8,7 +8,7 @@
 
 """Durable record of every delete drone performs.
 
-Patrick's ruling: "if something deletes, there should be a record of it."
+The owner's ruling: "if something deletes, there should be a record of it."
 ``drone rm`` is the fleet's only sanctioned delete path — raw recursive rm is
 gate-blocked — so this is the choke point where the record belongs.
 
@@ -267,7 +267,7 @@ def _append_record(record: dict, log_path: Path) -> None:
 def ledger_beside(name: str, project_root: Path | None = None) -> Path:
     """Path for another of drone's ledgers, kept in the same folder as this one.
 
-    ``.ai_central`` is the one place Patrick looks for who did a consequential
+    ``.ai_central`` is the one place the owner looks for who did a consequential
     thing, so a second ledger (the external-repo git door, DPLAN-0344) sits
     beside this one rather than inventing a home — and follows it wherever
     ``AIPASS_DELETION_LOG`` points, which keeps a test run out of the live store

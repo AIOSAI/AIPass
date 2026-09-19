@@ -9,7 +9,7 @@
 """The anchor is written by code, from a template, or it is not written.
 
 FPLAN-0460 phase 4. @devpulse created AIPASS_ROOTS.json by hand this morning and
-Patrick ruled on seeing it, verbatim: "jsons are normally created by code, so if
+The owner ruled on seeing it, verbatim: "jsons are normally created by code, so if
 they corrupt or get deleted they are always rebuilt from default settings from a
 template directory."
 
@@ -23,11 +23,11 @@ drop.
 
 HEALING IS A SEPARATE, DELIBERATE VERB, never a side effect of reading. Stated
 here because it is a design ruling and not an implementation detail: an automatic
-rebuild would replace Patrick's declarations with an empty scaffold as a
+rebuild would replace the owner's declarations with an empty scaffold as a
 side effect of any lane that happened to read the file first -- rollover, lint,
 health, @daemon's scheduler -- and because ZERO ROOTS IS A LEGAL STATE, nothing
 downstream would fail. The system would keep running and quietly maintain
-nothing. That is re-declaring on Patrick's behalf, which is exactly what
+nothing. That is re-declaring on the owner's behalf, which is exactly what
 declaration-is-the-credential forbids. Same principle as the One Law's fourth
 hat: unreadable gold REFUSES rather than scoring zero.
 
@@ -327,7 +327,7 @@ class TestOnePredicateNotTwo:
 
 
 class TestTheLiveFileMatchesWhatTheVerbsWouldProduce:
-    """Task 4: adopt Patrick's hand-made file, or say exactly how it differs."""
+    """Task 4: adopt the owner's hand-made file, or say exactly how it differs."""
 
     def test_the_blessed_declarations_survive_a_regeneration(self, tmp_path):
         live = rs.find_repo_root() / rs.DECLARED_ROOTS
@@ -349,13 +349,13 @@ class TestTheLiveFileMatchesWhatTheVerbsWouldProduce:
 
         rebuilt = json.loads((stand_in / rs.DECLARED_ROOTS).read_text(encoding="utf-8"))
         assert rebuilt["roots"] == blessed["roots"], (
-            "the verbs do not reproduce Patrick's declarations -- his blessing is what must survive"
+            "the verbs do not reproduce the owner's declarations -- his blessing is what must survive"
         )
 
     def test_the_live_file_is_exactly_what_the_verbs_produce(self, tmp_path):
         """After adoption there is no daylight between the file and its generator.
 
-        The declarations are Patrick's and are asserted above; THIS is the pin
+        The declarations are the owner's and are asserted above; THIS is the pin
         that says the hand-made file has been brought under code management
         rather than merely tolerated. If it fails, the live file was edited by
         hand again.
@@ -468,7 +468,7 @@ class TestTheDeclaredSpellingIsPosixOnEveryMachine:
     containing a backslash, not a path — so the row that a Windows box wrote
     would silently declare a root that does not exist when read back on Linux.
 
-    The anchor is a file Patrick blesses. It has to read the same to a human on
+    The anchor is a file the owner blesses. It has to read the same to a human on
     either machine, and it has to diff.
     """
 

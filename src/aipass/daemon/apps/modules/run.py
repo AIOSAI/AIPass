@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: run.py
 # Description: Manual one-tick scheduler command (drone @daemon run)
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-06-15
-# Modified: 2026-09-11
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -200,6 +200,12 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
 
     if job.get("schedule", {}).get("type") == ROTATION_TYPE:
         ok, detail = fire_rotation(job, runstate, header=header)
+        # Logged here, not in rotation: prax files a line under the calling
+        # module, and every tick outcome belongs in logs/run.log.
+        if ok:
+            logger.info("[run] Fired %s/%s: %s", job["owner"], job["id"], detail)
+        else:
+            logger.warning("[run] Failed to fire %s/%s: %s", job["owner"], job["id"], detail)
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
     # Cross-branch handler import authorized by DPLAN-0204 §2.8

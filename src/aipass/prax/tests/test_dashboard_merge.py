@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_dashboard_merge.py
 # Description: quick_status has many writers — none may delete another's key
@@ -11,7 +10,7 @@
 
 DASHBOARD.local.json's quick_status block has several writers. Each one used to
 build a fresh dict and assign it over the whole block, so every writer silently
-deleted the keys it did not know about. Patrick saw the symptom on his devpulse
+deleted the keys it did not know about. The owner saw the symptom on his devpulse
 card: 0 todos while local.json held 9. @flow fixed their push and found the
 mirror here — prax refresh drops their ``commons_mentions`` on every run.
 
@@ -245,6 +244,16 @@ class TestPushTemplateIsNotAWreckingBall:
         pusher = _load(PUSHER_PATH)
         assert "commons_mentions" not in pusher.DEPRECATED_QUICK_STATUS_KEYS
 
+    def test_the_differ_reads_the_pushers_list_not_its_own_copy(self):
+        """The adviser carried a second copy of the policy and kept recommending
+        the deletion of flow's live key for weeks after the writer was fixed
+        (docs/dashboard.md, 2026-08-25). One list, the pusher's, or the advice
+        and the write disagree again."""
+        pusher = _load(PUSHER_PATH)
+        differ = _load("aipass.prax.apps.handlers.dashboard.template_differ")
+        assert differ.DEPRECATED_QUICK_STATUS_KEYS is pusher.DEPRECATED_QUICK_STATUS_KEYS
+        assert "commons_mentions" not in differ.DEPRECATED_QUICK_STATUS_KEYS
+
     def test_structural_update_preserves_foreign_key(self, tmp_path):
         pusher = _load(PUSHER_PATH)
         branch = _seed_branch(tmp_path, {"new_mail": 0, **FOREIGN})
@@ -286,7 +295,7 @@ class TestActionRequiredMatchesItsOwnSummary:
 
     Identical counts, opposite flag from the two writers — the same clobber
     species as Finding 1, moved out of a key and into a boolean, and it is the
-    field Patrick's card reads for 'needs attention'.
+    field the owner's card reads for 'needs attention'.
     """
 
     @pytest.mark.parametrize("name,calc", CALCULATORS)

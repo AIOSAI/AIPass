@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_check.py
 # Description: Trinity Memory File Standards Checker
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-25
 # Modified: 2026-09-15
 # =============================================
@@ -29,10 +29,11 @@ standard exists because the old gate measured unparseable shapes as zero chars
 and passed them.  So: a missing, unreadable or invalid file fails every group
 that depends on it, loudly and by name; a field of the wrong type is reported
 with the type actually found and is never coerced or ``len()``-ed; an
-unreadable ``memory.config.json`` fails the Char caps group instead of falling
-back to remembered numbers; unreadable gold templates fail the Meta lines
-group instead of falling back to a copied-out prose string.  There is no code
-path where something unreadable produces a passing check.
+unreadable ``memory.config.json`` fails the Char caps AND Entry shapes groups
+instead of falling back to remembered numbers or a remembered shape;
+unreadable gold templates fail the Meta lines group instead of falling back to
+a copied-out prose string.  There is no code path where something unreadable
+produces a passing check.
 
 Unmeasurable has a THIRD answer, and it is not zero
 ---------------------------------------------------
@@ -58,12 +59,17 @@ rounded up into a pass.
 Per-group subscore rule (proportional where a natural denominator exists,
 binary 0/100 otherwise):
 
-* Entry shapes (30) -- proportional over every entry in the four containers.
-  A container that is missing, is not a list, or lives in an unreadable file
-  counts as one failed unit rather than being skipped.  Carries the 5 points
-  of the retired Todos hygiene group (DPLAN-0345, 2026-09-15): todos have no
-  ``status`` field now, so a todo kept as done can only be spelled as a key
-  outside the closed shape, and this group already flags that by name.
+* Entry shapes (30) -- proportional over every entry in the four containers,
+  measured against the shape @memory's config publishes under
+  ``entry_limits.entry_types.<type>.fields`` (FPLAN-0593 Phase 2), never
+  against a shape carried here.  A container that is missing, is not a list,
+  or lives in an unreadable file counts as one failed unit rather than being
+  skipped.  Binary 0 when memory.config.json cannot be read, and an error row
+  naming the key when it publishes no ``fields`` for a section, because the
+  shape is never assumed any more than the cap numbers are.  Carries the 5
+  points of the retired Todos hygiene group (DPLAN-0345, 2026-09-15): todos
+  have no ``status`` field now, so a todo kept as done can only be spelled as
+  a key outside the closed shape, and this group already flags that by name.
 * Top-level keys (15) -- proportional over 17 fixed sub-rules: eight per file
   (file parses, key set, key order, duplicate keys, document_metadata fields,
   no ``status`` block, document_name, managed_by) plus one cross-file
@@ -112,6 +118,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.trinity_groups import (
     _prose_from_templates,
     _stray_names,
     _usage_from_templates,
+    entry_shapes,
     expected_meta_line,
     is_versioned_backup,
     validate_entry_shape,
@@ -121,12 +128,16 @@ from aipass.seedgo.apps.handlers.aipass_standards.trinity_groups import (
 # module. expected_meta_line, is_versioned_backup and validate_entry_shape now
 # live in trinity_groups; they are re-exported here because callers have always
 # imported them from the checker and the split must not move their address.
+# entry_shapes joins them for the same reason: validate_entry_shape now takes
+# the shape @memory publishes, and a caller reaching one address for the
+# validator and another for its input is how the two come to disagree.
 __all__ = [
     "AUDIT_SCOPE",
     "BRANCH_INPUTS",
     "GROUP_WEIGHTS",
     "check_branch",
     "check_branch_info",
+    "entry_shapes",
     "expected_meta_line",
     "external_inputs",
     "is_clean_checkout",

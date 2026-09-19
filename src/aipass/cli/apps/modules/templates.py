@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: templates.py
 # Description: CLI Templates Module — reusable operation output patterns
-# Version: 0.3.0
+# Version: 0.3.1
 # Created: 2025-11-12
-# Modified: 2025-11-15
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -75,9 +75,8 @@ def print_help():
     CONSOLE.print("  [green]# Run demo[/green]")
     CONSOLE.print("  drone @cli templates demo")
     CONSOLE.print()
-    CONSOLE.print("  [green]# Via drone[/green]")
-    CONSOLE.print("  drone cli templates")
-    CONSOLE.print("  drone cli ops demo")
+    CONSOLE.print("  [green]# Help for this module[/green]")
+    CONSOLE.print("  drone @cli templates --help")
     CONSOLE.print()
 
     CONSOLE.print("[bold cyan]Integration Example:[/bold cyan]")
@@ -94,7 +93,7 @@ def print_help():
     CONSOLE.print()
 
     CONSOLE.print("[bold cyan]Reference:[/bold cyan]")
-    CONSOLE.print("  [dim]See CODE_STANDARDS/cli.md[/dim]")
+    CONSOLE.print("  [dim]See docs/display_api.md[/dim]")
     CONSOLE.print()
 
     CONSOLE.print("[bold]Commands: templates, demo, --help[/bold]")

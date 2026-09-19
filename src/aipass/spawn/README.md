@@ -2,578 +2,140 @@
 
 # SPAWN
 
-**The agent factory and branch lifecycle manager for AIPass.**
-
-**Module:** `aipass.spawn` | **Version:** 1.0.0 | **Created:** 2026-03-05
-
----
-
-## What I Do
-
-- Create new branches from the one citizen template — class (`manager` / `specialist`) is decided at mint
-- Update branches from templates (single or batch by class, with --dry-run)
-- Delete branches (archive + deregister)
-- Sync registry against filesystem
-- Regenerate template registries with fresh file hashes
-- Replace all `{{PLACEHOLDER}}` patterns with branch-specific values
-- Register new citizens in `AIPASS_REGISTRY.json`
-- Mint each citizen's own `citizen_id` at birth — and a brand-new external project's own registry credential
+**Purpose:** The agent factory and branch lifecycle manager for AIPass. Mints citizens from
+the one template, updates branches from it, retires them into the archive, and keeps the
+registry agreeing with the filesystem.
+**Module:** `aipass.spawn`
+**Version:** 2.1.0
+**Created:** 2026-03-05
 
 ---
 
 ## Quick Start
 
 ```bash
-# Create a new branch
 drone @spawn create /path/to/my_agent --role "Analyst" --purpose "Data reports"
-
-# Preview an update before applying
-drone @spawn update @my_agent
-
-# Apply the update
-drone @spawn update @my_agent --apply
-
-# Check registry health
-drone @spawn sync-registry
+drone @spawn update @my_agent              # preview; --apply executes
+drone @spawn sync-registry                 # registry against filesystem
+drone @spawn delete @my_agent --dry-run    # preview a retirement
 ```
 
 ---
 
-## Citizen Classes
+## What It Does
 
-Every branch belongs to a **citizen class**, which determines its template:
+- **Mints citizens.** A new branch is copied from `templates/citizen/`, every
+  `{{PLACEHOLDER}}` is replaced, an identity is minted once and written twice (passport and
+  registry entry), the tree is verified against the template's own manifest, and a birth
+  receipt is stamped before the citizen is ever registered. A mint that cannot be completed
+  refuses instead of half-registering.
+- **Updates branches from the template.** Preview-only until `--apply`. Missing files are
+  added, JSON is deep-merged, `.py` is skipped by design, markdown is compared and reported
+  but never written, and a branch's own `.updateignore` is honoured before every other rule.
+- **Retires citizens.** Archive the whole tree including its memories, then deregister — and
+  refuse outright while the passport still says the citizen is registered.
+- **Keeps the registry true.** Scan, repair, relocate, and migrate passports to the current
+  schema; each write-capable lane previews first and needs an explicit flag to act.
+- **Owns the birth shape.** The template is the source of truth for what a citizen is, and a
+  newborn is pinned to start inside every startup cap the fleet's other branches publish.
 
-| Class | What It Means |
-|-------|---------------|
-| `manager` | A project's first citizen (citizen #1) — manages the project. ai_mail's wake-block keys on it: managers are emailed, never dispatched |
-| `specialist` (default) | Every citizen minted after the first |
+It never edits a living branch's code: `.py` and `.md` are the owner's, and a template
+change reaches them through a dispatch, not through this engine.
 
-Both classes mint from the **one** template, `templates/citizen/` — full 3-layer scaffold:
-.trinity/, .aipass/, apps/ (modules/ + handlers/ incl. json shim), tests/, docs/, logs/ —
-49 files, 24 dirs. The class is a *behavioral* label in `identity.citizen_class`, not a
-choice of scaffold shape (DPLAN-0319), which is why the template directory is named for
-what it is rather than for a class.
+---
 
-**The class is decided at mint, not typed.** Citizen #1 of a project is born `manager`,
-everyone after is `specialist`. An explicit class still wins if you pass one. The retired
-names `aipass_framework`, `project_agent` and `builder` **refuse loudly** at every entry
-point — they are never silently remapped, because a passport that quietly disagrees with
-the value a caller typed is the exact drift the rename ends.
+## Live Inventory
 
-`admin` is permanently refused as a class or `--template` value — see Grant Admin below.
+The list of modules and commands is **generated from the code that runs them**, so it is not
+written down on this page and cannot go stale:
 
-**Class is resolved from the passport, not guessed.** A leading positional is read
-as a target path only when it is either a known class (`create <class> <path>`) or
-carries an explicit path marker (a separator, `~`, `.`/`..`, or `@`). A bare token
-with neither — `create wizard` — refuses by name instead of silently making a
-branch called WIZARD in `./wizard` (APLAN-0007, fixed).
+- `drone @spawn` — the self-map: every discovered module with its one-line description.
+- `drone @spawn --help` — the command surface, its flags and its examples.
+- `drone @spawn --version` — the version string.
+
+---
+
+## How To Reach Me
+
+- Mint, update or retire a citizen: run the verbs above, or hand the work over with
+  `drone @ai_mail dispatch @spawn "Subject" "Body"`.
+- A template change that must reach living branches is a conversation, not an update run:
+  say which file and which branches, and it comes back with a measurement.
+- A branch that wants files protected from updates writes its own `.updateignore` — no
+  permission needed from here.
 
 ---
 
 ## Commands
 
-All commands run through `drone @spawn <command>`.
-
-### Create
-
-```bash
-drone @spawn create <path>                                    # Class decided at mint (manager if first, else specialist)
-drone @spawn create <path> --role "Analyst" --purpose "Reports"  # With identity
-drone @spawn create <path> --dry-run                           # Preview without touching disk
-drone @spawn create @existing                                  # Adopt pre-existing agent
-drone @spawn create ~/Projects/MyProject/agent_name            # External project (targets that project's own registry)
-```
-
-### Update
-
-Update is **preview-only by default** — `--apply` required to execute changes.
-
-```bash
-drone @spawn update @branch_name                               # Preview changes (dry-run default)
-drone @spawn update @branch_name --apply                       # Execute changes
-drone @spawn update specialist --all --apply                   # All specialist-class branches
-drone @spawn update @branch_name --dry-run                     # Explicit preview (same as default)
-```
-
-#### `.updateignore` — the owner decides what update skips
-
-A branch protects its own files with a `.updateignore` at its root, beside `.trinity/`.
-Same fashion as `.gitignore` and `.backupignore`: one pattern per line, `#` comments,
-blank lines ignored, a trailing `/` for a directory and everything under it, a pattern
-with no slash also matching that filename at any depth. No negation in v1.
-
-```
-.trinity/passport.json
-docs.local/
-```
-
-A matched file is **never written, never merged, never backed up**, and the preview
-reports it as `skipped (.updateignore)` on its own line rather than as a warning — an
-owner-protected file is a decision already made. Spawn never creates or modifies the
-file; its absence protects nothing.
-
-One name, two doors: `aipass init update` honours the same contract at *project* roots
-(`tier1_navmap.md`, `.aipass/prompts/`), so an owner learns the syntax once. The case it
-was built for is a preview that proposed merging template boilerplate into a citizen's
-passport — with the passport named here, it is hers, and the rest of the update proceeds.
-
-### Delete
-
-```bash
-drone @spawn delete @branch_name --dry-run                     # Preview
-drone @spawn delete @branch_name --yes                         # Archive + deregister
-```
-
-The archive copy skips build and VCS noise — `ARCHIVE_EXCLUDE` in `repair_ops.py`
-is `.venv`, `.git`, `__pycache__`, `.chroma`, `node_modules`, `.pytest_cache`. The
-same set guards `repair --relocate`, so neither lane carries a virtualenv into
-`.archive/`.
-
-**Delete refuses protected branches, and every live citizen is protected.**
-`is_protected()` guards three layers, any one sufficient: the hardcoded floor
-(spawn, devpulse, drone), a registry entry carrying `owner: true`, and a passport
-with `citizenship.registered: true`. Since `create` writes `registered: true`, a
-branch is protected from the moment it exists. There is no `--force` — retiring a
-citizen means clearing that passport flag first.
-
-Verified live 2026-08-13 (APLAN-0007): the `infrastructure (devpulse, drone, spawn)`
-and `active citizen` refusals both fire and exit 1. The `registry owner` layer is
-**unreachable in the live fleet** — `devpulse` is the only entry carrying
-`owner: true` and it short-circuits at layer 1, so no branch can reach layer 2.
-It is covered by unit tests against a synthetic registry, not by live behaviour.
-
-### Sync and Regenerate
-
-```bash
-drone @spawn sync-registry                                     # Report healthy/stale/unregistered (registry found from CWD)
-drone @spawn sync-registry <project_path>                      # Same report against another project's registry
-drone @spawn sync-registry --fix                               # Rebuild .spawn/ tracking, register strays, fix passport registry_ids
-drone @spawn sync-registry --fix --dry-run                     # Preview what --fix would change
-drone @spawn sync-registry --check [--json]                    # Owner/identity health check only — never writes
-drone @spawn regenerate-registry                               # Regenerate the citizen template hashes
-drone @spawn regenerate-registry specialist                    # Named class (both classes share one template)
-drone @spawn regenerate-registry --all                         # Every template directory
-
-# Passport 2.0 migration — one-shot, dry-run by default (DPLAN-0319)
-drone @spawn migrate-passports                                 # Measure every fleet passport, write nothing
-drone @spawn migrate-passports --only @canary                  # Restrict to one branch
-drone @spawn migrate-passports --confirm                       # Execute: backup to passport.json.pre_v2_backup, then write
-
-# Passport seeds — regenerate each branch's tracked seed, dry-run by default
-drone @spawn export-seeds                                      # Measure every branch's live passport vs its seed, write nothing
-drone @spawn export-seeds --only @canary                       # Restrict to one branch
-drone @spawn export-seeds --root <path>                        # Another project root
-drone @spawn export-seeds --confirm                            # Execute: rewrite .aipass/passport.seed.json
-
-# Repair — the bare scan is read-only ALWAYS; only --relocate and --clean-pollution execute, and both need --apply
-drone @spawn repair <project_path>                             # Scan: pollution + registry path mismatches (read-only)
-drone @spawn repair --relocate @branch src/pkg/branch --apply  # Move branch to new location
-drone @spawn repair --relocate @branch path --relocate-artifacts --apply  # Move + .chroma/
-drone @spawn repair <project_path> --clean-pollution --apply    # Archive + remove duplicate dirs
-```
-
-### Registry entry shape — mixed casing is historical, not a rule
-
-`AIPASS_REGISTRY.json` carries 18 entries in two shapes, measured 2026-09-05: six
-UPPERCASE names with registry-relative paths (`BACKUP`, `CANARY`, `COMMONS`,
-`DAEMON`, `HOOKS`, `SKILLS`) and twelve lowercase names with absolute paths
-(@devpulse's finding, 2026-09-05).
-
-**The uppercase-plus-relative shape is what `create` writes today.** `core.py` hands
-`add_to_registry` the uppercased name (`branch_upper`) and a path relativized to the
-registry's own directory, falling back to absolute only when relativization raises.
-So the six are spawn's own lane; the twelve lowercase absolute entries predate it or
-were written by another hand.
-
-Nothing reads the difference: registry lookups lowercase both sides before comparing
-(`is_protected`, `ensure_admin`), and a path is resolved as `registry_dir / entry_path`,
-which pathlib returns unchanged when the entry is already absolute. It is cosmetic —
-two shapes a reader sees and no code does. **Normalising is not done here** and
-`sync-registry` does not currently touch casing; whether it should is @devpulse's call
-to make, not a defect to fix silently under a docs pass. — `repair_project()` reports and
-never writes, so the flag changes nothing on the scan path. It is the two submodes that
-act, and each refuses to act without `--apply`.
-
-### Grant Admin (ceremony)
-
-The devpulse-only admin privilege (DPLAN-0288). Spawn owns exactly one leg of it:
-the `admin: true` flag on the devpulse registry entry. The flag **grants nothing on
-its own** — the dispatch lane verifies five legs (verified caller, cert path, cert
-content, HMAC signature, this flag).
-
-```bash
-drone @spawn grant-admin                                       # Write admin:true on the devpulse entry
-drone @spawn grant-admin --registry /path/AIPASS_REGISTRY.json # Explicit registry
-```
-
-There is no branch argument: the seat is a constant. `admin` is also permanently
-refused as a citizen class or template value — `create`, `update` and `sync` all
-say no by name. Admin is never minted from a template; only Patrick's ceremony
-grants it.
-
-### Introspection
-
-```bash
-drone @spawn                                                   # No args — lists connected modules
-drone @spawn --help                                            # Full help text
-drone @spawn --version                                         # Version string
-```
-
-### Exit codes — a refusal never exits 0
-
-`main()` calls `reset_command_state()` on entry (the failure flag is process-level and
-drone routes in-process, so a stale mark from an earlier command would otherwise convict
-this one), and every routed command's code passes through `_resolved()`: a non-zero code is
-its own answer and is returned untouched, a 0 is re-asked of `resolve_exit`, which answers
-**2** when the command called `error()` and **0** when it did not.
-
-| Code | Meaning |
-|------|---------|
-| `0` | The command did what it said |
-| `1` | The command refused, or the verb is unknown |
-| `2` | The command returned 0 after calling `error()` — the seam caught it |
-
-`migrate-passports` against a root with no discoverable passports is the worked example: it
-prints "No passports found … nothing was scanned" and **exits 1**. It exited 0 until
-2026-09-08, which made "I searched the wrong root" indistinguishable from "your fleet is
-already 2.0" to anything reading the exit code (fleet refusal sweep, FPLAN-0518).
-
-### Class registry — the gateway other branches import through
-
-`apps/handlers/` is internal to this branch; its `__init__` refuses cross-branch
-imports and points callers here. Other branches that need to resolve a
-`citizen_class` read spawn's registry through the modules gateway rather than
-mirroring the class table — a mirror makes the reader a fleet-wide single point
-of failure the moment spawn renames a class.
-
-```python
-from aipass.spawn.apps.modules import get_template_dir, refuse_legacy_class
-
-get_template_dir("specialist")        # -> Path(.../templates/citizen)
-get_template_dir("aipass_framework")  # -> ValueError naming the retired name AND 'specialist'
-get_template_dir("admin")             # -> ValueError, permanent refusal
-get_template_dir("wizard")            # -> ValueError listing the registered classes
-refuse_legacy_class("aipass_framework")  # -> the rename message
-refuse_legacy_class("specialist")        # -> "" (not a retired name)
-```
-
-`get_template_dir` already refuses forbidden, retired and unknown values by
-name, so "resolve, or tell me why not" is one call plus `try/except ValueError`.
-`refuse_legacy_class` is the separate lane for callers that must distinguish
-"this passport has not been migrated yet" from a hard error.
-
-### Python API
-
-```python
-from aipass.spawn import spawn_agent
-
-result = spawn_agent(
-    "/path/to/new/agent",
-    role="Data Analyst",
-    purpose="Process incoming reports",
-    traits="Precise, thorough"
-)
-# Returns on success: { success, branch_name, path, files_copied, dirs_created,
-#                       files_skipped, renamed, registry_updated, registry_path,
-#                       citizen_number, validation_issues }
-# Returns on failure: { success: False, error, ...the same counters, zeroed }
-```
+There is no command list on this page, deliberately: a hand-typed copy of the branch's own
+help output rots the next time a verb lands. The generated surface is above under **Live
+Inventory**, and each verb's behaviour is documented under [docs/](docs/) below.
 
 ---
 
 ## Architecture
 
-```
-spawn/
-├── __init__.py                          # Public API (exports spawn_agent)
-├── apps/
-│   ├── spawn.py                         # Entry point — CLI routing, version, help
-│   ├── modules/
-│   │   ├── core.py                      # Create orchestrator (_spawn_agent, handle_command)
-│   │   ├── update.py                    # Update CLI — single/batch by class
-│   │   ├── delete.py                    # Delete CLI — archive + deregister
-│   │   ├── sync_registry.py             # Registry repair CLI
-│   │   ├── regenerate_registry.py       # Template registry regeneration CLI
-│   │   ├── migrate_passports.py         # One-shot fleet passport 2.0 migration CLI
-│   │   ├── export_seeds.py              # Tracked passport seeds CLI — live → .aipass/passport.seed.json, dry-run default
-│   │   ├── repair.py                    # Structural repair CLI — scan, relocate, clean pollution
-│   │   └── grant_admin.py               # Admin flag ceremony CLI (devpulse-only)
-│   ├── handlers/
-│   │   ├── class_registry.py            # Citizen class → template directory mapping
-│   │   ├── adoption_ops.py              # The target-exists lane — adopt a passported dir, or birth from its tracked seed
-│   │   ├── file_ops.py                  # Template copy, path renaming, registry regeneration
-│   │   ├── metadata.py                  # Branch name extraction, profile detection
-│   │   ├── placeholders.py              # {{PLACEHOLDER}} replacement engine
-│   │   ├── passport_migration.py        # Passport 1.x → 2.0 structure migration
-│   │   ├── seed_ops.py                  # Passport seeds — build/validate/mint-from-seed, machine-local strip, stamp
-│   │   ├── registry.py                  # Registry CRUD, find_registry(), project credential mint
-│   │   ├── meta_ops.py                  # Branch metadata generation, hash computation
-│   │   ├── mint_verify.py               # Read-only completeness check of a mint vs the template manifest
-│   │   ├── receipt_ops.py               # Birth receipt — stamps .trinity/.template_version.json at mint
-│   │   ├── update_ops.py                # Update workflow (path-based template walk)
-│   │   ├── delete_ops.py                # Delete workflow (resolve → archive → cleanup → deregister)
-│   │   ├── sync_registry_ops.py         # Registry sync (CWD-aware, external project support)
-│   │   ├── regenerate_registry_ops.py   # Template registry hash regeneration
-│   │   ├── repair_ops.py                # Pollution detection, branch relocation, registry path repair
-│   │   ├── json_ops.py                  # JSON deep merge, backup utilities
-│   │   ├── atomic_write.py              # Atomic text write primitive (stage → fsync → os.replace)
-│   │   └── json/
-│   │       └── json_handler.py          # The fleet json shim — 9 bound names + 2 exceptions over prax's service
-│   ├── plugins/                         # Package marker — no plugins shipped
-│   └── integrations/                    # Package marker — no integrations shipped
-├── templates/
-│   ├── citizen/                         # The one citizen template (49 files, 24 dirs)
-│   └── .archive/                        # Retired templates (aipass_framework, project_agent, birthright)
-├── tests/                               # 28 test files, 809 test functions (960 cases)
-├── spawn_json/                          # JSON tracking directory
-├── tools/                               # birth_certificate_repair.py (gitignored — machine-local)
-├── artifacts/                           # Birth certificate
-├── docs/                                # Documentation
-├── docs.local/                          # Machine-local notes, sub-agent drops
-├── dropbox/                             # Inbound file drops
-└── logs/                                # Prax log output
-```
+Three layers. `apps/spawn.py` is a thin entry point: it intercepts the help and version
+flags before parsing, routes a verb to the first module that claims it, and resolves the
+exit code so a refusal can never leave as success. `apps/modules/` holds one coordinator per
+surface — `core` (mint and adopt), `update`, `delete`, `sync_registry`,
+`regenerate_registry`, `migrate_passports`, `export_seeds`, `repair` and `grant_admin` —
+each parsing arguments and delegating. `apps/handlers/` holds the implementation, grouped by
+concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
+`class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
+`receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`,
+`sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`), and the primitives
+(`json_ops`, `atomic_write`, `metadata`, and the fleet json shim under `json/`).
 
-### Three-Layer Design
+`templates/citizen/` is the one template both classes mint from, and its
+`.spawn/.template_registry.json` manifest is what a mint is verified against — change a
+template file and regenerate that manifest in the same pass. `templates/docs_page.md`, the
+docs page skeleton, sits beside it so that no mint ever stamps it.
 
-1. **Entry point** (`spawn.py`) — Routes CLI commands, never imports handlers directly
-2. **Modules** (`modules/`) — Business logic coordinators, parse arguments, delegate to handlers
-3. **Handlers** (`handlers/`) — Implementation details, pure functions where possible
+The full directory tree lives in this branch's own prompt
+(`.aipass/aipass_local_prompt.md`) — one place, so it cannot disagree with itself.
 
 ---
 
-## Workflows
+## Documentation
 
-### Create (`_spawn_agent`, core.py)
+Depth lives in [docs/](docs/), one file per module or handler group:
 
-1. **Resolve** — Extract the branch name from the target path and refuse a target that sits inside another citizen's tree (any parent holding `.trinity/passport.json`). An existing directory that already has a passport is **adopted** instead of refused (see Adopt Existing)
-2. **Lookup** — Resolve the citizen class to a template directory via class_registry
-3. **Credential** — Resolve the target project's registry credential (`metadata.id`) **before anything is written**. `load_registry` MINTS a fresh uuid4 when the registry file is **missing** — that is what a brand-new external project is, and it stops its first citizen inheriting AIPass's own id. A registry that **exists but will not parse** deliberately gets no mint (id-less schema plus a logged warning): that is a live project whose credential we failed to READ, and inventing a replacement would re-credential it and orphan every passport already carrying the real one. The resolved value is handed to `add_to_registry`, which adopts it **only when it is creating the registry file** — keyed off `registry_path.exists()` captured BEFORE the load, because a `load_registry` that always returns an id makes "is it already set?" useless as a guard (2026-08-24)
-4. **Copy** — Recursive copy of the class template to target (skips `__pycache__`)
-5. **Rename** — Replace `{{BRANCH}}` in directory and file names
-6. **Replace** — Substitute all `{{PLACEHOLDER}}` patterns in file contents, including `{{CITIZEN_CLASS}}` (sourced from the create call, not a baked literal)
-7. **Identity ids** — Mint the citizen's own UUID ONCE and use it twice: stamped into the passport as `citizenship.citizen_id` (the citizen's unique id, rendered by faces as the passport number) and written as the `registry_id` of its `branches[]` registry entry. Minting it at registration time instead would be too late — the passport is written before the registry, so the two copies would be different UUIDs for one citizen. Distinct from `citizenship.registry_id`, which is the id of the REGISTRY holding the citizen and is shared by every citizen in a project (Patrick's ruling, 2026-08-24)
-8. **Meta** — Generate `.branch_meta.json`: the per-branch tracking file that maps each delivered file back to its **template file id** (`f001`…`f050`) with a current SHA-256, matched by path first and content hash second. This is what lets `update` reason about a renamed or drifted file rather than diffing blind. Meta tabs load from `@memory` when available, degrading gracefully to empty when it's not
-9. **Verify** — Compare the minted tree against the template's own manifest (`.spawn/.template_registry.json`) and its on-disk contents. A file the template claims but the mint never produced REFUSES the create, names every missing path, and never reaches the registry — a gitignored template file used to mint a citizen with an empty `artifacts/` and no `inbox.json` while printing "Agent created" (2026-08-17). Custom `--template <dir>` trees carry no manifest and are verified against their own contents only. The partial tree is deliberately left on disk for inspection
-10. **Receipt** — Stamp `.trinity/.template_version.json`: which trinity template version this citizen carries, in @memory's four-key shape (`template_versions`, `stamped`, `stamped_by: "spawn birth"`, `config_rendered`). The versions are read from the fleet's GOLD source (`memory/templates/*.template.json` → `document_metadata.schema_version`), never from spawn's own seeds — reading the seeds would let a drifted copy mint a receipt claiming a version the fleet never issued, and the lie would score green. Shape copied, never imported: birth must not fail because another branch's package does not import. A gold source that cannot be read stamps NOTHING and surfaces the miss in `validation_issues` — a receipt naming an unverifiable version is worse than an absent one, but a citizen unborn because @memory's files are unreadable is worse than both
-11. **Registry** — Register in the target project's own `AIPASS_REGISTRY.json`. Placed after step 10 deliberately: a registered citizen always carries a receipt
-12. **Owner** — Ensure at least one citizen in that project carries `owner: true`
-13. **Validate** — Scan for any remaining `{{...}}` patterns
-
-### Update (path-based template walk, `update_ops.py` v2.1.0)
-
-The ID-based change-detection engine was replaced (P1 rewrite, TDPLAN-0006). The
-current engine walks the template and decides per path — no renames, no pruning,
-no snapshot phase.
-
-1. **Resolve** — Branch path from the registry, citizen class from its passport, template directory from the class
-2. **Directories** — Walk the template's directories and create any the branch is missing
-3. **Files** — Walk the template's files and decide per file: missing → add (placeholders replaced, atomically written) · existing `.py` → **skip by design** · existing `.json` → deep merge (existing values win, plus the list policy below) · `passport.json` → heal against a narrow allowlist only (DPLAN-0262) · create-only paths → skip entirely
-4. **Refresh** — Regenerate `.branch_meta.json` with current state
-
-**The list policy (FPLAN-0492).** `deep_merge` is additive for KEYS and
-existing-wins for VALUES, and a non-empty list is a value: a list entry ADDED to a
-template after a branch was born never reached that branch. Measured on @vera —
-the template's `.registry_ignore.json` grew from two `ignore_files` entries to
-four, and an update would have left the branch at two while adding the notes block
-that describes four. Both halves of that behaviour are wanted, for different
-lists, so the split is declared by name in `_TEMPLATE_OWNED_LISTS`:
-
-- **Template-owned lists are additive.** Today that is `.spawn/.registry_ignore.json`
-  → `ignore_files`, `ignore_patterns`, `patterns`. They are copy-engine machinery —
-  spawn writes them, spawn reads them, and a missing entry is a scaffold that does
-  not work. Template entries the branch lacks are appended; the branch's own entries
-  and their order are never touched, so the list is only ever grown, never reordered
-  or pruned, and a second pass reports `unchanged`.
-- **Every other list stays existing-wins**, which is `deep_merge`'s default and
-  needs no code. That includes `.claude/settings.local.json` permissions, which read
-  like template-owned safety rules and are not: measured 2026-09-07 across 18
-  branches, 2 differ from the template — @devpulse by 17 deny rules, because it is
-  the one citizen allowed to write the repository history, and @drone by 3. A union
-  would have re-denied the fleet's only publishing lane. Permission drift is a
-  branch's own posture; it is handled by hand, never merged.
-
-**The passport heal is not a migration.** It repairs three derived fields
-(`branch_info.email`, `branch_info.git_branch`, `identity.traits`) and every one of
-them exists in schema 1.0.0 and 2.0.0 alike, so a 1.0 passport gains no 2.0 shape
-and no version bump from an update — measured on @vera's live 1.0.0 passport,
-2026-09-07, which comes back `unchanged`. Changing schema is `migrate-passports`'
-job and it either completes (every field the target schema requires,
-`schema_version` bumped in the same write) or raises `PassportMigrationError`;
-there is no partial write. `tests/test_update.py` pins both halves, including the
-rule that any field added to the heal allowlist must exist in every schema version
-it can meet.
-
-The heal also answers "did anything change?" about the DOCUMENT, not about how it
-was spelled. Passports written with `ensure_ascii=True` carry an escape where the
-heal's serialiser writes the character itself; the old text comparison rewrote
-every such passport (with a backup) on every single update while changing not one
-field — measured on @vera's passport, 120 bytes of diff, zero fields. 0 of the 18
-core passports were affected (all 2.0.0, all written by the migration lane); it
-bites the externals.
-
-Create-only (never re-added, never overwritten): everything under `.trinity/`
-except the passport heal, everything under `.ai_mail.local/` (a live mailbox is
-@ai_mail's data, not spawn's), plus `DASHBOARD.local.json`,
-`artifacts/birth_certificate.json`, `.seedgo/bypass.json` and
-`tests/test_scaffold.py`.
-
-### Adopt Existing (`create @existing`)
-
-1. **Fix** — Repair `registry_id` in passport if stale (from registry recreation)
-2. **Register** — Add to project registry, then ensure the project has an owner
-3. **Receipt** — Stamp `.trinity/.template_version.json` **only if the directory has none**. Adoption fills a hole; it never restamps. A branch @memory's push already stamped carries `"memory push"`, and overwriting that with `"spawn birth"` would replace a true record of which lane last touched those files with a false one
-4. **Update** — Run template update to sync scaffold files
+| Doc | What it covers |
+|---|---|
+| [docs/birth.md](docs/birth.md) | Citizen classes, the mint pipeline step by step, the birth receipt, the newborn budget contract, adoption, the Python API |
+| [docs/update_engine.md](docs/update_engine.md) | The template walk, `.updateignore`, markdown drift, the list policy, the passport heal, create-only paths |
+| [docs/registry_and_repair.md](docs/registry_and_repair.md) | Registry entry shapes, sync and fix modes, passport migration, seeds, template registry regeneration, repair, the admin ceremony |
+| [docs/retire.md](docs/retire.md) | Archive then deregister, what travels with a citizen, the three protection layers |
+| [docs/cli_contract.md](docs/cli_contract.md) | Exit codes and the refusal seam, introspection, the class-registry import door, the docs page skeleton door |
+| [docs/tests_and_quality.md](docs/tests_and_quality.md) | What each test file pins, and the command that produces every number |
 
 ---
 
-## Tests
-
-**960 passed | 0 skipped | 0 failed** across 28 test files, measured 2026-09-08 from the
-repo root in the CI shape (`-p no:cacheprovider`, 1m56s) AND from the branch directory
-(2m19s) — both rootdirs agree.
-
-**809 test functions expand to 960 cases.** The counting method is written down because it
-decides the number: 809 is an AST count of `FunctionDef` nodes named `test_*` under
-`tests/`, which is what seedgo's corpus measures. A `grep` for `def test_` answers 812 at
-any indentation and 814 anywhere on a line — both count lines inside docstrings and
-comments. This README carried 801 in one place and 811 in another for exactly that reason;
-one number, one method, stated once.
-
-There is no longer a skip. `test_scaffold.py` moved to `tests/.archive/` during the
-DPLAN-0325 sweep — it still ships in the template (a newborn gets it), but spawn's own
-suite no longer carries it, so the file is out of the table below.
-
-| File | Focus |
-|------|-------|
-| `test_lifecycle.py` | End-to-end spawn lifecycle workflows |
-| `test_json_handler.py` | The shim's wiring to the fleet json service — the seam, the binding, the bool contract |
-| `test_handlers.py` | Handler function behavior and integration |
-| `test_modules_gateway.py` | The modules-package gateway other branches import through |
-| `test_passport_migration.py` | Passport 1.x → 2.0 fleet migration: order, drops, renames, idempotency |
-| `test_passport_birth_schema.py` | 2.0 block and key order on a newly minted passport |
-| `test_regenerate_registry_ops.py` | Template registry regeneration |
-| `test_update.py` | Branch update mechanics |
-| `test_citizen_classes.py` | Citizen class validation and template discovery |
-| `test_file_ops.py` | File copy, rename, placeholder replacement |
-| `test_cli_routing.py` | Command routing and argument parsing |
-| `test_contracts.py` | Handler contracts and interface compliance |
-| `test_spawn.py` | Basic CLI routing and help |
-| `test_error_resilience.py` | Error handling and edge cases |
-| `test_check_fix_identity.py` | Owner/identity check and fix (DPLAN-0239 P4) |
-| `test_admin_fence.py` | Admin grant ceremony + permanent admin-class refusal (DPLAN-0288) |
-| `test_owner_resolver.py` | Owner resolution + `is_protected()` protection layers |
-| `test_passport_drift.py` | Fleet passport drift canary |
-| `test_template_hygiene.py` | Template content invariants |
-| `test_output_streams.py` | stdout/stderr routing |
-| `test_repair.py` | Structural repair + relocation |
-| `test_citizen_id.py` | `citizen_id` minted once — passport and registry entry always agree |
-| `test_registry_credential.py` | Credential mint asymmetry: missing registry mints, unreadable never does |
-| `test_json_durability.py` | Torn-write durability — atomic writes across every JSON/text path |
-| `test_birth_receipt.py` | Birth receipt lane — gold versions, receipt shape, seed-vs-gold drift, retire carries `.trinity` |
-| `test_passport_seeds.py` | Passport seeds — the tracked identity that ships with the repo (TDPLAN-0017) |
-| `test_template_import_guard.py` | What the newborn's handler guard must survive on its first import |
-| `test_conftest_fixtures.py` | Pins that spawn's own mocking fixtures reach the code they claim to mock |
-| `conftest.py` | Fixtures: mock templates, registry protection |
-
-**Public functions:** 94 total, 87 tested (93%) — seedgo's own count, `drone @seedgo audit
-aipass @spawn`, 2026-09-08. The seven untested are listed by `drone @seedgo test_map @spawn`.
-
----
-
-## Integration
+## Integration Points
 
 ### Depends On
 
-- **aipass.prax** — Logging via `system_logger`
-- **aipass.cli** — Console output (header, error, warning)
-- **aipass.prax** — `json_handler` (the fleet's one json service, DPLAN-0325; spawn's `apps/handlers/json/json_handler.py` is the byte-identical shim that binds it)
-- **aipass.aipass.shared** — `json_ops` (`deep_merge`, `backup_json`), `registry_discovery.find_registry`,
-  `project_home._detect_aipass_home` (the one shared home detector, used by `placeholders.py`)
-- **aipass.memory** (optional) — `tab_renderer.render_all_meta_tabs` for meta tabs at create; import is guarded and degrades to empty
-- Python stdlib (`pathlib`, `json`, `shutil`, `hashlib`, `re`, `argparse`, `uuid`)
+- **aipass.prax** — logging through `system_logger`, and the fleet json service that
+  `apps/handlers/json/json_handler.py` binds as a byte-identical shim
+- **aipass.cli** — console output, refusal formatting and exit-code state
+- **aipass.aipass.shared** — `deep_merge` and `backup_json`, registry discovery, and the one
+  shared home detector used by the placeholder engine
+- **aipass.memory** (optional) — meta tabs at create; the import is guarded and degrades to
+  empty when it is unavailable
 
 ### Provides To
 
-- All branches — creation, template updates, registry management, citizenship
-- Registry: CRUD operations on `AIPASS_REGISTRY.json` and `*_REGISTRY.json`
+- Every branch — creation, template updates, retirement, and citizenship itself
+- Every branch — the class-registry gateway for resolving a `citizen_class`
+- **@seedgo** — the docs page skeleton its `docs_page` standard renders, read live through
+  the same gateway
+- Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
 
 ---
 
-## Newborn Compliance
-
-A citizen minted from `templates/citizen/` audits **100%** against the CI gate on
-its first day — verified 2026-08-22, **not re-verified since** (no newborn was minted
-in tonight's docs pass) — by minting one and running
-`.venv/bin/python .github/scripts/seedgo_audit.py`, the real gate, floor 100.
-Before this the same mint scored 79% and failed the gate, having earned none of
-it (@canary's finding: their entry point was byte-identical to the template
-apart from name substitution).
-
-**Trinity: 100/100 on both classes, live-measured 2026-08-27** (**not re-verified
-since**) by minting a citizen and running @seedgo's trinity checker against it. It scored 77 before
-this: the receipt group at 0 and the file set at 80 (no
-`.trinity/.template_version.json` existed until birth stamped one), top-level
-keys at 78 (the seeds carried a `document_metadata.status` block the standard
-deletes, and stamped `managed_by` in the wrong case), and meta lines at 0 (the
-seeds' `_usage` prose and meta lines had drifted from @memory's gold templates).
-The `.trinity` seeds are now derived from those gold templates, and
-`tests/test_birth_receipt.py` pins them byte-for-byte — the pin goes red the
-moment @memory bumps, which is the only honest way to hold a copy.
-
-One starter test suite ships at birth (`tests/test_cli_routing.py`) so a newborn
-owns real, readable tests from day one. The `test_quality` standard that once
-scored it retired 2026-09-07 (DPLAN-0323). It is listed in the template's
-`.spawn/.registry_ignore.json`: seedgo's architecture baseline treats every
-template file as a structural requirement of **every** branch of that class, so
-adding it without that entry dropped 9 existing branches to 99% and red-boarded
-the gate. Measured, not assumed — the exclusion is what keeps a template addition
-from being a fleet-wide mandate.
-
-`tests/test_json_handler.py` shipped beside it until 2026-09-07, when it was
-archived to `tests/.archive/deleted_2026-09-07_template_test_json_handler.py`
-(FPLAN-0492, Patrick's ruling). Its six shim-pin tests were the last live copy of
-six identities the fleet had just folded into two parametrised tests in @seedgo's
-json handler contract suite (89 instances across 16 files, FPLAN-0491); the
-template stamped them into every newborn, so keeping it would have regrown the
-twins one citizen at a time. **A newborn loses no coverage**, measured 2026-09-07
-by minting a throwaway citizen: that suite discovers subjects by globbing the
-installed package for `*/apps/handlers/json/json_handler.py`, the newborn ships
-that exact path, and its shim hashes to the pinned canonical (`3456b766…`) — so it
-joins the parametrised run (18 branches today) the moment it lives under
-`src/aipass/`. The one gap, stated rather than papered over: a citizen minted into
-ANOTHER project's tree is outside that glob and gets no contract coverage from it.
-`tests/test_template_hygiene.py` now pins the file's ABSENCE from the template.
+**Last Updated:** 2026-09-19
 
 ---
-
-## Known Issues
-
-- `.py` files never auto-update during `drone @spawn update` (by design) — template .py changes need individual branch dispatch
-- `tests/test_scaffold.py` ships at create and is never re-added on update (`_NEVER_UPDATE_FILES`). In a branch with a real conftest it can only skip, so it cannot inform — @seedgo ruling, DPLAN-0291. Spawn's own copy moved to `tests/.archive/` in the DPLAN-0325 sweep for exactly that reason; the template still ships it to newborns
-- `AIPASS_REGISTRY.json` holds two entry shapes (see Registry entry shape). Cosmetic — every reader is case-insensitive and path-shape agnostic — but a reader comparing entries sees two conventions
-- A branch's own `tools/` is gitignored fleet-wide (`.gitignore:57`), so the verification utilities there are machine-local and diverge between checkouts. The **template's** `tools/` is explicitly un-ignored (`.gitignore:120-121`) and does ship to newborns — a fix belongs in the template copy, where it can actually be committed
-
----
-
-## Metrics
-
-- **Seedgo:** 100% on every one of the 46 scored categories, 2026-09-07 (`drone @seedgo audit
-  aipass @spawn`, 29 production files measured — `apps/` only, `tests/` not in the corpus);
-  0 violations, 0 failed checks, 0 type errors. 16 live bypass rules.
-  The old "98% without bypasses" figure is **unverified** — not re-measured since 2026-08-25 and
-  it would need all 16 lifted to re-measure honestly.
-- **Tests:** 960 passed, 0 skipped, 0 failed (2026-09-08, both rootdirs) — 809 test functions (AST count; see Tests)
-- **Public functions:** 94, of which 87 are tested (seedgo's test-opportunity count, 2026-09-08)
-- **Production files:** 29 in `apps/` (seedgo's corpus); 19 handlers, 9 modules, entry point
-- **Template registry:** 49 files, 24 dirs (citizen — the one template both classes mint from),
-  manifest verified against disk 2026-09-05: every declared file present, nothing untracked but
-  the manifest itself
-- **Live command sweep:** 29/29 paths pass, incl. error and refusal paths (APLAN-0007, 2026-08-13)
-  — **unverified since**; not re-run tonight
-
----
-
-*Last Updated: 2026-09-07*
-
 [← Back to AIPass](../../../README.md)

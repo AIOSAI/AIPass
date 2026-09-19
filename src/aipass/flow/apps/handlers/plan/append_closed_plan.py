@@ -3,7 +3,7 @@
 # Description: Closed Plans Local Registry Handler
 # Version: 0.1.0
 # Created: 2026-03-03
-# Modified: 2026-07-15
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -37,7 +37,20 @@ _LOCK_BACKOFF_BASE = 0.05
 
 
 def _acquire_append_lock(lock_path: Path) -> bool:
-    """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff."""
+    """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
+
+    A Windows delete-pending PermissionError (another writer mid-release) is
+    a held lock: it is retried on the same budget as FileExistsError.
+
+    Returns:
+        True once acquired; False when the budget runs out on contention.
+
+    Raises:
+        PermissionError: The budget ran out and the last attempt was denied.
+            Chained from that denial, so a real permissions problem surfaces.
+    """
+    denial: PermissionError | None = None
+    waited = 0.0
     for attempt in range(_LOCK_RETRIES):
         try:
             fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -45,8 +58,20 @@ def _acquire_append_lock(lock_path: Path) -> bool:
             os.close(fd)
             return True
         except FileExistsError:
+            denial = None
             logger.info("[%s] Lock contention on %s, retry %d", MODULE_NAME, lock_path, attempt + 1)
-            time.sleep(_LOCK_BACKOFF_BASE * (2**attempt))
+        except PermissionError as exc:
+            denial = exc
+            logger.info(
+                "[%s] Lock denied on %s (delete-pending?), retry %d: %s", MODULE_NAME, lock_path, attempt + 1, exc
+            )
+        delay = _LOCK_BACKOFF_BASE * (2**attempt)
+        time.sleep(delay)
+        waited += delay
+    if denial is not None:
+        raise PermissionError(
+            f"Lock {lock_path} still denied after {_LOCK_RETRIES} attempts ({waited:.2f}s waited)"
+        ) from denial
     return False
 
 

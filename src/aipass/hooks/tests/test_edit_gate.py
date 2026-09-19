@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-08-18
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for handlers/security/edit_gate.py."""
@@ -23,8 +23,8 @@ class TestEditGateHandler:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/apps/test.py"},
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/hooks",
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
+                "cwd": "/srv/example/AIPass/src/aipass/hooks",
             }
         )
         assert result["exit_code"] == 0
@@ -36,8 +36,8 @@ class TestEditGateHandler:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/.ai_mail.local/inbox.json"},
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/hooks",
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/.ai_mail.local/inbox.json"},
+                "cwd": "/srv/example/AIPass/src/aipass/hooks",
             }
         )
         assert result["exit_code"] == 2
@@ -51,8 +51,8 @@ class TestEditGateHandler:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/apps/test.py"},
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/api",
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
+                "cwd": "/srv/example/AIPass/src/aipass/api",
             }
         )
         assert result["exit_code"] == 2
@@ -66,8 +66,8 @@ class TestEditGateHandler:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/apps/test.py"},
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/devpulse",
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
+                "cwd": "/srv/example/AIPass/src/aipass/devpulse",
             }
         )
         assert result["exit_code"] == 0
@@ -79,8 +79,8 @@ class TestEditGateHandler:
             result = handle(
                 {
                     "tool_name": "Edit",
-                    "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/apps/test.py"},
-                    "cwd": "/home/patrick/Projects/AIPass/src/aipass/api",
+                    "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/apps/test.py"},
+                    "cwd": "/srv/example/AIPass/src/aipass/api",
                 }
             )
         assert result["exit_code"] == 2
@@ -94,8 +94,8 @@ class TestEditGateHandler:
             result = handle(
                 {
                     "tool_name": "Edit",
-                    "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/api/apps/test.py"},
-                    "cwd": "/home/patrick/Projects/AIPass/src/aipass/api",
+                    "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/api/apps/test.py"},
+                    "cwd": "/srv/example/AIPass/src/aipass/api",
                 }
             )
         assert result["exit_code"] == 0
@@ -106,7 +106,7 @@ class TestEditGateHandler:
         result = handle(
             {
                 "tool_name": "Bash",
-                "tool_input": {"file_path": "/home/patrick/Projects/AIPass/src/aipass/hooks/.ai_mail.local/inbox.json"},
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/.ai_mail.local/inbox.json"},
             }
         )
         assert result["exit_code"] == 0
@@ -123,6 +123,57 @@ class TestEditGateHandler:
 
         result = handle({})
         assert result["exit_code"] == 0
+
+    # The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc): "Everyone else: own files only."
+
+    def test_block_ordinary_citizen_writing_a_project_level_file(self, registered_projects: dict):
+        """A file outside every branch row belongs to the project's manager, not to whoever reaches it."""
+        result = _write(registered_projects["hooks"], registered_projects["aipass"] / "README.md")
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "Project-level write blocked" in reason
+        assert "@devpulse" in reason
+
+    def test_branch_identity_is_read_from_the_registry_rows(self, tmp_path: Path):
+        """A project whose branches do not sit at src/<pkg>/<branch> is fenced by its rows."""
+        root = tmp_path / "Studio"
+        for name in ("alpha", "beta"):
+            (root / "agents" / name).mkdir(parents=True)
+        rows = [{"name": name, "path": f"agents/{name}"} for name in ("alpha", "beta")]
+        (root / "STUDIO_REGISTRY.json").write_text(json.dumps({"branches": rows}), encoding="utf-8")
+
+        result = _write(str(root / "agents" / "alpha"), root / "agents" / "beta" / "notes.md")
+        assert result["exit_code"] == 2
+        assert "'alpha' cannot write to 'beta'" in json.loads(result["stdout"])["reason"]
+        assert _write(str(root / "agents" / "alpha"), root / "agents" / "alpha" / "notes.md")["exit_code"] == 0
+
+    def test_seedgo_and_spawn_write_anywhere_inside_aipass(self, registered_projects: dict):
+        for seat in ("seedgo", "spawn"):
+            for target in (
+                registered_projects["aipass"] / "src" / "aipass" / "hooks" / "apps" / "x.py",
+                registered_projects["aipass"] / "README.md",
+            ):
+                assert _write(registered_projects[seat], target)["exit_code"] == 0, (seat, target)
+
+    def test_a_file_outside_every_project_is_nobodys(self, registered_projects: dict, tmp_path: Path):
+        """Scratch and temp files belong to no project: the ownership rule has nothing to say."""
+        scratch = tmp_path / "scratch" / "notes.md"
+        assert _write(registered_projects["hooks"], scratch)["exit_code"] == 0
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        command = f"echo x > {scratch.as_posix()}"
+        bash = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": registered_projects["hooks"]})
+        assert bash["exit_code"] == 0
+
+    def test_the_registry_owner_writes_anywhere_in_the_project(self, registered_projects: dict):
+        for target in (registered_projects["aipass"] / "README.md", Path(registered_projects["memory"]) / "x.py"):
+            assert _write(registered_projects["devpulse"], target)["exit_code"] == 0
+
+
+def _write(cwd: str, target: Path, tool: str = "Edit") -> dict:
+    from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+    return handle({"tool_name": tool, "tool_input": {"file_path": str(target)}, "cwd": cwd})
 
 
 @pytest.fixture
@@ -238,23 +289,62 @@ class TestEditGateProjectBoundary:
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
 
-    def test_allow_host_seat_writing_down_into_nested_project(self, nested_projects: dict):
-        """Trust runs downward: the host may write into a project it hosts.
+    def test_block_host_seat_writing_down_into_nested_project(self, nested_projects: dict):
+        """REVERSED by the owner's ruling, 2026-09-18 22:17: trust no longer runs downward.
 
-        This direction also covers the host's own artifact registries
-        (flow_json/PLAN_REGISTRY.json, backup snapshots), which sit under the
-        repo root and would otherwise read as foreign projects to their owners.
+        Until then the host could write into any project it contains, so every
+        AIPass citizen could edit projects/baud. A nested project keeps its own
+        registry, and "an AIPass agent must have no way to touch another
+        project's files". The seat here is named devpulse and holds no grant:
+        the name opens nothing.
         """
         from aipass.hooks.apps.handlers.security.edit_gate import handle
 
-        result = handle(
-            {
-                "tool_name": "Edit",
-                "tool_input": {"file_path": str(nested_projects["baud_file"])},
-                "cwd": str(nested_projects["host_seat"]),
-            }
-        )
+        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+            result = handle(
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": str(nested_projects["baud_file"])},
+                    "cwd": str(nested_projects["host_seat"]),
+                }
+            )
+        assert result["exit_code"] == 2
+        assert "Cross-project" in json.loads(result["stdout"])["reason"]
+
+    def test_verified_admin_still_writes_down_into_nested_project(self, nested_projects: dict):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
+            result = handle(
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {"file_path": str(nested_projects["baud_file"])},
+                    "cwd": str(nested_projects["host_seat"]),
+                }
+            )
         assert result["exit_code"] == 0
+
+    def test_seedgo_and_spawn_never_reach_beyond_aipass(self, registered_projects: dict):
+        """ "seedgo and spawn edit any file inside AIPass and NEVER beyond AIPass." """
+        targets = (
+            Path(registered_projects["writer"]) / "draft.md",
+            registered_projects["vera"] / "README.md",
+            Path(registered_projects["baud_seat"]) / "app.py",
+        )
+        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+            for seat in ("seedgo", "spawn"):
+                for target in targets:
+                    result = _write(registered_projects[seat], target)
+                    assert result["exit_code"] == 2, (seat, target)
+                    assert "Cross-project" in json.loads(result["stdout"])["reason"]
+
+    def test_an_artifact_registry_is_not_a_project_boundary(self, registered_projects: dict):
+        """flow_json/PLAN_REGISTRY.json catalogues plans, not branches: its directory stays flow's."""
+        target = Path(registered_projects["flow"]) / "flow_json" / "PLAN_REGISTRY.json"
+        assert _write(registered_projects["flow"], target)["exit_code"] == 0
+        refused = _write(registered_projects["hooks"], target)
+        assert refused["exit_code"] == 2
+        assert "Cross-branch" in json.loads(refused["stdout"])["reason"]
 
     def test_project_seat_named_like_a_trusted_writer_is_still_blocked(self, nested_projects: dict):
         """A project seat cannot borrow the devpulse/seedgo/spawn exemption.
@@ -578,8 +668,8 @@ class TestEditGateExternalProject:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/user/Projects/vera/src/vera_studio/designer/apps/test.py"},
-                "cwd": "/home/user/Projects/vera/src/vera_studio/writer",
+                "tool_input": {"file_path": "/srv/example/vera/src/vera_studio/designer/apps/test.py"},
+                "cwd": "/srv/example/vera/src/vera_studio/writer",
             }
         )
         assert result["exit_code"] == 2
@@ -593,8 +683,8 @@ class TestEditGateExternalProject:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/user/Projects/vera/src/vera_studio/writer/apps/test.py"},
-                "cwd": "/home/user/Projects/vera/src/vera_studio/writer",
+                "tool_input": {"file_path": "/srv/example/vera/src/vera_studio/writer/apps/test.py"},
+                "cwd": "/srv/example/vera/src/vera_studio/writer",
             }
         )
         assert result["exit_code"] == 0
@@ -606,8 +696,8 @@ class TestEditGateExternalProject:
             result = handle(
                 {
                     "tool_name": "Edit",
-                    "tool_input": {"file_path": "/home/user/Projects/vera/src/vera_studio/designer/apps/test.py"},
-                    "cwd": "/home/user/Projects/vera/src/vera_studio/writer",
+                    "tool_input": {"file_path": "/srv/example/vera/src/vera_studio/designer/apps/test.py"},
+                    "cwd": "/srv/example/vera/src/vera_studio/writer",
                 }
             )
         assert result["exit_code"] == 2
@@ -621,11 +711,37 @@ class TestEditGateExternalProject:
             result = handle(
                 {
                     "tool_name": "Edit",
-                    "tool_input": {"file_path": "/home/user/Projects/vera/src/vera_studio/writer/apps/test.py"},
-                    "cwd": "/home/user/Projects/vera/src/vera_studio/writer",
+                    "tool_input": {"file_path": "/srv/example/vera/src/vera_studio/writer/apps/test.py"},
+                    "cwd": "/srv/example/vera/src/vera_studio/writer",
                 }
             )
         assert result["exit_code"] == 0
+
+    # The owner's ruling, 2026-09-18 22:17: "A manager (e.g. @vera in Vera Studio, like devpulse
+    # in AIPass) edits her own project's agents' files, within her project only."
+
+    def test_the_manager_writes_her_projects_agents_files(self, registered_projects: dict):
+        for target in (Path(registered_projects["writer"]) / "draft.md", registered_projects["vera"] / "README.md"):
+            assert _write(registered_projects["vera_seat"], target)["exit_code"] == 0, target
+
+    def test_the_manager_reaches_nothing_outside_her_project(self, registered_projects: dict):
+        with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
+            for target in (Path(registered_projects["hooks"]) / "x.py", registered_projects["aipass"] / "README.md"):
+                result = _write(registered_projects["vera_seat"], target)
+                assert result["exit_code"] == 2, target
+                assert "Cross-project" in json.loads(result["stdout"])["reason"]
+
+    def test_an_ordinary_agent_writes_its_own_branch_only(self, registered_projects: dict):
+        writer = registered_projects["writer"]
+        assert _write(writer, Path(writer) / "draft.md")["exit_code"] == 0
+        for target in (Path(registered_projects["vera_seat"]) / "brand.md", registered_projects["vera"] / "README.md"):
+            assert _write(writer, target)["exit_code"] == 2, target
+
+    def test_a_trusted_writers_name_is_no_licence_outside_aipass(self, registered_projects: dict):
+        """A Vera branch called seedgo is not @seedgo: the grant is AIPass's, read from its registry."""
+        result = _write(registered_projects["vera_seedgo"], Path(registered_projects["writer"]) / "draft.md")
+        assert result["exit_code"] == 2
+        assert "Cross-branch" in json.loads(result["stdout"])["reason"]
 
 
 class TestCapGateStatesItsReach:

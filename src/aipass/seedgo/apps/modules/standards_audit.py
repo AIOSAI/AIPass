@@ -233,7 +233,7 @@ def _print_refusal(refused) -> NoReturn:
     The raise is the second half of the same sentence. This function printed
     "exit code: 7" and then returned, its callers returned True, and
     `seedgo.py` turned that into exit 0 - so the line above was a claim the
-    process contradicted one line later. Patrick's standing ruling (fleet
+    process contradicted one line later. The owner's standing ruling (fleet
     sweep 2026-09-07): an unknown command or argument FAILS.
     """
     error(refused.stdout_line())
@@ -315,7 +315,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 
     if parsed.unrecognized:
         # Raises: the refusal carries its own exit code out to seedgo.py. A
-        # plain `return True` here meant the shell saw 0 (Patrick's ruling,
+        # plain `return True` here meant the shell saw 0 (the owner's ruling,
         # fleet sweep 2026-09-07); a `return False` would have had seedgo.py
         # report 'Unknown command: audit' over a verb that is very much ours.
         _refuse_unknown_argument(parsed.unrecognized[0], args)

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: trinity_push.py
 # Description: The trinity push — frame rebuild, vectorize-verify-prune, todos to the backlog file
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-08-27
 # Modified: 2026-09-15
 # =============================================
@@ -135,7 +135,7 @@ _TEMPLATE_FILES = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS
 
 _DOC_NAME_SUFFIX = {"local": ".LOCAL", "observations": ".OBSERVATIONS"}
 
-# document_metadata is a CLOSED set — Patrick's ruling. Anything not named
+# document_metadata is a CLOSED set — the owner's ruling. Anything not named
 # here is pruned from the block, `status` included (health is computed at run
 # time; a stored copy of a derivable fact is a second source of truth).
 DOC_META_FIELDS = (
@@ -176,25 +176,75 @@ _TYPE_INT = "int"
 _TYPE_STR = "str"
 _TYPE_STR_LIST = "list[str]"
 
-ENTRY_RULES: dict[str, dict[str, dict[str, str]]] = {
-    "sessions": {
-        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "summary": _TYPE_STR, "status": _TYPE_STR},
-        "optional": {"tags": _TYPE_STR_LIST},
-    },
-    "key_learnings": {
-        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "key": _TYPE_STR, "value": _TYPE_STR},
-        "optional": {},
-    },
-    # DPLAN-0345: no `status`. What is on the pad IS the status; done = deleted.
-    "todos": {
-        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "task": _TYPE_STR},
-        "optional": {"priority": _TYPE_STR},
-    },
-    "observations": {
-        "required": {"number": _TYPE_INT, "date": _TYPE_STR, "note": _TYPE_STR, "tags": _TYPE_STR_LIST},
-        "optional": {},
-    },
-}
+# THE SHAPE LIVES IN THE CONFIG, NOT HERE (FPLAN-0593)
+# ----------------------------------------------------
+# This module carried its own literal copy of the entry shape until
+# 2026-09-15, and @seedgo's trinity_groups carried a third. Three copies of
+# one contract is three chances for a push to prune an entry the write gate
+# would have accepted, or to carry one it would have refused. The shape now
+# has ONE home — `entry_limits.entry_types.<type>.fields` in
+# memory.config.json — and this module derives its required/optional split
+# from it. @seedgo's mirror retires against the same key in Phase 2.
+#
+# The derivation is mechanical: a field is required when the config says so,
+# optional otherwise, and `type` is the same three type names both sides
+# already spoke.
+
+# Only the global fallback is cached. The push path hands its own resolved
+# type definition in (`resolve_caps` -> `cap_spec`), so a per_branch override
+# is honoured without ever reaching this; the cache exists so a shape-only
+# caller in a loop does not re-read the config per entry.
+_RULES_CACHE: dict[str, dict[str, dict[str, str]]] = {}
+
+
+def _rules_from_fields(fields: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Split a closed field map into the required/optional shape this module checks.
+
+    Args:
+        fields: ``entry_types.<type>.fields`` — ``{name: {"type", "required", ...}}``.
+
+    Returns:
+        ``{"required": {name: type}, "optional": {name: type}}``.
+    """
+    required: dict[str, str] = {}
+    optional: dict[str, str] = {}
+    for name, spec in fields.items():
+        if not isinstance(spec, dict):
+            continue
+        target = required if spec.get("required") else optional
+        target[name] = str(spec.get("type", _TYPE_STR))
+    return {"required": required, "optional": optional}
+
+
+def entry_rules(section: str, cap_spec: Any = None) -> dict[str, dict[str, str]] | None:
+    """Return the canonical shape for *section*, read from the config.
+
+    Args:
+        section: One of todos, key_learnings, sessions, observations.
+        cap_spec: The section's resolved entry-type definition when the caller
+            already has one (the push does). Its ``fields`` map wins, so a
+            per_branch override is honoured. Any other value falls back to the
+            global config.
+
+    Returns:
+        ``{"required": ..., "optional": ...}``, or None when the config
+        publishes no shape for this section — an unknown section stays
+        unknown rather than quietly becoming an open one.
+    """
+    if isinstance(cap_spec, dict):
+        fields = cap_spec.get("fields")
+        if isinstance(fields, dict) and fields:
+            return _rules_from_fields(fields)
+
+    if section in _RULES_CACHE:
+        return _RULES_CACHE[section]
+
+    types = entry_limits.load_entry_limits("").get("entry_types", {})
+    for name, type_def in types.items():
+        fields = type_def.get("fields") if isinstance(type_def, dict) else None
+        if isinstance(fields, dict) and fields:
+            _RULES_CACHE[name] = _rules_from_fields(fields)
+    return _RULES_CACHE.get(section)
 
 
 def _type_ok(value: Any, spec: str) -> bool:
@@ -246,7 +296,7 @@ def entry_problems(section: str, entry: Any, cap_spec: Any = None) -> list[str]:
     Returns:
         Human-readable problem strings, empty when the entry is canonical.
     """
-    rules = ENTRY_RULES.get(section)
+    rules = entry_rules(section, cap_spec)
     if rules is None:
         return [f"unknown section '{section}'"]
     if not isinstance(entry, dict):
@@ -315,7 +365,13 @@ def todo_defect(entry: Any, cap_spec: Any = None) -> str | None:
     """
     if not isinstance(entry, dict):
         return DEFECT_NOT_OBJECT
-    rules = ENTRY_RULES[TODO_SECTION]
+    rules = entry_rules(TODO_SECTION, cap_spec)
+    if rules is None:
+        # Unreachable while the config publishes a todos shape, and the
+        # regeneration seed always does. If it ever happens the pad must NOT
+        # read as clean: an unjudgeable todo is moved, not silently carried.
+        logger.warning("[trinity_push] No todos field shape in config — every todo reads as non-canonical")
+        return DEFECT_UNKNOWN
     allowed = set(rules["required"]) | set(rules["optional"])
     if "status" in entry:
         return DEFECT_STATUS
@@ -813,7 +869,7 @@ def _trinity_strays(trinity: Path) -> list[str]:
 
     Reported, never removed. Deleting another branch's backup or status file
     is a destructive act outside this lane's three-part mandate; the dry-run
-    surfaces them so the call stays Patrick's.
+    surfaces them so the call stays the owner's.
     """
     try:
         return sorted(

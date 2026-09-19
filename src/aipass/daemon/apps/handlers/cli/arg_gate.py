@@ -9,7 +9,7 @@
 """
 Unknown-argument gate — one refusal, decided once, for every daemon verb.
 
-PATRICK'S STANDING RULING: an unknown command or argument FAILS with a non-zero
+THE OWNER'S STANDING RULING: an unknown command or argument FAILS with a non-zero
 exit and a message naming the token. Never default, never silently ignore.
 
 WHY THIS EXISTS. @devpulse's 2026-09-07 fleet CLI sweep caught `branch-health`

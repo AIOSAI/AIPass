@@ -231,7 +231,7 @@ class TestBranchHealthCommand:
 
         `branch-health not_a_real_subarg_xyz` printed "Branch not found" twice —
         once from the report, once from the entry-health block — and exited 0.
-        Patrick's standing ruling: an unknown argument FAILS non-zero with the
+        The owner's standing ruling: an unknown argument FAILS non-zero with the
         token named. The token has to appear, or the caller cannot tell WHICH
         argument was rejected.
         """

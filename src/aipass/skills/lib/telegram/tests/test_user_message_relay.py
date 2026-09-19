@@ -371,7 +371,7 @@ class TestHandle:
         assert result["exit_code"] == 0
 
     def test_skips_tg_origin(self):
-        result = handle({"prompt": "Patrick via Telegram: hello"})
+        result = handle({"prompt": "User via Telegram: hello"})
         assert result["exit_code"] == 0
 
     def test_skips_no_bot_found(self, tmp_path):

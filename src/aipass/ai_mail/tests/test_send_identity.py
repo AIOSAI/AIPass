@@ -598,7 +598,7 @@ class TestDispatchEnvIsolation:
     def test_detect_refuses_when_cwd_is_outside_any_branch(self, clean_env, tmp_path, list_format_registry):
         """A CALLER_BRANCH claim no longer survives a CALLER_CWD outside any branch.
 
-        POLICY CHANGE, 2026-08-21 (Patrick's ruling via @devpulse, 096c9a42):
+        POLICY CHANGE, 2026-08-21 (the owner's ruling via @devpulse, 096c9a42):
         "ur dispatch should fail if u run from [outside] ur cwd, and if aimail was
         run in root it should fail outright." This test previously asserted the
         opposite — that the env var rescues a useless cwd — and that permissiveness

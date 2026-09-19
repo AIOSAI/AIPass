@@ -1,0 +1,42 @@
+{
+  "kind": "standards",
+  "ecosystem": "aipass",
+  "display_name": "context",
+  "generic": false,
+  "status": "advisory",
+  "reason": "the audit ROW is advisory: it scores and prints, and branch_audit keeps it out of the gating average - a checker that moved in one commit put 17 of 18 branches red on 2026-09-13. Gating happens in the per-file CI ratchet below, which holds only the two files a clean checkout can see, and only where the fleet is already under.",
+  "design": "DPLAN-0347 / FPLAN-0593, boardroom thread 16 (converged 2026-09-15), seedgo comment 57",
+  "corpus": {
+    "noun": "startup files",
+    "detail": "README.md, .aipass/aipass_local_prompt.md, .trinity/{local,observations,passport}.json, DASHBOARD.local.json - apps/ is never opened",
+    "measured_by": "startup_budget_check:measure_corpus"
+  },
+  "caps": {
+    "README.md": {
+      "max_chars": 10000,
+      "units": "chars",
+      "owner": "seedgo",
+      "ruled": "2026-09-15 16:02 - 'readme 10k and off from start up' (DPLAN-0347 Design Decisions, README cap = RULED)",
+      "note": "The boardroom proposed 6,000 and FPLAN-0593 still says 6,000 at lines 179 and 221; those lines are STALE. 10,000 is the ruling and this key is the number the audit reads.",
+      "ratchet": "GATED since 2026-09-15. startup_ratchet reads THIS key at run time on every CI run - no copy of 10,000 exists in Python or in .github/. Move this number and the gate moves with it."
+    },
+    "docs/*.md": {
+      "max_chars": 20000,
+      "units": "chars",
+      "owner": "seedgo",
+      "ruled": "DPLAN-0347 - every docs/ page under 20,000 chars; DPLAN-0351 (2026-09-19 09:48) put it in the audit",
+      "scored_by": "aipass_standards/docs_page_check reads THIS key through startup_budget_check.docs_page_cap() on every call - no copy of 20,000 exists in the checker. A page AT the cap passes; over is >."
+    }
+  },
+  "ratchet": {
+    "implemented_by": "startup_ratchet:run",
+    "runs_in": ".github/scripts/seedgo_audit.py (seedgo-audit job), ahead of the standards audit and over the same branch list",
+    "gated": ["README.md", ".aipass/aipass_local_prompt.md"],
+    "boundary": "chars <= cap passes; OVER is strictly greater. A file measuring exactly its cap is not a failure.",
+    "units": "chars (wc -m): decode utf-8, len(text). Never bytes, never lines, never tokens.",
+    "not_gated": [".trinity/local.json", ".trinity/observations.json", ".trinity/passport.json", "DASHBOARD.local.json", "docs/*.md"],
+    "why_not_gated": ".trinity/ and DASHBOARD.local.json are gitignored, so a CI checkout holds none of them - a gate on them would measure nothing on every run and pass by accident forever. docs/ pages are measured by the advisory lane but not gated: the fleet holds pages that predate the 20,000-chars-per-page rule. A ratchet drops only where the corpus is already under.",
+    "unreadable_cap": "RED, naming the owner. There is no fallback constant anywhere in the gate; a cap that cannot be read means the gate has stopped measuring, and it says so instead of printing green.",
+    "failure_line": "FAIL <path> - measured <chars>, cap <cap>, owner @<branch> (<where the cap lives>)"
+  }
+}

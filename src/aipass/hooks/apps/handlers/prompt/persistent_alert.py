@@ -1,15 +1,23 @@
 # =================== AIPass ====================
 # Name: persistent_alert.py
-# Version: 1.0.1
-# Description: Injects advisory banners for active alerts on UserPromptSubmit
+# Version: 1.1.0
+# Description: Injects advisory banners for active alerts on UserPromptSubmit — on arrival, then on cadence
 # Branch: hooks
 # Layer: apps/handlers/prompt
 # Created: 2026-07-14
-# Modified: 2026-07-14
+# Modified: 2026-09-15
 # =============================================
 
-"""Injects advisory banners for active alerts from .aipass/alerts.json."""
+"""Injects advisory banners for active alerts from .aipass/alerts.json.
 
+An alert announces on the turn it arrives, then repeats on the cadence beat
+(loader "alert", default period 5) for as long as it stays active. The guard
+file was only ever silencing the SOUND: the banner itself re-injected in full on
+every single turn, up to ten alerts with uncapped bodies (DPLAN-0347, measured
+2026-09-15). A standing condition is worth a reminder, not a tax on every prompt.
+"""
+
+import importlib
 import json
 import os
 import tempfile
@@ -21,6 +29,13 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 _GUARD_DIR = Path(tempfile.gettempdir())
 _MAX_ALERTS_SHOWN = 10
+#: Cadence loader name for the repeat beat. Unknown names inherit the global
+#: period, but it is spelled in cadence.DEFAULTS so the beat is a contract a
+#: clone runs on rather than a fallback (cadence_config.json is gitignored).
+_CADENCE_LOADER = "alert"
+#: Per-alert body ceiling. The title, severity, source and id always render;
+#: only the body is cut, because the body is the part that grows.
+_BODY_CHAR_CAP = 300
 
 
 def _find_aipass_dir() -> Path | None:
@@ -100,6 +115,40 @@ def _mark_announced(session_id: str, alert_id: str) -> None:
             logger.info("[HOOKS] persistent_alert: guard write failed: %s", exc)
 
 
+def _repeat_allowed(hook_data: dict) -> bool:
+    """True when an already-announced banner may re-inject this turn.
+
+    Arrival is not gated — an alert that waits four turns to be seen is not a
+    notification. Every turn after that runs on the cadence beat, the same one
+    the kernel, navmap, branch prompt and identity land on.
+    """
+    try:
+        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        return bool(cadence.should_fire(_CADENCE_LOADER, hook_data))
+    except Exception as exc:
+        logger.warning(
+            "[HOOKS] persistent_alert FAIL-OPEN loader=%s: cadence check raised, so the banner repeats "
+            "EVERY turn until this is cured: %s",
+            _CADENCE_LOADER,
+            exc,
+        )
+        return True
+
+
+def _cap_body(body: str, alert_id: str) -> str:
+    """Cut an alert body to _BODY_CHAR_CAP, saying where the rest is.
+
+    The dismiss command is already on the banner; the pointer here names the id
+    so a long alert can be read in full where it lives instead of costing the
+    prompt every beat.
+    """
+    if len(body) <= _BODY_CHAR_CAP:
+        return body
+    logger.info("[HOOKS] persistent_alert: body of %s is %d chars, cut to %d", alert_id, len(body), _BODY_CHAR_CAP)
+    marker = f"… [cut at {_BODY_CHAR_CAP} chars — full text: drone @hooks alerts]"
+    return body[: _BODY_CHAR_CAP - len(marker)].rstrip() + marker
+
+
 def _format_banner(alerts: list[dict]) -> str:
     """Format alert banners for prompt injection, capped at _MAX_ALERTS_SHOWN."""
     shown = alerts[:_MAX_ALERTS_SHOWN]
@@ -114,7 +163,7 @@ def _format_banner(alerts: list[dict]) -> str:
         alert_id = alert.get("id", "?")
         lines.append(f"[{severity}] {title} (from @{source}, id: {alert_id})")
         if body:
-            lines.append(f"  {body}")
+            lines.append(f"  {_cap_body(str(body), str(alert_id))}")
     if hidden > 0:
         lines.append(f"...and {hidden} more (dismiss some to see the rest)")
     header = "# Active Alerts"
@@ -143,8 +192,6 @@ def handle(hook_data: dict) -> dict:
     if not alerts:
         return {"stdout": "", "exit_code": 0}
 
-    banner = _format_banner(alerts)
-
     session_id = hook_data.get("session_id", "") or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     new_ids = [a["id"] for a in alerts if a.get("id") and not _already_announced(session_id, a["id"])]
     sound = ""
@@ -154,6 +201,11 @@ def handle(hook_data: dict) -> dict:
         count = len(alerts)
         plural = "s" if count != 1 else ""
         sound = f"alert: {count} active alert{plural}"
+    elif not _repeat_allowed(hook_data):
+        logger.info("[HOOKS] persistent_alert: %d active alerts held for the next beat", len(alerts))
+        return {"stdout": "", "exit_code": 0}
+
+    banner = _format_banner(alerts)
 
     json_handler.log_operation("inject_alerts", {"count": len(alerts)})
     logger.info("[HOOKS] persistent_alert: %d active alerts injected", len(alerts))

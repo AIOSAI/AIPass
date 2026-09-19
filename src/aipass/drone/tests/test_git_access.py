@@ -1,15 +1,16 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access, new handlers, and PR deprecation
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for tier-based git access, new handlers (diff, log, commit, checkout), and PR deprecation."""
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import subprocess
@@ -25,6 +26,8 @@ from aipass.drone.apps.plugins.devpulse_ops.auth import (
 from aipass.drone.apps.handlers.git.diff_handler import get_branch_diff
 from aipass.drone.apps.handlers.git.log_handler import get_git_log
 from aipass.drone.apps.handlers.git.show_handler import show_object
+from aipass.prax.apps.modules import dashboard as prax_dashboard
+from aipass.drone.apps.handlers.git import commit_handler
 from aipass.drone.apps.handlers.git.commit_handler import commit_changes, stage_branch_dir
 from aipass.drone.apps.handlers.git.checkout_handler import checkout_branch
 from aipass.drone.apps.handlers.git import repo_door
@@ -1106,6 +1109,125 @@ class TestCommitChanges:
         assert result["exit_code"] == 1
         assert "failed" in result["stderr"].lower()
         _assert_ordered_calls(mock_run, [_GIT_DIFF_CACHED, _GIT_COMMIT])
+
+
+class TestCommitSubjectCap:
+    """An essay in the subject line is refused at the door (DPLAN-0347)."""
+
+    def test_cap_is_prax_s_number_not_a_copy(self) -> None:
+        """A commit subject and a plan subject are the same glance — one number.
+
+        The value alone cannot prove it: CPython interns small ints, so a
+        hand-copied 120 passes even an identity check (measured — the mutant
+        survived). Where the number comes FROM is a property of the source.
+        """
+        source = inspect.getsource(commit_handler)
+        assert "from aipass.prax.apps.modules.dashboard import SUBJECT_CAP" in source, (
+            "the cap must be read from prax, never copied into drone"
+        )
+        assert commit_handler.SUBJECT_CAP == prax_dashboard.SUBJECT_CAP
+
+    def test_over_cap_subject_refused(self, repo_dir: Path) -> None:
+        essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
+
+        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run:
+            result = commit_changes(essay)
+
+        assert result["exit_code"] == 1
+        assert result["stdout"] == ""
+        assert mock_run.call_count == 0, "a refused subject must not reach git"
+
+    def test_refusal_names_the_length_the_cap_and_the_rule(self, repo_dir: Path) -> None:
+        essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
+        subject_length = len(essay)
+
+        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run"):
+            result = commit_changes(essay)
+
+        stderr = result["stderr"]
+        assert str(subject_length) in stderr, f"refusal must show the offending length: {stderr!r}"
+        assert str(commit_handler.SUBJECT_CAP) in stderr, f"refusal must show the cap: {stderr!r}"
+        assert "body" in stderr.lower(), f"refusal must teach where the why goes: {stderr!r}"
+        assert "Nothing was committed." in stderr
+
+    def test_subject_exactly_at_the_cap_commits(self, repo_dir: Path) -> None:
+        subject = "feat(drone): " + "x" * (commit_handler.SUBJECT_CAP - len("feat(drone): "))
+        assert len(subject) == commit_handler.SUBJECT_CAP
+
+        mock_diff = MagicMock(returncode=1, stdout="", stderr="")
+        mock_commit = MagicMock(returncode=0, stdout="[main cap120] at the cap", stderr="")
+
+        with patch(
+            "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
+            side_effect=[mock_diff, mock_commit],
+        ) as mock_run:
+            result = commit_changes(subject)
+
+        assert result["exit_code"] == 0
+        _assert_ordered_calls(mock_run, [_GIT_DIFF_CACHED, _GIT_COMMIT])
+
+    def test_a_body_of_any_length_is_wanted(self, repo_dir: Path) -> None:
+        """The cap is on line 1 only — the record keeps the essay."""
+        message = "feat(drone): the subject stays short\n\n" + ("the why, at length. " * 200)
+
+        mock_diff = MagicMock(returncode=1, stdout="", stderr="")
+        mock_commit = MagicMock(returncode=0, stdout="[main body99] short subject", stderr="")
+
+        with patch(
+            "aipass.drone.apps.handlers.git.commit_handler.subprocess.run",
+            side_effect=[mock_diff, mock_commit],
+        ):
+            result = commit_changes(message)
+
+        assert result["exit_code"] == 0
+
+    def test_leading_blank_lines_do_not_hide_an_essay(self, repo_dir: Path) -> None:
+        """git's own cleanup drops them before taking line 1; so does the gate."""
+        essay = "\n\n   \nfeat(drone): " + "x" * commit_handler.SUBJECT_CAP
+
+        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run:
+            result = commit_changes(essay)
+
+        assert result["exit_code"] == 1
+        assert mock_run.call_count == 0
+
+    def test_refusal_precedes_the_lint_and_test_lane(self, repo_dir: Path) -> None:
+        """--all runs ruff and the suite; a subject refusal must cost neither."""
+        essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/ruff") as mock_which,
+            patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run,
+        ):
+            result = commit_changes(essay, all_files=True)
+
+        assert result["exit_code"] == 1
+        assert mock_run.call_count == 0, "no ruff, no pytest, no git add"
+        assert mock_which.call_count == 0
+
+    def test_refusal_precedes_repo_resolution(self, repo_dir: Path) -> None:
+        """Nothing is touched — not even the repo the commit would have landed in."""
+        essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
+
+        with (
+            patch("aipass.drone.apps.handlers.git.commit_handler.find_repo_root") as mock_root,
+            patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run"),
+        ):
+            result = commit_changes(essay)
+
+        assert result["exit_code"] == 1
+        assert mock_root.call_count == 0
+
+    def test_the_external_repo_door_gets_the_same_refusal(self, repo_dir: Path) -> None:
+        """--repo names another repo and gets that repo's own seat — cap included."""
+        essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
+
+        with patch("aipass.drone.apps.handlers.git.commit_handler.subprocess.run") as mock_run:
+            result = commit_changes(essay, repo_root=repo_dir)
+
+        assert result["exit_code"] == 1
+        assert str(commit_handler.SUBJECT_CAP) in result["stderr"]
+        assert mock_run.call_count == 0
 
 
 # ===========================================================================

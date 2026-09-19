@@ -333,7 +333,7 @@ class TestFeedbackToggleModule:
 
         Both arms printed "No .aipass/ directory found" and returned True, which
         hooks.main() turns into exit 0 — `drone @hooks feedback off` reported
-        success having toggled nothing. Patrick's standing ruling: a refusal
+        success having toggled nothing. The owner's standing ruling: a refusal
         exits non-zero and names the reason.
 
         Both subcommands in one body because the cure is one seam

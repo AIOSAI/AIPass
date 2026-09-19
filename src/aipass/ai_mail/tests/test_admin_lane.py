@@ -13,7 +13,7 @@ Split by responsibility:
   - what EARNS the flag  -> here (5-leg verification + dispatch.py wiring)
 
 The signing key lives outside every repo at ~/.aipass/admin_grant.key and does
-not exist until Patrick's ceremony. Nothing here creates it: every test that
+not exist until the owner's ceremony. Nothing here creates it: every test that
 needs a passing signature builds a throwaway key under tmp_path and hands its
 path in explicitly.
 """
@@ -72,7 +72,7 @@ def ceremony(tmp_path):
     cert = {
         "owner": "devpulse",
         "type": "birth_certificate",
-        "privileges": {"admin": True, "granted_by": "patrick", "granted": "2026-08-12"},
+        "privileges": {"admin": True, "granted_by": "owner", "granted": "2026-08-12"},
     }
     cert["signature"] = {"algo": "hmac-sha256", "value": compute_signature(cert, bytes.fromhex(_KEY_HEX))}
     cert_path = branch / "artifacts" / "birth_certificate.json"
@@ -115,7 +115,7 @@ class TestVerifyAdminCaller:
         """One field edited after signing — signature no longer matches."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         cert = ceremony["cert"]
-        cert["privileges"]["granted_by"] = "not-patrick"
+        cert["privileges"]["granted_by"] = "not-owner"
         ceremony["cert_path"].write_text(json.dumps(cert), encoding="utf-8")
 
         ok, reason = verify_admin_caller(key_path=ceremony["key_path"], registry_path=ceremony["registry_path"])
@@ -187,7 +187,7 @@ class TestVerifyAdminCaller:
     def test_real_key_path_is_not_touched_by_this_suite(self):
         """Guard: this suite must never create OR modify the ceremony key.
 
-        Originally this asserted the key did not exist — true until Patrick's
+        Originally this asserted the key did not exist — true until the owner's
         ceremony, and false the moment it happened. The durable form compares
         the key's stat against the value captured at import: fixtures stay
         under tmp_path either way, and the guard survives the ceremony.

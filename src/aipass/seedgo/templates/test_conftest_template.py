@@ -216,7 +216,7 @@ def mock_json_handler() -> MagicMock:
 def host_state_snapshot(tmp_path):
     """Opt-in guard for a test that must touch REAL host state and put it back.
 
-    Patrick's ruling, 2026-09-08: a test may touch the real thing, it must
+    The owner's ruling, 2026-09-08: a test may touch the real thing, it must
     restore the exact prior state. Reach for this only when patching the seam
     will not do - monkeypatch.setenv, delenv, chdir and setattr are restored for
     you and are the cheaper cure. The pack rule is host_state; the full worked

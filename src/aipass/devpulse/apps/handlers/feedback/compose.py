@@ -249,7 +249,7 @@ def _deliver_to_ai_mail(
     # match any registry branch email: a match on '@devpulse' routes the reply
     # through normal delivery, which refuses cross-project mail (#134) — the
     # stored reply_path is only consulted on a registry MISS. The feedback loop
-    # is cross-project BY DESIGN and owns its whole round trip (Patrick ruling
+    # is cross-project BY DESIGN and owns its whole round trip (the owner's ruling
     # 2026-08-07); '@devpulse:feedback' steers replies past the registry onto
     # the reply_path route.
     mail_message = {

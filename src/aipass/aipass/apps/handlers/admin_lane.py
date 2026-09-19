@@ -6,7 +6,7 @@
 # Modified: 2026-08-28
 # =============================================
 
-"""Admin-lane state for ``aipass doctor`` (DPLAN-0319 train, Patrick's ruling).
+"""Admin-lane state for ``aipass doctor`` (DPLAN-0319 train, the owner's ruling).
 
 Reports whether this machine's admin lane is LIT or DARK, and nothing more.
 

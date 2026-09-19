@@ -13,7 +13,7 @@ WHY AN EXCEPTION AND NOT A RETURN VALUE. `handle_command` answers one question -
 That made a refusal indistinguishable from a success to anything reading the
 exit code: `drone @seedgo audit not_a_real_pack` printed
 `❌ Unknown pack: 'not_a_real_pack'` and exited 0, and `audit --bogus-flag`
-printed `exit code: 7` in its own output while exiting 0 alongside it. Patrick's
+printed `exit code: 7` in its own output while exiting 0 alongside it. The owner's
 standing ruling (fleet sweep 2026-09-07) is that an unknown command or argument
 FAILS. Widening the return type to `bool | int` would have had every caller in
 the fleet decide what `0` meant - the code that ran fine, or the module that

@@ -62,7 +62,7 @@ def _require_sentinel() -> Path:
 
     Both toggles used to print "No .aipass/ directory found" and return True,
     which hooks.main() turns into exit 0 — `drone @hooks feedback off` reported
-    success having toggled nothing, twice over. Patrick's standing ruling: a
+    success having toggled nothing, twice over. The owner's standing ruling: a
     refusal exits non-zero and names the reason.
 
     One seam rather than the same fix twice: the two arms asked the identical

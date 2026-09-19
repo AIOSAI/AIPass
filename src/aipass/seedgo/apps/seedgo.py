@@ -211,6 +211,10 @@ def print_help() -> None:
     console.print(
         "  [green]drone @seedgo audit pytest_quality[/green]           [dim]# The same over every citizen[/dim]"
     )
+    console.print(
+        "  [green]drone @seedgo audit context[/green]                  "
+        "[dim]# Startup-budget fleet table: 6 files per branch vs their owners' caps (advisory)[/dim]"
+    )
     console.print()
 
     console.print("[yellow]Test Quality:[/yellow]")
@@ -372,7 +376,7 @@ def main() -> int:
         error(f"Unknown command: {command}", suggestion="Run 'seedgo --help' for usage")
         return 1
     except CommandRefused as refused:
-        # The module already printed why. Patrick's standing ruling, fleet
+        # The module already printed why. The owner's standing ruling, fleet
         # sweep 2026-09-07: an unknown command or argument FAILS. Until this
         # arm existed, `audit --bogus-flag` printed "exit code: 7" and handed
         # the shell a 0 on the next line.

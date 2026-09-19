@@ -3,7 +3,7 @@
 # Description: Background post-close processing
 # Version: 1.2.0
 # Created: 2026-02-14
-# Modified: 2026-02-14
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -14,7 +14,9 @@ Called by close_plan.py via subprocess.Popen so the close command returns fast.
 
 Uses a lock file to prevent concurrent execution - if another instance is
 already running, this one exits silently (the running instance will pick up
-all unprocessed plans since it scans ALL of them).
+all unprocessed plans since it scans ALL of them). A lock file that cannot be
+created at all (still denied after lock_ops' retry budget) is not "already
+running": it is logged as an error and the runner exits non-zero.
 
 This script lives inside the flow branch so handler import guards allow it.
 """
@@ -87,7 +89,15 @@ def handle_command(command: str, args: list) -> bool:
     json_handler.log_operation("post_close_processed", {"command": command, "args": args})
 
     # Run the post-close processing directly (foreground)
-    if not acquire_lock(LOCK_FILE):
+    try:
+        acquired = acquire_lock(LOCK_FILE)
+    except PermissionError as e:
+        # Denied past lock_ops' retry budget: a permissions problem, not a
+        # running instance, so it must not be reported as one.
+        logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
+        error(f"Could not create lock: {e}")
+        return True
+    if not acquired:
         warning("Another instance is already running")
         return True
 
@@ -156,7 +166,12 @@ if __name__ == "__main__":
         print_help()
         sys.exit(0)
 
-    if not acquire_lock(LOCK_FILE):
+    try:
+        acquired = acquire_lock(LOCK_FILE)
+    except PermissionError as e:
+        logger.error("[%s] Could not create lock %s: %s", MODULE_NAME, LOCK_FILE, e)
+        sys.exit(1)
+    if not acquired:
         sys.exit(0)
 
     try:

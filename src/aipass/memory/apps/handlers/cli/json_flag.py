@@ -20,7 +20,7 @@ Purpose:
 
     The flag is position-agnostic exactly like the help flag, and is
     STRIPPED before positional parsing so
-    `config set @memory sessions 25 --json` parses identically to the same
+    `config set @memory sessions 12 --json` parses identically to the same
     line without it.
 
 Precedence:

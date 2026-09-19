@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_watcher.py
 # Description: Centralized log file watcher for system_logs directory
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-01-31
-# Modified: 2026-08-04
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -14,8 +14,12 @@ Detects ERROR/WARNING/INFO entries and fires appropriate events.
 
 Events fired:
     - error_detected: When ERROR level log detected (Medic v2 pipeline via registry_report)
-    - error_logged: Monitoring-only event (no dispatch)
     - warning_logged: When WARNING level log detected
+
+An `error_logged` event is named nowhere in the fleet and is fired by nothing. It was
+advertised here and in the log_events help page until 2026-09-15; the line is gone rather
+than kept as vocabulary, because a name with no firer sends a reader looking for a lane
+that does not exist.
 
 Architecture:
     - Trigger OWNS all file watching (filesystem events)
@@ -39,7 +43,7 @@ from aipass.trigger.apps.handlers.json import json_handler
 # System logs directory (package-relative via config)
 SYSTEM_LOGS_DIR = TRIGGER_ROOT.parent.parent.parent / "system_logs"
 
-# Sole owner of the system_logs directory (Patrick's ruling, 2026-08-14).
+# Sole owner of the system_logs directory (the owner's ruling, 2026-08-14).
 # Named here so the ownership is readable in the code rather than only in a
 # commit message — see start_log_watcher() for what the ruling cost to leave
 # unmade.
@@ -436,7 +440,7 @@ def start_log_watcher() -> Any:
     """
     Decline to start — `branch_log_events` owns system_logs.
 
-    Patrick ruled on 2026-08-14 that double-watching this directory is wasted
+    The owner ruled on 2026-08-14 that double-watching this directory is wasted
     CPU and, worse, duplicate signal: both watchers registered it, so one
     condition minted two escalation signatures with different attribution. The
     branch watcher resolved the owning branch from the filename, this one
@@ -458,7 +462,7 @@ def start_log_watcher() -> Any:
         check for an observer take their existing not-started path.
     """
     logger.info(
-        "[TRIGGER] system_logs is watched by %s — centralized observer not started (Patrick's ruling, 2026-08-14)",
+        "[TRIGGER] system_logs is watched by %s — centralized observer not started (the owner's ruling, 2026-08-14)",
         SYSTEM_LOGS_OWNER,
     )
     return None

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tab_renderer.py
 # Description: Config-generated state-tabs for .trinity memory files
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-25
 # Modified: 2026-09-15
 # =============================================
@@ -282,7 +282,13 @@ def render_tab(
     # and it hard-defaulted a missing count to 15 — printing a limit that does
     # not exist. Both are gone: config_loader.resolve_limits is the single
     # implementation, shared with `config get` and pinned against the detector.
-    count = config_loader.resolve_limits(rollover_cfg, branch_name).get(section_name, {}).get("count")
+    #
+    # The entry_limits section goes WITH it (FPLAN-0593): the keep-count is
+    # clamped to what the file budget can actually hold, and the resolver can
+    # only clamp against a budget it was handed. Passing it here is the
+    # difference between printing "keep 15" and printing "keep 40" into a file
+    # that will roll at 16.
+    count = config_loader.resolve_limits(rollover_cfg, branch_name, entry_limits_cfg).get(section_name, {}).get("count")
 
     if count is None:
         # No limit anywhere for this section — say so. Naming a number here

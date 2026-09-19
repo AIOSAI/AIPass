@@ -9,7 +9,7 @@
 """
 Notification Feed Writer
 
-Desktop toasts are retired (Patrick's ruling, 2026-08-11) — no D-Bus, no
+Desktop toasts are retired (the owner's ruling, 2026-08-11) — no D-Bus, no
 notify-send, and no fallback that still toasts. Notification events are
 appended as JSON lines to a shared feed; BAUD's notification bell reads it.
 

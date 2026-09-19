@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_files.py
 # Description: Memory File Safe I/O Handler
-# Version: 1.3.0
+# Version: 1.6.0
 # Created: 2026-03-17
-# Modified: 2026-08-30
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -37,6 +37,7 @@ from aipass.memory.apps.handlers.json import json_handler
 from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json.entry_limits import load_entry_limits, classify_entries
 from aipass.memory.apps.handlers.repo_root import module_file
+from aipass.memory.apps.handlers.write_fence import fence_write
 
 logger = get_system_logger()
 
@@ -55,6 +56,41 @@ _TRACKED_TRINITY_FILES = {"local.json", "observations.json"}
 # =============================================================================
 # ENTRY-LIMITS VALIDATION (rollover-safe)
 # =============================================================================
+
+
+def violation_line(violation: Dict[str, Any]) -> str:
+    """Render one violation the way the agent who must fix it needs to read it.
+
+    The over-cap line — ``sessions[0] 312/300 (+12 over)`` — was the only
+    species this text ever had to carry, so it was written inline three times.
+    The closed field shape (FPLAN-0593) added species where those numbers are
+    meaningless: an ``unknown_field`` has no cap to be over, and printing
+    "todos[0] 0/0 (+0 over)" tells the agent a todo is zero characters over a
+    zero-character cap. That is worse than silence — it reads as a bug in the
+    gate rather than a field that may not exist.
+
+    Args:
+        violation: One record from ``classify_entries``.
+
+    Returns:
+        A single line naming the container, the entry, and what is wrong.
+    """
+    where = f"{violation['container']}[{violation['key']}]"
+    reason = violation.get("reason")
+    field = violation.get("field", "")
+    units = violation.get("units", "chars")
+
+    if reason == "unknown_field":
+        return f"{where} field '{field}' is not part of the entry shape"
+    if reason == "field_over_cap":
+        return f"{where} '{field}' is {violation['length']}/{violation['cap']} {units} (+{violation['over_by']} over)"
+    if reason == "missing_field":
+        return f"{where} has no '{field}' field"
+    if reason == "unmeasurable":
+        found = violation.get("found_type", "unknown")
+        named = f" '{field}'" if field else ""
+        return f"{where}{named} is {found}, expected str"
+    return f"{where} {violation['length']}/{violation['cap']} (+{violation['over_by']} over)"
 
 
 def _validate_entry_limits(
@@ -131,8 +167,7 @@ def _validate_entry_limits(
     for debt in split["carried"]:
         logger.warning(
             f"[entry_limits] CARRIED {branch} {file_path.name} "
-            f"{debt['container']}[{debt['key']}] "
-            f"{debt['length']}/{debt['cap']} (+{debt['over_by']} over) — "
+            f"{violation_line(debt)} — "
             f"not written by this write, not refused; only @{branch} can cure it"
         )
 
@@ -159,16 +194,11 @@ def _validate_entry_limits(
 
     if not enforce:
         for violation in over:
-            logger.warning(
-                f"[entry_limits] WARN {branch} {file_path.name} "
-                f"{violation['container']}[{violation['key']}] "
-                f"{violation['length']}/{violation['cap']} "
-                f"(+{violation['over_by']} over)"
-            )
+            logger.warning(f"[entry_limits] WARN {branch} {file_path.name} {violation_line(violation)}")
         return None  # Write through in warn mode
 
     # Enforce mode — block the write
-    details = "; ".join(f"{v['container']}[{v['key']}] {v['length']}/{v['cap']} (+{v['over_by']} over)" for v in over)
+    details = "; ".join(violation_line(v) for v in over)
     return {"success": False, "error": f"Entry limit exceeded: {details}"}
 
 
@@ -325,7 +355,12 @@ def write_memory_file(file_path: Path, data: Dict[str, Any]) -> Dict[str, Any]:
         - Writes to temp file first
         - Only renames if write succeeds
         - Original file unchanged if write fails
+        - Refused outright outside the AIPass root (write_fence)
     """
+    refusal = fence_write(file_path, lane="write_memory_file")
+    if refusal is not None:
+        return {"success": False, "error": refusal}
+
     if not isinstance(data, dict):
         return {"success": False, "error": f"Data must be dict, got {type(data).__name__}"}
 

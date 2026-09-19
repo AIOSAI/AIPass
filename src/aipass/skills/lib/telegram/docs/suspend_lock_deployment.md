@@ -8,7 +8,7 @@ the **deployment**: what is on, what is off, and why.
 
 ---
 
-## 1. Deployment model (Patrick's ruling #217, supersedes #216)
+## 1. Deployment model (the owner's ruling #217, supersedes #216)
 
 **The machine stays awake 24/7. Lock is never sleep.**
 
@@ -65,7 +65,7 @@ refuse.
 - 13:13 — the real `_handle_control_lock` code path driven from an environment with
   `XDG_SESSION_ID`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS` unset, reproducing the service
   context. `LockedHint` went `no` → `yes`.
-- 13:28:51 — Patrick's own tap in the Telegram control chat, through the live
+- 13:28:51 — The owner's own tap in the Telegram control chat, through the live
   `telegram-bot@base.service` after its 13:26 restart onto v1.5.1. Logged by the service as
   `Screen locked via loginctl (session=3)`.
 
@@ -107,7 +107,7 @@ Constants (`base_bot.py`): `SUSPEND_GRACE_WINDOW_SECONDS=180`,
 | Verb | Effect |
 |---|---|
 | `/start [branch]` | Wake a terminal agent — detached tmux session `aipass-<branch>`, runs `claude -c \|\| claude`. Default branch `aipass`. No-ops if the session exists. |
-| `/kill [branch]` | Kill the `aipass-<branch>` tmux session outright. No graceful stop (Patrick's ruling). |
+| `/kill [branch]` | Kill the `aipass-<branch>` tmux session outright. No graceful stop (the owner's ruling). |
 | `/status` | Normal status text plus a live listing of all `aipass-*` sessions (branch, PID, alive/dead). |
 | `/stop` | Every bot, not just control bots — Escape-interrupts *this* bot's own mirrored session. |
 | `/logs`, `/monitor` | Session log stream control and system-wide log subscription. |
@@ -123,12 +123,12 @@ without it GNOME or logind will sleep the machine regardless of what the verbs d
 |---|---|---|
 | `org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type` | `nothing` | Never auto-suspend on AC |
 | `…sleep-inactive-battery-type` | `nothing` | Never auto-suspend on battery either |
-| `org.gnome.desktop.session idle-delay` | `0` | Screen never blanks on idle — Patrick's preference; `/lock` is the lock path, not a timer |
+| `org.gnome.desktop.session idle-delay` | `0` | Screen never blanks on idle — the owner's preference; `/lock` is the lock path, not a timer |
 | `org.gnome.desktop.screensaver lock-enabled` | `true` | When it does lock, a password is required |
 | `org.gnome.desktop.screensaver lock-delay` | `0` | Lock takes effect immediately, no grace period |
 | `/etc/systemd/logind.conf` `HandleLidSwitch` | `ignore` | Closing the lid does not suspend |
 | `HandleLidSwitchExternalPower` | `ignore` | Same on AC |
-| `aipass-wake-sources.service` | `disabled` / `inactive` | Patrick ran the disable 2026-08-02 |
+| `aipass-wake-sources.service` | `disabled` / `inactive` | The owner ran the disable 2026-08-02 |
 
 Note: the `sleep-inactive-*-timeout` values (3600 AC / 900 battery) are still at their
 defaults but are inert while the corresponding `-type` is `nothing`.
@@ -160,7 +160,7 @@ human decision. See section 4 for why this is opt-in.
 ## 4. The saga (for future archaeology)
 
 **Jul 30 – Aug 1 — the "perfect days".** Chat-behind-suspend felt near-live. `/suspend` was
-shipped and in daily use; Patrick could message the machine and get answers back promptly
+shipped and in daily use; the owner could message the machine and get answers back promptly
 while it appeared to be asleep.
 
 **What was actually happening.** It was a hardware bug, not a feature. Spurious ACPI wakes on
@@ -168,7 +168,7 @@ gpe4E were defeating suspend, duty-cycling the machine in 7–44 second naps. Th
 never really asleep for long, so the bot kept polling. The good behaviour was an accident.
 
 **2026-08-02 morning — the trap.** The `aipass-wake-sources` masking was installed to stop the
-spurious wakes. It worked: suspend became real. Patrick was then trapped behind a genuinely
+spurious wakes. It worked: suspend became real. The owner was then trapped behind a genuinely
 sleeping machine — 5 suspend cycles in 25 minutes. Two defects compounded it: his chat
 messages did not count as presence (the control bot is a separate process from `@devpulse`,
 where he was actually typing), and the grace window started at resume detection rather than at
@@ -183,7 +183,7 @@ effect of reinstalling grants.
 anchoring (first successful poll), and added the in-flight hold plus the `suspend_enabled`
 parking brake.
 
-**The live soak.** v1.5.0 worked exactly as designed — and Patrick still hit the wall. Fixed
+**The live soak.** v1.5.0 worked exactly as designed — and the owner still hit the wall. Fixed
 suspend is still suspend, and real sleep is real disconnect.
 
 **Ruling #217 (13:07, supersedes #216).** The machine stays awake 24/7. `/suspend` is retired
@@ -231,7 +231,7 @@ clears it — but not the armed RTC alarm, which is why step 1 comes first.
 
 ### Re-enable suspend deliberately
 
-Only with Patrick's approval — the verb is grounded, and it has never passed the hands-off
+Only with the owner's approval — the verb is grounded, and it has never passed the hands-off
 overnight soak (DPLAN-0270 test-matrix step T4). Never self-trigger a live suspend.
 
 1. Confirm `suspend_enabled` is `true` (or absent — it defaults to true) in the base bot config.
@@ -241,7 +241,7 @@ overnight soak (DPLAN-0270 test-matrix step T4). Never self-trigger a live suspe
 3. Decide on wake-source masking. Leave it off to get the short-beat behaviour back; install it
    with `sudo tools/suspend/install_suspend_grants.sh --with-wake-sources` to make suspend real.
    These are opposite outcomes — see section 4.
-4. Soak overnight with Patrick present before trusting it.
+4. Soak overnight with the owner present before trusting it.
 
 ---
 
@@ -258,4 +258,4 @@ overnight soak (DPLAN-0270 test-matrix step T4). Never self-trigger a live suspe
 | Live unit | `telegram-bot@base.service` (`systemd --user`), restarted onto v1.5.1 at 13:26 on 2026-08-02 |
 | Also running | `telegram-bot@{api,devpulse,prax_monitor,scheduler}.service`, `prax-monitor.service` |
 | `/lock` | Live and proven |
-| `/suspend` | Grounded — do not live-test without Patrick |
+| `/suspend` | Grounded — do not live-test without the owner |

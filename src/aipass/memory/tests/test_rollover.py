@@ -32,6 +32,19 @@ def _prepare_rollover_mocks(monkeypatch):
 
     Returns a dict of key mock objects so tests can assert against them.
     """
+    # FIRST LINE OF THE FIXTURE, before a single mock reaches sys.modules.
+    # The `config` verbs live in modules/rollover_config.py and `_Json`,
+    # `_emit` and `_refuse` in modules/rollover_json.py; rollover.py re-exports
+    # both sets. BOTH modules must be first-imported against the REAL
+    # aipass.cli, because whatever `console` and `error` each binds at import
+    # time it keeps FOREVER — the module stays cached long after teardown
+    # restores sys.modules. Standing below the cli stand-in was enough to hand
+    # 191 of test_config_verbs.py's tests a MagicMock console that printed
+    # nothing, in serial order only: --dist loadscope split the files across
+    # workers and CI never saw it.
+    real_rollover_config = importlib.import_module("aipass.memory.apps.modules.rollover_config")
+    real_rollover_json = importlib.import_module("aipass.memory.apps.modules.rollover_json")
+
     # rich
     mock_panel = MagicMock()
     mock_box = MagicMock()
@@ -96,11 +109,10 @@ def _prepare_rollover_mocks(monkeypatch):
     # machine only because some earlier test in the same process had already
     # imported the real one; on a fresh CI worker running this file first, all
     # 18 tests in this class died at import with "cli is not a package".
-    import importlib
-
     real_help_flags = importlib.import_module("aipass.memory.apps.handlers.cli.help_flags")
     real_json_flag = importlib.import_module("aipass.memory.apps.handlers.cli.json_flag")
     real_branch_flag = importlib.import_module("aipass.memory.apps.handlers.cli.branch_flag")
+
     cli_pkg = MagicMock()
     cli_pkg.help_flags = real_help_flags
     cli_pkg.json_flag = real_json_flag
@@ -135,6 +147,18 @@ def _prepare_rollover_mocks(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.memory_watcher", mock_memory_watcher)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover", rollover_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
+    # Patched attribute by attribute rather than through the sys.modules
+    # stand-in, because `_refuse` reads `error` from ITS OWN globals - without
+    # these three the mock error() the tests assert on is never called.
+    # monkeypatch restores each one.
+    monkeypatch.setattr(real_rollover_config, "console", mock_console)
+    monkeypatch.setattr(real_rollover_config, "error", mock_error)
+    monkeypatch.setattr(real_rollover_config, "detector", mock_detector)
+    # And the same two on rollover_json, which is where `_emit` reads `console`
+    # and `_refuse` reads `error` now — a patch on rollover_config no longer
+    # reaches either of them. No `detector` there: that module never took one.
+    monkeypatch.setattr(real_rollover_json, "console", mock_console)
+    monkeypatch.setattr(real_rollover_json, "error", mock_error)
 
     # intake (lazy import inside process_plans_command)
     mock_plans_processor = MagicMock()

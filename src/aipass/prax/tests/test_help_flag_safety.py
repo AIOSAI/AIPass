@@ -133,7 +133,7 @@ class TestHelpNeverExecutes:
 
 
 class TestUnknownArgumentIsRefused:
-    """Patrick's standing ruling: an unknown token FAILS — named, on stderr, non-zero.
+    """The owner's standing ruling: an unknown token FAILS — named, on stderr, non-zero.
 
     @devpulse's 2026-09-07 fleet CLI sweep found prax swallowing two of them.
     `drone @prax --definitely-not-a-flag` printed the self-map and exited 0,

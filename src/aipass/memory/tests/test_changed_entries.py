@@ -1033,3 +1033,276 @@ class TestTheNearCapLineIsAPerTypeKnob:
         assert _get_entry_limits().is_near_cap(legacy) is True
         legacy["length"] = 10
         assert _get_entry_limits().is_near_cap(legacy) is False
+
+
+# =============================================================================
+# THE CLOSED FIELD SHAPE (FPLAN-0593 / DPLAN-0347)
+# =============================================================================
+
+
+class TestTheClosedFieldShape:
+    """Every field an entry may carry, its type and its cap — and the two reasons.
+
+    One capped field per entry type is what let a 917-char ``status`` ride past
+    every gate while the fleet median was 9. These pin the shape that closes
+    that hole, and the refusal shapes @hooks renders.
+    """
+
+    @staticmethod
+    def _limits():
+        """The shipped sessions shape, hand-built so a config edit cannot mask a pin."""
+        return {
+            "enabled": True,
+            "enforce": True,
+            "entry_types": {
+                "sessions": {
+                    "file": "local.json",
+                    "container": "sessions",
+                    "kind": "list",
+                    "field": "summary",
+                    "max_chars": 300,
+                    "fields": {
+                        "number": {"type": "int", "required": True},
+                        "date": {"type": "str", "required": True, "max_chars": 10},
+                        "summary": {"type": "str", "required": True, "max_chars": 300},
+                        "status": {"type": "str", "required": True, "max_chars": 40},
+                        "tags": {"type": "list[str]", "required": False, "max_items": 3, "max_chars": 20},
+                    },
+                }
+            },
+        }
+
+    @staticmethod
+    def _entry(**over):
+        base = {"number": 1, "date": "2026-09-15", "summary": "a summary", "status": "completed"}
+        base.update(over)
+        return base
+
+    def _authored(self, before_entries, after_entries):
+        mod = _get_entry_limits()
+        return mod.classify_entries({"sessions": before_entries}, {"sessions": after_entries}, self._limits())[
+            "authored"
+        ]
+
+    # -- the two new reasons -------------------------------------------------
+
+    def test_a_field_outside_the_shape_is_unknown_field(self):
+        hits = self._authored([], [self._entry(mood="great")])
+        assert len(hits) == 1
+        assert hits[0] == {
+            "entry_type": "sessions",
+            "container": "sessions",
+            "key": "0",
+            "length": 5,
+            "cap": 0,
+            "over_by": 0,
+            "reason": "unknown_field",
+            "field": "mood",
+            "units": "chars",
+        }
+
+    def test_a_non_canonical_field_over_its_cap_is_field_over_cap(self):
+        hits = self._authored([], [self._entry(status="x" * 917)])
+        assert len(hits) == 1
+        assert hits[0]["reason"] == "field_over_cap"
+        assert hits[0]["field"] == "status"
+        assert (hits[0]["length"], hits[0]["cap"], hits[0]["over_by"]) == (917, 40, 877)
+        assert hits[0]["units"] == "chars"
+
+    def test_a_list_past_max_items_reports_items_not_chars(self):
+        hits = self._authored([], [self._entry(tags=["a", "b", "c", "d"])])
+        assert [h["units"] for h in hits] == ["items"]
+        assert (hits[0]["length"], hits[0]["cap"], hits[0]["over_by"]) == (4, 3, 1)
+
+    def test_a_list_can_bust_items_and_joined_chars_independently(self):
+        """Two caps because they fail differently: how many, and how much text."""
+        hits = self._authored([], [self._entry(tags=["x" * 30])])
+        assert [h["units"] for h in hits] == ["chars"]
+        assert (hits[0]["length"], hits[0]["cap"]) == (30, 20)
+
+    def test_the_six_published_keys_stay_ints_on_every_new_reason(self):
+        """@hooks formats length/cap/over_by with %d — a None there crashes the renderer."""
+        for entry in (self._entry(mood="x"), self._entry(status="x" * 50), self._entry(tags=["a"] * 9)):
+            for hit in self._authored([], [entry]):
+                for key in ("length", "cap", "over_by"):
+                    assert isinstance(hit[key], int), f"{hit['reason']}.{key} is {hit[key]!r}"
+
+    # -- reused reasons, not new ones ----------------------------------------
+
+    def test_a_missing_required_non_canonical_field_reuses_missing_field(self):
+        entry = self._entry()
+        del entry["status"]
+        hits = self._authored([], [entry])
+        assert [(h["reason"], h["field"]) for h in hits] == [("missing_field", "status")]
+        assert hits[0]["found_type"] == "missing"
+
+    def test_a_wrongly_typed_field_reuses_unmeasurable_and_names_what_arrived(self):
+        hits = self._authored([], [self._entry(status=["open"])])
+        assert [(h["reason"], h["field"], h["found_type"]) for h in hits] == [("unmeasurable", "status", "list")]
+
+    def test_an_optional_field_that_is_absent_is_not_a_violation(self):
+        assert self._authored([], [self._entry()]) == []
+
+    # -- no defect is reported twice -----------------------------------------
+
+    def test_the_canonical_field_is_judged_once_not_twice(self):
+        """check_entry owns `summary`; check_fields skips it by contract."""
+        hits = self._authored([], [self._entry(summary="x" * 400)])
+        assert len(hits) == 1
+        assert hits[0].get("field") != "summary"
+        assert hits[0].get("reason") is None, "the plain over-cap species, unchanged"
+
+    def test_check_fields_skips_the_canonical_field_directly(self):
+        mod = _get_entry_limits()
+        hits = mod.check_fields("sessions", "sessions", "0", self._entry(summary="x" * 400), self._limits())
+        assert hits == []
+
+    # -- carried, at field resolution ----------------------------------------
+
+    def test_an_untouched_fat_entry_is_carried_never_authored(self):
+        fat = self._entry(status="x" * 917)
+        split = _get_entry_limits().classify_entries({"sessions": [fat]}, {"sessions": [fat]}, self._limits())
+        assert split["authored"] == []
+        assert [h["reason"] for h in split["carried"]] == ["field_over_cap"]
+
+    def test_editing_only_the_status_is_authorship_even_though_the_summary_matches(self):
+        """The hole this shape exists to close: identity is the WHOLE entry."""
+        before = [self._entry(status="ok")]
+        after = [self._entry(status="x" * 917)]
+        assert [h["field"] for h in self._authored(before, after)] == ["status"]
+
+    def test_a_reordered_entry_is_still_carried(self):
+        """Rollover moves entries; membership, never index."""
+        fat = self._entry(number=1, status="x" * 917)
+        other = self._entry(number=2)
+        split = _get_entry_limits().classify_entries(
+            {"sessions": [fat, other]}, {"sessions": [other, fat]}, self._limits()
+        )
+        assert split["authored"] == []
+
+    # -- fail open on an unconfigured type -----------------------------------
+
+    def test_a_type_with_no_fields_map_gets_no_field_checks(self):
+        limits = self._limits()
+        del limits["entry_types"]["sessions"]["fields"]
+        split = _get_entry_limits().classify_entries(
+            {}, {"sessions": [self._entry(mood="x", status="y" * 900)]}, limits
+        )
+        assert split["authored"] == []
+
+    def test_fields_for_answers_empty_rather_than_raising_on_an_unknown_type(self):
+        assert _get_entry_limits().fields_for("nope", self._limits()) == {}
+
+    # -- dict containers take the same path ----------------------------------
+
+    def test_a_dict_container_is_checked_the_same_way(self):
+        limits = self._limits()
+        limits["entry_types"]["sessions"]["kind"] = "dict"
+        split = _get_entry_limits().classify_entries(
+            {"sessions": {}}, {"sessions": {"s1": self._entry(mood="x")}}, limits
+        )
+        assert [(h["key"], h["reason"]) for h in split["authored"]] == [("s1", "unknown_field")]
+
+    # -- one cap, whichever copy was edited ----------------------------------
+
+    def test_the_top_level_cap_wins_over_the_fields_copy(self, tmp_path, monkeypatch):
+        """The duplicate is transitional; the number the agent is SHOWN governs."""
+        mod = _get_entry_limits()
+        type_def = {
+            "file": "local.json",
+            "container": "sessions",
+            "kind": "list",
+            "field": "summary",
+            "max_chars": 300,
+            "fields": {"summary": {"type": "str", "required": True, "max_chars": 250}},
+        }
+        mod._reconcile_canonical_cap("sessions", type_def)
+        assert type_def["fields"]["summary"]["max_chars"] == 300
+
+
+class TestTheFileBudgets:
+    """The passport row: size only, because @spawn owns that schema."""
+
+    @staticmethod
+    def _budgets():
+        return {"passport.json": {"max_chars": 200, "max_string_chars": 20}}
+
+    def test_a_file_over_its_budget_is_named_whole(self):
+        mod = _get_entry_limits()
+        text = '{"pad": "' + "x" * 300 + '"}'
+        hits = mod.check_file_budget("passport.json", text, self._budgets())
+        assert hits[0]["reason"] == "file_over_budget"
+        assert hits[0]["key"] == "passport.json"
+        assert hits[0]["cap"] == 200
+
+    def test_one_oversized_string_is_named_by_its_dotted_path(self):
+        mod = _get_entry_limits()
+        text = json.dumps({"identity": {"purpose": "p" * 50, "role": "ok"}})
+        hits = [h for h in mod.check_file_budget("passport.json", text, self._budgets()) if h["field"]]
+        assert [(h["key"], h["length"], h["cap"]) for h in hits] == [("identity.purpose", 50, 20)]
+
+    def test_a_list_element_carries_its_index_in_the_path(self):
+        mod = _get_entry_limits()
+        text = json.dumps({"identity": {"what_i_do": ["ok", "w" * 40]}})
+        hits = [h for h in mod.check_file_budget("passport.json", text, self._budgets()) if h["field"]]
+        assert hits[0]["key"] == "identity.what_i_do[1]"
+
+    def test_a_file_with_no_budget_is_not_judged(self):
+        assert _get_entry_limits().check_file_budget("dev.local.md", "x" * 9999, self._budgets()) == []
+
+    def test_unparseable_content_is_still_size_checked(self):
+        """A file that will not parse is not silently compliant."""
+        hits = _get_entry_limits().check_file_budget("passport.json", "{broken" + "x" * 300, self._budgets())
+        assert [h["reason"] for h in hits] == ["file_over_budget"]
+
+    def test_the_budgets_come_from_the_one_reader(self):
+        """entry_limits delegates; two readers of one key is the drift load() ended."""
+        mod = _get_entry_limits()
+        budgets = mod.load_file_budgets()
+        assert budgets["local.json"]["max_chars"] == 25000
+        assert budgets["observations.json"]["max_chars"] == 15000
+        assert budgets["passport.json"] == {"max_chars": 6000, "max_string_chars": 600}
+
+
+class TestTheRefusalTextTheAgentReads:
+    """A refusal the agent cannot act on is worse than silence."""
+
+    @staticmethod
+    def _line(violation):
+        return _get_memory_files().violation_line(violation)
+
+    def test_an_unknown_field_does_not_print_zero_over_a_zero_cap(self):
+        line = self._line(
+            {
+                "container": "todos",
+                "key": "0",
+                "length": 0,
+                "cap": 0,
+                "over_by": 0,
+                "reason": "unknown_field",
+                "field": "tags",
+                "units": "chars",
+            }
+        )
+        assert "0/0" not in line
+        assert "tags" in line and "not part of the entry shape" in line
+
+    def test_a_field_over_cap_names_the_field_and_its_units(self):
+        line = self._line(
+            {
+                "container": "sessions",
+                "key": "3",
+                "length": 11,
+                "cap": 10,
+                "over_by": 1,
+                "reason": "field_over_cap",
+                "field": "tags",
+                "units": "items",
+            }
+        )
+        assert "'tags' is 11/10 items (+1 over)" in line
+
+    def test_the_plain_over_cap_line_is_unchanged(self):
+        """The species this text always carried still reads exactly as it did."""
+        line = self._line({"container": "sessions", "key": "0", "length": 312, "cap": 300, "over_by": 12})
+        assert line == "sessions[0] 312/300 (+12 over)"

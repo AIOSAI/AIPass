@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-14
-# Modified: 2026-05-14
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -187,6 +187,61 @@ def _detect_package_names(project_root: Path) -> set:
 
 
 # =============================================================================
+# RESIDENCY — which project root an agent answers to
+# =============================================================================
+
+
+def _registry_residents(registry: Path) -> "tuple[set[str], set[Path]]":
+    """The names (lowercased) and directories a registry lists as its citizens."""
+    data = json_handler.read_json(registry)
+    if not isinstance(data, dict):
+        return set(), set()
+    names: set = set()
+    paths: set = set()
+    for entry in data.get("branches") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip().lower()
+        if name:
+            names.add(name)
+        rel = str(entry.get("path", "")).strip()
+        if rel:
+            paths.add((registry.parent / rel).resolve())
+    return names, paths
+
+
+def resident_root(agent: AgentInfo, project_root: Path) -> Optional[Path]:
+    """The project root whose registry lists this agent, walking up from the agent.
+
+    A citizen of a project under ``projects/<name>/`` legitimately lives outside the
+    framework's ``src/`` — its home is its OWN project root, and the proof is
+    residency: the ``*_REGISTRY.json`` beside that root names it (spawn writes the
+    row when it seats the citizen). Measuring such an agent against the framework's
+    src/ produced a WARNING per scan for a correctly placed citizen — 28 of them
+    since 2026-08-28 for aipass_site, which is what this reads instead of muting.
+
+    Args:
+        agent: The discovered agent.
+        project_root: The framework project root the scan started from.
+
+    Returns:
+        The nearest ancestor directory holding a registry that lists this agent,
+        or None when no registry claims it (the caller then measures against
+        project_root, which is the unchanged behaviour for framework citizens).
+    """
+    here = agent.path.resolve()
+    name = agent.name.strip().lower()
+    for parent in (here, *here.parents):
+        for registry in registries_in(parent):
+            names, paths = _registry_residents(registry)
+            if (name and name in names) or here in paths:
+                return parent
+        if parent == project_root.resolve():
+            break
+    return None
+
+
+# =============================================================================
 # PLACEMENT VALIDATION
 # =============================================================================
 
@@ -197,17 +252,27 @@ def check_placement(agents: List[AgentInfo], project_root: Path) -> List[Placeme
     When pyproject.toml defines packages, agents at src/<name>/ where name
     is not a declared package are flagged as misplaced siblings.
 
+    Each agent is measured against the root that CLAIMS it (resident_root) and
+    only then against the scan's own project_root, so a registered citizen of a
+    project under projects/ is read at its own src/ instead of being reported as
+    misplaced forever.
+
     Returns:
         List of PlacementIssue for agents in unexpected locations.
     """
-    src_dir = project_root / "src"
     issues: List[PlacementIssue] = []
-    package_names = _detect_package_names(project_root)
+    packages_by_root: Dict[Path, set] = {}
 
     for agent in agents:
+        home = resident_root(agent, project_root) or project_root
+        src_dir = home / "src"
+        if home not in packages_by_root:
+            packages_by_root[home] = _detect_package_names(home)
+        package_names = packages_by_root[home]
+
         rel = None
         try:
-            rel = agent.path.relative_to(src_dir)
+            rel = agent.path.resolve().relative_to(src_dir.resolve())
         except ValueError:
             logger.warning("[structure_scan] agent %s outside src/: %s", agent.name, agent.path)
             issues.append(

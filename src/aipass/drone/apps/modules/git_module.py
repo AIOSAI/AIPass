@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.3.0
+# Version: 1.4.1
 # Created: 2026-03-17
-# Modified: 2026-09-13
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -37,13 +37,8 @@ from aipass.drone.apps.handlers.git import (
     close_pr_handler,
     tag_handler,
     remote_handler,
+    repo_door,
 )
-
-# On its own line, not in the block above: seedgo's dead_code rule matches an import
-# with a single-line pattern and cannot read a name inside a parenthesised multi-line
-# import, so in the block it scored repo_door.py unreferenced (reported to @seedgo
-# 2026-09-13). Rejoin the block once the rule reads multi-line imports.
-from aipass.drone.apps.handlers.git import repo_door
 from aipass.drone.apps.handlers.help_flags import wants_help
 from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
@@ -842,7 +837,7 @@ def _handle_log(args: list[str], repo_root: Path | None = None) -> dict:
             count = int(candidate)
             break
         except ValueError:
-            # Patrick's standing ruling: an unknown argument FAILS by name. This
+            # The owner's standing ruling: an unknown argument FAILS by name. This
             # used to log a WARNING and carry on with the default 10, so
             # `log not_a_real_count` printed output byte-identical to `log` with
             # an empty stderr and exit 0 — the code knew the token was bad and
@@ -1108,6 +1103,8 @@ def get_help(command: str | None = None) -> str:
             "    --all          Stage all repo changes (git add -A) before committing.\n"
             "    file1 file2    Stage only these files before committing.\n"
             "  With no flag or files, commits whatever is already staged.\n"
+            f"  The subject (line 1) is refused over {commit_handler.SUBJECT_CAP} chars: keep it under\n"
+            "  about 80 in type(scope): what form, blank line, then the why in the body.\n"
         )
     if command == "checkout":
         return "git checkout <main|dev> — Switch branches (main or dev only) [owner]\n"
@@ -1335,5 +1332,13 @@ def print_introspection() -> None:
 
 
 def print_help() -> None:
-    """Print help (seedgo compliance)."""
-    _get_console().print(get_help())
+    """Print help (seedgo compliance).
+
+    ``markup=False``: this page is documentation, not styled output, and its
+    argument placeholders are literal. Rendered as markup, Rich read ``[count]``
+    and ``[path]`` as style tags and deleted them silently — ``log [count]``
+    reached the terminal as ``log``. Measured 2026-09-15, with the Rich_Markup
+    standard scoring 100, because the literal is returned by ``get_help()``
+    rather than written at the print site.
+    """
+    _get_console().print(get_help(), markup=False)

@@ -126,7 +126,7 @@ src/aipass/*/apps/integrations/**
 !src/aipass/spawn/templates/*/docs.local/**
 !src/aipass/spawn/templates/*/DASHBOARD.local.json
 
-# .archive/ exceptions: NONE, ever (Patrick ruling 2026-08-18: .archive is the
+# .archive/ exceptions: NONE, ever (the owner's ruling 2026-08-18: .archive is the
 # disposal zone, cleaned without warning — nothing that must survive or ship may
 # live there; durable records belong in tracked homes). The ONLY ignored-dir
 # exceptions in this file are spawn's framework templates above, which exist so
@@ -158,7 +158,7 @@ src/aipass/hooks/tools/*
 !src/aipass/hooks/tools/install_boot_shim.sh
 
 # skills suspend grants — reviewable root-grant drafts + installer for the
-# /suspend control verb (DPLAN-0270 P5). Must ship: Patrick reviews and
+# /suspend control verb (DPLAN-0270 P5). Must ship: the owner reviews and
 # installs from the repo. Collides with the blanket tools/ ignore (line 51).
 !src/aipass/skills/tools/
 src/aipass/skills/tools/*

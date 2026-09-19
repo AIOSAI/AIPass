@@ -341,7 +341,7 @@ def hooks_sound_set(active: bool) -> bool:
 
     THIS USED TO WRITE THE FLAG BY HAND — a touch and an unlink on a path this
     module rebuilt for itself, while the docstring above named the door it was
-    bypassing. Patrick's ruling settled it: api is api. The switch belongs to
+    bypassing. The owner's ruling settled it: api is api. The switch belongs to
     @hooks, so the flip is their command, the same one an operator types.
 
     Idempotent in both directions, unchanged: muting a muted fleet and unmuting

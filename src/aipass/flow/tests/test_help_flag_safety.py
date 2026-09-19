@@ -313,6 +313,54 @@ class TestUnflaggedModulesHelpSafety:
         help_fn.assert_called_once()
         target.assert_not_called()
 
+    def test_post_lock_denial_reports_an_error_not_already_running(self, tmp_path, mock_logger):
+        """A lock that can never be created is reported as an error, not a crash
+        and not "Another instance is already running".
+
+        Windows answers a create against a lock still being removed with
+        PermissionError; try_create_lock retries that on a short budget and then
+        raises. handle_command must turn the raise into an honest report.
+
+        The processing path sits behind refuse_extra, which refuses every
+        non-empty argument list (and no arguments prints introspection), so the
+        gate is patched open here to reach the lock call at all.
+        """
+        import os
+
+        from aipass.flow.apps.handlers.runner import lock_ops
+        from aipass.flow.apps.modules import post_close_runner as mod
+
+        lock = tmp_path / ".post_close_runner.lock"
+        real_open = os.open
+        attempts: list[str] = []
+
+        def fake_open(path, flags, *args, **kwargs):
+            if flags & os.O_EXCL and str(path) == str(lock):
+                attempts.append(str(path))
+                raise PermissionError(13, "Access is denied")
+            return real_open(path, flags, *args, **kwargs)
+
+        with (
+            patch(f"{_POST}.LOCK_FILE", lock),
+            patch(f"{_POST}.refuse_extra"),
+            patch(f"{_POST}.process_closed_plans") as target,
+            patch(f"{_POST}.release_lock") as release,
+            patch(f"{_POST}.error") as error_fn,
+            patch(f"{_POST}.warning") as warning_fn,
+            patch("aipass.flow.apps.handlers.runner.lock_ops.os.open", side_effect=fake_open),
+            patch("time.sleep"),
+        ):
+            handled = mod.handle_command("post", ["run"])
+
+        assert handled is True
+        target.assert_not_called()
+        release.assert_not_called()
+        warning_fn.assert_not_called()
+        error_fn.assert_called_once()
+        assert str(lock) in error_fn.call_args.args[0]
+        mock_logger.error.assert_called()
+        assert len(attempts) == lock_ops._CREATE_RETRIES
+
     def test_normal_registry_status_still_works(self):
         from aipass.flow.apps.modules import registry_monitor as mod
 

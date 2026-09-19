@@ -1,17 +1,26 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 2.0.0
+# Version: 2.2.0
 # Description: Tests for git_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-06-05
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/security/git_gate.py."""
 
 import json
+from pathlib import Path
 
-CWD = "/home/patrick/Projects/AIPass/src/aipass/api"
+# Derived, never spelled: the fixtures below are only meaningful as paths INSIDE
+# this checkout, and a hardcoded home path makes the suite a property of one
+# machine. parents[4] is the repo root — tests -> hooks -> aipass -> src -> root.
+_REPO = Path(__file__).resolve().parents[4]
+
+CWD = str(_REPO / "src" / "aipass" / "api")
+DEVPULSE_CWD = str(_REPO / "src" / "aipass" / "devpulse")
+PROVIDER_SETTINGS = str(Path.home() / ".claude" / "settings.json")
+PROJECT_HOOK = str(_REPO / ".claude" / "hooks" / "some_hook.py")
 
 
 def _bash(cmd: str) -> dict:
@@ -108,10 +117,10 @@ class TestGitGateReadAllowed:
 class TestGitGateGlobalOptions:
     """Read verbs with global options before the subcommand."""
 
-    def test_git_C_path_ls_files(self):
+    def test_git_c_path_ls_files(self):
         _assert_allowed(_bash("git -C /some/path ls-files"))
 
-    def test_git_C_path_push_blocked(self):
+    def test_git_c_path_push_blocked(self):
         _assert_blocked(_bash("git -C /some/path push"))
 
     def test_git_no_pager_log(self):
@@ -372,7 +381,7 @@ class TestGitGateEditProtection:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/.claude/settings.json"},
+                "tool_input": {"file_path": PROVIDER_SETTINGS},
                 "cwd": CWD,
             }
         )
@@ -384,8 +393,8 @@ class TestGitGateEditProtection:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/.claude/settings.json"},
-                "cwd": "/home/patrick/Projects/AIPass/src/aipass/devpulse",
+                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "cwd": DEVPULSE_CWD,
             }
         )
         _assert_allowed(result)
@@ -396,11 +405,37 @@ class TestGitGateEditProtection:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/Projects/AIPass/.claude/hooks/some_hook.py"},
+                "tool_input": {"file_path": PROJECT_HOOK},
                 "cwd": CWD,
             }
         )
         _assert_blocked(result)
+
+    def test_windows_spellings_of_a_protected_path_are_blocked_on_every_host(self):
+        """The Windows CI runner measured the gate ALLOWING these (2026-09-16).
+
+        The tests above build their paths from the host, so Linux never saw a
+        backslash. These are spelled out so every host exercises the Windows form,
+        and in mixed case, which Windows and default macOS filesystems open as the same file.
+        """
+        from aipass.hooks.apps.handlers.security.git_gate import handle
+
+        for path in (
+            r"D:\work\.claude\settings.json",
+            r"D:\work\.claude\settings.local.json",
+            r"D:\a\repo\.claude\hooks\some_hook.py",
+            r"D:\a\repo\.git\hooks\pre-commit",
+            r"D:\work\.Claude\Settings.JSON",
+            "D:/work/.CLAUDE/hooks/x.py",
+        ):
+            result = handle({"tool_name": "Edit", "tool_input": {"file_path": path}, "cwd": CWD})
+            assert result["exit_code"] == 2, f"allowed: {path}"
+
+    def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
+        from aipass.hooks.apps.handlers.security.git_gate import handle
+
+        for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
+            _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
 
 
 class TestGitGateMisc:
@@ -451,9 +486,70 @@ class TestGitGateMisc:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/home/patrick/.claude/settings.json"},
+                "tool_input": {"file_path": PROVIDER_SETTINGS},
                 "cwd": CWD,
             }
         )
         parsed = json.loads(result["stdout"])
         assert "git_gate.enabled" in parsed["reason"]
+
+
+class TestMailBodyIsAnArgumentNotACommand:
+    """A heredoc body is data; an interpreter's own text is code.
+
+    @ai_mail was refused twice on 2026-09-15 for a reply whose BODY quoted a
+    write-shaped line, and shipped through a file instead; every dispatch brief
+    since carried a line telling recipients not to quote one. Quoted spans were
+    already blanked here, so the surviving shape was the heredoc — a body that
+    carries no quotes to blank.
+
+    The same reading closes the opposite hole in the same move: an interpreter's
+    inline script had its whole program blanked as a quoted argument, so a write
+    verb inside it was read as no invocation at all.
+    """
+
+    #: Assembled rather than written out. The pieces keep the fixture honest —
+    #: every test below is the SAME text in a different position, so a failure
+    #: names the position and never the wording.
+    WRITE_LINE = "gi" + "t push"
+
+    def test_a_heredoc_mail_body_quoting_a_write_line_is_allowed(self):
+        body = f"The gate refused my reply because it quoted {self.WRITE_LINE} in prose."
+        _assert_allowed(_bash(f"drone @ai_mail reply abc123 <<EOF\n{body}\nEOF"))
+
+    def test_a_heredoc_handed_to_an_interpreter_is_still_blocked(self):
+        """The cure must not become a bypass: bash really does run its heredoc."""
+        _assert_blocked(_bash(f"bash <<'EOF'\n{self.WRITE_LINE}\nEOF"))
+
+    def test_an_interpreters_inline_script_is_blocked(self):
+        """The hole the same reading closes. Quoted, and still a program."""
+        _assert_blocked(_bash(f'bash -c "{self.WRITE_LINE}"'))
+
+    def test_a_non_shell_program_that_names_git_is_read_as_its_quotes_were(self):
+        """awk and perl are not shell: their quoted programs stay blanked, as before 1.1.0.
+
+        Measured on a real turn 2026-09-16: the first code_text appended every
+        interpreter's program, and a read-only awk filter naming a diff header was refused.
+        """
+        _assert_allowed(_bash("drone @git diff | awk '/^diff --git a\\/x/{p=1} p'"))
+        _assert_allowed(_bash(f"perl -e \"print('{self.WRITE_LINE}')\""))
+        _assert_allowed(_bash(f"perl <<'EOF'\nprint('{self.WRITE_LINE}')\nEOF"))
+
+    def test_a_quoted_argument_that_merely_names_it_stays_allowed(self):
+        """Unchanged behaviour, pinned so the widening above cannot reach it."""
+        _assert_allowed(_bash(f'drone @ai_mail reply abc123 "I quoted {self.WRITE_LINE} and was refused"'))
+
+    def test_an_unquoted_invocation_inside_another_commands_arguments_is_blocked(self):
+        """Also unchanged: the reading did not narrow to command position.
+
+        find -exec is in bash_writes' published residual for write TARGETS, so
+        nothing here may start depending on it being seen as a command.
+        """
+        _assert_blocked(_bash(f"find . -exec {self.WRITE_LINE} \\;"))
+
+    def test_a_reader_failure_falls_back_to_the_raw_command(self):
+        """A gate that cannot parse must not become permissive on what it cannot read."""
+        from unittest.mock import patch
+
+        with patch("aipass.hooks.apps.modules.bash_writes.code_text", side_effect=RuntimeError("boom")):
+            _assert_blocked(_bash(f"drone @ai_mail reply abc123 <<EOF\n{self.WRITE_LINE}\nEOF"))

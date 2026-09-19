@@ -387,7 +387,7 @@ def require_scope(required: str = "read"):
             # revoked device learns "no", not "you were valid until 10:42". The
             # difference lives in the audit trail, never in the response.
             #
-            # And the trail HAS it now. It did not on 2026-08-16, when Patrick's
+            # And the trail HAS it now. It did not on 2026-08-16, when the owner's
             # phone was refused for nine minutes and this comment's promise came
             # up empty: both cases logged token_unrecognised, so "the phone held
             # a revoked credential" could not be ruled in or out from the log.
@@ -558,7 +558,7 @@ def _outside_room_for(project: str, branch: str, row: Optional[Dict[str, Any]] =
 
     ONE ROOM, step 1 (DPLAN-0327), built on the 08-18 ruling in DPLAN-0310 that
     the phone finds the seat by reading the snapshot rather than rebuilding a
-    name. On 2026-09-04 Patrick opened his aipass chat on the laptop and the
+    name. On 2026-09-04 the owner opened his aipass chat on the laptop and the
     phone attached to a blank terminal: `_room_for` composed `baud-<branch>`
     from the branch name, `new-session -A` created that empty room, and the
     live seat was sitting in the shim's own `aipass-<id>` session the whole
@@ -665,7 +665,7 @@ def create_app() -> Any:
         Validation fires IN FRONT of every handler, so it never reached the
         envelope above — it emitted FastAPI's own `{"detail": [...]}` instead.
         A client coding to the documented shape therefore lost the sentence on
-        EVERY validation error, on every route: Patrick was holding a phone
+        EVERY validation error, on every route: the owner was holding a phone
         reading "HTTP 422" while that same response body named the exact field
         and the exact problem.
 
@@ -1026,7 +1026,7 @@ def create_app() -> Any:
     # 503 stays what it always was — nobody was home — and now also covers an
     # answer that did not parse. After a write that is the honest report: this
     # server cannot tell whether it happened, and a 200 would be a guess about
-    # Patrick's configuration.
+    # the owner's configuration.
 
     @app.get("/v1/memory-config")
     def memory_config(
@@ -1308,7 +1308,7 @@ def create_app() -> Any:
                 # run <branch>` on a read-only PTY.
                 #
                 # THIS USED TO REFUSE ANY PROJECT BUT THE SEAT, on the reasoning
-                # that a watch is anchor tooling. Patrick ruled against it and
+                # that a watch is anchor tooling. The owner ruled against it and
                 # measuring settled it: `monitor run baud` answers "Live —
                 # scoped to BAUD" and `monitor run vera` answers "Live — scoped
                 # to VERA" plus @prax's own line, "VERA is not a known branch —

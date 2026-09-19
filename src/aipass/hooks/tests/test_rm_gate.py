@@ -234,7 +234,7 @@ class TestHandle:
 
 
 class TestDeletionRecord:
-    """Patrick, 2026-08-14: "we need a log for deleted files - if something deletes,
+    """The owner, 2026-08-14: "we need a log for deleted files - if something deletes,
     it should be a record of it."
 
     @drone records the sanctioned lane (drone rm). This covers the leak this gate

@@ -6,7 +6,7 @@
 # Modified: 2026-09-07
 # =============================================
 
-"""The unknown-argument gate (Patrick's standing ruling, fleet sweep 2026-09-07).
+"""The unknown-argument gate (the owner's standing ruling, fleet sweep 2026-09-07).
 
 An unknown command or argument FAILS: non-zero exit, a message naming the token,
 a did-you-mean when one is close. It never proceeds as if a default were meant.

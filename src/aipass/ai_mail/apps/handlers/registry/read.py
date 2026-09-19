@@ -454,7 +454,7 @@ def get_external_branches(repo_root: Path) -> Dict[str, str]:
     reads AIPASS_ROOTS.json; nothing here reads it a second time. Until this
     existed, a dispatch to an external citizen (e.g. @vera in Vera-Studio) was
     refused at DELIVERY with "Unknown branch email" before the wake - which
-    already knew the address - ever ran. Patrick's ruling 2026-09-02: the admin
+    already knew the address - ever ran. The owner's ruling 2026-09-02: the admin
     seat dispatches any agent in any directory; a map that stops at projects/
     is the gap, not the design.
 

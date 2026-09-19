@@ -62,7 +62,7 @@ class TestHandleCommand:
     def test_drone_not_found_refuses_non_zero(self) -> None:
         """An unreachable drone is a refusal: it names the reason and exits non-zero.
 
-        Rewritten 2026-09-07 (FPLAN-0492 wave 6, Patrick's standing ruling that a
+        Rewritten 2026-09-07 (FPLAN-0492 wave 6, the owner's standing ruling that a
         refusal exits non-zero and names its reason). This test previously
         asserted only that warning() was called and nothing raised -- which is
         exactly what PINNED the exit-0 defect: the code computed 1, and

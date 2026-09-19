@@ -2,7 +2,7 @@
 # META DATA HEADER
 # Name: test_cli_routing.py - Unit tests for skills.py CLI routing
 # Date: 2026-03-10
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: skills/tests
 # =============================================
 
@@ -60,9 +60,14 @@ class TestHandleCommand:
         result = handle_command("-h")
         assert result is True
 
-    def test_version_command(self):
+    def test_version_command(self, capsys):
         result = handle_command("--version")
         assert result is True
+        # One version string: the printed line is the module's own constant,
+        # never a literal that drifts from the file header.
+        from aipass.skills.apps import skills as entry
+
+        assert capsys.readouterr().out.strip() == f"SKILLS v{entry.VERSION}"
 
     def test_version_short_flag(self):
         result = handle_command("-V")
@@ -164,6 +169,11 @@ class TestPrintHelp:
         assert "Usage:" in captured.out
         assert "Commands:" in captured.out
         assert "drone @skills <command> [args]" in captured.out
+        # Doors the dispatcher answers that the page did not name until 2026-09-15:
+        # a skill's own page, the create flags, and the two --help aliases.
+        assert "run <name> --help" in captured.out
+        assert "create <name> --help" in captured.out
+        assert "--help, -h, help" in captured.out
 
     def test_print_help_via_command(self, capsys):
         """print_help: handle_command('--help') produces output."""
@@ -210,9 +220,13 @@ class TestOutputCapture:
         """output_capture: --version produces version string."""
         handle_command("--version")
         captured = capsys.readouterr()
-        # The banner is one literal in skills.py; the old `or` passed on either
-        # half of it, so a half-broken version line read green.
-        assert captured.out.strip() == "SKILLS v1.0.0"
+        # The banner is built from skills.VERSION; the old `or` passed on either
+        # half of it, so a half-broken version line read green. Pinned to the
+        # constant, which is also this file's header version.
+        from aipass.skills.apps import skills as entry
+
+        assert captured.out.strip() == f"SKILLS v{entry.VERSION}"
+        assert entry.VERSION == "1.1.0"
 
     def test_output_capture_unknown_command(self, capsys):
         """output_capture: unknown command names itself and points at help."""

@@ -67,9 +67,10 @@ HELP_TEXT = """\
 [bold]Examples:[/bold]
   drone @devpulse watchdog agent @drone
   drone @devpulse watchdog agent @flow --timeout 600
-  drone @devpulse watchdog baseline            (via Monitor, description "watchdog" — one line per completion,
-                                                replays events missed while no wire was up)
-  drone @devpulse watchdog baseline --once     (via run_in_background — wake on first)
+  drone @devpulse watchdog baseline --once     (the sign-in: Bash run_in_background — silent until the first
+                                                completion, replays missed ones, exits = one wake)
+  drone @devpulse watchdog baseline            (continuous, Monitor tool only — the harness now ends every
+                                                Monitor at 30m, so prefer --once; see docs/watchdog.md)
   drone @devpulse watchdog timer 5m
   drone @devpulse watchdog timer start build-phase-3
   drone @devpulse watchdog timer stop build-phase-3
@@ -398,8 +399,10 @@ def _handle_baseline(sub_args: List[str]) -> bool:
 
     The ARM DOOR (wire.py): take the delivery wire for THIS session, replay
     completions missed while nothing was wired, follow the notification feed.
-    Run it via the Monitor tool with description "watchdog". ``--once`` wires
-    until the first delivered completion (run_in_background style).
+    ``--once`` is the sign-in (DPLAN-0348): under Bash run_in_background it
+    wires until the first delivered completion, and its exit is the one wake.
+    The continuous form needs the Monitor tool, which Claude Code 2.1.271
+    capped at 30 minutes per watch.
 
     ``--daemon`` was removed in r4. There is no detection process any more: the
     agent that finishes REPORTS, and this wire delivers what it reported. The
@@ -427,7 +430,8 @@ def _handle_baseline(sub_args: List[str]) -> bool:
     # stderr, never stdout: the Monitor tool reads every stdout line as a wake
     # event, so an arm-time banner there fires a spurious wake (same contract as
     # _handle_agent's reminder, #634).
-    err_console.print("[dim]watchdog baseline: arming the wire (run via Monitor, description 'watchdog')[/dim]")
+    wrapper_hint = "Bash run_in_background" if once else "Monitor tool only — prefer --once"
+    err_console.print(f"[dim]watchdog baseline: arming the wire ({wrapper_hint})[/dim]")
 
     wire_mod = importlib.import_module("aipass.devpulse.apps.handlers.watchdog.wire")
     result = wire_mod.arm_wire(once=once)

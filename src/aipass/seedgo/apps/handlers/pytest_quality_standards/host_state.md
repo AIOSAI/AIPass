@@ -12,7 +12,7 @@
 
 ## The ruling, first, because this is the part people get backwards
 
-Patrick, 2026-09-08:
+The owner, 2026-09-08:
 
 > "tests can't disable processes, they should restore to exact same state before
 > the test. The test is fine and good that it can enter something."

@@ -3,7 +3,7 @@
 # Description: Host API Token Handler — bearer token issue, verify, revoke
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-17
 # =============================================
 
 """
@@ -207,7 +207,7 @@ def receipt_path(label: str) -> Path:
     """
     Where a freshly minted token's raw value belongs, given its label.
 
-    THE RECEIPT IS A SECRET AND BELONGS WITH THE SECRETS. Patrick found three
+    THE RECEIPT IS A SECRET AND BELONGS WITH THE SECRETS. The owner found three
     raw bearer receipts sitting in his home root on 2026-08-19 (43-byte files
     from the August phone-setup mints), and they were there because this
     branch's own help text said `--out ~/pixel.token`. Nobody chose the home
@@ -338,6 +338,10 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
     breaking a stale lock is a lost timestamp; the worst case for honouring one
     forever is a server that can never revoke a credential again.
 
+    Windows answers a create against a lock another writer is still removing
+    (delete pending) with ACCESS DENIED rather than FILE EXISTS. That is the
+    lock still held, so it is polled the same way, inside the same wait.
+
     Args:
         wait: Seconds to keep trying before giving up.
 
@@ -345,7 +349,8 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
         None, with the lock held.
 
     Raises:
-        OSError: The lock could not be taken within *wait*.
+        OSError: The lock could not be taken within *wait*, because it stayed
+            held or because access stayed denied.
     """
     path = lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -362,6 +367,16 @@ def _store_lock(wait: float = LOCK_WAIT_SECONDS) -> Iterator[None]:
                 continue
             if time.monotonic() >= deadline:
                 raise OSError(f"Token store lock held longer than {wait}s at {path}") from None
+            time.sleep(LOCK_POLL_SECONDS)
+        except PermissionError as e:
+            # The Windows delete-pending answer (CI 35192484222: the revoke
+            # thread died here, and a revoked credential stayed live). Polled
+            # inside the wait only, and never checked for staleness — a stale
+            # lock answers FILE EXISTS. A directory this process truly cannot
+            # write answers this way forever, so past the wait it surfaces as
+            # the denial it is.
+            if time.monotonic() >= deadline:
+                raise OSError(f"Token store lock at {path} still denied access after {wait}s: {e}") from e
             time.sleep(LOCK_POLL_SECONDS)
 
     try:
@@ -387,6 +402,8 @@ def _lock_is_stale(path: Path) -> bool:
         age = time.time() - path.stat().st_mtime
     except OSError as e:
         # Gone between the failed create and this stat — not stale, just raced.
+        # Windows answers a stat on a lock being deleted with ACCESS DENIED,
+        # which lands here too and means the same thing.
         # Logged rather than passed over: this is the ordinary outcome of two
         # writers meeting, but if it ever repeats in a burst it is the trace
         # that says so.
@@ -405,12 +422,15 @@ def _drop_lock(path: Path) -> None:
     """
     try:
         os.unlink(str(path))
-    except OSError as e:
-        # Tolerated: a stale-lock break may have removed it already. Never
-        # raised — a release that throws would mask whatever the body was
-        # doing — but never silent either, because a lock that cannot be
-        # removed wedges every write until the staleness timeout expires.
+    except FileNotFoundError as e:
+        # Tolerated: a stale-lock break may have removed it already.
         logger.debug("[host_api] token store lock at %s was already gone: %s", path, e)
+    except OSError as e:
+        # Not gone: refused, which is also Windows' answer for a lock already
+        # being deleted. Never raised — a release that throws would mask
+        # whatever the body was doing — but a warning, because a lock that
+        # cannot be removed wedges every write until the staleness timeout.
+        logger.warning("[host_api] could not remove the token store lock at %s: %s", path, e)
 
 
 # ==============================================
@@ -501,7 +521,7 @@ def resolve_token(raw: str) -> Tuple[Optional[Dict[str, Any]], str]:
     Re-reads the store on every call, which is what makes revocation effective
     on the next request.
 
-    WHY THIS EXISTS SEPARATELY FROM verify_token: on 2026-08-16 Patrick's phone
+    WHY THIS EXISTS SEPARATELY FROM verify_token: on 2026-08-16 the owner's phone
     was refused for nine minutes and the trail said only token_unrecognised.
     The store was provably intact, so the one thing that would have closed the
     investigation — did that device present a credential we once issued, or

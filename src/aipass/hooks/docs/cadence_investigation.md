@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # Cadence Investigation — DPLAN-0200
 
 Per-turn injection cadence mechanism for prompt loaders (global_loader, branch_loader).

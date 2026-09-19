@@ -277,7 +277,7 @@ class TestARevokedTokenIsDistinguishableInTheTrail:
     """
     The audit must tell 'this device WAS enrolled' from 'this is garbage'.
 
-    Written on 2026-08-16 after a real incident: Patrick's phone was refused for
+    Written on 2026-08-16 after a real incident: the owner's phone was refused for
     nine minutes with reason=token_unrecognised, and the log could not say
     whether it had presented a revoked credential or a corrupted one. The store
     was provably intact, so the log's inability to distinguish those two was the

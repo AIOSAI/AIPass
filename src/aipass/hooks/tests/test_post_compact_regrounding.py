@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_post_compact_regrounding.py
-# Version: 1.0.0
+# Version: 1.2.0
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-08-01
+# Modified: 2026-09-16
 # =============================================
 
 """Tests for handlers/lifecycle/post_compact_regrounding.py.
@@ -16,7 +16,10 @@ additionalContext the next time any tool runs, exactly once per compact, and
 stay silent otherwise.
 """
 
+import contextlib
 import json
+import os
+import time
 from unittest.mock import patch
 
 
@@ -52,9 +55,16 @@ class TestPostCompactRegrounding:
         assert "IDENTITY" in context
         assert "DPLAN-0276" in context
 
-    def test_silent_when_pending_but_all_content_empty(self, tmp_path):
+    def test_silent_when_pending_but_all_content_empty(self, tmp_path, monkeypatch):
+        """Silent only where nothing was promised: an unstamped, non-branch directory.
+
+        The chdir is the contract, not scaffolding. From inside a stamped tree the
+        same four empties are a degraded regroup and ship a banner — the twin
+        below pins that side (DPLAN-0347, hooks row 1).
+        """
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
 
+        monkeypatch.chdir(tmp_path)
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
             patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value=""),
@@ -65,6 +75,49 @@ class TestPostCompactRegrounding:
             result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
 
         assert result == {"stdout": "", "exit_code": 0}
+
+    def test_a_stamped_tree_with_nothing_loaded_ships_the_banner_not_silence(self, tmp_path, monkeypatch):
+        """The quiet nothing this row exists to end: a post-compact session that
+        got no grounding at all is the one that most needs to be told so."""
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+        from aipass.hooks.apps.modules import release_notice
+
+        (tmp_path / ".aipass").mkdir()
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value=""),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value=""),
+            patch.object(release_notice, "build_notice", return_value="NOTICE") as spy,
+        ):
+            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert "[GROUNDING DEGRADED" in context
+        assert "Carried: nothing." in context
+        assert "kernel: this tree is AIPass-stamped but .aipass/tier0_kernel.md is missing" in context
+        assert "navmap: this tree is AIPass-stamped but .aipass/tier1_navmap.md is missing" in context
+        spy.assert_not_called()
+
+    def test_the_banner_opens_part_one_ahead_of_the_branch(self, tmp_path, monkeypatch):
+        from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+
+        (tmp_path / ".aipass").mkdir()
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
+            patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_navmap", side_effect=OSError("boom")),
+            patch("aipass.hooks.apps.modules.grounding_content.load_branch", return_value="BRANCH"),
+            patch("aipass.hooks.apps.modules.grounding_content.load_identity", return_value="IDENTITY"),
+        ):
+            result = post_compact_regrounding.handle({"cwd": str(tmp_path)})
+
+        context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
+        assert "navmap: loading it raised OSError: boom" in context
+        assert context.index("[GROUNDING DEGRADED") < context.index("BRANCH") < context.index("KERNEL")
 
     def test_one_loader_failing_does_not_block_the_others(self, tmp_path):
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
@@ -118,6 +171,158 @@ class TestPostCompactRegrounding:
 
         assert "KERNEL" in first["stdout"]
         assert second == {"stdout": "", "exit_code": 0}
+
+    # --- DPLAN-0348: ground once after a compaction ---
+
+    def test_a_complete_regroup_then_a_prompt_grounds_once_not_twice(self, tmp_path):
+        """09:03 -> 09:30 on 09-16: three parts of re-ground, then the turn-0 fire-all sent 20,310 chars more."""
+        with _seat(tmp_path, sizes=TODAYS_SIZES) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 6) > 1
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, False)
+            # A channel is not grounding: the alert sibling of the same prompt keeps its turn 0.
+            assert _sibling(cadence, "alert", transcript) is True
+
+    def test_every_sibling_of_that_prompt_agrees_and_a_later_turn_zero_fires(self, tmp_path):
+        """Once. Each loader is its own process: all four of the prompt that spends the
+        stamp suppress (a split decision is a third of a grounding), and a later turn 0
+        in the same window (the counter's file lost) grounds in full."""
+        with _seat(tmp_path) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 1) == 1
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, False)
+            (tmp_path / f"aipass-cadence-{_SEAT}.json").unlink()
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, True)
+
+    def test_a_partial_regroup_then_a_prompt_still_fires_all_four(self, tmp_path):
+        """Only a COMPLETE delivery stamps: part 1 of 3, then the owner types, is today's handoff."""
+        with _seat(tmp_path, sizes=TODAYS_SIZES) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 1) == 1
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, True)
+
+    def test_a_second_compaction_re_arms_the_fire_all(self, tmp_path):
+        """DPLAN-0276's dead zone stays closed: a stamp from the last window never
+        silences a compaction followed at once by a human prompt, no tool call between."""
+        with _seat(tmp_path) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 1) == 1
+            with patch.object(cadence, "_REGROUP_DEBOUNCE_S", 0.0):
+                cadence.reset_counter()
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, True)
+
+    def test_a_long_autonomous_stretch_after_the_regroup_needs_the_grounding_again(self, tmp_path):
+        """Window alone is not enough: grounding far back up the transcript is not grounding."""
+        with _seat(tmp_path, fresh_bytes=5_000) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 1) == 1
+            assert _tool_calls(transcript, 6) == 0
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, True)
+
+    def test_a_degraded_regroup_does_not_stand_in_for_the_fire_all(self, tmp_path):
+        """A re-ground that shipped a banner for a missing section did not ground the seat."""
+        degraded = ([("kernel", "KERNEL")], ["navmap: gone"])
+        with _seat(tmp_path) as (cadence, transcript), patch(f"{_GC}.grounding_report", return_value=degraded):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 1) == 1
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, True)
+
+    def test_a_harness_wake_does_not_spend_turn_zero_so_the_stamp_decides_the_owners_prompt(self, tmp_path):
+        """The two cures meet. A wake after the compaction fires nothing and consumes
+        nothing, its own tool calls carry the whole re-ground, and the owner's prompt
+        (turn 0, because no wake counted) is suppressed by the stamp."""
+        with _seat(tmp_path, sizes=TODAYS_SIZES) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _prompt(cadence, transcript, _NOTIFICATION) == dict.fromkeys(_GROUNDING, False)
+            assert _tool_calls(transcript, 6) > 1
+            assert _prompt(cadence, transcript, _NOTIFICATION) == dict.fromkeys(_GROUNDING, False)
+            assert _prompt(cadence, transcript) == dict.fromkeys(_GROUNDING, False)
+            assert cadence.current_turn() == 0
+
+    def test_a_harness_wake_mid_regroup_leaves_the_queued_parts(self, tmp_path):
+        """A documented change: any UserPromptSubmit used to truncate the queue. A
+        task-notification is not the turn the queue waits for, so the parts still land."""
+        with _seat(tmp_path, sizes=TODAYS_SIZES) as (cadence, transcript):
+            cadence.reset_counter()
+            assert _tool_calls(transcript, 1) == 1
+            _prompt(cadence, transcript, _NOTIFICATION)
+            assert _tool_calls(transcript, 6) >= 1
+
+    def test_the_shipped_distance_covers_the_measured_double_ground_not_the_long_stretches(self):
+        """Calibrated on the 09-16 injection ledgers: the backstop's last part sat 126,258
+        transcript bytes before the 09:30 fire-all, and 308,557 and 587,488 bytes of
+        autonomous work before the other two post-compact prompts. DEFAULTS is what
+        ships: cadence_config.json is gitignored, an operator's override (the
+        long-stretch case above proves the file is read)."""
+        from aipass.hooks.apps.modules import cadence
+
+        assert 126_258 <= cadence.DEFAULTS["regroup_fresh_bytes"] < 308_557
+
+
+_SEAT = "grounded-once-session"
+_GROUNDING = ("tier0", "navmap", "identity", "branch")
+#: How a harness task-notification reached a live UserPromptSubmit on 2.1.273 (no `source` key).
+_NOTIFICATION = "<task-notification>\n<task-id>b1hws2iup</task-id>\n<status>completed</status>\n</task-notification>"
+
+
+@contextlib.contextmanager
+def _seat(tmp_path, sizes=None, fresh_bytes=None):
+    """One seat on real cadence and the real packer: its guard dir, session, transcript and sections."""
+    from aipass.hooks.apps.modules import cadence
+
+    sizes = sizes or {"branch": 10, "identity": 10, "kernel": 10, "navmap": 10}
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    config = tmp_path / "cadence.json"
+    config.write_text(json.dumps({} if fresh_bytes is None else {"regroup_fresh_bytes": fresh_bytes}))
+    cadence._turn = None
+    cadence._config = None
+    with (
+        patch.object(cadence, "_GUARD_DIR", tmp_path),
+        patch.object(cadence, "_CONFIG_PATH", config),
+        patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": _SEAT}),
+        patch(f"{_GC}.load_branch", return_value=_section("BRANCH", sizes["branch"])),
+        patch(f"{_GC}.load_identity", return_value=_section("IDENTITY", sizes["identity"])),
+        patch(f"{_GC}.load_kernel", return_value=_section("KERNEL", sizes["kernel"])),
+        patch(f"{_GC}.load_navmap", return_value=_section("NAVMAP", sizes["navmap"])),
+        patch(f"{_RN}.build_notice", return_value=""),
+    ):
+        yield cadence, transcript
+    cadence._turn = None
+    cadence._config = None
+
+
+def _grow(transcript, size):
+    with transcript.open("a", encoding="utf-8") as fh:
+        fh.write("x" * size)
+
+
+def _tool_calls(transcript, count):
+    """*count* PostToolUse events, each after 1,000 bytes of work. Returns how many re-ground parts fired."""
+    from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
+
+    fired = 0
+    for _ in range(count):
+        _grow(transcript, 1_000)
+        result = post_compact_regrounding.handle({"cwd": str(transcript.parent), "transcript_path": str(transcript)})
+        fired += bool(result["stdout"])
+    return fired
+
+
+def _prompt(cadence, transcript, text="the owner types"):
+    """One UserPromptSubmit after a real prior turn: each grounding loader as its own process, one token."""
+    state = transcript.parent / f"aipass-cadence-{_SEAT}.json"
+    if state.exists():
+        old = time.time() - 10
+        os.utime(state, (old, old))
+    _grow(transcript, 2_000)
+    return {loader: _sibling(cadence, loader, transcript, text) for loader in _GROUNDING}
+
+
+def _sibling(cadence, loader, transcript, text="the owner types"):
+    """One loader's process for the prompt already in *transcript*: a fresh turn memo, the same token."""
+    cadence._turn = None
+    return cadence.should_fire(loader, {"prompt": text, "transcript_path": str(transcript)})
 
 
 class TestActiveStartupInstruction:
@@ -249,9 +454,9 @@ class TestReleaseNoticeModule:
         assert f"aipass init update {tmp_path / 'proj'} --dry-run" in out
 
     def test_it_never_tells_the_agent_to_apply_on_its_own(self, tmp_path):
-        """Patrick's rule, 2026-09-09: apply only on his or devpulse's go."""
+        """The owner's rule, 2026-09-09: apply only on his or devpulse's go."""
         out = _notice(_make_project(tmp_path / "proj", stamped="2.8.1"))
-        assert "Apply ONLY with Patrick's or devpulse's go" in out
+        assert "Apply ONLY with the owner's or devpulse's go" in out
         assert "--dry-run" in out
 
     def test_the_stamp_shows_the_date_not_the_full_timestamp(self, tmp_path):
@@ -442,13 +647,14 @@ class TestReleaseNoticeCompactDoor:
         context = json.loads(result["stdout"])["hookSpecificOutput"]["additionalContext"]
         assert "KERNEL" in context
 
-    def test_the_notice_is_not_even_built_when_there_is_no_grounding(self, tmp_path):
+    def test_the_notice_is_not_even_built_when_there_is_no_grounding(self, tmp_path, monkeypatch):
         """Guard order, not just output: a bare notice under a re-ground header
         would read as a regroup that reground nothing, and the two file reads
         would be spent on a block nobody sees."""
         from aipass.hooks.apps.handlers.lifecycle import post_compact_regrounding
         from aipass.hooks.apps.modules import release_notice
 
+        monkeypatch.chdir(tmp_path)
         with (
             patch("aipass.hooks.apps.modules.cadence.consume_regroup_pending", return_value=True),
             patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value=""),

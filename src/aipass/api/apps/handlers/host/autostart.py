@@ -16,7 +16,7 @@ WHY THIS EXISTS
 ---------------
 On 2026-08-27 @baud's phone face went dark. `host_api_serve.log` showed normal
 traffic, then silence — no traceback, no shutdown line. A detached server dies
-with the machine, and nothing brought it back; Patrick ruled that a face which
+with the machine, and nothing brought it back; the owner ruled that a face which
 waits for a human after every reboot is wrong.
 
 WHY SYSTEMD AND NOT A LOOP OF MY OWN

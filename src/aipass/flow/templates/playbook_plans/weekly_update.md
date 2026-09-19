@@ -50,7 +50,7 @@ PPLAN-0008 / 0011 / 0015 / 0017 / 0029 runs. v2.1: full clickable URLs
       not em dashes, no banned words, durable numbers. Report losses and misses,
       not only wins — a dev log that only reports wins reads as marketing.
       EVERY post on EVERY channel includes the website as a FULL clickable URL:
-      https://aipass.ai (Patrick directives 2026-07-27 + 2026-08-07). Bare
+      https://aipass.ai (the owner's directives 2026-07-27 + 2026-08-07). Bare
       'aipass.ai' only auto-links on X — Reddit and API-posted Bluesky render
       it as dead plain text.
       Body ENDS with the series footer BEFORE first fire (bot posts cannot be
@@ -69,7 +69,7 @@ PPLAN-0008 / 0011 / 0015 / 0017 / 0029 runs. v2.1: full clickable URLs
       u/aipass-poster via Devvit upload + uninstall/reinstall of r/AIPass).
 - [ ] 5. **Verify the Reddit post yourself** — open `r/AIPass/new` and read it back.
       Confirm: title + number correct, body rendered, footer intact, no duplicate
-      of a prior number. This is yours, not Patrick's. If the number collided, fix
+      of a prior number. This is yours, not the owner's. If the number collided, fix
       it NOW while the post is minutes old: `--delete <id>`, correct the body, re-fire.
       Content-only mistakes are a 60s `--edit <id>` (title stays immutable).
 - [ ] 6. Bluesky: short promo via `drone @api integrations call publish_bluesky
@@ -81,19 +81,19 @@ PPLAN-0008 / 0011 / 0015 / 0017 / 0029 runs. v2.1: full clickable URLs
 - [ ] 7. X: Chrome MCP post as @AIPassSystem, verify on the profile. The
       https://aipass.ai link card renders automatically — free real estate,
       keep the URL in.
-- [ ] 8. Leave mod-approve for Patrick; log any cleanup items.
+- [ ] 8. Leave mod-approve for the owner; log any cleanup items.
 - [ ] 9. Fill Run Summary + Listen, update `.trinity`, close the plan (auto-vectorizes).
       Post-mortem within 24h → `docs/reference/post_mortems/YYYY-MM-DD_slug.md`.
 
 ---
 
-## Driving Chrome (do this yourself — do not wait for Patrick)
+## Driving Chrome (do this yourself — do not wait for the owner)
 
 *Cold-start tested end to end 2026-08-04: killed Chrome, confirmed `[]`, relaunched,
 reconnected, bound, read r/AIPass. Every step below is verified, not assumed.*
 
 Chrome MCP needs a running Chrome carrying the Claude extension. Launching it is
-**your** job; only the browser *selection* requires Patrick.
+**your** job; only the browser *selection* requires the owner.
 
 1. Check first: `list_connected_browsers`. An empty array `[]` means **no browser is
    running** — it does NOT mean the tooling is down. Never report Chrome as blocked
@@ -113,10 +113,10 @@ Chrome MCP needs a running Chrome carrying the Claude extension. Launching it is
    - `pkill -f "google-chrome"` → kills nothing, silently
    - `pgrep -x chrome` / `pkill -x chrome` → correct
    Measured cold start: extension reconnects ~1s after launch.
-4. **Ask Patrick which browser to bind** — the tool contract requires listing every
+4. **Ask the owner which browser to bind** — the tool contract requires listing every
    connected browser via AskUserQuestion; you may not self-pick. Then
    `select_browser` with the chosen deviceId. The deviceId is **stable across Chrome
-   restarts**, so a choice he already made this session can be reused for the same
+   restarts**, so a choice they already made this session can be reused for the same
    device without re-asking.
 5. `tabs_context_mcp {createIfEmpty: true}` → navigate → drive.
 

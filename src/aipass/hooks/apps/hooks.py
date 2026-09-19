@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: hooks.py
-# Version: 1.2.1
+# Version: 1.3.0
 # Description: Hook infrastructure — drone entry point
 # Branch: hooks
 # Layer: apps
 # Created: 2026-05-18
-# Modified: 2026-09-07
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -118,7 +118,7 @@ def print_help():
     """Print CLI help — usage instructions and available commands."""
     modules = discover_modules()
     console.print()
-    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.2.1[/dim] — Hook Infrastructure for AIPass")
+    console.print("[bold cyan]HOOKS[/bold cyan] [dim]v1.3.0[/dim] — Hook Infrastructure for AIPass")
     console.print()
     console.print("[dim]Dispatches hooks across platforms with per-project config, logging, and crash isolation.[/dim]")
     console.print()
@@ -203,7 +203,7 @@ def handle_command(command: str, args: list) -> bool:
         return True
 
     if command in ["--version", "-V"]:
-        console.print("hooks 1.2.1")
+        console.print("hooks 1.3.0")
         return True
 
     return route_command(command, args, modules)

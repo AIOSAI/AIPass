@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: pr_handler.py
 # Description: Full PR workflow with atomic lockfile
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -28,7 +28,11 @@ from aipass.drone.apps.handlers.git.lock_handler import (
     find_repo_root,
     release_lock,
 )
-from aipass.drone.apps.handlers.git.commit_handler import stage_branch_dir
+from aipass.drone.apps.handlers.git.commit_handler import (
+    commit_subject,
+    stage_branch_dir,
+    subject_refusal,
+)
 
 
 def _has_credential_helper() -> bool:
@@ -113,6 +117,7 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
     the same commit (without checkout) and pushed for GitHub's PR system.
 
     Steps:
+        0. Refuse an over-cap subject (before the lock — see below)
         1. Verify we are on main
         2. Acquire lock
         3. Stage only files under branch_dir (on main)
@@ -143,6 +148,17 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         "feature_branch": feature_branch,
         "message": "",
     }
+
+    # Step 0: the message this workflow will commit, composed once and measured
+    # BEFORE the lock. A PR commit lands in the same oneline log as any other,
+    # so it obeys the same subject cap — and a refusal that has taken the
+    # repo-wide PR lock blocks every other citizen while it teaches.
+    commit_msg = f"feat({branch_name}): {description}\n\nCo-Authored-By: @{branch_name} <{branch_name}@aipass>"
+    refusal = subject_refusal(commit_msg)
+    if refusal is not None:
+        result["message"] = refusal
+        logger.error("PR refused: commit subject over the cap (%s chars)", len(commit_subject(commit_msg)))
+        return result
 
     try:
         # Step 1: Check we're on main
@@ -192,7 +208,6 @@ def create_pr(branch_name: str, description: str, branch_dir: Path) -> dict:
         # swept in. The staging step already scoped git add, but another
         # drone @git pr could stage its own files into the shared index
         # between our add and our commit.
-        commit_msg = f"feat({branch_name}): {description}\n\nCo-Authored-By: @{branch_name} <{branch_name}@aipass>"
         commit = subprocess.run(
             ["git", "commit", "-m", commit_msg, "--", str(rel_dir) + "/"],
             capture_output=True,

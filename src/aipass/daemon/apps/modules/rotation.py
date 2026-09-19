@@ -48,7 +48,7 @@ HANDLED_COMMANDS = {"rotation"}
 
 ROTATION_TYPE = "rotation"
 
-# Patrick's ruling 2026-09-10 (DPLAN-0337 R2): rounds run on opus. The job stanza
+# The owner's ruling 2026-09-10 (DPLAN-0337 R2): rounds run on opus. The job stanza
 # names it as well; this is only the fallback for a stanza that omits it.
 DEFAULT_WAKE_MODEL = "opus"
 

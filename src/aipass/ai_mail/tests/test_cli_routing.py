@@ -33,7 +33,7 @@ def _caller_stands_in_a_branch(tmp_path, monkeypatch):
 
     These are tests of ROUTING — which command reaches which module, and what the
     exit code says about the result. They are not tests of identity. But main()
-    refuses outright when the caller cannot be resolved (Patrick's ruling,
+    refuses outright when the caller cannot be resolved (the owner's ruling,
     2026-08-21), so without a caller they assert something about identity they
     never meant to.
 

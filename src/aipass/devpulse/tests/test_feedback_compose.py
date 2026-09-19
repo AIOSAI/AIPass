@@ -202,7 +202,7 @@ class TestAiMailDelivery:
         # resolves reply_to before from, and a registry MATCH routes through
         # normal delivery which refuses cross-project mail (#134). The
         # non-registry address forces the registry MISS that activates the
-        # stored reply_path route (wall-3, Patrick ruling 2026-08-07: the
+        # stored reply_path route (wall-3, the owner's ruling 2026-08-07: the
         # feedback loop is cross-project by design, no boundary protection).
         assert mail_msg["reply_to"] == "@devpulse:feedback"
         assert mail_msg["reply_to"] != mail_msg["from"]

@@ -2,8 +2,8 @@
 # META DATA HEADER
 # Name: tests/test_rollover_pipeline.py
 # Date: 2026-04-25
-# Version: 1.2.1
-# Modified: 2026-09-15
+# Version: 1.3.0
+# Modified: 2026-09-18
 # Category: memory/tests
 # =============================================
 
@@ -135,6 +135,21 @@ def _import_extractor(monkeypatch):
 
 def _import_rollover_module(monkeypatch):
     """Import the rollover module with mocked infrastructure dependencies."""
+    # FIRST LINE OF THE FIXTURE, before a single mock reaches sys.modules.
+    # The `config` verbs live in modules/rollover_config.py and `_Json`,
+    # `_emit` and `_refuse` in modules/rollover_json.py; rollover.py re-exports
+    # both sets. BOTH modules must be first-imported against the REAL
+    # aipass.cli, because whatever `console` and `error` each binds at import
+    # time it keeps FOREVER — the module stays cached long after teardown
+    # restores sys.modules. Standing one line below the cli stand-in was enough
+    # to hand 191 of test_config_verbs.py's tests a MagicMock console that
+    # printed nothing, in serial order only: --dist loadscope split the two
+    # files across workers and no CI run ever saw it (2026-09-16).
+    import importlib
+
+    real_rollover_config = importlib.import_module("aipass.memory.apps.modules.rollover_config")
+    real_rollover_json = importlib.import_module("aipass.memory.apps.modules.rollover_json")
+
     # rich
     mock_panel = MagicMock()
     mock_box = MagicMock()
@@ -208,6 +223,17 @@ def _import_rollover_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover", rollover_pkg)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
     monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.todo_report", mock_todo_report)
+    # Patched attribute by attribute rather than through the sys.modules
+    # stand-in, because `_refuse` reads `error` from ITS OWN globals - without
+    # these the mock error() never hears the refusal. monkeypatch restores each.
+    monkeypatch.setattr(real_rollover_config, "console", mock_console)
+    monkeypatch.setattr(real_rollover_config, "error", mock_error)
+    monkeypatch.setattr(real_rollover_config, "detector", mock_detector)
+    # And the same two on rollover_json, which is where `_emit` reads `console`
+    # and `_refuse` reads `error` now — a patch on rollover_config no longer
+    # reaches either of them. No `detector` there: that module never took one.
+    monkeypatch.setattr(real_rollover_json, "console", mock_console)
+    monkeypatch.setattr(real_rollover_json, "error", mock_error)
 
     # Recorded first, the way test_rollover.py's _import_rollover evicts. This re-import binds rollover
     # to the MagicMock cli; a bare pop and a bare delattr left that module cached AND named by the
@@ -323,7 +349,9 @@ def _import_line_counter(monkeypatch):
 class TestStoreVectorsSubprocess:
     """Test store_vectors_subprocess calls subprocess and returns dict."""
 
-    def test_success_returns_parsed_json(self, monkeypatch):
+    def test_success_returns_parsed_json(self, monkeypatch, tmp_path):
+        # tmp_path, not tempfile.gettempdir(): a local store is a branch write,
+        # and the write fence (2026-09-18) admits only the root it stands on.
         orch, _ = _import_orchestrator(monkeypatch)
         expected = {"success": True, "collection": "test_col", "total_vectors": 5}
         mock_result = MagicMock()
@@ -337,12 +365,37 @@ class TestStoreVectorsSubprocess:
                 embeddings=[[0.1, 0.2]],
                 documents=["doc1"],
                 metadatas=[{"key": "val"}],
-                db_path=str(Path(tempfile.gettempdir()) / "test.chroma"),
+                db_path=str(tmp_path / "test.chroma"),
             )
 
         assert result["success"] is True
         assert result["collection"] == "test_col"
         mock_run.assert_called_once()
+
+    def test_a_local_store_outside_the_aipass_root_never_starts_the_subprocess(self, monkeypatch, tmp_path):
+        """The write that put rolled-over vectors into Vera Studio's `.chroma` dirs.
+
+        Refused in THIS process, before the subprocess starts: the child is the
+        thing that writes, so a refusal it would have to report back is already
+        too late. The global store (db_path None) is memory's own and unfenced.
+        """
+        from aipass.memory.apps.handlers import write_fence
+
+        orch, _ = _import_orchestrator(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+
+        with patch.object(subprocess, "run") as mock_run:
+            result = orch.store_vectors_subprocess(
+                branch="X",
+                memory_type="local",
+                embeddings=[[0.1]],
+                documents=["doc1"],
+                metadatas=[{}],
+                db_path=str(tmp_path / "other_root" / "src" / "x" / ".chroma"),
+            )
+
+        assert result["success"] is False
+        mock_run.assert_not_called()
 
     def test_nonzero_returncode_returns_failure(self, monkeypatch):
         orch, _ = _import_orchestrator(monkeypatch)
@@ -548,6 +601,31 @@ class TestGetBranchLocalChromaPath:
 
         result = orch.get_branch_local_chroma_path("BRANCH")
         assert result == chroma_dir
+
+    def test_a_branch_outside_the_aipass_root_gets_no_chroma_directory(self, monkeypatch, tmp_path):
+        """No path handed out, no directory made — the auto-create was the first write."""
+        from aipass.memory.apps.handlers import write_fence
+
+        orch, mocks = _import_orchestrator(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        branch_dir = tmp_path / "other_root" / "src" / "x"
+        branch_dir.mkdir(parents=True)
+        mocks["detector"]._read_registry.return_value = [{"name": "X", "path": str(branch_dir)}]
+
+        assert orch.get_branch_local_chroma_path("X") is None
+        assert not (branch_dir / ".chroma").exists()
+
+    def test_an_existing_foreign_chroma_directory_is_not_handed_out_either(self, monkeypatch, tmp_path):
+        """Existing is not permission: the store call would write straight into it."""
+        from aipass.memory.apps.handlers import write_fence
+
+        orch, mocks = _import_orchestrator(monkeypatch)
+        monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
+        branch_dir = tmp_path / "other_root" / "src" / "x"
+        (branch_dir / ".chroma").mkdir(parents=True)
+        mocks["detector"]._read_registry.return_value = [{"name": "X", "path": str(branch_dir)}]
+
+        assert orch.get_branch_local_chroma_path("X") is None
 
 
 # ===========================================================================
@@ -1494,6 +1572,24 @@ class TestRunRollover:
         result = rollover.run_rollover()
         assert result is True
 
+    def test_the_run_says_its_file_list_is_fleet_wide(self, monkeypatch):
+        """`run --branch @x` reads as scoped; only the pad follows it, and the run says so where it happens."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 1,
+            "success_count": 1,
+            "failed": [],
+            "skipped": [],
+            "results": [],
+        }
+
+        rollover.run_rollover("@memory")
+
+        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        assert "files ready for rollover (fleet-wide)" in printed, printed
+        assert rollover.FLEET_WIDE_RUN_NOTE in printed, printed
+
     def test_returns_false_on_handler_exception(self, monkeypatch):
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["orchestrator"].execute_rollover.side_effect = RuntimeError("boom")
@@ -1642,6 +1738,19 @@ class TestCheckTriggers:
         }
         rollover.check_triggers()
         mocks["error"].assert_called()
+
+    def test_undrainable_files_are_listed_without_the_ready_phrase(self, monkeypatch):
+        """@hooks' PreCompact fires a fleet run on 'ready for rollover', and no run can move these files."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
+        mocks["detector"].check_all_branches.return_value = {"success": True, "triggers": [], "undrainable": [stuck]}
+
+        rollover.check_triggers()
+
+        printed = " ".join(str(c) for c in mocks["console"].print.call_args_list)
+        warned = " ".join(str(c) for c in mocks["warning"].call_args_list)
+        assert stuck in warned and "cannot drain" in warned, warned
+        assert "ready for rollover" not in (printed + warned).lower()
 
 
 # ===========================================================================
@@ -1975,6 +2084,40 @@ class TestASkippedTriggerIsNotSilentlyDropped:
         """Nothing broke — 'nothing to do' is a legitimate outcome, just a named one."""
         assert self._run_with_skip()["success"] is True
 
+    def test_an_empty_run_still_carries_the_undrainable_files(self):
+        """A dict-only file is never a trigger, so the no-trigger return is where it must survive."""
+        from aipass.memory.apps.handlers.rollover import orchestrator
+
+        stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
+        walk = {"success": True, "triggers": [], "undrainable": [stuck]}
+        with patch.object(orchestrator.detector, "check_all_branches", return_value=walk):
+            result = orchestrator.execute_rollover()
+
+        assert (result["triggers_count"], result["undrainable"]) == (0, [stuck])
+
+    def test_the_extractor_names_a_dict_instead_of_claiming_no_excess(self, tmp_path, monkeypatch):
+        """'No entries exceed v2 limits' is what VERA's 250/15 printed on every run."""
+        ext, mocks = _import_extractor(monkeypatch)
+        data = {
+            "document_metadata": {"schema_version": "2.0.0"},
+            "key_learnings": {f"KL-{n:03d}": "x" for n in range(1, 5)},
+        }
+        file_path = tmp_path / "writer" / ".trinity" / "local.json"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_text(json.dumps(data), encoding="utf-8")
+        mocks["config_loader"].section.return_value = {
+            "defaults": {"local": {"key_learnings": {"count": 3}}},
+            "per_branch": {},
+        }
+        mocks["memory_files"].read_memory_file_data.return_value = data
+
+        result = ext.extract_items(file_path)
+
+        assert result["skipped"] is True
+        assert "exceed" not in result["message"], result["message"]
+        assert "4/3 key_learnings held as a dict" in result["message"], result["message"]
+        mocks["memory_files"].write_memory_file_simple.assert_not_called()
+
 
 class TestASkippedTriggerIsVisibleOnScreen:
     """The handler counting it is only half — the operator has to be able to read it."""
@@ -2011,6 +2154,25 @@ class TestASkippedTriggerIsVisibleOnScreen:
         rollover.run_rollover()
 
         assert "skipped" not in " ".join(str(c) for c in mocks["console"].print.call_args_list)
+
+    def test_an_empty_run_prints_the_undrainable_files(self, monkeypatch):
+        """No triggers used to end on 'No files need rollover' with VERA at 250/15 unsaid."""
+        rollover, mocks = _import_rollover_module(monkeypatch)
+        stuck = "VERA.local (250/15 key_learnings held as a dict, not a list (schema 2.0.0))"
+        mocks["orchestrator"].execute_rollover.return_value = {
+            "success": True,
+            "triggers_count": 0,
+            "success_count": 0,
+            "failed": [],
+            "skipped": [],
+            "results": [],
+            "undrainable": [stuck],
+        }
+
+        rollover.run_rollover()
+
+        warned = " ".join(str(c) for c in mocks["warning"].call_args_list)
+        assert stuck in warned and "cannot drain" in warned, warned
 
 
 # ===========================================================================
@@ -2183,6 +2345,17 @@ def _todo(number, task=None, **extra) -> dict:
     return todo
 
 
+def _todo_cap(module) -> int:
+    """The live cap on a todo's task, read from the config the gate reads.
+
+    Never a literal: the number moved once already (150 -> 100) and a test
+    carrying its own copy would pin the cap that WAS, then pass while the
+    refusal it claims to measure stopped matching.
+    """
+    limits = module.load_entry_limits("guinea")
+    return int(limits["entry_types"]["todos"]["max_chars"])
+
+
 def _mint_pad(root: Path, todos: list, name: str = "guinea") -> Path:
     """A branch directory under *root* whose local memory file holds *todos*; returns that file."""
     local = root / name / ".trinity" / "local.json"
@@ -2262,6 +2435,29 @@ class TestTodoRoll:
         ]
         entries = json.loads(_backlog_file(tmp_path).read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in entries] == [1, 2]
+
+    def test_a_backlog_outside_the_aipass_root_is_refused_and_the_pad_kept(self, tr, tmp_path, monkeypatch):
+        """The backlog's directory is made BEFORE the gated write, so it needs its own fence.
+
+        Without it the gate still refuses the file — and leaves an empty
+        ``.backup/todo/<branch>/`` behind in the other project, which is a
+        write. The pad is untouched either way: nothing is pruned until the
+        backlog reads back.
+        """
+        from aipass.memory.apps.handlers import write_fence
+
+        home = tmp_path / "aipass"
+        monkeypatch.setattr(write_fence, "ROOT", home)
+        local = _mint_pad(home, [_todo(n) for n in range(1, 13)])
+        before = local.read_bytes()
+        foreign_backup = tmp_path / "other_root" / ".backup"
+
+        result = tr.roll_todos("guinea", local_path=local, backup_root=foreign_backup)
+
+        assert result["success"] is False
+        assert "NOTHING PRUNED" in result["error"]
+        assert local.read_bytes() == before
+        assert not (foreign_backup / "todo").exists()
 
     def test_the_backlog_is_the_nested_document(self, tr, tmp_path):
         local = _mint_pad(tmp_path, [_todo(n) for n in range(1, 13)])
@@ -2491,6 +2687,230 @@ class TestTodoTarget:
         assert bare["name"] == "guinea", "with no launcher at all, the process cwd is the caller's"
 
 
+def _point_backlog_ceiling(monkeypatch, tmp_path: Path, tr, ceiling) -> None:
+    """Rewrite the throwaway config's ``rollover.backlog.max_records`` in place.
+
+    Layered on top of :func:`_point_todos_count`, which already repointed the
+    loader at this file. Written rather than monkeypatched onto the accessor so
+    the pins measure the CONFIG READ too — a ceiling the loader would not serve
+    is a ceiling the fleet does not have. ``config_loader.load`` reads from disk
+    on every call, so rewriting the file is the whole update.
+    """
+    del tr  # the loader is repointed by _point_todos_count; kept for call-site symmetry
+    path = tmp_path / "custom_config" / "memory.config.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    if ceiling is None:
+        config["rollover"].pop("backlog", None)
+    else:
+        config["rollover"]["backlog"] = {"max_records": ceiling}
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+class TestTheBacklogTrim:
+    """A backlog past its ceiling moves its oldest records to a SIBLING archive.
+
+    The trim exists because nothing bounded the file: @seedgo sat at 72 records
+    and would have crossed 100 on its own. What it may not do is drop anything.
+    A backlog is the only copy of a rolled todo — never vectorised, by this
+    branch's own ruling — so "trim" here means move deeper, never delete, and
+    these pins are mostly about the records that leave the working file still
+    existing afterwards.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _backlogs_stay_in_tmp(self, tmp_path, monkeypatch):
+        _scratch_backlogs(tmp_path, monkeypatch)
+
+    @pytest.fixture
+    def tr(self, tmp_path, monkeypatch):
+        module = _todo_roll()
+        _point_todos_count(monkeypatch, tmp_path, module, 10)
+        return module
+
+    @staticmethod
+    def _backlog_of(tmp_path: Path, count: int, start: int = 1) -> Path:
+        path = _backlog_file(tmp_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        records = [
+            {"rolled": f"2026-09-01T10:00:{index % 60:02d}+00:00", "reason": "overflow", "entry": _todo(index)}
+            for index in range(start, start + count)
+        ]
+        document = {
+            "document_metadata": {"managed_by": "memory", "branch": "guinea", "high_water": start + count - 1},
+            "entries": records,
+        }
+        path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        return path
+
+    @staticmethod
+    def _numbers(path: Path) -> list:
+        if not path.exists():
+            return []
+        return [record["entry"]["number"] for record in json.loads(path.read_text(encoding="utf-8"))["entries"]]
+
+    def test_a_backlog_within_its_ceiling_is_not_touched(self, tr, tmp_path):
+        backlog = self._backlog_of(tmp_path, 5)
+        before = backlog.read_bytes()
+
+        result = tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        assert result["success"] is True
+        assert result["archived"] == 0
+        assert backlog.read_bytes() == before
+        assert not tr.archive_path_for(backlog).exists(), "an archive was created with nothing to put in it"
+
+    def test_a_backlog_exactly_at_its_ceiling_is_not_touched(self, tr, tmp_path):
+        backlog = self._backlog_of(tmp_path, 10)
+
+        assert tr.trim_backlog(backlog, "guinea", ceiling=10)["archived"] == 0
+        assert len(self._numbers(backlog)) == 10
+
+    def test_the_oldest_records_move_to_the_sibling_archive_and_none_is_lost(self, tr, tmp_path):
+        # The whole contract in one measurement: what left the backlog is in
+        # the archive, in order, and the two files together still hold all 14.
+        backlog = self._backlog_of(tmp_path, 14)
+
+        result = tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        assert result["success"] is True, result["error"]
+        assert result["archived"] == 4
+        assert self._numbers(backlog) == [5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        assert self._numbers(tr.archive_path_for(backlog)) == [1, 2, 3, 4]
+
+    def test_an_archived_record_is_carried_json_equal_not_reshaped(self, tr, tmp_path):
+        backlog = self._backlog_of(tmp_path, 12)
+        original = json.loads(backlog.read_text(encoding="utf-8"))["entries"][0]
+
+        tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        archived = json.loads(tr.archive_path_for(backlog).read_text(encoding="utf-8"))["entries"][0]
+        assert archived == original, "the archive rewrote the record on its way in"
+
+    def test_the_archive_is_verified_before_the_backlog_is_shortened(self, tr, tmp_path, monkeypatch):
+        # Same order as the roll, for the same reason: a record may sit in both
+        # files for an instant, and must never sit in neither.
+        backlog = self._backlog_of(tmp_path, 12)
+        writes = []
+        real_write = tr._write_document
+        monkeypatch.setattr(
+            tr, "_write_document", lambda path, doc: writes.append(Path(path).name) or real_write(path, doc)
+        )
+
+        tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        assert writes == ["backlog.archive.json", "backlog.json"]
+
+    def test_an_archive_that_does_not_land_leaves_the_backlog_whole(self, tr, tmp_path, monkeypatch):
+        backlog = self._backlog_of(tmp_path, 12)
+        before = backlog.read_bytes()
+        real_write = tr._write_document
+        monkeypatch.setattr(
+            tr,
+            "_write_document",
+            lambda path, doc: "disk full" if Path(path).name == "backlog.archive.json" else real_write(path, doc),
+        )
+
+        result = tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        assert result["success"] is False
+        assert "NOTHING TRIMMED" in result["error"]
+        assert backlog.read_bytes() == before, "records left the backlog with nowhere to go"
+
+    def test_high_water_survives_a_trim_so_a_number_is_never_re_issued(self, tr, tmp_path):
+        # The archive is unreachable from `todo restore`, so the floor that
+        # stops #1 being minted twice has to outlive the record itself.
+        backlog = self._backlog_of(tmp_path, 12)
+
+        tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        document = json.loads(backlog.read_text(encoding="utf-8"))
+        assert tr.high_water_of(document) == 12
+
+    def test_a_second_trim_appends_to_the_archive_rather_than_replacing_it(self, tr, tmp_path):
+        backlog = self._backlog_of(tmp_path, 12)
+        tr.trim_backlog(backlog, "guinea", ceiling=10)
+        self._backlog_of(tmp_path, 12, start=13)
+
+        tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        assert self._numbers(tr.archive_path_for(backlog)) == [1, 2, 13, 14]
+
+    def test_an_archive_belonging_to_another_branch_is_refused(self, tr, tmp_path):
+        backlog = self._backlog_of(tmp_path, 12)
+        archive = tr.archive_path_for(backlog)
+        archive.write_text(
+            json.dumps({"document_metadata": {"managed_by": "memory", "branch": "elsewhere"}, "entries": []}),
+            encoding="utf-8",
+        )
+
+        result = tr.trim_backlog(backlog, "guinea", ceiling=10)
+
+        assert result["success"] is False
+        assert "belongs to 'elsewhere'" in result["error"]
+        assert len(self._numbers(backlog)) == 12
+
+    def test_the_ceiling_is_read_from_the_config_when_none_is_passed(self, tr, tmp_path, monkeypatch):
+        # The CONTROL for the parametrized guard below. Without it those cases
+        # would pass vacuously: 12 records sit under the shipped ceiling of
+        # 100, so "no trim happened" proves nothing unless a good value in the
+        # same file is first shown to trim.
+        backlog = self._backlog_of(tmp_path, 12)
+        _point_backlog_ceiling(monkeypatch, tmp_path, tr, 10)
+
+        result = tr.trim_backlog(backlog, "guinea")
+
+        assert result["archived"] == 2, result["error"]
+        assert self._numbers(tr.archive_path_for(backlog)) == [1, 2]
+
+    @pytest.mark.parametrize("ceiling", [None, 0, -3, "100", True])
+    def test_an_unusable_ceiling_means_no_trim_never_a_trim_to_zero(self, tr, tmp_path, monkeypatch, ceiling):
+        # The failure mode of this number is "the file stays long", never
+        # "the last copy is gone". A config that lost the key must not be read
+        # as a ceiling of nothing.
+        backlog = self._backlog_of(tmp_path, 12)
+        _point_backlog_ceiling(monkeypatch, tmp_path, tr, ceiling)
+
+        result = tr.trim_backlog(backlog, "guinea")
+
+        assert result["archived"] == 0
+        assert len(self._numbers(backlog)) == 12
+        assert not tr.archive_path_for(backlog).exists()
+
+    def test_a_missing_backlog_is_a_state_not_an_error(self, tr, tmp_path):
+        result = tr.trim_backlog(_backlog_file(tmp_path), "guinea", ceiling=10)
+
+        assert result["success"] is True
+        assert result["archived"] == 0
+
+    def test_the_roll_trims_on_its_way_past(self, tr, tmp_path, monkeypatch):
+        # The trim hangs off append_to_backlog, the one choke point both the
+        # roll and the push go through, so it fires at the moment the file
+        # grows rather than on a sweep nobody runs.
+        _point_backlog_ceiling(monkeypatch, tmp_path, tr, 10)
+        self._backlog_of(tmp_path, 10)
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(20, 33)])
+
+        result = tr.roll_todos("guinea", local_path=local, backup_root=tmp_path / ".backup")
+
+        assert result["success"] is True, result["error"]
+        assert len(self._numbers(_backlog_file(tmp_path))) == 10, "the backlog grew past its ceiling"
+        assert self._numbers(tr.archive_path_for(_backlog_file(tmp_path))) == [1, 2, 3]
+
+    def test_a_failed_trim_never_fails_the_append(self, tr, tmp_path, monkeypatch):
+        # By the time the trim runs the records are safely on disk and the
+        # caller is about to prune the pad on the strength of that. A trim
+        # that could veto the append would strand open work on a full pad.
+        _point_backlog_ceiling(monkeypatch, tmp_path, tr, 10)
+        self._backlog_of(tmp_path, 10)
+        monkeypatch.setattr(tr, "trim_backlog", lambda *a, **k: {"success": False, "archived": 0, "error": "boom"})
+        local = _mint_pad(tmp_path, [_todo(n) for n in range(20, 33)])
+
+        result = tr.roll_todos("guinea", local_path=local, backup_root=tmp_path / ".backup")
+
+        assert result["success"] is True, result["error"]
+        assert [t["number"] for t in json.loads(local.read_text(encoding="utf-8"))["todos"]] == list(range(23, 33))
+
+
 class TestTodoRestore:
     """restore_todo: pad first, then the backlog - never in neither place."""
 
@@ -2521,7 +2941,11 @@ class TestTodoRestore:
         return tr.restore_todo("guinea", number, local_path=local, backup_root=tmp_path / ".backup")
 
     def test_restore_reissues_the_next_number_and_carries_every_other_field(self, tr, tmp_path):
-        original = _todo(2, task="bring it back", priority="high", tags=["x"])
+        # `tags` used to stand in for "every other field" here. The closed
+        # field shape (FPLAN-0593) made that a field a todo may not carry, so
+        # the pin now rides on `priority` — a field the shape allows — and the
+        # tags case is pinned below for what it actually does now.
+        original = _todo(2, task="bring it back", priority="high")
         local = _mint_pad(tmp_path, [_todo(n) for n in (5, 9, 3)])
         backlog = self._backlog_with(
             tmp_path, [self._record(_todo(1)), self._record(original), self._record(_todo(14))]
@@ -2534,6 +2958,89 @@ class TestTodoRestore:
         assert json.loads(local.read_text(encoding="utf-8"))["todos"][0] == {**original, "number": 15}
         remaining = json.loads(backlog.read_text(encoding="utf-8"))["entries"]
         assert [record["entry"]["number"] for record in remaining] == [1, 14]
+
+    def test_restoring_a_non_canonical_todo_is_refused_and_the_field_is_named(self, tr, tmp_path):
+        # THE DEAD END, pinned rather than hidden (FPLAN-0593). A todo reaches
+        # the backlog BECAUSE it is non-canonical, and the closed field shape
+        # means putting it back on the pad is a refused write. Restore must not
+        # reshape it to get past the gate — that is the one thing the backlog
+        # contract forbids — so the honest outcome is a refusal.
+        #
+        # Phase 5 changed what that refusal SAYS, not whether it happens. The
+        # field is named now: two seats hit the bare version the same night and
+        # reshaped five records by hand because the only way to learn which
+        # field was wrong was to attempt the write and read one refusal at a
+        # time. The substring is asserted exactly, not with an `or` over two
+        # words — the loose version passed on a refusal that named nothing.
+        original = _todo(2, task="bring it back", tags=["x"])
+        local = _mint_pad(tmp_path, [_todo(5)])
+        backlog = self._backlog_with(tmp_path, [self._record(original)])
+
+        result = self._restore(tr, 2, local, tmp_path)
+
+        assert result["success"] is False
+        assert "field 'tags' is not part of the entry shape" in result["error"], result["error"]
+        assert "NOTHING RESTORED" in result["error"]
+        # The pad and the backlog are both left exactly as found.
+        assert [t["number"] for t in json.loads(local.read_text(encoding="utf-8"))["todos"]] == [5]
+        assert [r["entry"]["number"] for r in json.loads(backlog.read_text(encoding="utf-8"))["entries"]] == [2]
+
+    def test_every_broken_rule_is_named_in_one_refusal_not_one_per_attempt(self, tr, tmp_path):
+        # The whole point of the pre-write check: a seat fixes the record in
+        # one pass instead of bisecting it. @flow's five refused restores
+        # carried both species at once — a `status` field the shape does not
+        # allow, and a `task` past its cap — and the gate reported whichever it
+        # reached first.
+        cap = _todo_cap(tr)
+        original = _todo(2, task="x" * (cap + 17), status="open")
+        local = _mint_pad(tmp_path, [_todo(5)])
+        self._backlog_with(tmp_path, [self._record(original)])
+
+        error = self._restore(tr, 2, local, tmp_path)["error"]
+
+        assert "field 'status' is not part of the entry shape" in error, error
+        assert f"'task' is {cap + 17}/{cap} chars (+17 over)" in error, error
+
+    def test_the_refusal_lands_before_anything_is_written(self, tr, tmp_path, monkeypatch):
+        # "Pre-write" is the claim; this measures it. The old path built the
+        # pad, called the writer and let the gate refuse — correct, but it
+        # spent a write to learn what the shape already knew, and the pad file
+        # was rewritten and rolled back on a lane whose whole contract is that
+        # a todo is never in neither place.
+        writes = []
+        monkeypatch.setattr(tr, "_write_document", lambda path, document: writes.append(Path(path).name))
+        local = _mint_pad(tmp_path, [_todo(5)])
+        self._backlog_with(tmp_path, [self._record(_todo(2, task="bring it back", tags=["x"]))])
+
+        assert self._restore(tr, 2, local, tmp_path)["success"] is False
+        assert writes == [], f"the shape check ran after a write: {writes}"
+
+    def test_a_legal_record_passes_the_shape_check_untouched(self, tr, tmp_path):
+        # The other half: the check must not refuse what the gate would accept.
+        # A pre-flight stricter than the gate it predicts is a new dead end.
+        local = _mint_pad(tmp_path, [_todo(5)])
+        self._backlog_with(tmp_path, [self._record(_todo(2, task="bring it back", priority="high"))])
+
+        result = self._restore(tr, 2, local, tmp_path)
+
+        assert result["success"] is True, result["error"]
+
+    def test_the_check_reports_and_never_repairs(self, tr, tmp_path):
+        # Scope, held deliberately. Whether an over-cap task should be CUT to
+        # fit or carried VERBATIM is open (todo 251, the legacy-pad ruling) and
+        # is not presumed here: under either answer the refusal text above is
+        # the same, so only the reporting half was built. This pins that the
+        # repairing half was NOT — a restore that quietly trimmed a task would
+        # answer the open question by shipping.
+        cap = _todo_cap(tr)
+        original = _todo(2, task="x" * (cap + 5))
+        local = _mint_pad(tmp_path, [_todo(5)])
+        backlog = self._backlog_with(tmp_path, [self._record(original)])
+
+        assert self._restore(tr, 2, local, tmp_path)["success"] is False
+        record = json.loads(backlog.read_text(encoding="utf-8"))["entries"][0]["entry"]
+        assert record["task"] == "x" * (cap + 5), "the backlog record was reshaped"
+        assert json.loads(local.read_text(encoding="utf-8"))["todos"] == [_todo(5)]
 
     def test_the_pad_is_written_before_the_backlog_is_touched(self, tr, tmp_path, monkeypatch):
         local = _mint_pad(tmp_path, [_todo(3)])

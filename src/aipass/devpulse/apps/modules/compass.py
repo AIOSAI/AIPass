@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: compass.py
 # Description: Compass Module — drone command for devpulse's rated decision store
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-16
-# Modified: 2026-08-22
+# Modified: 2026-09-16
 # =============================================
 
 """
@@ -63,7 +63,7 @@ HELP_TEXT = """\
 [bold cyan]compass[/bold cyan] — devpulse rated decision store
 
 [bold]Usage:[/bold]
-  compass add "context" "decision" --rating R [opts]   Store a rated decision
+  compass add "context" "decision" --rating R \\[opts]   Store a rated decision
   compass query "question" [--rating R] [--limit N]     Search (rating shown)
   compass stats                                         Counts by rating/status
   compass rate <id> <rating>                            Re-rate a decision

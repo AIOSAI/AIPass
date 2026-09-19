@@ -278,7 +278,7 @@ class TestLogJson:
 
     @patch(_AUTH, return_value="drone")
     def test_unknown_argument_refuses_by_name(self, _auth: MagicMock) -> None:
-        """Patrick's standing ruling: an unknown argument FAILS, by name.
+        """The owner's standing ruling: an unknown argument FAILS, by name.
 
         Red before 2026-09-07. ``log not_a_real_count`` logged a WARNING that
         the token was unparseable and then carried on with the default 10, so

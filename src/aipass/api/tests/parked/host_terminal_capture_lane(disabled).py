@@ -627,7 +627,7 @@ class TestTheSendInvocation:
 
 class TestThePayloadNeverReachesALog:
     """
-    A pane is whatever is on Patrick's screen; typed text may be a password.
+    A pane is whatever is on the owner's screen; typed text may be a password.
 
     Logging either would create a second, permanent copy in a place nobody
     chose — and this server's logs are not where a secret goes to live.
@@ -680,7 +680,7 @@ def client(tmp_path: Path):
 @fastapi_required
 class TestTheScopeSplitIsTheWholeUiStory:
     """
-    Learning #389, which cost Patrick four "broken" features: a scope-refused UI
+    Learning #389, which cost the owner four "broken" features: a scope-refused UI
     is indistinguishable from breakage.
 
     The split is what lets @baud render the input row DISABLED with a reason
@@ -732,7 +732,7 @@ class TestTheScopeSplitIsTheWholeUiStory:
         assert response.status_code == 401
 
     def test_an_operate_token_can_do_both(self, client: Any) -> None:
-        """Operate implies read, so the sheet works fully on Patrick's token."""
+        """Operate implies read, so the sheet works fully on the owner's token."""
         _, raw = host_tokens.issue_token("operator", scope="operate")
 
         with patch(PATCH_VERBS_FLEET) as door, patch(PATCH_RESOLVE, return_value=Path("/tmp/b")):

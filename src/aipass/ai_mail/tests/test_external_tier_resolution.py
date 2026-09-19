@@ -275,7 +275,7 @@ class TestTheStepIsContained:
     def test_the_external_step_needs_no_admin_grant(self, home, vera_studio):
         """The daemon fires unverified. Declaration is the credential, not a grant.
 
-        Deliberate and stated: the anchor is a machine-managed file Patrick
+        Deliberate and stated: the anchor is a machine-managed file the owner
         blessed, so an external root is already an authorised destination. The
         admin sweep of ``projects/*`` is a different question and stays gated.
         """

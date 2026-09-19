@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon_wakeup.py
 # Description: DAEMON Wake-Up Cron Trigger
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-02-15
-# Modified: 2026-08-31
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -53,7 +53,7 @@ _DAEMON_ROOT = module_file(__file__).parents[1]  # src/aipass/daemon/
 JSON_DIR = _DAEMON_ROOT / "daemon_json"
 
 LOCK_FILE = JSON_DIR / "wakeup.lock"
-INBOX_PATH = _DAEMON_ROOT / "ai_mail.local" / "inbox.json"
+INBOX_PATH = _DAEMON_ROOT / ".ai_mail.local" / "inbox.json"
 
 # =============================================
 # LOGGING

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_differ.py
 # Description: Dashboard Template Diff Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-02-25
-# Modified: 2026-03-09
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -31,6 +31,7 @@ from aipass.prax.apps.modules.logger import get_direct_logger
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.repo_root import find_repo_root
 from aipass.prax.apps.handlers.repo_root import resolved_file
+from aipass.prax.apps.handlers.dashboard.template_pusher import DEPRECATED_QUICK_STATUS_KEYS
 
 logger = get_direct_logger()
 
@@ -73,8 +74,10 @@ DEPRECATED_SECTIONS = [
     "todo",
 ]
 
-# Deprecated quick_status keys that should be flagged
-DEPRECATED_QUICK_STATUS_KEYS = ["pending_bulletins", "commons_mentions"]
+# Deprecated quick_status keys are the pusher's list, imported above — one
+# policy, one place. The differ carried its own copy and kept recommending the
+# deletion of commons_mentions (a key @flow owns and writes) for weeks after the
+# pusher's list was corrected on 2026-08-13 (docs/dashboard.md, 2026-08-25).
 
 # Required sections (from template)
 REQUIRED_SECTIONS = ["ai_mail", "flow", "memory"]

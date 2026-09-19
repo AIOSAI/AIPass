@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: backup.py
 # Description: BACKUP Branch — main orchestrator with auto-discovery
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-09-14
+# Modified: 2026-09-15
 # =============================================
 
 """BACKUP Branch - Main Orchestrator
@@ -32,7 +32,7 @@ os.environ.setdefault("AIPASS_BRANCH_NAME", "backup")
 from aipass.prax import logger
 from aipass.cli.apps.modules import console, error, header, reset_command_state, resolve_exit
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 MODULE_NAME = "backup"
 MODULES_DIR = Path(__file__).parent / "modules"
 
@@ -67,6 +67,9 @@ def print_help() -> None:
     console.print("  [dim]drone @backup <command> <project_path|@name>[/dim]")
     console.print("  [dim]drone @backup --help[/dim]")
     console.print()
+    console.print("  [dim]Legacy form, still live: drone @backup backup <project_path|@name>[/dim]")
+    console.print("  [dim]runs snapshot; add --versioned or --all to pick another lane.[/dim]")
+    console.print()
     console.print("-" * 70)
     console.print()
     console.print("[bold cyan]COMMANDS:[/bold cyan]")
@@ -83,6 +86,19 @@ def print_help() -> None:
     console.print("  [green]drive_stats[/green]  Drive usage statistics")
     console.print("  [green]share[/green]        Upload a single file to Drive + get a shareable link")
     console.print("  [green]drive_clear[/green]  Clear the local Drive tracker (remote files untouched)")
+    console.print()
+    console.print("-" * 70)
+    console.print()
+    console.print("[bold cyan]OPTIONS:[/bold cyan]")
+    console.print()
+    console.print("  [green]--name <name>[/green]     register: register under a short name, so @name resolves")
+    console.print("  [green]--quiet[/green]           all: suppress the panels, the run itself is unchanged")
+    console.print("  [green]--force[/green]           drive_sync: re-upload tracked files · drive_clear: required")
+    console.print("  [green]--project <name>[/green]  drive_sync: sync a registered project by name")
+    console.print("  [green]--note <text>[/green]     drive_sync: attach a note to the sync record")
+    console.print("  [green]--public[/green]          share: anyone with the link may read the uploaded file")
+    console.print()
+    console.print("  [dim]restore takes subcommands, not flags: list <file> and file <file> <out>.[/dim]")
     console.print()
     console.print("-" * 70)
     console.print()

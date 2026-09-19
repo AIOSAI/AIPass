@@ -12,7 +12,7 @@
 
 The picker used to enumerate processes and call them chats. On 2026-08-18 that
 cost a conversation: Ctrl+C removes the dead chat's session file, so the chat
-Patrick wanted was the one thing a PID list could not show, while three bg
+the owner wanted was the one thing a PID list could not show, while three bg
 leftovers were offered as if they were his.
 """
 

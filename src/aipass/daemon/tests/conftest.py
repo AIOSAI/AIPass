@@ -55,7 +55,7 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 # HOST STATE — the suite may not move the live scheduler timer
 # =============================================================================
 #
-# PATRICK'S RULING (2026-09-08), his words: "tests can't disable processes, they
+# THE OWNER'S RULING (2026-09-08), his words: "tests can't disable processes, they
 # should restore to exact same state before the test. The test is fine and good
 # that it can enter something."
 #

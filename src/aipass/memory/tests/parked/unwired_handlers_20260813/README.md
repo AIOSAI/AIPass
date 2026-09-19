@@ -1,7 +1,7 @@
 # Unwired handlers — archived 2026-08-13
 
 Three of `apps/handlers/`'s files had no caller anywhere. `dead_code` scored 95%
-and named two of them (Patrick's 16:47 fleet audit; dispatch 40e33e8b); the third
+and named two of them (the owner's 16:47 fleet audit; dispatch 40e33e8b); the third
 surfaced only after the first two left. The owner call was wire-it or archive-it:
 **all three archived**, because each is superseded by the path that replaced it,
 and wiring dead code back in to satisfy a checker would have been the worse answer.
@@ -10,7 +10,7 @@ Nothing here is deleted. Restore = move the file back, drop the `(disabled)` suf
 and re-add its tests.
 
 **Moved here 2026-08-18, same bytes.** This park used to live in
-`.archive/unwired_handlers_20260813/`. Patrick's archive ruling that night made `.archive/`
+`.archive/unwired_handlers_20260813/`. The owner's archive ruling that night made `.archive/`
 always-ignored and named it his disposal zone, cleaned without warning, so a park kept there
 ships with nothing. "Archived not deleted" is only true while the bytes are somewhere a fresh
 clone can reach. Every `.py` here wears the `(disabled)` suffix, the house convention for code

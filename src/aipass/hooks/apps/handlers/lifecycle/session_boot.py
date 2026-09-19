@@ -10,7 +10,7 @@
 
 """Boot wrapper for Claude Code sessions.
 
-When Patrick runs `claude` in a branch directory, this wrapper presents a menu:
+When the owner runs `claude` in a branch directory, this wrapper presents a menu:
 
 Live session (interactive):
   hooks — live chat: PID 1234 · abc12345 · interactive · 2h old

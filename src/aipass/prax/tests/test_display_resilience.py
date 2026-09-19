@@ -267,7 +267,7 @@ class TestDisplayWorkerSurvivesBadEvent:
 class TestStandaloneRunArgs:
     """`python -m ...monitor run` must mean run-all, not 'branch named run'.
 
-    The systemd unit that carries Patrick's Telegram feed launches exactly that
+    The systemd unit that carries the owner's Telegram feed launches exactly that
     way. Before launch-time scoping the stray 'run' was parsed and discarded;
     once the scope became real it selected a branch nobody has, so a restart
     would have brought the service up watching — and relaying — nothing.
@@ -316,7 +316,7 @@ class TestRelaySurvivesConsoleFailure:
     """Console and Telegram are separate sinks; one must not take out the other."""
 
     def test_relay_runs_even_when_console_render_raises(self):
-        """Patrick's Telegram feed does not depend on Rich rendering a line."""
+        """The owner's Telegram feed does not depend on Rich rendering a line."""
         mod = _import_monitor()
         event = _event()
         with patch.object(mod, "_print_event_to_console", side_effect=ValueError("markup")):

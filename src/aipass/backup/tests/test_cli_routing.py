@@ -197,6 +197,12 @@ class TestPrintHelp:
         all_row = next(line for line in printed.splitlines() if "[green]all[/green]" in line)
         assert "drive" in all_row.lower(), f"'all' row hides its drive stage: {all_row}"
 
+        # Flags live in the verbs, not the router, so the page has to name them.
+        # --quiet, --project and --note were live and unnamed anywhere in this
+        # help until 2026-09-15; --force was named only by drive_clear's own page.
+        for flag in ("--name", "--quiet", "--force", "--project", "--note", "--public"):
+            assert flag in printed, f"help page never names {flag}"
+
     @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
     def test_print_introspection_exists(self, mod_path: str) -> None:
         """print_introspection callable exists on module."""

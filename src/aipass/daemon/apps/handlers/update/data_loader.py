@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: data_loader.py
 # Description: DAEMON Data Loading Handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-01-29
-# Modified: 2026-08-31
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -22,7 +22,7 @@ from aipass.daemon.apps.handlers.module_root import module_file
 # =============================================
 
 _DAEMON_ROOT = module_file(__file__).parents[3]  # src/aipass/daemon/
-INBOX_PATH = _DAEMON_ROOT / "ai_mail.local" / "inbox.json"
+INBOX_PATH = _DAEMON_ROOT / ".ai_mail.local" / "inbox.json"
 LOCAL_PATH = _DAEMON_ROOT / "DAEMON.local.json"
 
 # =============================================

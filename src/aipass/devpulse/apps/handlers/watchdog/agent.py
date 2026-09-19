@@ -290,7 +290,7 @@ class TranscriptScanner:
     The naive loop cost ~152 ms per 5 s tick against a 307-file projects dir —
     two pathlib rglobs plus a 1 MB tail re-read even when nothing changed —
     ~3% of a core per watchdog, compounding across concurrent watches
-    (Patrick-caught, todo #126; measured 2026-08-11). The scanner keeps the
+    (owner-caught, todo #126; measured 2026-08-11). The scanner keeps the
     discovered file list and re-walks it only every ``REFRESH_INTERVAL``
     seconds (or when a stall is about to be declared — see
     ``StallTracker.observe``), so a tick is one ``os.stat`` pass. The in-flight

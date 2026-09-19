@@ -3,7 +3,7 @@
 # Description: Process lock file operations handler
 # Version: 1.0.0
 # Created: 2026-04-22
-# Modified: 2026-04-22
+# Modified: 2026-09-18
 # =============================================
 
 """
@@ -11,6 +11,11 @@ Lock File Operations Handler
 
 Provides atomic lock file management for background runners.
 Uses O_CREAT | O_EXCL to avoid TOCTOU races between existence check and write.
+
+On Windows a create against a lock the previous runner is still removing
+(delete-pending) raises PermissionError, not FileExistsError. That is a lock
+being released, so try_create_lock retries it on a short bounded budget and
+raises only when the denial outlasts it.
 
 Usage:
     from aipass.flow.apps.handlers.runner.lock_ops import (
@@ -20,11 +25,17 @@ Usage:
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+
+# A delete-pending lock clears in milliseconds; a detached runner should not
+# sit out a long budget before reporting a real permissions problem.
+_CREATE_RETRIES = 5
+_CREATE_BACKOFF_BASE = 0.05
 
 
 def _pid_alive_windows(pid: int) -> bool:
@@ -79,15 +90,36 @@ def _pid_alive(pid: int) -> bool:
 
 
 def try_create_lock(lock_file: Path) -> bool:
-    """Atomically create lock file with current PID. Returns True on success."""
-    try:
-        fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
-        return True
-    except FileExistsError:
-        logger.info("Lock file already exists, cannot acquire: %s", lock_file)
-        return False
+    """Atomically create lock file with current PID. Returns True on success.
+
+    FileExistsError returns False at once: acquire_lock's stale check reads
+    the holder next. A Windows delete-pending PermissionError means the
+    previous holder is mid-release, so it is retried with backoff.
+
+    Raises:
+        PermissionError: Still denied after the retry budget. Chained from
+            the last denial, so a real permissions problem surfaces.
+    """
+    denial: PermissionError | None = None
+    waited = 0.0
+    for attempt in range(_CREATE_RETRIES):
+        try:
+            fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return True
+        except FileExistsError:
+            logger.info("Lock file already exists, cannot acquire: %s", lock_file)
+            return False
+        except PermissionError as exc:
+            denial = exc
+            logger.info("Lock file create denied (delete-pending?), retry %d: %s: %s", attempt + 1, lock_file, exc)
+        delay = _CREATE_BACKOFF_BASE * (2**attempt)
+        time.sleep(delay)
+        waited += delay
+    raise PermissionError(
+        f"Lock {lock_file} still denied after {_CREATE_RETRIES} attempts ({waited:.2f}s waited)"
+    ) from denial
 
 
 def is_lock_stale(lock_file: Path) -> bool:
@@ -107,7 +139,12 @@ def is_lock_stale(lock_file: Path) -> bool:
 def acquire_lock(lock_file: Path) -> bool:
     """Try to acquire lock file. Returns True if acquired.
 
-    Uses atomic O_CREAT | O_EXCL to avoid TOCTOU race.
+    Uses atomic O_CREAT | O_EXCL to avoid TOCTOU race. False means another
+    live process holds the lock.
+
+    Raises:
+        PermissionError: From try_create_lock, when the create is still denied
+            after its retry budget. Not contention, so never reported as False.
     """
     if try_create_lock(lock_file):
         json_handler.log_operation("lock_acquired", {"lock_file": str(lock_file)})

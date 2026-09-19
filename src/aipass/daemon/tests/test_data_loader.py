@@ -2,10 +2,11 @@
 # META DATA HEADER
 # Name: test_data_loader.py - Data Loader Tests
 # Date: 2026-03-24
-# Version: 1.0.0
+# Version: 1.1.0
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-09-19): Pin both inbox readers to the dotted .ai_mail.local mailbox
 #   - v1.0.0 (2026-03-24): Initial creation - data_loader handler tests
 #
 # CODE STANDARDS:
@@ -20,7 +21,12 @@ from pathlib import Path
 
 import pytest
 
+from aipass.daemon.apps import daemon_wakeup as _wakeup_mod
 from aipass.daemon.apps.handlers.update import data_loader as _dl_mod
+
+# Taken before isolate_paths patches INBOX_PATH: the path the code really reads.
+_REAL_INBOX_PATH = _dl_mod.INBOX_PATH
+_BRANCH_MAILBOX = Path(__file__).resolve().parents[1] / ".ai_mail.local" / "inbox.json"
 
 load_inbox = _dl_mod.load_inbox
 load_local = _dl_mod.load_local
@@ -112,6 +118,16 @@ class TestLoadInbox:
         result = load_inbox()
         assert result["messages"] == []
         assert result["total_messages"] == 0
+
+
+class TestInboxPathIsTheRealMailbox:
+    """Both inbox readers must point at the branch's dotted .ai_mail.local mailbox (APLAN-0015)."""
+
+    def test_data_loader_reads_the_dotted_mailbox(self):
+        assert _REAL_INBOX_PATH == _BRANCH_MAILBOX
+
+    def test_daemon_wakeup_reads_the_dotted_mailbox(self):
+        assert _wakeup_mod.INBOX_PATH == _BRANCH_MAILBOX
 
 
 # =============================================

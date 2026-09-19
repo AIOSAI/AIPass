@@ -1,10 +1,47 @@
 """Tests for close_ops handler — plan closure business logic."""
 
+import json
+import os
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ─── Helpers ─────────────────────────────────────────────
+
+_APPEND = "aipass.flow.apps.handlers.plan.append_closed_plan"
+
+# Captured before any test patches os.open: the stand-in below delegates here.
+_REAL_OS_OPEN = os.open
+
+
+def _deny_exclusive_creates(lock_path: Path, denials: int | None):
+    """An os.open stand-in that answers the way Windows does mid-release.
+
+    Windows answers an exclusive create against a lock another writer is still
+    removing (delete-pending) with PermissionError, not FileExistsError; Linux
+    cannot show that, so it is manufactured. The first ``denials`` exclusive
+    creates of ``lock_path`` are denied (None = never clears); everything else
+    reaches the real os.open.
+
+    Returns:
+        (side_effect, attempts, raised): attempts counts every exclusive create
+        of lock_path; raised holds each PermissionError handed out.
+    """
+    attempts: list[int] = []
+    raised: list[PermissionError] = []
+
+    def fake_open(path, flags, *args, **kwargs):
+        if flags & os.O_EXCL and str(path) == str(lock_path):
+            attempts.append(len(attempts) + 1)
+            if denials is None or len(attempts) <= denials:
+                denial = PermissionError(13, "Access is denied")
+                raised.append(denial)
+                raise denial
+        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+
+    return fake_open, attempts, raised
 
 
 def _import_extract_prefix():
@@ -328,6 +365,92 @@ class TestClosePlanImplSuccess:
         # Dashboard updates were called
         deps["update_dashboard_local"].assert_called_once()
         deps["push_to_plans_central"].assert_called_once()
+
+    @staticmethod
+    def _close_with_real_append(tmp_path, fake_open):
+        """Close FPLAN-0001 in tmp_path with the REAL CLOSED_PLANS append and a
+        stand-in os.open; returns close_plan_impl's result.
+        """
+        close_plan_impl = _import_close_plan_impl()
+        plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
+        plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
+        registry = {
+            "plans": {
+                "1": {
+                    "status": "open",
+                    "subject": "Test plan",
+                    "location": str(tmp_path),
+                    "file_path": str(plan_file),
+                    "relative_path": plan_file.name,
+                }
+            }
+        }
+        deps = _make_deps()
+        deps["load_registry"].return_value = registry
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
+            patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess"),
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch(f"{_APPEND}.os.open", side_effect=fake_open),
+            patch(f"{_APPEND}.time.sleep"),
+        ):
+            return close_plan_impl(plan_num="1", **deps)
+
+    def test_closed_plans_append_waits_out_a_delete_pending_lock(self, tmp_path):
+        """The CLOSED_PLANS append lock takes a Windows delete-pending denial as
+        a held lock and retries it; the entry lands in CLOSED_PLANS.local.json.
+
+        It used to escape _acquire_append_lock on the first denial, so every
+        close that raced a concurrent append reported a failed append.
+        """
+        closed_plans = tmp_path / "CLOSED_PLANS.local.json"
+        lock = closed_plans.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
+
+        result = self._close_with_real_append(tmp_path, fake_open)
+
+        assert result["success"] is True
+        assert len(attempts) == 2
+        entries = json.loads(closed_plans.read_text(encoding="utf-8"))["closed_plans"]
+        assert [e["plan_id"] for e in entries] == ["FPLAN-1"]
+        assert not any("CLOSED_PLANS" in m.get("text", "") for m in result["messages"])
+        assert not lock.exists()
+
+    def test_closed_plans_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
+        """A denial past the budget: exactly the budget of attempts, the close
+        still succeeds (the append is non-critical) but reports the failed
+        append, and the helper's PermissionError is chained to the last denial.
+        """
+        import aipass.flow.apps.handlers.plan.append_closed_plan as append_mod
+
+        closed_plans = tmp_path / "CLOSED_PLANS.local.json"
+        lock = closed_plans.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+
+        result = self._close_with_real_append(tmp_path, fake_open)
+
+        assert result["success"] is True
+        assert len(attempts) == append_mod._LOCK_RETRIES
+        assert not closed_plans.exists()
+        assert any("CLOSED_PLANS append failed" in m.get("text", "") for m in result["messages"])
+        # The logged arguments themselves, never str(call): a call's repr doubles
+        # every backslash, so a Windows path is never a substring of it.
+        warned = " ".join(str(arg) for c in mock_logger.warning.call_args_list for arg in c.args)
+        assert str(lock) in warned
+        assert f"{append_mod._LOCK_RETRIES} attempts" in warned
+
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
+        with (
+            patch(f"{_APPEND}.os.open", side_effect=fake_open),
+            patch(f"{_APPEND}.time.sleep"),
+            pytest.raises(PermissionError) as excinfo,
+        ):
+            append_mod._acquire_append_lock(lock)
+
+        assert excinfo.value.__cause__ is raised[-1]
+        assert len(attempts) == append_mod._LOCK_RETRIES
 
 
 class TestTemplateDetectionNeverDeletes:
@@ -1203,7 +1326,7 @@ class TestCloseAllRefusesUnresolvableRow:
 class TestDryRunEqualsRun:
     """The preview must resolve through the same path as the execution.
 
-    Patrick's success criterion: 'if the dry run accurately tells us what's
+    The owner's success criterion: 'if the dry run accurately tells us what's
     actually gonna happen, then yeah, we're good.' Two paths that merely agree
     today can drift; these pin them to one resolution.
     """

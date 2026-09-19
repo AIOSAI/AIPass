@@ -6,7 +6,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from aipass.cli.apps.modules import display
+from aipass.cli.apps import modules
+from aipass.cli.apps.modules import display, templates
 
 from .conftest import make_capture_console
 
@@ -627,3 +628,81 @@ class TestCommandState:
         with patch.object(display, "CONSOLE", cons):
             display.success("all good")
         assert display.command_failed() is False
+
+
+# =============================================================================
+# escape — published on the surface, and which render functions need it
+# =============================================================================
+
+
+def _render(fn, value):
+    """Call fn(value) with every console the surface prints through captured."""
+    cons, get_output = _make_capture_console()
+    with (
+        patch.object(display, "CONSOLE", cons),
+        patch.object(display, "err_console", cons),
+        patch.object(templates, "CONSOLE", cons),
+    ):
+        fn(value)
+    return get_output()
+
+
+class TestEscapeExport:
+    """escape is Rich's own, bound on this surface so no branch imports Rich to print safely.
+
+    The surface is split, measured 2026-09-17. header, success, section and the
+    templates parse markup in their values: a bare [count] is eaten. error, warning
+    and fatal build Text: a bare [count] survives, and an escaped one prints its
+    backslash. Both halves are pinned so docs/rich_markup.md cannot drift from the code.
+    """
+
+    PLACEHOLDER = "log [count]"
+
+    def test_escape_is_published_on_both_surfaces(self):
+        import aipass.cli
+        from rich.markup import escape as rich_escape
+
+        assert "escape" in modules.__all__
+        assert modules.escape is rich_escape
+        assert aipass.cli.escape is rich_escape
+
+    @pytest.mark.parametrize(
+        "fn",
+        [
+            display.header,
+            display.success,
+            display.section,
+            templates.operation_start,
+            lambda v: display.header("Title", {"key": v}),
+            lambda v: display.success("ok", key=v),
+            lambda v: templates.operation_complete(key=v),
+        ],
+        ids=[
+            "header",
+            "success",
+            "section",
+            "operation_start",
+            "header_details",
+            "success_kwargs",
+            "operation_complete",
+        ],
+    )
+    def test_markup_functions_need_escape(self, fn):
+        assert "[count]" not in _render(fn, self.PLACEHOLDER)
+        escaped = _render(fn, modules.escape(self.PLACEHOLDER))
+        assert "[count]" in escaped
+        assert "\\" not in escaped
+
+    @pytest.mark.parametrize(
+        "fn",
+        [
+            display.error,
+            display.warning,
+            lambda v: display.error("failed", suggestion=v),
+            lambda v: display.warning("careful", details=v),
+        ],
+        ids=["error", "warning", "error_suggestion", "warning_details"],
+    )
+    def test_text_functions_must_not_be_escaped(self, fn):
+        assert "log [count]" in _render(fn, self.PLACEHOLDER)
+        assert "\\[count]" in _render(fn, modules.escape(self.PLACEHOLDER))

@@ -31,6 +31,11 @@
       "reason": "Pure reader \u2014 parses the owner's .updateignore and answers is_ignored(). Performs no operation: it never writes, and spawn never creates or modifies the file. The operation it informs is the update itself, which update_ops logs at the site that performs it (log_operation('update_executed'))."
     },
     {
+      "file": "apps/handlers/docs_page.py",
+      "standard": "json_structure",
+      "reason": "Pure reader (DPLAN-0351) \u2014 returns the docs page skeleton text and writes nothing, so there is no operation here to log. The operation it serves is @seedgo's docs_page render, which seedgo performs and logs in its own process."
+    },
+    {
       "file": "apps/modules/core.py",
       "standard": "deep_nesting",
       "reason": "handle_command() depth 7 \u2014 complex argument parsing for spawn create with --role/--traits/--purpose/--template/--registry flags. Nested while loop through args array; extraction would obscure control flow."

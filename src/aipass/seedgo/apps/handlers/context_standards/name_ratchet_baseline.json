@@ -1,0 +1,18 @@
+{
+  "_what": "The name ratchet's baseline (DPLAN-0350): lines per file per rule that hit on the day it landed. A file is red when its count goes ABOVE its entry; a file not listed has a baseline of 0. Paths and counts only - never a line - so this file cannot carry the word it guards. Reader: name_ratchet.load_baseline.",
+  "_taken": "2026-09-19 at HEAD c431e57f: name 20 lines in 11 files, home_path 5 lines in 1 file. Exempt files are never opened and never listed here - see name_ratchet's docstring.",
+  "_tighten": "When a cure drops a count, the run reports LOOSE with the number to write. Write it; delete an entry that reaches 0.",
+  "files": {
+    ".claude/hooks/hook_test.py": {"name": 1},
+    "src/aipass/api/tests/conformance/settings/agent/agent-patch-file-mode-differs-by-runtime.json": {"name": 1},
+    "src/aipass/drone/tests/test_external_roots.py": {"name": 1},
+    "src/aipass/drone/tests/test_rm.py": {"name": 1},
+    "src/aipass/hooks/tests/test_cc_transcripts.py": {"name": 2},
+    "src/aipass/hooks/tests/test_edit_gate_trinity.py": {"name": 4},
+    "src/aipass/hooks/tests/test_registry_gate.py": {"name": 2},
+    "src/aipass/hooks/tests/test_rm_gate.py": {"name": 3},
+    "src/aipass/hooks/tests/test_testwrite_gate.py": {"name": 1},
+    "src/aipass/skills/lib/telegram/TELEGRAM_PORT_MAP.md": {"name": 3, "home_path": 5},
+    "src/aipass/skills/lib/telegram/tests/test_control_verbs.py": {"name": 1}
+  }
+}

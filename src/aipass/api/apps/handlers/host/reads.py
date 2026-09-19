@@ -31,7 +31,7 @@ branch is. Same D0 line as everywhere else in this package.
 
 THE FENCE GAINED ROOTS — FPLAN-0443, 2026-08-18
 ------------------------------------------------------------------------
-Patrick: "rn I can only see into agent files... I cant explore home. or project
+The owner: "rn I can only see into agent files... I cant explore home. or project
 files outside agents." The fence answered exactly one kind of word, so
 agent-land was the whole of where a phone could stand. It answers four now
 (ROOT_KINDS), and the widening is the ROSTER, not the rule: the client still
@@ -43,7 +43,7 @@ Where each floor comes from stays a lookup, never a composition: the registry
 for a branch, @baud's census for a project, Path.home() for home, this server's
 own registry parent for aipass.
 
-THE EXPOSURE IS ON THE RECORD (FPLAN-0443 Notes, Patrick's ruling): fully open,
+THE EXPOSURE IS ON THE RECORD (FPLAN-0443 Notes, the owner's ruling): fully open,
 no deny-list and no extra scope gate, so a read-scope token reads ~/.ssh and
 friends over the tailnet. The cheap reversal is a name deny-list here plus
 require_scope("operate") on the home arm; nothing in this shape forecloses it.
@@ -92,7 +92,7 @@ NOISE_DIRS = frozenset({".git", "node_modules", "target", "__pycache__", ".venv"
 # it in the same two words.
 #
 # Two grains, both honest. The card asks about one branch; the app asks about
-# the repository the branch lives in (Patrick's ruling, DPLAN-0303 08-17). A
+# the repository the branch lives in (the owner's ruling, DPLAN-0303 08-17). A
 # lane that served one while a caller believed the other would be wrong in the
 # most expensive way — silently.
 GRAIN_BRANCH = "branch"
@@ -102,7 +102,7 @@ GRAINS = (GRAIN_BRANCH, GRAIN_REPO)
 # ROOT KINDS — the whole vocabulary of the fence (FPLAN-0443).
 #
 # For as long as it existed the fence answered exactly ONE kind of word, a
-# citizen name, which is why browsing stopped at agent-land. Patrick named the
+# citizen name, which is why browsing stopped at agent-land. The owner named the
 # cost on 2026-08-18: "rn I can only see into agent files... I cant explore
 # home. or project files outside agents."
 #
@@ -161,7 +161,7 @@ def repo_root() -> Path:
 
 def home_root() -> Path:
     """
-    The operator's home directory — the root Patrick named first.
+    The operator's home directory — the root the owner named first.
 
     A location primitive like repo_root(), and deliberately as plain: whether
     the directory exists is resolve_root's question, not this one's.
@@ -182,7 +182,7 @@ def seated_project() -> str:
     The project name this server is seated in.
 
     THE SEAT IS NO LONGER A FENCE ON THIS LANE — it is a default and a fast
-    path. Patrick's ruling, 2026-08-16: "I should be able to open another
+    path. The owner's ruling, 2026-08-16: "I should be able to open another
     project via the project tab drop down, and view other agent project files,
     open any passport and view watch read files. no restriction." Browsing is
     free; the terminal binds to the seat; attach is the only takeover. So reads

@@ -2,10 +2,10 @@
 
 # =================== META ====================
 # Name: test_standards_audit.py
-# Description: Unit tests for the standards_audit module
-# Version: 1.0.0
+# Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-15
 # =============================================
 
 import time
@@ -567,7 +567,7 @@ def test_the_space_typo_refuses_and_never_runs_the_standards_audit(monkeypatch):
 
 
 def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
-    """Patrick's ruling: it should have failed AND given the solution."""
+    """The owner's ruling: it should have failed AND given the solution."""
     _wire_branches(monkeypatch, "BACKUP")
 
     _refuse(["-tests", "@backup"])
@@ -698,7 +698,7 @@ def _forwarded(monkeypatch, argv):
 
 
 def test_audit_tests_reaches_the_lane_with_the_target(monkeypatch):
-    """Patrick's ask: `audit tests @backup`, a plain word where a hyphen was.
+    """The owner's ask: `audit tests @backup`, a plain word where a hyphen was.
 
     The hyphen was the whole defect -- `audit -tests @backup` was one keystroke
     from correct and ran the wrong lane. A word cannot be mistyped as a flag.
@@ -934,3 +934,252 @@ def test_the_lane_word_leaves_every_printing_invocation_alone(monkeypatch, argv)
     assert handle_command("audit", argv) is True
     assert calls == []
     assert not _refused_argv()
+
+
+# ---------------------------------------------------------------------------
+# THE CONTEXT PACK -- `audit context` is the startup-budget fleet table
+# ---------------------------------------------------------------------------
+#
+# The verb strips the `_standards` suffix, so `handlers/context_standards/`
+# IS `drone @seedgo audit context`. That is the whole reason the pack carries
+# that directory name (DPLAN-0347, seedgo's row 1): one rule that measures six
+# files per branch must not drag the 47 rules of aipass_standards over every
+# branch's source to answer.
+
+#: This branch's real `handlers/` directory, reached through the real discovery
+#: handler bound above -- the autouse fixture replaces the module in sys.modules
+#: for every test in this file, so asking for the path through the mock would
+#: hand back a MagicMock.
+_HANDLERS_DIR = Path(real_discovery.__file__).resolve().parent.parent
+
+
+def test_the_context_pack_is_discovered_as_the_context_verb():
+    """`handlers/context_standards/` must reach the audit as the word `context`.
+
+    Pins the DIRECTORY NAME against the verb, and the manifest's `kind` against
+    the lane. A pack that declared `kind: execution` would vanish from the
+    scoring audit entirely and `drone @seedgo audit context` would refuse as an
+    unknown pack -- the same silent disappearance discover_packs() publishes
+    non_scoring_packs() to prevent.
+    """
+    packs = real_discovery.discover_packs(_HANDLERS_DIR)
+
+    assert "context" in packs, f"the context pack must be offered for scoring; found {sorted(packs)}"
+    assert packs["context"].name == "context_standards"
+    assert real_discovery.pack_kind(packs["context"]) == real_discovery.SCORING_PACK_KIND
+    assert "context" not in real_discovery.non_scoring_packs(_HANDLERS_DIR)
+
+
+def test_the_context_pack_holds_only_the_startup_budget_checker():
+    """One rule, its own pack -- the point of giving it a pack at all.
+
+    `audit context` exists so the startup budget can be asked without running
+    the other 47 rules. A second checker landing here without that being the
+    intent would make the cheap question expensive again.
+    """
+    pack = real_discovery.discover_packs(_HANDLERS_DIR)["context"]
+
+    assert [f.name for f in sorted(pack.glob("*_check.py"))] == ["startup_budget_check.py"]
+
+
+def _wire_context_pack(monkeypatch):
+    """Make `context` resolve to this branch's real pack directory."""
+    import sys
+
+    packs = {"aipass": Path("handlers/aipass_standards"), "context": _HANDLERS_DIR / "context_standards"}
+    monkeypatch.setattr(
+        sys.modules["aipass.seedgo.apps.handlers.audit.discovery"], "discover_packs", MagicMock(return_value=packs)
+    )
+    return packs
+
+
+def test_audit_context_with_no_branch_audits_every_branch(monkeypatch):
+    """`drone @seedgo audit context` is the FLEET table -- no branch argument.
+
+    A pack name with nothing after it must not be read as a missing branch: the
+    fleet run is the command the owner asks for, and the table is one row per
+    citizen.
+    """
+    audit_mock = _wire_branches(monkeypatch, "FLOW", "PRAX")
+    _wire_context_pack(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["context", "--no-artifact"]) is True
+    assert audit_mock.call_count == 2, "every discovered branch gets a row"
+    assert {call.kwargs["pack_path"].name for call in audit_mock.call_args_list} == {"context_standards"}
+
+
+def test_audit_context_standards_reaches_the_same_pack(monkeypatch):
+    """The directory's own name is an unambiguous spelling for its pack."""
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    _wire_context_pack(monkeypatch)
+    from aipass.seedgo.apps.modules.standards_audit import handle_command
+
+    assert handle_command("audit", ["context_standards", "@flow", "--no-artifact"]) is True
+    assert audit_mock.call_args.kwargs["pack_path"].name == "context_standards"
+
+
+def test_audit_context_refuses_an_unknown_branch_by_name(monkeypatch):
+    """A branch that does not exist REFUSES, names itself, and audits nothing.
+
+    Same contract as `audit aipass @nope`, asserted for the new verb because a
+    pack reached through a different code path is a pack whose refusal nobody
+    has watched: printing the ❌ line and exiting 0 is the exact defect the
+    2026-09-07 fleet sweep found here.
+    """
+    from aipass.seedgo.apps.handlers.audit_tests import refusal
+
+    audit_mock = _wire_branches(monkeypatch, "FLOW")
+    _wire_context_pack(monkeypatch)
+
+    refused = _refuse(["context", "@not_a_branch_xyz", "--no-artifact"])
+
+    assert refused.code == refusal.EXIT_UNKNOWN_ARGUMENT
+    assert "NOT_A_BRANCH_XYZ" in str(refused.token)
+    assert "not_a_branch_xyz" in _refusal_text().lower(), "the refusal must name the branch it could not find"
+    assert audit_mock.call_count == 0, "nothing may be audited once the target is unknown"
+
+
+# ===========================================================================
+# The CI gate script -- .github/scripts/seedgo_audit.py (DPLAN-0347 phase 5)
+# ===========================================================================
+#
+# The script has no importable surface: it is top-level code that audits the
+# whole fleet the moment it is imported. So it is pinned the way CI meets it --
+# RUN, in a subprocess, against a throwaway tree. That is also the only way to
+# prove the ratchet reached the exit code, rather than proving that a line of
+# source exists.
+#
+# The tree is a fixture, never the live fleet: growing a real README to watch a
+# gate go red leaves the repo one forgotten restore away from a phantom failure.
+
+CI_GATE = Path(__file__).resolve().parents[4] / ".github" / "scripts" / "seedgo_audit.py"
+
+
+def _fixture_fleet(root, **branches):
+    """A tree shaped like the repo: src/aipass/<branch>/apps plus gated files.
+
+    src/aipass is created even with no branches, because that is the shape the
+    script walks: a checkout without it is a broken checkout, not an empty fleet.
+    """
+    (root / "src" / "aipass").mkdir(parents=True, exist_ok=True)
+    for name, files in branches.items():
+        (root / "src" / "aipass" / name / "apps").mkdir(parents=True, exist_ok=True)
+        for rel, text in files.items():
+            path = root / "src" / "aipass" / name / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+    return root
+
+
+def _run_ci_gate(cwd):
+    """Run the CI gate script exactly as the workflow step does."""
+    import subprocess
+    import sys
+
+    return subprocess.run([sys.executable, str(CI_GATE)], cwd=str(cwd), capture_output=True, text=True, timeout=300)
+
+
+def test_the_ci_gate_goes_red_when_a_gated_readme_grows_past_its_cap(tmp_path):
+    """The whole point: CI fails, and the line says which file, how big, and whose cap.
+
+    Run end to end through the real script, so what is pinned is the exit code
+    a workflow step reads -- not a helper somebody could stop calling.
+    """
+    from aipass.seedgo.apps.handlers.context_standards import startup_budget_check
+
+    cap, reason = startup_budget_check.readme_cap()
+    assert cap is not None, f"the shipped pack.json must publish a README cap: {reason}"
+    fleet = _fixture_fleet(tmp_path, overgrown={"README.md": "x" * (cap + 1)})
+
+    done = _run_ci_gate(fleet)
+
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "STARTUP RATCHET FAILED" in done.stdout
+    assert "src/aipass/overgrown/README.md" in done.stdout, "the file, spelled repo-relative"
+    assert f"{cap + 1:,} chars" in done.stdout, "the measurement"
+    assert f"cap {cap:,} chars" in done.stdout, "the cap"
+    assert "@seedgo" in done.stdout, "the owner"
+
+
+def test_the_ratchet_runs_before_the_audit_and_short_circuits_it(tmp_path):
+    """A red ratchet stops the job before pyright walks eighteen branches.
+
+    An over-cap README is self-diagnosing; spending the audit's minutes on a run
+    that is already red buys nothing. The pin is that no audit output reached
+    the log at all -- neither a branch row nor the pack-count tripwire.
+    """
+    fleet = _fixture_fleet(tmp_path, overgrown={"README.md": "x" * 100000})
+
+    done = _run_ci_gate(fleet)
+
+    assert done.returncode == 1
+    assert "TRIPWIRE" not in done.stdout, "the audit never ran"
+    assert "branches pass" not in done.stdout
+
+
+def test_the_ci_gate_reaches_the_audit_when_the_ratchet_is_green(tmp_path):
+    """Under cap, the job carries on to the standards audit, exactly as before.
+
+    An empty fleet is the cleanest way to say it: nothing to gate, nothing to
+    audit, and the script's own closing line proves control flowed past the
+    ratchet rather than exiting at it.
+    """
+    done = _run_ci_gate(_fixture_fleet(tmp_path))
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "STARTUP RATCHET FAILED" not in done.stdout
+    assert "All 0 branches pass" in done.stdout, "the audit's own verdict line"
+
+
+def test_the_name_ratchet_is_advisory_so_its_red_never_fails_the_job(tmp_path):
+    """DPLAN-0350 lands advisory: a red name ratchet prints and the job carries on.
+
+    The fixture tree is not a git checkout, so the name ratchet cannot list
+    what is tracked and is red -- the honest verdict. The pin is that the red
+    reached the log AND the audit's own verdict line still followed it with a
+    zero exit. When @devpulse flips NAME_RATCHET_GATES, this is the test that
+    moves with it.
+    """
+    done = _run_ci_gate(_fixture_fleet(tmp_path))
+
+    assert "NAME RATCHET" in done.stdout and "advisory" in done.stdout, done.stdout
+    assert "git ls-files" in done.stdout, "the red says why"
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "All 0 branches pass" in done.stdout, "the audit ran after the advisory red"
+
+
+def test_the_ci_gate_keeps_its_tripwire_and_its_hundred_percent_threshold():
+    """The ratchet was added BESIDE the existing gates, never instead of them.
+
+    EXPECTED_STANDARDS catches a standard leaving the audit silently, and
+    THRESHOLD holds every branch at 100. What is pinned is that both are still
+    DECLARED and still COMPARED -- not the pack count itself, which moves by
+    hand every time a standard is added or retired and would make this a false
+    red in somebody else's lane.
+    """
+    import re
+
+    source = CI_GATE.read_text(encoding="utf-8")
+
+    assert re.search(r"^EXPECTED_STANDARDS = \d+", source, re.M), "the pack-count tripwire must still be declared"
+    assert re.search(r"^THRESHOLD = 100\b", source, re.M), "every branch is still held at 100"
+    assert "len(consulted) != EXPECTED_STANDARDS" in source, "the tripwire must still be compared"
+    assert "avg < THRESHOLD" in source, "the per-branch threshold must still be compared"
+
+
+def test_the_ci_gate_holds_no_cap_of_its_own(tmp_path):
+    """No number lives in .github/. The gate reads the owner's config at run time.
+
+    A constant here would be a third copy of a cap -- unreachable from the
+    owner, unmoved by a diet, and green long after the ruling changed.
+    """
+    import ast
+
+    literals = {
+        node.value
+        for node in ast.walk(ast.parse(CI_GATE.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool)
+    }
+
+    assert literals.isdisjoint({10000, 9000, 6000, 15000, 25000}), f"a cap was copied into the CI script: {literals}"

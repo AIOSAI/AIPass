@@ -173,8 +173,8 @@ resolve_user_name < <(printf 'Tommy\n')
 assert "custom name overrides the GIT_NAME default" "Tommy" "$USER_NAME"
 
 GIT_NAME=""
-resolve_user_name < <(printf 'Patrick\n')
-assert "no GIT_NAME default: entered name is stored" "Patrick" "$USER_NAME"
+resolve_user_name < <(printf 'Someone\n')
+assert "no GIT_NAME default: entered name is stored" "Someone" "$USER_NAME"
 
 GIT_NAME=""
 resolve_user_name < <(printf 'skip\n')

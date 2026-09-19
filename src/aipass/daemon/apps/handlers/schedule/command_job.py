@@ -10,7 +10,7 @@
 
 A job carries ``command`` where a wake job carries ``prompt``. The tick runs it as a
 subprocess in the owner's branch directory and records the answer exactly like a
-wake: no seat, no session, no tokens. Patrick, 2026-09-11: "if it runs there's a
+wake: no seat, no session, no tokens. The owner, 2026-09-11: "if it runs there's a
 log, if it passed or failed there's a log."
 
 THE RULES, and why each one exists:

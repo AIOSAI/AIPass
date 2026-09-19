@@ -690,7 +690,10 @@ def test_continuous_arm_under_run_in_background_is_refused(tmp_path, capsys, mon
         assert exc_info.value.code == 1
         out = capsys.readouterr().out
         assert "run_in_background" in out
-        assert "Monitor" in out
+        # The refusal must name a remedy that still exists: Claude Code 2.1.271
+        # removed Monitor's `persistent`, so it points at the one-shot (DPLAN-0348).
+        assert "baseline --once" in out
+        assert "persistent" not in out
         assert peer.poll() is None, "a refused arm must not have taken over the existing wire"
     finally:
         peer.kill()
@@ -1164,7 +1167,7 @@ def test_a_live_monitor_inside_its_timeout_is_silent(tmp_path, capsys, monkeypat
 
 
 def test_the_register_is_read_every_five_minutes_not_every_tick(tmp_path, monkeypatch):
-    """Patrick, 2026-09-07 15:00: five minutes, not sixty seconds, and the
+    """The owner, 2026-09-07 15:00: five minutes, not sixty seconds, and the
     code checks — the redesign exists to cut cpu. One read at sign-in, none
     per tick at the default cadence; every tick only when a test asks for it."""
     assert wire.DEAD_CHECK_SECONDS == 300.0

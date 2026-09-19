@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.1.0
+# Version: 2.2.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-15
+# Modified: 2026-09-18
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -156,3 +156,80 @@ def isolated_cadence_state(tmp_path_factory, monkeypatch):
     cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
     monkeypatch.setattr(cadence, "_GUARD_DIR", tmp_path_factory.mktemp("cadence_state"))
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "pytest-session")
+
+
+@pytest.fixture(autouse=True)
+def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
+    """Keep the fleet-shared .diagnostics_state.json out of every test.
+
+    The file sits at src/aipass/ and every live session's auto_fix writes it. A test
+    whose Edit targets a .py file reached edit_gate's diagnostics block with whatever
+    error another branch had open at that moment. Measured 2026-09-18: @memory's
+    open import error turned two tests red in one run and green in the next. The
+    tests that exercise the state patch STATE_FILE on top of this.
+    """
+    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
+    monkeypatch.setattr(ds, "STATE_FILE", tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json")
+
+
+@pytest.fixture
+def registered_projects(tmp_path: Path) -> dict:
+    """AIPass, a project nested inside it, and a sibling Vera Studio, each with a REAL registry.
+
+    The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc): who may write whose
+    files is read from the registries — branch rows, their paths, the ``owner``
+    flag that marks a project's manager. The older fixtures write ``{}``, which
+    has no rows to read, so they only ever exercised the path-shape fallback.
+
+        Projects/
+          AIPass/        AIPASS_REGISTRY.json   (list shape; devpulse owner, one absolute path)
+            src/aipass/{devpulse,hooks,memory,seedgo,spawn,flow}
+            src/aipass/flow/flow_json/PLAN_REGISTRY.json   an artifact, not a project
+            projects/baud/  BAUD_REGISTRY.json   (nested project, baud owner)
+          Vera-Studio/   VERA-STUDIO_REGISTRY.json   (dict shape; VERA owner)
+            src/vera_studio/{vera,writer,seedgo}   seedgo here is only a name
+    """
+    projects = tmp_path / "Projects"
+    aipass = projects / "AIPass"
+    for name in ("devpulse", "hooks", "memory", "seedgo", "spawn", "flow"):
+        (aipass / "src" / "aipass" / name).mkdir(parents=True)
+    rows = [{"name": name, "path": f"src/aipass/{name}"} for name in ("HOOKS", "seedgo", "spawn", "flow")]
+    rows.append({"name": "memory", "path": str(aipass / "src" / "aipass" / "memory")})
+    rows.append({"name": "devpulse", "path": "src/aipass/devpulse", "owner": True, "admin": True})
+    (aipass / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": rows}), encoding="utf-8")
+    flow_json = aipass / "src" / "aipass" / "flow" / "flow_json"
+    flow_json.mkdir()
+    (flow_json / "PLAN_REGISTRY.json").write_text(json.dumps({"plans": {}, "next_number": 1}), encoding="utf-8")
+
+    baud = aipass / "projects" / "baud"
+    (baud / "src" / "baud" / "baud").mkdir(parents=True)
+    baud_rows = [{"name": "baud", "path": "src/baud/baud", "owner": True}]
+    (baud / "BAUD_REGISTRY.json").write_text(json.dumps({"metadata": {}, "branches": baud_rows}), encoding="utf-8")
+
+    vera = projects / "Vera-Studio"
+    vera_rows = {}
+    for name in ("vera", "writer", "seedgo"):
+        (vera / "src" / "vera_studio" / name).mkdir(parents=True)
+        vera_rows[name.upper()] = {"name": name.upper(), "path": f"src/vera_studio/{name}"}
+    vera_rows["VERA"]["owner"] = True
+    (vera / "VERA-STUDIO_REGISTRY.json").write_text(
+        json.dumps({"metadata": {}, "branches": vera_rows}), encoding="utf-8"
+    )
+
+    seat = aipass / "src" / "aipass"
+    vera_seat = vera / "src" / "vera_studio"
+    return {
+        "aipass": aipass,
+        "vera": vera,
+        "baud": baud,
+        "devpulse": str(seat / "devpulse"),
+        "hooks": str(seat / "hooks"),
+        "memory": str(seat / "memory"),
+        "seedgo": str(seat / "seedgo"),
+        "spawn": str(seat / "spawn"),
+        "flow": str(seat / "flow"),
+        "vera_seat": str(vera_seat / "vera"),
+        "writer": str(vera_seat / "writer"),
+        "vera_seedgo": str(vera_seat / "seedgo"),
+        "baud_seat": str(baud / "src" / "baud" / "baud"),
+    }

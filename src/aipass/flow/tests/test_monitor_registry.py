@@ -453,7 +453,7 @@ class TestFireEvent:
 # ═══════════════════════════════════════════════════════════
 # Cross-type numbers are NOT duplicates
 #
-# Ruling 2026-08-22 (Patrick): "numbers are separated by plan names. the plan
+# Ruling 2026-08-22 (the owner): "numbers are separated by plan names. the plan
 # name is the separation. aplan0002 fplan0001 dplan0001 pplan0001." The on-disk
 # index used to key on the bare number, so APLAN-0007 and FPLAN-0007 read as one
 # plan filed twice — and the scan RENAMES the loser on the filesystem, dropping

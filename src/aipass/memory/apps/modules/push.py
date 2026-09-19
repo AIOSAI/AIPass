@@ -15,7 +15,7 @@ report, and enforces the two gates.
 
 The gates
 ---------
-**A fleet write needs ``--confirm``.**  Patrick's ruling is that the fleet run
+**A fleet write needs ``--confirm``.**  The owner's ruling is that the fleet run
 is gated on a dry-run he has read.  Encoding that as a flag rather than as an
 operator's memory is the difference between a rule and a hope — and this
 branch has already demonstrated the alternative, when a command run to check
@@ -23,7 +23,7 @@ branch has already demonstrated the alternative, when a command run to check
 prompt and exit 0.
 
 **``--dry-run`` writes nothing anywhere** — not the memory files, not the
-vector store, not the receipts.  Its report is the artifact Patrick reads, so
+vector store, not the receipts.  Its report is the artifact the owner reads, so
 it is written to a file as well as to the terminal and the path is printed.
 
 Todos never go to vectors (DPLAN-0345).  A non-canonical todo, and past the

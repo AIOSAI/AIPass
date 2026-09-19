@@ -1,7 +1,7 @@
 # Parked tests
 
-Not an archive. `.archive/` is Patrick's disposal zone — always ignored,
-cleaned without warning (his ruling, 2026-08-18) — so nothing that must
+Not an archive. `.archive/` is the owner's disposal zone — always ignored,
+cleaned without warning (the owner's ruling, 2026-08-18) — so nothing that must
 survive a clone may live there. This directory is TRACKED and ordinary.
 
 Files here carry the house `(disabled)` suffix INSTEAD OF a `test_` prefix.
@@ -23,7 +23,7 @@ Files here are readable, revivable, and cannot be mistaken for a suite that runs
 `tmux capture-pane`, render the text on the phone, send keys back through a
 14-name allowlist.
 
-Patrick superseded that design as the TERMINAL lane four minutes after it was
+The owner superseded that design as the TERMINAL lane four minutes after it was
 briefed (Round 18b/18c). The sentence is worth keeping because it is the whole
 difference:
 
@@ -54,7 +54,7 @@ Tracked deliberately, and that is the whole reason this moved. It lived in
 `tests/.archive/` behind a selective `.gitignore` whitelist so a fresh clone
 could revive it rather than find a README claiming files that are not there
 (same species as c48b3c65, where the bare rule recorded @memory's park as a
-pure deletion). Patrick's ruling of 2026-08-18 removed every `.archive/`
+pure deletion). The owner's ruling of 2026-08-18 removed every `.archive/`
 exception fleet-wide, which left this park ignored and untracked — a README
 promising 63 tests nobody would receive. Rehomed here, tracked, same content,
 renamed only to stay out of collection.

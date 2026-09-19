@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-05
-# Modified: 2026-08-31
+# Modified: 2026-09-15
 # =============================================
 
 """
@@ -123,7 +123,10 @@ def print_help() -> None:
     table.add_row("activate @target", "Register all commands from a branch")
     table.add_row("list", "List registered custom commands")
     table.add_row("remove <name>", "Remove a custom command")
-    table.add_row("rm <path> [<path>...]", "Contained safe-delete (project + tmp)")
+    table.add_row(
+        "rm [--stale AGE] <path>...",
+        "Contained safe-delete; --stale sweeps old *_json temps (drone rm --help)",
+    )
     table.add_row(
         "@target ... --drone-timeout <n>",
         "Override subprocess timeout, default 600s (must come AFTER @target)",

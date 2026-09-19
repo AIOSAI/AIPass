@@ -3,14 +3,50 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+_PROC = "aipass.flow.apps.handlers.mbank.process"
+
+# Captured before any test patches os.open: the stand-in below delegates here.
+_REAL_OS_OPEN = os.open
+
+
+def _deny_exclusive_creates(lock_path: Path, denials: int | None):
+    """An os.open stand-in that answers the way Windows does mid-release.
+
+    Windows answers an exclusive create against a lock another writer is still
+    removing (delete-pending) with PermissionError, not FileExistsError; Linux
+    cannot show that, so it is manufactured. The first ``denials`` exclusive
+    creates of ``lock_path`` are denied (None = never clears); everything else
+    reaches the real os.open.
+
+    Returns:
+        (side_effect, attempts, raised): attempts counts every exclusive create
+        of lock_path; raised holds each PermissionError handed out.
+    """
+    attempts: list[int] = []
+    raised: list[PermissionError] = []
+
+    def fake_open(path, flags, *args, **kwargs):
+        if flags & os.O_EXCL and str(path) == str(lock_path):
+            attempts.append(len(attempts) + 1)
+            if denials is None or len(attempts) <= denials:
+                denial = PermissionError(13, "Access is denied")
+                raised.append(denial)
+                raise denial
+        return _REAL_OS_OPEN(path, flags, *args, **kwargs)
+
+    return fake_open, attempts, raised
 
 
 # ===================================================================
@@ -327,6 +363,69 @@ class TestSaveFlowRegistryAdditional:
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
         assert saved["plans"]["1"]["subject"] == "keep me"
         assert saved["next_number"] == 10
+
+    def test_delete_pending_denial_is_retried_and_processed_flag_lands(self, tmp_path):
+        """A Windows delete-pending denial on the registry lock is a held lock:
+        retried on the same budget, and the "processed" update reaches disk.
+
+        It used to give up on the first denial, so the plan was archived but
+        the registry never learned it was processed.
+        """
+        from aipass.flow.apps.handlers.mbank.process import save_flow_registry
+
+        reg_file = tmp_path / "fplan_registry.json"
+        lock = reg_file.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
+        data = {"next_number": 2, "plans": {"1": {"status": "closed", "processed": True}}}
+
+        with (
+            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
+            patch(f"{_PROC}.os.open", side_effect=fake_open),
+            patch(f"{_PROC}.time.sleep"),
+        ):
+            save_flow_registry(data, registry_file=reg_file.name)
+
+        assert len(attempts) == 2
+        saved = json.loads(reg_file.read_text(encoding="utf-8"))
+        assert saved["plans"]["1"]["processed"] is True
+        assert not lock.exists()
+
+    def test_denial_that_never_clears_fails_at_the_budget_with_the_denial(self, tmp_path):
+        """A denial past the budget raises out of save_flow_registry with the
+        denial in the message after exactly the budget; the helper's own raise
+        is a PermissionError chained to the last denial.
+        """
+        import aipass.flow.apps.handlers.mbank.process as proc
+
+        reg_file = tmp_path / "fplan_registry.json"
+        before = {"next_number": 2, "plans": {"1": {"status": "closed"}}}
+        reg_file.write_text(json.dumps(before), encoding="utf-8")
+        lock = reg_file.with_suffix(".lock")
+        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+
+        with (
+            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
+            patch(f"{_PROC}.os.open", side_effect=fake_open),
+            patch(f"{_PROC}.time.sleep"),
+            pytest.raises(Exception) as excinfo,
+        ):
+            proc.save_flow_registry({"next_number": 2, "plans": {}}, registry_file=reg_file.name)
+
+        assert len(attempts) == proc._LOCK_RETRIES
+        assert str(lock) in str(excinfo.value)
+        assert f"{proc._LOCK_RETRIES} attempts" in str(excinfo.value)
+        assert json.loads(reg_file.read_text(encoding="utf-8")) == before
+
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
+        with (
+            patch(f"{_PROC}.os.open", side_effect=fake_open),
+            patch(f"{_PROC}.time.sleep"),
+            pytest.raises(PermissionError) as helper_exc,
+        ):
+            proc._acquire_lock(lock)
+
+        assert helper_exc.value.__cause__ is raised[-1]
+        assert len(attempts) == proc._LOCK_RETRIES
 
 
 # ===================================================================

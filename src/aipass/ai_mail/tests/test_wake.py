@@ -12,11 +12,13 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
     _read_json,
     _check_lock,
@@ -295,10 +297,16 @@ def test_get_pid_cwd_linux_oserror(monkeypatch):
     assert _get_pid_cwd("100") is None
 
 
-def test_get_pid_cwd_darwin(monkeypatch, tmp_path):
-    """macOS: reads cwd via lsof."""
+def test_get_pid_cwd_darwin(monkeypatch):
+    """macOS: reads cwd via lsof.
+
+    The target is a synthetic POSIX literal, never a path from tmp_path: fake
+    lsof output is DATA the parser reads, not a directory the host has to own.
+    On a Windows runner tmp_path is a drive-letter path, the 'n/' prefix the
+    parser requires never appears, and the test reads None (CI 35058244702).
+    """
     monkeypatch.setattr("sys.platform", "darwin")
-    target = "/tmp/pytest-project"
+    target = "/private/var/folders/aipass/pytest-project"
 
     class FakeResult:
         returncode = 0
@@ -306,6 +314,23 @@ def test_get_pid_cwd_darwin(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
     assert _get_pid_cwd("100") == target
+
+
+def test_get_pid_cwd_darwin_ignores_a_name_line_that_is_not_an_absolute_path(monkeypatch):
+    """The leading slash is load-bearing: 'n' alone is not a cwd.
+
+    lsof -Fn prefixes every name line with 'n'; the parser takes only the ones
+    that are absolute POSIX paths. Without the slash a non-path name line would
+    be returned as a cwd. This is the mechanism behind CI 35058244702.
+    """
+    monkeypatch.setattr("sys.platform", "darwin")
+
+    class FakeResult:
+        returncode = 0
+        stdout = "p100\nnD:\\build\\project\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
+    assert _get_pid_cwd("100") is None
 
 
 def test_get_pid_cwd_darwin_failure(monkeypatch):
@@ -623,7 +648,7 @@ def test_known_model_aliases_has_expected_entries():
 
 
 def test_default_model_is_opus():
-    """Default model should be opus (Patrick ruling 2026-08-01)."""
+    """Default model should be opus (the owner ruling 2026-08-01)."""
     assert DEFAULT_MODEL == "opus"
 
 
@@ -995,6 +1020,11 @@ def _patch_wake_deps(monkeypatch, **overrides):
         "_is_branch_occupied": lambda p: False,
         "_acquire_lock": lambda p, pid: (True, "ok"),
         "_check_pid_alive": lambda pid: True,
+        # Stubbed by default: a unit test of the wake must not read the fleet's
+        # real .central.json files or write a dashboard into tmp_path. The pins
+        # that are ABOUT the refresh put the real hook back (see
+        # TestRecipientDashboardRefresh._real_refresh).
+        "_refresh_recipient_dashboard": lambda path, email, status: None,
     }
     defaults.update(overrides)
     for attr, val in defaults.items():
@@ -1997,7 +2027,7 @@ class TestIsManager:
         assert "wake skipped, mail delivered" not in src
 
 
-# --- wake-lane rulings, Patrick 2026-09-08 ------------------------------
+# --- wake-lane rulings, the owner 2026-09-08 ------------------------------
 #
 # THESE PINS WERE WRITTEN TO THE 2026-08-30 RULING AND ARE REWRITTEN IN PLACE.
 # That rule was "managers are fable thats it, only manager run fable", and this
@@ -2014,7 +2044,7 @@ def granted(monkeypatch, tmp_path):
     """Point the grant at a written config, and hand back a writer for it.
 
     The real CONFIG_FILE is untracked and may hold anything on the machine
-    running this suite, so a test that read it would be measuring Patrick's
+    running this suite, so a test that read it would be measuring the owner's
     laptop. Every test here writes the grant it means to test.
     """
 
@@ -2072,7 +2102,7 @@ class TestWakeModelPolicy:
 
     def test_nothing_requested_is_the_default_even_for_a_granted_seat(self, granted):
         """The grant is permission to ASK for Fable, not a standing assignment
-        to it. Patrick: everyone runs opus by default when dispatched."""
+        to it. The owner: everyone runs opus by default when dispatched."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@devpulse", None).model == DEFAULT_MODEL
@@ -2114,7 +2144,7 @@ class TestWakeModelPolicy:
 
 
 class TestTheGrantIsReadFromTheUntrackedConfig:
-    """fable_allowed() — Patrick edits the grant, the repo does not ship it.
+    """fable_allowed() — The owner edits the grant, the repo does not ship it.
 
     The direction of every fallback here is the point: a grant that collapsed to
     EMPTY on a bad file would demote @devpulse silently, and the only symptom
@@ -2153,7 +2183,7 @@ class TestTheGrantIsReadFromTheUntrackedConfig:
         assert wake_mod.fable_allowed() == wake_mod.FABLE_GRANT_DEFAULT
 
     def test_a_written_grant_replaces_the_default_entirely(self, monkeypatch, tmp_path):
-        """Patrick moving the seat means the default no longer applies — this is
+        """The owner moving the seat means the default no longer applies — this is
         a replacement, not an addition, or a revoked seat could never be revoked."""
         config = tmp_path / "safety_config.json"
         config.write_text(json.dumps({"fable_allowed": ["@someone_else"]}), encoding="utf-8")
@@ -2194,7 +2224,7 @@ def _tmux_line(calls, verb):
 
 
 class TestUnattendedWakesBypassPermissions:
-    """Ruling 1, Patrick 2026-08-30: "always bypass permissions always, claude
+    """Ruling 1, the owner 2026-08-30: "always bypass permissions always, claude
     alone will nvr work."
 
     @vera's first external wake launched as a bare `claude`, sat in default
@@ -2247,7 +2277,7 @@ class TestUnattendedWakesBypassPermissions:
 
 
 class TestDaemonSessionMarking:
-    """Ruling 3, Patrick 2026-08-30: a daemon-started session must be
+    """Ruling 3, the owner 2026-08-30: a daemon-started session must be
     recognizably daemon work, or a human kills it as a leftover.
 
     He killed @vera's live session mid-run — `daemon-vera-192848` read as his
@@ -2268,7 +2298,7 @@ class TestDaemonSessionMarking:
         assert session.startswith(wake_mod.DAEMON_SESSION_PREFIX)
 
     def test_the_session_name_that_got_killed_cannot_come_back(self, tmp_path, monkeypatch):
-        """`daemon-vera-192848` is not a hypothesis — Patrick read that exact
+        """`daemon-vera-192848` is not a hypothesis — The owner read that exact
         shape as his own leftover tmux and killed it mid-playbook.
 
         The pin above reads DAEMON_SESSION_PREFIX, so it passes for ANY value
@@ -2570,3 +2600,173 @@ class TestDispatchStatusLabelsAreACrossBranchContract:
         assert ok is False
         assert self._kind(status, "resolve") == "fail"
         assert status.find_step("blocked") is None, "a missing branch is not a transient block"
+
+
+class TestRecipientDashboardRefresh:
+    """The recipient's dashboard is refreshed BEFORE their session spawns.
+
+    FPLAN-0599 (FPLAN-0593 Phase 3). An agent's first turn reads
+    DASHBOARD.local.json as its single status glance; until now nothing
+    refreshed it on the way in, so a woken agent read whatever its last session
+    left behind — "0 unread" while three dispatches waited. The refresh is one
+    branch (measured 0.85-0.98 s), never the fleet, and it is FAIL-OPEN: a
+    dashboard is a convenience, a wake is the work, so every failure mode below
+    still spawns.
+    """
+
+    @staticmethod
+    def _prax(monkeypatch, fake=None, fleet_guard=True):
+        """Patch the prax entry point where the wake imports it from — the
+        MODULE door (apps/modules/dashboard.py), which is prax's published
+        surface and the only one another branch may read."""
+        import aipass.prax.apps.modules.dashboard as prax_refresh
+
+        if fake is not None:
+            monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)
+        if fleet_guard:
+
+            def _refused_fleet():
+                raise AssertionError("the wake must never refresh all 18 branches")
+
+            monkeypatch.setattr(prax_refresh, "refresh_all_dashboards", _refused_fleet)
+        return prax_refresh
+
+    @staticmethod
+    def _real_refresh(monkeypatch, **overrides):
+        """_patch_wake_deps, but with the REAL refresh hook left in place."""
+        _patch_wake_deps(
+            monkeypatch,
+            _refresh_recipient_dashboard=wake_mod._refresh_recipient_dashboard,
+            **overrides,
+        )
+
+    def test_the_recipient_dashboard_is_refreshed_before_the_spawn(self, tmp_path, monkeypatch):
+        """Order is the whole claim: refresh, THEN the process that reads it."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        order = []
+
+        def _fake_refresh(path):
+            order.append(("refresh", path))
+            return {"status": "success", "branch": path.name.upper()}
+
+        self._prax(monkeypatch, _fake_refresh)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: order.append(("spawn", None)) or _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True
+        assert [step for step, _ in order] == ["refresh", "spawn"]
+        assert order[0][1] == branch_path, "the RECIPIENT's branch, not the caller's"
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        assert dashboard_step[0] == "ok"
+
+    def test_the_refresh_is_one_branch_never_the_fleet(self, tmp_path, monkeypatch):
+        """--all is 18 branches and 18x the cost; the recipient is one."""
+        branch_path = _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        refreshed = []
+
+        self._prax(monkeypatch, lambda path: refreshed.append(path) or {"status": "success", "branch": "X"})
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True
+        assert refreshed == [branch_path]
+
+    def test_a_raising_refresh_does_not_cost_the_wake(self, tmp_path, monkeypatch):
+        """Fail-open, named: the warning carries the branch and the reason."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        spawned = []
+
+        def _boom(path):
+            raise RuntimeError("AIPASS_REGISTRY.json is unreadable")
+
+        self._prax(monkeypatch, _boom)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True, "a wake must never die on a dashboard"
+        assert spawned == [1]
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        kind, _, detail = dashboard_step
+        assert kind == "warn"
+        assert "@testbranch" in detail and "unreadable" in detail
+
+    def test_a_refresh_over_the_bound_does_not_cost_the_wake(self, tmp_path, monkeypatch):
+        """A refresh that hangs is overtaken, not waited on."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        # Patched where it is READ: the bound lives beside the function now.
+        monkeypatch.setattr(wake_dashboard_mod, "DASHBOARD_REFRESH_TIMEOUT", 0.05)
+        spawned = []
+        release = threading.Event()
+
+        def _hang(path):
+            release.wait(30)
+            return {"status": "success", "branch": "X"}
+
+        self._prax(monkeypatch, _hang)
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: spawned.append(1) or _FakeProc())
+
+        try:
+            status, ok = wake_branch("@testbranch", auto=True)
+        finally:
+            release.set()
+
+        assert ok is True
+        assert spawned == [1]
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        kind, _, detail = dashboard_step
+        assert kind == "warn"
+        assert "@testbranch" in detail
+
+    def test_an_error_status_from_prax_is_a_warning_not_an_ok(self, tmp_path, monkeypatch):
+        """prax swallows its own exception and RETURNS the failure — read it."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+
+        self._prax(monkeypatch, lambda path: {"status": "error", "branch": "TESTBRANCH", "error": "no centrals"})
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: _FakeProc())
+
+        status, ok = wake_branch("@testbranch", auto=True)
+
+        assert ok is True
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        kind, _, detail = dashboard_step
+        assert kind == "warn"
+        assert "no centrals" in detail
+
+    def test_the_interactive_manager_lane_refreshes_too(self, tmp_path, monkeypatch):
+        """Placed above the tmux branch, so all three spawn lanes inherit it."""
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        self._real_refresh(monkeypatch)
+        order = []
+
+        def _fake_run(cmd, **kwargs):
+            order.append(("tmux", list(cmd)[:2]))
+
+            class _Done:
+                returncode = 0
+                stderr = ""
+
+            return _Done()
+
+        self._prax(monkeypatch, lambda path: order.append(("refresh", path)) or {"status": "success", "branch": "X"})
+        monkeypatch.setattr(wake_mod.shutil, "which", lambda name: "/usr/bin/tmux")
+        monkeypatch.setattr(wake_mod.subprocess, "run", _fake_run)
+
+        status, ok = wake_branch("@testbranch", custom_message="go", sender="@daemon")
+
+        assert ok is True
+        assert order[0][0] == "refresh"
+        dashboard_step = status.find_step("dashboard")
+        assert dashboard_step is not None, "the dashboard gate must record its own verdict"
+        assert dashboard_step[0] == "ok"

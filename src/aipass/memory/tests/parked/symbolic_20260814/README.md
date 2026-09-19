@@ -1,11 +1,11 @@
 # PARKED: symbolic fragments tier — 2026-08-14
 
-**This is a park, not a demolition.** Patrick's ruling: *"comment out and disable the
+**This is a park, not a demolition.** The owner's ruling: *"comment out and disable the
 fragments code, we may use it later, and comment where compass is and that it is active."*
 Nothing here was deleted; every file is byte-identical to what ran in the tree.
 
 **Moved here 2026-08-18, same bytes.** This park used to live in
-`.archive/parked_symbolic_20260814/`. Patrick's archive ruling that night made `.archive/`
+`.archive/parked_symbolic_20260814/`. The owner's archive ruling that night made `.archive/`
 always-ignored and named it his disposal zone, cleaned without warning — so a park kept
 there ships with nothing and survives nothing. A park that a fresh clone does not carry is
 not revivable; it is a promise this machine happens to be keeping. Every `.py` here wears a
@@ -59,7 +59,7 @@ its only two importers were `symbolic/storage.py` and `symbolic/retriever.py`. M
 believing it — the live lane runs `vector/embed_subprocess.py` *by path* (from `query_executor`,
 `plans_processor` and `orchestrator`), and that script is self-contained, importing nothing from
 the package. @devpulse's ruling, 2026-08-14: park it with the tier rather than keep a generic
-utility for a consumer that does not exist. Patrick can overrule at revival. Its 15 tests in
+utility for a consumer that does not exist. The owner can overrule at revival. Its 15 tests in
 `tests/test_vector.py` are skip-annotated, not deleted.
 
 Left in place in the live tree on purpose:

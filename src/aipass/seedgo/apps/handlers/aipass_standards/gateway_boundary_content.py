@@ -28,7 +28,7 @@ def get_gateway_boundary_standards() -> str:
         "  theirs, through that branch's door. What it may NOT do is reach into",
         "  another branch's storage and write it by hand.",
         "",
-        '  [dim]Patrick, 2026-08-17: "@api should be only doing api calls.',
+        '  [dim]The owner, 2026-08-17: "@api should be only doing api calls.',
         '  api is api thats it."[/dim]',
         "",
         "[bold cyan]WHY IT MATTERS:[/bold cyan]",

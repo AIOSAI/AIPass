@@ -99,7 +99,7 @@
 | TG-CORE-072 | FUNC | base_bot.py:1773-1782 | _save_offset persist after update | copy-as-is | skill .local state dir | offset updated after poll |
 | TG-CORE-073 | CLASS | branch_plugin.py:65-128 | BranchPlugin per-branch overrides | copy-as-is | skill src/branch_plugin.py | importable, inherits BaseBot |
 | TG-CORE-074 | FUNC | branch_plugin.py:73-82 | __init__ stores branch_name+super | copy-as-is | skill | works |
-| TG-CORE-075 | FUNC | branch_plugin.py:88-98 | on_message prefix "Patrick via Telegram: " | copy-as-is | skill | injected prompt has prefix |
+| TG-CORE-075 | FUNC | branch_plugin.py:88-98 | on_message prefix "{sender} via Telegram: " | copy-as-is | skill | injected prompt has prefix |
 | TG-CORE-076 | FUNC | branch_plugin.py:100-110 | on_response prefix "@{branch}\n" | copy-as-is | skill | reply starts with @branch |
 | TG-CORE-077 | FUNC | branch_plugin.py:112-128 | on_session_create inject "hi" after 2s | keep(tmux/systemd) | skill | live: "hi" injected 2s after session |
 | TG-CORE-078 | SEAM | base_bot.py:1300-1305 | work_dir.is_dir() guard before tmux | copy-as-is | skill | bad work_dir returns False |

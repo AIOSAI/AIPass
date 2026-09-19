@@ -955,7 +955,7 @@ class TestEmptyScanIsNotAnAllClear:
 
     MEASURED 2026-08-30 against a real sibling repository:
 
-        drone @spawn migrate-passports --dry-run --root /home/patrick/Projects/wren
+        drone @spawn migrate-passports --dry-run --root /home/someone/Projects/wren
         Scanned: 0  (core 0 / resident 0)
         Nothing to migrate — every scanned passport is already 2.0.
 

@@ -24,7 +24,7 @@ NOTHING HERE ROUTES A REAL COMMAND. Every test drives a stubbed
 drone.route_command against the documents at the top of this file — real
 captured stdout where a read could be run safely, and transcriptions of
 @memory's own _emit call sites where producing one for real would mean WRITING
-to Patrick's live limits. A suite that resets 17 branches to defaults to see
+to the owner's live limits. A suite that resets 17 branches to defaults to see
 what the answer looks like is not a suite.
 """
 
@@ -63,7 +63,7 @@ PATCH_MEMORY_JSON = "aipass.api.apps.handlers.host.memory_config.json_handler.lo
 # The three write payloads and the populated OVERRIDES block are transcribed
 # from @memory's own _emit call sites in rollover.py, for the reason that has
 # governed this file since it shipped: producing them for real means WRITING
-# Patrick's live limits, and a suite that resets 17 branches to see what the
+# the owner's live limits, and a suite that resets 17 branches to see what the
 # answer looks like is not a suite.
 FLEET_JSON = (
     '{"ok": true, "verb": "config get", "defaults": {"sessions": {"count": 15, "auto_compact_cap": 3}, '

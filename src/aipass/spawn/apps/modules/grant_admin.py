@@ -9,7 +9,7 @@
 """Admin grant ceremony for the devpulse seat (DPLAN-0288).
 
 Thin CLI module that parses arguments and delegates to
-``registry.ensure_admin``. Patrick runs this once, at the terminal.
+``registry.ensure_admin``. The owner runs this once, at the terminal.
 
 The flag this writes GRANTS NOTHING on its own — the admin dispatch lane
 verifies five legs (verified caller, cert path, cert content, HMAC

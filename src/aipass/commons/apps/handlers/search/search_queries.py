@@ -19,6 +19,34 @@ from typing import List, Dict, Any, Optional
 from aipass.commons.apps.handlers.json import json_handler
 
 
+def _quote_fts5_query(query: str) -> str:
+    """
+    Turn a raw user query into a literal-text FTS5 MATCH expression.
+
+    FTS5 parses the string handed to MATCH as its own query language, not as
+    plain text: a hyphen reads as a column-NOT operator, `"` starts a quoted
+    phrase, `*`/`^`/`(`/`)` are prefix/NEAR/grouping operators, etc. Since
+    docs/search.md promises citizens only `search "query"` -> full-text
+    search, with no operator syntax, any of those characters in an ordinary
+    search term (a plan ID like "FPLAN-0593", a hyphenated name, a quoted
+    phrase) previously caused a raw fts5 syntax error instead of a match.
+
+    This wraps each whitespace-separated token in double quotes, doubling any
+    embedded double-quote first (the FTS5 escaping rule for a literal quote
+    inside a quoted string), so every token is read as a literal phrase.
+    Multiple tokens stay an implicit AND of quoted phrases, preserving the
+    existing multi-word search behaviour.
+
+    Args:
+        query: Raw user-entered search text.
+
+    Returns:
+        An FTS5 MATCH expression that matches the query as literal text.
+    """
+    tokens = query.split()
+    return " ".join('"' + token.replace('"', '""') + '"' for token in tokens)
+
+
 def search_posts(
     conn: sqlite3.Connection,
     query: str,
@@ -31,7 +59,8 @@ def search_posts(
 
     Args:
         conn: Database connection.
-        query: Search query string (FTS5 syntax).
+        query: Search query string (literal text; internally quoted into
+            FTS5 phrase tokens, so no FTS5 operator syntax is honored).
         room: Optional room name filter.
         author: Optional author name filter.
         limit: Maximum results to return.
@@ -46,7 +75,7 @@ def search_posts(
         JOIN posts p ON fts.rowid = p.id
         WHERE posts_fts MATCH ?
     """
-    params: List[Any] = [query]
+    params: List[Any] = [_quote_fts5_query(query)]
 
     if room:
         sql += " AND p.room_name = ?"
@@ -73,7 +102,8 @@ def search_comments(
 
     Args:
         conn: Database connection.
-        query: Search query string (FTS5 syntax).
+        query: Search query string (literal text; internally quoted into
+            FTS5 phrase tokens, so no FTS5 operator syntax is honored).
         author: Optional author name filter.
         limit: Maximum results to return.
 
@@ -89,7 +119,7 @@ def search_comments(
         JOIN posts p ON c.post_id = p.id
         WHERE comments_fts MATCH ?
     """
-    params: List[Any] = [query]
+    params: List[Any] = [_quote_fts5_query(query)]
 
     if author:
         sql += " AND c.author = ?"
@@ -114,7 +144,8 @@ def search_all(
 
     Args:
         conn: Database connection.
-        query: Search query string (FTS5 syntax).
+        query: Search query string (literal text; internally quoted into
+            FTS5 phrase tokens, so no FTS5 operator syntax is honored).
         room: Optional room name filter (posts only).
         author: Optional author name filter.
         limit: Maximum results per category.

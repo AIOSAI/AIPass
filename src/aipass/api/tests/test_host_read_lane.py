@@ -1059,7 +1059,7 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         """
         refusal = (
             "No .trinity/passport.json found in directory hierarchy "
-            "(caller cwd: /home/patrick/Projects/AIPass/projects/baud/src/baud) — cannot verify caller"
+            "(caller cwd: /home/someone/Projects/AIPass/projects/baud/src/baud) — cannot verify caller"
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1, stderr=refusal)):
@@ -1497,7 +1497,7 @@ class TestReadsFollowTheFleetLane:
     """
     Browsing is free. The seat is a default, never a fence, on the read lane.
 
-    Patrick ruled it on 2026-08-16, his words: "I should be able to open another
+    The owner ruled it on 2026-08-16, his words: "I should be able to open another
     project via the project tab drop down, and view other agent project files,
     open any passport and view watch read files. no restriction."
 
@@ -2461,7 +2461,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
 
 class TestPerFileDiff:
     """
-    Patrick's words: "git diffs are pretty much useless. we need a real diff
+    The owner's words: "git diffs are pretty much useless. we need a real diff
     setup." The fix is tap-a-file, so the lane needs a path.
 
     MEASURED BLOCKER: drone's _handle_diff recognises exactly --staged and

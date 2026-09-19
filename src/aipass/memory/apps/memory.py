@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory.py
 # Description: Entry point CLI for drone @memory
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-16
 # =============================================
 
 """
@@ -126,7 +126,7 @@ def print_help():
     table.add_row("config set @branch <type> <n> [--json]", "Set one branch's rollover limit")
     table.add_row("config set-default <type> <n> [--json]", "Set a global default rollover limit")
     table.add_row("search <query>", "Semantic search across all branch memories")
-    # PARKED 2026-08-14 (Patrick's ruling) — row kept so the command still explains
+    # PARKED 2026-08-14 (the owner's ruling) — row kept so the command still explains
     # itself instead of reading as an unknown command. Active curated-truth piece:
     # Compass, @devpulse-owned — drone @devpulse compass.
     table.add_row("symbolic", "⚠ PARKED 2026-08-14 — curated truth lives in Compass (drone @devpulse compass)")
@@ -136,6 +136,18 @@ def print_help():
     table.add_row("pool status", "Show pool file count, config, vector stats")
     table.add_row("verify <plan_label>", "Check if a plan is vectorized in ChromaDB")
     table.add_row("lint [@branch]", "Audit .trinity entries for over-limit violations (read-only)")
+    table.add_row("lint fields [@branch]", "Every string field by chars, flagging what is outside the shape")
+    # Four modules answered `drone @memory <verb>` and were named nowhere in this
+    # table, so the README's hand-typed command list was the only place they
+    # appeared — and the README is the layer that goes away (DPLAN-0347). A verb
+    # that exists and is not in --help is a verb nobody finds.
+    table.add_row("health [@branch]", "Read-only branch health: rollover state + cap violations")
+    table.add_row("roots", "Declared repo roots on this machine: list, init, add, remove, heal")
+    table.add_row("fleet", "The fleet definition — who counts as a citizen, answered once")
+    table.add_row("limits", "The entry shape, the char caps and the file budgets — one door")
+    table.add_row("rollover_config", "Describes the config verb — its implementation after the split")
+    table.add_row("rollover_json", "Describes the shared --json emitter the config verbs answer through")
+    table.add_row("governance", "Pure surfacing governance — state-in/state-out decisions")
     # `\\[` because Rich reads `[@name]` as a markup tag and prints nothing.
     table.add_row("todo \\[@branch]", "One line: the todo pad against its count, and the backlog count")
     table.add_row("todo backlog \\[@branch]", "List a branch's todo backlog (.backup/todo/<branch>/backlog.json)")
@@ -187,7 +199,7 @@ def print_help():
 
     console.print(
         "Commands: search, push, rollover \\[run|status|check|report-lines|push],"
-        " config \\[get|set|set-default], lint,"
+        " config \\[get|set|set-default], lint \\[fields], health, roots, fleet, governance,"
         " pool \\[process|status], templates, todo \\[backlog|restore], verify, watch"
     )
     console.print("[dim]--json: machine output on config get|set|set-default and rollover push[/dim]")
@@ -280,7 +292,7 @@ def main() -> int:
     passed it to ``sys.exit``, so the process exited 0 on all three shapes of
     an unknown argument — an unknown verb, an unknown flag, and a known verb
     given a bogus sub-argument. The refusal was printed correctly and then
-    contradicted by the exit code, which is the half a script reads (Patrick's
+    contradicted by the exit code, which is the half a script reads (the owner's
     standing ruling; @devpulse's fleet sweep 2026-09-07 named this branch as
     the only one failing all three probes).
 

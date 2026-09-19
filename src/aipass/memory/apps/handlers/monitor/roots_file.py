@@ -8,7 +8,7 @@
 
 """The WRITE half of the fleet anchor. ``registry_scope`` reads; this writes.
 
-FPLAN-0460 phase 4. @devpulse created ``AIPASS_ROOTS.json`` by hand and Patrick
+FPLAN-0460 phase 4. @devpulse created ``AIPASS_ROOTS.json`` by hand and the owner
 ruled on seeing it: "jsons are normally created by code, so if they corrupt or
 get deleted they are always rebuilt from default settings from a template
 directory."
@@ -145,7 +145,7 @@ def _spell(repo_root: Path | None, resolved: Path) -> str:
     ``Path("../wren")`` and ``Path("C:/proj/wren")`` resolve correctly on
     Windows, while ``..\\wren`` is a filename on POSIX, not a path. One
     spelling means a row can be compared, copied and diffed without knowing who
-    wrote it — and the anchor is a declaration Patrick blesses, so it has to
+    wrote it — and the anchor is a declaration the owner blesses, so it has to
     read the same to a human on either machine.
 
     Bending the test instead would have left the writer emitting whichever

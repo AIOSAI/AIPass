@@ -1,12 +1,12 @@
 # =============================================================================
 # RETIRED 2026-08-28 — DISABLED, NOT DELETED
 #
-# Patrick ruled that AIPass moved off Telegram entirely; BAUD is the phone face
+# The owner ruled that AIPass moved off Telegram entirely; BAUD is the phone face
 # now. This branch's Telegram awareness stopped being true, so it was stripped
 # rather than left standing as a claim about a capability that no longer exists.
 #
 # The .py extension is removed so nothing can import it. The file stays HERE, in
-# its tracked home, rather than in .archive/ — .gitignore:125 records Patrick's
+# its tracked home, rather than in .archive/ — .gitignore:125 records the owner's
 # 2026-08-18 ruling that .archive is the disposal zone, cleaned without warning,
 # and the dispatch that retired this said "never delete". Those two facts only
 # reconcile as an in-place disabled rename.

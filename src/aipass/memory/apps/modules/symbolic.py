@@ -7,7 +7,7 @@
 # =============================================
 
 """
-Symbolic Memory Module — PARKED 2026-08-14 (Patrick's ruling).
+Symbolic Memory Module — PARKED 2026-08-14 (the owner's ruling).
 
 WHY THIS IS PARKED
     The Agent Memory Atlas published a code-grounded review of AIPass memory at
@@ -17,7 +17,7 @@ WHY THIS IS PARKED
     a ``Delete`` verdict, and removes content with no record of what went or why —
     an unauditable deletion inside a memory system. The tier was never wired into a
     live lane: no hook entry, and no caller in rollover, the extractor, auto_process,
-    search or verify. Patrick's ruling, 2026-08-14: park it — we may use it later —
+    search or verify. The owner's ruling, 2026-08-14: park it — we may use it later —
     and say where the active piece is.
 
 WHERE THE ACTIVE PIECE IS
@@ -61,7 +61,7 @@ _PARKED_SUBCOMMANDS = {
 }
 
 _PARKED_REASON = (
-    f"PARKED {PARKED_DATE} by Patrick's ruling — unused tier, and the Agent Memory Atlas "
+    f"PARKED {PARKED_DATE} by the owner's ruling — unused tier, and the Agent Memory Atlas "
     "review flagged its AUDN deduplicator for acting on an LLM Delete verdict with no "
     "record of what was removed. Parked, not removed."
 )

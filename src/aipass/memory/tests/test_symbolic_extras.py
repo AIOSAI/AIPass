@@ -35,7 +35,7 @@ Covers imports required by the seedgo test scanner:
 """
 
 # ---------------------------------------------------------------------------
-# PARKED 2026-08-14 — Patrick's ruling. The symbolic fragments tier is disabled
+# PARKED 2026-08-14 — the owner's ruling. The symbolic fragments tier is disabled
 # (unused; the Agent Memory Atlas review flagged the AUDN deduplicator for acting
 # on an LLM Delete verdict with no record of what was removed). These tests are
 # KEPT, not deleted: they document the feature for revival.
@@ -45,7 +45,7 @@ Covers imports required by the seedgo test scanner:
 import pytest as _parked
 
 _parked.skip(
-    "symbolic fragments tier PARKED 2026-08-14 (Patrick's ruling) — "
+    "symbolic fragments tier PARKED 2026-08-14 (the owner's ruling) — "
     "active piece is Compass; revive via tests/parked/symbolic_20260814/README.md",
     allow_module_level=True,
 )

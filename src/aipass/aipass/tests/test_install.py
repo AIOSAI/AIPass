@@ -526,9 +526,9 @@ class TestRegistryUserName:
     def test_reads_user_from_registry(self, tmp_path: Path) -> None:
         """metadata.user comes back as-is."""
         (tmp_path / "AIPASS_REGISTRY.json").write_text(
-            '{"metadata": {"user": "patrick"}, "branches": []}', encoding="utf-8"
+            '{"metadata": {"user": "someone"}, "branches": []}', encoding="utf-8"
         )
-        assert _registry_user_name(tmp_path) == "patrick"
+        assert _registry_user_name(tmp_path) == "someone"
 
     def test_missing_registry_returns_empty(self, tmp_path: Path) -> None:
         """No registry file — empty string, not an exception."""

@@ -15,7 +15,7 @@ The group list is a COMPOSITION, never a constant (design section 4.2):
 
 Revision 1 of the design made `group_list` equality with a single core
 constant. That shape could not grow: adding an ecosystem meant editing the
-core, which is the exact future rebuild Patrick's ruling 3 forbade. The
+core, which is the exact future rebuild the owner's ruling 3 forbade. The
 invariant that actually matters is not equality — it is that NOTHING
 VANISHES, which `laws.py` enforces against the previous artifact.
 

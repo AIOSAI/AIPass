@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor Phase 1
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-15
 # =============================================
 
 """Tests for aipass doctor command — Phase 1 (FPLAN-0188)."""
@@ -498,6 +498,24 @@ class TestDoctorHandleCommand:
 
 
 class TestRunDoctor:
+    @pytest.fixture(autouse=True)
+    def sandbox_group_stays_offline(self):
+        """No test in this class runs a real binary through doctor's Sandbox group.
+
+        run_doctor() runs all seven groups; these tests patch five of them, so Sandbox
+        used to reach the machine — `npm root -g` and the node resolver, which write
+        ~/.npm/_logs/<ts>-debug-0.log on the real HOME (reported by @devpulse, mail
+        df3763d4). Every probe in that group goes through sandbox_checker's own
+        shutil.which / subprocess.run, so stubbing both there answers what doctor reads
+        (nothing found) and a subprocess call is now a test failure, not a stray log.
+        """
+        module = "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker"
+        with (
+            patch(f"{module}.shutil.which", return_value=None),
+            patch(f"{module}.subprocess.run", side_effect=AssertionError("doctor ran a real binary in a unit test")),
+        ):
+            yield
+
     def _mock_all_checks(self, mock_system, mock_identity, mock_services, mock_community):
         """Set all group mocks to return empty lists (no errors)."""
         mock_system.return_value = []
@@ -812,6 +830,117 @@ class TestProviderManifest:
         result = _find_manifest()
         assert result is not None
         assert result == manifest
+
+
+# =============================================================================
+# SETTINGS SCALAR SLOT — doctor's diff row per manifest key (DPLAN-0347)
+# =============================================================================
+
+
+class TestProviderSettingsScalars:
+    """doctor reads the PERSONAL settings file and names each manifest settings key.
+
+    Every test runs against a scratch HOME (tmp_path): the real ~/.claude/settings.json
+    of this machine is never read or written by the suite.
+    """
+
+    @staticmethod
+    def _scratch(tmp_path, wanted: dict, provider: dict | None):
+        """A scratch HOME: manifest with the settings slot, optional provider settings file."""
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"cli": {"claude": {"hooks": [], "settings": wanted}}}),
+            encoding="utf-8",
+        )
+        if provider is not None:
+            (tmp_path / ".claude" / "settings.json").write_text(json.dumps(provider), encoding="utf-8")
+        return manifest
+
+    @staticmethod
+    def _run(manifest, tmp_path, **kwargs):
+        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
+
+        with (
+            patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
+            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+        ):
+            return _check_provider_manifest(**kwargs)
+
+    def test_missing_key_is_named_with_the_cure_command(self, tmp_path) -> None:
+        """The regression DPLAN-0347 exists for: doctor must NAME the absent key, not stay silent."""
+        manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"env": {}})
+
+        results = self._run(manifest, tmp_path)
+
+        row = [r for r in results if r.label == "includeGitInstructions"][0]
+        assert row.glyph == GLYPH_WARN
+        assert row.detail == "manifest wants false, provider has MISSING"
+        assert row.remediation == "Run: aipass doctor --fix"
+
+    def test_key_set_to_the_wanted_value_passes(self, tmp_path) -> None:
+        """Once the wire verb has set it, doctor reads it back as wanted."""
+        manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"includeGitInstructions": False})
+
+        results = self._run(manifest, tmp_path)
+
+        row = [r for r in results if r.label == "includeGitInstructions"][0]
+        assert row.glyph == GLYPH_PASS
+        assert row.remediation == ""
+
+    def test_different_value_is_reported_never_wired_over(self, tmp_path) -> None:
+        """A value the user set themselves wins: reported, and it must not trigger auto-wire."""
+        manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"includeGitInstructions": True})
+
+        with patch("aipass.aipass.apps.modules.doctor._auto_wire_provider") as wire:
+            results = self._run(manifest, tmp_path, fix=True)
+
+        row = [r for r in results if r.label == "includeGitInstructions"][0]
+        assert row.glyph == GLYPH_WARN
+        assert row.detail == "manifest wants false, provider has true"
+        assert "Your value stands" in row.remediation
+        assert "aipass doctor --fix" in row.remediation
+        wire.assert_not_called()
+
+    def test_missing_key_alone_still_triggers_the_fix_wire(self, tmp_path) -> None:
+        """A settable gap is the one thing that still makes --fix run the wire verb."""
+        manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"env": {}})
+
+        with patch("aipass.aipass.apps.modules.doctor._auto_wire_provider", return_value=[]) as wire:
+            self._run(manifest, tmp_path, fix=True)
+
+        wire.assert_called_once()
+
+    def test_settings_row_from_an_earlier_pass_is_replaced_not_duplicated(self) -> None:
+        """--fix/interactive re-runs the manifest check; the first pass's key row must not survive."""
+        from aipass.aipass.apps.modules._doctor_wire import merge_manifest_rows
+        from aipass.aipass.apps.modules.doctor import CheckResult
+
+        first = [
+            CheckResult("drone", GLYPH_PASS, "18 citizens", ""),
+            CheckResult("hooks", GLYPH_WARN, "1 hook(s) missing", ""),
+            CheckResult("includeGitInstructions", GLYPH_WARN, "manifest wants false, provider has MISSING", ""),
+        ]
+        fresh = [
+            CheckResult("hooks", GLYPH_PASS, "28 provider hooks wired", ""),
+            CheckResult("includeGitInstructions", GLYPH_PASS, "false as wanted", ""),
+        ]
+
+        merged = merge_manifest_rows(first, fresh)
+
+        assert [r.label for r in merged] == ["drone", "hooks", "includeGitInstructions"]
+        assert [r.glyph for r in merged if r.label == "includeGitInstructions"] == [GLYPH_PASS]
+
+    def test_manifest_without_the_slot_adds_no_rows(self, tmp_path) -> None:
+        """No settings slot → no settings rows. Older manifests keep working unchanged."""
+        manifest = tmp_path / ".claude" / "provider_manifest.json"
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(json.dumps({"cli": {"claude": {"hooks": []}}}), encoding="utf-8")
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"env": {}}), encoding="utf-8")
+
+        results = self._run(manifest, tmp_path)
+
+        assert [r.label for r in results] == ["hooks"]
 
 
 # =============================================================================
