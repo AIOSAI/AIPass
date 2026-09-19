@@ -3,13 +3,13 @@
 # Description: Host API Upload Handler — bytes from the phone onto disk, named by this server
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-19
 # =============================================
 
 """
 Host API Upload Handler
 
-The photo lane (DPLAN-0300 Round 20). Patrick wants to send a screenshot from
+The photo lane (DPLAN-0300 Round 20). The owner wants to send a screenshot from
 his phone to an agent, and the mechanism for that already exists on the desktop.
 
     images by path, so THE PATH IS THE DELIVERY.
@@ -248,9 +248,11 @@ def _write_stream(destination: Path, head: bytes, source: object) -> int:
     # directory, so this is belt-and-braces rather than a threat model — but
     # the cheap habit is the one that holds when the object is not.
     handle = None
+    created = False
     written = 0
     try:
         handle = os.open(str(destination), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
         with os.fdopen(handle, "wb") as sink:
             handle = None
             chunk = head
@@ -271,7 +273,11 @@ def _write_stream(destination: Path, head: bytes, source: object) -> int:
     except OSError as e:
         if handle is not None:
             os.close(handle)
-        _discard(destination)
+        # Only a file this write created is its mess. A create refused by
+        # O_EXCL means the name was already taken — discarding it then would
+        # delete an EARLIER upload, the silent loss O_EXCL exists to prevent.
+        if created:
+            _discard(destination)
         logger.error("[host_api] could not write the upload to %s: %s", destination, e)
         raise UploadUnavailable(f"Could not write the upload: {e}") from e
 
