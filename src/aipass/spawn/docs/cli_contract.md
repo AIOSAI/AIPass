@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # The CLI contract — exit codes, introspection, the import door
 
 **Branch** spawn · **Code** `apps/spawn.py`, `apps/modules/__init__.py`,
-`apps/handlers/class_registry.py`
-**Moved out of README.md** (DPLAN-0347, the layer contract).
+`apps/handlers/class_registry.py`, `apps/handlers/docs_page.py`
 
 ---
 
@@ -65,4 +66,31 @@ pins what a newborn's own handler guard must survive on its first import.
 
 ---
 
-**Last Updated:** 2026-09-15
+## The docs page skeleton — one source, read live
+
+Every branch's `docs/*.md` pages share one shape, scored by @seedgo's `docs_page` standard.
+The skeleton that shows the shape is `templates/docs_page.md`, and seedgo renders it through
+the same gateway on every call — neither side keeps a copy.
+
+```python
+from aipass.spawn.apps.modules import docs_page_template
+
+docs_page_template()   # -> the skeleton text, read from disk on this call
+                       # -> OSError when it cannot be read; there is no fallback shape
+```
+
+The skeleton sits beside `templates/citizen/`, never inside it. Everything in the citizen
+tree is stamped into every newborn, so a skeleton there would arrive as a placeholder page in
+every branch; beside it, no walk reaches it — not the copy, not the manifest a mint is
+verified against, not the update engine. The handler reads and returns and performs no
+operation of its own, so it logs nothing; the render is seedgo's operation.
+
+What a newborn does carry is the index: `templates/citizen/docs/README.md` is a back-link,
+a title and one line, and it names the standard rather than the size cap, which seedgo owns.
+`tests/test_modules_gateway.py` pins the door, `tests/test_template_hygiene.py` pins the
+skeleton's shape and that no mint carries it, and `tests/test_birth_receipt.py` pins that the
+index copies no cap.
+
+---
+
+**Last Updated:** 2026-09-19

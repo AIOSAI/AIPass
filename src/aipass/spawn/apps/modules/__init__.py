@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: __init__.py
 # Description: Modules gateway — the public door other branches import through
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-19
 # =============================================
 
 """Spawn's modules package — the gateway other branches import through.
@@ -26,6 +26,14 @@ a ``try/except ValueError``. ``refuse_legacy_class`` is the separate lane for
 callers that must distinguish "this passport has not been migrated yet" from a
 hard error — it returns "" for everything that is not a retired name.
 
+The same door serves @seedgo's docs_page standard (DPLAN-0351), which renders
+the docs page skeleton from spawn's template tree on every call:
+
+    from aipass.spawn.apps.modules import docs_page_template
+
+It raises OSError when the skeleton cannot be read; the caller says so rather
+than rendering a copy.
+
 These are RE-EXPORTS, never reimplementations. A gateway that drifts from its
 handler is the same failure the mirror was, one layer closer in — pinned by
 identity assertions in tests/test_modules_gateway.py.
@@ -35,5 +43,6 @@ from aipass.spawn.apps.handlers.class_registry import (
     get_template_dir as get_template_dir,
     refuse_legacy_class as refuse_legacy_class,
 )
+from aipass.spawn.apps.handlers.docs_page import docs_page_template as docs_page_template
 
-__all__ = ["get_template_dir", "refuse_legacy_class"]
+__all__ = ["docs_page_template", "get_template_dir", "refuse_legacy_class"]

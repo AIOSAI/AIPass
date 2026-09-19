@@ -6,7 +6,7 @@
 the one template, updates branches from it, retires them into the archive, and keeps the
 registry agreeing with the filesystem.
 **Module:** `aipass.spawn`
-**Version:** 2.0.0
+**Version:** 2.1.0
 **Created:** 2026-03-05
 
 ---
@@ -83,14 +83,15 @@ surface — `core` (mint and adopt), `update`, `delete`, `sync_registry`,
 `regenerate_registry`, `migrate_passports`, `export_seeds`, `repair` and `grant_admin` —
 each parsing arguments and delegating. `apps/handlers/` holds the implementation, grouped by
 concern: the template lanes (`file_ops`, `placeholders`, `meta_ops`, `mint_verify`,
-`class_registry`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
+`class_registry`, `docs_page`), the identity lanes (`registry`, `passport_migration`, `seed_ops`,
 `receipt_ops`, `adoption_ops`), the engines (`update_ops`, `update_ignore`, `delete_ops`,
 `sync_registry_ops`, `regenerate_registry_ops`, `repair_ops`), and the primitives
 (`json_ops`, `atomic_write`, `metadata`, and the fleet json shim under `json/`).
 
 `templates/citizen/` is the one template both classes mint from, and its
 `.spawn/.template_registry.json` manifest is what a mint is verified against — change a
-template file and regenerate that manifest in the same pass.
+template file and regenerate that manifest in the same pass. `templates/docs_page.md`, the
+docs page skeleton, sits beside it so that no mint ever stamps it.
 
 The full directory tree lives in this branch's own prompt
 (`.aipass/aipass_local_prompt.md`) — one place, so it cannot disagree with itself.
@@ -107,9 +108,8 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/update_engine.md](docs/update_engine.md) | The template walk, `.updateignore`, markdown drift, the list policy, the passport heal, create-only paths |
 | [docs/registry_and_repair.md](docs/registry_and_repair.md) | Registry entry shapes, sync and fix modes, passport migration, seeds, template registry regeneration, repair, the admin ceremony |
 | [docs/retire.md](docs/retire.md) | Archive then deregister, what travels with a citizen, the three protection layers |
-| [docs/cli_contract.md](docs/cli_contract.md) | Exit codes and the refusal seam, introspection, the class-registry import door |
+| [docs/cli_contract.md](docs/cli_contract.md) | Exit codes and the refusal seam, introspection, the class-registry import door, the docs page skeleton door |
 | [docs/tests_and_quality.md](docs/tests_and_quality.md) | What each test file pins, and the command that produces every number |
-| [docs/known_issues.md](docs/known_issues.md) | Open defects, deliberate limits, and what is measured once rather than continuously |
 
 ---
 
@@ -129,11 +129,13 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 
 - Every branch — creation, template updates, retirement, and citizenship itself
 - Every branch — the class-registry gateway for resolving a `citizen_class`
+- **@seedgo** — the docs page skeleton its `docs_page` standard renders, read live through
+  the same gateway
 - Registry CRUD on `AIPASS_REGISTRY.json` and any project's own `*_REGISTRY.json`
 
 ---
 
-**Last Updated:** 2026-09-15
+**Last Updated:** 2026-09-19
 
 ---
 [← Back to AIPass](../../../README.md)

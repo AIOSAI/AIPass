@@ -1,3 +1,5 @@
+[<- Back to the README](../README.md)
+
 # The registry, sync, repair and the admin ceremony
 
 **Branch** spawn · **Code** `apps/handlers/registry.py`, `apps/handlers/sync_registry_ops.py`,
@@ -5,7 +7,6 @@
 `apps/handlers/seed_ops.py`, `apps/handlers/regenerate_registry_ops.py`,
 `apps/modules/` (`sync_registry.py`, `repair.py`, `migrate_passports.py`,
 `export_seeds.py`, `regenerate_registry.py`, `grant_admin.py`)
-**Moved out of README.md** (DPLAN-0347, the layer contract).
 
 Flags and usage are in `drone @spawn --help` and each verb's own `--help`. Everything below
 is the behaviour behind them.

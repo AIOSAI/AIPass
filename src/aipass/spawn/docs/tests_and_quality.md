@@ -1,7 +1,8 @@
+[<- Back to the README](../README.md)
+
 # Tests and quality — what is pinned, and how to measure it
 
 **Branch** spawn · **Code** `tests/`, `.seedgo/bypass.json`
-**Moved out of README.md** (DPLAN-0347, the layer contract).
 
 Nothing here states a current score. The numbers move with the code, so this page names the
 command that produces each one instead of a snapshot that starts rotting the day it is

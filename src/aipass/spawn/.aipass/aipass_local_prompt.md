@@ -48,6 +48,7 @@ apps/
 ├── handlers/
 │   ├── class_registry.py        # class → template dir, retired names refuse
 │   ├── file_ops.py              # template copy and path rename
+│   ├── docs_page.py             # docs page skeleton read, seedgo's door
 │   ├── placeholders.py          # {{PLACEHOLDER}} engine
 │   ├── meta_ops.py              # branch meta, template registry, hashes
 │   ├── mint_verify.py           # a mint is verified against the manifest
@@ -68,6 +69,7 @@ apps/
 │   └── json/json_handler.py     # the fleet json shim
 ├── plugins/ · integrations/     # package markers, nothing shipped
 templates/citizen/               # the one template + .spawn/.template_registry.json manifest
+templates/docs_page.md           # docs page skeleton - beside citizen/ so it is never stamped
 templates/.archive/              # retired templates
 tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools/ · logs/
 ```

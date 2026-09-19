@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_birth_receipt.py
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-27
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 """Birth receipt lane tests (DPLAN-0318 marker 7).
@@ -399,6 +399,27 @@ def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
     assert json.loads(raw)["branch"] == "DASHED"
 
 
+def _docs_page_cap() -> int:
+    """@seedgo's docs/*.md cap, read from the same pack manifest at assert time."""
+    pack = json.loads(SEEDGO_CONTEXT_PACK.read_text(encoding="utf-8"))
+    return int(pack["caps"]["docs/*.md"]["max_chars"])
+
+
+def test_the_stamped_docs_index_copies_no_cap_and_points_at_the_standard():
+    """The docs index every newborn is born with names no number seedgo owns (DPLAN-0351).
+
+    A cap typed into a template is stamped into every branch and keeps saying so
+    after its owner moves it. The index names the standard instead, and the
+    standard reads the cap live.
+    """
+    cap = _docs_page_cap()
+    index = (SPAWN_TEMPLATES / "citizen" / "docs" / "README.md").read_text(encoding="utf-8")
+
+    for spelling in (f"{cap:,}", str(cap)):
+        assert spelling not in index, f"the stamped docs index copies seedgo's cap as {spelling!r}"
+    assert "drone @seedgo standard docs_page" in index
+
+
 def test_every_cap_is_read_from_its_owner_and_never_copied_into_this_file():
     """A hand-copied cap is the failure this pin exists for.
 
@@ -419,7 +440,7 @@ def test_every_cap_is_read_from_its_owner_and_never_copied_into_this_file():
         for node in ast.walk(source)
         if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool)
     }
-    copied = sorted(set(budget.values()) & literals)
+    copied = sorted((set(budget.values()) | {_docs_page_cap()}) & literals)
     assert copied == [], f"cap values hand-copied into this test: {copied}"
 
 

@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # The update engine
 
 **Branch** spawn · **Code** `apps/handlers/update_ops.py`, `apps/handlers/update_ignore.py`,
 `apps/handlers/json_ops.py`, `apps/modules/update.py`
-**Moved out of README.md** (DPLAN-0347, the layer contract).
 
 Update is **preview-only by default**; `--apply` is what executes. The verbs and flags live
 in `drone @spawn update --help`. Everything below is what the engine decides once it runs.

@@ -1,9 +1,10 @@
+[<- Back to the README](../README.md)
+
 # Birth — how a citizen is minted
 
 **Branch** spawn · **Code** `apps/modules/core.py`, `apps/handlers/` (`class_registry.py`,
 `file_ops.py`, `placeholders.py`, `registry.py`, `meta_ops.py`, `mint_verify.py`,
 `receipt_ops.py`, `adoption_ops.py`, `seed_ops.py`)
-**Moved out of README.md** (DPLAN-0347, the layer contract).
 
 The verbs are in `drone @spawn --help`; the bare `drone @spawn` prints the live module
 inventory. Everything below is what happens behind `create`.

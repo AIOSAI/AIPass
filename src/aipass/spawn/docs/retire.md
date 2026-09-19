@@ -1,8 +1,9 @@
+[<- Back to the README](../README.md)
+
 # Retiring a citizen — delete, archive, deregister
 
 **Branch** spawn · **Code** `apps/handlers/delete_ops.py`, `apps/handlers/repair_ops.py`
 (`ARCHIVE_EXCLUDE`), `apps/modules/delete.py`
-**Moved out of README.md** (DPLAN-0347, the layer contract).
 
 Usage is in `drone @spawn delete --help`; preview is the default and confirmation is
 explicit. Everything below is what retirement means once it runs.
