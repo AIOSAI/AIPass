@@ -7,8 +7,8 @@ Provides consistent terminal output — headers, success/error/warning messages,
 section breaks, and operation templates — so every branch looks the same without
 duplicating Rich formatting code.
 **Module:** `aipass.cli`
-**Version:** 2.2.0
-**Last Updated:** 2026-09-15
+**Version:** 2.3.0
+**Last Updated:** 2026-09-17
 
 ## Quick Start
 
@@ -90,7 +90,7 @@ The same index, in the docs directory itself: [docs/README.md](docs/README.md).
 ### Provides To
 
 - **All branches** — display formatting (header, success, error, warning,
-  fatal, section)
+  fatal, section), and `escape` for values carrying literal square brackets
 - **All branches** — operation templates (operation_start, operation_complete)
 - **All branches** — Rich console access, and the exit-code seam every `main()`
   is meant to copy

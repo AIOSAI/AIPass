@@ -2,7 +2,7 @@
 
 import sys
 
-from aipass.cli.apps.modules.display import console, header, success, error, warning, section
+from aipass.cli.apps.modules.display import console, header, success, error, warning, section, escape
 
 
 def cli_entry():

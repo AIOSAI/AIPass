@@ -35,29 +35,54 @@ the statement that prints it.
   no styling at all and is printed verbatim, which is why it fixed `drone`'s
   returned help literal. Used on a styled line, it does not just fail to help;
   it prints the tags.
-- A hand-written `\[` is what `escape()` produces, and it works. It is still the
-  wrong source spelling: it survives only as long as nobody reformats the line,
-  and it cannot be applied to a value that arrives at runtime.
+- A hand-written `\[` is what `escape()` produces. For a runtime value it is the
+  wrong spelling, because it cannot be applied to a value the author never sees.
+- **The one exception, found by @seedgo:** a *styled literal that also carries a
+  literal bracket* — `"[dim]  console.print('\\[bold]Hello\\[/bold]')[/dim]"`. The
+  data and the styling live in the same string, so `escape()` on it eats the
+  styling too, and `markup=False` prints the style tags. Neither tool can tell the
+  two apart. Escape that one bracket by hand; it is the only spelling that renders
+  both. This branch's own `--help` page carried exactly this shape and printed
+  `console.print('Hello')` until 2026-09-17.
 
-So the fleet should not be reaching for `markup=False` by default, and should
-not be escaping bracketed tokens by hand. It should be escaping values.
+The rule in one line: **escape the data, do not disarm the line — and where the
+data and the styling share one literal, escape the bracket by hand.**
 
-## What this branch should provide
+## What this branch provides
 
-Branches currently have to `from rich.markup import escape` to do the right
-thing, which means reaching around the render surface they were given — and a
-branch that must import Rich directly to print safely will sometimes not
-bother. The surface should offer the escape itself, so that the safe spelling is
-also the local one. Not built yet; recorded here as the shape of the fix.
+```python
+from aipass.cli import escape            # or aipass.cli.apps.modules
+success(f"Updated {escape(path)}")
+```
 
-## The blind spot in the checker
+`escape` is Rich's own function, bound on this surface and not wrapped, so a
+branch never has to import Rich to print safely.
 
-seedgo's `Rich_Markup` checker reads the print site. A help page assembled as a
-returned string literal and printed by a caller elsewhere scores 100 while
-carrying tokens that will be eaten, which is why several branches passed the
-check and still lost their placeholders. Following a literal to the console call
-that consumes it — or flagging bracketed placeholder tokens in any string that
-reaches a `console.print` — is what would catch this class.
+The render surface is **split**, and `escape()` is only right for half of it.
+Measured through a capture console with the value `log [count]`:
+
+| function (argument) | raw value | `escape(value)` |
+|---------------------|-----------|-----------------|
+| `header` (title, detail values) | `log` — eaten | `log [count]` |
+| `success` (message, kwarg values) | `log` — eaten | `log [count]` |
+| `section` (title) | `log` — eaten | `log [count]` |
+| `operation_start`, `operation_complete` (all values) | `log` — eaten | `log [count]` |
+| `error` (message, suggestion) | `log [count]` | `log \[count]` — backslash shows |
+| `warning` (message, details) | `log [count]` | `log \[count]` — backslash shows |
+| `fatal` (message, suggestion) | `log [count]` | `log \[count]` — backslash shows |
+
+`error`, `warning` and `fatal` build Rich `Text` objects, which never parse
+markup, so they print any value literally. Escape for the first four rows; never
+for the last three. Both halves are pinned in `tests/test_display.py`
+(`TestEscapeExport`), so this table fails a test before it goes stale.
+
+## The checker
+
+seedgo's `Rich_Markup` checker used to read only the print site, so a help page
+assembled as a returned literal and printed by a caller elsewhere scored 100
+while its placeholders were eaten. It now follows a literal one hop to the call
+that consumes it (seedgo f23fab69). It deliberately does not flag a hand-escape,
+because of the styled-literal exception above.
 
 ---
 [← Back to the cli README](../README.md)

@@ -3,7 +3,7 @@
 # Description: Tests for cli's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-09-03
-# Modified: 2026-09-03
+# Modified: 2026-09-17
 # =============================================
 
 """Tests for cli's CLI entry point.
@@ -102,6 +102,32 @@ def test_print_help_has_usage_and_commands(capsys):
     out = capsys.readouterr().out
     assert "USAGE:" in out
     assert "COMMANDS:" in out
+
+
+def test_print_help_keeps_its_literal_markup_example(capsys):
+    """The console example shows the tags a reader types, not what they render.
+
+    A styled literal carrying literal brackets: escape() on the line would eat
+    the dim styling too, markup=False would print the dim tags, so the one
+    bracket is hand-escaped. It rendered console.print('Hello') until 2026-09-17.
+    """
+    branch_entry.print_help()
+
+    out = capsys.readouterr().out
+    assert "console.print('[bold]Hello[/bold]')" in out
+
+
+def test_print_help_publishes_escape_and_scopes_show(capsys):
+    """The page names the published escape and says show is top-level only.
+
+    `display show` exits 1, so a page that calls show an alias of display
+    without saying where the alias stops invites a refused command.
+    """
+    branch_entry.print_help()
+
+    out = capsys.readouterr().out
+    assert "from aipass.cli import escape" in out
+    assert "Alias of display (not display show)" in out
 
 
 # =============================================================================

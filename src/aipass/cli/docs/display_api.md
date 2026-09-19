@@ -58,6 +58,7 @@ Exported from `apps/modules/__init__.py`:
 | `warning()` | `warning(message, details=None)` | Yellow warning with optional details |
 | `fatal()` | `fatal(message, suggestion=None)` | Error + `sys.exit(1)` for unrecoverable failures |
 | `section()` | `section(title)` | Visual section separator with title |
+| `escape()` | `escape(value) -> str` | Rich's own escape, for a value with literal square brackets |
 | `operation_start()` | `operation_start(operation, **details)` | Standard operation begin header |
 | `operation_complete()` | `operation_complete(**summary)` | Completion summary with optional timing |
 | `mark_command_failed()` | `mark_command_failed()` | Set the process failure flag (`error()` calls it automatically) |
@@ -71,7 +72,7 @@ to copy into your own `main()`.
 Import paths:
 
 ```python
-from aipass.cli import console, header, success, error, warning, section  # Top-level
+from aipass.cli import console, header, success, error, warning, section, escape  # Top-level
 from aipass.cli.apps.modules import header, fatal, operation_start        # Full set
 from aipass.cli.apps.modules.display import header                        # Direct module
 ```
@@ -83,8 +84,11 @@ from aipass.cli.apps.modules.display import header                        # Dire
 - `apps/modules/` — Public API. Import from here.
 - `apps/handlers/` — Internal implementation. Don't import directly.
 
-Passing a value that may contain square brackets through any of these functions?
-Read [Rich markup](rich_markup.md) first — unescaped brackets are eaten silently.
+Passing a value that may contain square brackets? `header`, `success`, `section`
+and the templates parse markup and eat it silently — wrap the value in
+`escape()`. `error`, `warning` and `fatal` print values literally — do not
+escape for them, or the backslash shows. The measured table is in
+[Rich markup](rich_markup.md).
 
 ---
 [← Back to the cli README](../README.md)

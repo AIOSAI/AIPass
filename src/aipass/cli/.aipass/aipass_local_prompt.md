@@ -41,7 +41,7 @@ Re-derive this with `find` before trusting it. Scaffold and dot-directories are 
 
 # Public API
 
-Import from `aipass.cli` (short set) or `aipass.cli.apps.modules` (full set): `console`, `err_console`, `header`, `success`, `error`, `warning`, `fatal`, `section`, `operation_start`, `operation_complete`, plus the exit seam — `mark_command_failed`, `command_failed`, `reset_command_state`, `resolve_exit`.
+Import from `aipass.cli` (short set) or `aipass.cli.apps.modules` (full set): `console`, `err_console`, `header`, `success`, `error`, `warning`, `fatal`, `section`, `escape`, `operation_start`, `operation_complete`, plus the exit seam — `mark_command_failed`, `command_failed`, `reset_command_state`, `resolve_exit`.
 
 Signatures and examples are in `docs/display_api.md`. Do not restate them here.
 
@@ -64,7 +64,7 @@ These are the things that have actually broken here.
  - Display tests assert visible characters. Build captures with `make_capture_console()` from `tests/conftest.py`; a raw-byte assert makes the suite a function of the shell.
  - The `suggestion` argument to `error()` must not start with "Try:" — display adds it.
  - `handle_command()` lives in `display.py` and `templates.py`, not in `cli.py`. Both are service modules, so a bare invocation lists them under services and reports no discovered modules. That zero is correct.
- - Square brackets in any string printed through this surface are markup. Escape the value with `rich.markup.escape()`; reserve `markup=False` for whole lines that carry no styling. See `docs/rich_markup.md`.
+ - The surface is split on markup. `header`, `success`, `section` and the templates parse it (a bare `[count]` is eaten: pass `escape(value)`); `error`, `warning`, `fatal` print literally (escaping shows the backslash). A styled literal with a literal bracket is hand-escaped. Never `markup=False` on a styled line. See `docs/rich_markup.md`.
  - Project init belongs to the aipass branch. Never re-add init routing here.
  - Every other branch prints through this surface. A change to the render functions lands everywhere at once — treat behaviour changes as fleet changes.
 

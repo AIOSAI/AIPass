@@ -20,10 +20,19 @@ display API.
   Production-only and all-files are different questions; say which one a number
   answers. Both are measured by grep, never quoted from memory.
 - `show` is a live top-level verb of the display module and `demo` routes to the
-  display demo without a module name in front of it. Both now appear on the
-  entry point's help page; neither is exercised by a doc example, and the bare
-  `demo` form resolves by module discovery order rather than by an explicit
-  choice.
+  display demo without a module name in front of it. The help page names both
+  and says `show` is top-level only. The bare `demo` form still resolves by
+  module discovery order rather than by an explicit choice, so the templates
+  demo is reachable only as `templates demo`.
+- A refused subcommand is reported under its module's name: `drone @cli display
+  show` exits 1 with `Unknown command: display`, though `display` is a known
+  command and `show` is the token that was refused.
+- The render surface is split on markup. `header`, `success`, `section` and the
+  templates parse markup inside the values they are given; `error`, `warning`
+  and `fatal` print values literally. Callers therefore have to know which kind
+  they are calling before they reach for `escape()`. The split is documented and
+  pinned by test ([Rich markup](rich_markup.md)); unifying it would change what
+  every branch's existing calls render, so it is a fleet decision, not a fix.
 - `python -m aipass.cli` is not an entry point: `__main__.py` was archived and
   no branch in the fleet ships one. The import is the real entry point.
 

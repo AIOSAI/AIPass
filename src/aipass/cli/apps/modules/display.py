@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: display.py
 # Description: CLI Display Module — public API for Rich terminal output formatting
-# Version: 0.4.1
+# Version: 0.5.0
 # Created: 2025-11-12
-# Modified: 2026-09-15
+# Modified: 2026-09-17
 # =============================================
 
 """
@@ -16,6 +16,7 @@ Provides display functions for all branches:
 - warning() - Yellow warning + message
 - fatal() - Error + sys.exit(1)
 - section() - Visual section breaks
+- escape() - Rich's own, so a literal bracket survives a markup-parsing function
 
 Uses Rich library for beautiful terminal output.
 """
@@ -30,6 +31,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.columns import Columns
+from rich.markup import escape  # published, bound not wrapped: docs/rich_markup.md says which functions need it
 
 from aipass.cli.apps.handlers.json import json_handler
 from aipass.cli.apps.handlers.cli.help_flags import wants_help
@@ -465,6 +467,7 @@ __all__ = [
     "warning",
     "fatal",
     "section",
+    "escape",
     "mark_command_failed",
     "command_failed",
     "reset_command_state",
