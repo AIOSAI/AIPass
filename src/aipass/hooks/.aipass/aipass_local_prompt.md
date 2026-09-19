@@ -39,6 +39,7 @@ apps/
     testwrite_targets.py   #   Which of those targets are NEW test files
     testgate_policy.py     #   Reads .aipass/test_write_policy.json (drone @hooks testwrite)
     admin_seat.py          #   The verified admin-seat exemption, read by two gates
+    write_ownership.py     #   Who may write whose files, read from registry rows (edit_gate)
     diagnostics_state.py   #   What .diagnostics_state.json means -- auto_fix + edit_gate
     hook_test.py           #   Portable runner (bare 'test' prints a blurb, fires nothing)
     wire_verify.py         #   Provider <-> project hook wiring checker
@@ -60,7 +61,7 @@ apps/
       persistent_alert.py  #   alerts.json banners: on arrival, then on the beat
       compass_recall.py feedback_pulse.py   # governance recall; feedback nudge (ships disabled)
     security/              # Enforcement (PreToolUse)
-      edit_gate.py         #   Fences writes: cross-project/branch, inbox, .trinity caps, tripwire
+      edit_gate.py         #   Fences writes: not-yours (project/branch/project-level), inbox, .trinity caps, tripwire
       testwrite_gate.py    #   Blocks CREATION of new test files (drone @hooks testwrite)
       presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
       git_gate.py rm_gate.py registry_gate.py subagent_gate.py   # git tiers, rm, registries, stop

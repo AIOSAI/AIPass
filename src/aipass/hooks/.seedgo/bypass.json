@@ -2,7 +2,7 @@
   "metadata": {
     "version": "2.0.0",
     "created": "2026-05-18",
-    "updated": "2026-09-10",
+    "updated": "2026-09-18",
     "description": "Standards bypass configuration for this branch",
     "audit_context": "DPLAN-0191: Full ownership hardening. All handler wiring verified against .aipass/hooks.json + engine.jsonl firing evidence. Dynamic dispatch via engine._run_handler (importlib.import_module + getattr) means handlers are never statically imported — seedgo's dead_code/unused_function checks are false positives for this architecture."
   },
@@ -1335,6 +1335,16 @@
       "file": "apps/handlers/config/ledger_store.py",
       "standard": "json_structure",
       "reason": "The injection ledger IS an operations record: one JSONL line per engine dispatch, in the temp dir beside cadence's per-session state (DPLAN-0347 hooks row 3). It runs inside every dispatch, tool events included, so a log_operation per call would write a second ledger into hooks_json on every tool call. The read verb logs through json_handler in apps/modules/injection_ledger.py."
+    },
+    {
+      "file": "apps/modules/write_ownership.py",
+      "standard": "json_structure",
+      "reason": "Reads project registries (*_REGISTRY.json, any project's) read-only with stdlib json to learn branch rows and the owner flag for edit_gate. Writes nothing, logs no operation; same profile as admin_seat/bash_writes (devpulse 1d041cfc)."
+    },
+    {
+      "file": "apps/modules/write_ownership.py",
+      "standard": "modules",
+      "reason": "Not a drone command surface: the who-may-write-whose-files reader consumed by handlers/security/edit_gate.py inside a PreToolUse hook. print_introspection states the rule; a CLI verdict would read the operator's cwd as a seat."
     }
   ],
   "notes": {

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.15.0
-# Description: Cross-project (tool + scripted), cross-branch, inbox and shell-to-memory write protection
-#              (PreToolUse), plus the shell-memory tripwire (PreToolUse snapshot, PostToolUse report)
+# Version: 1.16.0
+# Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
+#              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-16
+# Modified: 2026-09-18
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -24,7 +24,8 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
-TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
+# Who may write whose files (TRUSTED_CROSS_WRITERS, the project marker, the registry rows)
+# lives in modules/write_ownership since the owner's ruling of 2026-09-18.
 # The one seat that reaches outwards. The owner, 2026-08-30, compassed as devpulse
 # entry 322: "It is only you who can reach outwards. Nobody else." The cross-
 # project fence stays for every other agent, tool lane and scripted lane alike.
@@ -34,11 +35,6 @@ TRUSTED_CROSS_WRITERS: tuple[str, ...] = ("devpulse", "seedgo", "spawn")
 # at import time (the branch's own architecture rule); modules/admin_seat holds
 # the same literal and admin_seat_name() below is what keeps the two honest.
 ADMIN_SEAT = "devpulse"
-# A project root is the directory holding a *_REGISTRY.json — the same marker
-# @ai_mail's find_project_root uses (handlers/paths.py). Deliberately identical:
-# the file fence and the mail fence must draw the boundary in the same place, or
-# an agent is refused a send and allowed the equivalent write (GH #733).
-_PROJECT_MARKER = "*_REGISTRY.json"
 # passport.json joined these on 2026-09-15 (DPLAN-0347 rows 4 and 6). It is a
 # .trinity file every bit as much as the other two, and until then it was
 # writable by any lane at any size: the identity block renders on every cadence
@@ -84,25 +80,13 @@ def _entry_number(entry: dict) -> int | None:
     return None
 
 
-def _find_project_root(start: Path) -> Path | None:
-    """Return the nearest ancestor of *start* holding a *_REGISTRY.json, or None.
+def _ownership() -> Any:
+    """modules/write_ownership, reached at call time: a handler never imports a module at import time."""
+    return importlib.import_module("aipass.hooks.apps.modules.write_ownership")
 
-    Mirrors @ai_mail's find_project_root. Returns None rather than raising on an
-    unreadable path — a fence that cannot locate a boundary must not invent one.
-    """
-    try:
-        current = start.resolve()
-    except OSError as exc:
-        logger.info("[HOOKS] edit_gate: project root unresolvable for %s: %s", start, exc)
-        return None
-    for candidate in [current] + list(current.parents):
-        try:
-            if any(candidate.glob(_PROJECT_MARKER)):
-                return candidate
-        except OSError as exc:
-            logger.info("[HOOKS] edit_gate: project marker scan failed at %s: %s", candidate, exc)
-            break
-    return None
+
+def _refuse(reason: str) -> dict:
+    return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
 
 
 def _is_admin_seat(cwd: str) -> bool:
@@ -131,67 +115,40 @@ def _is_admin_seat(cwd: str) -> bool:
     return bool(admin.is_admin_seat(cwd))
 
 
-def _check_project_boundary(cwd: str, target: Path) -> dict | None:
-    """Block a write that crosses out of the caller's project.
+def _check_project_boundary(cwd: str, caller: Any, landing: Any, target: Path) -> dict | None:
+    """Block a write that crosses out of the caller's project, in any direction.
 
-    Projects nest inside the host tree (projects/<name>) but are its least-trusted
-    layer. Every fence below this one keys on the src/<package>/<branch> shape,
-    which no project seat has: both sides resolved to an empty branch and the write
-    fell through to allow. GH #733 measured the result — a projects/baud session
-    edited src/aipass/drone unchallenged, while the same agent's mail to @drone was
-    correctly refused.
+    Projects nest inside the host tree (projects/<name>). Every fence below this
+    one keys on branch identity, which a project seat had none of before the
+    registry rows were read: GH #733 measured a projects/baud session editing
+    src/aipass/drone unchallenged while its mail to @drone was refused.
 
-    Direction matters, so this is not symmetric with the mail fence:
-      - upward (nested project -> host) and sideways (project -> sibling): blocked.
-      - downward (host -> a project it contains): allowed. Trust runs downward, and
-        the host tree carries artifact registries of its own (flow_json/
-        PLAN_REGISTRY.json, .backup snapshots) that would otherwise read as foreign
-        projects to the very branches that own them.
+    Upward and sideways were always refused. Downward (the host into a project
+    it contains) was trusted until the owner's ruling of 2026-09-18: "an AIPass
+    agent must have no way to touch another project's files". Only the verified
+    admin seat crosses now. *caller* and *landing* are write_ownership Projects.
 
     Returns a block dict, or None to allow.
     """
-    caller_root = _find_project_root(Path(cwd))
-    if caller_root is None:
-        return None
-    target_root = _crossing_root(caller_root, target)
-    if target_root is None:
+    if not _ownership().is_crossing(caller, landing):
         return None
     if _is_admin_seat(cwd):
         logger.info(
             "[HOOKS] edit_gate: cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
             ADMIN_SEAT,
-            caller_root.name,
-            target_root.name,
+            caller.root.name,
+            landing.root.name,
             target,
         )
         return None
 
     logger.warning(
         "[HOOKS] edit_gate: cross-project write refused: caller root %s != target root %s (%s)",
-        caller_root,
-        target_root,
+        caller.root,
+        landing.root,
         target,
     )
-    return _cross_project_block(caller_root, target_root, target, "")
-
-
-def _crossing_root(caller_root: Path, target: Path) -> Path | None:
-    """Return the foreign project root *target* lands in, or None if it stays home.
-
-    The direction rules live here alone so the tool lane and the scripted lane
-    cannot answer the same question differently — which is exactly how the
-    scripted lane came to be open while the tool lane was fenced.
-
-    The walk starts AT *target*, not at its parent: a bash operand can name a
-    directory (``mkdir``, ``cp -r``), and starting at the parent would read a
-    write to a project root as a write to the tree that contains it.
-    """
-    target_root = _find_project_root(target)
-    if target_root is None or target_root == caller_root:
-        return None
-    if caller_root in target_root.parents:
-        return None
-    return target_root
+    return _cross_project_block(caller.root, landing.root, target, "")
 
 
 def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how: str) -> dict:
@@ -200,7 +157,7 @@ def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how
     reason = (
         f"{lane}: project '{caller_root.name}' cannot write into project '{target_root.name}'.\n"
         f"Target: {target}\n"
-        "A project writes inside itself only — never into its host or a sibling. This is the "
+        "A project writes inside itself only — never into its host, a sibling or a project it holds. This is the "
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
         'To reach that project: drone @devpulse feedback send "Subject" "Body"'
     )
@@ -228,7 +185,7 @@ def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
         return []
 
 
-def _check_bash_project_boundary(cwd: str, targets: list[tuple[Path, str]]) -> dict | None:
+def _check_bash_project_boundary(cwd: str, caller: Any, targets: list[tuple[Path, str]]) -> dict | None:
     """Block a cross-project write made through the shell rather than a tool.
 
     The tool lane was fenced and this one was not: @devpulse's Edit into a
@@ -245,33 +202,47 @@ def _check_bash_project_boundary(cwd: str, targets: list[tuple[Path, str]]) -> d
 
     Returns a block dict, or None to allow.
     """
-    if not targets:
+    if caller is None:
         return None
-    caller_root = _find_project_root(Path(cwd))
-    if caller_root is None:
-        return None
-
+    wo = _ownership()
     for target, how in targets:
-        target_root = _crossing_root(caller_root, target)
-        if target_root is None:
+        landing = wo.project_of(target)
+        if not wo.is_crossing(caller, landing):
             continue
         if _is_admin_seat(cwd):
             logger.info(
                 "[HOOKS] edit_gate: scripted cross-project write ALLOWED for the admin seat (@%s): %s -> %s (%s)",
                 ADMIN_SEAT,
-                caller_root.name,
-                target_root.name,
+                caller.root.name,
+                landing.root.name,
                 target,
             )
             return None
         logger.warning(
             "[HOOKS] edit_gate: scripted cross-project write refused: %s -> %s via %s (%s)",
-            caller_root,
-            target_root,
+            caller.root,
+            landing.root,
             how,
             target,
         )
-        return _cross_project_block(caller_root, target_root, target, how)
+        return _cross_project_block(caller.root, landing.root, target, how)
+    return None
+
+
+def _check_bash_ownership(cwd: str, caller: Any, targets: list[tuple[Path, str]]) -> dict | None:
+    """Refuse a shell write into a file this seat does not own, inside its own project.
+
+    The owner's ruling, 2026-09-18: own files only, on this lane as on the tool
+    lane. Until then the shell lane read the project boundary alone, so any
+    citizen could sed another branch. Convicts on write grammar only: an
+    interpreter's held paths are left to the project fence (write_ownership).
+    """
+    wo = _ownership()
+    for target, how in targets:
+        reason = wo.ownership_refusal(caller, wo.project_of(target), cwd, target, how)
+        if reason:
+            logger.warning("[HOOKS] edit_gate: scripted write refused, not the seat's: %s via %s", target, how)
+            return _refuse(reason)
     return None
 
 
@@ -1107,9 +1078,10 @@ def _watched_trinity_dirs(cwd: str) -> list[Path]:
     """
     seat = _seat_trinity(cwd)
     dirs: list[Path] = [seat] if seat is not None else []
-    root = _find_project_root(Path(cwd)) if cwd else None
-    if root is None:
+    project = _ownership().project_of(Path(cwd)) if cwd else None
+    if project is None:
         return dirs
+    root = project.root
     try:
         for depth in range(1, _TRINITY_SCAN_DEPTH + 1):
             pattern = "/".join(["*"] * (depth - 1) + [".trinity"])
@@ -1214,19 +1186,23 @@ def handle(hook_data: dict) -> dict:
         tool_input = hook_data.get("tool_input", {})
         file_path = tool_input.get("file_path", "")
 
-        # The scripted lane. Two rules run on what the shell reader can see: the
-        # project fence, and the memory rule (a .trinity memory file is written
-        # where its caps are measured, never from a shell — DPLAN-0342 row 3).
-        # The branch, inbox and daemon checks read a single named file, and a
-        # shell command has no such field to read. What the reader cannot see is
-        # published in bash_writes.NOT_CAUGHT; a memory write among it is
-        # reported after the call by tripwire().
+        # The scripted lane. Three rules run on what the shell reader can see: the
+        # project fence, the memory rule (a .trinity memory file is written where
+        # its caps are measured, never from a shell — DPLAN-0342 row 3), and whose
+        # file it is (the owner's ruling, 2026-09-18). The inbox and daemon checks
+        # read a single named file, and a shell command has no such field. What the
+        # reader cannot see is published in bash_writes.NOT_CAUGHT; a memory write
+        # among it is reported after the call by tripwire().
         if tool_name == "Bash":
             cwd = hook_data.get("cwd", "") or os.getcwd()
             targets = _bash_write_targets(cwd, tool_input.get("command", ""))
+            if not targets:
+                return {"stdout": "", "exit_code": 0}
+            caller = _ownership().project_of(Path(cwd))
             return (
-                _check_bash_project_boundary(cwd, targets)
+                _check_bash_project_boundary(cwd, caller, targets)
                 or _check_bash_memory_write(targets)
+                or _check_bash_ownership(cwd, caller, targets)
                 or {"stdout": "", "exit_code": 0}
             )
 
@@ -1243,9 +1219,10 @@ def handle(hook_data: dict) -> dict:
 
         cwd = hook_data.get("cwd", "") or os.getcwd()
 
-        # Outermost boundary first: a project seat has no branch identity in the
-        # checks below, so it must be fenced before they can fall through to allow.
-        block = _check_project_boundary(cwd, fp)
+        # Outermost boundary first, then daemon confinement, then whose file it is.
+        wo = _ownership()
+        caller, landing = wo.project_of(Path(cwd)), wo.project_of(fp)
+        block = _check_project_boundary(cwd, caller, landing, fp)
         if block:
             return block
 
@@ -1283,17 +1260,9 @@ def handle(hook_data: dict) -> dict:
 
         target_branch = _get_branch(str(fp.resolve()) if not fp.is_absolute() else str(fp), package)
 
-        if cwd_branch and target_branch and cwd_branch != target_branch:
-            if cwd_branch not in TRUSTED_CROSS_WRITERS:
-                reason = (
-                    f"Cross-branch write blocked: '{cwd_branch}' cannot write to '{target_branch}'.\n"
-                    f"Trusted cross-writers: {', '.join(TRUSTED_CROSS_WRITERS)}"
-                )
-                return {
-                    "stdout": json.dumps({"decision": "block", "reason": reason}),
-                    "exit_code": 2,
-                    "sound": "edit gate",
-                }
+        reason = wo.ownership_refusal(caller, landing, cwd, fp)
+        if reason:
+            return _refuse(reason)
 
         trinity_tools = ("Write", "Edit", "MultiEdit")
         if tool_name in trinity_tools and fp.parent.name == ".trinity" and fp.name in _TRINITY_MEMORY_FILES:
@@ -1361,7 +1330,7 @@ def handle(hook_data: dict) -> dict:
         }
 
     except Exception as exc:
-        logger.info("[HOOKS] edit_gate: unexpected error (allowing): %s", exc)
+        logger.warning("[HOOKS] edit_gate: unexpected error, every fence dark for this call (allowing): %s", exc)
         return {"stdout": "", "exit_code": 0}
 
 

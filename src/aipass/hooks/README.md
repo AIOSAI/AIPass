@@ -32,8 +32,8 @@ each one to JSONL. One broken hook never blocks the rest — the engine catches,
 - **Grounds the session.** The branch prompt, the kernel, the fleet navmap, the passport identity
   block, the date, alert banners and a mid-turn re-ground after compaction, each rendered under a cap
   its owner publishes and fired on a cadence rather than every turn.
-- **Fences writes.** Cross-project and cross-branch edits, raw git, destructive `rm`, sealed
-  registries and the creation of new test files are refused at PreToolUse — on the tool lane and on
+- **Fences writes.** A write into a file the seat does not own (another project, another branch, a
+  project-level file), raw git, destructive `rm`, sealed registries and new test files are refused at PreToolUse — on the tool lane and on
   the shell lane both, because a fence only one of them can see is not a fence.
 - **Measures memory writes.** A write to a `.trinity` file is judged against @memory's published
   caps, and a shell write that slips past the reader is reported afterwards by a tripwire.
@@ -93,7 +93,8 @@ Three layers. `apps/hooks.py` is a thin router: it discovers the modules beside 
 command to the one that claims it. `apps/modules/` holds one business-logic module per concern —
 `engine` (the dispatcher itself), `cadence` (which turn a loader fires on), `injection_ledger` (what a
 seat was told, per turn), `grounding_content` (the
-injected blocks and their budgets), `bash_writes` and `testwrite_targets` (what a shell command can be
+injected blocks and their budgets), `write_ownership` (whose file a write lands in, read from the registries),
+`bash_writes` and `testwrite_targets` (what a shell command can be
 seen to write, and which of those are new tests), `admin_seat` and `testgate_policy` (who is exempt,
 and what the policy says), `hookstatus`, `hooksound`, `alert_dismiss`, `feedback`, `context_window`,
 `cc_sessions`, `cc_transcripts`, `diagnostics_state`, `hook_test`, `release_notice`, `sandbox` and
@@ -122,7 +123,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/engine.md](docs/engine.md) | Dispatch, the merged output document, dynamic handler import, the import-time working-directory rule |
 | [docs/project_config.md](docs/project_config.md) | The project template and what it ships, the trust hash and the re-enrol checkpoint, the release notice |
 | [docs/git_gate.md](docs/git_gate.md) | The closed allow-list of raw git verbs, what it protects, how a project disables it |
-| [docs/edit_gate.md](docs/edit_gate.md) | The branch and project fences, the direction table, the verified admin-seat exemption |
+| [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files (the 2026-09-18 ruling), the project fence, the verified admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | The scripted lane: what a shell command can be seen to write, what it misses, both Windows path spellings |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |
 | [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning |

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.5.0
+# Version: 1.6.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-09-16
+# Modified: 2026-09-18
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -113,6 +113,10 @@ _TRAILING_JUNK = ",;:)]}'\"`"
 # it and every command it runs accepts it, so an agent on Windows copies it
 # into the next command.
 _GIT_BASH_DRIVE = re.compile(r"/([A-Za-z])(?=/|$)")
+
+#: How an interpreter's held path is labelled. write_ownership reads it: a held path
+#: cannot be told from a read, so the branch fence never convicts on one.
+HELD_BY_INTERPRETER = "(interpreter — may write any path it holds)"
 
 # What this parser does NOT see. Stated as data so the reply, the README and the
 # tests all quote the same list instead of three drifting prose copies.
@@ -462,7 +466,7 @@ def _interpreter_targets(segment: list[str], raw: str, cwd: Path) -> list[tuple[
         seen.add(token)
         target = _resolve(token, cwd)
         if target is not None:
-            hits.append((target, f"{verb} (interpreter — may write any path it holds)"))
+            hits.append((target, f"{verb} {HELD_BY_INTERPRETER}"))
     return hits
 
 

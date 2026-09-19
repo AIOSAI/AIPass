@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_bash.py
-# Version: 1.2.0
+# Version: 1.3.0
 # Description: Tests for the edit gate's scripted lane (passport refused since 1.1.0)
 # Branch: hooks
 # Created: 2026-08-30
-# Modified: 2026-09-16
+# Modified: 2026-09-18
 # =============================================
 
 """Tests for edit_gate's scripted lane and the devpulse admin exemption.
@@ -82,7 +82,7 @@ def _names(targets, *parts: str) -> bool:
     """True when some target ends in these components, in any OS's spelling.
 
     THE CONTRACT, ruled 2026-08-31: the target list stays OS-NATIVE. These are
-    the Path objects edit_gate hands to _find_project_root, which globs the real
+    the Path objects edit_gate hands to write_ownership.project_of, which globs the real
     filesystem for *_REGISTRY.json — a list canonicalised to POSIX spelling
     would be unwalkable on Windows, so the fence would go dark in exactly the
     place this whole train was fixing. 1.2.0 normalises separators on the way
@@ -218,9 +218,17 @@ class TestAdminIdentityIsVerifiedNotClaimed:
         assert _blocked(result)
 
     def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict):
+        """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too."""
         from aipass.hooks.apps.handlers.security import edit_gate
 
-        with patch.object(edit_gate.importlib, "import_module", side_effect=ImportError("no ai_mail")):
+        real = edit_gate.importlib.import_module
+
+        def _no_rail(name: str):
+            if name.endswith("admin_seat") or name.startswith("aipass.ai_mail"):
+                raise ImportError("no ai_mail")
+            return real(name)
+
+        with patch.object(edit_gate.importlib, "import_module", side_effect=_no_rail):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
@@ -313,6 +321,31 @@ class TestScriptedLaneCatches:
         assert "sed -i" in _reason(result)
         assert "drone @devpulse feedback send" in _reason(result)
 
+    # The owner's ruling, 2026-09-18 22:17 (devpulse 1d041cfc): own files only, on this lane too.
+    # Until then the shell lane read the project boundary alone: hooks could sed another branch.
+
+    def test_sed_into_another_branch(self, registered_projects: dict):
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        result = _run(registered_projects["hooks"], command=f"sed -i s/a/b/ {target}")
+        assert _blocked(result)
+        assert "Cross-branch write blocked (sed -i): 'hooks' cannot write to 'memory'" in _reason(result)
+
+    def test_redirection_into_a_project_level_file(self, registered_projects: dict):
+        target = (registered_projects["aipass"] / "notes.md").as_posix()
+        result = _run(registered_projects["hooks"], command=f"echo x > {target}")
+        assert _blocked(result)
+        assert "Project-level write blocked" in _reason(result)
+
+    def test_tee_into_the_managers_branch_from_an_ordinary_agent(self, registered_projects: dict):
+        target = (Path(registered_projects["vera_seat"]) / "brand.md").as_posix()
+        assert _blocked(_run(registered_projects["writer"], command=f"echo x | tee {target}"))
+
+    def test_cp_down_into_a_nested_project(self, registered_projects: dict, grant_withheld):
+        target = (Path(registered_projects["baud_seat"]) / "app.py").as_posix()
+        result = _run(registered_projects["hooks"], command=f"cp ./app.py {target}")
+        assert _blocked(result)
+        assert "Cross-project" in _reason(result)
+
 
 class TestScriptedLaneDoesNotOverreach:
     """A gate that refuses correct commands teaches agents to route around it."""
@@ -365,6 +398,29 @@ class TestScriptedLaneDoesNotOverreach:
         loose = tmp_path / "loose"
         loose.mkdir()
         assert _run(str(loose), command="sed -i s/a/b/ /tmp/whatever.txt")["exit_code"] == 0
+
+    def test_an_interpreter_reading_another_branch_is_allowed(self, registered_projects: dict):
+        """Inside one project the branch fence convicts on write grammar only.
+
+        An interpreter's held paths cannot be told from reads, and reading
+        another branch is the daily loop — the ruling allows it. The residual
+        (an interpreter that DOES write another branch) is published in
+        docs/edit_gate.md; the project fence still reads held paths.
+        """
+        target = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        for command in (f"python3 -c \"print(open('{target}').read())\"", f"awk '/def /' {target}", f"cat {target}"):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
+
+    def test_seedgo_and_the_manager_write_across_branches_from_a_shell(self, registered_projects: dict):
+        memory = (Path(registered_projects["memory"]) / "apps" / "x.py").as_posix()
+        writer = (Path(registered_projects["writer"]) / "draft.md").as_posix()
+        assert _run(registered_projects["seedgo"], command=f"sed -i s/a/b/ {memory}")["exit_code"] == 0
+        assert _run(registered_projects["vera_seat"], command=f"sed -i s/a/b/ {writer}")["exit_code"] == 0
+
+    def test_writing_your_own_branch_stays_allowed(self, registered_projects: dict):
+        own = (Path(registered_projects["hooks"]) / "docs" / "x.md").as_posix()
+        for command in (f"echo x > {own}", f"sed -i s/a/b/ {own}", "mkdir -p ./docs.local/probe"):
+            assert _run(registered_projects["hooks"], command=command)["exit_code"] == 0, command
 
 
 class TestShellWritesToMemoryAreRefused:
@@ -853,7 +909,7 @@ class TestTargetSpellingIsNotPartOfTheContract:
     def test_the_target_list_stays_os_native(self):
         """The ruling, pinned: normalise on the way IN, never on the way out.
 
-        edit_gate hands these straight to _find_project_root, which globs the
+        edit_gate hands these straight to write_ownership.project_of, which globs the
         real filesystem for *_REGISTRY.json. A list canonicalised to one
         spelling would be unwalkable on the other OS — the fence would go dark
         in precisely the place this train was fixing.
