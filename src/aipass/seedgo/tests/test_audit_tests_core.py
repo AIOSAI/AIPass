@@ -148,10 +148,26 @@ class TestRev4Contracts:
     """The contracts bind groups that do not exist yet. That is the point."""
 
     def test_kill_cause_contract_is_attached_to_every_bound_group(self):
-        assert len(spine.KILL_CAUSE_BOUND) == 3
+        """Every group that executes a mutant carries the split, however many there are.
+
+        Pinned by NAME and not by COUNT. A bare `== 3` here made the contract
+        list unable to grow: adding `pseudo_tested`, the per-function probe
+        contract 2 promised, reddened this test for doing exactly what the
+        contract asks. That is the equality S3/S4 was revised to stop, in the
+        lane's own suite.
+        """
+        assert {"oracle_execution", "scoped_survival", "targeted_mutation"} <= set(spine.KILL_CAUSE_BOUND)
 
         for name in spine.KILL_CAUSE_BOUND:
             assert "kill_cause" in spine.contract_for(name)
+
+    def test_pseudo_tested_contract_refuses_the_rate_reading(self):
+        """Gutting survivors are a superset of pseudo-tested functions - say so."""
+        contract = spine.contract_for("pseudo_tested")
+
+        assert "kill_cause" in contract
+        assert "SUPERSET" in contract
+        assert "coverage" in contract
 
     def test_contract_resolves_through_the_namespaced_name(self):
         """Callers legitimately hold `pytest.scoped_survival`, not the bare name."""
@@ -274,7 +290,7 @@ class TestS3S4:
         problems = laws.validate(document, previous_group_list=previous)
         assert any("pytest.retired_yesterday" in p and p.startswith("S3") for p in problems)
 
-    def test_a_vanished_group_WITH_a_ruling_is_allowed(self):
+    def test_a_vanished_group_with_a_ruling_is_allowed(self):
         """S3 is a no-vanishing property, not a freeze - retirement stays possible."""
         document = _lawful_document()
         document["retired_groups"] = [
@@ -388,7 +404,7 @@ class TestS9:
 
         assert any(p.startswith("S9") for p in laws.validate(document))
 
-    def test_a_mutant_record_WITH_a_kill_cause_passes(self):
+    def test_a_mutant_record_with_a_kill_cause_passes(self):
         document = _lawful_document()
         document["groups"]["oracle_execution"]["mutants"] = [
             {"id": "m1", "killed": True, "kill_cause": "AssertionError"}
@@ -618,7 +634,11 @@ class TestCarrierRecorder:
         subtraction wearing a clean face.
         """
         carrier_window(tmp_path)
-        m10.carrier_hook("open", 42)
+        # 42 is not a tuple, and that is the input under test: the audit hook
+        # receives whatever the interpreter hands it, so the malformed case is
+        # the case. The checker is told here rather than the shape being
+        # corrected, because correcting it would delete the test.
+        m10.carrier_hook("open", 42)  # type: ignore[arg-type]
 
         assert m10.stop_carrier_recording()[1] == 1
 

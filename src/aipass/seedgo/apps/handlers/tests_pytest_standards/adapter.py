@@ -59,21 +59,35 @@ STATIC_GROUPS: tuple = (
     "static_assertion_shape",
     "static_capture_never_read",
     "static_coverage_slot",
+    "static_drifted_inventory",
     "static_empty_parametrize",
     "static_entry_point_diff",
     "static_mock_drift",
     "static_no_oracle",
     "static_posix_literal",
+    "static_raw_needle",
     "static_ruff_pt",
     "static_self_skip",
+    "static_tautology_assert",
     "static_unentered_assert",
 )
 
-#: The execution groups this adapter declares but does not yet run. They are
-#: published `not_applicable` with a reason from day one, because the rev-4
-#: contracts binding them (kill_cause, the survival naming rule) have to land
-#: before the capability or they never land at all.
+#: The execution groups this adapter declares but does not run in this
+#: release. They are published `not_applicable` with a reason from day one,
+#: because the rev-4 contracts binding them (kill_cause, the survival naming
+#: rule) have to land before the capability or they never land at all.
+#:
+#: `pseudo_tested` is the exception that proves the list is about the RUN LOOP
+#: and not about the code: its engine (`gutting.py`) is built and measured. It
+#: is unwired because `nominate(spec)` is the only seam a group document can
+#: come from and that signature carries no options channel, so there is no way
+#: to opt a campaign in per run without bumping ADAPTER_API. Running it
+#: unconditionally is not the alternative: the cost is one suite execution per
+#: function, measured at 2.09s on an 85-test suite. Its reason says so rather
+#: than borrowing "not built" from the two groups beside it, because a reader
+#: deciding whether to fund the seam needs to know the engine already exists.
 UNBUILT_EXECUTION_GROUPS: tuple = (
+    "pseudo_tested",
     "scoped_survival",
     "targeted_mutation",
 )
@@ -417,6 +431,15 @@ def nominate(spec: envcopy.EnvSpec) -> dict:
 def _unbuilt_reason(group: str) -> str:
     """Why a declared execution group has nothing to report yet."""
     reasons = {
+        "pseudo_tested": (
+            "built but not wired to the run loop - gutting.py implements per-function extreme "
+            "mutation (one mutant per function, body replaced by `return None`) and was proven "
+            "on the banked canary fixture: 21 functions probed, 3 survivors, kills split 14 "
+            "AssertionError / 4 error / 0 unknown at 2.09s per mutant. It is a NEW group and "
+            "never a redefinition of scoped_survival (contract 2). It stays unrun because "
+            "nominate(spec) carries no options channel to opt a campaign in per run, and the "
+            "cost - one suite execution per function - may not be spent by default"
+        ),
         "scoped_survival": (
             "not built - module gutting is not implemented in this release. When it is, it "
             "measures ORACLE SURVIVAL and is never to be read as pseudo-testedness (contract 2)"

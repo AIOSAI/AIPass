@@ -576,8 +576,12 @@ class TestNominate:
     """Static species nominate; they never score (Law M1)."""
 
     def test_every_nominated_group_carries_no_score(self, tmp_path):
+        # Pinned against the DECLARATION, not a count. `== 13` re-broke the
+        # moment three species were added, which is the growth the pack's own
+        # "three files and one line" promise invites - a count here taxes
+        # every addition and measures nothing the next line does not.
         documents = adapter.nominate(_spec_for(tmp_path))
-        assert len(documents) == 13
+        assert set(documents) == set(adapter.ADAPTER_GROUPS)
 
         for document in documents.values():
             assert document["score"] is None
@@ -595,7 +599,13 @@ class TestNominate:
         assert silent == []
 
     def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
-        assert len(adapter.UNBUILT_EXECUTION_GROUPS) == 2
+        """Law S1 for every group that does not run, however many there are.
+
+        The count is gone for the same reason it went in the two tests above:
+        `pseudo_tested` joined this tuple because its engine exists and its
+        RUN LOOP does not, and a `== 2` turned that honest state into a red.
+        """
+        assert {"scoped_survival", "targeted_mutation"} <= set(adapter.UNBUILT_EXECUTION_GROUPS)
 
         for name in adapter.UNBUILT_EXECUTION_GROUPS:
             document = adapter.nominate(_spec_for(tmp_path))[name]
@@ -1614,7 +1624,7 @@ class TestLiveWriterProbeWindowIsDisclosed:
         assert row, "check 17 must be present"
         assert "0.02" in row[0]["detail"]
 
-    def test_the_PUBLISHED_proof_carries_the_window_not_just_the_options_dict(self, tmp_path):
+    def test_the_published_proof_carries_the_window_not_just_the_options_dict(self, tmp_path):
         """The reader of the ARTIFACT is who needs this number.
 
         The first cut of this class pinned the options dict and the not-probed
@@ -1678,14 +1688,14 @@ class TestCheck12VerdictIsSplitFromUnattributedChanges:
         assert found, f"check {number} must be present"
         return found[0]
 
-    def test_check_12_passes_when_the_SUITE_changed_nothing(self):
+    def test_check_12_passes_when_the_suite_changed_nothing(self):
         """@trigger's exact case: ten unattributed, zero from the suite."""
         from aipass.seedgo.apps.handlers.audit_tests import selfcheck
 
         rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
         assert self._row(rows, 12)["status"] == selfcheck.PASS
 
-    def test_check_12_still_fails_when_the_suite_DID_write_the_real_tree(self):
+    def test_check_12_still_fails_when_the_suite_did_write_the_real_tree(self):
         """The finding the lane exists for must not be softened by the split."""
         from aipass.seedgo.apps.handlers.audit_tests import selfcheck
 

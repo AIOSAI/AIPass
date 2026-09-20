@@ -85,6 +85,7 @@ SPINE_RATIONALE: Dict[str, str] = {
 #: them runs, it cannot ship without the split.
 KILL_CAUSE_BOUND: tuple = (
     "oracle_execution",
+    "pseudo_tested",
     "scoped_survival",
     "targeted_mutation",
 )
@@ -115,9 +116,23 @@ SURVIVAL_NAMING_CONTRACT = (
     "rule, never as a redefinition of this one."
 )
 
+PSEUDO_TESTED_SCOPE_CONTRACT = (
+    "pseudo_tested is the per-function probe contract 2 promised as a NEW group, "
+    "and it reports GUTTING SURVIVORS, which is a SUPERSET of pseudo-tested "
+    "functions. Descartes (Vera-Perez et al. EMSE 2018) calls a method "
+    "pseudo-tested only when it is COVERED and the mutant survives; this probe "
+    "measures no coverage, so a function no test ever executes also survives and "
+    "is ordinary dead-to-the-suite code rather than this group's news. Measured on "
+    "the banked canary fixture: 3 survivors, of which 1 was covered and genuinely "
+    "pseudo-tested and 2 were never executed at all. Until a coverage pass feeds "
+    "this group, every survivor list is published with that split unknown, and the "
+    "group may not be read as a pseudo-tested RATE."
+)
+
 #: Contract text keyed by the group it binds, for stamping into the artifact.
 GROUP_CONTRACTS: Dict[str, str] = {
     "oracle_execution": KILL_CAUSE_CONTRACT,
+    "pseudo_tested": KILL_CAUSE_CONTRACT + " " + PSEUDO_TESTED_SCOPE_CONTRACT,
     "scoped_survival": KILL_CAUSE_CONTRACT + " " + SURVIVAL_NAMING_CONTRACT,
     "targeted_mutation": KILL_CAUSE_CONTRACT,
 }

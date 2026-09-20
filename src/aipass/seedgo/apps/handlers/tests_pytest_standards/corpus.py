@@ -167,7 +167,18 @@ def _walk(root: Path, patterns: Sequence[str]) -> List[Path]:
         # rather than an error. This lane copies targets into temporary trees,
         # so the parent directories are not the target's own business.
         # Measured before the fix: a project under node_modules/ collected 0 units.
-        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
+        # COLLECT WHAT PYTEST COLLECTS, AND NOTHING ELSE. pytest's own default
+        # `norecursedirs` includes `.*`, so no dot-directory is ever collected
+        # and nothing inside one can run. A rule reading a file pytest never
+        # loads reports on a test that does not exist: the banked canary
+        # fixture's `tests/.archive/test_scaffold.py` was nominated PERMA-SKIP
+        # for being unconditionally skipped, when the truth is it never runs at
+        # all. Pruning here rather than per rule keeps every nominator honest
+        # about its corpus at once.
+        relative_parts = path.relative_to(root).parts
+        if any(part.startswith(".") for part in relative_parts[:-1]):
+            continue
+        if any(part in SKIP_DIRS for part in relative_parts):
             continue
         if any(path.match(pattern) for pattern in patterns):
             found.append(path)
