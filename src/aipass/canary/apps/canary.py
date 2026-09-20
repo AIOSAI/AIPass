@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-08-20
-# Modified: 2026-09-15
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -40,7 +40,7 @@ if sys.platform == "win32":
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit  # noqa: E402
 from aipass.prax import logger  # noqa: E402
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -153,8 +153,10 @@ def print_help() -> None:
     console.print()
 
     console.print("[yellow]Commands:[/yellow]")
-    console.print("  [cyan]note add TEXT[/cyan]   Append one note to the branch-local store")
-    console.print("  [cyan]note list[/cyan]       Print notes in order, with index and timestamp")
+    console.print("  [cyan]note add TEXT[/cyan]      Append one note to the branch-local store")
+    console.print("  [cyan]note list[/cyan]          Print notes in order, with index and timestamp")
+    console.print("  [cyan]span TEXT[/cyan]          Print a written duration as a total in seconds")
+    console.print('  [cyan]span --json TEXT[/cyan]   The same total as {"seconds": N}, nothing on stdout')
     console.print("  [dim]modules are added per test, then removed — 'drone @canary' lists what is present[/dim]")
     console.print()
 
@@ -174,6 +176,8 @@ def print_help() -> None:
     console.print("  $ drone @canary")
     console.print('  $ drone @canary note add "check the tick-5 interrupt"')
     console.print("  $ drone @canary note list")
+    console.print("  $ drone @canary span '2d 4h'")
+    console.print("  $ drone @canary span --json 1h30m")
     console.print("  $ drone @canary --version")
     console.print()
 

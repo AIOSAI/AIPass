@@ -45,17 +45,24 @@ missing import-time set would be masked rather than cured.
 
 ## Where tests live, and where they went
 
-`tests/` holds the entry-point tests, the note store tests, and the dead-cwd
-import pins. Archived suites sit in `tests/.archive/` with the date they were
-retired in the filename.
+`tests/` holds the entry-point tests, the note store tests, the span parser
+tests, and the dead-cwd import pins. Archived suites sit in `tests/.archive/`
+with the date they were retired in the filename.
 
 The json handler tests were archived rather than deleted: every property they
 pinned about this branch's shim is now carried once, parametrised across every
 branch in the fleet, by the standards branch's own contract test. Nothing about
 the shim went unmeasured — the measurement moved to where the shim is one file.
 
-New test files need permission by policy; a hook gate refuses them. Editing an
-existing test is fine. The route for a new one is a mail to the orchestration
+New test files need permission by policy and a hook gate refuses them — across
+the fleet. This branch is the named exception: `agent_test_writing` is off and
+`allow` holds exactly one entry, `canary`, the trial the switch was built for.
+Read it live with `drone @hooks testwrite`; never route around it. For a branch
+that is not on that list, the route to a new test is a mail to the orchestration
 branch naming the defect or the contract it would pin.
+
+Being on the list means this seat cannot observe the refusal: the gate clears
+every write here, so what a blocked branch sees is not measurable from inside
+canary.
 
 [<- Back to the branch README](../README.md)
