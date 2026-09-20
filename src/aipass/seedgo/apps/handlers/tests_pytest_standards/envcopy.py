@@ -70,6 +70,13 @@ COPY_TIMEOUT_SECONDS = 900
 NO_EXECUTION_GROUPS: Tuple[str, ...] = ()
 
 
+#: Where a scratch env's sibling packages came from. Published on the spec:
+#: a run whose siblings came from a different tree than its target is a fact
+#: a reader of the artifact has to be able to find.
+SIBLINGS_FROM_OWN_ROOT = "own_root"
+SIBLINGS_FROM_HOST_REPO = "host_repo"
+
+
 class EnvError(RuntimeError):
     """The environment could not be built, or is not the one we would measure."""
 
@@ -90,6 +97,13 @@ class EnvSpec:
     log_path: Path
     copied_siblings: List[str] = field(default_factory=list)
     symlinked_siblings: List[str] = field(default_factory=list)
+
+    #: Which tree the siblings came from - `own_root` or `host_repo`. A banked
+    #: fixture has no siblings of its own, so its env borrows the running
+    #: checkout's; that is sound (they are the branch's real dependencies) but
+    #: it is not the frozen tree, and the artifact says so rather than implying
+    #: the whole env was frozen at the fixture's commit.
+    sibling_basis: str = SIBLINGS_FROM_OWN_ROOT
 
     #: The execution groups this run was asked to OPT INTO, by bare adapter
     #: name. Empty is the default and means "run nothing that costs extra".
@@ -123,6 +137,7 @@ class EnvSpec:
             "python": str(self.python),
             "copied_siblings": list(self.copied_siblings),
             "symlinked_siblings": list(self.symlinked_siblings),
+            "sibling_basis": self.sibling_basis,
             "m10_complete": self.m10_complete,
             "excludes": list(RSYNC_EXCLUDES),
             # PUBLISHED, so that a run which opted a campaign in and a run
@@ -218,17 +233,74 @@ def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> 
     return copied, symlinked
 
 
+def _has_siblings(real_src: Path, skip: str) -> bool:
+    """Whether this `src/aipass` holds any package other than the target."""
+    if not real_src.is_dir():
+        return False
+    return any(e.is_dir() and e.name not in ("__pycache__", skip) for e in real_src.iterdir())
+
+
+def host_repo_root() -> Optional[Path]:
+    """The real AIPass checkout this code is running from, or None.
+
+    Found by walking up for a directory that HOLDS `src/aipass`, not by
+    counting parents: a parent count is a silent liar the day the file moves
+    one level, and the first cut of this function was off by exactly one.
+    """
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "src" / "aipass").is_dir():
+            return candidate
+    return None
+
+
+def sibling_source(repo_root: Path, target_name: str) -> Tuple[Path, str]:
+    """Where to take sibling packages from, and which choice was made.
+
+    A BANKED FIXTURE IS ITS OWN REPO ROOT AND HAS NO SIBLINGS. `detect_layout`
+    answers with the fixture directory, so `repo_root/src/aipass` holds only
+    the frozen branch - and `aipass` is a REGULAR package, so putting the env's
+    `src` first on PYTHONPATH then hides every real sibling rather than
+    merging with them. The fixture's own conftest imports `aipass.prax`, that
+    import fails, pytest aborts before the hygiene plugin can report, and the
+    lane refuses with T10 "the gate produced no records at all" - a sentence
+    that names the symptom and not one thing about the cause. Measured on both
+    banked fixtures (seedgo todo 123).
+
+    So siblings come from the running checkout when the target's own root has
+    none. The choice is RETURNED rather than made quietly, because a run whose
+    siblings came from a different tree than its target is a fact a reader of
+    the artifact has to be able to find.
+    """
+    own_src = repo_root / "src" / "aipass"
+    if _has_siblings(own_src, target_name):
+        return own_src, SIBLINGS_FROM_OWN_ROOT
+
+    host_root = host_repo_root()
+    host_src = None if host_root is None else host_root / "src" / "aipass"
+    if host_src is not None and _has_siblings(host_src, target_name):
+        return host_src, SIBLINGS_FROM_HOST_REPO
+
+    raise EnvError(
+        f"no sibling packages for {target_name}: neither {own_src} nor {host_src} holds another "
+        "aipass package, so the copy could not import aipass.prax and the suite could not run"
+    )
+
+
 def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bool) -> dict:
     """Mirror the `src/aipass/<name>` layout inside the scratch env."""
     src_dir = env_root / "src" / "aipass"
     src_dir.mkdir(parents=True)
-    real_src = repo_root / "src" / "aipass"
+    real_src, sibling_basis = sibling_source(repo_root, target.name)
 
     for name in ("__init__.py", "conftest.py"):
         if (real_src / name).is_file():
             shutil.copy2(real_src / name, src_dir / name)
-    if (repo_root / "conftest.py").is_file():
-        shutil.copy2(repo_root / "conftest.py", env_root / "conftest.py")
+    root_conftest = repo_root / "conftest.py"
+    host_root = host_repo_root()
+    if not root_conftest.is_file() and sibling_basis == SIBLINGS_FROM_HOST_REPO and host_root is not None:
+        root_conftest = host_root / "conftest.py"
+    if root_conftest.is_file():
+        shutil.copy2(root_conftest, env_root / "conftest.py")
 
     copied, symlinked = _place_siblings(real_src, src_dir, target.name, symlink)
     target_copy = src_dir / target.name
@@ -242,6 +314,7 @@ def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bo
         "pythonpath": str(env_root / "src"),
         "copied_siblings": copied,
         "symlinked_siblings": symlinked,
+        "sibling_basis": sibling_basis,
     }
 
 
@@ -336,6 +409,7 @@ def build_env(
         log_path=log_path,
         copied_siblings=built["copied_siblings"],
         symlinked_siblings=built["symlinked_siblings"],
+        sibling_basis=built.get("sibling_basis", SIBLINGS_FROM_OWN_ROOT),
         execution_groups=normalise_execution_groups(execution_groups),
     )
 

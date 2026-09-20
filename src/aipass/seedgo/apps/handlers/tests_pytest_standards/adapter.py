@@ -40,7 +40,14 @@ from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy, envdiff, gatelog, gutting, nominators
+from aipass.seedgo.apps.handlers.tests_pytest_standards import (
+    envcopy,
+    envdiff,
+    gatelog,
+    gutting,
+    nominators,
+    statement_deletion,
+)
 from aipass.seedgo.apps.handlers.module_root import module_file
 
 ADAPTER_API = 1
@@ -89,6 +96,7 @@ STATIC_GROUPS: tuple = (
 OPT_IN_EXECUTION_GROUPS: tuple = (
     gutting.GROUP,
     envdiff.GROUP,
+    statement_deletion.GROUP,
 )
 
 #: The execution groups this adapter declares but does not run in this
@@ -173,6 +181,7 @@ STATUS_REFUSED = "refused"
 OPT_IN_FLAGS: Dict[str, str] = {
     gutting.GROUP: "--pseudo-tested",
     envdiff.GROUP: "--width-coupling",
+    statement_deletion.GROUP: "--statement-deletion",
 }
 
 
@@ -481,6 +490,7 @@ def nominate(spec: envcopy.EnvSpec) -> dict:
     requested = set(spec.execution_groups)
     documents[gutting.GROUP] = _pseudo_tested_group(spec, gutting.GROUP in requested)
     documents[envdiff.GROUP] = _width_coupling_group(spec, envdiff.GROUP in requested)
+    documents[statement_deletion.GROUP] = _statement_deletion_group(spec, statement_deletion.GROUP in requested)
 
     for name in ADAPTER_GROUPS:
         if name not in documents:
@@ -515,6 +525,15 @@ def _opt_in_reason(group: str) -> str:
             f"per mutant on the banked canary fixture and projected at ~2.44h on seedgo even with "
             f"coverage-based test selection. That is why it is never spent by default. It is a NEW "
             f"group and never a redefinition of scoped_survival (contract 2)"
+        ),
+        statement_deletion.GROUP: (
+            f"BUILT AND AVAILABLE, not requested for this run - pass "
+            f"{OPT_IN_FLAGS[statement_deletion.GROUP]} to opt in. statement_deletion.py deletes ONE "
+            f"statement at a time instead of a whole body, so it finds the statement no test "
+            f"observes inside a function that is otherwise well tested - the shape whole-body "
+            f"gutting cannot isolate. It is the most expensive group in the lane: 8.4x gutting's "
+            f"mutant count on the banked canary fixture and 6.2x on seedgo, paid down by selecting "
+            f"only the tests that execute the statement's OWN lines. Never spent by default"
         ),
         envdiff.GROUP: (
             f"BUILT AND AVAILABLE, not requested for this run - pass "
@@ -673,6 +692,45 @@ def _campaign_outcome(campaign: gutting.CampaignResult) -> Tuple[str, str, bool]
         )
 
     return STATUS_MEASURED, "", False
+
+
+def _statement_deletion_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, object]:
+    """Run the statement-deletion campaign, or say why it did not.
+
+    Mirrors `_pseudo_tested_group` exactly, including the refusal-to-crash
+    contract: a campaign that raises becomes `not_applicable` carrying the
+    exception, never a silent empty document and never a zero that reads like
+    a measurement.
+    """
+    if not requested:
+        return _execution_not_applicable(statement_deletion.GROUP, _opt_in_reason(statement_deletion.GROUP))
+
+    try:
+        sites = statement_deletion.discover_statements(spec.target_copy)
+        campaign = statement_deletion.run_campaign(_suite_target(spec), sites)
+    except Exception as e:  # the lane reports a failure to run, it never hides one
+        logger.info("statement_deletion campaign raised: %s", e)
+        return _execution_not_applicable(
+            statement_deletion.GROUP,
+            f"the statement-deletion campaign raised {type(e).__name__}: {e}",
+        )
+
+    document: Dict[str, object] = {
+        "tier": "exec",
+        "kind": "measure_only",
+        "score": None,
+    }
+    document.update(statement_deletion.summarize(campaign, sites))
+    if campaign.refusal_reason:
+        document["status"] = "not_applicable"
+        document["reason"] = campaign.refusal_reason
+    else:
+        document["status"] = "measured"
+        document["reason"] = (
+            f"{document['statements_executed']} statement deletions run, "
+            f"{document['survived_unobserved']} survived with a covering test watching"
+        )
+    return document
 
 
 def _width_coupling_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, object]:

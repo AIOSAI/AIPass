@@ -94,6 +94,7 @@ KILL_CAUSE_BOUND: tuple = (
     "oracle_execution",
     "pseudo_tested",
     "scoped_survival",
+    "statement_deletion",
     "targeted_mutation",
 )
 
@@ -161,11 +162,25 @@ WIDTH_COUPLING_CONTRACT = (
     "limits, which travel in the group document as `limits`: " + " ".join(envdiff.WIDTH_AXIS_LIMITS)
 )
 
+#: What a statement-deletion survivor does and does not mean. It deletes ONE
+#: simple statement, never a compound header, so a dead BRANCH is out of its
+#: reach by construction - and its declared arid list removes the statements
+#: whose deletion cannot change behaviour without claiming the rest are all
+#: observable.
+STATEMENT_DELETION_SCOPE_CONTRACT = (
+    "A survivor here is one statement whose deletion no covering test noticed. It is not a claim "
+    "about the function around it, and it is not a claim about any branch: this operator deletes "
+    "simple statements only, so branch deletion is out of reach by construction. Arid statements "
+    "(docstrings, pass, bare ellipsis, a trailing `return None`) are declared and excluded up front "
+    "with the reason each cannot change behaviour, and their counts travel in the document."
+)
+
 #: Contract text keyed by the group it binds, for stamping into the artifact.
 GROUP_CONTRACTS: Dict[str, str] = {
     "oracle_execution": KILL_CAUSE_CONTRACT,
     "pseudo_tested": KILL_CAUSE_CONTRACT + " " + PSEUDO_TESTED_SCOPE_CONTRACT,
     "scoped_survival": KILL_CAUSE_CONTRACT + " " + SURVIVAL_NAMING_CONTRACT,
+    "statement_deletion": KILL_CAUSE_CONTRACT + " " + STATEMENT_DELETION_SCOPE_CONTRACT,
     "targeted_mutation": KILL_CAUSE_CONTRACT,
     envdiff.GROUP: WIDTH_COUPLING_CONTRACT,
 }

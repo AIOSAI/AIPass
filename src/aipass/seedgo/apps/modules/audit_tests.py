@@ -70,6 +70,7 @@ COMMANDS: tuple = ("audit-tests", "audit_tests")
 OPT_IN_GROUP_FLAGS: Dict[str, str] = {
     "--pseudo-tested": "pseudo_tested",
     "--width-coupling": "width_coupling",
+    "--statement-deletion": "statement_deletion",
 }
 
 #: The key the opt-in list travels under, from here to `adapter.build_env()`
@@ -348,6 +349,7 @@ def print_introspection() -> None:
     console.print("[yellow]Opt-in groups[/yellow] [dim](BUILT; they cost wall clock, so you have to ask)[/dim]")
     console.print("  pytest.pseudo_tested    --pseudo-tested    one mutant per function; hours on a branch")
     console.print("  pytest.width_coupling   --width-coupling   the suite at two widths, verdicts diffed")
+    console.print("  pytest.statement_deletion --statement-deletion  one statement removed at a time")
     console.print()
     console.print("[dim]Unasked-for, both report not_applicable saying they are AVAILABLE, not unbuilt.[/dim]")
     console.print("[dim]SCORED is not GATING: this blocks nothing at launch.[/dim]")
@@ -371,8 +373,9 @@ def _print_help() -> None:
     console.print("  --no-tmpdir-allowance     treat TMPDIR writes as violations too")
     console.print("  --width-coupling          run the suite at two widths and diff the verdicts")
     console.print("  --pseudo-tested           gut one function at a time; HOURS on a real branch")
+    console.print("  --statement-deletion      delete one statement at a time; the most expensive group")
     console.print()
-    console.print("[dim]Both opt-in groups are BUILT. They are off by default because they cost[/dim]")
+    console.print("[dim]All three opt-in groups are BUILT. They are off by default because they cost[/dim]")
     console.print("[dim]whole extra suite runs, not because anything about them is unfinished.[/dim]")
     console.print("[dim]The suite runs against a COPY. Nothing writes to the real target.[/dim]")
     console.print("[dim]A run that cannot prove its own gate can fire publishes NOTHING.[/dim]")
