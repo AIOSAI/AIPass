@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the pytest pack, the payload gate and the verb
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -595,15 +595,20 @@ class TestNominate:
         did_not_run = {name for name, document in documents.items() if document["status"] == "not_applicable"}
         silent = sorted(name for name in did_not_run if not documents[name]["reason"])
 
-        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS)
+        # Both DECLARATIONS, unioned, rather than one of them plus a literal:
+        # a group moving from "unbuilt" to "opt-in" is a legitimate edit and
+        # must not need this line rewritten to stay true.
+        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS) | set(adapter.OPT_IN_EXECUTION_GROUPS)
         assert silent == []
 
     def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
         """Law S1 for every group that does not run, however many there are.
 
         The count is gone for the same reason it went in the two tests above:
-        `pseudo_tested` joined this tuple because its engine exists and its
-        RUN LOOP does not, and a `== 2` turned that honest state into a red.
+        `pseudo_tested` passed through this tuple while its engine existed and
+        its RUN LOOP did not, and a `== 2` turned that honest state into a red.
+        It has since left for OPT_IN_EXECUTION_GROUPS, which is the same fact
+        moving again - and this test did not have to change for either.
         """
         assert {"scoped_survival", "targeted_mutation"} <= set(adapter.UNBUILT_EXECUTION_GROUPS)
 
@@ -615,6 +620,105 @@ class TestNominate:
         # A declared group the adapter never fills would vanish from the
         # published list, which is precisely what S3 exists to catch.
         assert set(adapter.declared_groups()) == set(adapter.nominate(_spec_for(tmp_path)))
+
+
+class TestOptInExecutionGroups:
+    """A BUILT group nobody asked for still publishes, and says which it is.
+
+    The defect these pin is the one the seam was built to end: two engines
+    shipped, measured and unreachable, with the published artifact calling
+    them "not built". A group that cannot be told apart from an unimplemented
+    one is a group nobody will ever turn on.
+    """
+
+    def test_both_opt_in_groups_are_still_in_the_published_list(self, tmp_path):
+        """Law S3: opting out may never remove a group from the artifact."""
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            assert name in adapter.declared_groups()
+            assert name in documents
+
+    def test_an_unrequested_opt_in_group_is_not_reported_as_unbuilt(self, tmp_path):
+        """The reason must not borrow the wording of the groups beside it.
+
+        `not built` was true for these two yesterday and is false today, and a
+        stale sentence in a `not_applicable` is worse than no sentence: it
+        tells a reader deciding whether to spend the wall clock that there is
+        nothing to spend it on.
+        """
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            reason = documents[name]["reason"]
+            assert documents[name]["status"] == "not_applicable"
+            assert "not built" not in reason
+            assert adapter.OPT_IN_FLAGS[name] in reason, "the reason must name the flag that runs it"
+
+    def test_no_opt_in_group_carries_a_score(self, tmp_path):
+        """Neither is in SCORED_GROUPS, so Law S7a refuses a score on either."""
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            assert documents[name]["score"] is None
+
+    def test_the_request_rides_on_the_spec_rather_than_on_a_new_parameter(self, tmp_path):
+        """The seam itself: `nominate(spec)` can see what the operator asked for.
+
+        Pinned because the whole point of this design is that it cost no
+        signature change. A future refactor that moved the request into a
+        second argument would pass its own tests and silently stop honouring
+        `--width-coupling` for every caller that still holds the old shape.
+        """
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = ["width_coupling"]
+
+        assert "width_coupling" in spec.execution_groups
+        assert spec.to_document()["execution_groups"] == ["width_coupling"]
+
+    def test_a_run_that_opted_in_does_not_document_as_one_that_did_not(self, tmp_path):
+        """Two artifacts identical in what was ASKED FOR are unreadable later."""
+        plain = _spec_for(tmp_path).to_document()
+        opted = _spec_for(tmp_path)
+        opted.execution_groups = ["pseudo_tested"]
+
+        assert plain != opted.to_document()
+        assert plain["execution_groups"] == []
+
+    def test_the_opt_in_list_is_deduplicated_in_the_order_it_was_asked_for(self):
+        """A flag typed twice must not read back as two campaigns requested."""
+        assert envcopy.normalise_execution_groups(["width_coupling", "pseudo_tested", "width_coupling"]) == [
+            "width_coupling",
+            "pseudo_tested",
+        ]
+
+    def test_nothing_is_requested_when_nothing_was_asked_for(self):
+        """The default is the behaviour the lane had before the seam existed."""
+        assert envcopy.normalise_execution_groups(None) == []
+
+    def test_an_engine_that_raises_produces_a_group_and_never_a_crash(self, monkeypatch, tmp_path):
+        """Law S1 at its sharpest: could-not-run and found-nothing differ.
+
+        `nominate()` is called inside the runner's try block, so an exception
+        escaping one campaign would refuse the WHOLE target and publish nothing
+        about the other seventeen groups - a measurement lost to a dependency
+        the target never needed.
+        """
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import envdiff
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("no interpreter")
+
+        monkeypatch.setattr(envdiff, "measure_width_coupling", _explode)
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [envdiff.GROUP]
+
+        document = adapter.nominate(spec)[envdiff.GROUP]
+
+        assert document["status"] == "not_applicable"
+        assert "RuntimeError" in document["reason"] and "no interpreter" in document["reason"]
+        assert document["score"] is None
+        assert document["diverged"] == []
 
 
 class TestTeardown:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -42,7 +42,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -63,6 +63,11 @@ RSYNC_EXCLUDES: Tuple[str, ...] = (
 #: Wall-clock ceiling on one rsync. A copy that hangs must not become a hang
 #: of the whole lane; T-BUDGET covers the suite, this covers the setup.
 COPY_TIMEOUT_SECONDS = 900
+
+#: What an unrequested run asks for. Named rather than written as a bare
+#: `[]` three call sites apart, because the empty list IS the default
+#: behaviour of the whole lane and a reader deserves to find it by name.
+NO_EXECUTION_GROUPS: Tuple[str, ...] = ()
 
 
 class EnvError(RuntimeError):
@@ -86,6 +91,18 @@ class EnvSpec:
     copied_siblings: List[str] = field(default_factory=list)
     symlinked_siblings: List[str] = field(default_factory=list)
 
+    #: The execution groups this run was asked to OPT INTO, by bare adapter
+    #: name. Empty is the default and means "run nothing that costs extra".
+    #:
+    #: IT LIVES ON THE SPEC BECAUSE THE SPEC IS THE ONLY THING `nominate()`
+    #: RECEIVES. `build_env(target, workdir, options)` is handed the operator's
+    #: options and `nominate(spec)` is not, so an execution group that needs a
+    #: per-run decision had no channel to read one from - and bumping
+    #: ADAPTER_API to add a parameter would break every adapter for a fact that
+    #: already fits on the object both functions share. Carrying it here costs
+    #: no signature change and no version bump.
+    execution_groups: List[str] = field(default_factory=list)
+
     @property
     def m10_complete(self) -> bool:
         """True when nothing in this env can write through to the real tree.
@@ -108,6 +125,12 @@ class EnvSpec:
             "symlinked_siblings": list(self.symlinked_siblings),
             "m10_complete": self.m10_complete,
             "excludes": list(RSYNC_EXCLUDES),
+            # PUBLISHED, so that a run which opted a campaign in and a run
+            # which did not cannot produce the same document. Two artifacts
+            # identical everywhere but in what was ASKED FOR would make the
+            # opt-in unreadable after the fact, and "why is width_coupling
+            # not_applicable here and measured there" unanswerable.
+            "execution_groups": list(self.execution_groups),
         }
 
 
@@ -237,14 +260,42 @@ def _build_plain_env(target: Path, env_root: Path) -> dict:
     }
 
 
+def normalise_execution_groups(requested: Optional[Sequence[str]]) -> List[str]:
+    """The opt-in list, de-duplicated and in the order it was asked for.
+
+    Order is kept rather than sorted so the document reads back as the operator
+    typed it, and duplicates are dropped so that `--width-coupling
+    --width-coupling` cannot make one campaign look like two in the artifact.
+
+    Args:
+        requested: Whatever the caller was handed, including None.
+
+    Returns:
+        A fresh list. Never the caller's own, which a dataclass field would
+        otherwise keep a live reference to.
+    """
+    groups: List[str] = []
+    for name in requested or NO_EXECUTION_GROUPS:
+        text = str(name)
+        if text and text not in groups:
+            groups.append(text)
+    return groups
+
+
 def build_env(
     target: Path,
     env_root: Path,
     plugin_source: Path,
     python_override: Optional[str] = None,
     symlink_siblings: bool = False,
+    execution_groups: Optional[Sequence[str]] = None,
 ) -> EnvSpec:
-    """Materialise the scratch env and return how to run pytest inside it."""
+    """Materialise the scratch env and return how to run pytest inside it.
+
+    `execution_groups` DEFAULTS TO NOTHING, and that default is the lane's
+    existing behaviour exactly: every extra campaign is opt-in, so a caller
+    that says nothing gets the run it got before this parameter existed.
+    """
     target = target.resolve()
     layout, repo_root = detect_layout(target)
     env_root = env_root.resolve()
@@ -285,6 +336,7 @@ def build_env(
         log_path=log_path,
         copied_siblings=built["copied_siblings"],
         symlinked_siblings=built["symlinked_siblings"],
+        execution_groups=normalise_execution_groups(execution_groups),
     )
 
     # Recorded because `m10_complete: false` is the one env state a reader
@@ -297,6 +349,10 @@ def build_env(
             "copied_siblings": len(spec.copied_siblings),
             "symlinked_siblings": len(spec.symlinked_siblings),
             "m10_complete": spec.m10_complete,
+            # Logged beside the copy shape because it is the other thing that
+            # decides what this run cost. A 40-minute run with no explanation
+            # in the log is a run nobody can account for later.
+            "execution_groups": list(spec.execution_groups),
         },
     )
     return spec

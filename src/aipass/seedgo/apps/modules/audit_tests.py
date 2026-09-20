@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_tests.py
 # Description: the audit-tests verb - execution-tier test quality measurement
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -27,6 +27,8 @@ once it has claimed.
     drone @seedgo audit-tests aipass              every citizen
     drone @seedgo audit-tests @backup --budget 300
     drone @seedgo audit-tests @backup --prove-refusal    canary point C
+    drone @seedgo audit-tests @backup --width-coupling   two widths, diffed
+    drone @seedgo audit-tests @backup --pseudo-tested    one mutant per function
 
 A REFUSAL NOW REACHES THE SHELL; A SCORE STILL DOES NOT. Until 2026-09-07 this
 verb returned truthy for everything and `seedgo.py` turned that into exit 0, so
@@ -40,7 +42,7 @@ nobody recognised) leaves with its own code, per the owner's standing ruling fro
 the 2026-09-07 fleet sweep.
 """
 
-from typing import List, NoReturn
+from typing import Dict, List, NoReturn
 
 from aipass.cli import console
 from aipass.cli.apps.modules import error, success, warning
@@ -53,12 +55,34 @@ from aipass.seedgo.apps.modules import CommandRefused
 #: Exact tokens this module claims. Never a prefix match.
 COMMANDS: tuple = ("audit-tests", "audit_tests")
 
+#: The flags that opt a BUILT execution group into a run, mapped to the bare
+#: group name the adapter publishes it under.
+#:
+#: ONE TABLE, READ BY BOTH THE PARSER AND THE DID-YOU-MEAN. Law ARGV's whole
+#: mechanism is that the loop which accepts a token and the list which
+#: suggests one cannot disagree; a flag added to the loop and forgotten in
+#: LANE_FLAGS would be accepted and then never offered to somebody who
+#: mistyped it, which is the drift the law exists to end.
+#:
+#: Neither is on by default and neither ever will be by accident: both cost
+#: whole extra suite executions - `--pseudo-tested` one per function, which is
+#: projected at ~2.44h on seedgo, and `--width-coupling` two per run.
+OPT_IN_GROUP_FLAGS: Dict[str, str] = {
+    "--pseudo-tested": "pseudo_tested",
+    "--width-coupling": "width_coupling",
+}
+
+#: The key the opt-in list travels under, from here to `adapter.build_env()`
+#: and onto the EnvSpec that `nominate()` reads it back off.
+OPTION_EXECUTION_GROUPS = "execution_groups"
+
 #: Every option this verb accepts, for the did-you-mean a stray token gets.
 LANE_FLAGS: tuple = (
     "--budget",
     "--prove-refusal",
     "--symlink-siblings",
     "--no-tmpdir-allowance",
+    *OPT_IN_GROUP_FLAGS,
     "--help",
     "-h",
 )
@@ -172,6 +196,14 @@ def _parse(args: List[str]) -> tuple:
             options["no_tmpdir_allowance"] = True
             index += 1
             continue
+        if token in OPT_IN_GROUP_FLAGS:
+            # These APPEND rather than assign. `--pseudo-tested --width-coupling`
+            # asks for both campaigns, and a second flag that overwrote the
+            # first would run half of what the operator typed while reporting
+            # the other half as never requested.
+            _request_execution_group(options, OPT_IN_GROUP_FLAGS[token])
+            index += 1
+            continue
         if not token.startswith("-"):
             # One target per run: `runner.run()` takes a single argument, so a
             # second bare word names nothing. `aipass` is the fleet form.
@@ -185,6 +217,22 @@ def _parse(args: List[str]) -> tuple:
         index += 1
 
     return target, options, unrecognized
+
+
+def _request_execution_group(options: dict, group: str) -> None:
+    """Add one opt-in execution group to the request, once.
+
+    De-duplicated here rather than downstream because the request is PUBLISHED
+    in the artifact's environment block: a flag typed twice must not read back
+    as two campaigns having been asked for.
+
+    Args:
+        options: The options dict being built by `_parse`.
+        group: The bare adapter group name the flag asks for.
+    """
+    requested = options.setdefault(OPTION_EXECUTION_GROUPS, [])
+    if group not in requested:
+        requested.append(group)
 
 
 def _as_int(raw: str) -> int:
@@ -297,6 +345,11 @@ def print_introspection() -> None:
     console.print("  order_dependence   not built; reports not_applicable with a reason")
     console.print("  ai_advisory        nominate-only, never scored")
     console.print()
+    console.print("[yellow]Opt-in groups[/yellow] [dim](BUILT; they cost wall clock, so you have to ask)[/dim]")
+    console.print("  pytest.pseudo_tested    --pseudo-tested    one mutant per function; hours on a branch")
+    console.print("  pytest.width_coupling   --width-coupling   the suite at two widths, verdicts diffed")
+    console.print()
+    console.print("[dim]Unasked-for, both report not_applicable saying they are AVAILABLE, not unbuilt.[/dim]")
     console.print("[dim]SCORED is not GATING: this blocks nothing at launch.[/dim]")
     console.print("[dim]Run 'drone @seedgo audit-tests --help' for usage.[/dim]")
     console.print()
@@ -316,7 +369,11 @@ def _print_help() -> None:
     console.print("  --prove-refusal           run with the gate OFF; the run must REFUSE")
     console.print("  --symlink-siblings        faster, and stamps m10_complete: false")
     console.print("  --no-tmpdir-allowance     treat TMPDIR writes as violations too")
+    console.print("  --width-coupling          run the suite at two widths and diff the verdicts")
+    console.print("  --pseudo-tested           gut one function at a time; HOURS on a real branch")
     console.print()
+    console.print("[dim]Both opt-in groups are BUILT. They are off by default because they cost[/dim]")
+    console.print("[dim]whole extra suite runs, not because anything about them is unfinished.[/dim]")
     console.print("[dim]The suite runs against a COPY. Nothing writes to the real target.[/dim]")
     console.print("[dim]A run that cannot prove its own gate can fire publishes NOTHING.[/dim]")
     console.print()

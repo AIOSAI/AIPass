@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: adapter.py
 # Description: the pytest execution adapter - the 8-function contract
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -36,11 +36,11 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy, gatelog, nominators
+from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy, envdiff, gatelog, gutting, nominators
 from aipass.seedgo.apps.handlers.module_root import module_file
 
 ADAPTER_API = 1
@@ -72,27 +72,47 @@ STATIC_GROUPS: tuple = (
     "static_unentered_assert",
 )
 
+#: The execution groups whose ENGINES EXIST and which still do not run unless
+#: an operator asks for them by name on the command line.
+#:
+#: "Opt-in" is a statement about COST, never about confidence. Both engines
+#: are built, measured and published here; what neither of them may do is
+#: spend an operator's wall clock without being asked. `pseudo_tested` runs
+#: one whole suite execution per FUNCTION - projected at ~2.44h on seedgo even
+#: with coverage-based test selection - and `width_coupling` runs the suite
+#: twice more on top of the gated run. A default that quietly did either would
+#: turn `audit-tests` from a thing you run into a thing you schedule.
+#:
+#: THE NAMES COME FROM THE ENGINES rather than being spelled again here. A
+#: group name restated in a second file is a group name that can drift, and
+#: the published list is exactly what Law S3 refuses to let drift.
+OPT_IN_EXECUTION_GROUPS: tuple = (
+    gutting.GROUP,
+    envdiff.GROUP,
+)
+
 #: The execution groups this adapter declares but does not run in this
 #: release. They are published `not_applicable` with a reason from day one,
 #: because the rev-4 contracts binding them (kill_cause, the survival naming
 #: rule) have to land before the capability or they never land at all.
 #:
-#: `pseudo_tested` is the exception that proves the list is about the RUN LOOP
-#: and not about the code: its engine (`gutting.py`) is built and measured. It
-#: is unwired because `nominate(spec)` is the only seam a group document can
-#: come from and that signature carries no options channel, so there is no way
-#: to opt a campaign in per run without bumping ADAPTER_API. Running it
-#: unconditionally is not the alternative: the cost is one suite execution per
-#: function, measured at 2.09s on an 85-test suite. Its reason says so rather
-#: than borrowing "not built" from the two groups beside it, because a reader
-#: deciding whether to fund the seam needs to know the engine already exists.
+#: `pseudo_tested` LEFT THIS TUPLE on 2026-09-19 and that is an honesty fix,
+#: not a promotion: the engine had been built and measured for a day while
+#: this list still said "not built", because `nominate(spec)` carried no
+#: options channel to opt a campaign in per run. It has one now - the request
+#: rides on `EnvSpec`, which both `build_env()` and `nominate()` already hold -
+#: so the group runs when it is asked for and says it is AVAILABLE when it is
+#: not. Nothing vanished: it moved to OPT_IN_EXECUTION_GROUPS and is published
+#: on every run either way (Law S3).
 UNBUILT_EXECUTION_GROUPS: tuple = (
-    "pseudo_tested",
     "scoped_survival",
     "targeted_mutation",
 )
 
-ADAPTER_GROUPS: tuple = STATIC_GROUPS + UNBUILT_EXECUTION_GROUPS
+#: Every group this adapter publishes, in published order. The opt-in pair
+#: sits where `pseudo_tested` already sat so that an artifact diff across this
+#: change shows an ADDITION and not a reshuffle.
+ADAPTER_GROUPS: tuple = STATIC_GROUPS + OPT_IN_EXECUTION_GROUPS + UNBUILT_EXECUTION_GROUPS
 
 #: Law S3 - a group may only VANISH by a recorded ruling, and the ruling
 #: travels in the artifact rather than in a commit message nobody will find.
@@ -130,6 +150,30 @@ TEST_DIR_NAMES: tuple = ("tests", "test")
 
 #: Default wall-clock budget for one suite (Law T-BUDGET).
 DEFAULT_BUDGET_SECONDS = 900
+
+#: The key an operator's opt-in arrives under, in the options dict the verb
+#: builds and `build_env()` receives. Named once so the verb, the spec and
+#: this module cannot disagree about the spelling of it.
+OPTION_EXECUTION_GROUPS = "execution_groups"
+
+#: The shape of an execution group's document. `measure_only` is the honest
+#: kind for both of these: they report counts and named findings, and neither
+#: is in `spine.SCORED_GROUPS`, so `score` is None on every path out of here.
+#: Scoring is the core's job and an adapter that computed one would have
+#: stepped over the seam this whole pack is built around.
+EXEC_TIER = "exec"
+EXEC_KIND = "measure_only"
+STATUS_MEASURED = "measured"
+STATUS_NOT_APPLICABLE = "not_applicable"
+STATUS_REFUSED = "refused"
+
+#: The flag that asks for each opt-in group, quoted in the group's own reason.
+#: A `not_applicable` that says a group is available without saying how to ask
+#: for it is a reason nobody can act on.
+OPT_IN_FLAGS: Dict[str, str] = {
+    gutting.GROUP: "--pseudo-tested",
+    envdiff.GROUP: "--width-coupling",
+}
 
 
 # =============================================================================
@@ -192,6 +236,14 @@ def build_env(target: Path, workdir: Path, options: dict) -> envcopy.EnvSpec:
     first calibration run. A default that can write the real repo is not a
     default an auditor may ship. Choosing the fast mode stamps
     `m10_complete: false` on the run that chose it.
+
+    THIS IS WHERE THE OPTIONS CHANNEL ALREADY WAS. `nominate(spec)` takes only
+    the spec, so for a year the pack's answer to "how does an operator opt a
+    campaign in per run" was "bump ADAPTER_API". It never needed one: this
+    function receives `options` and returns the very object `nominate()` is
+    handed, so the request simply rides across on the spec. No signature in the
+    eight-function contract changed to make the two built execution groups
+    runnable.
     """
     return envcopy.build_env(
         Path(target),
@@ -199,6 +251,7 @@ def build_env(target: Path, workdir: Path, options: dict) -> envcopy.EnvSpec:
         PLUGIN_FILE,
         python_override=options.get("python"),
         symlink_siblings=bool(options.get("symlink_siblings")),
+        execution_groups=options.get(OPTION_EXECUTION_GROUPS),
     )
 
 
@@ -400,22 +453,34 @@ def fire_canary(spec: envcopy.EnvSpec) -> dict:
 
 
 def nominate(spec: envcopy.EnvSpec) -> dict:
-    """Static species. Nominate-only, never scored, ever (Law M1).
+    """Every group this adapter publishes, static and execution alike.
 
     THE CORPUS IS THE COPY, NEVER THE REAL TREE. The nominators only read, so
     pointing them at the real target would break nothing visible - and that is
     precisely why it is worth stating: the static tier would then be the one
     part of the lane measuring a different program from the rest of it, and a
     rule reading one tree while the gate reads another produces two numbers
-    nobody can reconcile.
+    nobody can reconcile. The two execution campaigns below run against the
+    same copy, through the same interpreter, for the same reason.
 
     A group whose nominator could not run reports `not_applicable` with the
     reason rather than an empty `measured`. Ruff's absence is the live case.
+
+    THE STATIC TIER IS STILL NOMINATE-ONLY (Law M1). What changed on
+    2026-09-19 is that this function also publishes two EXECUTION groups when
+    the spec says an operator asked for them. Neither carries a score, neither
+    convicts, and both report `not_applicable` with a reason when they were not
+    requested - so the default run is byte-for-byte the run it was before,
+    except that its two available campaigns now say they are available.
     """
     documents = nominators.run(spec.target_copy)
 
     for name in UNBUILT_EXECUTION_GROUPS:
         documents[name] = gatelog.nomination_group(_unbuilt_reason(name))
+
+    requested = set(spec.execution_groups)
+    documents[gutting.GROUP] = _pseudo_tested_group(spec, gutting.GROUP in requested)
+    documents[envdiff.GROUP] = _width_coupling_group(spec, envdiff.GROUP in requested)
 
     for name in ADAPTER_GROUPS:
         if name not in documents:
@@ -428,18 +493,223 @@ def nominate(spec: envcopy.EnvSpec) -> dict:
     return documents
 
 
+# =============================================================================
+# 6a - THE OPT-IN EXECUTION GROUPS
+# =============================================================================
+
+
+def _opt_in_reason(group: str) -> str:
+    """Why a BUILT execution group did not run on a run that never asked for it.
+
+    DELIBERATELY NOT the "not built" sentence its two neighbours carry. That
+    wording is false for these groups now, and a reader deciding whether to
+    spend the wall clock needs three facts a false sentence withholds: that the
+    capability exists, what it costs, and the exact flag that buys it.
+    """
+    reasons = {
+        gutting.GROUP: (
+            f"BUILT AND AVAILABLE, not requested for this run - pass "
+            f"{OPT_IN_FLAGS[gutting.GROUP]} to opt in. gutting.py replaces one function's whole "
+            f"body with `{gutting.GUT_STATEMENT}` and runs the tests that could kill it, once per "
+            f"function, so the cost scales with the TREE and not with the run: measured at 2.09s "
+            f"per mutant on the banked canary fixture and projected at ~2.44h on seedgo even with "
+            f"coverage-based test selection. That is why it is never spent by default. It is a NEW "
+            f"group and never a redefinition of scoped_survival (contract 2)"
+        ),
+        envdiff.GROUP: (
+            f"BUILT AND AVAILABLE, not requested for this run - pass "
+            f"{OPT_IN_FLAGS[envdiff.GROUP]} to opt in. envdiff.py runs the suite twice, at "
+            f"COLUMNS={envdiff.NARROW_COLUMNS} and COLUMNS={envdiff.WIDE_COLUMNS}, and subtracts "
+            f"the per-nodeid verdicts; it executes no mutant and is bound by no kill_cause. It is "
+            f"cheap - 10.3s on the banked canary fixture, 194s on seedgo - and it still costs two "
+            f"more whole suite executions on top of the gated one, so the doubling is asked for "
+            f"rather than assumed until it has been ruled on"
+        ),
+    }
+    return reasons.get(
+        group,
+        f"'{group}' is listed as an opt-in execution group with no reason written for it - "
+        f"that is a defect in this adapter and not a statement about the target",
+    )
+
+
+def _execution_not_applicable(group: str, reason: str) -> Dict[str, object]:
+    """An execution group that did not run, stated lawfully (Law S1).
+
+    The counts are ABSENT rather than zeroed. A `functions_probed: 0` beside
+    `status: not_applicable` invites exactly the reading S1 forbids - that the
+    campaign looked and found nothing - and the empty `mutants` list is carried
+    only because Law S9 iterates it and an absent list would be a different
+    shape from the measured document for no reason a reader benefits from.
+    """
+    return {
+        "group": group,
+        "tier": EXEC_TIER,
+        "kind": EXEC_KIND,
+        "status": STATUS_NOT_APPLICABLE,
+        "reason": reason,
+        "score": None,
+        "mutants": [],
+    }
+
+
+def _suite_target(spec: envcopy.EnvSpec) -> gutting.SuiteTarget:
+    """The copy's suite, as gutting invokes it. Built here, never by the engine."""
+    return gutting.SuiteTarget(
+        python=spec.python,
+        cwd=spec.run_cwd,
+        pythonpath=spec.pythonpath,
+        test_arg=spec.test_arg,
+        target_copy=spec.target_copy,
+    )
+
+
+def _axis_target(spec: envcopy.EnvSpec) -> envdiff.Target:
+    """The copy's suite, as the environment-diff axis invokes it."""
+    return envdiff.Target(
+        python=spec.python,
+        cwd=spec.run_cwd,
+        pythonpath=spec.pythonpath,
+        test_arg=spec.test_arg,
+    )
+
+
+def _pseudo_tested_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, object]:
+    """The per-function extreme-mutation campaign, when it was asked for.
+
+    COVERAGE SELECTION IS THE MODE THIS SEAM OPTS INTO. The full-suite mode
+    runs every test for every function and the projection for it on a real
+    branch is measured in hours; the coverage mode runs only the tests that
+    execute the gutted body. The engine REFUSES rather than silently falling
+    back when the map cannot be built, which is why a target without
+    pytest-cov gets a `not_applicable` naming that - and not a number quietly
+    read off a different campaign than the one it claims to be.
+
+    An engine that raises produces a `not_applicable` carrying the exception,
+    never a crash and never a silent clean: `nominate()` is called from inside
+    the runner's try block, so an escape here would convert one unavailable
+    group into a whole-target refusal that says nothing about the other
+    eighteen.
+    """
+    if not requested:
+        return _execution_not_applicable(gutting.GROUP, _opt_in_reason(gutting.GROUP))
+
+    try:
+        sites = gutting.discover_functions(spec.target_copy)
+        campaign = gutting.run_campaign(
+            _suite_target(spec),
+            sites,
+            selection=gutting.SELECTION_COVERAGE,
+        )
+    except Exception as exc:
+        logger.warning(f"[AUDIT-TESTS] the gutting campaign could not run: {type(exc).__name__}: {exc}")
+        return _execution_not_applicable(
+            gutting.GROUP,
+            f"the gutting campaign raised {type(exc).__name__}: {exc} - nothing about this "
+            f"target's oracles was measured, which is not the same as nothing being wrong",
+        )
+
+    return _pseudo_tested_document(campaign)
+
+
+def _pseudo_tested_document(campaign: gutting.CampaignResult) -> Dict[str, object]:
+    """One finished campaign as the artifact publishes it."""
+    status, reason, exhausted = _campaign_outcome(campaign)
+    document: Dict[str, object] = {
+        "tier": EXEC_TIER,
+        "kind": EXEC_KIND,
+        "status": status,
+        "reason": reason,
+        "score": None,
+    }
+    document.update(gutting.summarize(campaign))
+    # T-BUDGET, stamped from the campaign rather than inferred by a reader from
+    # the `not_run` reasons buried three levels down. An exhausted campaign is
+    # `refused` and never `measured`: a partial sweep reported as a whole-tree
+    # survivor count is forgery by omission.
+    document["budget_exhausted"] = exhausted
+    return document
+
+
+def _campaign_outcome(campaign: gutting.CampaignResult) -> Tuple[str, str, bool]:
+    """`(status, reason, budget_exhausted)` for a finished campaign.
+
+    THREE OUTCOMES, THREE DOCUMENTS, and none of them share a shape with
+    another. A campaign whose map could not be built measured nothing; a
+    campaign that ran out of clock measured part of a tree and may not report
+    it as the whole; a campaign that finished measured what it says it did.
+    Collapsing any two of those into one status is Law S1 broken from the
+    inside of an adapter.
+    """
+    coverage_map = campaign.coverage_map
+    if coverage_map is not None and coverage_map.refusal_reason:
+        return (
+            STATUS_NOT_APPLICABLE,
+            f"the coverage map this campaign selects its tests from could not be built, so no "
+            f"mutant was executed: {coverage_map.refusal_reason}",
+            False,
+        )
+
+    if not campaign.baseline.green:
+        return (
+            STATUS_NOT_APPLICABLE,
+            f"the unmutated suite is not green, so survivorship means nothing and no verdict was "
+            f"read: {campaign.baseline.refusal_reason}",
+            False,
+        )
+
+    unprobed = sum(
+        1
+        for result in campaign.results
+        if result.outcome == gutting.OUTCOME_NOT_RUN and result.reason == gutting.REASON_BUDGET_EXHAUSTED
+    )
+    if unprobed:
+        return (
+            STATUS_REFUSED,
+            f"the {campaign.budget_seconds}s campaign budget expired with {unprobed} function(s) "
+            f"still unprobed, so what was measured is a fragment of this tree and is published as "
+            f"one rather than as a survivor count for it (Law T-BUDGET)",
+            True,
+        )
+
+    return STATUS_MEASURED, "", False
+
+
+def _width_coupling_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[str, object]:
+    """The two-width verdict diff, when it was asked for.
+
+    The engine owns both document shapes already - `group_document()` for a run
+    that happened and `not_applicable_document()` for one that did not - so
+    this function decides only WHETHER, never WHAT. That is the same seam the
+    adapter itself sits on one level up.
+
+    `budget_seconds` is stamped here because the axis publishes its elapsed
+    time and not its ceiling, and Law T-BUDGET requires both of any execution
+    group that reports `measured`. The ceiling is the ENGINE's own default: the
+    lane's `--budget` reaches `run_gated()` and has no channel into
+    `nominate()`, and inventing a second number here would make the artifact
+    claim a budget nothing enforced.
+    """
+    if not requested:
+        return envdiff.not_applicable_document(_opt_in_reason(envdiff.GROUP))
+
+    try:
+        result = envdiff.measure_width_coupling(_axis_target(spec))
+    except Exception as exc:
+        logger.warning(f"[AUDIT-TESTS] the width axis could not run: {type(exc).__name__}: {exc}")
+        return envdiff.not_applicable_document(
+            f"the width axis raised {type(exc).__name__}: {exc} - no verdict was compared at "
+            f"either width, which is not the same as no test being width-coupled"
+        )
+
+    document: Dict[str, object] = dict(envdiff.group_document(result))
+    document["budget_seconds"] = envdiff.DEFAULT_BUDGET_SECONDS
+    return document
+
+
 def _unbuilt_reason(group: str) -> str:
     """Why a declared execution group has nothing to report yet."""
     reasons = {
-        "pseudo_tested": (
-            "built but not wired to the run loop - gutting.py implements per-function extreme "
-            "mutation (one mutant per function, body replaced by `return None`) and was proven "
-            "on the banked canary fixture: 21 functions probed, 3 survivors, kills split 14 "
-            "AssertionError / 4 error / 0 unknown at 2.09s per mutant. It is a NEW group and "
-            "never a redefinition of scoped_survival (contract 2). It stays unrun because "
-            "nominate(spec) carries no options channel to opt a campaign in per run, and the "
-            "cost - one suite execution per function - may not be spent by default"
-        ),
         "scoped_survival": (
             "not built - module gutting is not implemented in this release. When it is, it "
             "measures ORACLE SURVIVAL and is never to be read as pseudo-testedness (contract 2)"

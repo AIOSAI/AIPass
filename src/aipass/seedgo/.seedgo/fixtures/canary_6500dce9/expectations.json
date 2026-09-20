@@ -10,10 +10,12 @@
   "fixture": {
     "subject": "@canary",
     "commit": "6500dce9",
-    "tree": "tree/",
+    "tree": "src/aipass/canary/",
     "tracked_fidelity": "every file tracked at 6500dce9 is byte-identical in tree/, verified file by file against git show",
     "untracked_addendum": {
-      "paths": ["tests/.archive/"],
+      "paths": [
+        "tests/.archive/"
+      ],
       "provenance": "copied from the live canary worktree on 2026-09-19, never committed to any branch so no commit can supply it",
       "sha256": {
         "tests/.archive/test_scaffold.py": "4b01d4130807e56fa063cd435cc2805df0c4536b4bdb7f8e78853c768ed3ec38",
@@ -26,7 +28,8 @@
       "live_drift_at_banking": "the live canary tracked tree differed from 6500dce9 in README.md only, so the untracked addendum is contemporaneous with the commit"
     },
     "why_not_under_payload": "the brief asked for the fixture under payload/. It cannot live there: adapters.execution_isolation() refuses to register any pack whose payload contains a file importing aipass, and canary's tree is nothing but such files. Measured by planting one canary module under payload/ - isolated: false, 4 offenders, pack registration refused. .seedgo/ is outside apps/ (so outside the audit's corpus), outside tests/ (so outside the test-write gate), and tracked (so the fixture is frozen and travels with the repo).",
-    "one_campaign_per_copy": "a gutting campaign mutates a copy of tree/, never tree/ itself. Two campaigns against one copy corrupt each other's baseline - measured."
+    "one_campaign_per_copy": "a gutting campaign mutates a copy of tree/, never tree/ itself. Two campaigns against one copy corrupt each other's baseline - measured.",
+    "layout_note": "Banked as src/aipass/canary rather than a bare tree/ so envcopy.detect_layout() returns a repo root and the COPY is importable as aipass.canary. Measured 2026-09-19: under the bare tree/ shape the fixture's own tests resolved aipass.canary through the venv to the LIVE branch (/home/patrick/.../src/aipass/canary/apps/canary.py), so any execution group ran the fixture's TESTS against the live SOURCE. That is round 0's own C2 row reproduced inside this instrument."
   },
   "release_check": {
     "property": "every must_fire row nominated, every must_not_fire row silent, or the lane does not ship",
@@ -167,5 +170,6 @@
       "reach": "mechanism_not_built",
       "why": "a test asserting a substring of a config file rather than the config's effective semantics. Reachable only by a rule that knows .gitignore negation semantics, i.e. a domain oracle per config format. Not a generalisable test-quality species."
     }
-  ]
+  ],
+  "subject_path": "src/aipass/canary"
 }

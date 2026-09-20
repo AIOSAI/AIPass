@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: gutting.py
 # Description: extreme mutation - the per-function pseudo-tested probe
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-09-19
 # Modified: 2026-09-19
 # =============================================
@@ -96,16 +96,65 @@ already ``pass``) and the ones where gutting would be a DIFFERENT mutation than
 intended (a generator, where removing ``yield`` changes the function's type
 rather than its behaviour).
 
-A SURVIVOR IS A SUPERSET OF PSEUDO-TESTED, AND THE DIFFERENCE IS COVERAGE.
-Descartes calls a method pseudo-tested only when it is COVERED and its mutant
-survives; a method no test ever executes is simply NOT COVERED, which is an
-ordinary coverage finding and not this probe's news. This module runs no
-coverage instrumentation, so it cannot tell the two apart: `pseudo_tested`
-here means "gutting survivor", and on the calibration fixture one of three
-survivors was covered-and-unnoticed while the other two were never executed at
-all. Read the survivors against a coverage report before calling any of them
-pseudo-tested. Closing that gap needs a coverage pass the caller supplies; it
-is stated here rather than papered over.
+A SURVIVOR IS A SUPERSET OF PSEUDO-TESTED, AND THE DIFFERENCE IS COVERAGE -
+WHICH ``SELECTION_COVERAGE`` NOW MEASURES. Descartes calls a method
+pseudo-tested only when it is COVERED and its mutant survives; a method no test
+ever executes is simply NOT COVERED, which is an ordinary coverage finding and
+not this probe's news. The default ``SELECTION_FULL_SUITE`` mode runs no
+coverage instrumentation and still cannot tell the two apart, and its limits
+say so. ``selection=SELECTION_COVERAGE`` closes the gap: the baseline pass is
+taken under coverage.py with per-test contexts, so a function whose body no
+test executes is reported in its own ``uncovered`` bucket carrying
+``reason: "no covering test"`` and NEVER appears in ``pseudo_tested``. They are
+different findings - the first is a hole in the coverage, the second is a
+missing oracle over code the suite really runs - and only the second is the
+thing Descartes named. Measured on the c5a487e2 canary fixture: of three
+full-suite survivors, two are uncovered and one is genuinely pseudo-tested.
+
+TEST SELECTION IS A COST REDUCTION AND A DIFFERENT CLAIM, SO IT IS RECORDED
+PER MUTANT. Gutting one function and running 4362 tests to watch none of them
+notice is the cost problem that keeps this probe off a weekly cadence: seedgo
+has 2091 probeable functions and a 101.9s suite, which is 35.6 projected hours
+of full-suite campaign. ``SELECTION_COVERAGE`` runs, for each mutant, ONLY the
+tests whose recorded coverage context executes that function's body - the
+mutmut-3 strategy - and every mutant record carries ``selected_tests`` and
+``selection_basis`` so a reader can see which claim it is looking at. A verdict
+from nine tests is not the verdict from the whole suite, and a record that does
+not say which one it is would be the conflation this lane exists to refuse.
+
+THE SELECTION IS SOUND ONLY BECAUSE GUTTING TOUCHES NOTHING BUT A BODY. The
+mutant keeps the original decorators, the def line and the signature byte for
+byte, so a test that never enters the body cannot observe the mutation; the
+tests that execute the body's lines are therefore the complete set that can
+kill. That argument is what makes the reduction legitimate rather than merely
+cheap, and it is exactly why this module refuses to rewrite signatures.
+
+THREE COVERAGE CLASSES, AND THE MIDDLE ONE WAS FOUND BY RUNNING THIS. A body
+line can carry a test context, no context at all, or no coverage record:
+
+* Body lines carrying test contexts -> run those tests, basis
+  ``covering_tests``.
+* Body lines executed under coverage's EMPTY context -> the function ran
+  outside any test phase, i.e. at import or collection time, and no nodeid can
+  be attributed to it. Selecting nothing here would be a silent lie. Measured:
+  the fixture's ``_find_real_caller`` runs only at import, has zero test
+  contexts, and the full suite KILLS it with a TypeError. Recorded basis
+  ``import_time_no_test_context`` and the WHOLE SUITE runs for that mutant.
+* No coverage record on any body line -> nothing executes it, so nothing can
+  kill it. That is a survivor with zero runs and ``reason: "no covering test"``,
+  and it is free.
+
+WHAT SELECTION CANNOT SEE, STATED BEFORE THE SAVING. coverage.py traces the
+process it runs in. A test that exercises the target through a SUBPROCESS - the
+fixture's own ``test_dead_cwd_imports.py`` does - contributes no context, so a
+function reached only that way reads as "no covering test" when the full suite
+would have killed it. The ``uncovered`` bucket is therefore a list to verify,
+not a conclusion, and a source file absent from the coverage data altogether
+(never imported, or dropped by an inherited ``omit``) falls back to the whole
+suite under basis ``source_file_not_instrumented`` rather than being guessed at.
+When the coverage map cannot be produced at all, the campaign REFUSES with the
+reason; it never quietly runs the full suite and reports the cheap number as if
+it were the same measurement.
 
 WHAT A SURVIVOR DOES NOT PROVE. A surviving mutant may be an EQUIVALENT mutant:
 a function that genuinely has no observable effect, in which case no test could
@@ -117,27 +166,119 @@ NO ``check_module`` AND NO ``check_branch`` LIVE HERE. Their absence is the
 shape gate that keeps this pack invisible to the audit's file-walk scoring
 engine, exactly as in ``adapter.py``. A flag can be forgotten; a function that
 does not exist cannot be called.
+
+THIS FILE IS THE DISCOVERY, THE MUTATION, THE CAMPAIGN AND THE REPORT, AND
+NOTHING ELSE ANY MORE. Three sections moved out on 2026-09-19, when the file
+crossed the branch's 1500-line architecture cap: the record shapes into
+``mutation_shapes``, the pytest invocation and its output parsing into
+``mutation_runner``, and the coverage pass with its per-mutant test selection
+into ``mutation_selection``. It was a relocation and it changed no rule, no
+threshold and no number. The chain is strictly one-directional -
+``mutation_shapes`` <- ``mutation_runner`` <- ``mutation_selection`` <- here -
+and every name those three modules own is imported back below, because callers
+have always reached them through ``gutting`` and a split must not move an
+address.
 """
 
 import ast
-import os
-import re
-import subprocess
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from aipass.prax import logger
+
+# The three modules below were split out of this file and every public name
+# they own is imported back here. Callers have always reached these through
+# `gutting.<name>` - `adapter.py` still does - so the split must not move an
+# address. A name this file does not itself use carries the F401 waiver rather
+# than being dropped.
+from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_runner import (
+    ASSERTION_EXCEPTION_NAME,  # noqa: F401  (re-exported)
+    ASSERTION_REWRITE_PREFIX,  # noqa: F401  (re-exported)
+    BASELINE_EXTRA_ARGS,  # noqa: F401  (re-exported)
+    COUNT_PATTERN,  # noqa: F401  (re-exported)
+    DEFAULT_BASELINE_TIMEOUT_SECONDS,  # noqa: F401  (re-exported)
+    ERROR_MARKER_PATTERN,  # noqa: F401  (re-exported)
+    EXCEPTION_HEAD_PATTERN,  # noqa: F401  (re-exported)
+    KILL_CAUSE_ASSERTION,
+    KILL_CAUSE_ERROR,
+    KILL_CAUSE_UNKNOWN,
+    LOG_TAG,
+    NO_BYTECODE_ARG,  # noqa: F401  (re-exported)
+    NO_BYTECODE_VALUE,  # noqa: F401  (re-exported)
+    NO_BYTECODE_VAR,  # noqa: F401  (re-exported)
+    PASSED_SUMMARY_PATTERN,  # noqa: F401  (re-exported)
+    PYTEST_COMMON_ARGS,  # noqa: F401  (re-exported)
+    PYTEST_EXIT_OK,
+    PYTHONPATH_VAR,  # noqa: F401  (re-exported)
+    PYTHON_ARGS,  # noqa: F401  (re-exported)
+    SHORT_SUMMARY_PATTERN,  # noqa: F401  (re-exported)
+    TB_LINE_PATTERN,  # noqa: F401  (re-exported)
+    TERMINAL_WIDTH_VALUE,  # noqa: F401  (re-exported)
+    TERMINAL_WIDTH_VAR,  # noqa: F401  (re-exported)
+    TOTALS_LINE_PATTERN,  # noqa: F401  (re-exported)
+    _run_pytest,
+    baseline,
+    classify_kill,
+    parse_counts,
+)
+from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_selection import (
+    BASIS_COVERING_TESTS,  # noqa: F401  (re-exported)
+    BASIS_FILE_NOT_MEASURED,  # noqa: F401  (re-exported)
+    BASIS_FULL_SUITE,
+    BASIS_IMPORT_TIME_ONLY,  # noqa: F401  (re-exported)
+    BASIS_MAP_REFUSED,  # noqa: F401  (re-exported)
+    BASIS_NEAR_TOTAL,  # noqa: F401  (re-exported)
+    BASIS_NO_COVERING_TEST,  # noqa: F401  (re-exported)
+    BASIS_UNMAPPED_CONTEXT,  # noqa: F401  (re-exported)
+    CONTEXT_PHASE_SEPARATOR,  # noqa: F401  (re-exported)
+    COVERAGE_CONTEXT_ARG,  # noqa: F401  (re-exported)
+    COVERAGE_DATA_NAME,  # noqa: F401  (re-exported)
+    COVERAGE_FILE_VAR,  # noqa: F401  (re-exported)
+    COVERAGE_MAP_NAME,  # noqa: F401  (re-exported)
+    COVERAGE_READER_CODE,  # noqa: F401  (re-exported)
+    COVERAGE_READER_TIMEOUT_SECONDS,  # noqa: F401  (re-exported)
+    COVERAGE_REPORT_ARG,  # noqa: F401  (re-exported)
+    COVERAGE_REQUEST_NAME,  # noqa: F401  (re-exported)
+    COVERAGE_SOURCE_FLAG,  # noqa: F401  (re-exported)
+    DEFAULT_SOURCE_DIRS,
+    NODEID_SEPARATOR,  # noqa: F401  (re-exported)
+    NO_TEST_CONTEXT,  # noqa: F401  (re-exported)
+    REASON_BASELINE_NOT_GREEN,
+    REASON_BUDGET_EXHAUSTED,
+    REASON_COVERAGE_UNAVAILABLE,
+    REASON_LAUNCH_FAILED,
+    REASON_MUTANT_NOT_PARSEABLE,
+    REASON_MUTANT_TIMEOUT,
+    REASON_NOT_GUTTABLE,
+    REASON_SOURCE_IO,
+    SELECTION_FULL_SUITE_FRACTION,  # noqa: F401  (re-exported)
+    SOURCE_ENCODING,
+    STDOUT_TAIL_CHARS,
+    coverage_baseline,
+    select_tests,
+    site_key,  # noqa: F401  (re-exported)
+)
+from aipass.seedgo.apps.handlers.tests_pytest_standards.mutation_shapes import (
+    BaselineResult,
+    CampaignResult,
+    CoverageMap,
+    DEFAULT_BUDGET_SECONDS,
+    DEFAULT_MUTANT_TIMEOUT_SECONDS,
+    FunctionSite,
+    MutantResult,
+    SELECTION_COVERAGE,
+    SELECTION_FULL_SUITE,
+    SELECTION_MODES,
+    Selection,
+    SuiteRun,
+    SuiteTarget,
+)
 
 #: The group this module serves. NOT `scoped_survival` - see contract 2 above.
 GROUP = "pseudo_tested"
 
 MODULE_NAME = "gutting"
-LOG_TAG = "[AUDIT-TESTS]"
-
-#: Production source roots inside a target copy. Tests are never gutted.
-DEFAULT_SOURCE_DIRS: tuple = ("apps",)
 
 #: Directory names that are never production source. Any dot-directory is
 #: excluded on top of this list, which covers `.venv`, `.git` and `.archive`.
@@ -151,7 +292,6 @@ EXCLUDED_DIR_NAMES: tuple = (
 )
 
 SOURCE_GLOB = "*.py"
-SOURCE_ENCODING = "utf-8"
 
 #: The mutation itself. One statement, at the body's own indentation.
 GUT_STATEMENT = "return None"
@@ -170,15 +310,9 @@ REASON_NO_BODY_RANGE = "no_body_range"
 REASON_UNPARSABLE_SOURCE = "unparsable_source"
 REASON_DUNDER_INIT = "dunder_init"
 
-#: Not-run reasons. A mutant that never ran is never a survivor and never a
-#: kill; it is an unmeasured function and says so.
-REASON_BASELINE_NOT_GREEN = "baseline_not_green"
-REASON_BUDGET_EXHAUSTED = "budget_exhausted"
-REASON_MUTANT_TIMEOUT = "mutant_timeout"
-REASON_NOT_GUTTABLE = "not_guttable"
-REASON_MUTANT_NOT_PARSEABLE = "mutant_not_parseable"
-REASON_SOURCE_IO = "source_io_error"
-REASON_LAUNCH_FAILED = "pytest_launch_failed"
+#: The survivor that cost nothing to find. Spelled exactly as the lane's
+#: contract names it, because it is published verbatim in the mutant record.
+REASON_NO_COVERING_TEST = "no covering test"
 
 #: Decorator trailing names that mean the body is not a behaviour to remove.
 SKIP_DECORATOR_REASONS: Dict[str, str] = {
@@ -199,22 +333,6 @@ OUTCOME_SKIPPED = "skipped"
 OUTCOME_NOT_RUN = "not_run"
 OUTCOME_MUTATION_FAILED = "mutation_failed"
 
-#: Contract 1 buckets.
-KILL_CAUSE_ASSERTION = "assertion"
-KILL_CAUSE_ERROR = "error"
-KILL_CAUSE_UNKNOWN = "unknown"
-ASSERTION_EXCEPTION_NAME = "AssertionError"
-
-#: The invocation. Fixed shape, serial, no plugin autoload surprises. `-B` and
-#: `-p no:cacheprovider` are not tidiness: a suite reading a `.pyc` of a body
-#: that no longer exists measures a tree that does not exist either.
-PYTHON_ARGS: tuple = ("-B", "-m", "pytest")
-PYTEST_COMMON_ARGS: tuple = ("-p", "no:cacheprovider", "-q", "--no-header")
-
-#: `-rA` lists every PASSED nodeid, which is how the baseline captures the
-#: passing set under `-q` without giving up the quiet output.
-BASELINE_EXTRA_ARGS: tuple = ("--tb=line", "-rA")
-
 #: `-rfE` keeps the FAILED/ERROR short-summary lines, which is where the
 #: exception class is read from. `--tb=line` is the fallback source for the
 #: same class when the summary line is missing.
@@ -226,208 +344,9 @@ MUTANT_EXTRA_ARGS: tuple = ("--tb=line", "-rfE")
 #: line for the one failure that stopped the run are both still printed.
 STOP_FIRST_ARG = "-x"
 
-PYTHONPATH_VAR = "PYTHONPATH"
-NO_BYTECODE_VAR = "PYTHONDONTWRITEBYTECODE"
-NO_BYTECODE_VALUE = "1"
-
-#: MEASURED, NOT DECORATIVE. pytest appends the crash message to a short-summary
-#: line only if the whole line fits the terminal width, and a non-tty child gets
-#: 80 columns. Real nodeids are longer than that on their own, so every FAILED
-#: line arrived stripped of its exception class and the first campaign posted
-#: four honest `unknown` kills that were all AssertionError underneath. Widening
-#: the child's reported terminal is what makes the class readable at all.
-TERMINAL_WIDTH_VAR = "COLUMNS"
-TERMINAL_WIDTH_VALUE = "300"
-
-DEFAULT_BASELINE_TIMEOUT_SECONDS = 900
-DEFAULT_MUTANT_TIMEOUT_SECONDS = 300
-DEFAULT_BUDGET_SECONDS = 1800
-
 #: Below this much remaining budget a mutant is not started at all. Starting
 #: one with two seconds left produces a timeout that reads like a slow test.
 MIN_MUTANT_SECONDS = 5
-
-STDOUT_TAIL_CHARS = 2000
-PYTEST_EXIT_OK = 0
-
-SHORT_SUMMARY_PATTERN = re.compile(r"^(?:FAILED|ERROR)\s+(?P<nodeid>\S+)(?:\s+-\s+(?P<detail>.*))?$")
-PASSED_SUMMARY_PATTERN = re.compile(r"^PASSED\s+(?P<nodeid>\S+)")
-EXCEPTION_HEAD_PATTERN = re.compile(r"^(?P<exc>[A-Za-z_][A-Za-z0-9_.]*)\s*(?::|$)")
-TB_LINE_PATTERN = re.compile(r"^.+?:\d+:\s+(?P<detail>\S.*)$")
-ERROR_MARKER_PATTERN = re.compile(r"^E\s+(?P<detail>\S.*)$")
-
-#: THE SECOND MEASURED TRAP, AND THE WORSE ONE. pytest renders a crash message
-#: through `ExceptionInfo.exconly(tryshort=True)`, which strips the leading
-#: `AssertionError: ` from a REWRITTEN assert - so `assert 1 == 2` reaches every
-#: output mode with no class name on it at all. Reading that as "class unknown"
-#: would dump the single most important bucket into the unknown pile in every
-#: run. pytest only sets that strip text when the exception IS an AssertionError
-#: whose message begins `assert`, so the inverse rule is exact rather than a
-#: guess: a detail that starts with a bare `assert` is an AssertionError.
-ASSERTION_REWRITE_PREFIX = "assert"
-COUNT_PATTERN = re.compile(r"(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b")
-TOTALS_LINE_PATTERN = re.compile(r"\bin\s+\d+(?:\.\d+)?s\b")
-
-
-# =============================================================================
-# SHAPES
-# =============================================================================
-
-
-@dataclass(frozen=True)
-class FunctionSite:
-    """One `def` or `async def` in the target's production source.
-
-    `skip_reason` is None for a site that will be probed and a recorded reason
-    for one that will not. A site is never dropped from the list; declining to
-    mutate it is part of the measurement.
-    """
-
-    relpath: str
-    qualname: str
-    lineno: int
-    end_lineno: int
-    is_async: bool
-    body_line_count: int
-    body_lineno: int = 0
-    body_col_offset: int = 0
-    skip_reason: Optional[str] = None
-
-    def to_document(self) -> dict:
-        """The site as a plain record.
-
-        Returns:
-            A JSON-safe dict naming the function and where it lives.
-        """
-        return {
-            "relpath": self.relpath,
-            "qualname": self.qualname,
-            "lineno": self.lineno,
-            "end_lineno": self.end_lineno,
-            "is_async": self.is_async,
-            "body_line_count": self.body_line_count,
-            "skip_reason": self.skip_reason,
-        }
-
-
-@dataclass(frozen=True)
-class SuiteTarget:
-    """How to run the target copy's suite, entirely as supplied by the caller.
-
-    This module builds NO environment and imports NO target code. The isolated
-    env is the caller's job (`envcopy` does it for this pack); everything here
-    is a subprocess invocation over values handed in.
-    """
-
-    python: Path
-    cwd: Path
-    pythonpath: str
-    test_arg: str
-    target_copy: Path
-
-
-@dataclass(frozen=True)
-class SuiteRun:
-    """One pytest invocation's raw result."""
-
-    returncode: Optional[int]
-    stdout: str
-    stderr: str
-    elapsed_seconds: float
-    timed_out: bool = False
-    launch_error: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class BaselineResult:
-    """The unmutated suite, and whether it can support a verdict at all.
-
-    A target whose baseline is not green CANNOT BE MEASURED by this probe: a
-    mutant is killed when the suite goes red, so a suite that is already red
-    kills every mutant for free and survivorship means nothing. That state
-    returns `refusal_reason` and never a number - it is a refusal, not a zero.
-    """
-
-    green: bool
-    passed: int
-    failed: int
-    errors: int
-    skipped: int
-    passing_nodeids: Tuple[str, ...]
-    elapsed_seconds: float
-    returncode: Optional[int]
-    refusal_reason: Optional[str] = None
-
-    def to_document(self) -> dict:
-        """The baseline as a plain record.
-
-        Returns:
-            A JSON-safe dict, including the refusal reason when there is one.
-        """
-        return {
-            "green": self.green,
-            "passed": self.passed,
-            "failed": self.failed,
-            "errors": self.errors,
-            "skipped": self.skipped,
-            "passing_nodeids": len(self.passing_nodeids),
-            "elapsed_seconds": round(self.elapsed_seconds, 3),
-            "returncode": self.returncode,
-            "refusal_reason": self.refusal_reason,
-        }
-
-
-@dataclass(frozen=True)
-class MutantResult:
-    """One gutted function, and what the suite did about it.
-
-    `kill_cause` is present on EVERY record, killed or not, because contract 1
-    forbids a mutant record without it. For a survivor or an unrun mutant it is
-    None, which is a statement that no kill happened - not a missing field.
-    """
-
-    site: FunctionSite
-    outcome: str
-    kill_cause: Optional[str] = None
-    kill_exception: Optional[str] = None
-    first_failing_nodeid: Optional[str] = None
-    reason: Optional[str] = None
-    elapsed_seconds: float = 0.0
-    returncode: Optional[int] = None
-    note: Optional[str] = None
-
-    def to_document(self) -> dict:
-        """The mutant as a plain record.
-
-        Returns:
-            A JSON-safe dict carrying the kill_cause split required by
-            contract 1 plus the raw exception class behind it.
-        """
-        return {
-            "relpath": self.site.relpath,
-            "qualname": self.site.qualname,
-            "lineno": self.site.lineno,
-            "outcome": self.outcome,
-            "kill_cause": self.kill_cause,
-            "kill_exception": self.kill_exception,
-            "first_failing_nodeid": self.first_failing_nodeid,
-            "reason": self.reason,
-            "elapsed_seconds": round(self.elapsed_seconds, 3),
-            "returncode": self.returncode,
-            "note": self.note,
-        }
-
-
-@dataclass
-class CampaignResult:
-    """Everything one campaign produced, before it is summarised."""
-
-    baseline: BaselineResult
-    results: List[MutantResult] = field(default_factory=list)
-    elapsed_seconds: float = 0.0
-    budget_seconds: int = DEFAULT_BUDGET_SECONDS
-    mutant_timeout_seconds: int = DEFAULT_MUTANT_TIMEOUT_SECONDS
-    stopped_on_first_failure: bool = True
 
 
 # =============================================================================
@@ -749,220 +668,6 @@ def gut_source(source: str, site: FunctionSite) -> Optional[str]:
 
 
 # =============================================================================
-# EXECUTION
-# =============================================================================
-
-
-def _pytest_command(target: SuiteTarget, extra_args: Sequence[str]) -> List[str]:
-    """The serial pytest invocation for one run."""
-    return [str(target.python), *PYTHON_ARGS, target.test_arg, *PYTEST_COMMON_ARGS, *extra_args]
-
-
-def _pytest_environment(target: SuiteTarget) -> Dict[str, str]:
-    """The caller's PYTHONPATH laid over the current environment.
-
-    The isolated env is built elsewhere. All this does is point the child at
-    the PYTHONPATH it was handed and forbid bytecode, so a mutant can never be
-    shadowed by a `.pyc` of the body it replaced.
-    """
-    environment = dict(os.environ)
-    environment[PYTHONPATH_VAR] = target.pythonpath
-    environment[NO_BYTECODE_VAR] = NO_BYTECODE_VALUE
-    environment[TERMINAL_WIDTH_VAR] = TERMINAL_WIDTH_VALUE
-    return environment
-
-
-def _run_pytest(target: SuiteTarget, extra_args: Sequence[str], timeout_seconds: int) -> SuiteRun:
-    """One pytest subprocess, with a wall-clock ceiling.
-
-    Args:
-        target: Where and how to run the suite.
-        extra_args: Run-specific arguments appended to the fixed command.
-        timeout_seconds: Ceiling for this single run.
-
-    Returns:
-        The raw run. A timeout and a launch failure are both returned as
-        recorded states, never raised, because both are measurements about the
-        mutant rather than crashes of the campaign.
-    """
-    started = time.monotonic()
-    try:
-        completed = subprocess.run(
-            _pytest_command(target, extra_args),
-            cwd=str(target.cwd),
-            env=_pytest_environment(target),
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning(f"{LOG_TAG} a suite run exceeded its {timeout_seconds}s ceiling in {target.cwd}")
-        return SuiteRun(None, "", "", time.monotonic() - started, timed_out=True)
-    except OSError as exc:
-        detail = f"{type(exc).__name__}: {exc}"
-        logger.warning(f"{LOG_TAG} pytest could not be launched in {target.cwd}: {detail}")
-        return SuiteRun(None, "", "", time.monotonic() - started, launch_error=detail)
-
-    return SuiteRun(
-        returncode=completed.returncode,
-        stdout=completed.stdout or "",
-        stderr=completed.stderr or "",
-        elapsed_seconds=time.monotonic() - started,
-    )
-
-
-def _totals_line(stdout: str) -> str:
-    """The pytest totals line, or the whole output when it cannot be found."""
-    for line in reversed(stdout.splitlines()):
-        if TOTALS_LINE_PATTERN.search(line):
-            return line
-    return stdout
-
-
-def parse_counts(stdout: str) -> Dict[str, int]:
-    """The pass/fail/error/skip counts from a pytest run.
-
-    Args:
-        stdout: The run's standard output.
-
-    Returns:
-        A dict keyed `passed`, `failed`, `error`, `skipped` and friends. A
-        missing key means pytest printed no such count.
-    """
-    counts: Dict[str, int] = {}
-    for amount, label in COUNT_PATTERN.findall(_totals_line(stdout)):
-        counts[label.rstrip("s") if label.startswith("error") else label] = int(amount)
-    return counts
-
-
-def _passing_nodeids(stdout: str) -> Tuple[str, ...]:
-    """Every nodeid pytest reported as PASSED under `-rA`."""
-    found = [match.group("nodeid") for match in map(PASSED_SUMMARY_PATTERN.match, stdout.splitlines()) if match]
-    return tuple(found)
-
-
-def _detail_from_summary(lines: Sequence[str]) -> Tuple[Optional[str], Optional[str]]:
-    """The crash message and nodeid from the first FAILED/ERROR summary line."""
-    for line in lines:
-        match = SHORT_SUMMARY_PATTERN.match(line.strip())
-        if match is None:
-            continue
-        return (match.group("detail") or "").strip() or None, match.group("nodeid")
-    return None, None
-
-
-def _detail_from_traceback(lines: Sequence[str]) -> Optional[str]:
-    """The crash message from an `E` marker or a `--tb=line` location line."""
-    for pattern in (ERROR_MARKER_PATTERN, TB_LINE_PATTERN):
-        for line in lines:
-            match = pattern.match(line.rstrip())
-            if match is not None:
-                return match.group("detail").strip()
-    return None
-
-
-def _cause_from_detail(detail: str) -> Tuple[str, Optional[str]]:
-    """The contract-1 bucket and the exception class behind one crash message."""
-    first_word = detail.split(":", 1)[0].split()[0] if detail.split() else ""
-    if first_word == ASSERTION_REWRITE_PREFIX:
-        return KILL_CAUSE_ASSERTION, ASSERTION_EXCEPTION_NAME
-    head = EXCEPTION_HEAD_PATTERN.match(detail)
-    if head is None:
-        return KILL_CAUSE_UNKNOWN, None
-    short_name = head.group("exc").rsplit(".", 1)[-1]
-    cause = KILL_CAUSE_ASSERTION if short_name == ASSERTION_EXCEPTION_NAME else KILL_CAUSE_ERROR
-    return cause, short_name
-
-
-def classify_kill(stdout: str, stderr: str) -> Tuple[str, Optional[str], Optional[str]]:
-    """Split one kill by exception class, as contract 1 requires.
-
-    An `AssertionError` means a test looked at what the function produced and
-    said it was wrong. Any other class usually means the gutted `None` reached
-    a caller that could not use it, which is the duck-typing collapse this
-    split exists to expose. A class that cannot be read from pytest's output is
-    reported `unknown` and counted on its own; it is never guessed into either
-    side.
-
-    A crash message beginning with a bare `assert` is an AssertionError whose
-    class name pytest stripped on the way out - see ASSERTION_REWRITE_PREFIX.
-    That is a rule pytest's own behaviour makes exact, not an inference.
-
-    Args:
-        stdout: The mutant run's standard output.
-        stderr: The mutant run's standard error.
-
-    Returns:
-        `(kill_cause, exception_class_or_None, first_failing_nodeid_or_None)`.
-    """
-    lines = stdout.splitlines() + stderr.splitlines()
-    detail, nodeid = _detail_from_summary(lines)
-    if detail is None:
-        detail = _detail_from_traceback(lines)
-    if detail is None:
-        return KILL_CAUSE_UNKNOWN, None, nodeid
-
-    cause, exception_name = _cause_from_detail(detail)
-    return cause, exception_name, nodeid
-
-
-def baseline(target: SuiteTarget, *, timeout_seconds: int = DEFAULT_BASELINE_TIMEOUT_SECONDS) -> BaselineResult:
-    """Run the unmutated suite once and decide whether it can carry a verdict.
-
-    A RED BASELINE IS A REFUSAL, NOT A ZERO. A mutant is killed when the suite
-    goes red; against a suite that is already red every mutant is killed for
-    free and every survivor is an accident of ordering. There is no number to
-    report in that world, so this returns `green=False` with a `refusal_reason`
-    and the campaign publishes the refusal instead of a rate.
-
-    Args:
-        target: Where and how to run the suite.
-        timeout_seconds: Ceiling for the single baseline run.
-
-    Returns:
-        The baseline counts, the passing nodeids, and a refusal reason when the
-        suite cannot support a measurement.
-    """
-    run = _run_pytest(target, BASELINE_EXTRA_ARGS, timeout_seconds)
-    counts = parse_counts(run.stdout)
-    passed = counts.get("passed", 0)
-    failed = counts.get("failed", 0)
-    errors = counts.get("error", 0)
-    refusal = _baseline_refusal(run, passed, failed, errors, timeout_seconds)
-    if refusal is not None:
-        logger.warning(f"{LOG_TAG} gutting refused: {refusal}")
-    return BaselineResult(
-        green=refusal is None,
-        passed=passed,
-        failed=failed,
-        errors=errors,
-        skipped=counts.get("skipped", 0),
-        passing_nodeids=_passing_nodeids(run.stdout),
-        elapsed_seconds=run.elapsed_seconds,
-        returncode=run.returncode,
-        refusal_reason=refusal,
-    )
-
-
-def _baseline_refusal(run: SuiteRun, passed: int, failed: int, errors: int, timeout_seconds: int) -> Optional[str]:
-    """The sentence explaining why this baseline cannot be measured, or None."""
-    if run.timed_out:
-        return f"the unmutated suite did not finish within {timeout_seconds}s, so no mutant verdict can be trusted"
-    if run.launch_error is not None:
-        return f"pytest could not be launched for the unmutated suite ({run.launch_error})"
-    if failed or errors:
-        return (
-            f"the unmutated suite is already red ({failed} failed, {errors} error), so gutting verdicts are meaningless"
-        )
-    if run.returncode != PYTEST_EXIT_OK:
-        tail = run.stdout.strip().splitlines()[-1:] or [""]
-        return f"the unmutated suite exited {run.returncode} rather than 0 ({tail[0][:160]})"
-    if passed == 0:
-        return "the unmutated suite reported no passing tests, so there is no oracle for a mutant to escape"
-    return None
-
-
-# =============================================================================
 # CAMPAIGN
 # =============================================================================
 
@@ -1002,17 +707,22 @@ def _mutant_text(original: bytes, site: FunctionSite) -> Tuple[Optional[str], Op
     return mutant, None
 
 
-def _classify_run(site: FunctionSite, run: SuiteRun, base: BaselineResult, capped: bool) -> MutantResult:
-    """Turn one mutant run into a verdict, kill_cause included."""
+def _classify_run(
+    site: FunctionSite, run: SuiteRun, base: BaselineResult, capped: bool, selection: Selection
+) -> MutantResult:
+    """Turn one mutant run into a verdict, kill_cause and selection included."""
     if run.timed_out:
         reason = REASON_BUDGET_EXHAUSTED if capped else REASON_MUTANT_TIMEOUT
-        return MutantResult(site, OUTCOME_NOT_RUN, reason=reason, elapsed_seconds=run.elapsed_seconds)
+        return MutantResult(
+            site, OUTCOME_NOT_RUN, reason=reason, elapsed_seconds=run.elapsed_seconds, selection=selection
+        )
     if run.launch_error is not None:
         return MutantResult(
             site,
             OUTCOME_NOT_RUN,
             reason=f"{REASON_LAUNCH_FAILED}: {run.launch_error}",
             elapsed_seconds=run.elapsed_seconds,
+            selection=selection,
         )
     if run.returncode != PYTEST_EXIT_OK:
         cause, exception_name, nodeid = classify_kill(run.stdout, run.stderr)
@@ -1025,26 +735,33 @@ def _classify_run(site: FunctionSite, run: SuiteRun, base: BaselineResult, cappe
             elapsed_seconds=run.elapsed_seconds,
             returncode=run.returncode,
             note=run.stdout.strip()[-STDOUT_TAIL_CHARS:] if cause == KILL_CAUSE_UNKNOWN else None,
+            selection=selection,
         )
     return MutantResult(
         site,
         OUTCOME_SURVIVED,
         elapsed_seconds=run.elapsed_seconds,
         returncode=run.returncode,
-        note=_survivor_note(run, base),
+        note=_survivor_note(run, base, selection),
+        selection=selection,
     )
 
 
-def _survivor_note(run: SuiteRun, base: BaselineResult) -> Optional[str]:
-    """A warning when a green mutant ran fewer tests than the baseline did.
+def _survivor_note(run: SuiteRun, base: BaselineResult, selection: Selection) -> Optional[str]:
+    """A warning when a green mutant ran fewer tests than it was given.
 
     A mutant that turns tests into skips exits 0 and would otherwise read as a
-    clean survivor. The count is compared rather than assumed.
+    clean survivor. The count is compared rather than assumed - and it is
+    compared against THIS MUTANT'S expected count, not the baseline's. Under a
+    reduced selection every mutant runs fewer tests than the baseline by
+    design, so comparing to the baseline would stamp the warning on every
+    selected survivor and the signal would mean nothing.
     """
+    expected = base.passed if selection.runs_whole_suite else (selection.count or 0)
     passed = parse_counts(run.stdout).get("passed", 0)
-    if passed >= base.passed:
+    if passed >= expected:
         return None
-    return f"green but only {passed} of the baseline's {base.passed} tests passed - inspect before trusting"
+    return f"green but only {passed} of the {expected} tests it was given passed - inspect before trusting"
 
 
 def _probe_site(
@@ -1054,8 +771,9 @@ def _probe_site(
     timeout_seconds: int,
     capped: bool,
     extra_args: Sequence[str],
+    selection: Selection,
 ) -> MutantResult:
-    """Write one mutant, run the suite, classify, restore the original bytes.
+    """Write one mutant, run its tests, classify, restore the original bytes.
 
     Restoration is in a `finally`, so a crashed run, a keyboard interrupt or a
     failure inside the classifier can never leave a mutated file in the copy.
@@ -1063,18 +781,30 @@ def _probe_site(
     path = target.target_copy / site.relpath
     original, read_error = _read_source(path)
     if original is None:
-        return MutantResult(site, OUTCOME_MUTATION_FAILED, reason=f"{REASON_SOURCE_IO}: {read_error}")
+        return MutantResult(
+            site, OUTCOME_MUTATION_FAILED, reason=f"{REASON_SOURCE_IO}: {read_error}", selection=selection
+        )
 
     mutant, mutation_error = _mutant_text(original, site)
     if mutant is None:
-        return MutantResult(site, OUTCOME_MUTATION_FAILED, reason=mutation_error)
+        return MutantResult(site, OUTCOME_MUTATION_FAILED, reason=mutation_error, selection=selection)
 
     try:
         path.write_text(mutant, encoding=SOURCE_ENCODING, newline="")
-        run = _run_pytest(target, extra_args, timeout_seconds)
+        run = _run_pytest(target, extra_args, timeout_seconds, test_args=selection.nodeids)
     finally:
         path.write_bytes(original)
-    return _classify_run(site, run, base, capped)
+    return _classify_run(site, run, base, capped, selection)
+
+
+def _uncovered_survivor(site: FunctionSite, selection: Selection) -> MutantResult:
+    """The survivor that cost nothing: no test executes this function's body.
+
+    No pytest runs at all. This is a COVERAGE HOLE rather than a missing
+    oracle, it is reported in its own bucket, and it is the half of Descartes'
+    definition the full-suite mode has never been able to separate out.
+    """
+    return MutantResult(site, OUTCOME_SURVIVED, reason=REASON_NO_COVERING_TEST, selection=selection)
 
 
 def _mutant_args(stop_on_first_failure: bool) -> Tuple[str, ...]:
@@ -1084,9 +814,49 @@ def _mutant_args(stop_on_first_failure: bool) -> Tuple[str, ...]:
     return (*MUTANT_EXTRA_ARGS, STOP_FIRST_ARG)
 
 
-def _unrun(sites: Sequence[FunctionSite], reason: str) -> List[MutantResult]:
+def _unrun(
+    sites: Sequence[FunctionSite], reason: str, selector: Callable[[FunctionSite], Selection]
+) -> List[MutantResult]:
     """Mark a run of sites as never executed, with the reason attached."""
-    return [MutantResult(site, OUTCOME_NOT_RUN, reason=reason) for site in sites]
+    return [MutantResult(site, OUTCOME_NOT_RUN, reason=reason, selection=selector(site)) for site in sites]
+
+
+def _full_suite_selector(site: FunctionSite) -> Selection:
+    """The selector every full-suite campaign uses: one basis, every test."""
+    del site
+    return Selection(BASIS_FULL_SUITE)
+
+
+def _build_selector(
+    target: SuiteTarget,
+    sites: Sequence[FunctionSite],
+    selection_mode: str,
+    source_dirs: Sequence[str],
+    baseline_result: Optional[BaselineResult],
+) -> Tuple[BaselineResult, Optional[CoverageMap], Callable[[FunctionSite], Selection]]:
+    """The baseline, the map when one was asked for, and the per-site selector."""
+    if selection_mode != SELECTION_COVERAGE:
+        base = baseline_result if baseline_result is not None else baseline(target)
+        return base, None, _full_suite_selector
+
+    base, coverage_map = coverage_baseline(target, sites, source_dirs=source_dirs)
+
+    def selector(site: FunctionSite) -> Selection:
+        """This site's covering tests, read off the map taken at baseline."""
+        return select_tests(site, coverage_map)
+
+    return base, coverage_map, selector
+
+
+def _coverage_refusal(base: BaselineResult, coverage_map: Optional[CoverageMap]) -> Optional[str]:
+    """The sentence explaining why a coverage-selected campaign cannot run."""
+    if coverage_map is None:
+        return None
+    if coverage_map.refusal_reason is not None:
+        return coverage_map.refusal_reason
+    if not base.green:
+        return f"{REASON_COVERAGE_UNAVAILABLE}: {base.refusal_reason}"
+    return None
 
 
 def run_campaign(
@@ -1097,14 +867,25 @@ def run_campaign(
     mutant_timeout_seconds: int = DEFAULT_MUTANT_TIMEOUT_SECONDS,
     stop_on_first_failure: bool = True,
     baseline_result: Optional[BaselineResult] = None,
+    selection: str = SELECTION_FULL_SUITE,
+    source_dirs: Sequence[str] = DEFAULT_SOURCE_DIRS,
 ) -> CampaignResult:
-    """Gut every probeable function in turn, one suite run each.
+    """Gut every probeable function in turn and run the tests that can kill it.
 
     The campaign is serial and bounded twice over: `mutant_timeout_seconds`
     caps one suite run, `budget_seconds` caps the whole campaign. On expiry the
     remaining sites are recorded `not_run` with `budget_exhausted` and the
     summary reports what was completed - a partial campaign never becomes a
     whole-tree number.
+
+    `selection` DEFAULTS TO THE FULL SUITE, which is the behaviour every number
+    this group has published so far describes. `SELECTION_COVERAGE` opts into
+    the reduction: the baseline is taken under coverage.py with per-test
+    contexts and each mutant runs only the tests that execute its body. That is
+    a cheaper campaign and a different claim, so it is never selected
+    implicitly and every mutant record carries the basis it was judged on. When
+    the map cannot be built the campaign REFUSES rather than running the full
+    suite while still calling itself coverage-selected.
 
     Args:
         target: Where and how to run the suite, over a COPY of the tree.
@@ -1113,27 +894,56 @@ def run_campaign(
         mutant_timeout_seconds: Wall-clock ceiling for one mutant's suite run.
         stop_on_first_failure: Pass `-x`; one failure already means KILLED.
         baseline_result: A baseline already measured by the caller, if any.
+            Ignored under `SELECTION_COVERAGE`, whose baseline must be the
+            instrumented run that produced the map.
+        selection: One of `SELECTION_MODES`.
+        source_dirs: Production roots under the copy, instrumented for the map.
 
     Returns:
         The campaign, baseline included, ready for `summarize`.
     """
     started = time.monotonic()
-    base = baseline_result if baseline_result is not None else baseline(target)
-    skipped = [MutantResult(site, OUTCOME_SKIPPED, reason=site.skip_reason) for site in sites if site.skip_reason]
-    probeable = [site for site in sites if site.skip_reason is None]
+    if selection not in SELECTION_MODES:
+        raise ValueError(f"selection must be one of {SELECTION_MODES}, not {selection!r}")
 
-    if not base.green:
-        logger.warning(f"{LOG_TAG} campaign refused on {len(probeable)} functions: {base.refusal_reason}")
-        results = skipped + _unrun(probeable, REASON_BASELINE_NOT_GREEN)
+    base, coverage_map, selector = _build_selector(target, sites, selection, source_dirs, baseline_result)
+    skipped = [
+        MutantResult(site, OUTCOME_SKIPPED, reason=site.skip_reason, selection=selector(site))
+        for site in sites
+        if site.skip_reason
+    ]
+    probeable = [site for site in sites if site.skip_reason is None]
+    refusal = _coverage_refusal(base, coverage_map) or (None if base.green else base.refusal_reason)
+
+    if refusal is not None:
+        logger.warning(f"{LOG_TAG} campaign refused on {len(probeable)} functions: {refusal}")
+        reason = REASON_COVERAGE_UNAVAILABLE if coverage_map is not None else REASON_BASELINE_NOT_GREEN
+        results = skipped + _unrun(probeable, reason, selector)
         return CampaignResult(
-            base, results, time.monotonic() - started, budget_seconds, mutant_timeout_seconds, stop_on_first_failure
+            base,
+            results,
+            time.monotonic() - started,
+            budget_seconds,
+            mutant_timeout_seconds,
+            stop_on_first_failure,
+            selection,
+            coverage_map,
         )
 
     extra_args = _mutant_args(stop_on_first_failure)
-    results = skipped + _drive(target, probeable, base, started, budget_seconds, mutant_timeout_seconds, extra_args)
+    driven = _drive(target, probeable, base, started, budget_seconds, mutant_timeout_seconds, extra_args, selector)
     elapsed = time.monotonic() - started
     logger.info(f"{LOG_TAG} gutting campaign finished in {elapsed:.1f}s over {len(probeable)} functions")
-    return CampaignResult(base, results, elapsed, budget_seconds, mutant_timeout_seconds, stop_on_first_failure)
+    return CampaignResult(
+        base,
+        skipped + driven,
+        elapsed,
+        budget_seconds,
+        mutant_timeout_seconds,
+        stop_on_first_failure,
+        selection,
+        coverage_map,
+    )
 
 
 def _drive(
@@ -1144,16 +954,22 @@ def _drive(
     budget_seconds: int,
     mutant_timeout_seconds: int,
     extra_args: Sequence[str],
+    selector: Callable[[FunctionSite], Selection],
 ) -> List[MutantResult]:
     """Walk the probeable sites under the campaign's wall-clock budget."""
     results: List[MutantResult] = []
     for index, site in enumerate(probeable):
+        selection = selector(site)
+        if selection.count == 0:
+            results.append(_uncovered_survivor(site, selection))
+            continue
         remaining = budget_seconds - (time.monotonic() - started)
         if remaining < MIN_MUTANT_SECONDS:
             logger.warning(f"{LOG_TAG} budget exhausted with {len(probeable) - index} functions unprobed")
-            return results + _unrun(probeable[index:], REASON_BUDGET_EXHAUSTED)
+            return results + _unrun(probeable[index:], REASON_BUDGET_EXHAUSTED, selector)
         ceiling = min(mutant_timeout_seconds, int(remaining))
-        results.append(_probe_site(target, site, base, ceiling, ceiling < mutant_timeout_seconds, extra_args))
+        capped = ceiling < mutant_timeout_seconds
+        results.append(_probe_site(target, site, base, ceiling, capped, extra_args, selection))
     return results
 
 
@@ -1178,6 +994,92 @@ def _count_causes(results: Sequence[MutantResult], cause: str) -> int:
     return sum(1 for result in results if result.outcome == OUTCOME_KILLED and result.kill_cause == cause)
 
 
+def _count_bases(results: Sequence[MutantResult]) -> Dict[str, int]:
+    """How many mutants were judged on each selection basis."""
+    counts: Dict[str, int] = {}
+    for result in results:
+        basis = result.selection.basis if result.selection is not None else BASIS_FULL_SUITE
+        counts[basis] = counts.get(basis, 0) + 1
+    return counts
+
+
+def _selection_document(campaign: CampaignResult, results: Sequence[MutantResult]) -> dict:
+    """What test set the campaign's verdicts were read from, and how big it was."""
+    selected = [r.selection.count for r in results if r.selection is not None and r.selection.count is not None]
+    coverage_map = campaign.coverage_map
+    return {
+        "mode": campaign.selection_mode,
+        "by_basis": _count_bases(results),
+        "tests_selected_total": sum(selected),
+        "whole_suite_runs": sum(1 for r in results if r.selection is not None and r.selection.runs_whole_suite),
+        "coverage_map": coverage_map.to_document() if coverage_map is not None else None,
+    }
+
+
+def _selection_limits(campaign: CampaignResult) -> List[str]:
+    """The caveats that belong to the selection, not to gutting itself."""
+    if not _coverage_was_measured(campaign):
+        refused = campaign.coverage_map.refusal_reason if campaign.coverage_map is not None else None
+        sentences = [
+            "No function's coverage was measured, so the uncovered bucket is empty because nothing "
+            "looked, not because there is nothing there."
+        ]
+        if refused is None:
+            sentences.append(
+                "Every mutant here was measured against the WHOLE suite, so no verdict is a reduced-set verdict."
+            )
+            return sentences
+        sentences.append(
+            f"A coverage-selected campaign was asked for and REFUSED: {refused}. No mutant was run "
+            "and no verdict was produced; the full suite was not silently substituted."
+        )
+        return sentences
+    return [
+        "Each mutant ran only the tests whose coverage context executes its body, so every verdict is "
+        "a reduced-set verdict. The count and the basis are on each record; a basis other than "
+        "covering_tests means the map could not narrow that one and the whole suite ran instead.",
+        "The selection is sound because gutting replaces a body and nothing else: a test that never "
+        "enters the body cannot observe the mutation. It is bounded by what coverage.py can see, and "
+        "coverage.py traces one process - a test that exercises the target through a SUBPROCESS "
+        "contributes no context, so the uncovered bucket is a list to verify rather than a conclusion.",
+        "Functions whose body runs only at import or collection time carry no test context at all. "
+        "Those are recorded import_time_no_test_context and measured against the whole suite, because "
+        "selecting nothing for them would turn a killable mutant into a free survivor.",
+        "Each selection is kept in the baseline's collection order so that -x stops on the same test "
+        "the full suite would stop on and the kill_cause split is reproduced rather than reshuffled. "
+        "Sorting a selection any other way moves kills between the assertion and error buckets while "
+        "leaving the kill itself intact, which was measured before it was fixed.",
+    ]
+
+
+def _coverage_was_measured(campaign: CampaignResult) -> bool:
+    """True only when a coverage map was actually built for this campaign."""
+    coverage_map = campaign.coverage_map
+    return coverage_map is not None and coverage_map.refusal_reason is None
+
+
+def _superset_sentence(campaign: CampaignResult) -> str:
+    """How far this campaign got towards Descartes' own definition.
+
+    The full-suite mode still cannot separate an uncovered function from a
+    pseudo-tested one and must say so. The coverage mode can, and says that
+    instead - the sentence changes because the measurement changed.
+    """
+    if not _coverage_was_measured(campaign):
+        return (
+            "Survivors are a SUPERSET of pseudo-tested functions. Descartes calls a function pseudo-tested "
+            "only when tests cover it and the mutant still survives; a function no test executes is merely "
+            "uncovered. No coverage was measured here, so read this list against a coverage report before "
+            "calling any entry pseudo-tested."
+        )
+    return (
+        "Coverage was measured, so the two halves of Descartes' definition are separated: pseudo_tested "
+        "holds survivors whose bodies the suite really executes, and the uncovered bucket holds the "
+        "functions no test reaches at all. The first is a missing oracle, the second is a coverage hole, "
+        "and only the first is pseudo-testedness."
+    )
+
+
 def _limits(campaign: CampaignResult, survivors: Sequence[MutantResult], unknown: int) -> List[str]:
     """Plain-sentence caveats that travel with the numbers."""
     sentences = [
@@ -1189,10 +1091,7 @@ def _limits(campaign: CampaignResult, survivors: Sequence[MutantResult], unknown
         "record's kill_exception so the split can be regraded without re-running.",
         "A surviving mutant may be an equivalent mutant - a function with no observable effect, which "
         "no test could have caught. This probe reports the survivor and does not judge equivalence.",
-        "Survivors are a SUPERSET of pseudo-tested functions. Descartes calls a function pseudo-tested "
-        "only when tests cover it and the mutant still survives; a function no test executes is merely "
-        "uncovered. No coverage was measured here, so read this list against a coverage report before "
-        "calling any entry pseudo-tested.",
+        _superset_sentence(campaign),
         "This is pseudo-testedness, a property of a function. It is not the scoped_survival group's "
         "oracle survival, which is a property of a test, and the two counts are not comparable.",
         "Every mutation was written into a copy of the target and the original bytes were restored in "
@@ -1223,6 +1122,11 @@ def summarize(campaign: CampaignResult) -> dict:
     Args:
         campaign: A finished campaign.
 
+        `pseudo_tested` and `uncovered` are SEPARATE lists and neither is a
+        subset of the other. A function no test executes is a coverage hole; a
+        function the tests execute and no oracle watches is a missing oracle.
+        Folding them together is the confusion this group exists to undo.
+
     Returns:
         A JSON-safe dict. `killed_by_assertion`, `killed_by_error` and
         `killed_by_unknown` are reported separately and there is deliberately
@@ -1231,6 +1135,8 @@ def summarize(campaign: CampaignResult) -> dict:
     """
     results = campaign.results
     survivors = [result for result in results if result.outcome == OUTCOME_SURVIVED]
+    uncovered = [result for result in survivors if result.reason == REASON_NO_COVERING_TEST]
+    unwatched = [result for result in survivors if result.reason != REASON_NO_COVERING_TEST]
     probed = [result for result in results if result.outcome in (OUTCOME_SURVIVED, OUTCOME_KILLED)]
     unrun_reasons = _count_reasons(results, OUTCOME_NOT_RUN)
     unrun_reasons.update(_count_reasons(results, OUTCOME_MUTATION_FAILED))
@@ -1241,23 +1147,46 @@ def summarize(campaign: CampaignResult) -> dict:
         "group": GROUP,
         "functions_total": len(results),
         "functions_probed": len(probed),
+        # A `no covering test` survivor is a decided verdict that started no
+        # pytest at all, so the count of functions actually EXECUTED as mutants
+        # is published next to the count of functions judged.
+        "functions_executed": len(probed) - len(uncovered),
         "skipped": {
             "total": sum(1 for r in results if r.outcome == OUTCOME_SKIPPED),
             "by_reason": _count_reasons(results, OUTCOME_SKIPPED),
         },
-        "pseudo_tested": [
-            {"relpath": r.site.relpath, "qualname": r.site.qualname, "lineno": r.site.lineno, "note": r.note}
-            for r in survivors
-        ],
+        "pseudo_tested": [_survivor_document(r) for r in unwatched],
+        "uncovered": {
+            # False whenever nothing looked - the full-suite mode, and equally
+            # a coverage campaign whose map was refused. An empty list under
+            # `measured: true` must mean "looked, found none".
+            "measured": _coverage_was_measured(campaign),
+            "total": len(uncovered),
+            "functions": [_survivor_document(r) for r in uncovered],
+        },
         "killed_by_assertion": _count_causes(results, KILL_CAUSE_ASSERTION),
         "killed_by_error": _count_causes(results, KILL_CAUSE_ERROR),
         "killed_by_unknown": unknown,
         "not_run": {"total": sum(unrun_reasons.values()), "by_reason": unrun_reasons},
         "baseline": campaign.baseline.to_document(),
+        "selection": _selection_document(campaign, results),
         "elapsed_seconds": round(elapsed, 3),
         "seconds_per_mutant": round(elapsed / len(probed), 3) if probed else None,
         "budget_seconds": campaign.budget_seconds,
         "stopped_on_first_failure": campaign.stopped_on_first_failure,
         "mutants": [result.to_document() for result in results],
-        "limits": _limits(campaign, survivors, unknown),
+        "limits": _limits(campaign, survivors, unknown) + _selection_limits(campaign),
+    }
+
+
+def _survivor_document(result: MutantResult) -> dict:
+    """One survivor as it is published, selection and reason attached."""
+    return {
+        "relpath": result.site.relpath,
+        "qualname": result.site.qualname,
+        "lineno": result.site.lineno,
+        "reason": result.reason,
+        "selected_tests": result.selection.count if result.selection is not None else None,
+        "selection_basis": result.selection.basis if result.selection is not None else None,
+        "note": result.note,
     }
