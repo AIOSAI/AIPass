@@ -84,6 +84,29 @@ jobs:
         run: |
           # Grab the topmost "## [...]" block from CHANGELOG.md as release notes.
           awk '/^## \[/{c++} c==1' CHANGELOG.md | sed '/^---$/d' > release_notes.md
+          # GitHub refuses a release body over 125,000 characters (HTTP 422,
+          # v2.8.11's block was 144,571). Cut on an entry boundary under the cap
+          # and point at the full block; the CHANGELOG stays the record.
+          python3 - "$GITHUB_REF_NAME" <<'EOF'
+          import pathlib, sys
+          tag = sys.argv[1]
+          p = pathlib.Path("release_notes.md")
+          full = p.read_text()
+          cap = 120_000
+          if len(full) > cap:
+              head = full.splitlines()[0]
+              tail = (
+                  "\n\n---\n\n*Release notes truncated: the full block is "
+                  f"{len(full):,} characters and GitHub caps a release body at 125,000. "
+                  f"The complete entry is `{head[:60]}…` in "
+                  f"[CHANGELOG.md](https://github.com/${{ github.repository }}/blob/{tag}/CHANGELOG.md).*\n"
+              )
+              cut = full.rfind("\n- **", 0, cap - len(tail))
+              if cut <= 0:
+                  cut = cap - len(tail)
+              p.write_text(full[:cut].rstrip() + tail)
+              print(f"release notes truncated: {len(full):,} -> {len(p.read_text()):,} chars")
+          EOF
           echo "Release notes:" && cat release_notes.md
       - name: Create GitHub Release
         env:
