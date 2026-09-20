@@ -395,3 +395,293 @@ def test_ai_mail_entry_passes():
 
     result = check_module(str(_AIPASS_ROOT / "ai_mail" / "apps" / "ai_mail.py"))
     assert result["passed"] is True, f"ai_mail should pass: {result['checks']}"
+
+
+# ============================================================
+# RULE 2 — per-verb help that no caller can reach (drone fc032265)
+#
+# Rule 1 scored drone 100 for months while every `drone @git VERB
+# --help` returned the top-level index. These rows pin the shape that
+# was invisible: the defect is in the chain, not at either end.
+# ============================================================
+
+
+def _module_file(tmp_path, source, name="git_module.py"):
+    """A file under apps/modules/ — where the real specimen lived."""
+    mod_dir = tmp_path / "apps" / "modules"
+    mod_dir.mkdir(parents=True)
+    f = mod_dir / name
+    f.write_text(source)
+    return str(f)
+
+
+_STRANDED = """\
+def get_help(command=None):
+    if command == "commit":
+        return "git commit <msg>\\n"
+    if command == "status":
+        return "git status\\n"
+    return "the whole page\\n"
+
+
+def print_help():
+    console.print(get_help())
+
+
+def handle_command(command=None, args=None):
+    if wants_help(command, args):
+        print_help()
+        return 0
+"""
+
+_CURED = _STRANDED.replace("def print_help():", "def print_help(command=None):").replace(
+    "console.print(get_help())", "console.print(get_help(command))"
+)
+
+
+def test_stranded_per_verb_help_convicts(tmp_path):
+    """The specimen: 2 verbs behind `command`, and the only call omits it."""
+    f = _module_file(tmp_path, _STRANDED)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    result = check_module(f)
+    assert result["passed"] is False
+    assert result["score"] == 0
+    failed = [c for c in result["checks"] if not c["passed"]]
+    assert len(failed) == 1, f"only rule 2 should fail here: {result['checks']}"
+    assert failed[0]["name"] == "Per-verb help reachable"
+    assert "get_help()" in failed[0]["message"]
+    assert "2 verbs" in failed[0]["message"]
+
+
+def test_cure_clears_the_verdict(tmp_path):
+    """The same module with the verb passed through. A checker that cannot
+    tell the cure from the defect measures nothing."""
+    f = _module_file(tmp_path, _CURED)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    result = check_module(f)
+    assert result["passed"] is True, f"cured module must clear: {result['checks']}"
+    assert result["score"] == 100
+
+
+def test_printer_with_no_verb_parameter_is_not_a_violation(tmp_path):
+    """125 of the fleet's 129 help dispatch sites hand their printer
+    nothing. With no per-verb content to reach, that is the right answer."""
+    src = """\
+def print_help():
+    console.print("the whole page")
+
+
+def handle_command(command=None, args=None):
+    if wants_help(command, args):
+        print_help()
+        return 0
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
+
+
+def test_single_literal_is_not_per_verb_content(tmp_path):
+    """One comparison is a guard or an alias, not a menu. _MIN_VERB_LITERALS."""
+    src = """\
+def get_help(command=None):
+    if command == "commit":
+        return "git commit <msg>\\n"
+    return "the whole page\\n"
+
+
+def print_help():
+    console.print(get_help())
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
+
+
+def test_helper_is_not_help(tmp_path):
+    """'help' must match as a whole token. An early cut read every
+    `_local_helpers` in the tree and its precision was an accident."""
+    src = """\
+def _local_helpers(kind=None):
+    if kind == "alpha":
+        return "a"
+    if kind == "beta":
+        return "b"
+    return "z"
+
+
+def run():
+    return _local_helpers()
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
+
+
+def test_help_predicate_is_not_a_provider(tmp_path):
+    """A predicate hands back a bool; only a provider has text to strand."""
+    src = """\
+def is_help_flag(token=None):
+    if token == "--help":
+        return True
+    if token == "-h":
+        return True
+    return False
+
+
+def run():
+    return is_help_flag()
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
+
+
+def test_provider_with_no_call_site_is_left_alone(tmp_path):
+    """Its callers live in another module. This lane cannot read them, so
+    it says nothing rather than guessing either way."""
+    src = """\
+def get_help(command=None):
+    if command == "commit":
+        return "git commit <msg>\\n"
+    if command == "status":
+        return "git status\\n"
+    return "the whole page\\n"
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
+
+
+def test_keyword_argument_counts_as_passing_the_verb(tmp_path):
+    """`get_help(command=command)` reaches the per-verb branches too."""
+    src = _STRANDED.replace("console.print(get_help())", "console.print(get_help(command=command))")
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
+
+
+def test_dict_keyed_per_verb_help_convicts(tmp_path):
+    """Per-verb content reached by dict lookup is the same species."""
+    src = """\
+def get_help(command=None):
+    pages = {"commit": "git commit\\n", "status": "git status\\n"}
+    if command:
+        return pages[command]
+    return "the whole page\\n"
+
+
+def print_help():
+    console.print(get_help())
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    result = check_module(f)
+    assert result["passed"] is False
+    assert "get_help()" in result["checks"][-1]["message"]
+
+
+def test_non_entry_file_no_longer_blanket_passes(tmp_path):
+    """The old checker returned 100 for every non-entry file without
+    reading it. That blanket pass is how drone scored 100."""
+    f = _module_file(tmp_path, _STRANDED)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    result = check_module(f)
+    skipped = [c for c in result["checks"] if "Not an entry point" in c["message"]]
+    assert skipped, "rule 1 still stands down off the entry point"
+    assert result["passed"] is False, "but rule 2 read the file anyway"
+
+
+# ============================================================
+# RULE 2 — the branch lane (the corpus rule 1 never had)
+# ============================================================
+
+
+def test_check_branch_finds_it_under_apps_modules(tmp_path):
+    """The real specimen lived in apps/modules/git_module.py, a file the
+    audit lane never handed this checker."""
+    branch = tmp_path / "drone"
+    _module_file(branch, _STRANDED)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_branch
+
+    result = check_branch(str(branch))
+    assert result["passed"] is False
+    assert result["score"] == 0
+    stranded = [c for c in result["checks"] if c["name"] == "Per-verb help reachable"]
+    assert stranded and stranded[0]["passed"] is False
+    assert "git_module.py" in stranded[0]["message"]
+
+
+def test_check_branch_passes_a_clean_branch(tmp_path):
+    branch = tmp_path / "drone"
+    _module_file(branch, _CURED)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_branch
+
+    result = check_branch(str(branch))
+    assert result["passed"] is True
+    assert result["score"] == 100
+
+
+def test_check_branch_ignores_test_trees(tmp_path):
+    """APPLIES_TO = production. A fixture in tests/ is not a CLI."""
+    branch = tmp_path / "drone"
+    tests_dir = branch / "apps" / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_thing.py").write_text(_STRANDED)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_branch
+
+    assert check_branch(str(branch))["passed"] is True
+
+
+def test_collection_membership_is_per_verb_content(tmp_path):
+    """`if command in ("commit", "status")` is a menu too. A mutant that
+    dropped the collection arm survived until this row existed."""
+    src = """\
+def get_help(command=None):
+    if command in ("commit", "status"):
+        return "one of the two\\n"
+    return "the whole page\\n"
+
+
+def print_help():
+    console.print(get_help())
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    result = check_module(f)
+    assert result["passed"] is False
+    assert "2 verbs" in result["checks"][-1]["message"]
+
+
+def test_literals_compared_against_another_name_are_not_verbs(tmp_path):
+    """The comparison has to be against the PARAMETER. A provider that
+    branches on an output format holds no per-verb help, and convicting it
+    would be the rule reading any two string literals as a menu."""
+    src = """\
+def get_help(command=None):
+    fmt = "json"
+    if fmt == "json":
+        return "{}\\n"
+    if fmt == "text":
+        return "the whole page\\n"
+    return "the whole page\\n"
+
+
+def print_help():
+    console.print(get_help())
+"""
+    f = _module_file(tmp_path, src)
+    from aipass.seedgo.apps.handlers.aipass_standards.subcommand_help_check import check_module
+
+    assert check_module(f)["passed"] is True
