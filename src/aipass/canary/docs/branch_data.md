@@ -27,10 +27,13 @@ document for a given name resolves under `canary_json/` as
 
 ## canary_json/
 
-Test data, git-ignored, nothing depends on it. Each module's operation trail
-creates its own documents there on that module's first live run: `note_*` and
-`store_*` for the note store, `span_*` for the duration parser, config, data
-and log apiece.
+Test data, git-ignored, nothing depends on it. Each operation trail creates its
+own documents there on its first live run, config, data and log apiece. The
+documents are named for the FILE that logs, not for the command: `note_*` and
+`store_*` for the note store, `span_*` and `parser_*` for the duration parser,
+`top_*` and `reader_*` for the leaderboard reader. A module and the handler
+behind it therefore write separate trails — the successful runs land under the
+module's name and the refusals under the handler's.
 
 `canary_json/custom_config/` is a leftover directory holding only a placeholder
 README. Nothing routes there, because the json service accepts only the three
@@ -39,8 +42,9 @@ for its purpose.
 
 ## docs.local/
 
-Git-ignored working space. It holds the note store, `notes.jsonl`, and whatever
-a sub-agent drops during a test.
+Git-ignored working space. It holds the note store, `notes.jsonl`, the sample
+and deliberately-malformed tally files the `top` module was exercised against by
+hand, and whatever a sub-agent drops during a test.
 
 ## logs/
 
@@ -48,8 +52,8 @@ Prax log output *and* dispatch transcripts, which is worth knowing before
 reading anything there. `dispatch_stdout.log`, `dispatch_stderr.log`,
 `dispatch_wake.log` and the `.dispatch_env` snapshot are written by the mail
 branch when work arrives here — they are not this branch's own output.
-`note.log` and `span.log` are: each module logs its own refusals and I/O
-failures to a file named for it.
+`note.log`, `span.log` and `top.log` are: each module logs its own refusals and
+I/O failures to a file named for it.
 
 The entry point's own logger call sites — an import fallback, a module that
 fails to load, a module that raises mid-route, and an unhandled error in

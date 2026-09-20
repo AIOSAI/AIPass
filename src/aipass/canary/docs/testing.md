@@ -46,7 +46,7 @@ missing import-time set would be masked rather than cured.
 ## Where tests live, and where they went
 
 `tests/` holds the entry-point tests, the note store tests, the span parser
-tests, and the dead-cwd import pins. Archived suites sit in `tests/.archive/`
+tests, the leaderboard reader tests, and the dead-cwd import pins. Archived suites sit in `tests/.archive/`
 with the date they were retired in the filename.
 
 The json handler tests were archived rather than deleted: every property they
