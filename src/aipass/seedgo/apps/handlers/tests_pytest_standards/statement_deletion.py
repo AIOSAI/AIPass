@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: statement_deletion.py
 # Description: delete one statement at a time and report which deletions the suite does not notice
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
 # Modified: 2026-09-20
 # =============================================
@@ -53,6 +53,7 @@ find. Suppressing them would have suppressed all three sightings.
 """
 
 import ast
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -110,10 +111,28 @@ OUTCOME_MUTATION_FAILED = gutting.OUTCOME_MUTATION_FAILED
 #: gutting's cost by a rate instead of by its suite.
 HANG_TIMEOUT_FLOOR_SECONDS = 10
 
+#: HEADROOM, BECAUSE THE SUBSET IS SOMETIMES THE WHOLE SUITE. The ceiling above
+#: was argued from "a run over a SUBSET cannot legitimately outlast the whole
+#: suite" — true, and it does not hold when selection has no coverage entry for
+#: a statement and falls back to running everything. Then the mutant's honest
+#: cost IS the baseline and a ceiling of exactly the baseline loses a coin toss.
+#:
+#: Measured, canary a36f500a (devpulse r5_lane.json): baseline 19s, ceiling 19s,
+#: and the only two `not_run / mutant_timeout` of 153 were the only two with
+#: `selection_basis: unmapped_test_context` — store.py:82 `super().__init__` and
+#: kv.py:247 `logger.warning`. Both auditors deleted the log line by hand in
+#: under a suite's time. Five further mutants landed at 10.1-14.8s and survived
+#: the wall by luck.
+#:
+#: A hang is unbounded and a slow mutant is about one baseline, so doubling
+#: separates them and costs at most one extra baseline on a true hang.
+HANG_TIMEOUT_BASELINE_MULTIPLIER = 2
+
 
 def hang_timeout(baseline_seconds: float) -> int:
     """The per-mutant ceiling for this target, from its own baseline."""
-    return max(HANG_TIMEOUT_FLOOR_SECONDS, int(baseline_seconds) or HANG_TIMEOUT_FLOOR_SECONDS)
+    scaled = int(baseline_seconds * HANG_TIMEOUT_BASELINE_MULTIPLIER)
+    return max(HANG_TIMEOUT_FLOOR_SECONDS, scaled or HANG_TIMEOUT_FLOOR_SECONDS)
 
 
 REASON_NO_COVERING_TEST = gutting.REASON_NO_COVERING_TEST
@@ -132,7 +151,10 @@ ARID_REASONS: Dict[str, str] = {
     ARID_DOCSTRING: "a bare string expression is evaluated and discarded, at any point in a body",
     ARID_PASS: "`pass` is defined as doing nothing, so removing it removes nothing",
     ARID_ELLIPSIS: "a bare `...` expression is the same no-op as `pass`",
-    ARID_SOLE_RETURN_NONE: "`return None` at the end of a body is what falling off the end already does",
+    ARID_SOLE_RETURN_NONE: (
+        "`return None` in tail position — reaching the end of its block already ends the "
+        "function, so there is nothing left to skip. A guard clause is NOT this: see `_walk_block`"
+    ),
 }
 
 #: Non-arid skip reasons — the statement is real, but this operator cannot make
@@ -279,17 +301,63 @@ def _is_return_none(node: ast.stmt) -> bool:
     return isinstance(node.value, ast.Constant) and node.value.value is None
 
 
-def _arid_reason_for(node: ast.stmt, is_last: bool) -> Optional[str]:
-    """Why deleting this statement could not change behaviour, or None."""
+def _arid_reason_for(node: ast.stmt, ends_the_function: bool) -> Optional[str]:
+    """Why deleting this statement could not change behaviour, or None.
+
+    `ends_the_function` is the whole guard on the `return` case: see
+    `_walk_block`. The first cut passed `is_last`, computed per BLOCK, which
+    made every guard clause arid.
+    """
     if _is_bare_string(node):
         return ARID_DOCSTRING
     if isinstance(node, ast.Pass):
         return ARID_PASS
     if _is_ellipsis(node):
         return ARID_ELLIPSIS
-    if is_last and _is_return_none(node):
+    if ends_the_function and _is_return_none(node):
         return ARID_SOLE_RETURN_NONE
     return None
+
+
+#: Nodes that open a fresh scope. `_walk_block` does NOT descend into these.
+#:
+#: `discover_statements` finds functions with `ast.walk`, which reaches every
+#: nested `def` and every method on its own, so descending here as well emitted
+#: each nested statement TWICE — once under the outer function's qualname and
+#: once under its own. Measured on a two-level fixture: 6 sites for 4 lines.
+#: Found here, not in the round-5 report; it inflates any denominator built on
+#: the site count and pays to run the same mutant twice.
+_SCOPE_NODES: tuple = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+#: Loop nodes whose `body` re-enters: reaching the end of one starts the next
+#: iteration, so a deleted `return` there does not end the function.
+_LOOP_NODES: tuple = (ast.For, ast.AsyncFor, ast.While)
+
+
+def _child_block_exits(node: ast.stmt, name: str, parent_exits: bool) -> bool:
+    """Whether reaching the end of `node.<name>` ends the enclosing function.
+
+    Reached only when `node` is itself the last statement of a block that ends
+    the function, so `parent_exits` already carries the outer answer. Three
+    blocks take it away again:
+
+      loop `body`      the next iteration runs — deleting a `return` there
+                       continues the loop instead of leaving the function
+      `finalbody`      falling off a `finally` resumes the pending return or
+                       re-raises the pending exception; a `return` there
+                       SWALLOWS both, so deleting it is never a no-op
+      `try` body with  an `else` runs when the try completes normally, so
+      an `else`        falling off the try body runs code a `return` skipped
+    """
+    if not parent_exits:
+        return False
+    if name == "body" and isinstance(node, _LOOP_NODES):
+        return False
+    if name == "finalbody":
+        return False
+    if name == "body" and isinstance(node, ast.Try) and node.orelse:
+        return False
+    return True
 
 
 def _is_deletable_kind(node: ast.stmt) -> bool:
@@ -297,19 +365,26 @@ def _is_deletable_kind(node: ast.stmt) -> bool:
     return isinstance(node, DELETABLE_NODES)
 
 
-def _body_blocks(node: ast.stmt) -> List[List[ast.stmt]]:
-    """Every statement list hanging off a compound statement."""
-    blocks: List[List[ast.stmt]] = []
+def _body_blocks(node: ast.stmt, parent_exits: bool) -> List[Tuple[List[ast.stmt], bool]]:
+    """Every statement list hanging off a compound statement, each with its
+    own answer to "does reaching the end of this block end the function".
+
+    A nested `def`/`lambda`/`class` yields nothing: `discover_statements`
+    reaches those through `ast.walk` already, and descending twice double-counts.
+    """
+    if isinstance(node, _SCOPE_NODES):
+        return []
+    blocks: List[Tuple[List[ast.stmt], bool]] = []
     for name in ("body", "orelse", "finalbody"):
         block = getattr(node, name, None)
         if isinstance(block, list) and block and isinstance(block[0], ast.stmt):
-            blocks.append(block)
+            blocks.append((block, _child_block_exits(node, name, parent_exits)))
     for handler in getattr(node, "handlers", []) or []:
         if isinstance(handler, ast.ExceptHandler) and handler.body:
-            blocks.append(handler.body)
+            blocks.append((handler.body, parent_exits))
     for case in getattr(node, "cases", []) or []:
         if getattr(case, "body", None):
-            blocks.append(case.body)
+            blocks.append((case.body, parent_exits))
     return blocks
 
 
@@ -320,11 +395,32 @@ def _walk_block(
     function_qualname: str,
     lines: Sequence[str],
     out: List[StatementSite],
+    block_exits_function: bool = True,
 ) -> None:
-    """Collect deletable statements in this block, then recurse into compounds."""
+    """Collect deletable statements in this block, then recurse into compounds.
+
+    `block_exits_function` is the tail-position answer for THIS block: True
+    when reaching its end ends the enclosing function. Only then is a trailing
+    bare `return` the same thing as falling off the end.
+
+    THE DEFECT THIS PARAMETER CURES (devpulse, round 5, canary a36f500a). The
+    first cut asked `index == len(block) - 1` and nothing else, so a `return`
+    last in an `if` body was declared arid — which is the definition of a
+    guard clause, and the species this operator exists to probe. `kv.py:238`,
+    the `return` after `kv refused: --json is only for list`, was filtered out
+    before it was ever probed; deleting it leaves the suite green while
+    `kv --json FILE set K V` prints the refusal, exits 2, AND writes the pair.
+    13 statements on that tree were skipped under the old reason.
+
+    Measured here, the same filter was wrong about three more shapes the
+    report did not name: a `return` last in a LOOP body (deleting it continues
+    the loop), last in a `finally` (deleting it stops swallowing the pending
+    return or exception), and last in a `try` body that has an `else`.
+    """
     sole = len(block) == 1
     for index, node in enumerate(block):
         is_last = index == len(block) - 1
+        ends_the_function = is_last and block_exits_function
         lineno = getattr(node, "lineno", 0)
         end_lineno = getattr(node, "end_lineno", 0) or lineno
         source_line = lines[lineno - 1].strip() if 0 < lineno <= len(lines) else ""
@@ -342,17 +438,18 @@ def _walk_block(
                 is_sole_statement=sole,
                 source_line=source_line,
                 skip_reason=None if lineno else REASON_NO_LINE_RANGE,
-                arid_reason=_arid_reason_for(node, is_last),
+                arid_reason=_arid_reason_for(node, ends_the_function),
             )
             out.append(site)
 
-        for inner in _body_blocks(node):
+        for inner, inner_exits in _body_blocks(node, ends_the_function):
             _walk_block(
                 inner,
                 relpath=relpath,
                 function_qualname=function_qualname,
                 lines=lines,
                 out=out,
+                block_exits_function=inner_exits,
             )
 
 
@@ -634,6 +731,100 @@ def _count_by(values: Sequence[Optional[str]]) -> Dict[str, int]:
 ROLLUP_MIN_STATEMENTS = 2
 
 
+# =============================================================================
+# THE CONVICTION LINE
+# =============================================================================
+
+#: WHAT WOULD OBSERVE THIS STATEMENT, by the shape of the statement itself.
+#:
+#: The brief's boundary, verbatim: "A scored check that says 'unobserved
+#: statement at aligner.py:87, log_operation table_refused, reached by 20
+#: tests, none read the trail' teaches. A percentage does not."
+#:
+#: So the survivor list is not the product — the sentence is. Each pattern
+#: names the assertion that WOULD have killed the mutant, because a builder
+#: told only that something is unobserved has to invent the cure themselves,
+#: and the round-5 trail gap survived five rounds of exactly that.
+#:
+#: Matched on the statement's own source line, most specific first. A shape
+#: nobody has a sentence for falls through to the generic clause rather than
+#: guessing, which is why the last entry matches everything.
+OBSERVATION_CLAUSES: Tuple[Tuple[str, str], ...] = (
+    (
+        r"^json_handler\.log_operation\(\s*['\"](?P<name>[^'\"]+)",
+        "an assertion reading the operations trail for '{name}'",
+    ),
+    (r"^logger\.(?P<level>debug|info|warning|error|critical)\(", "an assertion on the captured log record at {level}"),
+    (r"^(console\.print|print)\(\s*\)", "an assertion that the blank separator line is present in captured output"),
+    (r"^(console\.print|print)\(", "an assertion on captured stdout containing this line"),
+    (r"^(error|_refuse)\(", "an assertion on the refusal reason AND on the exit code"),
+    (r"^return\s*$", "an assertion that the call refuses AND that the work it guards did not happen"),
+    (r"^(?P<target>[A-Za-z_][\w.]*)\s*(?::[^=]+)?=\s*", "an assertion reaching the branch that reads '{target}'"),
+    (r"^(?P<callee>[A-Za-z_][\w.]*)\(", "an assertion on the effect of {callee}()"),
+    (r"", "an assertion that reads the effect of this statement"),
+)
+
+
+def _outermost_callee(line: str) -> Optional[str]:
+    """The function a call statement actually calls, or None.
+
+    Regex alone reads the FIRST identifier, which is the wrong one the moment
+    a call is chained: `Path(temp_name).unlink(missing_ok=True)` is a call to
+    `unlink`, and `super().__init__(reason)` to `__init__`. Naming `Path()` in
+    a conviction sends the builder to assert on the wrong thing, so the line
+    is parsed and the regex kept only for what will not parse.
+    """
+    try:
+        node = ast.parse(line.strip(), mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(node, ast.Call):
+        return None
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return None
+
+
+def observation_clause(source_line: str) -> str:
+    """The sentence naming what would have killed this mutant."""
+    line = (source_line or "").strip()
+    for pattern, clause in OBSERVATION_CLAUSES:
+        match = re.match(pattern, line)
+        if not match:
+            continue
+        fields = match.groupdict()
+        if "callee" in fields:
+            fields["callee"] = _outermost_callee(line) or fields["callee"]
+        return clause.format(**fields) if fields else clause
+    return OBSERVATION_CLAUSES[-1][1]
+
+
+def conviction_line(result: StatementResult) -> str:
+    """One survivor, in the sentence a builder can act on.
+
+    The count of covering tests is the part that makes it a conviction rather
+    than a coverage note: a statement NO test reaches is a coverage fact and
+    never appears here, while one that 20 tests execute and none observe is a
+    claim about the assertions, which is the species.
+    """
+    site = result.site
+    reached = result.selected_tests
+    reach = f"reached by {reached} test{'s' if reached != 1 else ''}" if reached else "reached by the whole suite"
+    return (
+        f"unobserved statement at {site.relpath}:{site.lineno}, "
+        f"{site.source_line.strip()[:CONVICTION_STATEMENT_CHARS]}, "
+        f"{reach}, none observe it — {observation_clause(site.source_line)} would"
+    )
+
+
+#: How much of the statement the line quotes before it stops. A conviction is
+#: read in a terminal beside others; the address is what a builder navigates by.
+CONVICTION_STATEMENT_CHARS = 60
+
+
 def _survivor_rollup(campaign: StatementCampaign) -> dict:
     """Collapse whole-function survivor blocks into one row each.
 
@@ -712,6 +903,12 @@ def summarize(campaign: StatementCampaign, sites: Sequence[StatementSite]) -> di
         "survived": len(survivors),
         "survived_unobserved": len(observed),
         "survived_no_covering_test": len(survivors) - len(observed),
+        "convictions": [conviction_line(r) for r in observed],
+        "convictions_note": (
+            "One sentence per UNOBSERVED survivor — a statement at least one test executes and no "
+            "test observes. Statements with no covering test are a coverage fact and are counted "
+            "separately in `survived_no_covering_test`, never convicted here."
+        ),
         "survivor_rollup": _survivor_rollup(campaign),
         "not_run": len([r for r in campaign.results if r.outcome == OUTCOME_NOT_RUN]),
         "mutation_failed": len([r for r in campaign.results if r.outcome == OUTCOME_MUTATION_FAILED]),

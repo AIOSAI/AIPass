@@ -1898,7 +1898,7 @@ class TestStatementDeletionAridList:
         from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
 
         apps = tmp_path / "apps"
-        apps.mkdir()
+        apps.mkdir(exist_ok=True)
         (apps / "mod.py").write_text(source)
         return SD.discover_statements(tmp_path)
 
@@ -1933,6 +1933,184 @@ class TestStatementDeletionAridList:
         sites = self._sites(tmp_path, 'def f():\n    """Doc."""\n    return work()\n')
         assert any(s.arid_reason for s in sites), "arid sites stay in the list"
         assert all(s.arid_reason is None for s in SD.probeable(sites)), "but never get probed"
+
+    def _return_arid(self, tmp_path, source):
+        """The arid reason on every bare `return` in `source`, in line order."""
+        sites = self._sites(tmp_path, source)
+        return [s.arid_reason for s in sorted(sites, key=lambda s: s.lineno) if s.kind == "Return"]
+
+    def test_a_guard_return_is_never_arid(self, tmp_path):
+        """THE ROUND-5 DEFECT (devpulse, canary a36f500a). `is_last` was
+        computed per BLOCK, so the `return` closing an `if` was declared arid.
+        That is the definition of a guard clause and the species this operator
+        exists to probe: canary's `kv.py:238` was filtered out before it was
+        ever run, and deleting it leaves 91 tests green while
+        `kv --json FILE set K V` prints its refusal, exits 2, AND writes."""
+        source = "def f(a):\n    if a:\n        log('refused')\n        return\n    write(a)\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+    def test_a_return_in_tail_position_is_still_arid(self, tmp_path):
+        """The cure must not simply stop suppressing. Both of these DO fall
+        off the end of the function, so deleting them changes nothing."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        flat = "def f(a):\n    write(a)\n    return\n"
+        assert self._return_arid(tmp_path, flat) == [SD.ARID_SOLE_RETURN_NONE]
+
+        nested = "def f(a):\n    if a:\n        write(a)\n        return\n"
+        assert self._return_arid(tmp_path, nested) == [SD.ARID_SOLE_RETURN_NONE]
+
+    def test_a_return_closing_a_loop_body_is_never_arid(self, tmp_path):
+        """Not in the round-5 report — measured here. Reaching the end of a
+        loop body starts the next iteration, so deleting the `return` keeps
+        looping instead of leaving the function."""
+        source = "def f(xs):\n    for x in xs:\n        if x:\n            return\n    write('done')\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+        while_tail = "def f(xs):\n    while xs:\n        xs.pop()\n        return\n"
+        assert self._return_arid(tmp_path, while_tail) == [None]
+
+    def test_a_return_closing_a_finally_is_never_arid(self, tmp_path):
+        """Also measured here, not reported. A `return` in a `finally`
+        SWALLOWS the pending return value or exception; deleting it stops the
+        swallowing, which is the opposite of a no-op."""
+        source = "def f():\n    try:\n        return compute()\n    finally:\n        return\n"
+        assert self._return_arid(tmp_path, source) == [None, None]
+
+    def test_a_return_closing_a_try_body_with_an_else_is_never_arid(self, tmp_path):
+        """An `else` runs when the try completes normally, so falling off the
+        try body runs code the `return` skipped."""
+        source = "def f():\n    try:\n        return\n    except E:\n        h()\n    else:\n        k()\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+    def test_a_return_closing_an_except_handler_at_the_tail_is_arid(self, tmp_path):
+        """Falling off a handler leaves the whole `try`, and here that is the
+        end of the function. Keeping this one arid is what stops the cure from
+        convicting equivalent mutants."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        source = "def f():\n    try:\n        g()\n    except E:\n        return\n"
+        assert self._return_arid(tmp_path, source) == [SD.ARID_SOLE_RETURN_NONE]
+
+
+class TestStatementDeletionDiscoveryIsUnique:
+    """One statement, one site. A double-counted tree lies about its rate."""
+
+    def test_a_nested_def_is_walked_once_not_twice(self, tmp_path):
+        """Found here, not in the round-5 report. `discover_statements` finds
+        functions with `ast.walk`, which already reaches every nested `def`,
+        and `_walk_block` descended into them as well — so each nested
+        statement was emitted twice, once under each qualname. It inflates any
+        denominator built on the site count and pays to run one mutant twice."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(
+            "def outer(a):\n    x = 1\n    def inner(b):\n        y = 2\n        return y\n    return inner(a) + x\n"
+        )
+        sites = SD.discover_statements(tmp_path)
+        addresses = [(s.relpath, s.lineno) for s in sites]
+        assert len(addresses) == len(set(addresses)), f"a line was emitted twice: {addresses}"
+        inner_y = [s for s in sites if s.source_line == "y = 2"]
+        assert len(inner_y) == 1
+        assert inner_y[0].function_qualname == "inner", "attributed to its own function"
+
+
+class TestStatementDeletionConviction:
+    """The sentence IS the product. A percentage teaches nobody."""
+
+    def _result(self, statement, tests=5, relpath="apps/m.py", line=87):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        site = SD.StatementSite(
+            relpath=relpath,
+            qualname="f",
+            function_qualname="f",
+            lineno=line,
+            end_lineno=line,
+            body_lineno=line,
+            body_col_offset=0,
+            kind="Expr",
+            is_sole_statement=False,
+            source_line=statement,
+        )
+        return SD.StatementResult(site=site, outcome=SD.OUTCOME_SURVIVED, selected_tests=tests)
+
+    def test_a_conviction_names_file_line_statement_and_the_observation(self):
+        """The brief's four-part contract, one assertion per part."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        line = SD.conviction_line(self._result('json_handler.log_operation("table_refused", {})', tests=20))
+        assert "apps/m.py:87" in line, "the address a builder navigates by"
+        assert "log_operation" in line, "the statement itself"
+        assert "reached by 20 tests" in line, "the count that makes it a conviction, not a coverage note"
+        assert "operations trail for 'table_refused'" in line, "what would observe it"
+
+    def test_the_observation_clause_follows_the_statement_shape(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert "captured log record at warning" in SD.observation_clause('logger.warning("x", a)')
+        assert "captured stdout" in SD.observation_clause('console.print("hello")')
+        assert "refusal reason" in SD.observation_clause('error("kv refused: no verb")')
+        assert "did not happen" in SD.observation_clause("return"), "a guard return, the round-5 species"
+
+    def test_a_chained_call_names_the_function_it_actually_calls(self):
+        """Reading the FIRST identifier sends the builder to assert on the
+        wrong thing: these two are calls to `unlink` and `__init__`, and both
+        are real canary a36f500a survivors."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert "unlink()" in SD.observation_clause("Path(temp_name).unlink(missing_ok=True)")
+        assert "__init__()" in SD.observation_clause("super().__init__(reason)")
+
+    def test_an_unparseable_statement_still_gets_a_sentence(self):
+        """The fall-through matches everything rather than guessing."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.observation_clause("del broken(((")
+        assert SD.observation_clause("")
+
+    def test_a_statement_no_test_reaches_is_never_convicted(self):
+        """A statement with no covering test is a COVERAGE fact. Convicting it
+        would blame the assertions for a gap in what the suite executes."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        campaign = SD.StatementCampaign(
+            baseline=None,
+            results=[
+                SD.StatementResult(
+                    site=self._result("trail('x')").site,
+                    outcome=SD.OUTCOME_SURVIVED,
+                    reason=SD.REASON_NO_COVERING_TEST,
+                )
+            ],
+        )
+        document = SD.summarize(campaign, [])
+        assert document["convictions"] == []
+        assert document["survived_no_covering_test"] == 1
+
+
+class TestStatementDeletionHangTimeout:
+    """The ceiling has to clear an honest mutant and still catch a hang."""
+
+    def test_the_ceiling_leaves_room_above_the_baseline(self, tmp_path):
+        """ROUND-5 DEFECT TWO. The ceiling was `int(baseline)` exactly, argued
+        from 'a run over a SUBSET cannot outlast the whole suite'. When
+        selection has no coverage entry it falls back to the WHOLE suite, so
+        the honest cost IS the baseline and the ceiling loses a coin toss:
+        canary's only two `not_run / mutant_timeout` of 153 were its only two
+        `unmapped_test_context` mutants, both at 19.03s against a 19s wall."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.hang_timeout(19.0) > 19, "a whole-suite fallback must fit under its own ceiling"
+        assert SD.hang_timeout(19.0) == 38
+
+    def test_the_floor_still_holds_for_a_fast_suite(self, tmp_path):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.hang_timeout(0.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
+        assert SD.hang_timeout(1.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
 
 
 class TestStatementDeletionMutant:
