@@ -421,3 +421,50 @@ class TestAllowDenyUnchanged:
                 }
             )
             assert result["exit_code"] == expected, f"decision changed for: {command!r}"
+
+
+class TestOneDeleteSpelledManyWays:
+    """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
+
+    Measured on this gate BEFORE the cure: every row below was allowed AND
+    unrecorded except the bare lowercase spelling. Two losses in one, and the
+    second is the quiet one — the record is the only trace the unsanctioned lane
+    leaves, so a spelling the gate could not read deleted without a line.
+    """
+
+    CWD = str(Path(__file__).resolve().parent.parent)
+
+    BLOCKED = (
+        "rm.exe -rf /tmp/x",
+        "RM -rf /tmp/x",
+        "Rm -rf /tmp/x",
+        "/usr/bin/rm.exe -rf /tmp/x",
+        "C:\\Windows\\System32\\rm.exe -rf C:\\tmp\\x",
+        "sudo RM.EXE -rf /tmp/x",
+    )
+    ALLOWED = ("rm.exe /tmp/x", "RM /tmp/x", "drone rm /tmp/x", "DRONE rm -rf /tmp/x")
+
+    def _bash(self, command: str) -> dict:
+        return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
+
+    def test_every_spelling_of_a_recursive_delete_is_blocked(self):
+        for command in self.BLOCKED:
+            assert self._bash(command)["exit_code"] == 2, f"not refused: {command!r}"
+
+    def test_the_sanctioned_lane_and_plain_deletes_are_unchanged(self):
+        """The cure widens what counts as the verb, never what counts as recursive."""
+        for command in self.ALLOWED:
+            assert self._bash(command)["exit_code"] == 0, f"wrongly refused: {command!r}"
+
+    def test_a_renamed_delete_reaches_the_record(self, caplog):
+        with caplog.at_level(logging.INFO):
+            self._bash("rm.exe notes.txt")
+
+        records = [r for r in caplog.records if "DELETE" in r.getMessage()]
+        assert len(records) == 1
+        assert "rm.exe notes.txt" in records[0].getMessage()
+
+    def test_the_reader_being_away_leaves_the_old_narrow_reading(self):
+        """Fail-safe direction: the bare spelling still refuses, and the log says so."""
+        with patch("aipass.hooks.apps.modules.bash_writes.verb_name", side_effect=RuntimeError("boom")):
+            assert self._bash("rm -rf /tmp/x")["exit_code"] == 2

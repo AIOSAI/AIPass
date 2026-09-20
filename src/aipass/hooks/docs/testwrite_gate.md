@@ -50,6 +50,22 @@ in `modules/admin_seat.py` that `edit_gate` uses — so cleanup work with the ow
 policy file. A crash inside the gate allows rather than walls: fail-closed covers a policy that could
 not be *read*, not a defect that is ours.
 
+**Naming a path is not writing it (1.2.0, 2026-09-19).** `bash_writes` reports every path an
+interpreter is handed, which is the right breadth for `edit_gate`'s fence and the wrong breadth for
+this gate's narrower question. Three seats were refused for commands that created nothing — @seedgo
+for a one-liner that PRINTED a test path while measuring the fleet, @canary for a path literal in a
+heredoc, this branch for both (devpulse DPLAN-0352). The reader now looks at the interpreter's OWN
+text for a write verb, **in the grammar that text is written in** — `>` is a redirection in a shell
+and a comparison in python — and appends `NO_WRITE_VERB` to the reason when it finds none. This gate
+reads that marker and stands down; `edit_gate` ignores it and keeps the full breadth, because a path
+an interpreter holds still cannot be told from one it writes.
+
+The evidence is never claimed about text nobody read. An interpreter handed a **script file** keeps
+the broad reading — the program is on disk, not in the command — and so does `awk`, whose program
+arrives as a bare operand rather than behind `-c`/`-e` or a heredoc. Shelling out (`os.system`,
+`subprocess`) counts as a write shape for the same reason: the verb is then inside a string this
+parser does not read as code.
+
 **What it deliberately does NOT catch** — published as data in `testwrite_targets.NOT_CAUGHT` and
 printed by `drone @hooks testwrite`, so this list and the code cannot drift apart:
 
@@ -58,6 +74,8 @@ printed by `drone @hooks testwrite`, so this list and the code cannot drift apar
 - a new test appended *into* an existing test file — the deliberate cost of letting agents fix reds
 - a test tree under a different directory name (`specs/`, `testing/`, `t/`)
 - everything `bash_writes.NOT_CAUGHT` already lists, on the scripted lane
+- a write made through a shape the write-verb vocabulary has no pattern for — the path is still
+  reported, but without that evidence this gate stands down on it
 - a file created by a process the command merely starts (a scaffolder, a generator)
 - deletion or renaming of the policy file itself — this gate does not guard its own switch
 

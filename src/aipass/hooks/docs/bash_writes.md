@@ -28,6 +28,25 @@ space), so line two of a multi-line Bash call was glued onto line one: its write
 gates and its `cd` never moved. A backslash-newline still joins two lines into one command, and a `#`
 opens a comment only where a word starts outside quotes (the lexer's own rule cut the line at any `#`).
 
+**One program, many spellings (1.7.0, 2026-09-19).** `verb_name()` is the single reading of a
+command-position token: basename, lowercased, with a Windows executable extension (`.exe`, `.com`,
+`.bat`, `.cmd`, `.ps1`) removed. `CP.EXE` and `cp.exe` are cp on the host that runs them, and this
+parser read them as an unknown program naming no target. `git_gate` and `rm_gate` had the same hole
+and now read through this same function, so the list of executable extensions exists once. Only
+executable extensions are stripped — `some/path/git.py` is a file nobody invokes as git, and every
+gate leaves it alone on purpose. Reading every host the same way is deliberate: a lowercase read of
+`TEE` on Linux names a program that is not installed, so the parser reports a target for a command
+that would fail — broader than the truth, which is the safe direction for a fence.
+
+**Write-verb evidence for interpreters (1.7.0, 2026-09-19).** An interpreter's paths are all reported,
+as above, and the reason now says whether the program's own text contains a verb that CREATES a file
+— read in the grammar that text is written in, shell or source. When it does not, `NO_WRITE_VERB` is
+appended to the reason. `testwrite_gate` reads that and stands down (a printed path is not a
+creation); `edit_gate` ignores it and keeps the full breadth, because a path an interpreter holds
+still cannot be told from one it writes. The evidence is only claimed about text that is IN the
+command — inline source (`-c`, `-e`) or a heredoc. A script file, and `awk`'s bare-operand program,
+keep the broad reading: answering "no write verb" about text nobody read would be inventing evidence.
+
 **What it deliberately does NOT catch.** A perfect shell parser is not the bar and is not achievable;
 the residual is published as data in `bash_writes.NOT_CAUGHT` and printed by `drone @hooks` module
 introspection, so this list and the code cannot drift apart:
@@ -47,6 +66,10 @@ introspection, so this list and the code cannot drift apart:
   word cannot be told from `json.load`; `./local.json` is read)
 - a path joined in program text — `Path('.trinity') / 'local.json'` is two strings, neither a path
 - write verbs the parser has no grammar for: `sponge`, `ed` / `ex`, an interactive editor
+- a write made through a shape the write-verb vocabulary has no pattern for — the path is still
+  reported, only the evidence is missing, and the broad callers are unaffected
+- which held path a write shape belongs to — the evidence is read per interpreter, not per path
+- what a script FILE does — its text is on disk, never in the command
 
 A command the parser cannot read at all (an unbalanced quote, an internal error) **allows** and logs:
 a parser that has learned nothing about a command must not convict on it.

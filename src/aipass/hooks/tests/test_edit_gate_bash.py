@@ -530,6 +530,38 @@ class TestShellMemoryRuleDoesNotOverreach:
         assert "passport.json" in _reason(result)
 
 
+class TestTheVerbIsReadTheSameOnEveryHost:
+    """One program, four spellings — the reading the gates share (DPLAN-0352).
+
+    Found while curing git_gate and rm_gate on 2026-09-19: this parser had the
+    same hole. ``CP.EXE`` and ``cp.exe`` are cp on a Windows host, and the
+    scripted lane read them as an unknown program that names no target.
+    """
+
+    def test_verb_name_reads_path_extension_and_case(self):
+        from aipass.hooks.apps.modules.bash_writes import verb_name
+
+        assert verb_name("rm") == "rm"
+        assert verb_name("RM.EXE") == "rm"
+        assert verb_name("/usr/bin/git") == "git"
+        assert verb_name("C:\\Program Files\\Git\\bin\\git.exe") == "git"
+        assert verb_name("git.cmd") == "git"
+
+    def test_a_non_executable_extension_is_part_of_the_name(self):
+        """A file NAMED for a program is not that program — `git.py` stays quiet."""
+        from aipass.hooks.apps.modules.bash_writes import verb_name
+
+        assert verb_name("git.py") == "git.py"
+        assert verb_name("some/path/rm.txt") == "rm.txt"
+        assert verb_name(".bashrc") == ".bashrc"
+
+    def test_a_renamed_write_verb_still_names_its_target(self):
+        from aipass.hooks.apps.modules.bash_writes import write_targets
+
+        assert _names(write_targets("CP.EXE a.json /work/Other/b.json", "/work/Mine"), "Other", "b.json")
+        assert _names(write_targets("TOUCH /work/Other/new.json", "/work/Mine"), "Other", "new.json")
+
+
 class TestBashWritesParser:
     """Unit-level reading of the parser, independent of the fence."""
 
