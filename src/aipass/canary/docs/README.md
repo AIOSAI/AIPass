@@ -11,6 +11,7 @@ these pages are what it points at.
 | [note_module.md](note_module.md) | The append-only note store: format, refusal, why it avoids the fleet json service, what its tests measure |
 | [span_module.md](span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests and mutants measure |
 | [top_module.md](top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests and mutants measure |
+| [align_module.md](align_module.md) | The column aligner: the layout, the four rulings the contract left open, every refusal, what its tests and mutants measure |
 | [testing.md](testing.md) | Running the suite, the conftest seam, what continuous integration actually runs |
 | [branch_data.md](branch_data.md) | Everything this branch writes to disk: the json shim, `canary_json/`, `docs.local/`, `logs/`, archives |
 

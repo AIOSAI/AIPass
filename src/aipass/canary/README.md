@@ -5,7 +5,7 @@
 **Purpose:** The permanent test citizen — spawned, dispatched, resumed, broken
 and re-scaffolded so no working branch has to be the experiment.
 **Module:** `aipass.canary`
-**Version:** 2.4.0
+**Version:** 2.5.0
 **Created:** 2026-08-20
 
 Everything here is test data by definition: the mail, the logs, the artifacts,
@@ -21,6 +21,7 @@ drone @canary note add "check the interrupt"   # append one note
 drone @canary note list                        # read them back
 drone @canary span "2d 4h"                     # a written duration in seconds
 drone @canary top 3 scores.txt                 # the three highest counts in a tally
+drone @canary align table.txt                  # a text table with its columns lined up
 pytest src/aipass/canary/tests -v              # the suite, from the repo root
 ```
 
@@ -70,8 +71,8 @@ the thing landed — not a summary of it.
 
 ## Commands
 
-Three verbs are routed today — `note`, `span` and `top` — and not one of them
-is permanent. Modules are added here for a specific test and removed after it,
+Four verbs are routed today — `note`, `span`, `top` and `align` — and not one
+of them is permanent. Modules are added here for a specific test and removed after it,
 so the forms above are the reference and this page names no more than the verbs.
 
 What the help pages cannot tell you about themselves — why a refusal exits 2
@@ -83,11 +84,13 @@ reports — is in [docs/command_surface.md](docs/command_surface.md).
 `apps/canary.py` is the entry point and holds no business logic: it discovers
 modules, routes to them, and turns their answer into an exit code. Modules live
 in `apps/modules/`, which is empty by design between tests; today it holds
-`note`, an append-only note store, `span`, a duration parser, and `top`, a
-leaderboard reader. Handlers sit under `apps/handlers/`: the `notes` handler
-does the store's reading and appending, the `duration` handler parses a written
-duration and owns every one of that command's refusals, the `leaderboard`
-handler reads a name/count tally and owns every one of `top`'s refusals, the
+`note`, an append-only note store, `span`, a duration parser, `top`, a
+leaderboard reader, and `align`, a column aligner. Handlers sit under
+`apps/handlers/`: the `notes` handler does the store's reading and appending,
+the `duration` handler parses a written duration and owns every one of that
+command's refusals, the `leaderboard` handler reads a name/count tally and owns
+every one of `top`'s refusals, the `table` handler reads a whitespace-separated
+table and owns every one of `align`'s refusals, the
 `json` handler is the byte-identical fleet shim over the shared json service,
 and `apps/handlers/__init__.py` carries the guard that refuses a cross-branch
 handler import.
@@ -109,6 +112,7 @@ Depth lives in [docs/](docs/), one page per subject:
 | [docs/note_module.md](docs/note_module.md) | The note store: format, the parse refusal, why it avoids the fleet json service, what its tests measure |
 | [docs/span_module.md](docs/span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests and mutants measure |
 | [docs/top_module.md](docs/top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests measure |
+| [docs/align_module.md](docs/align_module.md) | The column aligner: the layout, the four rulings the contract left open, every refusal, what its tests and mutants measure |
 | [docs/testing.md](docs/testing.md) | Running the suite, the conftest seam, and what continuous integration actually runs |
 | [docs/branch_data.md](docs/branch_data.md) | Everything written to disk here: the json shim, `canary_json/`, `docs.local/`, `logs/`, the archives |
 
@@ -131,7 +135,7 @@ Depth lives in [docs/](docs/), one page per subject:
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
 
 ---
 

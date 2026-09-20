@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: canary.py
 # Description: Entry point CLI for drone @canary — permanent test citizen
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-08-20
-# Modified: 2026-09-19
+# Modified: 2026-09-20
 # =============================================
 
 """
@@ -40,7 +40,7 @@ if sys.platform == "win32":
 from aipass.cli.apps.modules import console, error, reset_command_state, resolve_exit  # noqa: E402
 from aipass.prax import logger  # noqa: E402
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -159,6 +159,8 @@ def print_help() -> None:
     console.print('  [cyan]span --json TEXT[/cyan]   The same total as {"seconds": N}, nothing on stdout')
     console.print("  [cyan]top N FILE[/cyan]         Print the N highest counts in a name/count file")
     console.print("  [cyan]top --json N FILE[/cyan]  The same rows as one JSON array, nothing else on stdout")
+    console.print("  [cyan]align FILE[/cyan]         Print a text table with every column lined up")
+    console.print("  [cyan]align --json FILE[/cyan]  The same rows as one JSON array of arrays, nothing else")
     console.print("  [dim]modules are added per test, then removed — 'drone @canary' lists what is present[/dim]")
     console.print()
 
@@ -182,6 +184,8 @@ def print_help() -> None:
     console.print("  $ drone @canary span --json 1h30m")
     console.print("  $ drone @canary top 3 scores.txt")
     console.print("  $ drone @canary top --json 3 scores.txt")
+    console.print("  $ drone @canary align table.txt")
+    console.print("  $ drone @canary align --json table.txt")
     console.print("  $ drone @canary --version")
     console.print()
 

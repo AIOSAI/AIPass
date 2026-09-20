@@ -35,18 +35,22 @@ Canary registers no persistent subcommands. Modules are added for a specific tes
 
 # Architecture
 
-Re-derived from the tree, not copied from a page. Modules come and go: today two.
+Re-derived from the tree, not copied from a page. Modules come and go: today four.
 
 ```
 apps/
 ├── canary.py              # entry point: self-map, help, routing, exit codes
 ├── modules/
 │   ├── note.py            # append-only note store (add | list)
-│   └── span.py            # duration text to seconds (--json for one object)
+│   ├── span.py            # duration text to seconds (--json for one object)
+│   ├── top.py             # N highest counts in a tally (--json for one array)
+│   └── align.py           # text table with its columns lined up (--json for rows)
 ├── handlers/
 │   ├── __init__.py        # guard: refuses a cross-branch handler import
 │   ├── json/              # byte-identical fleet shim over the prax json service
 │   ├── duration/parser.py # parses a written duration, owns every span refusal
+│   ├── leaderboard/reader.py # ranks a name/count file, owns every top refusal
+│   ├── table/aligner.py   # reads and lays out a table, owns every align refusal
 │   └── notes/store.py     # reads and appends the notes.jsonl store
 ├── integrations/          # scaffold, empty
 └── plugins/               # scaffold, empty
@@ -54,14 +58,14 @@ docs/                      # depth, indexed by docs/README.md
 docs.local/                # git-ignored: notes.jsonl, sub-agent drops
 canary_json/               # git-ignored json output; custom_config/ is a leftover
 logs/                      # note.log, plus ai_mail dispatch transcripts
-tests/                     # entry point, note store, dead-cwd pins; .archive/ retired
+tests/                     # entry point, each module, dead-cwd pins; .archive/ retired
 ```
 
 Archive directories are untracked by doctrine: on disk, absent from git.
 
 # Depth
 
-The README is the face for strangers and stays off the startup read. Depth is in docs/ — command_surface (routed forms, exit codes), note_module (the store and its refusal), span_module (the duration grammar and its refusals), testing (the suite and the conftest seam), branch_data (everything written to disk).
+The README is the face for strangers and stays off the startup read. Depth is in docs/ — command_surface (routed forms, exit codes), note_module (the store and its refusal), span_module (the duration grammar and its refusals), top_module (the tie-break and its refusals), align_module (the layout rulings and its refusals), testing (the suite and the conftest seam), branch_data (everything written to disk).
 
 # Integration
 
