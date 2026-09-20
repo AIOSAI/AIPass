@@ -2198,3 +2198,172 @@ class TestStatementDeletionSurvivorRollup:
         rollup = SD._survivor_rollup(self._campaign(rows))
 
         assert [r["function"] for r in rollup["survivors_by_function"]] == ["big", "small"]
+
+
+class TestDiffScopeIsLinesNotFiles:
+    """The brief's first boundary: a one-line fix probes one statement."""
+
+    def test_a_hunk_header_yields_only_its_own_lines(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        diff = "+++ b/src/aipass/seedgo/apps/m.py\n@@ -10,1 +10,3 @@\n+a\n+b\n+c\n"
+        assert diff_scope.parse_changed_lines(diff) == {"src/aipass/seedgo/apps/m.py": {10, 11, 12}}
+
+    def test_a_pure_deletion_puts_nothing_in_scope(self):
+        """A `+` count of 0 adds no line, so there is nothing to splice into -
+        limit 2 falling out of the parse rather than bolted on after it."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        diff = "+++ b/apps/m.py\n@@ -10,4 +9,0 @@\n-gone\n"
+        assert diff_scope.parse_changed_lines(diff) == {}
+
+    def test_the_granularity_is_published_not_inferred(self):
+        """The brief: if file scope ever ships because line scope is harder,
+        the artifact must SAY so rather than let a count imply line scope."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        scope = diff_scope.DiffScope(changed={"apps/m.py": {4}}, ref="HEAD~1")
+        document = scope.to_document()
+        assert document["granularity"] == diff_scope.GRANULARITY_LINE
+        assert diff_scope.GRANULARITY is diff_scope.GRANULARITY_LINE
+        assert document["ref"] == "HEAD~1"
+
+    def test_a_multi_line_statement_is_in_scope_when_its_middle_changed(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        scope = diff_scope.DiffScope(changed={"apps/m.py": {21}})
+        assert scope.holds("apps/m.py", 20, 23) is True
+        assert scope.holds("apps/m.py", 30, 33) is False
+        assert scope.holds("apps/other.py", 20, 23) is False
+
+    def test_the_scope_carries_its_blind_spots(self):
+        """The load-bearing one is the statement that did not change and became
+        unobserved anyway. A cost strategy that reads as a coverage claim is
+        the way this feature goes wrong."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        limits = " ".join(diff_scope.SCOPE_LIMITS).lower()
+        assert "unobserved because of a change elsewhere" in limits
+        assert "untracked files are invisible" in limits
+        assert "never a coverage claim" in limits
+        assert diff_scope.DiffScope().to_document()["limits"] == list(diff_scope.SCOPE_LIMITS)
+
+    def test_a_target_outside_the_repository_refuses_by_name(self):
+        """An empty scope would probe nothing and report it as a clean run."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        with pytest.raises(diff_scope.DiffScopeError) as caught:
+            diff_scope.read_scope(Path("/tmp/not_in_here"), Path("/home"), ref=None)
+        assert "not inside" in str(caught.value)
+
+
+class TestUnreadRedirectNominatesTheMechanism:
+    """One autouse fixture that nothing reads blinds a whole seam."""
+
+    def _corpus(self, tmp_path, conftest: str, test_body: str):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
+
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "conftest.py").write_text(conftest)
+        (tests / "test_thing.py").write_text(test_body)
+        return corpus.build(tmp_path)
+
+    REDIRECT = (
+        "import pytest\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def seam(tmp_path, monkeypatch):\n"
+        "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+        "    return tmp_path\n"
+    )
+
+    def test_an_unread_redirect_that_hands_a_target_back_is_nominated(self, tmp_path):
+        scanned = self._corpus(tmp_path, self.REDIRECT, "def test_a():\n    assert True\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        rows = R.nominate(scanned)
+        assert [r["species"] for r in rows] == ["UNREAD-REDIRECT"]
+        assert rows[0]["evidence"]["fixture"] == "seam"
+        assert rows[0]["verdict"] == corpus.VERDICT_IMPROVE
+
+    def test_a_fence_that_hands_nothing_back_is_never_nominated(self, tmp_path):
+        """No target means nothing to read, so nothing reading it is the
+        design. This clause is what acquits every isolation guard in the fleet."""
+        fence = (
+            "import pytest\n"
+            "@pytest.fixture(autouse=True)\n"
+            "def fence(tmp_path, monkeypatch):\n"
+            "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+        )
+        scanned = self._corpus(tmp_path, fence, "def test_a():\n    assert True\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+        assert R.acquitted(scanned)[0]["why_not"].startswith("it hands nothing back")
+
+    def test_a_requested_fixture_is_never_nominated(self, tmp_path):
+        scanned = self._corpus(tmp_path, self.REDIRECT, "def test_a(seam):\n    assert seam.exists()\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+
+    def test_usefixtures_counts_as_requesting_it(self, tmp_path):
+        body = "import pytest\n@pytest.mark.usefixtures('seam')\ndef test_a():\n    assert True\n"
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+
+    def test_substituting_the_writer_is_the_second_door_and_acquits(self, tmp_path):
+        """MEASURED, not imagined: this is how seedgo observes its own trail,
+        and the first cut of the rule reported seedgo as blind because of it."""
+        body = (
+            "def test_a(monkeypatch):\n"
+            "    seen = []\n"
+            "    monkeypatch.setattr(mod.json_handler, 'log_operation', lambda n, p: seen.append(n))\n"
+            "    assert seen == []\n"
+        )
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+
+    def test_a_dotted_patch_target_is_the_same_door(self, tmp_path):
+        """`patch("a.b.json_handler.log_operation")` names the writer inside
+        one string. Comparing the whole literal made devpulse and hooks false
+        positives; the comparison takes the dotted tail."""
+        body = (
+            "from unittest.mock import patch\n"
+            "def test_a():\n"
+            "    with patch('aipass.x.apps.handlers.json.json_handler.log_operation'):\n"
+            "        assert True\n"
+        )
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+        assert "substitutes the seam writer" in R.acquitted(scanned)[0]["why_not"]
+
+    def test_a_fixture_that_is_not_autouse_is_out_of_scope(self, tmp_path):
+        plain = (
+            "import pytest\n"
+            "@pytest.fixture\n"
+            "def seam(tmp_path, monkeypatch):\n"
+            "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+            "    return tmp_path\n"
+        )
+        scanned = self._corpus(tmp_path, plain, "def test_a():\n    assert True\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+        assert R.acquitted(scanned) == []
+
+    def test_the_rule_declares_itself_to_the_lane(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter, nominators
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.GROUP in adapter.STATIC_GROUPS
+        assert R.GROUP in nominators.declared_groups()
+        assert not hasattr(R, "check_module") and not hasattr(R, "check_branch")
+        assert any("floor" in limit.lower() for limit in R.SPECIFICATION["limits"])

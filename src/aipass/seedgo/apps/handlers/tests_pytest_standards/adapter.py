@@ -41,6 +41,7 @@ from typing import Dict, List, Optional, Tuple
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_pytest_standards import (
+    diff_scope,
     envcopy,
     envdiff,
     gatelog,
@@ -77,6 +78,7 @@ STATIC_GROUPS: tuple = (
     "static_self_skip",
     "static_tautology_assert",
     "static_unentered_assert",
+    "static_unread_redirect",
 )
 
 #: The execution groups whose ENGINES EXIST and which still do not run unless
@@ -261,6 +263,8 @@ def build_env(target: Path, workdir: Path, options: dict) -> envcopy.EnvSpec:
         python_override=options.get("python"),
         symlink_siblings=bool(options.get("symlink_siblings")),
         execution_groups=options.get(OPTION_EXECUTION_GROUPS),
+        scope_to_diff=bool(options.get("scope_to_diff")),
+        diff_scope_ref=options.get("diff_scope_ref"),
     )
 
 
@@ -706,7 +710,8 @@ def _statement_deletion_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[st
         return _execution_not_applicable(statement_deletion.GROUP, _opt_in_reason(statement_deletion.GROUP))
 
     try:
-        sites = statement_deletion.discover_statements(spec.target_copy)
+        discovered = statement_deletion.discover_statements(spec.target_copy)
+        sites = discovered if spec.diff_scope is None else diff_scope.apply(discovered, spec.diff_scope)
         campaign = statement_deletion.run_campaign(_suite_target(spec), sites)
     except Exception as e:  # the lane reports a failure to run, it never hides one
         logger.info("statement_deletion campaign raised: %s", e)
@@ -721,6 +726,13 @@ def _statement_deletion_group(spec: envcopy.EnvSpec, requested: bool) -> Dict[st
         "score": None,
     }
     document.update(statement_deletion.summarize(campaign, sites))
+    if spec.diff_scope is not None:
+        # The DENOMINATOR changes when the scope does, so the scope travels
+        # with the numbers rather than only in the environment block. A
+        # reader who sees "53 probeable" must be able to see, in the same
+        # document, that the tree held 13,743.
+        document["scope"] = spec.diff_scope.to_document()
+        document["statements_in_tree"] = len(discovered)
     if campaign.refusal_reason:
         document["status"] = "not_applicable"
         document["reason"] = campaign.refusal_reason

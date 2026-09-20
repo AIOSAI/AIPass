@@ -46,6 +46,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.tests_pytest_standards.diff_scope import DiffScope, read_scope
 
 #: Never copied. `.chroma`, `.venv` and `node_modules` are the three the MVP's
 #: set omitted; each is large enough to change what the lane costs to run.
@@ -58,7 +59,30 @@ RSYNC_EXCLUDES: Tuple[str, ...] = (
     ".chroma",
     ".venv",
     "node_modules",
+    # prax stages every atomic json write beside its target as
+    # `.<pid>_<serial>.tmp` and then os.replace()s it away, so the file exists
+    # for microseconds. Copying a live fleet raced that window on every run:
+    # the audit's own drone calls generate the writes that break the audit.
+    # Excluded by its own pattern rather than by excluding prax_json, because
+    # the SETTLED json is part of the tree and the staging file never was.
+    ".*_*.tmp",
 )
+
+#: rsync exit codes that are warnings, not failures, and what each one means
+#: for a measurement. 24 is "some files vanished before they could be
+#: transferred" - the tree moved under us. It is not a partial copy of what
+#: was there; rsync transferred everything it could still see.
+#:
+#: TOLERATED, NOT IGNORED: the run records the stderr in `vanished_during_copy`
+#: so a vanished file that is NOT a staging temp stays visible. Measured
+#: 2026-09-20 from a fleet pass by @devpulse: @drone refused under T10 on
+#: `prax/prax_json/.1196433_28.tmp`, and both @drone and @memory then passed on
+#: a plain retry, which is what proves it transient rather than structural.
+#:
+#: Retrying the whole copy was the third option offered and is not taken: a
+#: retry re-walks trees that run to 157 MB to cure a warning that the exclude
+#: above already removes at source.
+RSYNC_WARNING_CODES: Tuple[int, ...] = (24,)
 
 #: Wall-clock ceiling on one rsync. A copy that hangs must not become a hang
 #: of the whole lane; T-BUDGET covers the suite, this covers the setup.
@@ -98,6 +122,13 @@ class EnvSpec:
     copied_siblings: List[str] = field(default_factory=list)
     symlinked_siblings: List[str] = field(default_factory=list)
 
+    #: rsync warnings tolerated during the copy, verbatim. Empty on a quiet
+    #: run. A non-empty list does NOT invalidate the measurement - the copy
+    #: holds everything rsync could still see - but it says the fleet was
+    #: moving underneath it, which is the difference between "the tree is
+    #: this" and "the tree was this while nothing else ran".
+    vanished_during_copy: List[str] = field(default_factory=list)
+
     #: Which tree the siblings came from - `own_root` or `host_repo`. A banked
     #: fixture has no siblings of its own, so its env borrows the running
     #: checkout's; that is sound (they are the branch's real dependencies) but
@@ -116,6 +147,16 @@ class EnvSpec:
     #: already fits on the object both functions share. Carrying it here costs
     #: no signature change and no version bump.
     execution_groups: List[str] = field(default_factory=list)
+
+    #: The change set this run was asked to narrow its mutants to, read from
+    #: the REAL target before the copy, or None for the whole tree.
+    #:
+    #: IT IS RESOLVED HERE for the same reason `execution_groups` lives here
+    #: and for one more: `.git` is excluded from the copy, so the scratch env
+    #: is not a repository and `nominate(spec)` could not read a diff even if
+    #: it wanted to. `build_env` is the only code that ever holds both the
+    #: real target and its repo root.
+    diff_scope: Optional[DiffScope] = None
 
     @property
     def m10_complete(self) -> bool:
@@ -140,6 +181,8 @@ class EnvSpec:
             "sibling_basis": self.sibling_basis,
             "m10_complete": self.m10_complete,
             "excludes": list(RSYNC_EXCLUDES),
+            "vanished_during_copy": list(self.vanished_during_copy),
+            "diff_scope": None if self.diff_scope is None else self.diff_scope.to_document(),
             # PUBLISHED, so that a run which opted a campaign in and a run
             # which did not cannot produce the same document. Two artifacts
             # identical everywhere but in what was ASKED FOR would make the
@@ -194,11 +237,14 @@ def detect_layout(target: Path) -> Tuple[str, Optional[Path]]:
 # =============================================================================
 
 
-def rsync(source: Path, destination: Path) -> None:
+def rsync(source: Path, destination: Path) -> Optional[str]:
     """One rsync with the contract's excludes. Raises EnvError on failure.
 
     Never falls back to a partial copy: an env built from an incomplete tree
-    would produce a measurement of something that does not exist.
+    would produce a measurement of something that does not exist. A code in
+    `RSYNC_WARNING_CODES` is not that - it is the live fleet moving under a
+    read - so it is returned as a warning string rather than raised, and the
+    caller publishes it. Returns None when the copy was quiet.
     """
     destination.mkdir(parents=True, exist_ok=True)
     excludes: List[str] = []
@@ -211,14 +257,27 @@ def rsync(source: Path, destination: Path) -> None:
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise EnvError(f"rsync of {source} could not complete: {type(exc).__name__}: {exc}") from exc
 
+    if result.returncode in RSYNC_WARNING_CODES:
+        warning = f"rsync of {source} warned ({result.returncode}): {result.stderr.strip()[:400]}"
+        logger.warning("[audit_tests] %s", warning)
+        return warning
+
     if result.returncode != 0:
         raise EnvError(f"rsync of {source} failed ({result.returncode}): {result.stderr.strip()[:400]}")
 
+    return None
 
-def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> Tuple[List[str], List[str]]:
-    """Copy or symlink every sibling package. Returns `(copied, symlinked)`."""
+
+def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> Tuple[List[str], List[str], List[str]]:
+    """Copy or symlink every sibling package.
+
+    Returns `(copied, symlinked, warnings)`. A sibling is a live branch being
+    written to while it is read, so the warnings list is where a vanished file
+    in SOMEONE ELSE'S tree surfaces.
+    """
     copied: List[str] = []
     symlinked: List[str] = []
+    warnings: List[str] = []
 
     for entry in sorted(real_src.iterdir()):
         if not entry.is_dir() or entry.name in ("__pycache__", skip):
@@ -227,10 +286,12 @@ def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> 
             (src_dir / entry.name).symlink_to(entry)
             symlinked.append(entry.name)
         else:
-            rsync(entry, src_dir / entry.name)
+            warning = rsync(entry, src_dir / entry.name)
+            if warning is not None:
+                warnings.append(warning)
             copied.append(entry.name)
 
-    return copied, symlinked
+    return copied, symlinked, warnings
 
 
 def _has_siblings(real_src: Path, skip: str) -> bool:
@@ -302,9 +363,11 @@ def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bo
     if root_conftest.is_file():
         shutil.copy2(root_conftest, env_root / "conftest.py")
 
-    copied, symlinked = _place_siblings(real_src, src_dir, target.name, symlink)
+    copied, symlinked, warnings = _place_siblings(real_src, src_dir, target.name, symlink)
     target_copy = src_dir / target.name
-    rsync(target, target_copy)
+    target_warning = rsync(target, target_copy)
+    if target_warning is not None:
+        warnings.append(target_warning)
 
     return {
         "target_copy": target_copy,
@@ -315,15 +378,17 @@ def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bo
         "copied_siblings": copied,
         "symlinked_siblings": symlinked,
         "sibling_basis": sibling_basis,
+        "vanished_during_copy": warnings,
     }
 
 
 def _build_plain_env(target: Path, env_root: Path) -> dict:
     """Copy an ordinary directory whole. Nothing is symlinked."""
     target_copy = env_root / target.name
-    rsync(target, target_copy)
+    warning = rsync(target, target_copy)
     return {
         "target_copy": target_copy,
+        "vanished_during_copy": [warning] if warning is not None else [],
         "run_cwd": env_root,
         "test_arg": target.name,
         "target_module": "",
@@ -355,6 +420,26 @@ def normalise_execution_groups(requested: Optional[Sequence[str]]) -> List[str]:
     return groups
 
 
+def _resolve_diff_scope(
+    target: Path, repo_root: Optional[Path], ref: Optional[str], requested: bool
+) -> Optional[DiffScope]:
+    """The change set, or None when nothing asked for one.
+
+    REFUSES rather than silently widening: a target with no repository to
+    diff against (a banked fixture is the ordinary case) would otherwise get
+    an empty scope, probe zero statements, and report a clean run that never
+    measured anything.
+    """
+    if not requested:
+        return None
+    if repo_root is None:
+        raise EnvError(
+            f"--diff-scope was asked for but {target} is not inside a repository, so there is no "
+            "change set to read; an empty scope would probe nothing and report it as clean"
+        )
+    return read_scope(target, repo_root, ref)
+
+
 def build_env(
     target: Path,
     env_root: Path,
@@ -362,16 +447,25 @@ def build_env(
     python_override: Optional[str] = None,
     symlink_siblings: bool = False,
     execution_groups: Optional[Sequence[str]] = None,
+    diff_scope_ref: Optional[str] = None,
+    scope_to_diff: bool = False,
 ) -> EnvSpec:
     """Materialise the scratch env and return how to run pytest inside it.
 
     `execution_groups` DEFAULTS TO NOTHING, and that default is the lane's
     existing behaviour exactly: every extra campaign is opt-in, so a caller
     that says nothing gets the run it got before this parameter existed.
+
+    `scope_to_diff` is the same shape one level further: off by default, and a
+    run that does not ask for it probes the whole tree exactly as before.
     """
     target = target.resolve()
     layout, repo_root = detect_layout(target)
     env_root = env_root.resolve()
+
+    # BEFORE the copy: `.git` never reaches the scratch env, so this is the
+    # only moment the change set can be read at all.
+    scope = _resolve_diff_scope(target, repo_root, diff_scope_ref, scope_to_diff)
 
     if env_root.exists():
         shutil.rmtree(env_root)
@@ -410,7 +504,9 @@ def build_env(
         copied_siblings=built["copied_siblings"],
         symlinked_siblings=built["symlinked_siblings"],
         sibling_basis=built.get("sibling_basis", SIBLINGS_FROM_OWN_ROOT),
+        vanished_during_copy=built.get("vanished_during_copy", []),
         execution_groups=normalise_execution_groups(execution_groups),
+        diff_scope=scope,
     )
 
     # Recorded because `m10_complete: false` is the one env state a reader
