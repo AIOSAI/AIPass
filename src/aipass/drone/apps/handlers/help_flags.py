@@ -62,3 +62,37 @@ def wants_help(
         return True
 
     return any(token in DASHED_HELP_TOKENS for token in tokens)
+
+
+def help_topic(
+    command: str | None,
+    args: Sequence[str] | None = None,
+    *,
+    bare_help: bool = True,
+) -> str | None:
+    """Which verb a help request is asking about, or None for the whole page.
+
+    ``wants_help`` answers *whether* to explain; this answers *what*. A module
+    whose ``get_help`` carries a paragraph per verb needs both — asked about
+    one verb and handed the index instead, the caller reads a page that does
+    not mention what they typed (seedgo subcommand_help: "shows top-level help
+    (unhelpful)").
+
+    The topic is the first token that is not the question itself, so it is
+    found wherever the flag lands: ``commit --help`` and ``help commit`` and
+    ``commit "a message" --help`` all name ``commit``.
+
+    Args:
+        command: The subcommand slot, or None.
+        args: Everything after it.
+        bare_help: Whether a bare ``help`` at position 0 is the question rather
+            than the topic. Mirrors ``wants_help`` — modules that own ``help``
+            as a real verb pass False, and for them the word names itself.
+
+    Returns:
+        The verb the question is about, or None if it names no verb.
+    """
+    tokens = [t for t in [command, *(args or [])] if t is not None]
+    if bare_help and tokens and tokens[0] == BARE_HELP_TOKEN:
+        tokens = tokens[1:]
+    return next((token for token in tokens if token not in DASHED_HELP_TOKENS), None)

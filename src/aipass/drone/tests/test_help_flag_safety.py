@@ -24,7 +24,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
 
 
 # ===========================================================================
@@ -323,3 +323,77 @@ class TestDiscoveryHelpSubcommandSurvives:
         target.assert_not_called()
         help_.assert_called_once()
         assert result is True
+
+
+# ===========================================================================
+# 4. Explaining is not enough — explain the verb that was asked about
+# ===========================================================================
+
+
+class TestHelpTopic:
+    """help_topic() — which verb the question is about, if any."""
+
+    @pytest.mark.parametrize(
+        "command,args,expected",
+        [
+            ("commit", ["--help"], "commit"),
+            ("commit", ["a message", "--help"], "commit"),
+            ("status", ["-h"], "status"),
+            ("help", ["tag"], "tag"),
+            ("status", ["--repo", "/some/path", "--help"], "status"),
+            ("--help", [], None),
+            ("-h", [], None),
+            ("help", [], None),
+            (None, None, None),
+        ],
+    )
+    def test_topic_is_the_first_token_that_is_not_the_question(
+        self, command: str | None, args: list[str] | None, expected: str | None
+    ) -> None:
+        assert help_topic(command, args) == expected
+
+    def test_a_module_that_owns_help_reads_it_as_a_topic(self) -> None:
+        """bare_help=False: `help` is that module's verb, so it names itself."""
+        assert help_topic("help", ["@seedgo"], bare_help=False) == "help"
+
+
+class TestGitHelpNamesTheVerb:
+    """`drone @git <verb> --help` must explain THAT verb, not the whole page.
+
+    get_help(command) carries a paragraph for each of nineteen verbs, and
+    handle_command called print_help() with no argument — so every one of them
+    was unreachable from the CLI and the top-level page came back instead.
+    seedgo's subcommand_help standard names that exact shape a violation:
+    "shows top-level help (unhelpful)".
+    """
+
+    @pytest.mark.parametrize(
+        "command,args,topic",
+        [
+            ("commit", ["--help"], "commit"),
+            ("commit", ["a message", "--help"], "commit"),
+            ("sync", ["-h"], "sync"),
+            ("help", ["tag"], "tag"),
+            ("--help", [], None),
+            ("help", [], None),
+        ],
+    )
+    def test_the_named_verb_reaches_get_help(self, command: str, args: list[str], topic: str | None) -> None:
+        from aipass.drone.apps.modules.git_module import handle_command
+
+        with (
+            patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access") as auth,
+            patch(f"{_M}.git_module.get_help", return_value="") as get_help_,
+            patch(f"{_M}.git_module._get_console"),
+        ):
+            result = handle_command(command, args)
+
+        get_help_.assert_called_once_with(topic)
+        auth.assert_not_called()
+        assert result["exit_code"] == 0
+
+    def test_an_unknown_verb_still_gets_the_whole_page(self) -> None:
+        """get_help falls through to the top-level text: no empty answer."""
+        from aipass.drone.apps.modules.git_module import get_help
+
+        assert get_help("not-a-verb") == get_help()

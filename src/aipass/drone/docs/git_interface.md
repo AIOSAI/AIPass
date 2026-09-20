@@ -6,7 +6,8 @@
 `apps/handlers/json_flags.py`
 
 What each verb does once the tier gate in [git_access.md](git_access.md) has let it through. The
-verb list and its flags are `drone @git --help`.
+verb list and its flags are `drone @git --help`; one verb on its own is `drone @git <verb> --help`
+or `drone @git help <verb>`, and an unknown verb falls through to the full page.
 
 ---
 

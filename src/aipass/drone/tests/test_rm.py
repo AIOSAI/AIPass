@@ -403,7 +403,7 @@ class TestRefuseDeletion:
         assert results[1][1] is False
 
     @pytest.mark.usefixtures("_patch_roots")
-    def test_refuse_home_patrick(self):
+    def test_refuse_a_users_home_directory(self):
         results = safe_delete(["/home/someone"])
         assert results[0][1] is False
 
