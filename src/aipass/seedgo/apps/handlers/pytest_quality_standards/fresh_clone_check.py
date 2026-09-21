@@ -285,7 +285,7 @@ SANDBOX_SEEDS: frozenset = frozenset(
         "gettempdir",
         # A NAMED EXCEPTION, NOT A WILDCARD. `temp_test_dir` is not a pytest
         # builtin - it is the fleet's own sandbox, defined in
-        # seedgo/templates/test_conftest_template.py as
+        # seedgo/templates/.archive/test_conftest_template.py as
         # `test_dir = tmp_path / "test_workspace"` with a yield and a cleanup,
         # and copied into branch conftests fleet-wide. It is listed here for
         # that reason and no other: it resolves to tmp_path in the template that

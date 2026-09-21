@@ -1,32 +1,40 @@
-"""Tests for readme_update module."""
-
 # =================== META ====================
 # Name: test_readme_update.py
-# Description: Unit tests for the readme_update module
-# Version: 1.0.0
-# Created: 2026-03-24
-# Modified: 2026-03-24
+# Description: Template v1 model — readme_update module, readme_generator and readme_ops
+# Version: 2.2.0
+# Created: 2026-09-20
+# Modified: 2026-09-21
 # =============================================
 
+"""Tests for apps/modules/readme_update.py and the handlers it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/readme/ parses and imports
+# seedgo: no-test-needed(documentation) — that the public generator functions carry docstrings
+# seedgo: no-test-needed(constant) — SECTION_NAMES' display strings and MARKER_PREFIX's text
+# seedgo: no-test-needed(stdlib) — importlib's ability to load a module from a path
+# seedgo: no-test-needed(generated) — the tree glyphs; the shape is CPython's os.scandir order
+
+import json
+import os
+import sys
+from pathlib import Path
+
 import pytest
-from typing import cast
-from unittest.mock import MagicMock, patch
+
+from aipass.seedgo.apps.handlers import registry_scan
+from aipass.seedgo.apps.handlers.readme import readme_generator, readme_ops
+from aipass.seedgo.apps.modules import readme_update
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# A read-only file is the only route a command has to a write failure, and it is
+# not one everywhere: Windows ignores the bit and root writes through it.
+_WRITE_BIT_HOLDS = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
 
 
-def _mock(obj: object) -> MagicMock:
-    """A module attribute the autouse fixture replaced, typed as the mock it is.
-
-    ``readme_update`` binds ``console``, ``header`` and ``display_error`` from
-    real modules, so a type checker reads them as Console/FunctionType and
-    rejects ``.call_args_list``. Under this fixture they are MagicMocks at
-    runtime; this says so in one place instead of a suppression per line.
-    """
-    return cast(MagicMock, obj)
+def _set_writable(path: Path, writable: bool) -> None:
+    if sys.platform != "win32":
+        os.chmod(path, 0o644 if writable else 0o444)
 
 
 # ---------------------------------------------------------------------------
@@ -34,267 +42,327 @@ def _mock(obj: object) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for readme_update."""
-    import sys
+@pytest.fixture
+def branch(tmp_path):
+    """A branch tree with one auto-marked README, the shape the product expects."""
+    (tmp_path / "apps").mkdir()
+    (tmp_path / "apps" / "main.py").write_text("# entry point\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text(
+        "# Title\nprose above\n<!-- AUTO:TREE -->\nstale\n<!-- /AUTO:TREE -->\nprose below\n",
+        encoding="utf-8",
+    )
+    return tmp_path
 
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
-    mock_header = MagicMock()
-    mock_error = MagicMock()
-    mock_warning = MagicMock()
-    mock_json_handler = MagicMock()
 
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    cli_mod.header = mock_header
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    cli_modules.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- readme ops handler -------------------------------------------------
-    readme_pkg = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.readme", readme_pkg)
-    readme_ops_mod = MagicMock()
-    readme_ops_mod.load_generator = MagicMock(return_value=None)
-    readme_ops_mod.resolve_targets = MagicMock(return_value=([], "no_args"))
-    readme_ops_mod.SECTION_NAMES = {
-        "TREE": "Directory Tree",
-        "MODULES": "Module List",
-        "COMMANDS": "Commands",
-        "HEADER": "Branch Header",
-        "LAST_UPDATED": "Last Updated",
-    }
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.readme.readme_ops", readme_ops_mod)
-
-    # Force re-import
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.readme_update", raising=False)
+@pytest.fixture
+def registered(branch, tmp_path, monkeypatch):
+    """The branch above, reachable as @made_up through a registry this test built."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(
+        json.dumps({"branches": [{"name": "MADE_UP", "path": str(branch)}]}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
+    return branch
 
 
 # ---------------------------------------------------------------------------
-# Tests — handle_command
+# handle_command — the routing a user actually types
 # ---------------------------------------------------------------------------
 
 
-def test_handle_command_wrong_command_returns_false():
-    """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+class TestHandleCommand:
+    def test_a_command_that_is_not_ours_is_declined(self):
+        assert readme_update.handle_command("wrong_command", []) is False
 
-    assert handle_command("wrong_command", []) is False
+    def test_both_spellings_reach_this_modules_introspection(self, capsys):
+        for spelling in ("readme", "readme_update"):
+            assert readme_update.handle_command(spelling, []) is True
+        assert capsys.readouterr().out.count("readme_update Module") == 2
 
+    def test_no_args_names_the_module_and_its_handlers(self, capsys):
+        readme_update.handle_command("readme", [])
+        printed = capsys.readouterr().out
+        assert "readme_update Module" in printed
+        assert "handlers/readme/" in printed
 
-def test_handle_command_accepts_readme_name():
-    """'readme' reaches this module's introspection, not just a True."""
-    from aipass.seedgo.apps.modules import readme_update
+    def test_a_help_flag_behind_a_subcommand_explains_instead_of_updating(self, capsys, monkeypatch):
+        """`readme update -h` must describe the update, never perform it."""
+        ran = []
+        monkeypatch.setattr(readme_update, "_handle_update", lambda args: ran.append(args))
 
-    with patch.object(readme_update, "print_introspection") as shown:
-        assert readme_update.handle_command("readme", []) is True
-    shown.assert_called_once_with()
-
-
-def test_handle_command_accepts_readme_update_name():
-    """'readme_update' is the same door as 'readme', not a near miss returning True."""
-    from aipass.seedgo.apps.modules import readme_update
-
-    with patch.object(readme_update, "print_introspection") as shown:
-        assert readme_update.handle_command("readme_update", []) is True
-    shown.assert_called_once_with()
-
-
-def test_handle_command_no_args_shows_introspection():
-    """No args puts the module's own introspection on the console."""
-    from aipass.seedgo.apps.modules import readme_update
-
-    assert readme_update.handle_command("readme", []) is True
-
-    lines = [call.args[0] for call in _mock(readme_update.console).print.call_args_list if call.args]
-    assert "[bold cyan]readme_update Module[/bold cyan]" in lines
-    assert "  [cyan]handlers/readme/[/cyan]" in lines
-
-
-def test_handle_command_help_flag():
-    """--help takes the help door and not the introspection one."""
-    from aipass.seedgo.apps.modules import readme_update
-
-    with (
-        patch.object(readme_update, "print_help") as helped,
-        patch.object(readme_update, "print_introspection") as shown,
-    ):
-        assert readme_update.handle_command("readme", ["--help"]) is True
-    helped.assert_called_once_with()
-    assert shown.call_args_list == []
-
-
-def test_handle_command_h_flag():
-    """-h wins over the subcommand it sits behind — help, and no update run.
-
-    The flag check (line 98) precedes the subcommand dispatch (line 106), so
-    `readme update -h` must describe the update, never perform it. Asserting
-    only the return value could not tell those two apart.
-    """
-    from aipass.seedgo.apps.modules import readme_update
-
-    with (
-        patch.object(readme_update, "print_help") as helped,
-        patch.object(readme_update, "_handle_update") as updated,
-    ):
         assert readme_update.handle_command("readme", ["update", "-h"]) is True
-    helped.assert_called_once_with()
-    assert updated.call_args_list == []
 
+        printed = capsys.readouterr().out
+        assert ran == []
+        assert "README Auto-Update" in printed
+        assert "readme update @branch" in printed
 
-def test_handle_command_unknown_subcommand():
-    """An unknown subcommand is named back to the user with the valid list.
+    def test_an_unknown_subcommand_is_named_back_on_stderr_with_the_valid_list(self, capsys):
+        readme_update.handle_command("readme", ["bogus_subcommand"])
 
-    Was `assert result is True` under a docstring promising an error was
-    displayed — and every router path returns True, so the test passed with
-    all eight console lines deleted. These are the lines it actually emits.
-    """
-    from aipass.seedgo.apps.modules import readme_update
+        out, err = capsys.readouterr()
+        assert "Unknown subcommand: 'bogus_subcommand'" in err
+        assert "Valid subcommands:" in out
 
-    assert readme_update.handle_command("readme", ["bogus_subcommand"]) is True
+    def test_update_forwards_the_args_that_followed_it(self, monkeypatch):
+        ran = []
+        monkeypatch.setattr(readme_update, "_handle_update", lambda args: ran.append(args))
 
-    _mock(readme_update.display_error).assert_called_once_with("Unknown subcommand: 'bogus_subcommand'")
-    lines = [call.args[0] for call in _mock(readme_update.console).print.call_args_list if call.args]
-    assert "[yellow]Valid subcommands:[/yellow] update, check" in lines
+        readme_update.handle_command("readme", ["update", "@flow", "--extra"])
 
+        assert ran == [["@flow", "--extra"]]
 
-def test_handle_command_update_subcommand():
-    """'update' reaches _handle_update with the args that followed it."""
-    from aipass.seedgo.apps.modules import readme_update
+    def test_check_never_reaches_the_writing_path(self, monkeypatch):
+        checked, updated = [], []
+        monkeypatch.setattr(readme_update, "_handle_check", lambda args: checked.append(args))
+        monkeypatch.setattr(readme_update, "_handle_update", lambda args: updated.append(args))
 
-    with patch.object(readme_update, "_handle_update") as updated:
-        assert readme_update.handle_command("readme", ["update", "@flow"]) is True
-    updated.assert_called_once_with(["@flow"])
+        readme_update.handle_command("readme", ["check", "@flow"])
 
-
-def test_handle_command_check_subcommand():
-    """'check' reaches _handle_check, and never the writing path."""
-    from aipass.seedgo.apps.modules import readme_update
-
-    with (
-        patch.object(readme_update, "_handle_check") as checked,
-        patch.object(readme_update, "_handle_update") as updated,
-    ):
-        assert readme_update.handle_command("readme", ["check", "@flow"]) is True
-    checked.assert_called_once_with(["@flow"])
-    assert updated.call_args_list == []
+        assert checked == [["@flow"]] and updated == []
 
 
 # ---------------------------------------------------------------------------
-# Tests — introspection / help
+# readme update / readme check — a whole run, through the command
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_runs():
-    """print_introspection names the module and both handlers it is wired to.
+class TestUpdateRun:
+    def test_a_named_branch_is_updated_and_its_readme_rewritten(self, capsys, registered):
+        readme_update.handle_command("readme", ["update", "@made_up"])
 
-    Was `assert _mock(console).print.called or _mock(header).called` — an OR that passes on
-    either half, so a version that printed nothing but touched the header
-    still passed. These are the lines the function actually emits, measured
-    2026-09-07; `console`/`header` are the fixture mocks the module binds.
-    """
-    from aipass.seedgo.apps.modules.readme_update import console, header, print_introspection
+        printed = capsys.readouterr().out
+        assert "README Update: MADE_UP" in printed
+        assert "Updated" in printed and "TREE" in printed
+        assert "main.py" in (registered / "README.md").read_text(encoding="utf-8")
 
-    assert print_introspection() is None
+    @pytest.mark.skipif(not _WRITE_BIT_HOLDS, reason="the write cannot be made to fail on this platform")
+    def test_a_write_failure_is_reported_on_stderr_and_no_section_is_claimed(self, capsys, registered):
+        """A run that errored must not also claim the sections it had already rendered."""
+        readme = registered / "README.md"
+        _set_writable(readme, False)
+        try:
+            readme_update.handle_command("readme", ["update", "@made_up"])
+        finally:
+            _set_writable(readme, True)
 
-    lines = [call.args[0] for call in _mock(console).print.call_args_list if call.args]
-    assert "[bold cyan]readme_update Module[/bold cyan]" in lines
-    assert "  [cyan]handlers/readme/[/cyan]" in lines
-    assert "  [cyan]handlers/json/[/cyan]" in lines
-    assert "  [dim]- aipass.cli (console, header)[/dim]" in lines
-    assert _mock(header).call_args_list == []
+        out, err = capsys.readouterr()
+        assert "Failed to write README.md" in err
+        assert "Updated" not in out and "Skipped" not in out
 
+    def test_check_says_would_update_where_update_says_updated(self, capsys, registered):
+        readme_update.handle_command("readme", ["check", "@made_up"])
+        checked = capsys.readouterr().out
 
-def test_print_help_runs():
-    """print_help prints the command list under the 'README Auto-Update' header.
+        readme_update.handle_command("readme", ["update", "@made_up"])
+        updated = capsys.readouterr().out
 
-    Was `assert _mock(console).print.called or _mock(header).called` — an OR that passes on
-    either half. Both halves are real here, so both are pinned separately,
-    against the strings measured 2026-09-07.
-    """
-    from aipass.seedgo.apps.modules.readme_update import console, header, print_help
+        assert "Would update" in checked and "content differs" in checked
+        assert "Updated" not in checked
+        assert "Updated" in updated
 
-    assert print_help() is None
+    def test_a_section_with_no_marker_is_called_skipped_and_named(self, capsys, registered):
+        readme_update.handle_command("readme", ["update", "@made_up"])
 
-    lines = [call.args[0] for call in _mock(console).print.call_args_list if call.args]
-    _mock(header).assert_called_once_with("README Auto-Update")
-    assert "[yellow]COMMANDS:[/yellow]" in lines
-    assert "[yellow]AUTO-GENERATED SECTIONS:[/yellow]" in lines
-    assert "  LAST_UPDATED  Timestamp" in lines
-    assert "[dim]Commands: readme, --help[/dim]" in lines
+        printed = capsys.readouterr().out
+        assert "Skipped" in printed and "no marker found" in printed
+        assert "LAST_UPDATED" in printed
+
+    def test_a_section_with_nothing_to_generate_is_silent_on_update_and_named_on_check(self, capsys, registered):
+        """Noise here is noise on every run; check mode is the place that says nothing changed."""
+        readme_update.handle_command("readme", ["update", "@made_up"])
+        updated = capsys.readouterr().out
+
+        readme_update.handle_command("readme", ["check", "@made_up"])
+        checked = capsys.readouterr().out
+
+        assert "Up to date" not in updated
+        assert "Up to date" in checked and "MODULES" in checked
+
+    def test_no_target_is_refused_with_the_usage_line_and_nothing_is_written(self, capsys, registered):
+        """`readme update` with no branch must never fan out across the fleet."""
+        before = (registered / "README.md").read_text(encoding="utf-8")
+
+        readme_update.handle_command("readme", ["update"])
+
+        assert "Usage: drone @seedgo readme update @branch" in capsys.readouterr().err
+        assert (registered / "README.md").read_text(encoding="utf-8") == before
+
+    def test_an_unknown_branch_is_named_back_in_the_error(self, capsys, registered):
+        readme_update.handle_command("readme", ["update", "@nope_xyz"])
+
+        assert "Branch '@nope_xyz' not found in registry" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
-# Tests — display helpers
+# update_readme_auto_sections — the write itself
 # ---------------------------------------------------------------------------
 
 
-def test_print_target_error_not_found():
-    """_print_target_error names the unresolved branch, on the error channel.
+class TestMarkerReplacement:
+    def test_the_marked_region_is_replaced_and_prose_outside_it_is_untouched(self, branch):
+        """The whole product promise: rewrite between markers, never a hand-written line."""
+        result = readme_generator.update_readme_auto_sections(str(branch))
 
-    Was a bare call that asserted nothing (no_oracle): it could not tell the
-    branch name being reported from it being swallowed. Measured 2026-09-07 —
-    this arm routes to cli's error(), and prints nothing on console.
-    """
-    from aipass.seedgo.apps.modules.readme_update import _print_target_error, console, display_error
+        written = (branch / "README.md").read_text(encoding="utf-8")
+        assert result["updated"] == ["tree"]
+        assert "stale" not in written
+        assert "main.py" in written
+        assert written.startswith("# Title\nprose above\n")
+        assert written.endswith("prose below\n")
 
-    _print_target_error("not_found:some_branch")
+    def test_a_section_with_no_markers_is_reported_not_silently_dropped(self, branch):
+        result = readme_generator.update_readme_auto_sections(str(branch))
 
-    reported = [call.args[0] for call in _mock(display_error).call_args_list if call.args]
-    assert reported == ["Branch 'some_branch' not found in registry"]
-    assert _mock(console).print.call_args_list == []
+        assert "last_updated" in result["missing_markers"]
+        assert "last_updated" not in result["updated"]
+
+    def test_a_dry_run_reports_the_change_and_writes_nothing(self, branch):
+        before = (branch / "README.md").read_text(encoding="utf-8")
+
+        result = readme_generator.update_readme_auto_sections(str(branch), dry_run=True)
+
+        assert result["updated"] == ["tree"] and result["dry_run"] is True
+        assert (branch / "README.md").read_text(encoding="utf-8") == before
+
+    def test_a_missing_readme_is_an_error_not_a_crash(self, tmp_path):
+        result = readme_generator.update_readme_auto_sections(str(tmp_path))
+
+        assert result["errors"] == ["README.md not found"]
+        assert result["updated"] == []
+
+    def test_a_branch_path_holding_a_regex_escape_is_replaced_not_interpreted(self, tmp_path):
+        """The replacement went to re.sub as a string, so C:\\Users read as the escape \\U (PR#774)."""
+        # Joined, not written whole: this is a directory NAME carrying a
+        # backslash-U, not a path anything opens, and a literal would read to
+        # the hardcoded_path checker as a real Windows home.
+        branch = tmp_path / "\\".join(("C:", "Users", "runner"))
+        (branch / "apps").mkdir(parents=True)
+        (branch / "apps" / "main.py").write_text("# entry\n", encoding="utf-8")
+        (branch / "README.md").write_text("<!-- AUTO:TREE -->\nstale\n<!-- /AUTO:TREE -->\n", encoding="utf-8")
+
+        result = readme_generator.update_readme_auto_sections(str(branch))
+
+        assert result["errors"] == []
+        assert result["updated"] == ["tree"]
+        assert "main.py" in (branch / "README.md").read_text(encoding="utf-8")
+
+    def test_every_marker_name_in_the_map_is_recognised(self, tmp_path):
+        """A marker the generator emits but cannot find again is a silent no-op."""
+        (tmp_path / "apps").mkdir()
+        (tmp_path / "apps" / "main.py").write_text("# entry\n", encoding="utf-8")
+        body = "\n".join(f"<!-- AUTO:{m} -->\nx\n<!-- /AUTO:{m} -->" for m in ("TREE", "LAST_UPDATED"))
+        (tmp_path / "README.md").write_text(body + "\n", encoding="utf-8")
+
+        result = readme_generator.update_readme_auto_sections(str(tmp_path))
+
+        assert sorted(result["updated"]) == ["last_updated", "tree"]
+        assert result["missing_markers"] == []
 
 
-def test_print_result_empty():
-    """Nothing updated, nothing missing, no errors: _print_result says nothing.
-
-    Silence is the design here, and this pins it. Was a bare call that
-    asserted nothing (no_oracle). Measured 2026-09-07: outside check mode
-    every section falls to the else arm, which prints only when is_check is
-    True — so an empty result really does emit zero lines on either channel.
-    """
-    from aipass.seedgo.apps.modules.readme_update import _print_result, console, display_error
-
-    _print_result({"updated": [], "missing_markers": [], "errors": []})
-
-    assert _mock(console).print.call_args_list == []
-    assert _mock(display_error).call_args_list == []
+# ---------------------------------------------------------------------------
+# readme_generator — the sections
+# ---------------------------------------------------------------------------
 
 
-def test_print_result_with_errors():
-    """_print_result reports the error and stops: it does not also list sections.
+class TestTreeSection:
+    def test_a_missing_directory_yields_no_section_rather_than_a_broken_fence(self, tmp_path):
+        assert readme_generator.generate_tree_section(str(tmp_path / "nonexistent")) == ""
 
-    Was a bare call that asserted nothing (no_oracle). "TREE" is in `updated`
-    on purpose: without the early return after the errors, console would carry
-    "  [green]Updated[/green] Directory Tree" (measured 2026-09-07), so the
-    console-silence assertion is what pins the return.
-    """
-    from aipass.seedgo.apps.modules.readme_update import _print_result, console, display_error
+    def test_a_real_tree_is_fenced_and_names_the_files_in_it(self, tmp_path):
+        (tmp_path / "apps").mkdir()
+        (tmp_path / "apps" / "main.py").write_text("# entry\n", encoding="utf-8")
 
-    _print_result({"updated": ["TREE"], "missing_markers": [], "errors": ["Something went wrong"]})
+        result = readme_generator.generate_tree_section(str(tmp_path))
 
-    reported = [call.args[0] for call in _mock(display_error).call_args_list if call.args]
-    assert reported == ["Something went wrong"]
-    assert _mock(console).print.call_args_list == []
+        assert result.startswith("```") and result.endswith("```")
+        assert "apps" in result and "main.py" in result
+
+    def test_pycache_never_reaches_a_published_readme(self, tmp_path):
+        (tmp_path / "__pycache__").mkdir()
+        (tmp_path / "__pycache__" / "m.cpython-312.pyc").write_text("", encoding="utf-8")
+        (tmp_path / "real_file.py").write_text("# code\n", encoding="utf-8")
+
+        result = readme_generator.generate_tree_section(str(tmp_path))
+
+        assert "__pycache__" not in result
+        assert "real_file.py" in result
+
+
+class TestModulesSection:
+    @staticmethod
+    def _modules_dir(tmp_path):
+        modules = tmp_path / "apps" / "modules"
+        modules.mkdir(parents=True)
+        return modules
+
+    def test_no_modules_directory_yields_no_section(self, tmp_path):
+        assert readme_generator.generate_modules_section(str(tmp_path)) == ""
+
+    def test_each_module_is_listed_with_its_own_description_and_init_is_not(self, tmp_path):
+        modules = self._modules_dir(tmp_path)
+        (modules / "audit_ops.py").write_text('"""Audit Operations Module"""\n', encoding="utf-8")
+        (modules / "__init__.py").write_text("", encoding="utf-8")
+
+        result = readme_generator.generate_modules_section(str(tmp_path))
+
+        assert "audit_ops" in result and "Audit Operations Module" in result
+        assert "__init__" not in result
+
+    def test_a_meta_name_line_beats_the_docstring_below_it(self, tmp_path):
+        """Every product file carries both; the header is the one the README must show."""
+        modules = self._modules_dir(tmp_path)
+        (modules / "both.py").write_text(
+            '# Name: both.py - The Header Description\n"""The Docstring Line"""\n', encoding="utf-8"
+        )
+
+        result = readme_generator.generate_modules_section(str(tmp_path))
+
+        assert "The Header Description" in result
+        assert "The Docstring Line" not in result
+
+    def test_a_module_with_only_a_docstring_is_described_by_its_first_line(self, tmp_path):
+        modules = self._modules_dir(tmp_path)
+        (modules / "prose.py").write_text('"""My cool module\n\nMore details here.\n"""\nx = 1\n', encoding="utf-8")
+
+        result = readme_generator.generate_modules_section(str(tmp_path))
+
+        assert result == "- **prose** - My cool module"
+
+    def test_a_module_that_describes_nothing_is_listed_bare_rather_than_guessed_at(self, tmp_path):
+        modules = self._modules_dir(tmp_path)
+        (modules / "bare.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
+
+        result = readme_generator.generate_modules_section(str(tmp_path))
+
+        assert result == "- **bare**"
+
+
+# ---------------------------------------------------------------------------
+# readme_ops — target resolution
+# ---------------------------------------------------------------------------
+
+
+class TestTargetResolution:
+    def test_no_target_is_its_own_error_not_a_silent_all(self):
+        assert readme_ops.resolve_targets([]) == ([], "no_args")
+
+    def test_an_unknown_branch_is_named_back_in_the_error(self, registered):
+        branches, error = readme_ops.resolve_targets(["nope_xyz"])
+
+        assert branches == []
+        assert error == "not_found:nope_xyz"
+
+    def test_a_named_branch_resolves_to_the_path_its_registry_entry_gives(self, registered):
+        branches, error = readme_ops.resolve_targets(["@made_up"])
+
+        assert error is None and len(branches) == 1
+        assert branches[0]["path"] == str(registered)
+
+    def test_the_generator_loads_from_beside_the_ops_handler(self):
+        """load_generator resolves its own neighbour; a move breaks the update silently."""
+        generator = readme_ops.load_generator()
+
+        assert generator is not None
+        assert hasattr(generator, "update_readme_auto_sections")

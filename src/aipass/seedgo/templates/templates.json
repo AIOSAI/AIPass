@@ -1,0 +1,22 @@
+{
+  "document_metadata": {
+    "document_type": "template_gold_manifest",
+    "document_name": "seedgo.TEMPLATES",
+    "schema_version": "1.0.0",
+    "managed_by": "seedgo",
+    "_usage": "The gold source of record for the fleet's test template. 'template_versions' is what every branch's tests/.template_version.json receipt is compared against by 'drone @seedgo tests template-status'. Bump a version here, then run 'drone @seedgo tests template bump' (dry run) and '--confirm' to write the receipts."
+  },
+  "template_versions": {
+    "test_template": "1.0.0"
+  },
+  "files": {
+    "test_template": {
+      "page": "test_template_v1.md",
+      "model": "readme_update_model.py.txt",
+      "model_lives_at": "src/aipass/seedgo/tests/test_readme_update.py",
+      "distributed_as": "TEST_TEMPLATE.md",
+      "plan": "DPLAN-0354",
+      "accepted": "2026-09-21"
+    }
+  }
+}

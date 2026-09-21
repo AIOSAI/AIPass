@@ -663,7 +663,11 @@ def update_readme_auto_sections(branch_path: str, dry_run: bool = False) -> dict
             # Replace content between markers
             pattern = re.compile(re.escape(open_marker) + r".*?" + re.escape(close_marker), re.DOTALL)
             replacement = f"{open_marker}\n{section_content}\n{close_marker}"
-            updated_content = pattern.sub(replacement, updated_content)
+            # A callable hands the text over verbatim. As a string, re.sub reads
+            # it as a template: the tree's first line is the branch path, and on
+            # Windows "C:\Users" is the escape \U, so every update raised
+            # re.error (PR#774 Windows lane, 2026-09-21).
+            updated_content = pattern.sub(lambda _match: replacement, updated_content)
             result["updated"].append(section_name)
         else:
             result["missing_markers"].append(section_name)

@@ -67,7 +67,7 @@ Three layers. `apps/seedgo.py` is a thin router: it discovers modules, dispatche
 one that claims a command, and turns a refusal into an exit code. `apps/modules/` holds one
 business-logic module per verb — audit_tests, checklist, diagnostics_audit, inbox_audit,
 inventory, permissions, proof_query, readme_update, seedgo_proof, shadow_cycle,
-standards_audit, standards_query and test_map. `apps/handlers/` holds the implementation,
+standards_audit, standards_query, test_map and tests_lane. `apps/handlers/` holds the implementation,
 grouped one directory per concern: the checker packs (`*_standards/`), the proof pack, the
 audit engine, the bypass and ignore systems, the test lanes, and the json shim every branch
 shares.

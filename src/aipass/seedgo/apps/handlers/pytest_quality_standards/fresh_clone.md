@@ -203,7 +203,8 @@ temp directory two frames up (6 rows).
 
 **`temp_test_dir`, carried by name — a named exception with a reason, not a
 wildcard.** It is not a pytest builtin. It is the *fleet's own* sandbox, defined in
-`seedgo/templates/test_conftest_template.py` as:
+`seedgo/templates/.archive/test_conftest_template.py` (archived 2026-09-21; the
+fixture is carried forward as **C3** in `seedgo/templates/test_template_v1.md`) as:
 
 ```python
 @pytest.fixture

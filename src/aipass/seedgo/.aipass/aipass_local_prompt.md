@@ -18,6 +18,8 @@ seedgo diagnostics                               # Pyright type errors (runs via
 seedgo proof aipass                              # Proof certification
 seedgo test_map @branch                          # Custom function test coverage
 seedgo test-inventory <path>                     # Every test function in a tree, ranked
+seedgo tests retired / restore <name>            # The retire lane — a logged move, never a delete
+seedgo tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
 seedgo shadow-cycle run                          # The three weekly v5 passes
 seedgo permissions / inbox_audit                 # Settings sweep / mailbox hygiene
 seedgo readme update @branch                     # README auto-update
@@ -55,7 +57,8 @@ apps/
     ├── readme/                  # readme_update handlers
     ├── shadow_cycle/            # Weekly v5 cadence: score, cycle
     ├── test_inventory/          # collection, exclusions
-    └── test_map/                # function_scanner
+    ├── test_map/                # function_scanner
+    └── tests_lane/              # retire_ops (the .backup move), template_ops (gold + receipts)
 ```
 
 Two lanes, and a finding can exist in one and not the other: the **audit** walks `apps/**/*.py` only (`tests/` is not in its corpus), while the PostToolUse **checklist** hook checks `tests/`. A pack declares its own corpus in `pack.json`; the banner over its scores is that declaration, not the engine's file count.
@@ -87,3 +90,4 @@ Seedgo + devpulse have **system-wide file access**. "No cross-branch edits" rule
 - `standard ruff` answers "Unknown standard": the audit shows `ruff` (file `ruff_check.py` minus `_check`), the query surface takes `ruff_check` (its content/md names). Two names, one checker
 - The tree above is the ONLY copy — README is the face, not the map, and is off the startup read (DPLAN-0347)
 - Depth is `docs/` (indexed from README): standards pack, v5 pack, startup budget, audit engine, checklist+hooks, proof+coverage, tech debt
+- `templates/` is the fleet's GOLD test template (owner 2026-09-20, DPLAN-0354): `templates.json` versions it, `test_template_v1.md` is the page, `readme_update_model.py` is the model. Never collected by pytest. A branch's receipt is its `tests/.template_version.json`; a test's BODY is never distributed

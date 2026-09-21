@@ -1,9 +1,9 @@
 # =================== META ====================
-# Name: test_readme_update_trial.py
-# Description: Template v1 trial — readme_update module, readme_generator and readme_ops
-# Version: 2.1.0
+# Name: test_readme_update.py
+# Description: Template v1 model — readme_update module, readme_generator and readme_ops
+# Version: 2.2.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-09-21
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -231,6 +231,22 @@ class TestMarkerReplacement:
 
         assert result["errors"] == ["README.md not found"]
         assert result["updated"] == []
+
+    def test_a_branch_path_holding_a_regex_escape_is_replaced_not_interpreted(self, tmp_path):
+        """The replacement went to re.sub as a string, so C:\\Users read as the escape \\U (PR#774)."""
+        # Joined, not written whole: this is a directory NAME carrying a
+        # backslash-U, not a path anything opens, and a literal would read to
+        # the hardcoded_path checker as a real Windows home.
+        branch = tmp_path / "\\".join(("C:", "Users", "runner"))
+        (branch / "apps").mkdir(parents=True)
+        (branch / "apps" / "main.py").write_text("# entry\n", encoding="utf-8")
+        (branch / "README.md").write_text("<!-- AUTO:TREE -->\nstale\n<!-- /AUTO:TREE -->\n", encoding="utf-8")
+
+        result = readme_generator.update_readme_auto_sections(str(branch))
+
+        assert result["errors"] == []
+        assert result["updated"] == ["tree"]
+        assert "main.py" in (branch / "README.md").read_text(encoding="utf-8")
 
     def test_every_marker_name_in_the_map_is_recognised(self, tmp_path):
         """A marker the generator emits but cannot find again is a silent no-op."""
