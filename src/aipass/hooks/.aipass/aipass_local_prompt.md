@@ -62,7 +62,7 @@ apps/
       compass_recall.py feedback_pulse.py   # governance recall; feedback nudge (ships disabled)
     security/              # Enforcement (PreToolUse)
       edit_gate.py         #   Fences writes: not-yours (project/branch/project-level), inbox, .trinity caps, tripwire
-      testwrite_gate.py    #   Blocks CREATION of new test files (drone @hooks testwrite)
+      testwrite_gate.py    #   New test files + template pointer (drone @hooks testwrite)
       presence_gate.py     #   Session presence gate (UserPromptSubmit + Stop release)
       git_gate.py rm_gate.py registry_gate.py subagent_gate.py   # git tiers, rm, registries, stop
     lifecycle/             # Session + compaction

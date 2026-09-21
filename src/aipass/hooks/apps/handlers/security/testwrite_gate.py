@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.2.0
-# Description: Blocks agent creation of NEW test files behind a JSON policy switch (PreToolUse)
+# Version: 1.3.0
+# Description: Blocks agent creation of NEW test files (PreToolUse) + the test template pointer (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-09-19
+# Modified: 2026-09-21
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -358,4 +358,181 @@ def handle(hook_data: dict) -> dict:
         # fail-CLOSED ruling covers a policy this gate could not READ; it does not
         # cover a defect in this gate, which is ours and must be loud, not a wall.
         logger.error("[HOOKS] testwrite_gate: unexpected error (allowing): %s", exc)
+        return _ALLOW
+
+
+# ---------------------------------------------------------------------------
+# The template pointer — @seedgo's contract, this branch's hook (DPLAN-0354)
+#
+# @seedgo houses the fleet's test template and distributes it as a page in each
+# branch's own tests/, beside a receipt. Their contract, verbatim: on a
+# PostToolUse touching a path matching tests/**, one line pointing at the LOCAL
+# page and then the checklist. Nothing here reads seedgo's manifest — the page
+# beside the file is the whole question, read per call, because a receipt that
+# was true when the process started is not evidence about now.
+#
+# It shares this file with the gate rather than growing a second reader of the
+# tests/ shape: the gate's own target walk (_targets) answers both lanes, and
+# testwrite_targets.in_test_tree answers the path question for both callers.
+# ---------------------------------------------------------------------------
+
+#: The page @seedgo stamps into each branch's tests/, and the receipt beside it.
+TEMPLATE_PAGE = "TEST_TEMPLATE.md"
+TEMPLATE_RECEIPT = ".template_version.json"
+
+#: The receipt key that carries this template's version.
+_TEMPLATE_KEY = "test_template"
+
+#: What the line says when no readable receipt names a version. The PAGE is what
+#: decides whether the line appears at all; the receipt only spells the number,
+#: so an unreadable one costs accuracy in one word, never the pointer.
+_DEFAULT_VERSION = "v1"
+
+
+def _nearest_test_tree(path: Path) -> Path | None:
+    """The innermost ``tests`` directory *path* sits in, or None.
+
+    Innermost on purpose: the page lives beside the suite it describes, so a
+    file at ``tests/fixtures/x.json`` is pointed at ``tests/TEST_TEMPLATE.md``
+    and a branch that nests a second test tree gets its own page rather than
+    its parent's.
+
+    Args:
+        path: A write target already known to be inside a test tree.
+
+    Returns:
+        That directory, or None when no component is named ``tests``.
+    """
+    for parent in path.parents:
+        if parent.name == targets_module_test_dir():
+            return parent
+    return None
+
+
+def targets_module_test_dir() -> str:
+    """The directory name that marks a test tree, read from the classifier.
+
+    Read rather than restated: ``testwrite_targets.TEST_DIR`` is the one place
+    this branch spells it, and a constant spelled twice is a constant that
+    drifts. An unimportable classifier falls back to the shipped spelling so
+    the pointer degrades to a wrong-tree miss rather than a crash.
+
+    Returns:
+        The test-tree directory name.
+    """
+    try:
+        return str(_module("testwrite_targets").TEST_DIR)
+    except Exception as exc:
+        logger.info("[HOOKS] testwrite_gate: classifier unread for TEST_DIR (%s)", exc)
+        return "tests"
+
+
+def _template_version(tests_dir: Path) -> str:
+    """The template version the local receipt names, as ``v<major>``.
+
+    Args:
+        tests_dir: The branch's test tree.
+
+    Returns:
+        ``v<major>`` from the receipt, or :data:`_DEFAULT_VERSION` when there is
+        no readable receipt or it names no version for this template.
+    """
+    receipt = tests_dir / TEMPLATE_RECEIPT
+    try:
+        data = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # Worth one line rather than a silent default: we only get here because
+        # the PAGE is present, so a receipt that is missing or unreadable beside
+        # it is a stamp that half-landed.
+        logger.info("[HOOKS] testwrite_gate: template receipt unread at %s (%s)", receipt, exc)
+        return _DEFAULT_VERSION
+    version = (data.get("template_versions") or {}).get(_TEMPLATE_KEY) if isinstance(data, dict) else None
+    if not isinstance(version, str) or not version:
+        return _DEFAULT_VERSION
+    return f"v{version.split('.')[0]}"
+
+
+def _spelled(path: Path, cwd: str) -> str:
+    """*path* as a line can carry it: project-relative when it is inside one.
+
+    A project-relative POSIX path is copy-pasteable from the project root, the
+    same spelling every dispatch and plan in this fleet uses, and it keeps a
+    machine's home directory out of a rendered line. Outside a project — or on
+    another drive, which is what ``relative_to`` raises about — the absolute
+    path is the only true answer and is used as is.
+
+    Args:
+        path: The page or the touched file.
+        cwd: The session working directory, where the project walk starts.
+
+    Returns:
+        The path as text, POSIX-spelled.
+    """
+    try:
+        project = _module("write_ownership").project_of(Path(cwd))
+        if project is not None:
+            return path.resolve().relative_to(project.root).as_posix()
+    except Exception as exc:
+        logger.info("[HOOKS] testwrite_gate: no project root for %s (%s) — absolute path", path, exc)
+    return path.as_posix()
+
+
+def template_pointer(hook_data: dict) -> dict:
+    """PostToolUse: one line pointing at the branch's own test template page.
+
+    @seedgo's contract (DPLAN-0354). Suppressed — an empty document, not a
+    pointer at nothing — when the branch carries no page, which is how an
+    unstamped branch reads. Both lanes are covered because the gate's own
+    ``_targets`` reads them: the tool payload's ``file_path``, and a Bash
+    command's write targets through ``bash_writes``.
+
+    Args:
+        hook_data: Parsed hook event dict from the engine.
+
+    Returns:
+        A result dict carrying PostToolUse ``additionalContext``, or an empty
+        stdout when there is nothing to say. Never raises.
+    """
+    try:
+        tool_name = hook_data.get("tool_name", "")
+        if tool_name != "Bash" and tool_name not in EDIT_TOOLS:
+            return _ALLOW
+
+        tool_input = hook_data.get("tool_input", {}) or {}
+        cwd = hook_data.get("cwd", "") or os.getcwd()
+        in_tree = _module("testwrite_targets").in_test_tree
+
+        touched = next((t for t in _targets(tool_name, tool_input, cwd) if in_tree(t)), None)
+        if touched is None:
+            return _ALLOW
+
+        tests_dir = _nearest_test_tree(touched)
+        if tests_dir is None:
+            return _ALLOW
+
+        page = tests_dir / TEMPLATE_PAGE
+        if not page.exists():
+            logger.info(
+                "[HOOKS] testwrite_gate: template pointer suppressed — no page at %s (branch unstamped)",
+                page,
+            )
+            return _ALLOW
+
+        line = (
+            f"Test template {_template_version(tests_dir)}: {_spelled(page, cwd)}"
+            f" - then drone @seedgo checklist {_spelled(touched, cwd)}"
+        )
+        logger.info("[HOOKS] testwrite_gate: template pointer injected for %s", touched)
+        document = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": line,
+            }
+        }
+        return {"stdout": json.dumps(document), "exit_code": 0}
+
+    except Exception as exc:
+        # A pointer is a courtesy, never a wall: a defect here must cost the
+        # line and nothing else.
+        logger.error("[HOOKS] testwrite_gate: template pointer failed (silent): %s", exc)
         return _ALLOW

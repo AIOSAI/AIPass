@@ -91,6 +91,38 @@ template entry against silent drift. Stamping a default policy is @aipass's call
 correct inside AIPass, wrong advice for an unrelated project that happens to own its own
 `FOO_REGISTRY.json`. That needs its own measurement, not a ride-along.
 
+## The template pointer — one line, PostToolUse (1.3.0, 2026-09-21)
+
+@seedgo houses the fleet's test template (`src/aipass/seedgo/templates/`) and distributes it as a page
+in each branch's own `tests/TEST_TEMPLATE.md`, beside a receipt `tests/.template_version.json`. Their
+contract, this branch's hook (DPLAN-0354, devpulse c3ab29d2): on a PostToolUse touching `tests/**`,
+inject exactly one line — `Test template v1: <branch>/tests/TEST_TEMPLATE.md - then drone @seedgo
+checklist <file>`, both paths rendered project-relative.
+
+`template_pointer()` shares this file with the gate rather than growing a second reader: the gate's own
+`_targets()` already answers both lanes — a tool payload's `file_path` and a Bash command's write
+targets through `bash_writes` — and `testwrite_targets.in_test_tree()` is the one reading of the
+`tests/` shape, extracted from `is_test_file()` so both callers ask it the same way. The contract is
+`tests/**`, wider than the gate's own question: a `fixtures/corpus.json` under a test tree gets the
+line, a collectable file outside one does not. A nested test tree is pointed at its OWN page — the
+page sits beside the suite it describes.
+
+**The page is the whole question, read per call.** No manifest of seedgo's is consulted and nothing is
+cached: a branch with no page is unstamped, and the line is SUPPRESSED rather than pointing at a file
+that is not there. The receipt only spells the version (`v<major>`, defaulting to `v1` when it is
+missing or unreadable), so a stamp that half-landed costs one word and never the pointer. Paths are
+rendered project-relative and POSIX-spelled, which keeps a machine's home directory out of the line;
+outside a project the absolute path is the only true answer and is used as is.
+
+It reaches the model as PostToolUse `additionalContext` — plain stdout would only reach the transcript
+— and `config/output_merge.py` folds it in beside `auto_fix`'s diagnostics when both fire on one
+event. A defect in the pointer costs the line and nothing else: it runs after the write, so it is a
+courtesy, never a wall.
+
+**Wiring:** it needs its own PostToolUse entry in the project's `.aipass/hooks.json`, a project-level
+file and therefore @devpulse's to apply (owner's ruling, 2026-09-18). Until that entry lands the
+handler is built, tested and dark.
+
 ---
 
 ## Related

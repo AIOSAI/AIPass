@@ -125,7 +125,7 @@ Depth lives in [docs/](docs/), one file per gate or module group:
 | [docs/edit_gate.md](docs/edit_gate.md) | Who may write whose files (the 2026-09-18 ruling), the project fence, the verified admin seat, what the gate cannot see |
 | [docs/bash_writes.md](docs/bash_writes.md) | The scripted lane: what a shell command can be seen to write, what it misses, both Windows path spellings |
 | [docs/trinity_memory_gate.md](docs/trinity_memory_gate.md) | Memory writes: the shell refusal, the tripwire, and judging a write on what it authors |
-| [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning |
+| [docs/testwrite_gate.md](docs/testwrite_gate.md) | The ruling that agents do not create tests, the policy file, the fail-closed reasoning, the test template pointer |
 | [docs/prompt_injection.md](docs/prompt_injection.md) | The injection caps and where each is read from, the loud fail-open, the alert banners |
 | [docs/diagnostics.md](docs/diagnostics.md) | The two log streams and the post-edit diagnostics block |
 | [docs/sandbox.md](docs/sandbox.md) | The kernel filesystem boundary: policy per role, what is writable, the launch seam |

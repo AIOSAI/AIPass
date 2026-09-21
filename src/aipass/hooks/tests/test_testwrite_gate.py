@@ -596,3 +596,147 @@ class TestNamingAPathIsNotWritingIt:
         assert held, "the path must still be REPORTED — only this gate stands down on it"
         assert all(bash_writes.HELD_BY_INTERPRETER in why for _target, why in held)
         assert all(bash_writes.NO_WRITE_VERB in why for _target, why in held)
+
+
+class TestTheTemplatePointer:
+    """@seedgo's contract, this branch's hook — DPLAN-0354, devpulse c3ab29d2.
+
+    @seedgo houses the fleet's test template and distributes it as a page in each
+    branch's own ``tests/``, beside a receipt. On a PostToolUse touching
+    ``tests/**`` this branch injects exactly one line naming that LOCAL page and
+    the checklist to run next.
+
+    The page's presence is the whole question, read per call: a branch with no
+    page is unstamped, and the line is SUPPRESSED rather than pointing at a file
+    that is not there. Nothing here reads seedgo's manifest.
+
+    It prints nothing — there is no console channel to capture. The handler
+    returns a PostToolUse document and the ENGINE writes it (output_merge folds
+    it in beside auto_fix's), so every assertion below reads the returned
+    document through the handler's own entry point.
+    """
+
+    LINE_HEAD = "Test template v1: "
+
+    def _stamp(self, project: dict, version: str = "1.0.0") -> Path:
+        """Give the branch a page and a receipt, the way seedgo's bump does."""
+        page = project["tests_dir"] / "TEST_TEMPLATE.md"
+        page.write_text("# Test template v1\n", encoding="utf-8")
+        receipt = project["tests_dir"] / ".template_version.json"
+        receipt.write_text(
+            json.dumps({"template_versions": {"test_template": version}, "stamped_by": "test"}),
+            encoding="utf-8",
+        )
+        return page
+
+    def _pointer(self, cwd: str, *, file_path: str | None = None, command: str | None = None, tool: str = "Edit"):
+        from aipass.hooks.apps.handlers.security.testwrite_gate import template_pointer
+
+        tool_input = {"command": command} if command is not None else {"file_path": file_path}
+        return template_pointer(
+            {"tool_name": "Bash" if command is not None else tool, "tool_input": tool_input, "cwd": cwd}
+        )
+
+    def _context(self, result: dict) -> str:
+        own = json.loads(result["stdout"])["hookSpecificOutput"]
+        assert own["hookEventName"] == "PostToolUse", "the merged document must name its own event"
+        return own["additionalContext"]
+
+    def test_the_line_appears_when_the_page_is_there(self, project):
+        self._stamp(project)
+        line = self._context(self._pointer(project["seat"], file_path=project["existing"]))
+
+        assert line.startswith(self.LINE_HEAD)
+        assert line.count("\n") == 0, "exactly one line, per the contract"
+        assert line.endswith("tests/test_existing.py")
+        assert "tests/TEST_TEMPLATE.md" in line
+        assert "drone @seedgo checklist " in line
+
+    def test_the_line_is_suppressed_when_the_branch_has_no_page(self, project):
+        """An unstamped branch. Pointing at a file that is not there is worse
+        than saying nothing, so the document is empty rather than wrong."""
+        result = self._pointer(project["seat"], file_path=project["existing"])
+
+        assert result["stdout"] == ""
+        assert result["exit_code"] == 0
+
+    @pytest.mark.parametrize("key", ["not_a_test", "new_conftest"])
+    def test_a_path_outside_a_test_tree_never_gets_a_line(self, project, key):
+        """new_conftest is the control: it IS in tests/, so only not_a_test proves
+        the tree test rather than the filename one."""
+        self._stamp(project)
+        result = self._pointer(project["seat"], file_path=project[key])
+
+        if key == "not_a_test":
+            assert result["stdout"] == ""
+        else:
+            assert "TEST_TEMPLATE.md" in self._context(result)
+
+    def test_the_scripted_lane_gets_the_same_line(self, project):
+        """The gate's own target walk answers both lanes, so a shell write into
+        tests/ is pointed at the page exactly like an Edit."""
+        self._stamp(project)
+        target = Path(project["existing"]).as_posix()
+        line = self._context(self._pointer(project["seat"], command=f"echo x >> {target}"))
+
+        assert line.startswith(self.LINE_HEAD)
+        assert line.endswith("tests/test_existing.py")
+
+    def test_any_file_under_the_tree_counts_not_only_a_collectable_one(self, project):
+        """The contract is tests/**, which is wider than the gate's own question."""
+        self._stamp(project)
+        corpus = project["tests_dir"] / "fixtures" / "corpus.json"
+        corpus.parent.mkdir(parents=True)
+        corpus.write_text("{}", encoding="utf-8")
+
+        assert self._context(self._pointer(project["seat"], file_path=str(corpus))).endswith("fixtures/corpus.json")
+
+    def test_a_nested_test_tree_gets_its_own_page(self, project):
+        """MUTATION-CHECK, and it survived the first sweep: the docstring said
+        "innermost on purpose" while nothing pinned it, so an outermost walk
+        passed every other pin here. The page sits beside the suite it
+        describes, so the inner tree's own page is the right pointer."""
+        self._stamp(project)
+        inner = project["tests_dir"] / "integration" / "tests"
+        inner.mkdir(parents=True)
+        (inner / "TEST_TEMPLATE.md").write_text("# inner page\n", encoding="utf-8")
+        inner_test = inner / "test_inner.py"
+        inner_test.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+        line = self._context(self._pointer(project["seat"], file_path=str(inner_test)))
+
+        assert "integration/tests/TEST_TEMPLATE.md" in line, line
+
+    def test_the_version_is_read_from_the_receipt_per_call(self, project):
+        """A bump must not need a restart: the receipt is read on every call."""
+        self._stamp(project)
+        first = self._context(self._pointer(project["seat"], file_path=project["existing"]))
+        self._stamp(project, version="2.3.1")
+        second = self._context(self._pointer(project["seat"], file_path=project["existing"]))
+
+        assert first.startswith("Test template v1: ")
+        assert second.startswith("Test template v2: ")
+
+    def test_a_page_with_no_readable_receipt_still_points(self, project):
+        """The PAGE decides whether the line appears; the receipt only spells the
+        number, so a stamp that half-landed costs one word, never the pointer."""
+        self._stamp(project)
+        (project["tests_dir"] / ".template_version.json").write_text("{not json", encoding="utf-8")
+
+        assert self._context(self._pointer(project["seat"], file_path=project["existing"])).startswith(self.LINE_HEAD)
+
+    def test_a_pointer_defect_costs_the_line_and_nothing_else(self, project):
+        """A courtesy is never a wall: this handler runs AFTER the write."""
+        self._stamp(project)
+        with patch(
+            "aipass.hooks.apps.modules.testwrite_targets.in_test_tree",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = self._pointer(project["seat"], file_path=project["existing"])
+
+        assert result == {"stdout": "", "exit_code": 0}
+
+    def test_an_unrelated_tool_is_not_read_at_all(self, project):
+        self._stamp(project)
+
+        assert self._pointer(project["seat"], file_path=project["existing"], tool="Read")["stdout"] == ""
