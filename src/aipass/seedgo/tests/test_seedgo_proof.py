@@ -9,7 +9,7 @@
 # =============================================
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 
@@ -74,51 +74,84 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_accepts_proof_name():
-    """handle_command recognises 'proof' as its command."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """'proof' reaches this module's introspection, not just a True."""
+    from aipass.seedgo.apps.modules import seedgo_proof
 
-    result = handle_command("proof", [])
-    assert result is True
+    with patch.object(seedgo_proof, "print_introspection") as shown:
+        assert seedgo_proof.handle_command("proof", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_accepts_seedgo_proof_name():
-    """handle_command recognises 'seedgo_proof' as its command."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """'seedgo_proof' is the same door, not a near miss returning True."""
+    from aipass.seedgo.apps.modules import seedgo_proof
 
-    result = handle_command("seedgo_proof", [])
-    assert result is True
+    with patch.object(seedgo_proof, "print_introspection") as shown:
+        assert seedgo_proof.handle_command("seedgo_proof", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """--help explains and runs no pack."""
+    from aipass.seedgo.apps.modules import seedgo_proof
 
-    result = handle_command("proof", ["--help"])
-    assert result is True
+    with (
+        patch.object(seedgo_proof, "print_help") as helped,
+        patch.object(seedgo_proof, "_run_proof_pack") as ran,
+    ):
+        assert seedgo_proof.handle_command("proof", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """A help flag AFTER a pack name describes the run instead of performing it.
 
-    result = handle_command("proof", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `proof aipass
+    --help` used to run the pack. Running it and describing it both return
+    True, so only the effect separates them — and one of the two is slow.
+    """
+    from aipass.seedgo.apps.modules import seedgo_proof
+
+    with (
+        patch.object(seedgo_proof, "print_help") as helped,
+        patch.object(seedgo_proof, "_run_proof_pack") as ran,
+    ):
+        assert seedgo_proof.handle_command("proof", ["aipass", "-h"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    from aipass.seedgo.apps.modules import seedgo_proof
 
-    result = handle_command("proof", ["help"])
-    assert result is True
+    with (
+        patch.object(seedgo_proof, "print_help") as helped,
+        patch.object(seedgo_proof, "_run_proof_pack") as ran,
+    ):
+        assert seedgo_proof.handle_command("proof", ["help"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_unknown_pack():
-    """Unknown pack name returns True (error displayed to user)."""
-    from aipass.seedgo.apps.modules.seedgo_proof import handle_command
+    """An unknown pack is named back with the available ones, and nothing runs.
 
-    result = handle_command("proof", ["nonexistent_pack_xyz"])
-    assert result is True
+    Was `assert result is True` under a docstring promising an error was
+    displayed — and this module returns True on every path, so the test
+    passed with _validate_pack's whole error arm deleted.
+    """
+    from aipass.seedgo.apps.modules import seedgo_proof
+
+    with patch.object(seedgo_proof, "_run_proof_pack") as ran:
+        assert seedgo_proof.handle_command("proof", ["nonexistent_pack_xyz"]) is True
+
+    assert ran.call_args_list == []
+    reported = seedgo_proof.error.call_args_list  # type: ignore[attr-defined]
+    assert len(reported) == 1
+    assert reported[0].args[0] == "Unknown proof pack: 'nonexistent_pack_xyz'"
+    assert "Available packs:" in reported[0].kwargs["suggestion"]
 
 
 # ---------------------------------------------------------------------------

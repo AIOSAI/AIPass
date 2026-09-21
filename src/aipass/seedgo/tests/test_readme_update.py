@@ -9,7 +9,24 @@
 # =============================================
 
 import pytest
-from unittest.mock import MagicMock
+from typing import cast
+from unittest.mock import MagicMock, patch
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _mock(obj: object) -> MagicMock:
+    """A module attribute the autouse fixture replaced, typed as the mock it is.
+
+    ``readme_update`` binds ``console``, ``header`` and ``display_error`` from
+    real modules, so a type checker reads them as Console/FunctionType and
+    rejects ``.call_args_list``. Under this fixture they are MagicMocks at
+    runtime; this says so in one place instead of a suppression per line.
+    """
+    return cast(MagicMock, obj)
 
 
 # ---------------------------------------------------------------------------
@@ -88,67 +105,101 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_accepts_readme_name():
-    """handle_command recognises 'readme' as its command."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """'readme' reaches this module's introspection, not just a True."""
+    from aipass.seedgo.apps.modules import readme_update
 
-    result = handle_command("readme", [])
-    assert result is True
+    with patch.object(readme_update, "print_introspection") as shown:
+        assert readme_update.handle_command("readme", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_accepts_readme_update_name():
-    """handle_command recognises 'readme_update' as its command."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """'readme_update' is the same door as 'readme', not a near miss returning True."""
+    from aipass.seedgo.apps.modules import readme_update
 
-    result = handle_command("readme_update", [])
-    assert result is True
+    with patch.object(readme_update, "print_introspection") as shown:
+        assert readme_update.handle_command("readme_update", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_no_args_shows_introspection():
-    """No args triggers introspection (returns True)."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """No args puts the module's own introspection on the console."""
+    from aipass.seedgo.apps.modules import readme_update
 
-    result = handle_command("readme", [])
-    assert result is True
+    assert readme_update.handle_command("readme", []) is True
+
+    lines = [call.args[0] for call in _mock(readme_update.console).print.call_args_list if call.args]
+    assert "[bold cyan]readme_update Module[/bold cyan]" in lines
+    assert "  [cyan]handlers/readme/[/cyan]" in lines
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """--help takes the help door and not the introspection one."""
+    from aipass.seedgo.apps.modules import readme_update
 
-    result = handle_command("readme", ["--help"])
-    assert result is True
+    with (
+        patch.object(readme_update, "print_help") as helped,
+        patch.object(readme_update, "print_introspection") as shown,
+    ):
+        assert readme_update.handle_command("readme", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert shown.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """-h wins over the subcommand it sits behind — help, and no update run.
 
-    result = handle_command("readme", ["-h"])
-    assert result is True
+    The flag check (line 98) precedes the subcommand dispatch (line 106), so
+    `readme update -h` must describe the update, never perform it. Asserting
+    only the return value could not tell those two apart.
+    """
+    from aipass.seedgo.apps.modules import readme_update
+
+    with (
+        patch.object(readme_update, "print_help") as helped,
+        patch.object(readme_update, "_handle_update") as updated,
+    ):
+        assert readme_update.handle_command("readme", ["update", "-h"]) is True
+    helped.assert_called_once_with()
+    assert updated.call_args_list == []
 
 
 def test_handle_command_unknown_subcommand():
-    """Unknown subcommand returns True (error displayed to user)."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """An unknown subcommand is named back to the user with the valid list.
 
-    result = handle_command("readme", ["bogus_subcommand"])
-    assert result is True
+    Was `assert result is True` under a docstring promising an error was
+    displayed — and every router path returns True, so the test passed with
+    all eight console lines deleted. These are the lines it actually emits.
+    """
+    from aipass.seedgo.apps.modules import readme_update
+
+    assert readme_update.handle_command("readme", ["bogus_subcommand"]) is True
+
+    _mock(readme_update.display_error).assert_called_once_with("Unknown subcommand: 'bogus_subcommand'")
+    lines = [call.args[0] for call in _mock(readme_update.console).print.call_args_list if call.args]
+    assert "[yellow]Valid subcommands:[/yellow] update, check" in lines
 
 
 def test_handle_command_update_subcommand():
-    """'update' subcommand is routed without crashing."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """'update' reaches _handle_update with the args that followed it."""
+    from aipass.seedgo.apps.modules import readme_update
 
-    result = handle_command("readme", ["update"])
-    assert result is True
+    with patch.object(readme_update, "_handle_update") as updated:
+        assert readme_update.handle_command("readme", ["update", "@flow"]) is True
+    updated.assert_called_once_with(["@flow"])
 
 
 def test_handle_command_check_subcommand():
-    """'check' subcommand is routed without crashing."""
-    from aipass.seedgo.apps.modules.readme_update import handle_command
+    """'check' reaches _handle_check, and never the writing path."""
+    from aipass.seedgo.apps.modules import readme_update
 
-    result = handle_command("readme", ["check"])
-    assert result is True
+    with (
+        patch.object(readme_update, "_handle_check") as checked,
+        patch.object(readme_update, "_handle_update") as updated,
+    ):
+        assert readme_update.handle_command("readme", ["check", "@flow"]) is True
+    checked.assert_called_once_with(["@flow"])
+    assert updated.call_args_list == []
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +210,7 @@ def test_handle_command_check_subcommand():
 def test_print_introspection_runs():
     """print_introspection names the module and both handlers it is wired to.
 
-    Was `assert console.print.called or header.called` — an OR that passes on
+    Was `assert _mock(console).print.called or _mock(header).called` — an OR that passes on
     either half, so a version that printed nothing but touched the header
     still passed. These are the lines the function actually emits, measured
     2026-09-07; `console`/`header` are the fixture mocks the module binds.
@@ -168,18 +219,18 @@ def test_print_introspection_runs():
 
     assert print_introspection() is None
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    lines = [call.args[0] for call in _mock(console).print.call_args_list if call.args]
     assert "[bold cyan]readme_update Module[/bold cyan]" in lines
     assert "  [cyan]handlers/readme/[/cyan]" in lines
     assert "  [cyan]handlers/json/[/cyan]" in lines
     assert "  [dim]- aipass.cli (console, header)[/dim]" in lines
-    assert header.call_args_list == []
+    assert _mock(header).call_args_list == []
 
 
 def test_print_help_runs():
     """print_help prints the command list under the 'README Auto-Update' header.
 
-    Was `assert console.print.called or header.called` — an OR that passes on
+    Was `assert _mock(console).print.called or _mock(header).called` — an OR that passes on
     either half. Both halves are real here, so both are pinned separately,
     against the strings measured 2026-09-07.
     """
@@ -187,8 +238,8 @@ def test_print_help_runs():
 
     assert print_help() is None
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
-    header.assert_called_once_with("README Auto-Update")
+    lines = [call.args[0] for call in _mock(console).print.call_args_list if call.args]
+    _mock(header).assert_called_once_with("README Auto-Update")
     assert "[yellow]COMMANDS:[/yellow]" in lines
     assert "[yellow]AUTO-GENERATED SECTIONS:[/yellow]" in lines
     assert "  LAST_UPDATED  Timestamp" in lines
@@ -211,9 +262,9 @@ def test_print_target_error_not_found():
 
     _print_target_error("not_found:some_branch")
 
-    reported = [call.args[0] for call in display_error.call_args_list if call.args]
+    reported = [call.args[0] for call in _mock(display_error).call_args_list if call.args]
     assert reported == ["Branch 'some_branch' not found in registry"]
-    assert console.print.call_args_list == []
+    assert _mock(console).print.call_args_list == []
 
 
 def test_print_result_empty():
@@ -228,8 +279,8 @@ def test_print_result_empty():
 
     _print_result({"updated": [], "missing_markers": [], "errors": []})
 
-    assert console.print.call_args_list == []
-    assert display_error.call_args_list == []
+    assert _mock(console).print.call_args_list == []
+    assert _mock(display_error).call_args_list == []
 
 
 def test_print_result_with_errors():
@@ -244,6 +295,6 @@ def test_print_result_with_errors():
 
     _print_result({"updated": ["TREE"], "missing_markers": [], "errors": ["Something went wrong"]})
 
-    reported = [call.args[0] for call in display_error.call_args_list if call.args]
+    reported = [call.args[0] for call in _mock(display_error).call_args_list if call.args]
     assert reported == ["Something went wrong"]
-    assert console.print.call_args_list == []
+    assert _mock(console).print.call_args_list == []

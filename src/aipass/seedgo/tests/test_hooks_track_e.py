@@ -188,9 +188,12 @@ def test_inbox_audit_handles_inbox_ids_subcommand():
     """handle_command returns True and runs scan for `audit inbox-ids`."""
     from aipass.seedgo.apps.modules.inbox_audit import handle_command
 
-    with patch("aipass.seedgo.apps.modules.inbox_audit._run_inbox_id_scan", return_value=0):
+    with patch("aipass.seedgo.apps.modules.inbox_audit._run_inbox_id_scan", return_value=0) as scan:
         result = handle_command("audit", ["inbox-ids"])
     assert result is True
+    # The docstring promised the scan RAN; the True alone held whether it did
+    # or the subcommand was claimed and dropped.
+    assert scan.call_count == 1
 
 
 def test_inbox_audit_ignores_other_audit_subcommands():

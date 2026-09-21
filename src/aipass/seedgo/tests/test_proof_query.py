@@ -9,7 +9,7 @@
 # =============================================
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -73,35 +73,60 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_no_args_shows_introspection():
-    """No args triggers introspection (returns True)."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
+    """No args shows introspection, not help and not a pack lookup."""
+    from aipass.seedgo.apps.modules import proof_query
 
-    result = handle_command("proof_query", [])
-    assert result is True
+    with (
+        patch.object(proof_query, "print_introspection") as shown,
+        patch.object(proof_query, "print_help") as helped,
+    ):
+        assert proof_query.handle_command("proof_query", []) is True
+    shown.assert_called_once_with()
+    assert helped.call_args_list == []
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
+    """--help explains and looks nothing up."""
+    from aipass.seedgo.apps.modules import proof_query
 
-    result = handle_command("proof_query", ["--help"])
-    assert result is True
+    with (
+        patch.object(proof_query, "print_help") as helped,
+        patch.object(proof_query, "_discover_proof_packs") as discovered,
+    ):
+        assert proof_query.handle_command("proof_query", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
+    """A help flag AFTER a pack name explains it, never looks up a proof named '-h'.
 
-    result = handle_command("proof_query", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `proof_query
+    aipass_proof --help` used to look up a proof named '--help'. The return
+    value is True on both sides of that bug.
+    """
+    from aipass.seedgo.apps.modules import proof_query
+
+    with (
+        patch.object(proof_query, "print_help") as helped,
+        patch.object(proof_query, "_discover_proof_packs") as discovered,
+    ):
+        assert proof_query.handle_command("proof_query", ["aipass_proof", "-h"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.proof_query import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    from aipass.seedgo.apps.modules import proof_query
 
-    result = handle_command("proof_query", ["help"])
-    assert result is True
+    with (
+        patch.object(proof_query, "print_help") as helped,
+        patch.object(proof_query, "_discover_proof_packs") as discovered,
+    ):
+        assert proof_query.handle_command("proof_query", ["help"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_unknown_pack():

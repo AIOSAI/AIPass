@@ -114,59 +114,92 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_accepts_diagnostics_name():
-    """handle_command recognises 'diagnostics' as its command."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """'diagnostics' reaches this module's introspection, not just a True."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
 
-    result = handle_command("diagnostics", [])
-    assert result is True
+    with patch.object(diagnostics_audit, "print_introspection") as shown:
+        assert diagnostics_audit.handle_command("diagnostics", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_accepts_diagnostics_audit_name():
-    """handle_command recognises 'diagnostics_audit' as its command."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """'diagnostics_audit' is the same door, not a near miss returning True."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
 
-    result = handle_command("diagnostics_audit", [])
-    assert result is True
+    with patch.object(diagnostics_audit, "print_introspection") as shown:
+        assert diagnostics_audit.handle_command("diagnostics_audit", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_no_args_shows_introspection():
-    """No args triggers introspection (returns True)."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """No args names the module on the console, rather than erroring quietly."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
 
-    result = handle_command("diagnostics", [])
-    assert result is True
+    assert diagnostics_audit.handle_command("diagnostics", []) is True
+
+    printed = " ".join(str(c.args[0]) for c in diagnostics_audit.console.print.call_args_list if c.args)  # type: ignore[attr-defined]
+    assert "Diagnostics Audit Module" in printed
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """--help explains, and does not take the unknown-argument door."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
 
-    result = handle_command("diagnostics", ["--help"])
-    assert result is True
+    with (
+        patch.object(diagnostics_audit, "print_help") as helped,
+        patch.object(diagnostics_audit, "error") as reported,
+    ):
+        assert diagnostics_audit.handle_command("diagnostics", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert reported.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """A help flag AFTER an argument explains instead of rejecting it.
 
-    result = handle_command("diagnostics", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `diagnostics
+    aipass --help` used to answer "Unknown argument" for a question it can
+    answer. Both sides of that bug return True.
+    """
+    from aipass.seedgo.apps.modules import diagnostics_audit
+
+    with (
+        patch.object(diagnostics_audit, "print_help") as helped,
+        patch.object(diagnostics_audit, "error") as reported,
+    ):
+        assert diagnostics_audit.handle_command("diagnostics", ["aipass", "-h"]) is True
+    helped.assert_called_once_with()
+    assert reported.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    from aipass.seedgo.apps.modules import diagnostics_audit
 
-    result = handle_command("diagnostics", ["help"])
-    assert result is True
+    with (
+        patch.object(diagnostics_audit, "print_help") as helped,
+        patch.object(diagnostics_audit, "error") as reported,
+    ):
+        assert diagnostics_audit.handle_command("diagnostics", ["help"]) is True
+    helped.assert_called_once_with()
+    assert reported.call_args_list == []
 
 
 def test_handle_command_unknown_arg():
-    """Unknown argument returns True (error displayed gracefully)."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
+    """An unknown argument is named back, with the route that does work.
 
-    result = handle_command("diagnostics", ["some_unknown_arg"])
-    assert result is True
+    Was `assert result is True` under a docstring promising an error was
+    displayed gracefully — and this module returns True on every path, so the
+    test passed with all six console lines and both channels deleted.
+    """
+    from aipass.seedgo.apps.modules import diagnostics_audit
+
+    assert diagnostics_audit.handle_command("diagnostics", ["some_unknown_arg"]) is True
+
+    diagnostics_audit.error.assert_called_once_with("Unknown argument: 'some_unknown_arg'")  # type: ignore[attr-defined]
+    diagnostics_audit.warning.assert_called_once_with("This module has no subcommands.")  # type: ignore[attr-defined]
+    printed = " ".join(str(c.args[0]) for c in diagnostics_audit.console.print.call_args_list if c.args)  # type: ignore[attr-defined]
+    assert "drone @seedgo audit aipass" in printed
 
 
 # ---------------------------------------------------------------------------

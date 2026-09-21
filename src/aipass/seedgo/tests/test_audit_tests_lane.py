@@ -1292,14 +1292,23 @@ class TestVerbClaiming:
     def test_the_hyphenated_verb_is_claimed(self, monkeypatch):
         from aipass.seedgo.apps.modules import audit_tests as verb
 
-        monkeypatch.setattr(verb, "_run", lambda args: None)
-        assert verb.handle_command("audit-tests", []) is True
+        # The True alone could not tell "claimed and ran" from "claimed and
+        # did nothing" — and doing nothing is what a broken claim looks like.
+        # It also hid that the old `[]` argument never reached _run at all:
+        # no args takes the introspection door, so patching _run and asserting
+        # True was green either way.
+        ran = []
+        monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
+        assert verb.handle_command("audit-tests", ["@backup"]) is True
+        assert ran == [["@backup"]]
 
     def test_the_underscore_alias_is_claimed(self, monkeypatch):
         from aipass.seedgo.apps.modules import audit_tests as verb
 
-        monkeypatch.setattr(verb, "_run", lambda args: None)
-        assert verb.handle_command("audit_tests", []) is True
+        ran = []
+        monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
+        assert verb.handle_command("audit_tests", ["@backup"]) is True
+        assert ran == [["@backup"]], "the alias must forward its args, not just answer True"
 
     def test_the_audit_verb_is_never_swallowed(self):
         from aipass.seedgo.apps.modules import audit_tests as verb
@@ -1308,16 +1317,37 @@ class TestVerbClaiming:
         # here would silently take the audit verb away from its owner.
         assert verb.handle_command("audit", []) is False
 
-    def test_a_crash_after_claiming_still_returns_true(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_a_crash_after_claiming_refuses_with_the_unproven_code(self, monkeypatch):
+        """A crashed lane exits 2, and is never reported as an unknown command.
+
+        Renamed from `..._still_returns_true` on 2026-09-20. That test patched
+        `_run`, called `handle_command("audit-tests", [])` and asserted True —
+        but `[]` takes the introspection door and never enters `_run`, so it
+        was green over a crash that never happened, and it went on asserting a
+        contract the module had already replaced. The live behaviour is the
+        owner's 2026-09-07 exit-code ruling: a lane that could not run refuses
+        with EXIT_UNPROVEN (2) rather than telling the shell it succeeded.
+
+        `handle_command`'s own docstring still reads "Returns True once
+        claimed, always" and calls the unconditional True "the whole safety
+        property". That text is now wrong about its own function; it is
+        reported, not edited here.
+        """
+        from aipass.seedgo.apps.handlers.audit_tests import refusal
+        from aipass.seedgo.apps.modules import CommandRefused, audit_tests as verb
+
+        entered = []
 
         def explode(args):
+            entered.append(args)
             raise RuntimeError("the lane broke")
 
         monkeypatch.setattr(verb, "_run", explode)
-        # route_command() swallows exceptions and moves on, so a lane that
-        # raised would be reported to the user as an unknown command.
-        assert verb.handle_command("audit-tests", []) is True
+        with pytest.raises(CommandRefused) as refused:
+            verb.handle_command("audit-tests", ["@backup"])
+
+        assert entered == [["@backup"]], "the crash must happen inside _run, not before it"
+        assert refused.value.code == refusal.EXIT_UNPROVEN
 
 
 class TestVerbParsing:

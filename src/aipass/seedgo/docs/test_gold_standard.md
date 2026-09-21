@@ -33,7 +33,7 @@ The pattern in all three: **the oracle reads the effect, through the real seam, 
 
 | shape | why it is weak | specimen |
 |---|---|---|
-| sole `is True` on a command router | every router returns `True`; the test passes if the command did nothing | `tests/test_readme_update.py:130` — named "unknown subcommand … error displayed to user", asserts only `result is True` while 8 unasserted `console.print` lines fire |
+| sole `is True` on a command router — **now a rule, [`router_assert`](../apps/handlers/aipass_standards/router_assert.md)** | every router returns `True`; the test passes if the command did nothing | `tests/test_readme_update.py:130` — named "unknown subcommand … error displayed to user", asserted only `result is True` while 8 unasserted `console.print` lines fired. Rewritten 2026-09-20 |
 | `console.print.called` | a function printing one blank line passes | `tests/test_coverage_audit.py:740` |
 | existence / `isinstance` / key-presence | restates the return type | `tests/test_aipass_standards.py:56` — seven asserts, zero behaviour |
 | substring of a prose constant | the word was typed into the constant by the author | `tests/test_aipass_standards.py:376` — `assert "quarantine" not in text`, vacuously green forever |

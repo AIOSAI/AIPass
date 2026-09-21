@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 def _lines(text: str) -> List[str]:
@@ -1161,8 +1161,11 @@ class TestHandleCommandDirectoryMode:
         (d / "_private.py").write_text("z = 3\n", encoding="utf-8")
         (d / "readme.txt").write_text("not python\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", [str(d)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", [str(d)]) is True
+
+        checked = sorted(Path(call.args[0]).name for call in ran.call_args_list)
+        assert checked == ["first.py", "second.py"], "directory mode must skip _private.py and readme.txt"
 
     def test_directory_with_no_py_files(self, tmp_path, monkeypatch):
         """Directory with no .py files shows error."""
@@ -1224,8 +1227,10 @@ class TestHandleCommandPackFlag:
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["--pack", "custom", str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["--pack", "custom", str(f)]) is True
+
+        ran.assert_called_once_with(str(f.resolve()), pack_name="custom", prototype=False)
 
     def test_short_pack_flag(self, tmp_path, monkeypatch):
         """-p flag is equivalent to --pack."""
@@ -1237,8 +1242,10 @@ class TestHandleCommandPackFlag:
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["-p", "custom", str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["-p", "custom", str(f)]) is True
+
+        ran.assert_called_once_with(str(f.resolve()), pack_name="custom", prototype=False)
 
     def test_no_file_after_pack_shows_error(self, monkeypatch):
         """--pack with no file specified shows error."""
@@ -1264,8 +1271,11 @@ class TestHandleCommandPackFlag:
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["--unknown", str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["--unknown", str(f)]) is True
+
+        # Skipped, not adopted as the file and not adopted as the pack.
+        ran.assert_called_once_with(str(f.resolve()), pack_name="aipass", prototype=False)
 
 
 # ===========================================================================
@@ -1662,8 +1672,10 @@ class TestHandleCommandPathResolution:
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", [str(f)])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", [str(f)]) is True
+
+        ran.assert_called_once_with(str(f.resolve()), pack_name="aipass", prototype=False)
 
     def test_relative_path_fallback_cwd(self, tmp_path, monkeypatch):
         """Relative path falls back to CWD resolution."""
@@ -1679,8 +1691,11 @@ class TestHandleCommandPathResolution:
         f = tmp_path / "sample.py"
         f.write_text("x = 1\n", encoding="utf-8")
 
-        result = checklist.handle_command("checklist", ["sample.py"])
-        assert result is True
+        with patch.object(checklist, "run_checklist", return_value=[]) as ran:
+            assert checklist.handle_command("checklist", ["sample.py"]) is True
+
+        # No repo root, so the bare name resolves against CWD — which is tmp_path.
+        ran.assert_called_once_with(str((tmp_path / "sample.py").resolve()), pack_name="aipass", prototype=False)
 
 
 # ===========================================================================

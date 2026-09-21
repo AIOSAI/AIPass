@@ -11,7 +11,7 @@
 import time
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 
@@ -169,43 +169,67 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_accepts_audit_name():
-    """handle_command recognises 'audit' as its command."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """'audit' reaches this module's own introspection, not just a True."""
+    from aipass.seedgo.apps.modules import standards_audit
 
-    result = handle_command("audit", [])
-    assert result is True
+    with patch.object(standards_audit, "_show_audit_introspection") as shown:
+        assert standards_audit.handle_command("audit", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_accepts_standards_audit_name():
-    """handle_command recognises 'standards_audit' as its command."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """'standards_audit' is the same door, not a near miss returning True."""
+    from aipass.seedgo.apps.modules import standards_audit
 
-    result = handle_command("standards_audit", [])
-    assert result is True
+    with patch.object(standards_audit, "_show_audit_introspection") as shown:
+        assert standards_audit.handle_command("standards_audit", []) is True
+    shown.assert_called_once_with()
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """--help explains and audits no branch."""
+    from aipass.seedgo.apps.modules import standards_audit
 
-    result = handle_command("audit", ["--help"])
-    assert result is True
+    with (
+        patch.object(standards_audit, "print_help") as helped,
+        patch.object(standards_audit, "audit_branch_incremental") as audited,
+    ):
+        assert standards_audit.handle_command("audit", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert audited.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """A help flag anywhere in the line answers before anything executes.
 
-    result = handle_command("audit", ["-h"])
-    assert result is True
+    `audit aipass -h` puts the flag past args[0], so only the wider scan in
+    handle_command catches it. That scan is the whole point of
+    help_flag_safety — "a question must never execute" — and a fleet audit is
+    the most expensive thing this branch can be tricked into running. Both
+    outcomes return True.
+    """
+    from aipass.seedgo.apps.modules import standards_audit
+
+    with (
+        patch.object(standards_audit, "print_help") as helped,
+        patch.object(standards_audit, "audit_branch_incremental") as audited,
+    ):
+        assert standards_audit.handle_command("audit", ["aipass", "-h"]) is True
+    helped.assert_called_once_with()
+    assert audited.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.standards_audit import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    from aipass.seedgo.apps.modules import standards_audit
 
-    result = handle_command("audit", ["help"])
-    assert result is True
+    with (
+        patch.object(standards_audit, "print_help") as helped,
+        patch.object(standards_audit, "audit_branch_incremental") as audited,
+    ):
+        assert standards_audit.handle_command("audit", ["help"]) is True
+    helped.assert_called_once_with()
+    assert audited.call_args_list == []
 
 
 def test_print_introspection_runs():

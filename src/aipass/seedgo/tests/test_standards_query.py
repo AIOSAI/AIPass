@@ -9,7 +9,7 @@
 # =============================================
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -71,35 +71,60 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_no_args_shows_introspection():
-    """No args triggers introspection (returns True)."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """No args shows introspection, and does not fall through to help."""
+    from aipass.seedgo.apps.modules import standards_query
 
-    result = handle_command("standards_query", [])
-    assert result is True
+    with (
+        patch.object(standards_query, "print_introspection") as shown,
+        patch.object(standards_query, "print_help") as helped,
+    ):
+        assert standards_query.handle_command("standards_query", []) is True
+    shown.assert_called_once_with()
+    assert helped.call_args_list == []
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """--help explains and discovers no packs."""
+    from aipass.seedgo.apps.modules import standards_query
 
-    result = handle_command("standards_query", ["--help"])
-    assert result is True
+    with (
+        patch.object(standards_query, "print_help") as helped,
+        patch.object(standards_query, "_discover_packs") as discovered,
+    ):
+        assert standards_query.handle_command("standards_query", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """A help flag AFTER a pack name explains it, never looks up a standard named '-h'.
 
-    result = handle_command("standards_query", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `standards_query
+    <pack> --help` used to look up a standard called '--help'. The return value
+    is True on both sides of that bug, so only the effect tells them apart.
+    """
+    from aipass.seedgo.apps.modules import standards_query
+
+    with (
+        patch.object(standards_query, "print_help") as helped,
+        patch.object(standards_query, "_discover_packs") as discovered,
+    ):
+        assert standards_query.handle_command("standards_query", ["aipass_standards", "-h"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    from aipass.seedgo.apps.modules import standards_query
 
-    result = handle_command("standards_query", ["help"])
-    assert result is True
+    with (
+        patch.object(standards_query, "print_help") as helped,
+        patch.object(standards_query, "_discover_packs") as discovered,
+    ):
+        assert standards_query.handle_command("standards_query", ["help"]) is True
+    helped.assert_called_once_with()
+    assert discovered.call_args_list == []
 
 
 def test_handle_command_unknown_pack():
@@ -212,17 +237,35 @@ def test_discover_standards_finds_content_files(tmp_path):
 
 
 def test_alias_no_args_lists_all_standards():
-    """`standard` with no args lists every standard (returns True)."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """`standard` with no args puts real standard names on the console.
+
+    Was `assert handle_command("standard", []) is True` under a docstring
+    promising a list — and the alias returns True unconditionally, so the
+    test passed with _show_all_standards() emptied out.
+    """
+    from aipass.seedgo.apps.modules.standards_query import console, handle_command
 
     assert handle_command("standard", []) is True
 
+    printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)  # type: ignore[attr-defined]
+    assert "json_structure" in printed
+    assert "architecture" in printed
+
 
 def test_alias_shows_content_for_known_standard():
-    """`standard json_structure` resolves the pack itself and displays content."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """`standard json_structure` resolves the pack itself and prints THAT content.
+
+    Pinned against the content module's own first line, so resolving to the
+    wrong standard — or to the alias help — reddens this instead of passing
+    on the alias's unconditional True.
+    """
+    from aipass.seedgo.apps.modules.standards_query import console, handle_command
 
     assert handle_command("standard", ["json_structure"]) is True
+
+    printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)  # type: ignore[attr-defined]
+    assert "JSON STRUCTURE STANDARD" in printed
+    assert "Operational JSON Output" in printed
 
 
 def test_alias_unknown_standard_refuses_with_a_non_zero_code():
@@ -245,10 +288,16 @@ def test_alias_unknown_standard_refuses_with_a_non_zero_code():
 
 
 def test_alias_help_flag():
-    """`standard --help` is handled without error."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
+    """`standard --help` explains the alias and resolves no standard."""
+    from aipass.seedgo.apps.modules import standards_query
 
-    assert handle_command("standard", ["--help"]) is True
+    with (
+        patch.object(standards_query, "print_alias_help") as helped,
+        patch.object(standards_query, "_resolve_standard") as resolved,
+    ):
+        assert standards_query.handle_command("standard", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert resolved.call_args_list == []
 
 
 def test_print_alias_help_runs():

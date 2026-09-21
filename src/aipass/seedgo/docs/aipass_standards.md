@@ -57,6 +57,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | readme | entry_point | everywhere | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
 | readme_quality | entry_point | everywhere | README content depth and section quality |
 | rich_markup | all_files | production | Literal `[placeholders]` Rich silently eats at render time |
+| router_assert *(tests only)* | all_files | tests | A test whose every assertion is a command router returning `is True` — `is False` is never convicted. Scores nothing in `audit aipass` (the corpus is `apps/`); it convicts in the checklist lane on the write, and reports the standing backlog unscored |
 | ruff *(advisory)* | branch_level | everywhere | Ruff linter compliance — surfaces violations, never gates the score |
 | shebang | all_files | everywhere | No shebang lines in library code |
 | silent_catch | all_files | everywhere | No bare except/pass patterns |

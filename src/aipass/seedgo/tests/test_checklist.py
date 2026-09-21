@@ -9,7 +9,7 @@
 # =============================================
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -95,35 +95,61 @@ def test_handle_command_wrong_command_returns_false():
 
 
 def test_handle_command_no_args_shows_introspection():
-    """No args triggers introspection (returns True)."""
-    from aipass.seedgo.apps.modules.checklist import handle_command
+    """No args shows introspection, and does not fall through to help."""
+    from aipass.seedgo.apps.modules import checklist
 
-    result = handle_command("checklist", [])
-    assert result is True
+    with (
+        patch.object(checklist, "print_introspection") as shown,
+        patch.object(checklist, "print_help") as helped,
+    ):
+        assert checklist.handle_command("checklist", []) is True
+    shown.assert_called_once_with()
+    assert helped.call_args_list == []
 
 
 def test_handle_command_help_flag():
-    """--help flag is handled without error."""
-    from aipass.seedgo.apps.modules.checklist import handle_command
+    """--help explains and runs nothing."""
+    from aipass.seedgo.apps.modules import checklist
 
-    result = handle_command("checklist", ["--help"])
-    assert result is True
+    with (
+        patch.object(checklist, "print_help") as helped,
+        patch.object(checklist, "run_checklist") as ran,
+    ):
+        assert checklist.handle_command("checklist", ["--help"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_h_flag():
-    """-h flag is handled without error."""
-    from aipass.seedgo.apps.modules.checklist import handle_command
+    """A help flag AFTER a file explains the run instead of performing it.
 
-    result = handle_command("checklist", ["-h"])
-    assert result is True
+    The cured defect this pins, stated in handle_command itself: `checklist
+    <file> --help` used to run the full per-file audit it was being asked to
+    describe. Only the position of the flag distinguishes the two, and the
+    return value is True either way.
+    """
+    from aipass.seedgo.apps.modules import checklist
+
+    with (
+        patch.object(checklist, "print_help") as helped,
+        patch.object(checklist, "run_checklist") as ran,
+    ):
+        assert checklist.handle_command("checklist", ["some_file.py", "-h"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 def test_handle_command_help_word():
-    """'help' word is handled without error."""
-    from aipass.seedgo.apps.modules.checklist import handle_command
+    """The bare word 'help' reaches the same door as the flags."""
+    from aipass.seedgo.apps.modules import checklist
 
-    result = handle_command("checklist", ["help"])
-    assert result is True
+    with (
+        patch.object(checklist, "print_help") as helped,
+        patch.object(checklist, "run_checklist") as ran,
+    ):
+        assert checklist.handle_command("checklist", ["help"]) is True
+    helped.assert_called_once_with()
+    assert ran.call_args_list == []
 
 
 # ---------------------------------------------------------------------------
