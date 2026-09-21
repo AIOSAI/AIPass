@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-10
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -28,8 +28,10 @@ from aipass.prax import logger
 try:
     from aipass.cli.apps.modules.display import console
 # An optional dependency's fallback has to be at least as wide as the failures its import can produce.
-# A peer's handler package does real filesystem work at import time (its access guard), so a broken peer can raise OSError — FileNotFoundError from a dead cwd — not only ImportError.
-# Catching ImportError alone means 'the peer is unavailable' is handled and 'the peer is broken' is fatal, which is backwards.
+# A peer's handler package does real filesystem work at import time (its access guard), so a broken
+# peer can raise OSError — FileNotFoundError from a dead cwd — not only ImportError.
+# Catching ImportError alone means 'the peer is unavailable' is handled and 'the peer is broken'
+# is fatal, which is backwards.
 # Raised by @prax 2026-08-31 from their own watcher, measured against spawn the same hour.
 except (ImportError, OSError) as e:
     logger.warning("Failed to import aipass.cli.apps.modules.display, falling back to rich.console: %s", e)
@@ -47,7 +49,7 @@ from aipass.spawn.apps.handlers.file_ops import (
 )
 from aipass.spawn.apps.handlers.meta_ops import load_template_registry, generate_branch_meta, save_branch_meta
 from aipass.spawn.apps.handlers.mint_verify import verify_mint
-from aipass.spawn.apps.handlers.receipt_ops import write_birth_receipt
+from aipass.spawn.apps.handlers.receipt_ops import write_birth_receipt, write_test_template_receipt
 from aipass.spawn.apps.handlers.registry import (
     resolve_project_credential,
     find_registry,
@@ -445,6 +447,14 @@ def _spawn_agent(
     # surfaced instead of swallowed — validation_issues is what the CLI prints.
     receipt_result = write_birth_receipt(target / ".trinity")
     receipt_issues = [] if receipt_result["success"] else [f"Birth receipt not stamped: {receipt_result['error']}"]
+
+    # Step 3e: The same stamp one step over — @seedgo's test template receipt in
+    # tests/, plus the page itself (DPLAN-0354). Same rules as 3d: the gold
+    # manifest is another branch's file, so a miss is surfaced and the birth
+    # continues, and a manifest that cannot be read leaves no receipt at all.
+    test_template_result = write_test_template_receipt(target / "tests")
+    if not test_template_result["success"]:
+        receipt_issues.append(f"Test template receipt not stamped: {test_template_result['error']}")
 
     # Step 4: Register in project registry
     # Store path relative to registry location (works for both AIPass and external projects)

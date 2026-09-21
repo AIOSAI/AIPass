@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: receipt_ops.py
 # Description: Birth receipt — stamp .trinity/.template_version.json onto a newborn
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-21
 # =============================================
 
 """Stamp the trinity template receipt at birth.
@@ -42,7 +42,15 @@ from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 from aipass.spawn.apps.handlers.json import json_handler
 
-__all__ = ["STAMPED_BY_BIRTH", "RECEIPT_NAME", "gold_template_versions", "write_birth_receipt"]
+__all__ = [
+    "STAMPED_BY_BIRTH",
+    "STAMPED_BY_SCAFFOLD",
+    "RECEIPT_NAME",
+    "gold_template_versions",
+    "seedgo_test_template",
+    "write_birth_receipt",
+    "write_test_template_receipt",
+]
 
 
 RECEIPT_NAME = ".template_version.json"
@@ -51,8 +59,19 @@ RECEIPT_NAME = ".template_version.json"
 # owns exactly one of them.
 STAMPED_BY_BIRTH = "spawn birth"
 
+# @seedgo's lane name for the receipt spawn stamps into a newborn's tests/.
+# Their own bump writes "seedgo tests template bump"; this one says who stamped
+# it, so a reader can tell a birth stamp from a fleet bump.
+STAMPED_BY_SCAFFOLD = "spawn scaffold"
+
 # The gold trinity templates: @memory owns them, @seedgo scores against them.
 _GOLD_TEMPLATES = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS.template.json"}
+
+# @seedgo's gold test template (DPLAN-0354): the manifest names the versions and
+# the page each branch receives. Same gold-source rule as the trinity receipt —
+# read the owner's manifest, never a copy of it held here.
+_SEEDGO_TEMPLATES = Path(__file__).resolve().parents[3] / "seedgo" / "templates"
+_TEST_TEMPLATE_MANIFEST = "templates.json"
 
 
 def _gold_dir() -> Path:
@@ -85,6 +104,97 @@ def gold_template_versions() -> dict:
             raise ValueError(f"gold template has no readable schema_version: {path}")
         versions[key] = value
     return versions
+
+
+def seedgo_test_template() -> tuple:
+    """Read @seedgo's gold test template manifest.
+
+    Returns:
+        Tuple of (versions, pages): the ``template_versions`` dict to copy into
+        the receipt, and a list of ``(source_path, distributed_name)`` pairs for
+        the pages a newborn receives.
+
+    Raises:
+        ValueError: the manifest is missing, unparseable, carries no usable
+            ``template_versions``, or names a page that cannot be read. All of
+            it or none of it — a receipt stamped against a half-read manifest
+            would claim a version the newborn does not carry.
+    """
+    manifest_path = _SEEDGO_TEMPLATES / _TEST_TEMPLATE_MANIFEST
+    try:
+        data = json_handler.read_json(manifest_path)
+    except OSError as exc:
+        raise ValueError(f"test template manifest unreadable: {manifest_path} ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"test template manifest unreadable: {manifest_path}")
+
+    versions = data.get("template_versions")
+    if not isinstance(versions, dict) or not versions:
+        raise ValueError(f"test template manifest has no readable template_versions: {manifest_path}")
+
+    pages = []
+    for name in versions:
+        entry = data.get("files", {}).get(name, {})
+        page, distributed_as = entry.get("page"), entry.get("distributed_as")
+        if not isinstance(page, str) or not isinstance(distributed_as, str) or not page or not distributed_as:
+            raise ValueError(f"test template manifest does not name the page for '{name}': {manifest_path}")
+        source = _SEEDGO_TEMPLATES / page
+        if not source.is_file():
+            raise ValueError(f"test template page missing: {source}")
+        pages.append((source, distributed_as))
+
+    return dict(versions), pages
+
+
+def write_test_template_receipt(tests_dir) -> dict:
+    """Stamp @seedgo's test template receipt into a newborn's ``tests/`` (DPLAN-0354).
+
+    The same shape as the trinity receipt one step over: read the owner's gold
+    manifest, copy the versions it publishes, stamp who did it and when, and
+    hand the newborn the page itself. Three keys, no more — @seedgo's own bump
+    writes the same three.
+
+    Args:
+        tests_dir: The newborn's ``tests`` directory.
+
+    Returns:
+        Dict with ``success`` and either ``receipt``/``path``/``pages`` or
+        ``error``. Never raises: a birth is not abandoned over a receipt, but
+        the caller is told so it can surface the miss rather than swallow it.
+        A manifest that cannot be read leaves NO receipt behind — an absent
+        receipt reads as unstamped, which is true; an empty one would read as
+        stamped against nothing.
+    """
+    tests_dir = Path(tests_dir)
+    try:
+        versions, pages = seedgo_test_template()
+    except ValueError as exc:
+        logger.error("[spawn] Test template receipt NOT stamped for %s: %s", tests_dir, exc)
+        return {"success": False, "error": str(exc)}
+
+    payload = {
+        "template_versions": versions,
+        "stamped": datetime.now().isoformat(timespec="seconds"),
+        "stamped_by": STAMPED_BY_SCAFFOLD,
+    }
+
+    path = tests_dir / RECEIPT_NAME
+    written = []
+    try:
+        for source, distributed_as in pages:
+            atomic_write_text(tests_dir / distributed_as, source.read_text(encoding="utf-8"))
+            written.append(distributed_as)
+        atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.error("[spawn] Test template receipt write failed for %s: %s", path, exc)
+        return {"success": False, "error": f"test template receipt write failed: {exc}"}
+
+    logger.info("[spawn] Test template receipt stamped: %s (%s)", path, versions)
+    json_handler.log_operation(
+        "test_template_receipt_stamped",
+        data={"path": str(path), "template_versions": versions, "pages": written},
+    )
+    return {"success": True, "receipt": payload, "path": str(path), "pages": written}
 
 
 def write_birth_receipt(trinity_dir) -> dict:

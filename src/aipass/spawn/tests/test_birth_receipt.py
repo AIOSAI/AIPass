@@ -38,6 +38,24 @@ SEEDGO_CONTEXT_PACK = FLEET / "seedgo" / "apps" / "handlers" / "context_standard
 #: @memory's whole-file budgets for the three .trinity files, plus its per-string cap.
 MEMORY_CONFIG = FLEET / "memory" / "memory_json" / "custom_config" / "memory.config.json"
 
+#: @seedgo's gold test template: the manifest spawn stamps a newborn against (DPLAN-0354).
+SEEDGO_TEMPLATES = FLEET / "seedgo" / "templates"
+
+
+def _seedgo_manifest() -> dict:
+    return json.loads((SEEDGO_TEMPLATES / "templates.json").read_text(encoding="utf-8"))
+
+
+def _seedgo_template_versions() -> dict:
+    """seedgo's published versions, read at assert time - never copied into this file."""
+    return _seedgo_manifest()["template_versions"]
+
+
+def _seedgo_test_template_page() -> str:
+    """The gold page text a newborn is meant to receive, named by seedgo's own manifest."""
+    page = _seedgo_manifest()["files"]["test_template"]["page"]
+    return (SEEDGO_TEMPLATES / page).read_text(encoding="utf-8")
+
 
 # =============================================================================
 # GOLD VERSIONS
@@ -201,6 +219,54 @@ def test_a_minted_citizen_arrives_carrying_a_valid_receipt(tmp_path):
     assert set(written) == {"template_versions", "stamped", "stamped_by", "config_rendered"}
     assert written["stamped_by"] == receipt_ops.STAMPED_BY_BIRTH
     assert written["template_versions"] == receipt_ops.gold_template_versions()
+
+
+def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, capsys):
+    """The same stamp, one step further: @seedgo's test template (DPLAN-0354).
+
+    The versions are read from seedgo's gold manifest at assert time, never
+    copied here, so a bump over there moves this pin with it.
+    """
+    import datetime
+
+    from aipass.spawn.apps.modules.core import _spawn_agent
+
+    result = _spawn_agent(str(tmp_path / "tested"), role="Test", purpose="test template receipt")
+    assert result["success"] is True, result.get("error")
+
+    tests_dir = tmp_path / "tested" / "tests"
+    receipt_path = tests_dir / receipt_ops.RECEIPT_NAME
+    assert receipt_path.exists(), "no test template receipt in the newborn's tests/"
+
+    written = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert set(written) == {"template_versions", "stamped", "stamped_by"}
+    assert written["stamped_by"] == getattr(receipt_ops, "STAMPED_BY_SCAFFOLD")
+    assert written["template_versions"] == _seedgo_template_versions()
+    datetime.datetime.fromisoformat(written["stamped"])
+
+    page = tests_dir / "TEST_TEMPLATE.md"
+    assert page.exists(), "the test template page did not land beside the receipt"
+    assert page.read_text(encoding="utf-8") == _seedgo_test_template_page()
+
+    assert capsys.readouterr().err == "", "the mint wrote to stderr while stamping"
+
+
+def test_a_newborn_gets_no_test_receipt_when_seedgos_manifest_is_unreadable(tmp_path, monkeypatch):
+    """An absent receipt reads as unstamped, which is true; an empty one would lie."""
+    from aipass.spawn.apps.handlers import receipt_ops as ops
+    from aipass.spawn.apps.modules.core import _spawn_agent
+
+    monkeypatch.setattr(ops, "_SEEDGO_TEMPLATES", tmp_path / "no_such_gold")
+
+    result = _spawn_agent(str(tmp_path / "unstamped"), role="Test", purpose="no gold manifest")
+
+    assert result["success"] is True, "a birth is not abandoned over a receipt"
+    tests_dir = tmp_path / "unstamped" / "tests"
+    assert not (tests_dir / receipt_ops.RECEIPT_NAME).exists(), "a receipt was stamped against nothing"
+    assert not (tests_dir / "TEST_TEMPLATE.md").exists(), "the page landed without a receipt"
+    assert [issue for issue in result["validation_issues"] if "test template" in issue.lower()], (
+        f"the miss was never surfaced: {result['validation_issues']}"
+    )
 
 
 def test_an_unstampable_receipt_surfaces_but_does_not_abandon_the_birth(tmp_path, monkeypatch):
