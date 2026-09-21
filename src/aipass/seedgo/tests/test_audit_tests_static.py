@@ -680,7 +680,7 @@ class TestRuffBinaryLookup:
     reported absent, and a tool that is absent must say where it was looked for.
     """
 
-    def test_the_ruff_beside_the_interpreter_wins_over_the_one_on_PATH(self, tmp_path, monkeypatch):
+    def test_the_ruff_beside_the_interpreter_wins_over_the_one_on_path(self, tmp_path, monkeypatch):
         # PREFERRED, not merely found. The venv's ruff is the one the target's
         # own configuration was pinned against; a system ruff of another
         # version would nominate different codes for the same corpus.
@@ -697,7 +697,7 @@ class TestRuffBinaryLookup:
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: "")
         assert ruff_pt_check._ruff_binary() == str(sibling)
 
-    def test_PATH_is_still_searched_when_the_interpreter_has_no_sibling(self, tmp_path, monkeypatch):
+    def test_path_is_still_searched_when_the_interpreter_has_no_sibling(self, tmp_path, monkeypatch):
         # The fix adds a place to look; it must not remove one. A system-wide
         # ruff with no venv beside it is the ordinary case on a CI runner.
         _fake_interpreter(tmp_path, monkeypatch)
@@ -729,7 +729,7 @@ class TestRuffBinaryLookup:
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: None)
         assert ruff_pt_check._ruff_binary() == ""
 
-    def test_the_refusal_names_BOTH_places_it_looked(self, tmp_path, monkeypatch):
+    def test_the_refusal_names_both_places_it_looked(self, tmp_path, monkeypatch):
         # "ruff is not installed" was true of PATH and false of the machine,
         # and no reader of the artifact could tell which claim they held. The
         # reason has to carry the candidate locations or the next reader
@@ -885,7 +885,7 @@ class TestContentRendering:
         for exemption in exemptions:
             assert exemption in rendered
 
-    def test_every_shipped_md_is_BYTE_IDENTICAL_to_what_the_spec_renders(self):
+    def test_every_shipped_md_is_byte_identical_to_what_the_spec_renders(self):
         # The strongest form of the no-drift claim, and the reason
         # render_markdown() exists at all: the .md on disk is not a second
         # statement of the rule that a reader has to trust, it is output. A
@@ -903,10 +903,14 @@ class TestContentRendering:
     def test_every_shipped_nominator_has_a_content_module_and_a_doc(self):
         pack = Path(nominators.PACK_DIR)
         checks = sorted(pack.glob("*_check.py"))
-        # The count is the declared static half of the pack (11 of the 13
-        # groups the adapter declares); a checker that stops being discovered
-        # would otherwise shrink this loop to a silent pass.
-        assert len(checks) == 11
+        # The anti-vacuity guard is real - a checker that stops being
+        # discovered would shrink this loop to a silent pass - but a CONSTANT
+        # was the wrong instrument for it: adding three species reddened this
+        # test for doing what the pack's "three files and one line" promise
+        # invites. Pinned against the adapter's declaration instead, which
+        # cannot go stale and still catches a vanished file.
+        declared = {name.removeprefix("static_") for name in adapter.STATIC_GROUPS}
+        assert {c.stem.removesuffix("_check") for c in checks} == declared
 
         for check in checks:
             name = check.stem.removesuffix("_check")
@@ -916,7 +920,10 @@ class TestContentRendering:
     def test_every_content_module_names_its_function_by_convention(self):
         pack = Path(nominators.PACK_DIR)
         contents = sorted(pack.glob("*_content.py"))
-        assert len(contents) == 11
+        # Against the declaration, not a constant - see the test above.
+        assert {c.stem.removesuffix("_content") for c in contents} == {
+            name.removeprefix("static_") for name in adapter.STATIC_GROUPS
+        }
 
         for content in contents:
             name = content.stem.removesuffix("_content")
@@ -958,7 +965,7 @@ class TestPackKindRefusal:
         (tmp_path / "pack.json").write_text("{not json", encoding="utf-8")
         assert discovery.pack_kind(tmp_path) == discovery.SCORING_PACK_KIND
 
-    def test_the_non_scoring_packs_are_actually_PRINTED(self, capsys):
+    def test_the_non_scoring_packs_are_actually_printed(self, capsys):
         # The function returning the right answer proves nothing if no surface
         # calls it: a pack that is hidden and a pack that is absent look the
         # same to an operator, which is the whole reason the list exists.
@@ -1004,7 +1011,7 @@ class TestRetirement:
         "static_unentered_assert",
     )
 
-    def test_the_ruling_names_EVERY_group_that_superseded_it(self):
+    def test_the_ruling_names_every_group_that_superseded_it(self):
         # Naming two endpoints and trusting the middle is how a ruling ends up
         # accounting for less than it retired. The claim is that every species
         # the placeholder stood in for is still published - so every group that

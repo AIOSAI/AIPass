@@ -553,3 +553,53 @@ class TestMailBodyIsAnArgumentNotACommand:
 
         with patch("aipass.hooks.apps.modules.bash_writes.code_text", side_effect=RuntimeError("boom")):
             _assert_blocked(_bash(f"drone @ai_mail reply abc123 <<EOF\n{self.WRITE_LINE}\nEOF"))
+
+
+class TestOneProgramSpelledManyWays:
+    """A rename is not a bypass — the owner's go, 2026-09-19 (devpulse DPLAN-0352).
+
+    Measured on this gate BEFORE the cure: of the write rows below, only the
+    bare lowercase one was refused. Windows runs every one of them as git, so
+    the single mechanical layer holding git writes behind drone was one spelling
+    away from being off — reported 09-16, carried as todo 51 until the go.
+    """
+
+    #: Assembled, like WRITE_LINE above and for the same reason: a literal write
+    #: invocation in this file refuses the next agent who edits it from a shell.
+    WRITE = "commi" + "t -m x"
+
+    WRITES = ("git", "git.exe", "GIT", "Git", "git.EXE", "git.cmd", "/usr/bin/git.exe", "~/bin/git.exe")
+    READS = ("git", "git.exe", "GIT", "/usr/bin/git.exe")
+
+    def test_every_spelling_of_a_write_is_blocked(self):
+        for spelled in self.WRITES:
+            _assert_blocked(_bash(f"{spelled} {self.WRITE}"))
+
+    def test_every_spelling_of_a_read_stays_allowed(self):
+        """The promise the redirect makes ("read-only verbs run raw") is spelling-blind too."""
+        for spelled in self.READS:
+            _assert_allowed(_bash(f"{spelled} status"))
+
+    def test_gh_is_read_the_same_way(self):
+        _assert_blocked(_bash("gh.exe pr create"))
+        _assert_blocked(_bash("GH pr create"))
+        _assert_allowed(_bash("gh.exe api repos/owner/repo/pulls"))
+        _assert_allowed(_bash("GH api repos/owner/repo/pulls"))
+
+    def test_a_dotted_tail_that_is_not_executable_is_not_the_program(self):
+        """The regex finds a candidate; verb_name is what makes it a verdict.
+
+        A file NAMED for git is not git. Keeping that quiet is why the list of
+        executable extensions lives once in bash_writes instead of being spelled
+        into a regex in each gate, where the two copies would drift apart.
+        """
+        _assert_allowed(_bash("cat some/path/git.py"))
+        _assert_allowed(_bash("ls /usr/bin/git"))
+        _assert_allowed(_bash(f"node git.js {self.WRITE}"))
+
+    def test_the_reader_being_away_leaves_the_old_narrow_reading(self):
+        """Fail-safe direction: the bare spelling still refuses, and the log says so."""
+        from unittest.mock import patch
+
+        with patch("aipass.hooks.apps.modules.bash_writes.verb_name", side_effect=RuntimeError("boom")):
+            _assert_blocked(_bash(f"git {self.WRITE}"))

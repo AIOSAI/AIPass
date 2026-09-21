@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: testwrite_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Blocks agent creation of NEW test files behind a JSON policy switch (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-09-01
-# Modified: 2026-09-07
+# Modified: 2026-09-19
 # =============================================
 
 """Enforces the owner's 2026-09-01 ruling: agents do not create tests for now.
@@ -168,6 +168,14 @@ _TEST_RUNNER_MODULES = frozenset({"pytest", "unittest"})
 # this gate, which asks the narrower question "is a NEW TEST being created".
 _INTERPRETER_REASON = "(interpreter — may write any path it holds)"
 
+# The marker bash_writes appends when an interpreter's own text names no verb
+# that creates a file. READ from the reader, never restated here: auto_fix spent
+# months grepping for a marker @seedgo had stopped printing, and this gate
+# refusing a command it should pass is that same silence with a wall in front of
+# it. Absent — an older bash_writes — means no evidence either way, and the gate
+# keeps its old, broader reading.
+_NO_WRITE_VERB_ATTR = "NO_WRITE_VERB"
+
 
 def _is_test_run(segment: list[str]) -> bool:
     """True when this segment merely RUNS tests.
@@ -187,24 +195,38 @@ def _is_test_run(segment: list[str]) -> bool:
 def testwrite_targets_bash(command: str, cwd: str) -> list[tuple[Path, str]]:
     """Seam onto ``bash_writes``, minus the targets a test RUN merely names.
 
-    Reuses the one shell reader rather than growing a second, and drops only
-    interpreter-attributed targets from runner segments. Everything else
-    survives: ``pytest x && touch tests/test_new.py`` still refuses, because
-    ``touch`` names its target under its own reason in its own segment.
+    Reuses the one shell reader rather than growing a second, and drops the two
+    interpreter-attributed targets that cannot be a test CREATION:
+
+     * one from a segment that merely RUNS tests (see :func:`_is_test_run`)
+     * one from an interpreter whose own text names no write verb at all — a
+       path printed, compared or logged. @seedgo was refused for an interpreter
+       one-liner that PRINTED a test path (2026-09-19), @canary for one in a
+       heredoc, and this branch for both: data was being read as a target. The
+       evidence comes from bash_writes, the one reader holding the program text.
+
+    Everything else survives: a runner segment chained to a ``touch`` of a new
+    test still refuses, because ``touch`` names its target under its own reason
+    in its own segment, and a heredoc that really writes still carries a write
+    verb.
 
     Args:
         command: The raw Bash command string.
         cwd: The session working directory.
 
     Returns:
-        The (path, why) pairs bash_writes reports, runner noise removed.
+        The (path, why) pairs bash_writes reports, runner and read-only noise gone.
     """
-    grouped = _module("bash_writes").write_targets_by_segment(command, cwd)
+    reader = _module("bash_writes")
+    grouped = reader.write_targets_by_segment(command, cwd)
+    no_write = getattr(reader, _NO_WRITE_VERB_ATTR, "")
     pairs: list[tuple[Path, str]] = []
     for segment, hits in grouped:
         run = _is_test_run(segment)
         for target, why in hits:
             if run and _INTERPRETER_REASON in why:
+                continue
+            if no_write and no_write in why:
                 continue
             pairs.append((target, why))
     return pairs

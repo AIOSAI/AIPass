@@ -39,7 +39,7 @@ from aipass.drone.apps.handlers.git import (
     remote_handler,
     repo_door,
 )
-from aipass.drone.apps.handlers.help_flags import wants_help
+from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
 from aipass.drone.apps.handlers.router_handler import caller_cwd
 from aipass.drone.apps.handlers.json_flags import strip_json_flag, wants_json
 
@@ -170,7 +170,7 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
             return {"stdout": "", "stderr": "", "exit_code": 0}
         args = []
     if wants_help(command, args):
-        print_help()
+        print_help(help_topic(command, args))
         return {"stdout": "", "stderr": "", "exit_code": 0}
 
     if command is None:
@@ -1331,8 +1331,12 @@ def print_introspection() -> None:
     c.print()
 
 
-def print_help() -> None:
+def print_help(command: str | None = None) -> None:
     """Print help (seedgo compliance).
+
+    Args:
+        command: The verb to explain. None prints the top-level page; an
+            unknown verb falls through to it inside ``get_help``.
 
     ``markup=False``: this page is documentation, not styled output, and its
     argument placeholders are literal. Rendered as markup, Rich read ``[count]``
@@ -1341,4 +1345,4 @@ def print_help() -> None:
     standard scoring 100, because the literal is returned by ``get_help()``
     rather than written at the print site.
     """
-    _get_console().print(get_help(), markup=False)
+    _get_console().print(get_help(command), markup=False)

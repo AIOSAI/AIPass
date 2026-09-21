@@ -148,7 +148,7 @@ class TestTheStandInWorldIsSealed:
             assert registry_handler.get_branch_by_name("trigger") is None
 
 
-class TestNothingMovesUntilPatrickBlesses:
+class TestNothingMovesUntilTheOwnerBlesses:
     """The tier is driven by the declared file and by nothing else.
 
     This class first pinned "declared_roots() is empty on this machine", which

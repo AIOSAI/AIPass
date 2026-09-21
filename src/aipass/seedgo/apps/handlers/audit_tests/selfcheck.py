@@ -43,6 +43,17 @@ PASS = "pass"
 FAIL = "fail"
 NOT_APPLICABLE = "not_applicable"
 
+#: Line prefixes pytest's short summary uses for a unit that did not pass.
+#: Check 4 names the failing nodeids because "control exit 1" on its own costs
+#: the reader a full rebuild of the sandbox to learn WHICH test failed - which
+#: @canary paid once, and which is the whole of the cost this constant removes.
+FAILURE_SUMMARY_PREFIXES: tuple = ("FAILED ", "ERROR ")
+
+#: How many failing nodeids the detail names before it summarises the rest. A
+#: control run that is comprehensively red does not become more actionable at
+#: fifty names, and the artifact carries the full stdout tail either way.
+MAX_NAMED_FAILURES = 5
+
 #: Checks that cannot run until their group does. Named here so an unbuilt
 #: group produces a `not_applicable` with the group's own name rather than a
 #: silent absence.
@@ -219,6 +230,51 @@ def _m10_rows(m10_proof: dict) -> List[dict]:
     ]
 
 
+def _failing_units(run: dict, returncode: Optional[int]) -> str:
+    """The nodeids behind a non-zero control, as a clause appended to check 4.
+
+    A green control needs no names, so this returns "" and check 4's sentence
+    is unchanged. A red one names the units: pytest's short summary prints
+    `FAILED <nodeid> - <message>` even under `-q`, and while it truncates the
+    MESSAGE to the reported terminal width, the nodeid itself always survives.
+
+    An unreadable or summary-free tail returns a clause saying so rather than
+    an empty one. "control exit 1" and "control exit 1, and the summary did not
+    reach the captured tail" send a reader to different places, and collapsing
+    them is the species this whole lane refuses.
+
+    Args:
+        run: The gated run's result, carrying `stdout_tail`.
+        returncode: The suite's own exit status.
+
+    Returns:
+        A clause to append to check 4's detail, or "" when the control was green.
+    """
+    if returncode == 0:
+        return ""
+
+    tail = str(run.get("stdout_tail") or "")
+    if not tail:
+        return ". No stdout was captured, so the failing unit(s) cannot be named from this run"
+
+    nodeids = [
+        line.split(" - ", 1)[0].split(" ", 1)[1].strip()
+        for line in tail.splitlines()
+        if line.startswith(FAILURE_SUMMARY_PREFIXES) and " " in line
+    ]
+    if not nodeids:
+        return (
+            ". No FAILED/ERROR summary line reached the captured tail, so the failing unit(s) "
+            "cannot be named - the tail is a fixed-size window and a large dump can push the "
+            "summary out of it"
+        )
+
+    named = ", ".join(nodeids[:MAX_NAMED_FAILURES])
+    if len(nodeids) > MAX_NAMED_FAILURES:
+        return f". Failing: {named}, and {len(nodeids) - MAX_NAMED_FAILURES} more"
+    return f". Failing: {named}"
+
+
 def _gate_rows(hygiene: dict, run: dict) -> List[dict]:
     """Checks 4, 10, 11, 14, 15 - the gate and the process that ran it."""
     returncode = run.get("returncode")
@@ -233,7 +289,7 @@ def _gate_rows(hygiene: dict, run: dict) -> List[dict]:
             PASS if returncode == 0 else FAIL,
             f"the suite's own exit status was {returncode}. A non-zero control means the "
             f"target's tests do not pass on their own, and the hygiene number below describes "
-            f"a run in that state",
+            f"a run in that state{_failing_units(run, returncode)}",
         ),
         _check(
             10,

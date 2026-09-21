@@ -5,7 +5,7 @@
 **Purpose:** The permanent test citizen — spawned, dispatched, resumed, broken
 and re-scaffolded so no working branch has to be the experiment.
 **Module:** `aipass.canary`
-**Version:** 2.2.0
+**Version:** 2.6.0
 **Created:** 2026-08-20
 
 Everything here is test data by definition: the mail, the logs, the artifacts,
@@ -19,6 +19,10 @@ drone @canary                                  # what is present right now
 drone @canary --help                           # the reference
 drone @canary note add "check the interrupt"   # append one note
 drone @canary note list                        # read them back
+drone @canary span "2d 4h"                     # a written duration in seconds
+drone @canary top 3 scores.txt                 # the three highest counts in a tally
+drone @canary align table.txt                  # a text table with its columns lined up
+drone @canary kv store.txt set colour red      # file a value; 'get colour' reads it back
 pytest src/aipass/canary/tests -v              # the suite, from the repo root
 ```
 
@@ -40,45 +44,58 @@ its own memory for the gap, or take on production work.
 
 ## Live Inventory
 
-The list of modules, verbs and flags is generated from the code that runs them, so it is not written down here and cannot go stale on this page:
-
-- `drone @canary` — the self-map: the discovered modules and what this branch is.
-- `drone @canary --help` — the full command surface. Each module answers for its own verbs: `drone @canary note --help`.
-
-## How To Reach Me
-
-The inventory is generated from the code that runs it, so it is never typed on
-this page and never stale:
+The list of modules, verbs and flags is generated from the code that runs them,
+so it is never typed on this page and cannot go stale here:
 
 - `drone @canary` — the self-map: identity, and every module discovered right
   now with its one-line description.
 - `drone @canary --help` — the reference: every verb, the flags, the exit-code
   contract and examples.
+- `drone @canary <command> --help` — that command's own page, without running
+  it: `drone @canary top --help`.
 
-The two answer different questions. The self-map lists modules and never lists
-verbs; the reference lists verbs and never names a module. Ask the first what
-exists today, the second how to call it.
+The first two answer different questions. The self-map lists modules and never
+lists verbs; the reference lists verbs and never names a module. Ask the first
+what exists today, the second how to call it.
+
+## How To Reach Me
+
+Work arrives here by mail. This branch does not self-start, and nothing it
+sends back is evidence about the production fleet.
+
+- `drone @ai_mail dispatch @canary "Subject" "Body"` — send the test and wake
+  this branch. Use this when you need something run or checked.
+- `drone @ai_mail email @canary "Subject" "Body"` — FYI, no wake.
+
+The reply comes back with the refusal text verbatim, the exit code, and where
+the thing landed — not a summary of it.
 
 ## Commands
 
-No command list lives here, deliberately. This branch registers nothing
-permanent: modules are added for one specific test and removed afterwards, so
-any list typed on this page would be wrong within the week. The help page is
-generated from what is actually routed, and it is the reference.
+Five verbs are routed today — `note`, `span`, `top`, `align` and `kv` — and not
+one of them is permanent. Modules are added here for a specific test and removed after it,
+so the forms above are the reference and this page names no more than the verbs.
 
-What the help page cannot tell you about itself — why a refusal exits 2 rather
-than 0, which forms reach a module's own help, what a raising module reports —
-is in [docs/command_surface.md](docs/command_surface.md).
+What the help pages cannot tell you about themselves — why a refusal exits 2
+rather than 0, which forms reach a module's own help, what a raising module
+reports — is in [docs/command_surface.md](docs/command_surface.md).
 
 ## Architecture
 
 `apps/canary.py` is the entry point and holds no business logic: it discovers
 modules, routes to them, and turns their answer into an exit code. Modules live
 in `apps/modules/`, which is empty by design between tests; today it holds
-`note`, an append-only note store. Handlers sit under `apps/handlers/`: the
-`notes` handler does the store's reading and appending, the `json` handler is
-the byte-identical fleet shim over the shared json service, and
-`apps/handlers/__init__.py` carries the guard that refuses a cross-branch
+`note`, an append-only note store, `span`, a duration parser, `top`, a
+leaderboard reader, `align`, a column aligner, and `kv`, a key/value store that
+survives between runs. Handlers sit under
+`apps/handlers/`: the `notes` handler does the store's reading and appending,
+the `duration` handler parses a written duration and owns every one of that
+command's refusals, the `leaderboard` handler reads a name/count tally and owns
+every one of `top`'s refusals, the `table` handler reads a whitespace-separated
+table and owns every one of `align`'s refusals, the `kv` handler reads and
+rewrites the key/value store and owns every one of `kv`'s refusals, the
+`json` handler is the byte-identical fleet shim over the shared json service,
+and `apps/handlers/__init__.py` carries the guard that refuses a cross-branch
 handler import.
 
 A routed command that refuses exits 2, an unknown command exits 1, and refusal
@@ -96,6 +113,10 @@ Depth lives in [docs/](docs/), one page per subject:
 |------|----------------|
 | [docs/command_surface.md](docs/command_surface.md) | Every routed form, the exit-code contract, subcommand help, and the forms the help pages had been missing |
 | [docs/note_module.md](docs/note_module.md) | The note store: format, the parse refusal, why it avoids the fleet json service, what its tests measure |
+| [docs/span_module.md](docs/span_module.md) | The duration parser: the grammar, every refusal and why stdout stays empty, the JSON form, what its tests and mutants measure |
+| [docs/top_module.md](docs/top_module.md) | The leaderboard reader: the file shape, the tie-break and why it is not insertion order, every refusal, what its tests measure |
+| [docs/align_module.md](docs/align_module.md) | The column aligner: the layout, the four rulings the contract left open, every refusal, what its tests and mutants measure |
+| [docs/kv_module.md](docs/kv_module.md) | The key/value store: the verbs, the file, the six rulings, what guards the write, every refusal, what its tests and mutants measure |
 | [docs/testing.md](docs/testing.md) | Running the suite, the conftest seam, and what continuous integration actually runs |
 | [docs/branch_data.md](docs/branch_data.md) | Everything written to disk here: the json shim, `canary_json/`, `docs.local/`, `logs/`, the archives |
 
@@ -118,7 +139,7 @@ Depth lives in [docs/](docs/), one page per subject:
 
 ---
 
-**Last Updated:** 2026-09-19
+**Last Updated:** 2026-09-20
 
 ---
 

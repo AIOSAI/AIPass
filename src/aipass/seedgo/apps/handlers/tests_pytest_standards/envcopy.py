@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: envcopy.py
 # Description: copy-first scratch environment for the pytest adapter (Law M10)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -42,10 +42,11 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.tests_pytest_standards.diff_scope import DiffScope, read_scope
 
 #: Never copied. `.chroma`, `.venv` and `node_modules` are the three the MVP's
 #: set omitted; each is large enough to change what the lane costs to run.
@@ -58,11 +59,46 @@ RSYNC_EXCLUDES: Tuple[str, ...] = (
     ".chroma",
     ".venv",
     "node_modules",
+    # prax stages every atomic json write beside its target as
+    # `.<pid>_<serial>.tmp` and then os.replace()s it away, so the file exists
+    # for microseconds. Copying a live fleet raced that window on every run:
+    # the audit's own drone calls generate the writes that break the audit.
+    # Excluded by its own pattern rather than by excluding prax_json, because
+    # the SETTLED json is part of the tree and the staging file never was.
+    ".*_*.tmp",
 )
+
+#: rsync exit codes that are warnings, not failures, and what each one means
+#: for a measurement. 24 is "some files vanished before they could be
+#: transferred" - the tree moved under us. It is not a partial copy of what
+#: was there; rsync transferred everything it could still see.
+#:
+#: TOLERATED, NOT IGNORED: the run records the stderr in `vanished_during_copy`
+#: so a vanished file that is NOT a staging temp stays visible. Measured
+#: 2026-09-20 from a fleet pass by @devpulse: @drone refused under T10 on
+#: `prax/prax_json/.1196433_28.tmp`, and both @drone and @memory then passed on
+#: a plain retry, which is what proves it transient rather than structural.
+#:
+#: Retrying the whole copy was the third option offered and is not taken: a
+#: retry re-walks trees that run to 157 MB to cure a warning that the exclude
+#: above already removes at source.
+RSYNC_WARNING_CODES: Tuple[int, ...] = (24,)
 
 #: Wall-clock ceiling on one rsync. A copy that hangs must not become a hang
 #: of the whole lane; T-BUDGET covers the suite, this covers the setup.
 COPY_TIMEOUT_SECONDS = 900
+
+#: What an unrequested run asks for. Named rather than written as a bare
+#: `[]` three call sites apart, because the empty list IS the default
+#: behaviour of the whole lane and a reader deserves to find it by name.
+NO_EXECUTION_GROUPS: Tuple[str, ...] = ()
+
+
+#: Where a scratch env's sibling packages came from. Published on the spec:
+#: a run whose siblings came from a different tree than its target is a fact
+#: a reader of the artifact has to be able to find.
+SIBLINGS_FROM_OWN_ROOT = "own_root"
+SIBLINGS_FROM_HOST_REPO = "host_repo"
 
 
 class EnvError(RuntimeError):
@@ -86,6 +122,42 @@ class EnvSpec:
     copied_siblings: List[str] = field(default_factory=list)
     symlinked_siblings: List[str] = field(default_factory=list)
 
+    #: rsync warnings tolerated during the copy, verbatim. Empty on a quiet
+    #: run. A non-empty list does NOT invalidate the measurement - the copy
+    #: holds everything rsync could still see - but it says the fleet was
+    #: moving underneath it, which is the difference between "the tree is
+    #: this" and "the tree was this while nothing else ran".
+    vanished_during_copy: List[str] = field(default_factory=list)
+
+    #: Which tree the siblings came from - `own_root` or `host_repo`. A banked
+    #: fixture has no siblings of its own, so its env borrows the running
+    #: checkout's; that is sound (they are the branch's real dependencies) but
+    #: it is not the frozen tree, and the artifact says so rather than implying
+    #: the whole env was frozen at the fixture's commit.
+    sibling_basis: str = SIBLINGS_FROM_OWN_ROOT
+
+    #: The execution groups this run was asked to OPT INTO, by bare adapter
+    #: name. Empty is the default and means "run nothing that costs extra".
+    #:
+    #: IT LIVES ON THE SPEC BECAUSE THE SPEC IS THE ONLY THING `nominate()`
+    #: RECEIVES. `build_env(target, workdir, options)` is handed the operator's
+    #: options and `nominate(spec)` is not, so an execution group that needs a
+    #: per-run decision had no channel to read one from - and bumping
+    #: ADAPTER_API to add a parameter would break every adapter for a fact that
+    #: already fits on the object both functions share. Carrying it here costs
+    #: no signature change and no version bump.
+    execution_groups: List[str] = field(default_factory=list)
+
+    #: The change set this run was asked to narrow its mutants to, read from
+    #: the REAL target before the copy, or None for the whole tree.
+    #:
+    #: IT IS RESOLVED HERE for the same reason `execution_groups` lives here
+    #: and for one more: `.git` is excluded from the copy, so the scratch env
+    #: is not a repository and `nominate(spec)` could not read a diff even if
+    #: it wanted to. `build_env` is the only code that ever holds both the
+    #: real target and its repo root.
+    diff_scope: Optional[DiffScope] = None
+
     @property
     def m10_complete(self) -> bool:
         """True when nothing in this env can write through to the real tree.
@@ -106,8 +178,17 @@ class EnvSpec:
             "python": str(self.python),
             "copied_siblings": list(self.copied_siblings),
             "symlinked_siblings": list(self.symlinked_siblings),
+            "sibling_basis": self.sibling_basis,
             "m10_complete": self.m10_complete,
             "excludes": list(RSYNC_EXCLUDES),
+            "vanished_during_copy": list(self.vanished_during_copy),
+            "diff_scope": None if self.diff_scope is None else self.diff_scope.to_document(),
+            # PUBLISHED, so that a run which opted a campaign in and a run
+            # which did not cannot produce the same document. Two artifacts
+            # identical everywhere but in what was ASKED FOR would make the
+            # opt-in unreadable after the fact, and "why is width_coupling
+            # not_applicable here and measured there" unanswerable.
+            "execution_groups": list(self.execution_groups),
         }
 
 
@@ -156,11 +237,14 @@ def detect_layout(target: Path) -> Tuple[str, Optional[Path]]:
 # =============================================================================
 
 
-def rsync(source: Path, destination: Path) -> None:
+def rsync(source: Path, destination: Path) -> Optional[str]:
     """One rsync with the contract's excludes. Raises EnvError on failure.
 
     Never falls back to a partial copy: an env built from an incomplete tree
-    would produce a measurement of something that does not exist.
+    would produce a measurement of something that does not exist. A code in
+    `RSYNC_WARNING_CODES` is not that - it is the live fleet moving under a
+    read - so it is returned as a warning string rather than raised, and the
+    caller publishes it. Returns None when the copy was quiet.
     """
     destination.mkdir(parents=True, exist_ok=True)
     excludes: List[str] = []
@@ -173,14 +257,27 @@ def rsync(source: Path, destination: Path) -> None:
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise EnvError(f"rsync of {source} could not complete: {type(exc).__name__}: {exc}") from exc
 
+    if result.returncode in RSYNC_WARNING_CODES:
+        warning = f"rsync of {source} warned ({result.returncode}): {result.stderr.strip()[:400]}"
+        logger.warning("[audit_tests] %s", warning)
+        return warning
+
     if result.returncode != 0:
         raise EnvError(f"rsync of {source} failed ({result.returncode}): {result.stderr.strip()[:400]}")
 
+    return None
 
-def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> Tuple[List[str], List[str]]:
-    """Copy or symlink every sibling package. Returns `(copied, symlinked)`."""
+
+def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> Tuple[List[str], List[str], List[str]]:
+    """Copy or symlink every sibling package.
+
+    Returns `(copied, symlinked, warnings)`. A sibling is a live branch being
+    written to while it is read, so the warnings list is where a vanished file
+    in SOMEONE ELSE'S tree surfaces.
+    """
     copied: List[str] = []
     symlinked: List[str] = []
+    warnings: List[str] = []
 
     for entry in sorted(real_src.iterdir()):
         if not entry.is_dir() or entry.name in ("__pycache__", skip):
@@ -189,27 +286,88 @@ def _place_siblings(real_src: Path, src_dir: Path, skip: str, symlink: bool) -> 
             (src_dir / entry.name).symlink_to(entry)
             symlinked.append(entry.name)
         else:
-            rsync(entry, src_dir / entry.name)
+            warning = rsync(entry, src_dir / entry.name)
+            if warning is not None:
+                warnings.append(warning)
             copied.append(entry.name)
 
-    return copied, symlinked
+    return copied, symlinked, warnings
+
+
+def _has_siblings(real_src: Path, skip: str) -> bool:
+    """Whether this `src/aipass` holds any package other than the target."""
+    if not real_src.is_dir():
+        return False
+    return any(e.is_dir() and e.name not in ("__pycache__", skip) for e in real_src.iterdir())
+
+
+def host_repo_root() -> Optional[Path]:
+    """The real AIPass checkout this code is running from, or None.
+
+    Found by walking up for a directory that HOLDS `src/aipass`, not by
+    counting parents: a parent count is a silent liar the day the file moves
+    one level, and the first cut of this function was off by exactly one.
+    """
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "src" / "aipass").is_dir():
+            return candidate
+    return None
+
+
+def sibling_source(repo_root: Path, target_name: str) -> Tuple[Path, str]:
+    """Where to take sibling packages from, and which choice was made.
+
+    A BANKED FIXTURE IS ITS OWN REPO ROOT AND HAS NO SIBLINGS. `detect_layout`
+    answers with the fixture directory, so `repo_root/src/aipass` holds only
+    the frozen branch - and `aipass` is a REGULAR package, so putting the env's
+    `src` first on PYTHONPATH then hides every real sibling rather than
+    merging with them. The fixture's own conftest imports `aipass.prax`, that
+    import fails, pytest aborts before the hygiene plugin can report, and the
+    lane refuses with T10 "the gate produced no records at all" - a sentence
+    that names the symptom and not one thing about the cause. Measured on both
+    banked fixtures (seedgo todo 123).
+
+    So siblings come from the running checkout when the target's own root has
+    none. The choice is RETURNED rather than made quietly, because a run whose
+    siblings came from a different tree than its target is a fact a reader of
+    the artifact has to be able to find.
+    """
+    own_src = repo_root / "src" / "aipass"
+    if _has_siblings(own_src, target_name):
+        return own_src, SIBLINGS_FROM_OWN_ROOT
+
+    host_root = host_repo_root()
+    host_src = None if host_root is None else host_root / "src" / "aipass"
+    if host_src is not None and _has_siblings(host_src, target_name):
+        return host_src, SIBLINGS_FROM_HOST_REPO
+
+    raise EnvError(
+        f"no sibling packages for {target_name}: neither {own_src} nor {host_src} holds another "
+        "aipass package, so the copy could not import aipass.prax and the suite could not run"
+    )
 
 
 def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bool) -> dict:
     """Mirror the `src/aipass/<name>` layout inside the scratch env."""
     src_dir = env_root / "src" / "aipass"
     src_dir.mkdir(parents=True)
-    real_src = repo_root / "src" / "aipass"
+    real_src, sibling_basis = sibling_source(repo_root, target.name)
 
     for name in ("__init__.py", "conftest.py"):
         if (real_src / name).is_file():
             shutil.copy2(real_src / name, src_dir / name)
-    if (repo_root / "conftest.py").is_file():
-        shutil.copy2(repo_root / "conftest.py", env_root / "conftest.py")
+    root_conftest = repo_root / "conftest.py"
+    host_root = host_repo_root()
+    if not root_conftest.is_file() and sibling_basis == SIBLINGS_FROM_HOST_REPO and host_root is not None:
+        root_conftest = host_root / "conftest.py"
+    if root_conftest.is_file():
+        shutil.copy2(root_conftest, env_root / "conftest.py")
 
-    copied, symlinked = _place_siblings(real_src, src_dir, target.name, symlink)
+    copied, symlinked, warnings = _place_siblings(real_src, src_dir, target.name, symlink)
     target_copy = src_dir / target.name
-    rsync(target, target_copy)
+    target_warning = rsync(target, target_copy)
+    if target_warning is not None:
+        warnings.append(target_warning)
 
     return {
         "target_copy": target_copy,
@@ -219,15 +377,18 @@ def _build_aipass_env(target: Path, env_root: Path, repo_root: Path, symlink: bo
         "pythonpath": str(env_root / "src"),
         "copied_siblings": copied,
         "symlinked_siblings": symlinked,
+        "sibling_basis": sibling_basis,
+        "vanished_during_copy": warnings,
     }
 
 
 def _build_plain_env(target: Path, env_root: Path) -> dict:
     """Copy an ordinary directory whole. Nothing is symlinked."""
     target_copy = env_root / target.name
-    rsync(target, target_copy)
+    warning = rsync(target, target_copy)
     return {
         "target_copy": target_copy,
+        "vanished_during_copy": [warning] if warning is not None else [],
         "run_cwd": env_root,
         "test_arg": target.name,
         "target_module": "",
@@ -237,17 +398,74 @@ def _build_plain_env(target: Path, env_root: Path) -> dict:
     }
 
 
+def normalise_execution_groups(requested: Optional[Sequence[str]]) -> List[str]:
+    """The opt-in list, de-duplicated and in the order it was asked for.
+
+    Order is kept rather than sorted so the document reads back as the operator
+    typed it, and duplicates are dropped so that `--width-coupling
+    --width-coupling` cannot make one campaign look like two in the artifact.
+
+    Args:
+        requested: Whatever the caller was handed, including None.
+
+    Returns:
+        A fresh list. Never the caller's own, which a dataclass field would
+        otherwise keep a live reference to.
+    """
+    groups: List[str] = []
+    for name in requested or NO_EXECUTION_GROUPS:
+        text = str(name)
+        if text and text not in groups:
+            groups.append(text)
+    return groups
+
+
+def _resolve_diff_scope(
+    target: Path, repo_root: Optional[Path], ref: Optional[str], requested: bool
+) -> Optional[DiffScope]:
+    """The change set, or None when nothing asked for one.
+
+    REFUSES rather than silently widening: a target with no repository to
+    diff against (a banked fixture is the ordinary case) would otherwise get
+    an empty scope, probe zero statements, and report a clean run that never
+    measured anything.
+    """
+    if not requested:
+        return None
+    if repo_root is None:
+        raise EnvError(
+            f"--diff-scope was asked for but {target} is not inside a repository, so there is no "
+            "change set to read; an empty scope would probe nothing and report it as clean"
+        )
+    return read_scope(target, repo_root, ref)
+
+
 def build_env(
     target: Path,
     env_root: Path,
     plugin_source: Path,
     python_override: Optional[str] = None,
     symlink_siblings: bool = False,
+    execution_groups: Optional[Sequence[str]] = None,
+    diff_scope_ref: Optional[str] = None,
+    scope_to_diff: bool = False,
 ) -> EnvSpec:
-    """Materialise the scratch env and return how to run pytest inside it."""
+    """Materialise the scratch env and return how to run pytest inside it.
+
+    `execution_groups` DEFAULTS TO NOTHING, and that default is the lane's
+    existing behaviour exactly: every extra campaign is opt-in, so a caller
+    that says nothing gets the run it got before this parameter existed.
+
+    `scope_to_diff` is the same shape one level further: off by default, and a
+    run that does not ask for it probes the whole tree exactly as before.
+    """
     target = target.resolve()
     layout, repo_root = detect_layout(target)
     env_root = env_root.resolve()
+
+    # BEFORE the copy: `.git` never reaches the scratch env, so this is the
+    # only moment the change set can be read at all.
+    scope = _resolve_diff_scope(target, repo_root, diff_scope_ref, scope_to_diff)
 
     if env_root.exists():
         shutil.rmtree(env_root)
@@ -285,6 +503,10 @@ def build_env(
         log_path=log_path,
         copied_siblings=built["copied_siblings"],
         symlinked_siblings=built["symlinked_siblings"],
+        sibling_basis=built.get("sibling_basis", SIBLINGS_FROM_OWN_ROOT),
+        vanished_during_copy=built.get("vanished_during_copy", []),
+        execution_groups=normalise_execution_groups(execution_groups),
+        diff_scope=scope,
     )
 
     # Recorded because `m10_complete: false` is the one env state a reader
@@ -297,6 +519,10 @@ def build_env(
             "copied_siblings": len(spec.copied_siblings),
             "symlinked_siblings": len(spec.symlinked_siblings),
             "m10_complete": spec.m10_complete,
+            # Logged beside the copy shape because it is the other thing that
+            # decides what this run cost. A 40-minute run with no explanation
+            # in the log is a run nobody can account for later.
+            "execution_groups": list(spec.execution_groups),
         },
     )
     return spec

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -136,8 +136,46 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     return {"passed": overall_passed, "checks": checks, "score": score, "standard": "IMPORTS"}
 
 
+def _opening_marker(stripped: str, in_docstring: bool, docstring_marker: Optional[str]) -> str:
+    """Which triple quote this line is actually using.
+
+    WHICHEVER COMES FIRST, not whichever is preferred. This used to read
+    `'\"\"\"' if '\"\"\"' in stripped else \"'''\"`, so a line opening a `'''`
+    block whose CONTENT begins with a `\"\"\"` was measured against the wrong
+    marker - counted twice, read as an open-and-close pair, and the block was
+    left un-blanked. Measured 2026-09-19 on
+    `tests_pytest_standards/envdiff.py`, whose payload string opens
+    `f'''\"\"\"Per-test verdict recorder...\"\"\"`: the whole 200-line payload
+    stayed visible, its `import json` was read as a real stdlib import 200
+    lines below the real ones, and the file was reported as having its imports
+    out of order when they are in order.
+
+    Every check downstream of `filter_docstrings` read that same un-blanked
+    payload, so this is one fix for all of them - the same shape as the
+    off-by-docstring-lines defect recorded in that function's docstring.
+
+    Args:
+        stripped: The line, already stripped.
+        in_docstring: Whether a block is currently open.
+        docstring_marker: The marker that opened it, if one is open.
+
+    Returns:
+        The marker to count on this line.
+    """
+    if in_docstring and docstring_marker:
+        # Inside a block only its OWN marker can close it; the other is content.
+        return docstring_marker
+    double = stripped.find('"""')
+    single = stripped.find("'''")
+    if double == -1:
+        return "'''"
+    if single == -1:
+        return '"""'
+    return '"""' if double < single else "'''"
+
+
 def _process_docstring_marker(stripped, in_docstring, docstring_marker):
-    marker = '"""' if '"""' in stripped else "'''"
+    marker = _opening_marker(stripped, in_docstring, docstring_marker)
     marker_count = stripped.count(marker)
 
     if not in_docstring:
@@ -384,13 +422,9 @@ def check_import_order(lines: List[str], file_path: str = "", bypass_rules: list
     if is_bypassed(file_path, "imports", None, bypass_rules):
         return {"name": "Import order", "passed": True, "message": "Bypassed by bypass rules"}
 
-    imports = []
-    for i, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if stripped.startswith("import ") or stripped.startswith("from "):
-            imports.append((i, stripped))
+    imports = [
+        (number, line.strip()) for number, line in enumerate(lines, 1) if line.strip().startswith(("import ", "from "))
+    ]
 
     if not imports:
         return None

@@ -28,6 +28,7 @@ from typing import Generator, List, Tuple
 
 import pytest
 
+from aipass.cli.apps.modules import display
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
@@ -77,6 +78,26 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Pin the product's consoles to one width for the whole run.
+
+    Rich sizes an unpinned console on every print: 80 columns on POSIX and 79
+    on Windows under pytest's capture, the terminal's width under -s, COLUMNS
+    when it is exported. A line that wraps on one OS and not another turns a
+    substring assertion into a coin toss (DPLAN-0354, test template v1 item 20).
+    """
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture

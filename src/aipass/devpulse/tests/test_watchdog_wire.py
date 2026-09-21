@@ -1064,7 +1064,16 @@ def test_a_dead_dispatch_of_mine_is_announced_at_sign_in(tmp_path, capsys, monke
     assert result["dead"] == 1
     assert "DEAD @prax [70da6e9c] dispatched 09-07 12:00" in out
     assert "no completion by 09-07 14:00" in out
-    assert "Re-dispatch in continue mode" in out
+    # Overdue alone proves nothing about the monitor. dispatch_monitor retries up
+    # to three times and the row stays overdue against the FIRST deadline, so a
+    # live monitor on attempt 2 looks identical here (a @seedgo row did exactly
+    # that on 2026-09-20 while its service was active). The line must not name a
+    # cause it did not check, and must not send the reader straight to a
+    # re-dispatch that would double a running retry.
+    assert "Nothing here checked whether its monitor is alive" in out
+    assert "retries a dispatch up to" in out
+    assert "re-dispatching" in out.lower()
+    assert "its monitor died" not in out
 
 
 def test_a_death_is_announced_once_ever_not_once_per_wire(tmp_path, capsys, monkeypatch):

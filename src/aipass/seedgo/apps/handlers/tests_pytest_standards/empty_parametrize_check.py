@@ -58,6 +58,14 @@ GROUP = "static_empty_parametrize"
 #: ``range(24)`` is a table written in shorthand, not a query.
 SAFE_BUILTINS: frozenset = frozenset({"range", "sorted", "list", "tuple", "reversed", "enumerate", "set"})
 
+#: Dict views that are exactly as non-empty as the dict they are taken from.
+#: `list(TABLE.values())` is a table written in shorthand in the same file, not
+#: a query that could come back empty - and reading it as one is what made this
+#: rule's only false positive on the banked canary fixture. Terminal, never a
+#: chain: the receiver must be a plain Name already proven non-empty, so this
+#: stays a lookup and does not become the interpreter Law M10 forbids.
+DICT_VIEW_METHODS: frozenset = frozenset({"values", "keys", "items"})
+
 SPECIFICATION = {
     "rule": "TAXONOMY section 5 rule 3a - a table computed at collection time",
     "species": ["VANISHING-TABLE", "SHORT-TABLE"],
@@ -138,11 +146,29 @@ def _cannot_be_empty(value: ast.expr, safe_names: set) -> bool:
     if isinstance(value, ast.Name):
         return value.id in safe_names
     if isinstance(value, ast.Call):
+        if _is_view_of_safe_name(value, safe_names):
+            return True
         name = corpus.dotted_name(value.func).rsplit(".", 1)[-1]
         if name not in SAFE_BUILTINS or not value.args:
             return False
         return _cannot_be_empty(value.args[0], safe_names)
     return False
+
+
+def _is_view_of_safe_name(value: ast.Call, safe_names: set) -> bool:
+    """True when this call is ``NAME.values()`` on a proven non-empty mapping.
+
+    Args:
+        value: The call expression being judged.
+        safe_names: Module names bound to non-empty literals.
+
+    Returns:
+        True if the call is a dict view over a name that cannot be empty.
+    """
+    func = value.func
+    if not isinstance(func, ast.Attribute) or func.attr not in DICT_VIEW_METHODS:
+        return False
+    return isinstance(func.value, ast.Name) and func.value.id in safe_names
 
 
 def _guard_pins_a_count(parsed: corpus.TestFile) -> bool:

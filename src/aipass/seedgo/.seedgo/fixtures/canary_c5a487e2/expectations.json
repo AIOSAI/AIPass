@@ -1,0 +1,167 @@
+{
+  "document_metadata": {
+    "document_type": "lane_fixture_expectations",
+    "document_name": "canary_c5a487e2.EXPECTATIONS",
+    "version": "1.0.0",
+    "created": "2026-09-19",
+    "managed_by": "seedgo",
+    "record": "devpulse DPLAN-0352 round 1; seedgo FPLAN-0631"
+  },
+  "subject_path": "src/aipass/canary",
+  "fixture": {
+    "subject": "@canary",
+    "commit": "c5a487e2",
+    "tracked_fidelity": "every file tracked at c5a487e2 is byte-identical under src/aipass/canary/, verified file by file against git show",
+    "what_is_new": "canary built this blind while seedgo built round 0: a duration parser (drone @canary span TEXT, --json) and tests/test_span.py with 56 cases. This is the lane's first UNSEEN target.",
+    "layout_note": "Banked as src/aipass/canary rather than a bare tree/ so envcopy.detect_layout() returns a repo root and the COPY is importable as aipass.canary. Measured 2026-09-19: under a bare tree/ the fixture's own tests resolved aipass.canary through the venv to the LIVE branch, so any execution group would have run the fixture's TESTS against the live SOURCE. See the instrument_findings block.",
+    "one_campaign_per_copy": "a gutting campaign mutates a copy, never this tree. Two campaigns against one copy corrupt each other's baseline - measured."
+  },
+  "release_check": {
+    "property": "every must_fire row nominated, every must_not_fire row silent, or the lane does not ship",
+    "pattern": "Semgrep rule tests - ruleid:/ok: annotations run as the rule's own regression",
+    "out_of_reach_is_a_finding": "a row here is not excused, it is reported. reach=none means no mechanism of this lane's class can see it; reach=mechanism_not_built names the mechanism that would."
+  },
+  "opening_measurement": {
+    "what_round_1_found": "The improved lane nominated the same 3 true rows on the round-1 files and ZERO on test_span.py, where mutation found 25 of 56 red at COLUMNS=40 and 5 of 56 at 60.",
+    "diagnosis": "raw_needle acquits any test that never normalises, and test_span.py never normalises. The rule pinned the round-1 SPECIMEN (a raw needle beside a _squash call) rather than the SPECIES (output that wraps in a suite pinning no width). Learned the specimen, not the species.",
+    "cure": "pytest.width_coupling - a dynamic two-environment verdict diff, built in round 1. It does not pattern-match at all: it runs the suite at two widths and subtracts the verdicts, so a divergence IS the defect."
+  },
+  "must_fire": [
+    {
+      "id": "R2-1a-width-coupled-refusal-family",
+      "source_row": "round 1 brief 1, 'line 130 assert reason in captured.err - 20 of 30 refusal cases go red under 80 columns'",
+      "file": "tests/test_span.py",
+      "line": 130,
+      "group": "pytest.width_coupling",
+      "species": "WIDTH-COUPLED-VERDICT",
+      "match_on": "diverged_nodeids",
+      "nodeid_prefix": "tests/test_span.py::test_a_text_that_is_not_a_duration_is_refused_with_an_empty_stdout",
+      "expected_count": 20,
+      "why": "The reason strings carry spaces and Rich wraps stderr at console width because error() sets no soft wrap. The module names no column count and normalises nothing, so the static raw_needle rule acquits it by its own documented exemption.",
+      "built": "2026-09-19 round 1"
+    },
+    {
+      "id": "R2-1b-width-coupled-help-family",
+      "source_row": "round 1 brief 1, 'line 188 ... Rich wraps the example line so a bare 187200 lands alone; 5 cases'",
+      "file": "tests/test_span.py",
+      "line": 188,
+      "group": "pytest.width_coupling",
+      "species": "WIDTH-COUPLED-VERDICT",
+      "match_on": "diverged_nodeids",
+      "nodeid_prefix": "tests/test_span.py::test_help_anywhere_explains_and_parses_nothing",
+      "expected_count": 5,
+      "why": "assert not any(line.strip().isdigit() for line in captured.out.splitlines()) - an assertion written to PREVENT a false pass yields a false FAILURE when Rich wraps the example line and a bare number lands alone. No needle and no capture comparison at all, so the static width shape is structurally blind to it. This row is why the dynamic axis was built instead of the static one.",
+      "built": "2026-09-19 round 1"
+    },
+    {
+      "id": "R1-carried-A4-width-fragile-assert",
+      "source_row": "fixture one's A4, still present on this tree and now also convicted dynamically",
+      "file": "tests/test_note.py",
+      "line": 179,
+      "nodeid": "tests/test_note.py::test_corrupt_store_is_refused_by_name_and_left_untouched",
+      "group": "pytest.static_raw_needle",
+      "species": "WIDTH-FRAGILE-ASSERT",
+      "why": "The round-0 static species still fires on the round-1 file. Measured additionally: the same test contributes 20 diverged nodeids to the width axis, so both tiers convict it and they agree.",
+      "built": "2026-09-19 round 0"
+    },
+    {
+      "id": "R2-both-tiers-agree-on-A4",
+      "source_row": "seedgo's addition, not in the brief - the row that pins the two tiers AGREEING",
+      "file": "tests/test_note.py",
+      "line": 179,
+      "group": "pytest.width_coupling",
+      "species": "WIDTH-COUPLED-VERDICT",
+      "match_on": "diverged_nodeids",
+      "nodeid_prefix": "tests/test_note.py::test_corrupt_store_is_refused_by_name_and_left_untouched",
+      "expected_count": 20,
+      "why": "The static rule and the dynamic axis convict the SAME test by different mechanisms, and nothing in the lane would notice if they stopped agreeing. Measured 2026-09-19: 20 of this test's cases pass at 200 columns and fail at 40. If this row ever goes quiet while R1-carried-A4 still fires, the static rule is pinning a shape whose defect has gone - which is the failure this whole fixture exists to catch, pointed at my own instrument.",
+      "built": "2026-09-19 round 1"
+    },
+    {
+      "id": "R1-carried-C7-self-comparing-version-assert",
+      "source_row": "fixture one's C7, unchanged on this tree",
+      "file": "tests/test_canary_cli.py",
+      "line": 243,
+      "nodeid": "tests/test_canary_cli.py::test_branch_name_is_set_at_import_time",
+      "group": "pytest.static_tautology_assert",
+      "species": "TAUTOLOGY-ASSERT",
+      "why": "importlib.reload returns the module it was handed, so the assert compares an attribute to itself and cannot fail.",
+      "built": "2026-09-19 round 0"
+    },
+    {
+      "id": "R1-carried-C1-drifted-module-table",
+      "source_row": "fixture one's C1, and the drift is now WORSE - the span modules joined the tree and the literal did not grow",
+      "file": "tests/test_dead_cwd_imports.py",
+      "line": 61,
+      "nodeid": "tests/test_dead_cwd_imports.py::test_module_imports_with_no_readable_cwd",
+      "group": "pytest.static_drifted_inventory",
+      "species": "DRIFTED-INVENTORY",
+      "why": "CANARY_MODULES claims 'every importable module in canary's tree' and parametrizes the import probe. It already omitted the notes modules; c5a487e2 adds the duration package and the span module and the literal still did not move. A drifted inventory drifts further every time the tree grows, which is the argument for deriving it from a walk.",
+      "built": "2026-09-19 round 0"
+    }
+  ],
+  "must_not_fire": [
+    {
+      "id": "R2-the-56-cases-themselves",
+      "source_row": "round 1 brief, 'must_not_fire: the 56 cases themselves - 0 vacuous across 74 + 52 hand mutations, every node id red at least once, every function in parser.py and span.py protected under body gutting'",
+      "file": "tests/test_span.py",
+      "group_glob": "pytest.static_*",
+      "why_false": "Three sandboxes found the span suite genuinely strong: no vacuous case, no order dependence under reverse or xdist -n4, no external reads, no self-comparisons. negative and signed share one branch, which is redundant rather than vacuous. Any STATIC nomination against these 56 cases is a false positive, and the width axis convicting 25 of them is not - width coupling is a real defect in an otherwise strong suite, which is exactly why the two tiers are separate.",
+      "scope": "every pytest.static_* group must be silent on tests/test_span.py - one scope row rather than 56 written out, so the key does not need editing every time canary adds a parametrize case"
+    }
+  ],
+  "out_of_reach": [
+    {
+      "id": "R2-2-json-parsed-plain-byte-pinned",
+      "source_row": "round 1 brief 2, 'JSON form parsed, plain form byte-pinned'",
+      "file": "tests/test_span.py",
+      "line": 85,
+      "reach": "mechanism_not_built",
+      "why": "The plain family pins output exactly (captured.out.splitlines() == [str(seconds)]) while the JSON family round-trips through json.loads, so padding the payload with spaces survives and dropping markup=False, highlight=False, soft_wrap=True from the payload print survives. The 'byte for byte' guarantee lives in a COMMENT. This is targeted_mutation - declared, not built. Note the width axis cannot see it either: both mutants keep the suite green at 40 AND at 200, so there is no verdict to diff."
+    },
+    {
+      "id": "R2-3-documented-trail-nobody-reads",
+      "source_row": "round 1 brief 3, 'a documented trail nobody reads'",
+      "file": "apps/modules/span.py",
+      "reach": "mechanism_not_built",
+      "why": "docs/span_module.md devotes a section to the operation trail; deleting the duration_refused log_operation, the span_parsed log_operation or the logger.warning on refusal each leaves all 140 tests green (mutmut: all 8 mutants of _refuse's log call and all 10 of _span's survive). Gutting cannot reach it - these are STATEMENTS inside a function whose other behaviour is watched, so the function's gutting dies. Needs the statement-deletion operator already on the backlog from round 0's A3, and it is the same mechanism: an unwatched statement inside a watched function. Second instance in two rounds, which raises its priority."
+    },
+    {
+      "id": "R2-4-pseudo-tested-display-code",
+      "source_row": "round 1 brief 4, 'pseudo-tested display code in the entry point'",
+      "file": "apps/canary.py",
+      "reach": "built_not_measurable_here",
+      "why": "canary._module_summary -> ('', ''), print_introspection -> pass, print_help -> pass each leave 56 passed. pseudo_tested IS built and wired opt-in this round, so the mechanism exists. It cannot be measured on this fixture yet for a reason that is itself a finding - see instrument_findings.fixture_siblings."
+    },
+    {
+      "id": "R2-5-refusal-messages-naming-the-token",
+      "source_row": "round 1 brief 5, 'four refusal messages can drop {number}/{unit} and stay green'",
+      "file": "apps/handlers/duration/parser.py",
+      "reach": "none",
+      "why": "Only the unknown-unit reason is asserted exactly; the rest are matched by substring, so dropping an interpolated token from the tail of a message keeps the substring intact. No static rule can know which tokens of a message a reader needs, and a mutation that drops one is killed or not depending purely on where the asserted substring ends. The brief rates this lower value and I agree; recorded rather than chased."
+    },
+    {
+      "id": "R2-round-unique-module-discovery-order",
+      "source_row": "round 1 brief, round-unique findings (sandbox B)",
+      "reach": "none",
+      "why": "Module discovery order is filesystem glob order, so a sibling claiming 'span' wins by luck; and one unimportable sibling in modules/ takes 55 of 56 red because the import helper catches only ImportError. Both are properties of canary's PRODUCTION code rather than of its tests, so no test-quality species covers them. Recorded for the loop, as the brief asks, not for the lane."
+    },
+    {
+      "id": "R2-width-between-the-two-points",
+      "source_row": "seedgo's own finding about the group it just built",
+      "reach": "none",
+      "why": "The width axis samples exactly two points, 40 and 200. A suite coupled only at, say, 100 columns reads clean. Published in envdiff.WIDTH_AXIS_LIMITS and bound into the group's contract rather than left for a reader to discover. Measured on this very fixture: 25 fail at 40 but only 5 at 60, so the count itself is width-dependent and the group reports a divergence COUNT, never a width-independence certificate."
+    },
+    {
+      "id": "R2-divergence-versus-flakiness",
+      "source_row": "seedgo's own finding about the group it just built",
+      "reach": "none",
+      "why": "A divergence is measured once per variant, so an ordinarily flaky test is indistinguishable from a width-coupled one. PYTHONHASHSEED and LINES are pinned identically across both runs and -p no:randomly neutralises a third source, which removes the three known causes but not flakiness in general. Closing it needs repeated runs with a flake budget - a different instrument."
+    }
+  ],
+  "instrument_findings": {
+    "fixture_layout": "Round 0's C2 row, reproduced inside the instrument that reported it. A fixture banked as a bare tree/ is detected by envcopy.detect_layout() as layout 'plain' with no repo root, so the copy is NOT importable under its own package name and the fixture's tests resolve aipass.canary through the venv to the LIVE branch. Proven by importing in the fixture directory and printing __file__: /home/patrick/Projects/AIPass/src/aipass/canary/apps/canary.py. Any execution group run that way measures the fixture's TESTS against the live SOURCE. Cured by banking both fixtures as src/aipass/canary.",
+    "fixture_siblings": "With the layout cured, the lane now REFUSES on this fixture rather than measuring it: envcopy places sibling packages from the fixture's own src/, which holds only canary, so aipass.prax and aipass.cli are absent and the gated suite reports no records. The refusal is CORRECT behaviour and strictly better than the silent wrong number it replaces - a lane that cannot build a faithful env must say so. Until the env builder can source siblings from the real repo for a foreign-rooted fixture, the execution groups measure these fixtures through a hand-built scratch env (copy the subject, copy src/aipass/__init__.py and the repo conftest.py, symlink the other siblings, run with PYTHONPATH=<scratch>/src). Every execution number reported for round 1 was measured that way and the copy was verified live by printing __file__ in a child.",
+    "static_tier_unaffected": "The static nominators only PARSE files and never import the target, so every static measurement in round 0 and round 1 is unaffected by the layout defect. The two tiers failed independently, which is the argument for having both."
+  }
+}

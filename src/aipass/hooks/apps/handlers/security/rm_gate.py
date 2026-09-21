@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: rm_gate.py
-# Version: 1.1.0
+# Version: 1.2.0
 # Description: Guardrail — catches accidental rm -rf, records every raw rm (PreToolUse)
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-06-02
-# Modified: 2026-08-14
+# Modified: 2026-09-19
 # =============================================
 
 """Early-feedback guardrail — catches accidental recursive rm and teaches drone rm.
@@ -19,6 +19,7 @@ gate sees is written down, allowed or blocked. @drone records `drone rm`; this
 covers what used to pass through silently.
 """
 
+import importlib
 import json
 import re
 from pathlib import Path
@@ -30,7 +31,8 @@ RM_REDIRECT = (
     "Heads up — raw recursive rm is not the right tool here. Use:\n"
     "  drone rm <path>     # project-aware delete (allows project + /tmp, refuses outside)\n"
     "\n"
-    "This guardrail catches rm -rf, rm -r, rm -R, and rm --recursive."
+    "This guardrail catches rm -rf, rm -r, rm -R and rm --recursive, in any spelling —\n"
+    "a full path, a Windows .exe/.cmd tail and any casing all name the same program."
 )
 
 _BLOCK_ALLOW = {"stdout": "", "exit_code": 0}
@@ -74,21 +76,53 @@ def _has_recursive_flag(tokens: list[str]) -> bool:
     return False
 
 
+def _verb(token: str) -> str:
+    """The program *token* names, read through the branch's one shell reader.
+
+    One invocation reaches this gate in four spellings — a path, a backslash
+    path, a Windows executable extension and any casing — and until 2026-09-19
+    this gate matched exactly one of them, so a rename was a silent bypass of
+    both the guardrail AND the deletion record (todo 51, measured under
+    DPLAN-0352). bash_writes.verb_name owns that reading; this gate does not
+    grow a second copy of a list that must not drift.
+
+    Falls back to the raw token with a WARNING rather than going quiet: the old
+    narrow reading still catches the common spelling, and the log says which
+    ones it is now short of.
+
+    Args:
+        token: A command token.
+
+    Returns:
+        The normalised program name, or the raw token when the reader is away.
+    """
+    try:
+        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+        return bw.verb_name(token)
+    except Exception as exc:  # noqa: BLE001 - any reader failure falls back to the raw token
+        logger.warning("[HOOKS] rm_gate: bash_writes unavailable, reading %r raw: %s", token, exc)
+        return token
+
+
 def _scan_clause(clause: str) -> tuple[bool, bool]:
     """Return (deletes, recursive) for one clause in a single token walk.
 
     Two different questions off the same walk: the gate asks whether this is a
-    raw *recursive* rm, the deletion record asks whether anything gets deleted
-    at all. They skip different prefixes — `git rm` touches the index and has
-    its own lane, but `git rm -r` is still a raw recursive rm to the gate.
+    raw *recursive* delete, the deletion record asks whether anything gets
+    deleted at all. They skip different prefixes — `git rm` touches the index
+    and has its own lane, but `git rm -r` is still a raw recursive delete here.
+
+    Every token is read through :func:`_verb`, so the prefixes are recognised in
+    the same spellings as the verb itself: `DRONE rm` and `git.exe rm` keep
+    their own records.
     """
     deletes = False
     recursive = False
     tokens = clause.split()
     for i, tok in enumerate(tokens):
-        if tok != "rm" and not tok.endswith("/rm"):
+        if _verb(tok) != "rm":
             continue
-        prev = tokens[i - 1] if i > 0 else ""
+        prev = _verb(tokens[i - 1]) if i > 0 else ""
         if prev != "drone" and _has_recursive_flag(tokens[i + 1 :]):
             recursive = True
         if prev not in _RECORDED_ELSEWHERE:

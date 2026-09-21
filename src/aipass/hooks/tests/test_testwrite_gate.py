@@ -535,3 +535,64 @@ class TestRunningTestsIsNotWritingThem:
         assert not _is_test_run(["python3", "-c", "import pytest"])
         assert not _is_test_run(["python3", "-m", "pip", "install", "pytest"])
         assert not _is_test_run(["python3", "-m"])
+
+
+class TestNamingAPathIsNotWritingIt:
+    """Three seats, one shape: DATA read as a target (devpulse DPLAN-0352, 09-19).
+
+    @seedgo was refused for an interpreter one-liner that PRINTED a test path
+    while measuring the fleet; @canary for a path literal inside a heredoc; this
+    branch for both. Nothing was being created in any of them — the interpreter
+    breadth that fences a foreign project convicted on a string.
+
+    The cure reads the program's OWN text for a write verb, in the grammar that
+    text is written in, and stands down when there is none. What it must never
+    do is claim that evidence about text it did not read: a script FILE keeps
+    the broad reading, pinned in the class above.
+    """
+
+    def test_an_inline_program_that_only_names_a_test_path_is_allowed(self, project):
+        _policy(project)
+        body = "pri" + "nt('" + project["new_test"] + "')"
+        assert not _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    def test_a_heredoc_that_only_names_a_test_path_is_allowed(self, project):
+        """@canary's and @seedgo's shape: a path literal in a measuring script."""
+        _policy(project)
+        body = "pa" + "th = '" + project["new_test"] + "'"
+        assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
+
+    def test_a_heredoc_that_writes_is_still_refused(self, project):
+        """MUTATION-CHECK: the stand-down must key on the write verb, not on the heredoc."""
+        _policy(project)
+        body = "Path('" + project["new_test"] + "').write_te" + "xt('x')"
+        assert _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
+
+    def test_a_program_that_shells_out_is_still_refused(self, project):
+        """The write verb is then in a string this parser does not read as code,
+        so the shelling-out itself has to count as the evidence."""
+        _policy(project)
+        body = "import os; os.sys" + "tem('touch " + project["new_test"] + "')"
+        assert _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    def test_a_shell_program_is_read_in_shell_grammar(self, project):
+        """`>` is a redirection in a shell and a comparison in python — learning 245.
+
+        Handing one matcher both grammars is what refused a read-only awk filter
+        on a live turn, so the two vocabularies stay apart.
+        """
+        _policy(project)
+        new_test = Path(project["new_test"]).as_posix()
+        assert _blocked(_run(project["seat"], command=f'bash -c "echo x > {new_test}"'))
+        assert not _blocked(_run(project["seat"], command=f"python3 -c \"print(3 > 2, '{new_test}')\""))
+
+    def test_the_fence_beside_it_keeps_the_full_breadth(self, project):
+        """edit_gate must not inherit this narrowing: a path an interpreter HOLDS
+        still cannot be told from one it writes, and that breadth is what fences
+        a foreign project. The reason string keeps the label it reads."""
+        from aipass.hooks.apps.modules import bash_writes
+
+        held = bash_writes.write_targets(f"python3 -c \"print('{project['new_test']}')\"", project["seat"])
+        assert held, "the path must still be REPORTED — only this gate stands down on it"
+        assert all(bash_writes.HELD_BY_INTERPRETER in why for _target, why in held)
+        assert all(bash_writes.NO_WRITE_VERB in why for _target, why in held)

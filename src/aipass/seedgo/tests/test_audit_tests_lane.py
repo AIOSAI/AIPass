@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_lane.py
 # Description: tests for the pytest pack, the payload gate and the verb
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-19
 # =============================================
 
 """
@@ -576,8 +576,12 @@ class TestNominate:
     """Static species nominate; they never score (Law M1)."""
 
     def test_every_nominated_group_carries_no_score(self, tmp_path):
+        # Pinned against the DECLARATION, not a count. `== 13` re-broke the
+        # moment three species were added, which is the growth the pack's own
+        # "three files and one line" promise invites - a count here taxes
+        # every addition and measures nothing the next line does not.
         documents = adapter.nominate(_spec_for(tmp_path))
-        assert len(documents) == 13
+        assert set(documents) == set(adapter.ADAPTER_GROUPS)
 
         for document in documents.values():
             assert document["score"] is None
@@ -591,11 +595,22 @@ class TestNominate:
         did_not_run = {name for name, document in documents.items() if document["status"] == "not_applicable"}
         silent = sorted(name for name in did_not_run if not documents[name]["reason"])
 
-        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS)
+        # Both DECLARATIONS, unioned, rather than one of them plus a literal:
+        # a group moving from "unbuilt" to "opt-in" is a legitimate edit and
+        # must not need this line rewritten to stay true.
+        assert did_not_run == set(adapter.UNBUILT_EXECUTION_GROUPS) | set(adapter.OPT_IN_EXECUTION_GROUPS)
         assert silent == []
 
     def test_the_unbuilt_execution_groups_are_still_not_applicable(self, tmp_path):
-        assert len(adapter.UNBUILT_EXECUTION_GROUPS) == 2
+        """Law S1 for every group that does not run, however many there are.
+
+        The count is gone for the same reason it went in the two tests above:
+        `pseudo_tested` passed through this tuple while its engine existed and
+        its RUN LOOP did not, and a `== 2` turned that honest state into a red.
+        It has since left for OPT_IN_EXECUTION_GROUPS, which is the same fact
+        moving again - and this test did not have to change for either.
+        """
+        assert {"scoped_survival", "targeted_mutation"} <= set(adapter.UNBUILT_EXECUTION_GROUPS)
 
         for name in adapter.UNBUILT_EXECUTION_GROUPS:
             document = adapter.nominate(_spec_for(tmp_path))[name]
@@ -605,6 +620,105 @@ class TestNominate:
         # A declared group the adapter never fills would vanish from the
         # published list, which is precisely what S3 exists to catch.
         assert set(adapter.declared_groups()) == set(adapter.nominate(_spec_for(tmp_path)))
+
+
+class TestOptInExecutionGroups:
+    """A BUILT group nobody asked for still publishes, and says which it is.
+
+    The defect these pin is the one the seam was built to end: two engines
+    shipped, measured and unreachable, with the published artifact calling
+    them "not built". A group that cannot be told apart from an unimplemented
+    one is a group nobody will ever turn on.
+    """
+
+    def test_both_opt_in_groups_are_still_in_the_published_list(self, tmp_path):
+        """Law S3: opting out may never remove a group from the artifact."""
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            assert name in adapter.declared_groups()
+            assert name in documents
+
+    def test_an_unrequested_opt_in_group_is_not_reported_as_unbuilt(self, tmp_path):
+        """The reason must not borrow the wording of the groups beside it.
+
+        `not built` was true for these two yesterday and is false today, and a
+        stale sentence in a `not_applicable` is worse than no sentence: it
+        tells a reader deciding whether to spend the wall clock that there is
+        nothing to spend it on.
+        """
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            reason = documents[name]["reason"]
+            assert documents[name]["status"] == "not_applicable"
+            assert "not built" not in reason
+            assert adapter.OPT_IN_FLAGS[name] in reason, "the reason must name the flag that runs it"
+
+    def test_no_opt_in_group_carries_a_score(self, tmp_path):
+        """Neither is in SCORED_GROUPS, so Law S7a refuses a score on either."""
+        documents = adapter.nominate(_spec_for(tmp_path))
+
+        for name in adapter.OPT_IN_EXECUTION_GROUPS:
+            assert documents[name]["score"] is None
+
+    def test_the_request_rides_on_the_spec_rather_than_on_a_new_parameter(self, tmp_path):
+        """The seam itself: `nominate(spec)` can see what the operator asked for.
+
+        Pinned because the whole point of this design is that it cost no
+        signature change. A future refactor that moved the request into a
+        second argument would pass its own tests and silently stop honouring
+        `--width-coupling` for every caller that still holds the old shape.
+        """
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = ["width_coupling"]
+
+        assert "width_coupling" in spec.execution_groups
+        assert spec.to_document()["execution_groups"] == ["width_coupling"]
+
+    def test_a_run_that_opted_in_does_not_document_as_one_that_did_not(self, tmp_path):
+        """Two artifacts identical in what was ASKED FOR are unreadable later."""
+        plain = _spec_for(tmp_path).to_document()
+        opted = _spec_for(tmp_path)
+        opted.execution_groups = ["pseudo_tested"]
+
+        assert plain != opted.to_document()
+        assert plain["execution_groups"] == []
+
+    def test_the_opt_in_list_is_deduplicated_in_the_order_it_was_asked_for(self):
+        """A flag typed twice must not read back as two campaigns requested."""
+        assert envcopy.normalise_execution_groups(["width_coupling", "pseudo_tested", "width_coupling"]) == [
+            "width_coupling",
+            "pseudo_tested",
+        ]
+
+    def test_nothing_is_requested_when_nothing_was_asked_for(self):
+        """The default is the behaviour the lane had before the seam existed."""
+        assert envcopy.normalise_execution_groups(None) == []
+
+    def test_an_engine_that_raises_produces_a_group_and_never_a_crash(self, monkeypatch, tmp_path):
+        """Law S1 at its sharpest: could-not-run and found-nothing differ.
+
+        `nominate()` is called inside the runner's try block, so an exception
+        escaping one campaign would refuse the WHOLE target and publish nothing
+        about the other seventeen groups - a measurement lost to a dependency
+        the target never needed.
+        """
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import envdiff
+
+        def _explode(*args, **kwargs):
+            raise RuntimeError("no interpreter")
+
+        monkeypatch.setattr(envdiff, "measure_width_coupling", _explode)
+        spec = _spec_for(tmp_path)
+        spec.execution_groups = [envdiff.GROUP]
+
+        document = adapter.nominate(spec)[envdiff.GROUP]
+
+        assert document["status"] == "not_applicable"
+        assert "RuntimeError" in document["reason"] and "no interpreter" in document["reason"]
+        assert document["score"] is None
+        assert document["diverged"] == []
 
 
 class TestTeardown:
@@ -1178,14 +1292,23 @@ class TestVerbClaiming:
     def test_the_hyphenated_verb_is_claimed(self, monkeypatch):
         from aipass.seedgo.apps.modules import audit_tests as verb
 
-        monkeypatch.setattr(verb, "_run", lambda args: None)
-        assert verb.handle_command("audit-tests", []) is True
+        # The True alone could not tell "claimed and ran" from "claimed and
+        # did nothing" — and doing nothing is what a broken claim looks like.
+        # It also hid that the old `[]` argument never reached _run at all:
+        # no args takes the introspection door, so patching _run and asserting
+        # True was green either way.
+        ran = []
+        monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
+        assert verb.handle_command("audit-tests", ["@backup"]) is True
+        assert ran == [["@backup"]]
 
     def test_the_underscore_alias_is_claimed(self, monkeypatch):
         from aipass.seedgo.apps.modules import audit_tests as verb
 
-        monkeypatch.setattr(verb, "_run", lambda args: None)
-        assert verb.handle_command("audit_tests", []) is True
+        ran = []
+        monkeypatch.setattr(verb, "_run", lambda args: ran.append(args))
+        assert verb.handle_command("audit_tests", ["@backup"]) is True
+        assert ran == [["@backup"]], "the alias must forward its args, not just answer True"
 
     def test_the_audit_verb_is_never_swallowed(self):
         from aipass.seedgo.apps.modules import audit_tests as verb
@@ -1194,16 +1317,37 @@ class TestVerbClaiming:
         # here would silently take the audit verb away from its owner.
         assert verb.handle_command("audit", []) is False
 
-    def test_a_crash_after_claiming_still_returns_true(self, monkeypatch):
-        from aipass.seedgo.apps.modules import audit_tests as verb
+    def test_a_crash_after_claiming_refuses_with_the_unproven_code(self, monkeypatch):
+        """A crashed lane exits 2, and is never reported as an unknown command.
+
+        Renamed from `..._still_returns_true` on 2026-09-20. That test patched
+        `_run`, called `handle_command("audit-tests", [])` and asserted True —
+        but `[]` takes the introspection door and never enters `_run`, so it
+        was green over a crash that never happened, and it went on asserting a
+        contract the module had already replaced. The live behaviour is the
+        owner's 2026-09-07 exit-code ruling: a lane that could not run refuses
+        with EXIT_UNPROVEN (2) rather than telling the shell it succeeded.
+
+        `handle_command`'s own docstring still reads "Returns True once
+        claimed, always" and calls the unconditional True "the whole safety
+        property". That text is now wrong about its own function; it is
+        reported, not edited here.
+        """
+        from aipass.seedgo.apps.handlers.audit_tests import refusal
+        from aipass.seedgo.apps.modules import CommandRefused, audit_tests as verb
+
+        entered = []
 
         def explode(args):
+            entered.append(args)
             raise RuntimeError("the lane broke")
 
         monkeypatch.setattr(verb, "_run", explode)
-        # route_command() swallows exceptions and moves on, so a lane that
-        # raised would be reported to the user as an unknown command.
-        assert verb.handle_command("audit-tests", []) is True
+        with pytest.raises(CommandRefused) as refused:
+            verb.handle_command("audit-tests", ["@backup"])
+
+        assert entered == [["@backup"]], "the crash must happen inside _run, not before it"
+        assert refused.value.code == refusal.EXIT_UNPROVEN
 
 
 class TestVerbParsing:
@@ -1614,7 +1758,7 @@ class TestLiveWriterProbeWindowIsDisclosed:
         assert row, "check 17 must be present"
         assert "0.02" in row[0]["detail"]
 
-    def test_the_PUBLISHED_proof_carries_the_window_not_just_the_options_dict(self, tmp_path):
+    def test_the_published_proof_carries_the_window_not_just_the_options_dict(self, tmp_path):
         """The reader of the ARTIFACT is who needs this number.
 
         The first cut of this class pinned the options dict and the not-probed
@@ -1678,14 +1822,14 @@ class TestCheck12VerdictIsSplitFromUnattributedChanges:
         assert found, f"check {number} must be present"
         return found[0]
 
-    def test_check_12_passes_when_the_SUITE_changed_nothing(self):
+    def test_check_12_passes_when_the_suite_changed_nothing(self):
         """@trigger's exact case: ten unattributed, zero from the suite."""
         from aipass.seedgo.apps.handlers.audit_tests import selfcheck
 
         rows = selfcheck._m10_rows(self._proof(by_suite=[], unattributed=["a", "b"]))
         assert self._row(rows, 12)["status"] == selfcheck.PASS
 
-    def test_check_12_still_fails_when_the_suite_DID_write_the_real_tree(self):
+    def test_check_12_still_fails_when_the_suite_did_write_the_real_tree(self):
         """The finding the lane exists for must not be softened by the split."""
         from aipass.seedgo.apps.handlers.audit_tests import selfcheck
 
@@ -1727,3 +1871,760 @@ class TestCheck12VerdictIsSplitFromUnattributedChanges:
 
         rows = selfcheck._m10_rows({"probed": False, "note": "no fingerprint"})
         assert {r["check"] for r in rows} >= {1, 12, 17}
+
+
+# =============================================================================
+# STATEMENT DELETION — the operator commissioned by DPLAN-0352 round 2
+#
+# The species is three-instanced: a statement that executes, is documented as
+# doing something, and that no test observes. Whole-body gutting cannot
+# isolate it because the body has other work in it.
+# =============================================================================
+
+
+class TestStatementDeletionStaysAtStatementLevel:
+    """The brief's hard boundary: statement level, never branch deletion."""
+
+    def _sites(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(source)
+        return SD.discover_statements(tmp_path)
+
+    def test_a_compound_header_is_never_a_deletion_site(self, tmp_path):
+        """Deleting an `if` deletes its block, which is branch deletion and a
+        different, harder operator. The boundary is enforced, not documented."""
+        source = (
+            "def f(flag):\n"
+            "    if flag:\n"
+            "        trail('taken')\n"
+            "    for item in flag:\n"
+            "        trail(item)\n"
+            "    return 1\n"
+        )
+        kinds = {s.kind for s in self._sites(tmp_path, source)}
+        assert "If" not in kinds
+        assert "For" not in kinds
+        assert "Expr" in kinds, "but it must still reach the statements INSIDE the block"
+
+    def test_statements_inside_a_compound_are_reached(self, tmp_path):
+        """The trail call round 3 found was inside a block, not beside one."""
+        source = (
+            "def f(x):\n    try:\n        trail('before')\n        raise ValueError(x)\n"
+            "    finally:\n        trail('after')\n"
+        )
+        lines = {s.source_line for s in self._sites(tmp_path, source)}
+        assert "trail('before')" in lines
+        assert "trail('after')" in lines
+        assert "raise ValueError(x)" in lines
+
+
+class TestStatementDeletionAridList:
+    """Declared from line one, with the reason each cannot change behaviour."""
+
+    def _sites(self, tmp_path, source):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir(exist_ok=True)
+        (apps / "mod.py").write_text(source)
+        return SD.discover_statements(tmp_path)
+
+    def test_a_docstring_is_arid_and_carries_its_reason(self, tmp_path):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        sites = self._sites(tmp_path, 'def f():\n    """The docstring."""\n    return work()\n')
+        doc = [s for s in sites if s.source_line.startswith('"""')]
+        assert doc and doc[0].arid_reason == SD.ARID_DOCSTRING
+        assert SD.ARID_REASONS[SD.ARID_DOCSTRING]
+
+    def test_every_arid_reason_is_declared_with_a_why(self, tmp_path):
+        """A suppression with no reason is a denylist, which is the thing the
+        brief said must not happen."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        for name in (SD.ARID_DOCSTRING, SD.ARID_PASS, SD.ARID_ELLIPSIS, SD.ARID_SOLE_RETURN_NONE):
+            assert SD.ARID_REASONS.get(name), f"{name} is suppressed with no reason"
+
+    def test_a_logging_call_is_never_arid(self, tmp_path):
+        """Trail and telemetry calls LOOK arid and are the species itself.
+        Suppressing them would have suppressed all three sightings."""
+        sites = self._sites(tmp_path, "def f():\n    logger.info('did the thing')\n    return 1\n")
+        trail = [s for s in sites if "logger.info" in s.source_line]
+        assert trail and trail[0].arid_reason is None
+
+    def test_arid_statements_are_returned_not_dropped(self, tmp_path):
+        """A list that quietly drops half the tree then reports a rate is
+        lying about its denominator."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        sites = self._sites(tmp_path, 'def f():\n    """Doc."""\n    return work()\n')
+        assert any(s.arid_reason for s in sites), "arid sites stay in the list"
+        assert all(s.arid_reason is None for s in SD.probeable(sites)), "but never get probed"
+
+    def _return_arid(self, tmp_path, source):
+        """The arid reason on every bare `return` in `source`, in line order."""
+        sites = self._sites(tmp_path, source)
+        return [s.arid_reason for s in sorted(sites, key=lambda s: s.lineno) if s.kind == "Return"]
+
+    def test_a_guard_return_is_never_arid(self, tmp_path):
+        """THE ROUND-5 DEFECT (devpulse, canary a36f500a). `is_last` was
+        computed per BLOCK, so the `return` closing an `if` was declared arid.
+        That is the definition of a guard clause and the species this operator
+        exists to probe: canary's `kv.py:238` was filtered out before it was
+        ever run, and deleting it leaves 91 tests green while
+        `kv --json FILE set K V` prints its refusal, exits 2, AND writes."""
+        source = "def f(a):\n    if a:\n        log('refused')\n        return\n    write(a)\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+    def test_a_return_in_tail_position_is_still_arid(self, tmp_path):
+        """The cure must not simply stop suppressing. Both of these DO fall
+        off the end of the function, so deleting them changes nothing."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        flat = "def f(a):\n    write(a)\n    return\n"
+        assert self._return_arid(tmp_path, flat) == [SD.ARID_SOLE_RETURN_NONE]
+
+        nested = "def f(a):\n    if a:\n        write(a)\n        return\n"
+        assert self._return_arid(tmp_path, nested) == [SD.ARID_SOLE_RETURN_NONE]
+
+    def test_a_return_closing_a_loop_body_is_never_arid(self, tmp_path):
+        """Not in the round-5 report — measured here. Reaching the end of a
+        loop body starts the next iteration, so deleting the `return` keeps
+        looping instead of leaving the function."""
+        source = "def f(xs):\n    for x in xs:\n        if x:\n            return\n    write('done')\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+        while_tail = "def f(xs):\n    while xs:\n        xs.pop()\n        return\n"
+        assert self._return_arid(tmp_path, while_tail) == [None]
+
+    def test_a_return_closing_a_finally_is_never_arid(self, tmp_path):
+        """Also measured here, not reported. A `return` in a `finally`
+        SWALLOWS the pending return value or exception; deleting it stops the
+        swallowing, which is the opposite of a no-op."""
+        source = "def f():\n    try:\n        return compute()\n    finally:\n        return\n"
+        assert self._return_arid(tmp_path, source) == [None, None]
+
+    def test_a_return_closing_a_try_body_with_an_else_is_never_arid(self, tmp_path):
+        """An `else` runs when the try completes normally, so falling off the
+        try body runs code the `return` skipped."""
+        source = "def f():\n    try:\n        return\n    except E:\n        h()\n    else:\n        k()\n"
+        assert self._return_arid(tmp_path, source) == [None]
+
+    def test_a_return_closing_an_except_handler_at_the_tail_is_arid(self, tmp_path):
+        """Falling off a handler leaves the whole `try`, and here that is the
+        end of the function. Keeping this one arid is what stops the cure from
+        convicting equivalent mutants."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        source = "def f():\n    try:\n        g()\n    except E:\n        return\n"
+        assert self._return_arid(tmp_path, source) == [SD.ARID_SOLE_RETURN_NONE]
+
+
+class TestStatementDeletionDiscoveryIsUnique:
+    """One statement, one site. A double-counted tree lies about its rate."""
+
+    def test_a_nested_def_is_walked_once_not_twice(self, tmp_path):
+        """Found here, not in the round-5 report. `discover_statements` finds
+        functions with `ast.walk`, which already reaches every nested `def`,
+        and `_walk_block` descended into them as well — so each nested
+        statement was emitted twice, once under each qualname. It inflates any
+        denominator built on the site count and pays to run one mutant twice."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(
+            "def outer(a):\n    x = 1\n    def inner(b):\n        y = 2\n        return y\n    return inner(a) + x\n"
+        )
+        sites = SD.discover_statements(tmp_path)
+        addresses = [(s.relpath, s.lineno) for s in sites]
+        assert len(addresses) == len(set(addresses)), f"a line was emitted twice: {addresses}"
+        inner_y = [s for s in sites if s.source_line == "y = 2"]
+        assert len(inner_y) == 1
+        assert inner_y[0].function_qualname == "inner", "attributed to its own function"
+
+
+class TestStatementDeletionConviction:
+    """The sentence IS the product. A percentage teaches nobody."""
+
+    def _result(self, statement, tests=5, relpath="apps/m.py", line=87):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        site = SD.StatementSite(
+            relpath=relpath,
+            qualname="f",
+            function_qualname="f",
+            lineno=line,
+            end_lineno=line,
+            body_lineno=line,
+            body_col_offset=0,
+            kind="Expr",
+            is_sole_statement=False,
+            source_line=statement,
+        )
+        return SD.StatementResult(site=site, outcome=SD.OUTCOME_SURVIVED, selected_tests=tests)
+
+    def test_a_conviction_names_file_line_statement_and_the_observation(self):
+        """The brief's four-part contract, one assertion per part."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        line = SD.conviction_line(self._result('json_handler.log_operation("table_refused", {})', tests=20))
+        assert "apps/m.py:87" in line, "the address a builder navigates by"
+        assert "log_operation" in line, "the statement itself"
+        assert "reached by 20 tests" in line, "the count that makes it a conviction, not a coverage note"
+        assert "operations trail for 'table_refused'" in line, "what would observe it"
+
+    def test_the_observation_clause_follows_the_statement_shape(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert "captured log record at warning" in SD.observation_clause('logger.warning("x", a)')
+        assert "captured stdout" in SD.observation_clause('console.print("hello")')
+        assert "refusal reason" in SD.observation_clause('error("kv refused: no verb")')
+        assert "did not happen" in SD.observation_clause("return"), "a guard return, the round-5 species"
+
+    def test_a_chained_call_names_the_function_it_actually_calls(self):
+        """Reading the FIRST identifier sends the builder to assert on the
+        wrong thing: these two are calls to `unlink` and `__init__`, and both
+        are real canary a36f500a survivors."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert "unlink()" in SD.observation_clause("Path(temp_name).unlink(missing_ok=True)")
+        assert "__init__()" in SD.observation_clause("super().__init__(reason)")
+
+    def test_an_unparseable_statement_still_gets_a_sentence(self):
+        """The fall-through matches everything rather than guessing."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.observation_clause("del broken(((")
+        assert SD.observation_clause("")
+
+    def test_a_statement_no_test_reaches_is_never_convicted(self):
+        """A statement with no covering test is a COVERAGE fact. Convicting it
+        would blame the assertions for a gap in what the suite executes."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        campaign = SD.StatementCampaign(
+            baseline=None,
+            results=[
+                SD.StatementResult(
+                    site=self._result("trail('x')").site,
+                    outcome=SD.OUTCOME_SURVIVED,
+                    reason=SD.REASON_NO_COVERING_TEST,
+                )
+            ],
+        )
+        document = SD.summarize(campaign, [])
+        assert document["convictions"] == []
+        assert document["survived_no_covering_test"] == 1
+
+
+class TestStatementDeletionCostIsSplit:
+    """Fixed setup is not a per-mutant cost, and naming it one misled an owner."""
+
+    def _campaign(self, own_times, elapsed):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        results = []
+        for index, seconds in enumerate(own_times):
+            site = SD.StatementSite(
+                relpath="apps/m.py",
+                qualname="f",
+                function_qualname="f",
+                lineno=index + 1,
+                end_lineno=index + 1,
+                body_lineno=index + 1,
+                body_col_offset=0,
+                kind="Expr",
+                is_sole_statement=False,
+                source_line="trail('x')",
+            )
+            results.append(SD.StatementResult(site=site, outcome=SD.OUTCOME_KILLED, elapsed_seconds=seconds))
+        return SD.StatementCampaign(baseline=None, results=results, elapsed_seconds=elapsed)
+
+    def test_setup_is_not_charged_to_the_mutants(self):
+        """THE DEVPULSE CORRECTION, with its own numbers. 278.72s over 2
+        mutants published 139.36 s/mutant, while the two mutants' own clocks
+        read 0.98 and 1.58. I reported that 139 upward as a per-mutant floor."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        document = SD.summarize(self._campaign([0.98, 1.58], 278.72), [])
+        assert document["setup_seconds"] == 276.16, "the one-time cost, named as one-time"
+        assert document["seconds_per_mutant_mean"] == 1.28
+        assert document["seconds_per_mutant_max"] == 1.58
+        assert "seconds_per_mutant" not in document, "the conflated metric is gone, not renamed"
+
+    def test_the_median_travels_beside_the_mean(self):
+        """A deletion campaign's tail is long — canary read a 0.74s median
+        against a 2.14s mean with one mutant at 15.13s. A mean alone hides it."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        document = SD.summarize(self._campaign([0.5, 0.5, 0.5, 30.0], 40.0), [])
+        assert document["seconds_per_mutant_median"] == 0.5
+        assert document["seconds_per_mutant_mean"] == 7.88
+        assert document["seconds_per_mutant_max"] == 30.0
+
+    def test_the_cost_model_says_how_to_project(self):
+        """A reader who multiplies the wrong number reprices the whole lane."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        model = SD.summarize(self._campaign([1.0, 1.0], 50.0), [])["cost_model"]
+        assert "setup_seconds" in model and "does NOT scale" in model
+
+
+class TestStatementDeletionHangTimeout:
+    """The ceiling has to clear an honest mutant and still catch a hang."""
+
+    def test_the_ceiling_leaves_room_above_the_baseline(self, tmp_path):
+        """ROUND-5 DEFECT TWO. The ceiling was `int(baseline)` exactly, argued
+        from 'a run over a SUBSET cannot outlast the whole suite'. When
+        selection has no coverage entry it falls back to the WHOLE suite, so
+        the honest cost IS the baseline and the ceiling loses a coin toss:
+        canary's only two `not_run / mutant_timeout` of 153 were its only two
+        `unmapped_test_context` mutants, both at 19.03s against a 19s wall."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.hang_timeout(19.0) > 19, "a whole-suite fallback must fit under its own ceiling"
+        assert SD.hang_timeout(19.0) == 38
+
+    def test_the_floor_still_holds_for_a_fast_suite(self, tmp_path):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.hang_timeout(0.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
+        assert SD.hang_timeout(1.0) == SD.HANG_TIMEOUT_FLOOR_SECONDS
+
+
+class TestStatementDeletionMutant:
+    """The splice itself."""
+
+    def _site(self, tmp_path, source, needle):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text(source)
+        return next(s for s in SD.discover_statements(tmp_path) if needle in s.source_line)
+
+    def test_deletion_removes_only_that_statement(self, tmp_path):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        source = "def f(x):\n    trail('here')\n    return x + 1\n"
+        site = self._site(tmp_path, source, "trail(")
+        mutant = SD.delete_statement(source, site)
+        assert mutant is not None, "a deletable site always splices"
+        assert "trail(" not in mutant
+        assert "def f(x):" in mutant, "the signature stays byte-identical or selection is unsound"
+        assert "return x + 1" in mutant
+
+    def test_a_sole_statement_becomes_pass_rather_than_a_syntax_error(self, tmp_path):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        source = "def f(x):\n    if x:\n        trail('only')\n    return x\n"
+        site = self._site(tmp_path, source, "trail(")
+        mutant = SD.delete_statement(source, site)
+        assert mutant is not None, "a deletable site always splices"
+        assert "pass" in mutant
+        compile(mutant, "mod.py", "exec")
+
+    def test_a_statement_spans_its_own_lines_not_the_functions(self, tmp_path):
+        """This IS the cost argument: a statement is judged by the tests that
+        execute its own lines, a strictly smaller set than the function's."""
+        source = "def f(x):\n    a = 1\n    trail('here')\n    return a + x\n"
+        site = self._site(tmp_path, source, "trail(")
+        probe = site.as_function_site()
+        assert probe.body_lineno == site.lineno == 3
+        assert probe.end_lineno == 3, "one statement, not the whole body"
+
+
+class TestEnvcopySourcesSiblingsForABankedFixture:
+    """seedgo todo 123: both banked fixtures refused, and the sentence the
+    lane printed named a plugin rather than the cause."""
+
+    def test_a_fixture_borrows_siblings_from_the_running_checkout(self, tmp_path):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy
+
+        fixture = tmp_path / "src" / "aipass" / "canary"
+        fixture.mkdir(parents=True)
+        source, basis = envcopy.sibling_source(tmp_path, "canary")
+        assert basis == envcopy.SIBLINGS_FROM_HOST_REPO
+        assert (source / "prax").is_dir(), "the real dependencies, or the conftest import fails"
+
+    def test_a_real_repo_uses_its_own_siblings(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy
+
+        root = envcopy.host_repo_root()
+        assert root is not None
+        assert envcopy.sibling_source(root, "canary")[1] == envcopy.SIBLINGS_FROM_OWN_ROOT
+
+    def test_the_host_root_is_found_by_marker_not_by_counting_parents(self):
+        """A parent count is a silent liar the day the file moves one level,
+        and the first cut of this was off by exactly one."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy
+
+        root = envcopy.host_repo_root()
+        assert root is not None, "the running checkout always holds src/aipass"
+        assert (root / "src" / "aipass").is_dir()
+
+    def test_no_siblings_anywhere_refuses_by_name(self, tmp_path, monkeypatch):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import envcopy
+
+        (tmp_path / "src" / "aipass" / "canary").mkdir(parents=True)
+        monkeypatch.setattr(envcopy, "host_repo_root", lambda: None)
+        with pytest.raises(envcopy.EnvError) as excinfo:
+            envcopy.sibling_source(tmp_path, "canary")
+        assert "no sibling packages for canary" in str(excinfo.value)
+
+
+class TestStatementDeletionIsDeclaredToTheLane:
+    """An execution group that runs mutants is bound by the lane's own laws."""
+
+    def test_the_group_is_opt_in_and_flagged(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.GROUP in adapter.OPT_IN_EXECUTION_GROUPS
+        assert adapter.OPT_IN_FLAGS[SD.GROUP] == "--statement-deletion"
+
+    def test_it_is_kill_cause_bound_and_carries_a_contract(self):
+        """It executes mutants, so Law S9 requires a kill_cause on every
+        record and the artifact needs the contract that reads them."""
+        from aipass.seedgo.apps.handlers.audit_tests import spine
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        assert SD.GROUP in spine.KILL_CAUSE_BOUND
+        assert "branch deletion is out of reach" in spine.GROUP_CONTRACTS[SD.GROUP]
+
+    def test_the_not_requested_reason_names_the_flag_and_not_not_built(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        reason = adapter._opt_in_reason(SD.GROUP)
+        assert "--statement-deletion" in reason
+        assert "not built" not in reason
+
+    def test_the_cli_flag_reaches_the_group(self):
+        from aipass.seedgo.apps.modules import audit_tests
+
+        assert audit_tests.OPT_IN_GROUP_FLAGS["--statement-deletion"] == "statement_deletion"
+        assert "--statement-deletion" in audit_tests.LANE_FLAGS
+
+
+class TestStatementDeletionRefusesAnUncompilableMutant:
+    """An engine bug must never reach the suite dressed as a perfect kill."""
+
+    def test_a_semicolon_line_is_reported_not_written(self, tmp_path):
+        """Two statements on one line are one LINE RANGE, so deleting either
+        deletes both and can empty a block. The mutant is compiled before it
+        is written, so this comes back `mutation_failed` - which is not
+        evidence about the suite - rather than as a green run against a file
+        that never imported. It is also this operator's honest limit: a
+        semicolon line is mutated as a unit."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        source = "def f(x):\n    if x:\n        a = 1; trail('x')\n    return x\n"
+        (apps / "mod.py").write_text(source)
+
+        site = next(s for s in SD.discover_statements(tmp_path) if "a = 1" in s.source_line)
+        assert site.is_sole_statement is False, "the block holds two statements by AST count"
+
+        mutant, failure = SD._mutant_text(source, site)
+        assert mutant is None
+        assert failure == SD.REASON_MUTANT_NOT_PARSEABLE
+
+    def test_a_bare_string_is_arid_anywhere_in_the_body(self, tmp_path):
+        """Not only at position 0 - a string alone on a line is evaluated and
+        discarded wherever it sits."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        (apps / "mod.py").write_text('def f(x):\n    """Doc."""\n    x = 1\n    "mid body"\n    return x\n')
+        sites = SD.discover_statements(tmp_path)
+        mid = next(s for s in sites if "mid body" in s.source_line)
+        assert mid.arid_reason == SD.ARID_DOCSTRING
+
+
+class TestStatementDeletionSurvivorRollup:
+    """A survivor list nobody can triage is worse than no operator (the brief).
+
+    Measured on canary's round-4 tree: 230 survivors, 188 of them inside
+    `print_help` and `print_introspection` - two functions `pseudo_tested`
+    already convicts whole. The statement-level list this operator exists for
+    was the other 42, buried under 82% noise from one cause.
+    """
+
+    def _campaign(self, rows):
+        """rows: (file, qualname, lineno, outcome) -> a campaign to roll up."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        results = []
+        for relpath, qualname, lineno, outcome in rows:
+            site = SD.StatementSite(
+                relpath=relpath,
+                qualname=f"{qualname}:{lineno}",
+                function_qualname=qualname,
+                lineno=lineno,
+                end_lineno=lineno,
+                body_lineno=lineno,
+                body_col_offset=4,
+                kind="Expr",
+                is_sole_statement=False,
+                source_line="console.print()",
+            )
+            results.append(SD.StatementResult(site=site, outcome=outcome))
+        return SD.StatementCampaign(baseline=None, results=results)
+
+    def test_a_function_whose_every_statement_survived_becomes_one_row(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        campaign = self._campaign(
+            [("apps/m.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in (10, 11, 12, 13)]
+            + [("apps/m.py", "_top", 40, SD.OUTCOME_SURVIVED), ("apps/m.py", "_top", 41, SD.OUTCOME_KILLED)]
+        )
+        rollup = SD._survivor_rollup(campaign)
+
+        assert rollup["survivors_total"] == 5
+        assert rollup["statements_rolled_up"] == 4
+        assert rollup["survivors_after_rollup"] == 1, "the one statement-level finding, not five"
+        assert [r["function"] for r in rollup["functions_wholly_unobserved"]] == ["print_help"]
+        assert rollup["functions_wholly_unobserved"][0]["first_line"] == 10
+
+    def test_a_function_with_one_kill_is_never_rolled_up(self):
+        """One surviving statement inside an otherwise observed function is
+        exactly the species this operator was commissioned for - the trail call
+        beside a `raise` that kills. Rolling it up would delete the finding."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        campaign = self._campaign(
+            [
+                ("apps/h.py", "_refuse", 87, SD.OUTCOME_SURVIVED),
+                ("apps/h.py", "_refuse", 88, SD.OUTCOME_KILLED),
+            ]
+        )
+        rollup = SD._survivor_rollup(campaign)
+
+        assert rollup["functions_wholly_unobserved"] == []
+        assert rollup["survivors_after_rollup"] == 1
+
+    def test_a_lone_surviving_statement_is_a_statement_finding_not_a_function_one(self):
+        """A function with exactly one executed mutant says nothing about the
+        function when that mutant survives - there is no 'every' to be true of."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        campaign = self._campaign([("apps/m.py", "_add", 99, SD.OUTCOME_SURVIVED)])
+        rollup = SD._survivor_rollup(campaign)
+
+        assert rollup["functions_wholly_unobserved"] == []
+        assert rollup["survivors_after_rollup"] == 1
+        assert SD.ROLLUP_MIN_STATEMENTS == 2
+
+    def test_the_rollup_is_a_collapse_and_never_a_suppression(self):
+        """Law: nothing leaves `mutants[]`. The rollup is a reading aid over a
+        record that still carries every verdict."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        campaign = self._campaign([("apps/m.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in (10, 11)])
+        sites = [r.site for r in campaign.results]
+        document = SD.summarize(campaign, sites)
+
+        assert document["survived"] == 2, "the headline count is untouched by the rollup"
+        assert len(document["mutants"]) == 2, "both mutants still carry their own verdict"
+        assert document["survivor_rollup"]["survivors_after_rollup"] == 0
+        assert any("never a suppression" in limit for limit in document["limits"])
+
+    def test_a_partly_observed_function_is_the_species_and_keeps_its_rows(self):
+        """canary.py's print_help: 41 of 43 statements deleted green, 2 killed.
+        Gutting cannot report it - those 2 assertions protect the whole body -
+        so the 41 must stay statement-level and the row must say 41 of 43."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        rows = [("apps/canary.py", "print_help", n, SD.OUTCOME_SURVIVED) for n in range(10, 51)]
+        rows += [("apps/canary.py", "print_help", n, SD.OUTCOME_KILLED) for n in (51, 52)]
+        rollup = SD._survivor_rollup(self._campaign(rows))
+
+        assert rollup["functions_wholly_unobserved"] == [], "one observed statement blocks the rollup"
+        assert rollup["survivors_after_rollup"] == 41
+        row = rollup["survivors_by_function"][0]
+        assert (row["statements"], row["of_executed"]) == (41, 43)
+
+    def test_survivors_by_function_ranks_the_worst_first(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        rows = [("apps/a.py", "small", 10, SD.OUTCOME_SURVIVED)]
+        rows += [("apps/b.py", "big", n, SD.OUTCOME_SURVIVED) for n in (20, 21, 22)]
+        rollup = SD._survivor_rollup(self._campaign(rows))
+
+        assert [r["function"] for r in rollup["survivors_by_function"]] == ["big", "small"]
+
+
+class TestDiffScopeIsLinesNotFiles:
+    """The brief's first boundary: a one-line fix probes one statement."""
+
+    def test_a_hunk_header_yields_only_its_own_lines(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        diff = "+++ b/src/aipass/seedgo/apps/m.py\n@@ -10,1 +10,3 @@\n+a\n+b\n+c\n"
+        assert diff_scope.parse_changed_lines(diff) == {"src/aipass/seedgo/apps/m.py": {10, 11, 12}}
+
+    def test_a_pure_deletion_puts_nothing_in_scope(self):
+        """A `+` count of 0 adds no line, so there is nothing to splice into -
+        limit 2 falling out of the parse rather than bolted on after it."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        diff = "+++ b/apps/m.py\n@@ -10,4 +9,0 @@\n-gone\n"
+        assert diff_scope.parse_changed_lines(diff) == {}
+
+    def test_the_granularity_is_published_not_inferred(self):
+        """The brief: if file scope ever ships because line scope is harder,
+        the artifact must SAY so rather than let a count imply line scope."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        scope = diff_scope.DiffScope(changed={"apps/m.py": {4}}, ref="HEAD~1")
+        document = scope.to_document()
+        assert document["granularity"] == diff_scope.GRANULARITY_LINE
+        assert diff_scope.GRANULARITY is diff_scope.GRANULARITY_LINE
+        assert document["ref"] == "HEAD~1"
+
+    def test_a_multi_line_statement_is_in_scope_when_its_middle_changed(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        scope = diff_scope.DiffScope(changed={"apps/m.py": {21}})
+        assert scope.holds("apps/m.py", 20, 23) is True
+        assert scope.holds("apps/m.py", 30, 33) is False
+        assert scope.holds("apps/other.py", 20, 23) is False
+
+    def test_the_scope_carries_its_blind_spots(self):
+        """The load-bearing one is the statement that did not change and became
+        unobserved anyway. A cost strategy that reads as a coverage claim is
+        the way this feature goes wrong."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        limits = " ".join(diff_scope.SCOPE_LIMITS).lower()
+        assert "unobserved because of a change elsewhere" in limits
+        assert "untracked files are invisible" in limits
+        assert "never a coverage claim" in limits
+        assert diff_scope.DiffScope().to_document()["limits"] == list(diff_scope.SCOPE_LIMITS)
+
+    def test_a_target_outside_the_repository_refuses_by_name(self):
+        """An empty scope would probe nothing and report it as a clean run."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import diff_scope
+
+        with pytest.raises(diff_scope.DiffScopeError) as caught:
+            diff_scope.read_scope(Path("/tmp/not_in_here"), Path("/home"), ref=None)
+        assert "not inside" in str(caught.value)
+
+
+class TestUnreadRedirectNominatesTheMechanism:
+    """One autouse fixture that nothing reads blinds a whole seam."""
+
+    def _corpus(self, tmp_path, conftest: str, test_body: str):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
+
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "conftest.py").write_text(conftest)
+        (tests / "test_thing.py").write_text(test_body)
+        return corpus.build(tmp_path)
+
+    REDIRECT = (
+        "import pytest\n"
+        "@pytest.fixture(autouse=True)\n"
+        "def seam(tmp_path, monkeypatch):\n"
+        "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+        "    return tmp_path\n"
+    )
+
+    def test_an_unread_redirect_that_hands_a_target_back_is_nominated(self, tmp_path):
+        scanned = self._corpus(tmp_path, self.REDIRECT, "def test_a():\n    assert True\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        rows = R.nominate(scanned)
+        assert [r["species"] for r in rows] == ["UNREAD-REDIRECT"]
+        assert rows[0]["evidence"]["fixture"] == "seam"
+        assert rows[0]["verdict"] == corpus.VERDICT_IMPROVE
+
+    def test_a_fence_that_hands_nothing_back_is_never_nominated(self, tmp_path):
+        """No target means nothing to read, so nothing reading it is the
+        design. This clause is what acquits every isolation guard in the fleet."""
+        fence = (
+            "import pytest\n"
+            "@pytest.fixture(autouse=True)\n"
+            "def fence(tmp_path, monkeypatch):\n"
+            "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+        )
+        scanned = self._corpus(tmp_path, fence, "def test_a():\n    assert True\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+        assert R.acquitted(scanned)[0]["why_not"].startswith("it hands nothing back")
+
+    def test_a_requested_fixture_is_never_nominated(self, tmp_path):
+        scanned = self._corpus(tmp_path, self.REDIRECT, "def test_a(seam):\n    assert seam.exists()\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+
+    def test_usefixtures_counts_as_requesting_it(self, tmp_path):
+        body = "import pytest\n@pytest.mark.usefixtures('seam')\ndef test_a():\n    assert True\n"
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+
+    def test_substituting_the_writer_is_the_second_door_and_acquits(self, tmp_path):
+        """MEASURED, not imagined: this is how seedgo observes its own trail,
+        and the first cut of the rule reported seedgo as blind because of it."""
+        body = (
+            "def test_a(monkeypatch):\n"
+            "    seen = []\n"
+            "    monkeypatch.setattr(mod.json_handler, 'log_operation', lambda n, p: seen.append(n))\n"
+            "    assert seen == []\n"
+        )
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+
+    def test_a_dotted_patch_target_is_the_same_door(self, tmp_path):
+        """`patch("a.b.json_handler.log_operation")` names the writer inside
+        one string. Comparing the whole literal made devpulse and hooks false
+        positives; the comparison takes the dotted tail."""
+        body = (
+            "from unittest.mock import patch\n"
+            "def test_a():\n"
+            "    with patch('aipass.x.apps.handlers.json.json_handler.log_operation'):\n"
+            "        assert True\n"
+        )
+        scanned = self._corpus(tmp_path, self.REDIRECT, body)
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+        assert "substitutes the seam writer" in R.acquitted(scanned)[0]["why_not"]
+
+    def test_a_fixture_that_is_not_autouse_is_out_of_scope(self, tmp_path):
+        plain = (
+            "import pytest\n"
+            "@pytest.fixture\n"
+            "def seam(tmp_path, monkeypatch):\n"
+            "    monkeypatch.setenv('AIPASS_TEST_LOG_DIR', str(tmp_path))\n"
+            "    return tmp_path\n"
+        )
+        scanned = self._corpus(tmp_path, plain, "def test_a():\n    assert True\n")
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.nominate(scanned) == []
+        assert R.acquitted(scanned) == []
+
+    def test_the_rule_declares_itself_to_the_lane(self):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter, nominators
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import unread_redirect_check as R
+
+        assert R.GROUP in adapter.STATIC_GROUPS
+        assert R.GROUP in nominators.declared_groups()
+        assert not hasattr(R, "check_module") and not hasattr(R, "check_branch")
+        assert any("floor" in limit.lower() for limit in R.SPECIFICATION["limits"])

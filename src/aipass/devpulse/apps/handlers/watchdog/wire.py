@@ -540,8 +540,11 @@ def _format_dead(entry: dict) -> str:
             f"{_clock(entry.get('expected_by'))}: reboot, OOM or kill. Re-dispatch in continue mode."
         )
     return (
-        f"{head} — no completion by {_clock(entry.get('expected_by'))}, the hard timeout: "
-        "its monitor died (reboot, OOM, kill). Re-dispatch in continue mode."
+        f"{head} — no completion by {_clock(entry.get('expected_by'))}, the hard timeout. "
+        "Nothing here checked whether its monitor is alive, and ai_mail retries a dispatch up to "
+        "three times with a fresh timeout each attempt, so an overdue row is often a live monitor "
+        "part way through attempt 2. Check the service and the dispatch log first: re-dispatching "
+        "over a running retry doubles the work."
     )
 
 

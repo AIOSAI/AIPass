@@ -42,7 +42,9 @@ Downward was trusted until the ruling, so every AIPass citizen could edit `proje
 
 ### The shell lane, and its residual
 
-The shell lane applies the same rules to what `bash_writes` can see. Inside one project it convicts on write grammar only (redirection, `tee`, `sed -i`, `cp`/`mv` destinations, `dd of=`). An interpreter's held paths (`python -c`, a heredoc, `awk`) cannot be told from reads, and reading another branch is the daily loop, so **an interpreter that writes another branch of its own project is not refused**. The project fence still reads held paths: an interpreter naming another project's file is refused whether it reads or writes.
+The shell lane applies the same rules to what `bash_writes` can see. Inside one project it convicts on write grammar only (redirection, `tee`, `sed -i`, `cp`/`mv` destinations, `dd of=`). An interpreter's held paths (`python -c`, a heredoc, `awk`) cannot be told from reads, and reading another branch is the daily loop, so **an interpreter that writes another branch of its own project is not refused**. The project fence still reads held paths: an interpreter naming another project's file is refused whether it reads or writes. The narrower `testwrite_gate` now asks `bash_writes` whether the interpreter's own text holds a write verb and stands down when it does not; this gate deliberately does not, and the marker it ignores is named in [bash_writes.md](bash_writes.md).
+
+**A source-read gate is open for the seconds an edit is half-applied.** The live gate imports this file per event, so while a symbol was being moved on 2026-09-18 five real events hit a `NameError` and failed OPEN (@devpulse's trigger digest: tripwire unwatched x4, one bash scan allowing). Move code in one Edit per symbol.
 
 ## The admin exemption — one seat reaches outwards
 
