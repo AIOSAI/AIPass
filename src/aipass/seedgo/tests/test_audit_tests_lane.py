@@ -2091,6 +2091,59 @@ class TestStatementDeletionConviction:
         assert document["survived_no_covering_test"] == 1
 
 
+class TestStatementDeletionCostIsSplit:
+    """Fixed setup is not a per-mutant cost, and naming it one misled an owner."""
+
+    def _campaign(self, own_times, elapsed):
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        results = []
+        for index, seconds in enumerate(own_times):
+            site = SD.StatementSite(
+                relpath="apps/m.py",
+                qualname="f",
+                function_qualname="f",
+                lineno=index + 1,
+                end_lineno=index + 1,
+                body_lineno=index + 1,
+                body_col_offset=0,
+                kind="Expr",
+                is_sole_statement=False,
+                source_line="trail('x')",
+            )
+            results.append(SD.StatementResult(site=site, outcome=SD.OUTCOME_KILLED, elapsed_seconds=seconds))
+        return SD.StatementCampaign(baseline=None, results=results, elapsed_seconds=elapsed)
+
+    def test_setup_is_not_charged_to_the_mutants(self):
+        """THE DEVPULSE CORRECTION, with its own numbers. 278.72s over 2
+        mutants published 139.36 s/mutant, while the two mutants' own clocks
+        read 0.98 and 1.58. I reported that 139 upward as a per-mutant floor."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        document = SD.summarize(self._campaign([0.98, 1.58], 278.72), [])
+        assert document["setup_seconds"] == 276.16, "the one-time cost, named as one-time"
+        assert document["seconds_per_mutant_mean"] == 1.28
+        assert document["seconds_per_mutant_max"] == 1.58
+        assert "seconds_per_mutant" not in document, "the conflated metric is gone, not renamed"
+
+    def test_the_median_travels_beside_the_mean(self):
+        """A deletion campaign's tail is long — canary read a 0.74s median
+        against a 2.14s mean with one mutant at 15.13s. A mean alone hides it."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        document = SD.summarize(self._campaign([0.5, 0.5, 0.5, 30.0], 40.0), [])
+        assert document["seconds_per_mutant_median"] == 0.5
+        assert document["seconds_per_mutant_mean"] == 7.88
+        assert document["seconds_per_mutant_max"] == 30.0
+
+    def test_the_cost_model_says_how_to_project(self):
+        """A reader who multiplies the wrong number reprices the whole lane."""
+        from aipass.seedgo.apps.handlers.tests_pytest_standards import statement_deletion as SD
+
+        model = SD.summarize(self._campaign([1.0, 1.0], 50.0), [])["cost_model"]
+        assert "setup_seconds" in model and "does NOT scale" in model
+
+
 class TestStatementDeletionHangTimeout:
     """The ceiling has to clear an honest mutant and still catch a hang."""
 

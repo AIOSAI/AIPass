@@ -89,6 +89,7 @@ Depth lives in [docs/](docs/), one file per module or handler group:
 | [docs/audit_engine.md](docs/audit_engine.md) | Discovery, scoring, the incremental cache, the info channel, bypass and `.seedgoignore` |
 | [docs/checklist_and_hooks.md](docs/checklist_and_hooks.md) | The per-file lane and the hook that runs it |
 | [docs/proof_and_coverage.md](docs/proof_and_coverage.md) | Proof certification, coverage mapping, the test inventory, the weekly cycle |
+| [docs/test_gold_standard.md](docs/test_gold_standard.md) | What a good test is here, when NOT to write one, and how a justified pass is declared |
 
 ---
 

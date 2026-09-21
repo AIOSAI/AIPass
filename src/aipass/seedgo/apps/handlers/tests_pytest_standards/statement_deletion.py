@@ -950,6 +950,40 @@ def summarize(campaign: StatementCampaign, sites: Sequence[StatementSite]) -> di
         ],
     }
     if campaign.elapsed_seconds and executed:
-        document["seconds_per_mutant"] = round(campaign.elapsed_seconds / len(executed), 2)
+        document.update(_cost_breakdown(campaign, executed))
     json_handler.log_operation("statement_deletion_summarised", {"executed": len(executed)})
     return document
+
+
+def _cost_breakdown(campaign: StatementCampaign, executed: Sequence[StatementResult]) -> dict:
+    """Fixed setup and marginal per-mutant cost, split.
+
+    THE DEFECT THIS REPLACES (devpulse, 2026-09-20). `seconds_per_mutant` was
+    the GROUP's elapsed time divided by the mutant count, which silently folds
+    one-time setup — env copy, baseline, coverage map — into a number named
+    "per mutant". Measured on devpulse: 278.72s over 2 mutants published
+    139.36, while the two mutants' own clocks read 0.98s and 1.58s and the
+    other 276.16s was setup. I reported that 139 as a per-mutant floor and it
+    reached the owner as a projection; it was arithmetic on my own bad metric.
+
+    The honest model is `setup + N x marginal`, so both travel, and the median
+    travels beside the mean because a deletion campaign's tail is long: canary
+    read a 0.74s median against a 2.14s mean with one mutant at 15.13s.
+    """
+    own = sorted(result.elapsed_seconds for result in executed)
+    mutant_total = sum(own)
+    middle = len(own) // 2
+    median = own[middle] if len(own) % 2 else (own[middle - 1] + own[middle]) / 2
+    return {
+        "setup_seconds": round(max(0.0, campaign.elapsed_seconds - mutant_total), 2),
+        "mutant_seconds_total": round(mutant_total, 2),
+        "seconds_per_mutant_mean": round(mutant_total / len(own), 2),
+        "seconds_per_mutant_median": round(median, 2),
+        "seconds_per_mutant_max": round(own[-1], 2),
+        "cost_model": (
+            "elapsed = setup_seconds + sum(mutant_seconds). `setup_seconds` is one-time per run "
+            "(env copy, baseline, coverage map) and does NOT scale with the mutant count, so a "
+            "cost projection multiplies the MARGINAL figures and adds setup once. Dividing total "
+            "elapsed by the mutant count reads as a per-mutant floor and is not one."
+        ),
+    }
