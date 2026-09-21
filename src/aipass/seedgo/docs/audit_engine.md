@@ -17,7 +17,7 @@ pack inventory.
 | `audit/branch_audit.py` | The per-branch scoring engine. `discover_checkers()` loads every `*_check.py` in a pack directory that exports `check_module` or `check_branch`; the branch score is the mean over consulted standards, with `ADVISORY = True` standards kept out of it. |
 | `audit/discovery.py` | Branch discovery, CWD-first registry. |
 | `audit/audit_display.py` | Rich result formatting — the score grid, the violation detail, the info lines. |
-| `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker. |
+| `audit/incremental_cache.py` | Content-hash cache: a branch whose inputs did not change replays its stored score instead of re-running every checker, and a branch where one checker changed re-runs that checker alone. |
 | `audit/artifact.py` | The untruncated violation set → `.seedgo/last_audit_<branch>.json`, because the console view is capped and the full set is what you actually debug against. |
 | `module_root.py` | The guarded `module_file()` — the one import-time `__file__` resolve in the branch. |
 | `registry_scan.py` | Case-EXACT registry discovery — the one reader every lane uses. |
@@ -72,6 +72,25 @@ declares it:
   names @memory's config and gold templates.
 
 Without those two channels a cache hit is a stale answer wearing a fresh timestamp.
+
+### What invalidates what
+
+Two stamps, not one, because they answer different questions (2026-09-21):
+
+- **Per checker** — `compute_checker_stamps()` fingerprints each `*_check.py` on its own.
+  Edit one and only that checker re-runs, across the branch; every other checker's cached
+  per-file results are served, and so is the branch-level lane where `ruff` and pyright sit.
+- **Pack-wide** — `compute_pack_stamp()` covers what every checker answers *through*: the
+  shared helpers, `diagnostics.json`, `diagnostics_check.py`. Any of those busts the branch
+  whole. So does the machinery stamp (`audit/`, `bypass/`) and the bypass/ignore stamp — a
+  stale green is worse than a slow audit.
+- **Neither** — a standard's `.md` page and its `*_content.py`. Both belong to
+  `standards_query`, a separate command with no cache; no audit output carries a line of
+  either, checked against the live cache doc. Rewording a page is a cache hit.
+
+Measured on @memory: a one-checker edit cost 76.9s before the split and 8.7s after; a doc-page
+edit 78.4s and 1.4s. Across the fleet, 1261.3s and 475.2s — of which seedgo's own 404.5s is
+irreducible, because the checker file it edited *is* one of the files seedgo audits.
 
 ---
 

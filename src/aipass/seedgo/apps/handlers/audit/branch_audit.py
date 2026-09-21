@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-21
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -358,6 +358,37 @@ def _get_or_compute(
     return r
 
 
+def _get_or_compute_branch(
+    checker,
+    name: str,
+    branch_path: Path,
+    bypass_rules: list,
+    cached_branch_results: Dict[str, Any] | None,
+    unchanged_checkers: set | None,
+) -> dict:
+    """Return a branch-level checker's result — from cache when nothing it reads moved.
+
+    _get_or_compute() one level up. A branch-level checker walks the tree
+    itself, so its result is reusable exactly when no watched file changed AND
+    its own file did not; audit_branch_incremental folds both conditions into
+    unchanged_checkers before calling. This is where the per-checker stamp
+    pays: ruff and pyright live in this lane and are most of a branch's audit
+    cost, and before this a one-line comment in any checker re-ran both on
+    every branch in the fleet.
+
+    Read-only by design — nothing is written back, because a branch-level
+    result is already persisted inside the audit output's results[] and a
+    second copy on disk would double a 39MB cache doc for no new information.
+    With both cache args left at None (the default), this is byte-identical to
+    a bare checker.check_branch() call.
+    """
+    if unchanged_checkers is not None and cached_branch_results is not None and name in unchanged_checkers:
+        cached = cached_branch_results.get(name)
+        if cached is not None:
+            return cached
+    return checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
+
+
 def _run_all_files(
     checker,
     name: str,
@@ -474,14 +505,21 @@ def audit_branch(
     pack_path: Path | None = None,
     file_result_cache: Dict[str, Dict[str, Any]] | None = None,
     unchanged_files: set | None = None,
+    cached_branch_results: Dict[str, Any] | None = None,
+    unchanged_checkers: set | None = None,
 ) -> Dict:
     """Audit a branch for standards compliance. Returns backward-compatible dict.
 
     file_result_cache/unchanged_files are the incremental-audit hooks (see
     audit_branch_incremental): when a file's rel path is in unchanged_files
     and a cached per-checker result already exists, that result is reused
-    instead of recomputing. Left at their None defaults, behavior is
-    byte-identical to a full audit — nothing here changes for existing callers.
+    instead of recomputing.
+
+    cached_branch_results/unchanged_checkers are the same hooks for the
+    branch-level lane, where ruff and pyright live: a checker named in
+    unchanged_checkers reads its prior whole-branch result instead of walking
+    the tree again. Left at their None defaults, behavior is byte-identical to
+    a full audit — nothing here changes for existing callers.
     """
     entry_file, branch_path = branch["entry_file"], Path(branch["path"])
     entry_rel = _rel_path(Path(entry_file), branch_path.resolve())
@@ -500,7 +538,9 @@ def audit_branch(
         # Branch-level scope: call check_branch()
         if scope == "branch_level" or (not hasattr(checker, "check_module") and hasattr(checker, "check_branch")):
             try:
-                r = checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
+                r = _get_or_compute_branch(
+                    checker, name, branch_path, bypass_rules, cached_branch_results, unchanged_checkers
+                )
                 results[name] = r
                 # A standard that reports not_applicable measured NOTHING, so it
                 # never enters scores[]: a 0 would blame the branch for an
@@ -692,15 +732,21 @@ def audit_branch_incremental(
     decides WHAT needs recomputing, never HOW; every actual check still runs
     through audit_branch()'s unmodified code paths.
 
-    - Cold cache / --full / checker-pack or bypass/ignore rules changed:
-      full audit_branch() (still populates the per-file cache for next time).
-    - Branch clean (no added/changed/deleted files): serve the prior full
-      output straight from cache, zero checker executions.
+    - Cold cache / --full / shared pack file, audit machinery or bypass/ignore
+      rules changed: full audit_branch() (still populates the cache for next
+      time).
+    - Branch clean and no checker file edited: serve the prior full output
+      straight from cache, zero checker executions.
+    - One checker edited, branch otherwise clean: only that checker re-runs.
+      Its cached per-file answers are dropped, every other checker's are kept,
+      and the branch-level lane reads its prior results — so ruff and pyright,
+      most of a branch's cost, do not re-run for a neighbour's edit. Measured
+      on @memory: 76.9s before, and the fleet paid 1261.3s for one comment.
     - Branch dirty: audit_branch() re-runs with file_result_cache/
       unchanged_files so unchanged files reuse cached per-file results and
       only added/changed files actually execute. Branch-level checkers,
       diagnostics, post-checks, and test_map always re-run whole-branch on
-      any change (cross-file attribution — DPLAN-0275 re-run matrix).
+      any file change (cross-file attribution — DPLAN-0275 re-run matrix).
 
     Accepted staleness window (DPLAN-0275 §8 HIGH): diagnostics/pyright
     results are cached per-branch and only refreshed when that branch is
@@ -731,16 +777,20 @@ def audit_branch_incremental(
     cache = incremental_cache.load_cache()
     branch_entry = incremental_cache.get_branch_entry(cache, cache_key)
     stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path, no_bypass=no_bypass)
+    checker_stamps = incremental_cache.compute_checker_stamps(resolved_pack_path)
 
     watch_files = _collect_watch_files(branch_path, discover_checkers(pack_path))
     current_fp = incremental_cache.collect_fingerprints(watch_files)
 
+    cached_branch_results: Dict[str, Any] = {}
+    unchanged_checkers: set = set()
     if not force_full and branch_entry and branch_entry.get("stamp") == stamp:
+        stale = incremental_cache.stale_checkers(branch_entry.get("checker_stamps", {}), checker_stamps)
         cached_files_doc = branch_entry.get("files", {})
         cached_fp = {rel: v.get("fp") for rel, v in cached_files_doc.items()}
         added, changed, deleted, unchanged = incremental_cache.diff_fileset(cached_fp, current_fp)
 
-        if not (added or changed or deleted):
+        if not (added or changed or deleted) and not stale:
             output = copy.deepcopy(branch_entry.get("output", {}))
             output["deprecated_patterns"] = _deprecated_patterns(branch_path)
             # Observations read live runtime state, so a cached one is a
@@ -754,18 +804,43 @@ def audit_branch_incremental(
             output["_cache_hit"] = True
             return output
 
-        file_result_cache = {rel: dict(v.get("results", {})) for rel, v in cached_files_doc.items()}
+        # A stale checker's cached answers are dropped for EVERY file, so it
+        # re-runs across the branch while the rest of the pack is still served
+        # from cache. Nothing else in the entry is discarded.
+        file_result_cache = {
+            rel: {cname: r for cname, r in v.get("results", {}).items() if cname not in stale}
+            for rel, v in cached_files_doc.items()
+        }
+        if not (added or changed or deleted):
+            # The branch-level lane can only reuse when no watched file moved,
+            # which is exactly the one-checker-edit case. Read straight out of
+            # the cached output's results[] — branch-level results are already
+            # persisted there, so this costs no extra bytes on disk. Names of
+            # other scopes come along and are inert: _get_or_compute_branch is
+            # reachable only from the branch-level lane.
+            cached_branch_results = copy.deepcopy(branch_entry.get("output", {}).get("results", {}))
+            unchanged_checkers = set(cached_branch_results) - stale
     else:
-        # Cold cache / --full / pack or bypass stamp bust: nothing to reuse.
+        # Cold cache / --full / shared-pack, machinery or bypass stamp bust.
         unchanged = set()
         file_result_cache = {}
 
     output = audit_branch(
-        branch, bypass_rules, pack_path=pack_path, file_result_cache=file_result_cache, unchanged_files=unchanged
+        branch,
+        bypass_rules,
+        pack_path=pack_path,
+        file_result_cache=file_result_cache,
+        unchanged_files=unchanged,
+        cached_branch_results=cached_branch_results,
+        unchanged_checkers=unchanged_checkers,
     )
 
     new_files_doc = {rel: {"fp": current_fp[rel], "results": file_result_cache.get(rel, {})} for rel in current_fp}
-    incremental_cache.set_branch_entry(cache, cache_key, {"stamp": stamp, "files": new_files_doc, "output": output})
+    incremental_cache.set_branch_entry(
+        cache,
+        cache_key,
+        {"stamp": stamp, "checker_stamps": checker_stamps, "files": new_files_doc, "output": output},
+    )
     incremental_cache.save_cache(cache)
     output["_cache_hit"] = False
     return output

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-31
-# Modified: 2026-07-31
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -18,7 +18,8 @@ Cache doc shape (single flat file — seedgo_json/audit_cache.json):
         "schema_version": 1,
         "branches": {
             "<branch_name>": {          # "<branch_name>::no-bypass" for a --no-bypass run
-                "stamp": "<checker-pack + bypass/ignore + bypass-state + cache-version fingerprint>",
+                "stamp": "<shared-pack + machinery + bypass/ignore + bypass-state + cache-version fingerprint>",
+                "checker_stamps": {"<checker>": "<that checker file's own fingerprint>"},
                 "files": {
                     "<relpath>": {"fp": [mtime_ns, size], "results": {"<checker>": {...}}}
                 },
@@ -49,10 +50,16 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.module_root import module_file
 
 # Bump when the fingerprint/stamp ALGORITHM changes (belt-and-braces bust).
-CACHE_VERSION = "1"
+# "2": the pack stamp stopped covering the checker files themselves, which now
+# carry one stamp each. Every entry written under "1" must bust once, because
+# its single stamp claims a coverage the new one deliberately no longer has.
+CACHE_VERSION = "2"
 # Bump when the on-disk DOC SHAPE changes — checked separately from the
 # checker/bypass/version stamp so schema churn during development doesn't
-# piggyback on version bumps.
+# piggyback on version bumps. Deliberately NOT bumped for checker_stamps: the
+# key is additive, and an entry without it reads as "every checker stale",
+# which re-runs rather than serves. Bumping would discard 39MB of still-valid
+# per-file results to gain nothing CACHE_VERSION does not already do.
 SCHEMA_VERSION = 1
 # Asked of the service rather than spelled out: the shim binds the fleet json
 # service (DPLAN-0325) and no longer carries a JSON_DIR of its own.
@@ -118,18 +125,38 @@ def diff_fileset(cached: Dict[str, List[int]], current: Dict[str, List[int]]) ->
     return added, changed, deleted, unchanged
 
 
-def compute_pack_stamp(pack_path: Path, diag_path: Path | None = None) -> str:
-    """Fingerprint the whole pack directory, recursively (+ diagnostics_check.py).
+# Pack files the audit can never read: a standard's prose page and its
+# queryable *_content.py are consumed by standards_query, a separate command
+# with no cache. Checked against the live 39MB cache doc rather than assumed —
+# every ".md" and "_content" string in a cached output names a file in the
+# AUDITED branch, never a page of the pack's own. Fingerprinting them turned
+# every wording fix into a full fleet re-scan for a result that cannot move.
+_UNREAD_BY_AUDIT: Tuple[str, ...] = ("*.md", "*_content.py")
 
-    Any checker file OR pack asset (e.g. a runner config like diagnostics.json)
-    added, edited, or removed changes this stamp — busting the whole-branch
-    cache to a full re-scan. __pycache__ dirs are skipped (bytecode churn
-    isn't a real input change); only real files count.
+
+def _is_unread_by_audit(path: Path) -> bool:
+    """True for a pack file whose bytes cannot reach audit output."""
+    return any(path.match(pattern) for pattern in _UNREAD_BY_AUDIT)
+
+
+def compute_pack_stamp(pack_path: Path, diag_path: Path | None = None) -> str:
+    """Fingerprint the pack's SHARED inputs — everything except the checkers themselves.
+
+    Each checker now carries its own stamp (compute_checker_stamps), so editing
+    one no longer throws away the other fifty's results. What stays here is what
+    every checker answers THROUGH, and so still busts the whole branch: the
+    shared helpers (applicability, skip_dirs, trinity_groups, ...), the runner
+    config (diagnostics.json), and diagnostics_check.py, which lives outside the
+    pack and has no per-checker slot. Prose pages and *_content.py are excluded
+    (_is_unread_by_audit). __pycache__ is skipped — bytecode churn isn't a real
+    input change. A shared pack asset added or removed still changes this stamp.
     """
     entries = []
     if pack_path.exists():
         for cf in sorted(pack_path.rglob("*")):
             if not cf.is_file() or "__pycache__" in cf.parts:
+                continue
+            if cf.name.endswith("_check.py") or _is_unread_by_audit(cf):
                 continue
             fp = fingerprint_file(cf)
             entries.append([cf.relative_to(pack_path).as_posix(), fp[0], fp[1]])
@@ -137,6 +164,38 @@ def compute_pack_stamp(pack_path: Path, diag_path: Path | None = None) -> str:
         fp = fingerprint_file(diag_path)
         entries.append([diag_path.name, fp[0], fp[1]])
     return hashlib.sha1(json.dumps(entries).encode("utf-8")).hexdigest()
+
+
+def compute_checker_stamps(pack_path: Path) -> Dict[str, str]:
+    """Fingerprint every checker file on its own: {checker name: stamp}.
+
+    The key is the file stem minus ``_check`` — exactly the key
+    branch_audit.discover_checkers() uses — so a stale entry names the checker
+    whose cached results must be dropped, and nothing else's. A checker added
+    or removed shows up as a key appearing or disappearing, which
+    stale_checkers() reports as stale too.
+    """
+    stamps: Dict[str, str] = {}
+    if not pack_path.exists():
+        return stamps
+    for cf in sorted(pack_path.glob("*_check.py")):
+        fp = fingerprint_file(cf)
+        payload = json.dumps([cf.name, fp[0], fp[1]]).encode("utf-8")
+        stamps[cf.stem.removesuffix("_check")] = hashlib.sha1(payload).hexdigest()
+    return stamps
+
+
+def stale_checkers(cached: Dict[str, str], current: Dict[str, str]) -> set:
+    """Checker names whose cached results can no longer be served.
+
+    A name is stale when its stamp moved, when it is new (nothing cached for
+    it), or when the pack no longer has it. The removed case is named
+    deliberately: a checker that leaves and later comes back under the same
+    filename must not be handed the results its predecessor computed. An entry
+    written before checker_stamps existed has an empty cached map, so every
+    checker reads stale and the branch re-runs whole — the safe direction.
+    """
+    return {name for name in set(cached) | set(current) if cached.get(name) != current.get(name)}
 
 
 def compute_bypass_stamp(branch_path: Path) -> str:
@@ -172,7 +231,11 @@ def compute_machinery_stamp() -> str:
 
 
 def current_stamp(branch_path: Path, pack_path: Path, diag_path: Path | None = None, no_bypass: bool = False) -> str:
-    """Combined invalidation stamp: cache version + checker pack + audit machinery + bypass/ignore rules.
+    """Combined whole-branch stamp: cache version + shared pack + audit machinery + bypass/ignore rules.
+
+    Everything here busts the entire branch entry. The checkers themselves are
+    no longer in it — they are stamped one by one (compute_checker_stamps) so a
+    single checker's edit re-runs that checker and leaves the rest cached.
 
     no_bypass records that the rules were SUPPRESSED for this run (--no-bypass),
     which nothing else in the stamp can see: compute_bypass_stamp() fingerprints

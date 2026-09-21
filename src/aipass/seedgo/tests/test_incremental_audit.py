@@ -9,10 +9,10 @@ must never mean approximate.
 
 # =================== META ====================
 # Name: test_incremental_audit.py
-# Description: Equivalence + unit tests for incremental_cache.py / audit_branch_incremental
-# Version: 1.1.0
+# Description: Equivalence + re-run-matrix tests for audit_branch_incremental
+# Version: 1.2.0
 # Created: 2026-07-31
-# Modified: 2026-09-15
+# Modified: 2026-09-21
 # =============================================
 
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
@@ -310,6 +310,61 @@ def _write_observe_checker(pack_dir: Path, call_log: Path) -> None:
     (pack_dir / "observing_check.py").write_text(
         _OBSERVE_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
     )
+
+
+_SECOND_CHECKER_TEMPLATE = """
+CALL_LOG = "__CALL_LOG__"
+AUDIT_SCOPE = "all_files"
+
+
+def check_module(path, bypass_rules=None):
+    with open(CALL_LOG, "a", encoding="utf-8") as f:
+        f.write("second:" + path + "\\n")
+    return {"passed": True, "score": 100, "checks": []}
+"""
+
+
+_BRANCH_LEVEL_CHECKER_TEMPLATE = """
+CALL_LOG = "__CALL_LOG__"
+AUDIT_SCOPE = "branch_level"
+
+
+def check_branch(branch_path, bypass_rules=None):
+    with open(CALL_LOG, "a", encoding="utf-8") as f:
+        f.write("branchlevel:" + branch_path + "\\n")
+    return {"passed": True, "score": 100, "checks": []}
+"""
+
+
+def _write_second_checker(pack_dir: Path, call_log: Path) -> None:
+    """Write a SECOND all_files checker, tagging its calls so one checker's work is legible.
+
+    A one-checker pack cannot tell "only the edited checker re-ran" from "the
+    whole pack re-ran" — both look identical in the log. Two can.
+    """
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    escaped = str(call_log).replace("\\", "\\\\")
+    (pack_dir / "imports_check.py").write_text(
+        _SECOND_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
+    )
+
+
+def _write_branch_level_checker(pack_dir: Path, call_log: Path) -> None:
+    """Write a branch_level checker logging every check_branch() call.
+
+    Stands in for ruff and pyright: one call per branch, and most of a real
+    branch's audit cost sits in exactly this lane.
+    """
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    escaped = str(call_log).replace("\\", "\\\\")
+    (pack_dir / "ruffish_check.py").write_text(
+        _BRANCH_LEVEL_CHECKER_TEMPLATE.replace("__CALL_LOG__", escaped), encoding="utf-8"
+    )
+
+
+def _append_comment(path: Path) -> None:
+    """Append a comment line — a real byte change that cannot move any verdict."""
+    path.write_text(path.read_text(encoding="utf-8") + "\n# edited\n", encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -758,6 +813,201 @@ class TestNoBypassCacheIsolation:
 # ---------------------------------------------------------------------------
 
 
+class TestThePerCheckerStampScopesAReRun:
+    """The pack stamp used to cover every file in the pack directory, so one
+    comment line in ONE checker threw away every branch's whole entry. Measured
+    on @memory before the split: a clean run 1.5s, the same run after touching
+    one checker 76.9s; across the fleet, 9.7s against 1261.3s. Each checker now
+    carries its own stamp, and the shared helpers keep a pack-wide one that
+    still busts everything.
+    """
+
+    @staticmethod
+    def _split(call_log: Path) -> tuple:
+        """(files the first checker saw, files the second saw, branch-level calls)."""
+        calls = _read_calls(call_log)
+        first = {Path(c).name for c in calls if ":" not in c}
+        second = {Path(c.split(":", 1)[1]).name for c in calls if c.startswith("second:")}
+        branch_level = [c for c in calls if c.startswith("branchlevel:")]
+        return first, second, branch_level
+
+    def test_only_the_edited_checker_re_runs_across_the_branch(self, tmp_path, monkeypatch):
+        """The edited checker sees every file; the untouched one is served from cache."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n", "other.py": "print('GOOD')\n"}
+        )
+        _write_second_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        _append_comment(pack_dir / "naming_check.py")
+        result = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        first, second, _ = self._split(call_log)
+        assert result["_cache_hit"] is False
+        assert first == {"good.py", "other.py", "main.py"}
+        assert second == set()
+
+    def test_the_branch_level_lane_is_not_re_run_for_another_checkers_edit(self, tmp_path, monkeypatch):
+        """ruff and pyright are most of a branch's cost — a neighbour's edit must not wake them."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        _write_branch_level_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        _append_comment(pack_dir / "naming_check.py")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        _first, _second, branch_level = self._split(call_log)
+        assert branch_level == []
+
+    def test_a_branch_level_checker_re_runs_when_its_own_file_is_edited(self, tmp_path, monkeypatch):
+        """The reuse is scoped by stamp, not blanket: edit ruffish and ruffish runs."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        _write_branch_level_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        _append_comment(pack_dir / "ruffish_check.py")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        _first, _second, branch_level = self._split(call_log)
+        assert len(branch_level) == 1
+
+    def test_a_branch_level_checker_re_runs_when_a_branch_file_changes(self, tmp_path, monkeypatch):
+        """It walks the tree itself, so a moved file is not something it can be cached through."""
+        branch_audit, _cache, branch, branch_path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        _write_branch_level_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        (branch_path / "apps" / "good.py").write_text("print('BAD')\n", encoding="utf-8")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        _first, _second, branch_level = self._split(call_log)
+        assert len(branch_level) == 1
+
+    def test_a_shared_pack_helper_edit_still_re_runs_every_checker(self, tmp_path, monkeypatch):
+        """applicability decides which files a checker ever sees — nothing survives it moving."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        _write_second_checker(pack_dir, call_log)
+        helper = pack_dir / "shared_helper.py"
+        helper.write_text("VALUE = 1\n", encoding="utf-8")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        helper.write_text("VALUE = 2\n", encoding="utf-8")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        first, second, _ = self._split(call_log)
+        assert first == {"good.py", "main.py"}
+        assert second == {"good.py", "main.py"}
+
+    def test_a_prose_page_edit_is_still_a_cache_hit(self, tmp_path, monkeypatch):
+        """No audit output carries a line of the page, so rewording it changes no result."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        page = pack_dir / "naming.md"
+        page.write_text("# Naming\n", encoding="utf-8")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        page.write_text("# Naming, reworded\n", encoding="utf-8")
+        result = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        assert result["_cache_hit"] is True
+        assert _read_calls(call_log) == []
+
+    def test_a_content_module_edit_is_still_a_cache_hit(self, tmp_path, monkeypatch):
+        """*_content.py is standards_query's, and no checker imports one."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        content = pack_dir / "naming_content.py"
+        content.write_text("CONTENT = 'old'\n", encoding="utf-8")
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        content.write_text("CONTENT = 'new'\n", encoding="utf-8")
+        result = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        assert result["_cache_hit"] is True
+        assert _read_calls(call_log) == []
+
+    def test_a_new_checker_runs_without_waking_the_others(self, tmp_path, monkeypatch):
+        """An added checker has nothing cached, and that must not cost the pack its own."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        _write_second_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        first, second, _ = self._split(call_log)
+        assert second == {"good.py", "main.py"}
+        assert first == set()
+
+    def test_a_removed_checker_leaves_the_rest_cached(self, tmp_path, monkeypatch):
+        """Its results leave the entry with it, and no one else's do."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        _write_second_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        call_log.write_text("", encoding="utf-8")
+
+        (pack_dir / "imports_check.py").unlink()
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        first, second, _ = self._split(call_log)
+        assert first == set()
+        assert second == set()
+
+    def test_the_result_after_a_checker_edit_equals_a_full_audit(self, tmp_path, monkeypatch):
+        """The acceptance bar: cheaper must still mean identical, not approximate."""
+        branch_audit, _cache, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n", "bad.py": "print('BAD')\n"}
+        )
+        _write_second_checker(pack_dir, call_log)
+        _write_branch_level_checker(pack_dir, call_log)
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        _append_comment(pack_dir / "naming_check.py")
+        incremental = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        full = branch_audit.audit_branch(branch, [], pack_path=pack_dir)
+
+        assert {k: v for k, v in incremental.items() if k != "_cache_hit"} == full
+
+    def test_an_entry_written_before_checker_stamps_re_runs_rather_than_serves(self, tmp_path, monkeypatch):
+        """Fail-open: no cached stamps means every checker is stale, never every checker fresh."""
+        branch_audit, cache_mod, branch, _path, pack_dir, call_log = _prepare(
+            tmp_path, monkeypatch, {"good.py": "print('GOOD')\n"}
+        )
+        branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+        doc = cache_mod.load_cache()
+        key = branch_audit.cache_key_for("mybranch", pack_dir)
+        doc["branches"][key].pop("checker_stamps")
+        cache_mod.save_cache(doc)
+        call_log.write_text("", encoding="utf-8")
+
+        result = branch_audit.audit_branch_incremental(branch, [], pack_path=pack_dir)
+
+        first, _second, _bl = self._split(call_log)
+        assert result["_cache_hit"] is False
+        assert first == {"good.py", "main.py"}
+
+
 class TestFingerprintFile:
     def test_missing_file_returns_sentinel(self, tmp_path):
         from aipass.seedgo.apps.handlers.audit import incremental_cache
@@ -836,97 +1086,6 @@ class TestTheCacheKeyDiscriminatesThePack:
         }
 
         assert len(keys) == 4
-
-
-class TestStamps:
-    def test_pack_stamp_changes_when_checker_edited(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
-        pack_dir = tmp_path / "pack"
-        pack_dir.mkdir()
-        checker = pack_dir / "naming_check.py"
-        checker.write_text("def check_module(p): return {}\n", encoding="utf-8")
-        stamp1 = incremental_cache.compute_pack_stamp(pack_dir)
-        checker.write_text("def check_module(p): return {'x': 1}\n", encoding="utf-8")
-        stamp2 = incremental_cache.compute_pack_stamp(pack_dir)
-        assert stamp1 != stamp2
-
-    def test_bypass_stamp_changes_when_seedgoignore_added(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
-        branch_path = tmp_path / "branch"
-        branch_path.mkdir()
-        stamp1 = incremental_cache.compute_bypass_stamp(branch_path)
-        (branch_path / ".seedgoignore").write_text("tools/\n", encoding="utf-8")
-        stamp2 = incremental_cache.compute_bypass_stamp(branch_path)
-        assert stamp1 != stamp2
-
-    def test_machinery_stamp_changes_when_bypass_package_edited(self, tmp_path, monkeypatch):
-        """A bypass/ edit must re-scan every branch, not just seedgo's own tree.
-
-        FPLAN-0382 changed is_bypassed's matching semantics and nothing in the
-        stamp noticed: all 17 branches kept serving results computed under the
-        old rules, reading 17/17 green while uncached CI showed 99%.
-        """
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
-        machinery = tmp_path / "bypass"
-        machinery.mkdir()
-        utils = machinery / "utils.py"
-        utils.write_text("def is_bypassed(): ...\n", encoding="utf-8")
-        monkeypatch.setattr(incremental_cache, "MACHINERY_DIRS", (machinery,))
-
-        stamp1 = incremental_cache.compute_machinery_stamp()
-        utils.write_text("def is_bypassed(): ...  # comment only\n", encoding="utf-8")
-        stamp2 = incremental_cache.compute_machinery_stamp()
-        assert stamp1 != stamp2
-
-    def test_current_stamp_includes_the_machinery_stamp(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
-        pack_dir = tmp_path / "pack"
-        pack_dir.mkdir()
-        branch_path = tmp_path / "branch"
-        branch_path.mkdir()
-        machinery = tmp_path / "bypass"
-        machinery.mkdir()
-        (machinery / "utils.py").write_text("x = 1\n", encoding="utf-8")
-        monkeypatch.setattr(incremental_cache, "MACHINERY_DIRS", (machinery,))
-
-        stamp1 = incremental_cache.current_stamp(branch_path, pack_dir)
-        # Size must change, not just content: the fingerprint is (mtime_ns, size)
-        # and two writes inside one filesystem timestamp tick are indistinguishable.
-        (machinery / "utils.py").write_text("x = 1  # changed\n", encoding="utf-8")
-        assert incremental_cache.current_stamp(branch_path, pack_dir) != stamp1
-
-    def test_current_stamp_differs_when_bypasses_are_disabled(self, tmp_path):
-        """Suppressing the rules is an input change, exactly like editing them.
-
-        compute_bypass_stamp() fingerprints the bypass.json FILE, which is
-        byte-identical across a normal and a --no-bypass run — so the stamp
-        itself has to carry whether those rules were applied.
-        """
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
-        pack_dir = tmp_path / "pack"
-        pack_dir.mkdir()
-        branch_path = tmp_path / "branch"
-        branch_path.mkdir()
-
-        normal = incremental_cache.current_stamp(branch_path, pack_dir)
-        no_bypass = incremental_cache.current_stamp(branch_path, pack_dir, no_bypass=True)
-        assert normal != no_bypass
-
-    def test_current_stamp_stable_when_nothing_changes(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
-        pack_dir = tmp_path / "pack"
-        pack_dir.mkdir()
-        branch_path = tmp_path / "branch"
-        branch_path.mkdir()
-        stamp1 = incremental_cache.current_stamp(branch_path, pack_dir)
-        stamp2 = incremental_cache.current_stamp(branch_path, pack_dir)
-        assert stamp1 == stamp2
 
 
 class TestLoadSaveCache:
