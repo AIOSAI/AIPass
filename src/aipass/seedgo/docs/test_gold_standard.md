@@ -2,7 +2,7 @@
 
 [← README](../README.md)
 
-Draft, phase 1 of the gold-seal ruling (owner, 2026-09-20 16:35). Every example is a real path:line in this branch, good and bad. Nothing here is enforced yet.
+From the gold-seal ruling (owner, 2026-09-20 16:35). Every example is a real path:line in this branch, good and bad. Most of this page is not enforced — the two shapes that have become write-time rules are listed under *What has become a rule*.
 
 ## The one question
 
@@ -47,6 +47,15 @@ Today there is **no in-code way to say "no test needed here, because X"** — th
 ```
 
 The parenthesised token must name either a seedgo standard that enforces the thing, or one of `constant`, `stdlib`, `generated`. A bare marker with no token is refused, so the declaration cannot become a mute button. This mirrors `.seedgo/bypass.json`: **make the declared deviation cheap and the silent one impossible.**
+
+## What has become a rule
+
+Phase 2 turns findings from this page into write-time prohibitions, one at a time, each landed and measured before anything was edited. Both are tests-only, both score nothing, both report an unscored backlog.
+
+| rule | convicts | fleet on arrival |
+|---|---|---|
+| [`router_assert`](../apps/handlers/aipass_standards/router_assert.md) | a test whose every assertion is a router returning `is True` | 172 units, 14 branches |
+| [`oversize_test_file`](../apps/handlers/aipass_standards/oversize_test_file.md) | a test file over 1,500 code lines, payload excluded | 34 files, 11 branches |
 
 ## Rules are prohibitions, never requirements
 

@@ -52,6 +52,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | meta | all_files | production | File header metadata block |
 | modules | all_files | production | Module structure and naming |
 | naming | all_files | everywhere | snake_case, column-0 constants |
+| oversize_test_file *(tests only)* | all_files | tests | A test file over 1,500 CODE lines — multi-line string payload, docstrings included, is subtracted first. Scores nothing in `audit aipass`; convicts in the checklist lane on the write, and reports the standing backlog unscored |
 | output_routing | all_files | everywhere | Status output via @cli helpers, not raw console.print |
 | permission_flags | all_files | everywhere | No dangerous permission overrides |
 | readme | entry_point | everywhere | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |

@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -250,6 +251,13 @@ def check_branch_info(branch_path: str) -> List[str]:
         return []
     units, files = 0, 0
     for test_file in sorted(tests_dir.rglob("test_*.py")):
+        # Retired code is not lintable and the per-file lane already refuses
+        # it through applies_to_file(). Without the same guard here the
+        # backlog counted units the rule can never convict: measured
+        # 2026-09-20, daemon reported 8 because of one file under
+        # tests/.archive/, while the lane that does the convicting saw 7.
+        if applicability.is_retired_path(str(test_file)):
+            continue
         hits = _scan_path(test_file)
         if hits:
             units += len(hits)

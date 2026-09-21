@@ -158,22 +158,22 @@ def test_trigger_is_production_only():
     assert applicability.applies_to(discover_checkers()["trigger"]) == applicability.PRODUCTION
 
 
-def test_router_assert_is_the_only_tests_only_standard():
-    """The tests-only bucket holds exactly one checker, and it is not v4's.
+def test_the_tests_only_bucket_is_an_exact_roster():
+    """The tests-only bucket holds exactly the gold-seal rules, and not v4's.
 
     v4 `test_quality` was the sole APPLIES_TO = tests checker and it left
     2026-09-07; this test pinned the bucket EMPTY from then until 2026-09-20,
     precisely so that a future checker declaring `tests` would be a deliberate
     act and not an inherited one. `router_assert` is that act (owner ruling,
-    gold seal phase 2 rule 1), so the assertion becomes an exact roster rather
-    than being deleted — a second name appearing here still has to be argued
-    for, and `test_quality` still has to stay gone.
+    gold seal phase 2 rules 1 and 2), so the assertion is an exact roster
+    rather than being deleted — a third name appearing here still has to be
+    argued for, and `test_quality` still has to stay gone.
     """
     from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
 
     checkers = discover_checkers()
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
-    assert tests_only == ["router_assert"]
+    assert tests_only == ["oversize_test_file", "router_assert"]
     assert "test_quality" not in checkers
 
 

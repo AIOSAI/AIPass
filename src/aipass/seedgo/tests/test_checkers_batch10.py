@@ -1,11 +1,12 @@
-"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget, the two ratchets)."""
+"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget, the two ratchets,
+router_assert, oversize_test_file)."""
 
 # =================== META ====================
 # Name: test_checkers_batch10.py
-# Description: Unit tests for hardcoded_path_check, startup_budget_check, startup_ratchet and name_ratchet
-# Version: 1.3.0
+# Description: Unit tests for hardcoded_path_check, startup_budget_check, the two ratchets, router_assert, oversize_test_file
+# Version: 1.4.0
 # Created: 2026-06-18
-# Modified: 2026-09-19
+# Modified: 2026-09-20
 # =============================================
 
 import json
@@ -24,6 +25,9 @@ from unittest.mock import MagicMock
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as sb  # noqa: E402
 from aipass.seedgo.apps.handlers.context_standards import startup_ratchet as ratchet  # noqa: E402
 from aipass.seedgo.apps.handlers.context_standards import name_ratchet as names  # noqa: E402
+from aipass.seedgo.apps.handlers.aipass_standards import applicability  # noqa: E402
+from aipass.seedgo.apps.handlers.aipass_standards import router_assert_check as router_assert  # noqa: E402
+from aipass.seedgo.apps.handlers.aipass_standards import oversize_test_file_check as oversize  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -1367,3 +1371,330 @@ class TestRatchetReport:
         assert NAME not in shipped.lower()
         assert reason == "" and baseline, "the shipped baseline must load"
         assert capsys.readouterr().out == ""
+
+
+# =============================================
+# router_assert — the is-True router rule (gold seal phase 2, rule 1)
+# =============================================
+
+
+class TestRouterAssertFires:
+    """The two shapes the rule exists to convict."""
+
+    def test_the_one_liner_form_is_convicted(self):
+        """`assert handle_command(...) is True` and nothing else.
+
+        Reddens if the direct-call arm of _is_sole_router_true stops reading
+        the callee — the shape 86 of the fleet's 172 hits take.
+        """
+        source = "def test_x():\n    assert handle_command('x', []) is True\n"
+        assert router_assert.find_violations(source) == [(1, "test_x")]
+
+    def test_the_assign_then_assert_form_is_convicted(self):
+        """`result = handle_command(...)` then `assert result is True`.
+
+        This is the majority shape and the one my own phase-1 grep missed,
+        which is how 169 was reported for a population of 223. Reddens if
+        _router_bound_names stops following the assignment.
+        """
+        source = "def test_x():\n    result = handle_command('x', [])\n    assert result is True\n"
+        assert router_assert.find_violations(source) == [(1, "test_x")]
+
+    def test_an_attribute_call_is_the_same_router(self):
+        """`mod.handle_command(...)` is the same protocol as the bare name.
+
+        Reddens if _callee_name stops reading ast.Attribute — most branches
+        import the module, not the function.
+        """
+        source = "def test_x():\n    assert mod.handle_command('x', []) is True\n"
+        assert router_assert.find_violations(source) == [(1, "test_x")]
+
+
+class TestRouterAssertStaysSilent:
+    """Every acquittal, each for a different reason."""
+
+    def test_a_decline_is_a_whole_contract(self):
+        """`is False` is never convicted — 117 fleet units depend on this.
+
+        Reddens if the rule is widened from `is True` to "the sole return
+        flag", which is the version that would delete correct tests.
+        """
+        source = "def test_x():\n    assert handle_command('not_mine', []) is False\n"
+        assert router_assert.find_violations(source) == []
+
+    def test_one_honest_assertion_acquits_the_unit(self):
+        """A second assert means the test proves something the True does not.
+
+        Reddens if `all()` becomes `any()` — the difference between convicting
+        a vacuous test and convicting every test that also checks routing.
+        """
+        source = "def test_x():\n    assert handle_command('x', []) is True\n    assert con.print.called\n"
+        assert router_assert.find_violations(source) == []
+
+    def test_a_mock_assert_call_is_an_oracle(self):
+        """`assert_called_once_with` raises on its own; there is no `assert`.
+
+        Reddens if the effect scan drops mock's family — a test asserting
+        exactly the effect the message asks for would be convicted for it.
+        """
+        source = (
+            "def test_x():\n    assert handle_command('x', []) is True\n    con.print.assert_called_once_with('hi')\n"
+        )
+        assert router_assert.find_violations(source) == []
+
+    def test_an_underscore_helper_is_an_oracle(self):
+        """A module-local `_assert_*` helper carries the whole oracle.
+
+        This was a REAL false positive, found in the first precision sample:
+        aipass/tests/test_help_flag.py:174 asserts through
+        `_assert_nothing_happened` and the rule matched only "assert_".
+        Reddens if the lstrip("_") is removed.
+        """
+        source = (
+            "def test_x():\n    assert handle_command('x', []) is True\n    _assert_nothing_happened(stub, 'init -h')\n"
+        )
+        assert router_assert.find_violations(source) == []
+
+    def test_pytest_raises_is_an_oracle(self):
+        """A refusal proved by a context manager needs no second assert."""
+        source = (
+            "def test_x():\n"
+            "    with pytest.raises(CommandRefused):\n"
+            "        handle_command('x', ['bogus'])\n"
+            "    assert handle_command('x', []) is True\n"
+        )
+        assert router_assert.find_violations(source) == []
+
+    def test_a_predicate_is_not_a_router(self):
+        """`is_valid(...) is True` is a real claim: the True IS the behaviour.
+
+        Reddens if ROUTER_NAMES is widened to "anything returning a bool",
+        which would convict every predicate test in the fleet.
+        """
+        source = "def test_x():\n    assert is_valid('abc') is True\n"
+        assert router_assert.find_violations(source) == []
+
+    def test_a_unit_with_no_assertions_is_not_this_rules_problem(self):
+        """No assert at all is no_oracle's finding, not router_assert's.
+
+        Reddens if the `if not asserts: continue` guard goes — `all([])` is
+        True, so every assertionless test would be convicted here.
+        """
+        assert router_assert.find_violations("def test_x():\n    handle_command('x', [])\n") == []
+
+
+class TestRouterAssertLanes:
+    """The per-file lane, the bypass door, and the unscored backlog."""
+
+    def test_check_module_reports_the_owner_message(self, tmp_path):
+        """The conviction carries the owner's sentence, not a bare count."""
+        f = tmp_path / "test_thing.py"
+        f.write_text("def test_x():\n    assert handle_command('x', []) is True\n", encoding="utf-8")
+
+        result = router_assert.check_module(str(f))
+
+        assert result["passed"] is False and result["score"] == 0
+        assert "test_x:1" in result["checks"][0]["message"]
+        assert "assert the effect" in result["checks"][0]["message"]
+
+    def test_a_line_bypass_silences_one_unit_and_not_the_file(self, tmp_path):
+        """The declared deviation is cheap; the silent one stays impossible.
+
+        Reddens if check_module stops passing the unit's line to is_bypassed —
+        a file-wide bypass would then be the only way out of one bad test.
+        """
+        f = tmp_path / "test_thing.py"
+        f.write_text(
+            "def test_one():\n    assert handle_command('x', []) is True\n"
+            "\n"
+            "def test_two():\n    assert handle_command('y', []) is True\n",
+            encoding="utf-8",
+        )
+        rules = [{"standard": "router_assert", "file": "test_thing.py", "lines": [1]}]
+
+        result = router_assert.check_module(str(f), bypass_rules=rules)
+
+        assert result["passed"] is False
+        assert "test_two:4" in result["checks"][0]["message"]
+        assert "test_one" not in result["checks"][0]["message"]
+
+    def test_the_backlog_line_skips_retired_tests(self, tmp_path):
+        """A unit under tests/.archive/ can never be convicted, so it is not owed.
+
+        Reddens if the is_retired_path guard goes. Measured 2026-09-20: the
+        backlog reported daemon 8 against a lane that could only ever convict
+        7, because tests/.archive/test_actions_module.py was counted. A
+        backlog nobody can burn down is a number, not a debt.
+        """
+        live = tmp_path / "tests"
+        (live / ".archive").mkdir(parents=True)
+        unit = "def test_x():\n    assert handle_command('x', []) is True\n"
+        (live / "test_live.py").write_text(unit, encoding="utf-8")
+        (live / ".archive" / "test_retired.py").write_text(unit, encoding="utf-8")
+
+        lines = router_assert.check_branch_info(str(tmp_path))
+
+        assert len(lines) == 1
+        assert "1 test(s) in 1 file(s)" in lines[0]
+        assert "unscored" in lines[0]
+
+    def test_a_clean_branch_says_nothing_at_all(self, tmp_path):
+        """No backlog, no line — an info channel that always speaks is noise."""
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_clean.py").write_text(
+            "def test_x():\n    assert handle_command('x', []) is False\n", encoding="utf-8"
+        )
+
+        assert router_assert.check_branch_info(str(tmp_path)) == []
+
+    def test_the_standard_scores_nothing_because_it_declares_tests(self):
+        """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely.
+
+        This is the whole day-one guarantee: 172 fleet convictions and not one
+        branch's number moved. Reddens the moment the declaration changes.
+        """
+        assert router_assert.APPLIES_TO == applicability.TESTS
+
+
+# =============================================
+# oversize_test_file — the 1,500 code-line cap (gold seal phase 2, rule 2)
+# =============================================
+
+
+class TestOversizeTestFileMeasures:
+    """What counts as a code line, and what is given back."""
+
+    def test_payload_inside_a_multiline_string_is_not_code(self):
+        """A fixture blob is data the assertions read, not lines to split.
+
+        Reddens if _payload_lines stops subtracting — a file holding one
+        1,500-line JSON sample would then be convicted for the sample.
+        """
+        source = 'FIXTURE = """\n' + "line\n" * 50 + '"""\nx = 1\n'
+
+        code, total, payload = oversize.measure(source)
+
+        assert (total, payload, code) == (53, 52, 1)
+
+    def test_a_docstring_is_payload_too(self):
+        """A size rule must never be a reason to delete the bug a test names.
+
+        Reddens if payload is narrowed to "fixtures only" by, say, skipping
+        the first statement of a function — the gold standard asks authors to
+        write these sentences, so the size rule pays for them.
+        """
+        source = 'def test_x():\n    """\n' + "    why this test exists\n" * 20 + '    """\n    assert True\n'
+
+        code, _total, payload = oversize.measure(source)
+
+        assert payload == 22
+        assert code == 2
+
+    def test_an_fstring_span_is_counted_once(self):
+        """Nested constants inside one f-string must not double-count.
+
+        A sum of spans overstates a file by the lines an f-string shares with
+        its own children; measured 2026-09-20 that was 26 lines on this
+        branch's largest file. Reddens if the line SET becomes a sum.
+        """
+        source = 'V = 1\nS = f"""\n{V}\nmiddle\n{V}\n"""\n'
+
+        code, total, payload = oversize.measure(source)
+
+        assert (total, payload, code) == (6, 5, 1)
+
+    def test_an_unparseable_file_is_measured_whole(self):
+        """Breaking the syntax must not be a way under the cap.
+
+        Reddens if the SyntaxError arm returns 0 or skips the file: "delete
+        one bracket" would become the cheapest way to silence this rule.
+        """
+        code, total, payload = oversize.measure("def test_x(:\n" + "x = 1\n" * 40)
+
+        assert (total, payload, code) == (41, 0, 41)
+
+
+class TestOversizeTestFileLanes:
+    """The cap itself, the message, and the unscored backlog."""
+
+    def test_the_cap_convicts_at_one_line_over_and_not_at_the_cap(self, tmp_path):
+        """The boundary is `>`, not `>=`.
+
+        Reddens on an off-by-one that convicts a file sitting exactly on a
+        published cap — the one number an author will aim for.
+        """
+        at_cap = tmp_path / "test_at.py"
+        over = tmp_path / "test_over.py"
+        at_cap.write_text("x = 1\n" * oversize.CODE_LINE_CAP, encoding="utf-8")
+        over.write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8")
+
+        assert oversize.check_module(str(at_cap))["passed"] is True
+        assert oversize.check_module(str(over))["passed"] is False
+
+    def test_the_conviction_names_the_payload_it_already_forgave(self, tmp_path):
+        """An author at 10,524 lines needs to know 5,929 were already given back.
+
+        Reddens if the message drops to a bare count — the cap then reads as
+        unreachable and the rule gets bypassed instead of acted on.
+        """
+        big = tmp_path / "test_big.py"
+        big.write_text(
+            'P = """\n' + "pad\n" * 100 + '"""\n' + "x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8"
+        )
+
+        message = oversize.check_module(str(big))["checks"][0]["message"]
+
+        assert "102 of string payload already excluded" in message
+        assert "split it along the unit under test" in message
+
+    def test_the_message_sends_the_author_to_the_gate_not_around_it(self, tmp_path):
+        """The cure needs new test files, which the hooks gate refuses.
+
+        Reddens if the message ever tells an author to just create the files.
+        The rule must not instruct anyone to route around a policy gate.
+        """
+        big = tmp_path / "test_big.py"
+        big.write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8")
+
+        message = oversize.check_module(str(big))["checks"][0]["message"]
+
+        assert "@devpulse" in message
+        assert "moving tests is not adding them" in message.lower()
+
+    def test_the_backlog_names_the_largest_offender(self, tmp_path):
+        """ "3 files over the cap" gives an owner nowhere to start.
+
+        Reddens if the info line degrades to a count.
+        """
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_small.py").write_text("x = 1\n" * 10, encoding="utf-8")
+        (tests / "test_mid.py").write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 5), encoding="utf-8")
+        (tests / "test_worst.py").write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 900), encoding="utf-8")
+
+        lines = oversize.check_branch_info(str(tmp_path))
+
+        assert len(lines) == 1
+        assert "2 test file(s) over" in lines[0]
+        assert "largest test_worst.py at 2400" in lines[0]
+        assert "unscored" in lines[0]
+
+    def test_the_backlog_skips_retired_tests(self, tmp_path):
+        """A file under tests/.archive/ can never be convicted, so it is not owed.
+
+        Same defect router_assert's backlog shipped with: a debt nobody can
+        burn down is a number, not a backlog.
+        """
+        tests = tmp_path / "tests"
+        (tests / ".archive").mkdir(parents=True)
+        (tests / ".archive" / "test_old.py").write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8")
+
+        assert oversize.check_branch_info(str(tmp_path)) == []
+
+    def test_the_standard_scores_nothing_because_it_declares_tests(self):
+        """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely.
+
+        34 fleet convictions on arrival and not one branch's number moved.
+        Reddens the moment the declaration changes.
+        """
+        assert oversize.APPLIES_TO == applicability.TESTS
