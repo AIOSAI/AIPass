@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-08-09
 # Modified: 2026-09-21
 # =============================================
@@ -176,6 +176,11 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     its cure is `tmp_path`, a fixture that exists only in a test: production
     code builds its paths from config and a rule telling it to use a pytest
     fixture would be nonsense. `hardcoded_path` keeps the production half.
+    `file_top` is the seventh, 2026-09-22: template v1 items 5, 6 and 7,
+    @devpulse dispatch d3685bc1. `meta` and `documentation` are both
+    production-only, so a test file's header and docstring had no checker at
+    all; this one declares `tests` because its third sub-rule, the declared
+    pass, is a statement about tests and nothing else.
 
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
@@ -188,6 +193,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
     assert tests_only == [
         "calendar_bound",
+        "file_top",
         "import_site",
         "literal_path",
         "named_encoding",

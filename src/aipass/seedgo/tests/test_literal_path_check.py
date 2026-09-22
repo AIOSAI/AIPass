@@ -3,6 +3,7 @@
 # Description: literal_path_check — test template v1 item 22, paths built from tmp_path, never written
 # Version: 1.0.0
 # Created: 2026-09-22
+# Modified: 2026-09-22
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/literal_path_check.py."""
