@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -325,6 +325,49 @@ def _render_deprecated_patterns(audit_result: dict, console_obj) -> None:
 # =============================================================================
 
 
+#: How many re-run checkers to name before the line stops being readable. A
+#: pack-wide bust never reaches here (it fails the branch stamp and reports
+#: nothing cached), so this only trims the rare many-checkers-edited run.
+_MAX_NAMED_RERUNS = 4
+
+
+def cache_tag(audit_result: dict) -> str:
+    """The `(cached)` suffix for a branch line — and what a PARTIAL hit says.
+
+    A full hit reads `(cached)`. A run that served most of the cache and re-ran
+    a little used to read as nothing at all, identical to a cold scan, so a
+    working cache and a broken one looked the same from the outside. The owner
+    diagnosed a clobbering bug in 2026-09-21 from timings alone because of it.
+
+    Now it says what it re-did:
+
+        (cached: 51 of 53 checkers; re-ran imports, named_encoding)
+        (cached: 98 of 101 files)
+
+    Both clauses appear when both are true. Nothing is printed for a cold run,
+    a `--full` run or a stamp bust: there was no cache to serve, and claiming
+    a fraction of one would be worse than silence.
+    """
+    if audit_result.get("_cache_hit"):
+        return " [dim](cached)[/dim]"
+    partial = audit_result.get("_cache_partial")
+    if not partial:
+        return ""
+    parts = []
+    if partial["checkers_cached"] < partial["checkers_total"]:
+        parts.append(f"{partial['checkers_cached']} of {partial['checkers_total']} checkers")
+    if partial["files_cached"] < partial["files_total"]:
+        parts.append(f"{partial['files_cached']} of {partial['files_total']} files")
+    if not parts:
+        return ""
+    reran = partial.get("reran") or []
+    named = ", ".join(reran[:_MAX_NAMED_RERUNS])
+    if len(reran) > _MAX_NAMED_RERUNS:
+        named += f" (+{len(reran) - _MAX_NAMED_RERUNS} more)"
+    detail = f"; re-ran {named}" if reran else ""
+    return f" [dim](cached: {', '.join(parts)}{detail})[/dim]"
+
+
 def print_branch_summary(
     audit_result: Dict,
     system_averages: Dict[str, int] | None = None,
@@ -363,7 +406,7 @@ def print_branch_summary(
     corpus_noun = audit_result.get("corpus_noun") or DEFAULT_PACK_CORPUS["noun"]
     corpus_detail = audit_result.get("corpus_detail") or DEFAULT_PACK_CORPUS["detail"]
     corpus_size = audit_result.get("corpus_size", files_checked)
-    cached_tag = " [dim](cached)[/dim]" if audit_result.get("_cache_hit") else ""
+    cached_tag = cache_tag(audit_result)
     no_bypass_tag = " [bold yellow][BYPASSES DISABLED][/bold yellow]" if no_bypass else ""
     console.print()
     console.print(

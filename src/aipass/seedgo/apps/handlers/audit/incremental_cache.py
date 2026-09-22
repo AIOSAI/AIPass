@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-31
 # Modified: 2026-09-21
 # =============================================
@@ -13,26 +13,39 @@ Backup-style (mtime_ns, size) fingerprint cache so audit_branch_incremental()
 can skip re-scanning unchanged files/branches. Machine-local state only —
 never git-tracked (seedgo_json/ is gitignored like every branch's *_json/).
 
-Cache doc shape (single flat file — seedgo_json/audit_cache.json):
+ONE FILE PER CACHE KEY, under seedgo_json/audit_cache/:
+
     {
-        "schema_version": 1,
-        "branches": {
-            "<branch_name>": {          # "<branch_name>::no-bypass" for a --no-bypass run
-                "stamp": "<shared-pack + machinery + bypass/ignore + bypass-state + cache-version fingerprint>",
-                "checker_stamps": {"<checker>": "<that checker file's own fingerprint>"},
-                "files": {
-                    "<relpath>": {"fp": [mtime_ns, size], "results": {"<checker>": {...}}}
-                },
-                "output": {...last audit_branch() output dict, for the clean fast path...}
-            }
+        "schema_version": 2,
+        "cache_key": "memory",          # "memory::no-bypass", "memory::pack=x"
+        "entry": {
+            "stamp": "<shared-pack + machinery + bypass/ignore + bypass-state + cache-version fingerprint>",
+            "checker_stamps": {"<checker>": "<that checker file's own fingerprint>"},
+            "files": {
+                "<relpath>": {"fp": [mtime_ns, size], "results": {"<checker>": {...}}}
+            },
+            "output": {...last audit_branch() output dict, for the clean fast path...}
         }
     }
 
+WHY ONE FILE EACH, and it is not about speed. Every entry used to live in one
+flat doc. audit_branch_incremental loaded the WHOLE doc (47.7 MB, 67 keys),
+audited for 30 to 450 seconds, then saved the WHOLE doc back — so each save
+reverted every entry another process had written in that window to the stale
+snapshot the saver read on the way in. The owner met it on 2026-09-21: a fleet
+run immediately after a cold one re-scanned 14 of 18 branches, 1,149 s, because
+three overlapping processes kept clobbering each other's work. The cache itself
+was sound; the container was the bug.
+
+A save can now only race a save for the SAME key, where both processes did the
+same work over the same branch and last-writer-wins is a correct outcome.
+Nothing a run does to @memory's entry can touch @drone's. Load and save are
+O(one branch): the median entry is 226 KB against a 47.7 MB doc.
+
 Fail-open by construction: any read/schema problem here returns an empty
-cache, which the caller (branch_audit.audit_branch_incremental) treats as
-"no cache" and runs a full audit — never a skipped one. Concurrent runs
-racing on the same cache doc can, at worst, produce a spurious cache miss
-(full re-scan); never wrong output. No locking — accepted per DPLAN-0275.
+entry, which the caller (branch_audit.audit_branch_incremental) treats as
+"no cache" and runs a full audit — never a skipped one. Still no locking, and
+none is needed now — accepted per DPLAN-0275.
 
 See branch_audit.audit_branch_incremental()'s docstring for the accepted
 diagnostics/pyright cross-branch staleness divergence (DPLAN-0275 §8 HIGH).
@@ -41,7 +54,9 @@ diagnostics/pyright cross-branch staleness divergence (DPLAN-0275 §8 HIGH).
 import hashlib
 import json
 import os
+import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -67,13 +82,27 @@ CACHE_VERSION = "3"
 # key is additive, and an entry without it reads as "every checker stale",
 # which re-runs rather than serves. Bumping would discard 39MB of still-valid
 # per-file results to gain nothing CACHE_VERSION does not already do.
-SCHEMA_VERSION = 1
+#
+# 2: one file per cache key. The CONTAINER changed, not the entry — stamp,
+# checker_stamps, files and output are byte-identical to what schema 1 held, so
+# migrate_legacy_cache() rewraps them rather than discarding them, and
+# CACHE_VERSION does NOT move: no fingerprint or stamp algorithm changed, and
+# bumping it would throw away 47.7 MB of still-valid results to prove a point.
+SCHEMA_VERSION = 2
 # Asked of the service rather than spelled out: the shim binds the fleet json
 # service (DPLAN-0325) and no longer carries a JSON_DIR of its own.
 # The directory is asked for through a bound name rather than reached for on
 # the handle: get_json_path is the only public way to name it, and the cache
 # doc is not one of the three declared json_types.
-CACHE_FILE = json_handler.get_json_path("audit", "data").parent / "audit_cache.json"
+_JSON_DIR = json_handler.get_json_path("audit", "data").parent
+
+# One file per cache key lives here.
+CACHE_DIR = _JSON_DIR / "audit_cache"
+
+# The single flat doc every entry shared until 2026-09-21. Read once by
+# migrate_legacy_cache(), then retired by rename beside itself — never deleted,
+# because a cache is cheap to rebuild and evidence is not.
+LEGACY_CACHE_FILE = _JSON_DIR / "audit_cache.json"
 
 # Packages that decide audit OUTPUT without living in the checker pack: bypass/
 # decides whether a violation counts, audit/ decides which files a checker ever
@@ -260,43 +289,54 @@ def current_stamp(branch_path: Path, pack_path: Path, diag_path: Path | None = N
     return hashlib.sha1(combined.encode("utf-8")).hexdigest()
 
 
-def load_cache() -> Dict[str, Any]:
-    """Load the audit cache doc. Missing/corrupt/schema-mismatched -> {} (fail open to full)."""
-    if not CACHE_FILE.exists():
-        return {}
-    try:
-        content = CACHE_FILE.read_text(encoding="utf-8")
-    except OSError as e:
-        logger.info("[incremental_cache] Cannot read %s: %s", CACHE_FILE, e)
-        return {}
-    if not content.strip():
-        return {}
-    try:
-        doc = json.loads(content)
-    except json.JSONDecodeError as e:
-        logger.warning("[incremental_cache] Corrupt cache at %s, renaming aside: %s", CACHE_FILE, e)
-        corrupt = CACHE_FILE.with_suffix(CACHE_FILE.suffix + ".corrupt")
-        try:
-            CACHE_FILE.rename(corrupt)
-        except OSError as rename_err:
-            logger.info("[incremental_cache] Could not rename corrupt cache: %s", rename_err)
-        return {}
-    if not isinstance(doc, dict) or doc.get("schema_version") != SCHEMA_VERSION:
-        return {}
-    json_handler.log_operation("audit_cache_loaded", {"branches": len(doc.get("branches", {}))})
-    return doc
+#: Everything a filename may not carry. Cache keys hold "::" and "=", and ":"
+#: is illegal on Windows outright.
+_UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]")
+
+#: Names Windows reserves for devices, matched on the segment before the first
+#: dot and regardless of extension — a branch called `con` would otherwise
+#: produce a file that cannot be created there.
+_WINDOWS_RESERVED_STEMS: frozenset[str] = frozenset(
+    {"CON", "PRN", "AUX", "NUL"} | {f"COM{n}" for n in range(1, 10)} | {f"LPT{n}" for n in range(1, 10)}
+)
 
 
-def save_cache(doc: Dict[str, Any]) -> None:
-    """Atomically write the cache doc (write-tmp-then-os.replace, backup-style)."""
-    doc["schema_version"] = SCHEMA_VERSION
-    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=CACHE_FILE.parent, suffix=".tmp")
+def entry_filename(cache_key: str) -> str:
+    """The file one cache key lives in, spelled safely for every host.
+
+    Readable stem plus a digest of the EXACT key, and both halves earn their
+    place. The stem is what a human greps for. The digest is what keeps two
+    different keys apart after the stem has been flattened:
+
+        "memory::no-bypass" and "memory=no-bypass"  ->  same stem
+        "BACKUP" and "backup"                       ->  same file on Windows
+                                                        and macOS, which are
+                                                        case-insensitive
+
+    Both pairs are real: the fleet has `BACKUP` and lowercase branch names in
+    one cache, and every key carries "::". A collision would serve one branch
+    another branch's audit, so the digest is not decoration.
+    """
+    stem = _UNSAFE_IN_FILENAME.sub("_", cache_key)
+    if stem.split(".")[0].upper() in _WINDOWS_RESERVED_STEMS:
+        stem = f"_{stem}"
+    return f"{stem}.{hashlib.sha1(cache_key.encode('utf-8')).hexdigest()[:10]}.json"
+
+
+def entry_path(cache_key: str) -> Path:
+    """Where one cache key's entry is stored."""
+    return CACHE_DIR / entry_filename(cache_key)
+
+
+def _atomic_write(path: Path, doc: Dict[str, Any]) -> None:
+    """Write one JSON doc through a staging file (write-tmp-then-os.replace)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(doc, f, indent=2, default=str)
             f.write("\n")
-        os.replace(tmp, CACHE_FILE)
+        os.replace(tmp, path)
     finally:
         # finally, not `except Exception`: KeyboardInterrupt and SystemExit are
         # BaseExceptions and walked straight past the old clause, leaving the
@@ -307,15 +347,110 @@ def save_cache(doc: Dict[str, Any]) -> None:
                 os.unlink(tmp)
             except OSError as cleanup_err:
                 logger.warning("[incremental_cache] Failed to clean up temp file %s: %s", tmp, cleanup_err)
-    json_handler.log_operation("audit_cache_saved", {"branches": len(doc.get("branches", {}))})
 
 
-def get_branch_entry(cache: Dict[str, Any], branch_name: str) -> Dict[str, Any]:
-    """Return the cached sub-doc for a branch, or {} if absent."""
-    return cache.get("branches", {}).get(branch_name, {})
+def _retire_legacy_cache() -> None:
+    """Rename the flat doc beside itself, timestamped. Never deleted."""
+    retired = LEGACY_CACHE_FILE.with_name(f"audit_cache.retired-{time.strftime('%Y%m%d%H%M%S')}.json")
+    try:
+        LEGACY_CACHE_FILE.rename(retired)
+    except OSError as exc:
+        # Another process migrated first and the file is already gone, or the
+        # rename target exists. Either way the split is done; say so and move on.
+        logger.info("[incremental_cache] Legacy cache not retired (%s): %s", LEGACY_CACHE_FILE, exc)
+        return
+    logger.info("[incremental_cache] Legacy cache retired to %s", retired.name)
+    json_handler.log_operation("audit_cache_legacy_retired", {"file": retired.name})
 
 
-def set_branch_entry(cache: Dict[str, Any], branch_name: str, entry: Dict[str, Any]) -> Dict[str, Any]:
-    """Set/replace a branch's cached sub-doc. Returns the same top-level cache dict."""
-    cache.setdefault("branches", {})[branch_name] = entry
-    return cache
+def migrate_legacy_cache() -> int:
+    """Split the flat doc into one file per key, then retire it. Returns the count.
+
+    Runs at most once per install: the first load or save after this lands does
+    the split, and every call after that costs one ``exists()`` on a path that
+    is no longer there. The entry payload is carried across UNCHANGED — schema 2
+    rewrapped the container, it did not reshape what is inside — so a fleet's
+    worth of still-valid results survives the upgrade instead of being rebuilt
+    over twenty-five minutes of cold scanning.
+
+    An entry whose per-key file ALREADY exists is left alone: that file was
+    written by a run under the new shape and is newer than anything the flat
+    doc remembers. A corrupt or unreadable flat doc migrates nothing and is
+    still retired — it has already failed open to a full audit.
+    """
+    if not LEGACY_CACHE_FILE.exists():
+        return 0
+    try:
+        doc = json.loads(LEGACY_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("[incremental_cache] Legacy cache unreadable, retiring without migrating: %s", exc)
+        _retire_legacy_cache()
+        return 0
+
+    branches = doc.get("branches") if isinstance(doc, dict) else None
+    migrated = 0
+    if isinstance(branches, dict):
+        for cache_key, entry in branches.items():
+            if not isinstance(entry, dict) or entry_path(cache_key).exists():
+                continue
+            _atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
+            migrated += 1
+    _retire_legacy_cache()
+    logger.info("[incremental_cache] Migrated %d cache entries to %s", migrated, CACHE_DIR.name)
+    json_handler.log_operation("audit_cache_migrated", {"entries": migrated})
+    return migrated
+
+
+def _wrap(cache_key: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    """The on-disk doc for one entry: its schema, its key, and the entry itself."""
+    return {"schema_version": SCHEMA_VERSION, "cache_key": cache_key, "entry": entry}
+
+
+def load_branch_entry(cache_key: str) -> Dict[str, Any]:
+    """Load one key's cached entry. Missing/corrupt/mismatched -> {} (fail open to full)."""
+    migrate_legacy_cache()
+    path = entry_path(cache_key)
+    if not path.exists():
+        return {}
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as e:
+        logger.info("[incremental_cache] Cannot read %s: %s", path, e)
+        return {}
+    if not content.strip():
+        return {}
+    try:
+        doc = json.loads(content)
+    except json.JSONDecodeError as e:
+        logger.warning("[incremental_cache] Corrupt cache entry at %s, renaming aside: %s", path, e)
+        try:
+            path.rename(path.with_suffix(path.suffix + ".corrupt"))
+        except OSError as rename_err:
+            logger.info("[incremental_cache] Could not rename corrupt entry: %s", rename_err)
+        return {}
+    if not isinstance(doc, dict) or doc.get("schema_version") != SCHEMA_VERSION:
+        return {}
+    if doc.get("cache_key") != cache_key:
+        # The key is recorded inside the file as well as spelled into its name,
+        # so a digest collision or a hand-moved file reads as a miss rather than
+        # as another branch's audit.
+        logger.warning("[incremental_cache] %s holds key %r, wanted %r", path.name, doc.get("cache_key"), cache_key)
+        return {}
+    entry = doc.get("entry")
+    if not isinstance(entry, dict):
+        return {}
+    json_handler.log_operation("audit_cache_loaded", {"cache_key": cache_key})
+    return entry
+
+
+def save_branch_entry(cache_key: str, entry: Dict[str, Any]) -> None:
+    """Atomically write one key's entry to its own file.
+
+    A save can only ever race a save for the SAME key — two runs auditing the
+    same branch under the same pack and bypass mode, which did the same work
+    and where last-writer-wins is a correct outcome. No other branch's entry is
+    reachable from here, which is the whole point of the split.
+    """
+    migrate_legacy_cache()
+    _atomic_write(entry_path(cache_key), _wrap(cache_key, entry))
+    json_handler.log_operation("audit_cache_saved", {"cache_key": cache_key})

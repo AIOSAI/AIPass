@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-03-05
 # Modified: 2026-09-21
 # =============================================
@@ -878,8 +878,7 @@ def audit_branch_incremental(
     cache_key = cache_key_for(branch_name, pack_path, no_bypass=no_bypass)
     diag_path = Path(__file__).resolve().parent.parent / "diagnostics" / "diagnostics_check.py"
 
-    cache = incremental_cache.load_cache()
-    branch_entry = incremental_cache.get_branch_entry(cache, cache_key)
+    branch_entry = incremental_cache.load_branch_entry(cache_key)
     stamp = incremental_cache.current_stamp(branch_path, resolved_pack_path, diag_path, no_bypass=no_bypass)
     checker_stamps = incremental_cache.compute_checker_stamps(resolved_pack_path)
 
@@ -888,6 +887,7 @@ def audit_branch_incremental(
 
     cached_branch_results: Dict[str, Any] = {}
     unchanged_checkers: set = set()
+    partial: Dict[str, Any] | None = None
     if not force_full and branch_entry and branch_entry.get("stamp") == stamp:
         stale = incremental_cache.stale_checkers(branch_entry.get("checker_stamps", {}), checker_stamps)
         cached_files_doc = branch_entry.get("files", {})
@@ -907,6 +907,18 @@ def audit_branch_incremental(
             )
             output["_cache_hit"] = True
             return output
+
+        # What the run is about to re-do, recorded for the branch line. Without
+        # it a partial run prints exactly like a cold one: @memory re-running
+        # two edited checkers over a cached corpus reads as a 3.5s miss, and
+        # the reader cannot tell a working cache from a broken one.
+        partial = {
+            "checkers_total": len(checker_stamps),
+            "checkers_cached": len(checker_stamps) - len(stale),
+            "reran": sorted(stale),
+            "files_total": len(current_fp),
+            "files_cached": len(unchanged),
+        }
 
         # A stale checker's cached answers are dropped for EVERY file, so it
         # re-runs across the branch while the rest of the pack is still served
@@ -940,11 +952,11 @@ def audit_branch_incremental(
     )
 
     new_files_doc = {rel: {"fp": current_fp[rel], "results": file_result_cache.get(rel, {})} for rel in current_fp}
-    incremental_cache.set_branch_entry(
-        cache,
+    incremental_cache.save_branch_entry(
         cache_key,
         {"stamp": stamp, "checker_stamps": checker_stamps, "files": new_files_doc, "output": output},
     )
-    incremental_cache.save_cache(cache)
     output["_cache_hit"] = False
+    if partial is not None:
+        output["_cache_partial"] = partial
     return output

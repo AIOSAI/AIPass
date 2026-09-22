@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_audit_cache_stamps.py
-# Description: The audit cache's invalidation stamps — what busts a branch entry and what does not
-# Version: 1.0.0
+# Description: The audit cache's invalidation stamps and what its branch line reports
+# Version: 1.1.0
 # Created: 2026-09-21
 # Modified: 2026-09-21
 # =============================================
@@ -19,7 +19,7 @@ needs that file's infrastructure mocks.
 # seedgo: no-test-needed(behaviour) — what a moved stamp costs a run; test_incremental_audit.py
 # seedgo: no-test-needed(constant) — CACHE_VERSION's literal value; the bust it causes is behaviour
 
-from aipass.seedgo.apps.handlers.audit import incremental_cache
+from aipass.seedgo.apps.handlers.audit import audit_display, incremental_cache
 
 
 class TestStamps:
@@ -171,3 +171,52 @@ class TestCheckerStamps:
 
     def test_nothing_is_stale_when_the_pack_stands_still(self):
         assert incremental_cache.stale_checkers({"naming": "a"}, {"naming": "a"}) == set()
+
+
+class TestTheBranchLineSaysWhatWasReRun:
+    """A partial hit used to print exactly like a cold scan.
+
+    That is how the clobbering defect of 2026-09-21 stayed invisible: @memory
+    re-running two edited checkers over an otherwise cached corpus read as a
+    3.5s miss, indistinguishable from a cache that had been reverted by another
+    process. The owner diagnosed it from a log, not from the audit's own output.
+    """
+
+    def _partial(self, **over):
+        base = {"checkers_total": 53, "checkers_cached": 51, "reran": ["imports", "named_encoding"]}
+        base.update({"files_total": 101, "files_cached": 101})
+        base.update(over)
+        return {"_cache_hit": False, "_cache_partial": base}
+
+    def test_a_full_hit_still_reads_cached(self):
+        assert audit_display.cache_tag({"_cache_hit": True}) == " [dim](cached)[/dim]"
+
+    def test_a_cold_run_says_nothing(self):
+        """No cache was served, so claiming a fraction of one would be a lie."""
+        assert audit_display.cache_tag({"_cache_hit": False}) == ""
+
+    def test_a_stale_checker_run_names_what_it_re_ran(self):
+        tag = audit_display.cache_tag(self._partial())
+
+        assert tag == " [dim](cached: 51 of 53 checkers; re-ran imports, named_encoding)[/dim]"
+
+    def test_a_changed_file_run_counts_the_files(self):
+        tag = audit_display.cache_tag(self._partial(checkers_cached=53, reran=[], files_cached=98))
+
+        assert tag == " [dim](cached: 98 of 101 files)[/dim]"
+
+    def test_both_clauses_appear_when_both_are_true(self):
+        tag = audit_display.cache_tag(self._partial(files_cached=98))
+
+        assert "51 of 53 checkers, 98 of 101 files" in tag
+        assert "re-ran imports, named_encoding" in tag
+
+    def test_a_long_re_run_list_is_capped_and_says_so(self):
+        """A readable line beats a complete one; the count keeps it honest."""
+        tag = audit_display.cache_tag(self._partial(checkers_cached=46, reran=list("abcdefg")))
+
+        assert "re-ran a, b, c, d (+3 more)" in tag
+
+    def test_nothing_stale_and_nothing_moved_reads_as_nothing(self):
+        """Belt and braces: a partial record with no actual re-run must not print."""
+        assert audit_display.cache_tag(self._partial(checkers_cached=53, reran=[])) == ""

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: standards_audit.py
 # Description: Standards Audit Module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -34,7 +34,11 @@ from aipass.seedgo.apps.handlers.audit import argv as audit_argv
 from aipass.seedgo.apps.handlers.audit import discovery
 from aipass.seedgo.apps.handlers.audit.discovery import discover_branches, _is_branch_private, check_internal_access
 from aipass.seedgo.apps.handlers.audit.branch_audit import audit_branch_incremental
-from aipass.seedgo.apps.handlers.audit.audit_display import print_branch_summary, print_system_summary
+from aipass.seedgo.apps.handlers.audit.audit_display import (
+    cache_tag,
+    print_branch_summary,
+    print_system_summary,
+)
 from aipass.seedgo.apps.handlers.audit.artifact import write_audit_artifact
 
 # Bypass system
@@ -443,7 +447,7 @@ def handle_command(command: str, args: List[str]) -> bool:
             # Print completed branch result (persists above progress bar)
             avg = result.get("average", 0)
             style = "green" if avg >= 90 else "yellow" if avg >= 75 else "red"
-            cached_tag = " [dim](cached)[/dim]" if result.get("_cache_hit") else ""
+            cached_tag = cache_tag(result)
             progress.console.print(
                 f"  [dim][{idx}/{total_branches}][/dim] [cyan]{branch_name:<12}[/cyan]"
                 f" [{style}]{avg:>3}%[/{style}] [dim]({branch_elapsed:.1f}s)[/dim]{cached_tag}"
