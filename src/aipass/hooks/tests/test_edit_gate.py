@@ -850,3 +850,27 @@ class TestRevalidateParsesPyrightOutput:
         broken.stdout = "not json at all"
         with patch.object(ds.subprocess, "run", return_value=broken):
             assert ds.revalidate(str(target)) is None
+
+
+class TestEveryRefusalIsLogged:
+    """A refusal an agent never sees explained is a refusal nobody can diagnose.
+
+    engine.jsonl records exit 2 and the stdout length, never the reason, and it
+    holds under an hour of fleet traffic. Measured 2026-09-22: a live block at
+    04:37:29 left no line in edit_gate.log at all. Every block goes through
+    _refuse(), and _refuse() is where the WARNING is written.
+    """
+
+    def test_inbox_refusal_is_logged(self, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        result = handle(
+            {
+                "tool_name": "Edit",
+                "tool_input": {"file_path": "/srv/example/AIPass/src/aipass/hooks/.ai_mail.local/inbox.json"},
+                "cwd": "/srv/example/AIPass/src/aipass/hooks",
+            }
+        )
+        assert result["exit_code"] == 2
+        assert "refused" in caplog.text
+        assert "inbox.json" in caplog.text

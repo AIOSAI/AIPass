@@ -60,6 +60,9 @@ _TODO_BACKLOG = ".backup/todo/{branch}/backlog.json"
 # gate refused it, the command failed) must not grow it.
 _TRIPWIRE_DIR = Path(tempfile.gettempdir())
 _TRIPWIRE_PENDING_MAX = 8
+# A refusal reason runs to a screen; the log line is the diagnostic, not the copy.
+# The head names the rule and the target, and prax rotates at 50KB.
+_REFUSAL_LOG_CHARS = 500
 # The sanctioned writers of memory files from a shell: drone verbs, not raw writes.
 _MEMORY_VERB_TARGETS = frozenset({"@memory", "@spawn"})
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_]\w*=")
@@ -86,7 +89,27 @@ def _ownership() -> Any:
 
 
 def _refuse(reason: str) -> dict:
+    """Build the one refusal shape every gate in this file returns — and write the line that says why.
+
+    engine.jsonl records exit 2 and a stdout length, never the reason, and two
+    generations hold well under an hour of fleet traffic: a live block on
+    2026-09-22 04:37:29 left no line in edit_gate.log at all, so by morning
+    nothing on disk could say what had been refused or to whom. The cap refusal
+    was the widest case — _evaluate_limits logged each violation in WARN mode
+    and nothing in the mode that actually blocks.
+
+    Paths carrying detail the reason does not spell (the shell verb, a violation
+    count) log that line first and then call here; two lines is the intended
+    shape there, not a duplicate.
+    """
+    logger.warning("[HOOKS] edit_gate: refused — %s", _one_line(reason))
     return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+
+
+def _one_line(reason: str, cap: int = _REFUSAL_LOG_CHARS) -> str:
+    """Flatten a refusal to one bounded log line: the head is what names the rule and the target."""
+    flat = " | ".join(part.strip() for part in reason.splitlines() if part.strip())
+    return flat if len(flat) <= cap else f"{flat[:cap]}… (+{len(flat) - cap} chars, full text in the refusal)"
 
 
 def _is_admin_seat(cwd: str) -> bool:
@@ -161,11 +184,7 @@ def _cross_project_block(caller_root: Path, target_root: Path, target: Path, how
         "file-layer twin of the mail fence that refuses cross-project sends.\n"
         'To reach that project: drone @devpulse feedback send "Subject" "Body"'
     )
-    return {
-        "stdout": json.dumps({"decision": "block", "reason": reason}),
-        "exit_code": 2,
-        "sound": "edit gate",
-    }
+    return _refuse(reason)
 
 
 def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
@@ -274,7 +293,7 @@ def _check_bash_memory_write(targets: list[tuple[Path, str]]) -> dict | None:
             "Only reading it? An interpreter that names a memory path is refused whether it reads or writes, "
             "because this gate cannot tell which. Read the file with the Read tool, cat or jq."
         )
-        return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+        return _refuse(reason)
     return None
 
 
@@ -668,11 +687,7 @@ def _evaluate_limits(before: dict, after: dict, limits: dict, el: Any) -> dict |
             "  (Caps are measured on Edit/Write; a write to a memory file made through Bash is refused. "
             "Cure drift already on disk with drone @memory lint.)"
         )
-        return {
-            "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
-            "exit_code": 2,
-            "sound": "edit gate",
-        }
+        return _refuse("\n".join(lines))
     for v, text in zip(over, texts, strict=True):
         _log_violation(v, text)
     return None
@@ -719,11 +734,7 @@ def _evaluate_file_budget(file_name: str, after_text: str, limits: dict, el: Any
         "Caps live in @memory's memory.config.json (file_budgets); @spawn owns the schema."
     )
     logger.warning("[HOOKS] edit_gate: %s refused — %d file-budget violation(s)", file_name, len(violations))
-    return {
-        "stdout": json.dumps({"decision": "block", "reason": "\n".join(lines)}),
-        "exit_code": 2,
-        "sound": "edit gate",
-    }
+    return _refuse("\n".join(lines))
 
 
 def _todos_count_advisory(after: dict, branch: str) -> str:
@@ -934,11 +945,7 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
                 "next rollover archives the tail as 'oldest' and would silently drop a misplaced write. "
                 "Insert new entries at index 0 only, leaving the rest of the array untouched."
             )
-            return {
-                "stdout": json.dumps({"decision": "block", "reason": reason}),
-                "exit_code": 2,
-                "sound": "edit gate",
-            }
+            return _refuse(reason)
 
         new_numbers = [_entry_number(e) for e in new_entries if isinstance(e, dict)]
 
@@ -965,11 +972,7 @@ def _check_newest_first(before: dict, after: dict) -> dict | None:
                 )
             else:
                 continue
-            return {
-                "stdout": json.dumps({"decision": "block", "reason": reason}),
-                "exit_code": 2,
-                "sound": "edit gate",
-            }
+            return _refuse(reason)
     return None
 
 
@@ -986,7 +989,7 @@ def _unparseable_refusal(fp: Path, exc: ValueError) -> dict:
         "not parse is broken for every reader until the next edit lands — @memory, this gate, the tripwire "
         "and the startup read all see a corrupt seat. Make the edit so the whole file still parses, then retry."
     )
-    return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+    return _refuse(reason)
 
 
 def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: str) -> dict | None:
@@ -1215,7 +1218,7 @@ def handle(hook_data: dict) -> dict:
         fp = Path(file_path)
         if fp.name == "inbox.json" and ".ai_mail.local" in fp.parts:
             reason = 'Direct writes to inbox.json are blocked.\nUse: drone @ai_mail email @<branch> "Subject" "Body"'
-            return {"stdout": json.dumps({"decision": "block", "reason": reason}), "exit_code": 2, "sound": "edit gate"}
+            return _refuse(reason)
 
         cwd = hook_data.get("cwd", "") or os.getcwd()
 
@@ -1237,11 +1240,7 @@ def handle(hook_data: dict) -> dict:
                     f"Dispatched agent confined to own branch: '{cwd_branch}' "
                     f"cannot write to '{target_branch}' in daemon mode."
                 )
-                return {
-                    "stdout": json.dumps({"decision": "block", "reason": reason}),
-                    "exit_code": 2,
-                    "sound": "edit gate",
-                }
+                return _refuse(reason)
             repo_root = None
             for parent in Path(cwd).parents:
                 if (parent / ".git").exists():
@@ -1252,11 +1251,7 @@ def handle(hook_data: dict) -> dict:
                 resolved = str(fp.resolve()) if not fp.is_absolute() else str(fp)
                 if not resolved.startswith(allowed_prefix):
                     reason = f"Dispatched agent restricted to {allowed_prefix}. Cannot write to: {file_path}"
-                    return {
-                        "stdout": json.dumps({"decision": "block", "reason": reason}),
-                        "exit_code": 2,
-                        "sound": "edit gate",
-                    }
+                    return _refuse(reason)
 
         target_branch = _get_branch(str(fp.resolve()) if not fp.is_absolute() else str(fp), package)
 
@@ -1323,11 +1318,7 @@ def handle(hook_data: dict) -> dict:
 
         error_summary = "\n".join(f"  L{e['line']}: {e['message']}" for e in errors[:5])
         reason = f"Fix {len(errors)} error(s) in {Path(errored_file).name} before editing other files:\n{error_summary}"
-        return {
-            "stdout": json.dumps({"decision": "block", "reason": reason}),
-            "exit_code": 2,
-            "sound": "edit gate",
-        }
+        return _refuse(reason)
 
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: unexpected error, every fence dark for this call (allowing): %s", exc)

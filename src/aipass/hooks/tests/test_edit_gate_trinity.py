@@ -3240,3 +3240,50 @@ class TestPassportFileBudget:
 
         assert result == {"stdout": "", "exit_code": 0}
         assert "file_over_budget" in caplog.text
+
+
+class TestTrinityRefusalsAreLogged:
+    """The memory-lane refusals that blocked silently until 2026-09-22.
+
+    The cap refusal only logged in WARN mode — the branch that returns the block
+    skipped _log_violation entirely — and newest-first and the unparseable guard
+    never logged at all. Measured from a live block on 2026-09-22 04:37:29 that
+    left no line in edit_gate.log.
+    """
+
+    def test_enforced_cap_refusal_is_logged(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"summary": "k" * 301}]})
+        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+        assert result["exit_code"] == 2
+        assert "refused" in caplog.text
+        assert "Unwritable .trinity entries" in caplog.text
+
+    def test_newest_first_refusal_is_logged(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        Path(file_path).write_text(json.dumps({"sessions": [{"number": 5, "summary": "old"}]}), encoding="utf-8")
+        after = {"sessions": [{"number": 5, "summary": "old"}, {"number": 6, "summary": "new"}]}
+        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+            result = handle(_hook_data(file_path, json.dumps(after), cwd=cwd))
+        assert result["exit_code"] == 2
+        assert "refused" in caplog.text
+        assert "newest-first" in caplog.text
+
+    def test_unparseable_refusal_is_logged(self, tmp_path, caplog):
+        from aipass.hooks.apps.handlers.security.edit_gate import handle
+
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        Path(file_path).write_text(json.dumps({"sessions": []}), encoding="utf-8")
+        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+            result = handle(_hook_data(file_path, "{not json", cwd=cwd))
+        assert result["exit_code"] == 2
+        assert "refused" in caplog.text
+        assert "unparseable" in caplog.text
