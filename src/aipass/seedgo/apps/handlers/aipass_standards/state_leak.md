@@ -63,7 +63,7 @@ The leak was cured anyway, in the same dispatch — see below.
 ## The rule
 
 A write to shared state, **at test time**, with nothing to put it back. Three shapes,
-measured 2026-09-22 over the fleet's 582 test files:
+measured 2026-09-22 over the fleet's 580 test files:
 
 | shape | hits | spelling |
 |---|---|---|
@@ -74,12 +74,29 @@ measured 2026-09-22 over the fleet's 582 test files:
 | (a) `os.environ.pop()` | 5 | |
 | (a) a write to `os.environ` | 3 | |
 | (c) `os.chdir` with no restore | 1 | |
-| (b) a patcher started, never stopped | **0** | fires on input; no fleet instance |
+| (b) a patcher started, never stopped | **0** | both forms fire on input; no fleet instance |
 
 **Shape (b) ships with zero fleet instances.** All 28 `.start()` calls in the corpus are on
 threads, observers and monitors (`t.start()`, `thread.start()`, `observer.start()`), not on
 patchers. The shape is implemented, unit-tested both ways, and convicts nothing today. It
 is kept because the habit it names is cheap to acquire and invisible once acquired.
+
+**1.1.0 added the one-line form**, after @devpulse probed 1.0.0 on the model file and found
+it clean on the worse of the two spellings:
+
+| spelling | 1.0.0 | 1.1.0 | why |
+|---|---|---|---|
+| `p = patch(...)` then `p.start()` | convicted | convicted | it HOLDS the patcher, so a `stop()` is possible |
+| `patch(...).start()` bare | **clean** | **convicted** | holds nothing — nothing to call `stop()` on |
+| `mocked = patch(...).start()` | **clean** | **convicted** | `start()` returns the MOCK, not the patcher |
+
+Only `patch.stopall()` reaches the one-line form, and the rule still stands down when the
+function calls one, which is why the third row is a conviction and not a crash. Its message
+names the reason rather than the shape:
+
+```
+conftest.py:12 patch(...).start() holds no patcher, so nothing can stop it - stop() in teardown, or addCleanup(p.stop)
+```
 
 ### Depth ONE, and that restriction is the rule
 
@@ -192,7 +209,7 @@ Measured 2026-09-22 by this checker, before the rule landed:
 
 | | value |
 |---|---|
-| test files in the corpus | 582 |
+| test files in the corpus | 580 |
 | convicted | **49 (8%)** |
 | hits | **343** |
 | import-time writes counted, not charged | 22 in 20 files |

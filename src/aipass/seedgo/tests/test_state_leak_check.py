@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_state_leak_check.py
 # Description: state_leak_check — test template v1 item 18, no test leaks state into the next
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
 # Modified: 2026-09-22
 # =============================================
@@ -110,6 +110,28 @@ class TestAPatcherStartedAndNeverStopped:
 
     def test_addcleanup_counts_as_stopping_it(self):
         source = 'def test_x(self):\n    p = patch("aipass.x.y")\n    p.start()\n    self.addCleanup(p.stop)\n'
+
+        assert _found(source) == []
+
+    def test_a_bare_one_liner_is_a_hit_because_it_holds_no_patcher(self):
+        """@devpulse probed this on the model file and 1.0.0 read it clean.
+
+        `patch(...).start()` keeps no reference to the patcher, so there is
+        nothing in the test left to call stop() ON. The worst form of shape (b).
+        """
+        source = 'def test_x():\n    patch("aipass.x.y").start()\n'
+
+        assert _found(source) == ["patch(...).start() holds no patcher, so nothing can stop it"]
+
+    def test_binding_the_result_does_not_save_it(self):
+        """start() returns the MOCK, not the patcher -- the name is the wrong object."""
+        source = 'def test_x():\n    mocked = patch("aipass.x.y").start()\n'
+
+        assert _found(source) == ["patch(...).start() holds no patcher, so nothing can stop it"]
+
+    def test_stopall_reaches_even_the_one_liner(self):
+        """It is the only thing that can: it stops every patcher start() ever began."""
+        source = 'def test_x(self):\n    patch("aipass.x.y").start()\n    self.addCleanup(patch.stopall)\n'
 
         assert _found(source) == []
 

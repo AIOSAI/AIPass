@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: state_leak_check.py
 # Description: State Leak Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
 # Modified: 2026-09-22
 # =============================================
@@ -25,16 +25,21 @@ module then answers ``test_bypass.py`` with ``mock.utils.matching_rule()``.
 was ever green.
 
 THE RULE IS: A WRITE TO SHARED STATE, AT TEST TIME, WITH NOTHING TO PUT IT BACK.
-Three shapes, measured 2026-09-22 over the fleet's 582 test files:
+Three shapes, measured 2026-09-22 over the fleet's 580 test files:
 
   (a) A DIRECT WRITE to state the process shares --
       ``os.environ[k] = v``, ``sys.path.insert(...)``, ``sys.modules[k] = v``,
       ``mod.attr = value`` / ``setattr(mod, name, value)`` on an imported
       product module.
-  (b) A PATCHER STARTED AND NEVER STOPPED -- ``p = patch(...)`` then
-      ``p.start()`` with no ``.stop()``, ``addCleanup`` or teardown in the same
-      function. ``with patch(...)`` and ``@patch`` restore on exit and are never
-      convicted; only the manual form can be left running.
+  (b) A PATCHER STARTED AND NEVER STOPPED, in two forms. ``p = patch(...)``
+      then ``p.start()`` with no ``.stop()``, ``addCleanup`` or teardown in the
+      same function -- that one at least HOLDS the patcher. And the one-line
+      form, ``patch(...).start()`` bare or ``mocked = patch(...).start()``,
+      which holds nothing: ``start()`` returns the MOCK, not the patcher, so
+      there is no object left to stop and only ``patch.stopall()`` can reach it.
+      1.0.0 missed that second form; @devpulse found it by probing the model
+      file. ``with patch(...)`` and ``@patch`` restore on exit and are never
+      convicted; only the manual forms can be left running.
   (c) ``os.chdir(...)`` with no restore. ``monkeypatch.chdir`` is the cure and
       the fleet already uses it 257 times.
 
@@ -276,38 +281,77 @@ def _covered(function: ast.AST, body: List[ast.AST], autouse: Set[str], by_name:
     return covered
 
 
+#: What the one-line form leaves behind. It names the reason, not just the shape:
+#: the author has to see that there is nothing left to call stop() ON.
+_UNSTOPPABLE = "patch(...).start() holds no patcher, so nothing can stop it"
+
+
+def _is_patch_call(node: ast.expr | None) -> bool:
+    """Whether this expression IS a ``patch(...)`` call, not a name holding one."""
+    return isinstance(node, ast.Call) and _tail_name(node.func) in _PATCH_CALLS
+
+
+def _patcher_event(node: ast.AST, patchers: Set[str]) -> Tuple[str, str, int]:
+    """(kind, patcher name, line) for one node in the patcher pass.
+
+    ``("", "", 0)`` when the node is not part of this pass at all.
+    """
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+        return "", "", 0
+    name, base, line = node.func.attr, _base_name(node.func), node.lineno
+    if name == "start" and _is_patch_call(node.func.value):
+        return "unstoppable", "", line
+    if name in _STOPPERS and base not in patchers:
+        return "stopall", "", line
+    if name in ("start", "stop") and base in patchers:
+        return name, base, line
+    return "", "", 0
+
+
 def _patcher_names(body: List[ast.AST]) -> Set[str]:
     """Names bound to a ``patch(...)`` object inside this function."""
     names: Set[str] = set()
     for node in body:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
             continue
-        value = node.value
-        if isinstance(value, ast.Call) and _tail_name(value.func) in _PATCH_CALLS:
+        if _is_patch_call(node.value):
             names.add(node.targets[0].id)
     return names
 
 
+def _held_but_unstopped(started: List[Tuple[int, str]], stopped: Set[str]) -> List[Tuple[int, str]]:
+    """The named form: a patcher started in this function with no stop() in it."""
+    return [(line, f"{name}.start() with no stop()") for line, name in started if name not in stopped]
+
+
 def _unstopped_patchers(body: List[ast.AST]) -> List[Tuple[int, str]]:
-    """(line, name) for every patcher started here and never stopped here."""
+    """(line, what was left running) for every patcher started and never stopped.
+
+    TWO SHAPES, and the second is the worse one. ``p = patch(...)`` then
+    ``p.start()`` at least HOLDS the patcher, so a later ``stop()`` is possible
+    and the rule looks for one. The one-line form -- ``patch(...).start()`` bare,
+    or ``mocked = patch(...).start()`` bound to the Mock that start() RETURNS --
+    keeps no reference to the patcher at all, so nothing in that test can ever
+    stop it. Only ``patch.stopall()`` reaches it, which is why the rule still
+    stands down when the function calls one of the _STOPPERS on something else.
+    """
     started: List[Tuple[int, str]] = []
+    unstoppable: List[Tuple[int, str]] = []
     stopped: Set[str] = set()
     everything_stopped = False
     patchers = _patcher_names(body)
     for node in body:
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-            continue
-        name = node.func.attr
-        base = _base_name(node.func)
-        if name in _STOPPERS and base not in patchers:
-            everything_stopped = True
-        elif name == "start" and base in patchers:
-            started.append((node.lineno, base))
-        elif name == "stop" and base in patchers:
+        kind, base, line = _patcher_event(node, patchers)
+        everything_stopped = everything_stopped or kind == "stopall"
+        if kind == "unstoppable":
+            unstoppable.append((line, _UNSTOPPABLE))
+        elif kind == "start":
+            started.append((line, base))
+        elif kind == "stop":
             stopped.add(base)
     if everything_stopped:
         return []
-    return [(line, name) for line, name in started if name not in stopped]
+    return unstoppable + _held_but_unstopped(started, stopped)
 
 
 def _functions(tree: ast.Module) -> Tuple[Dict[int, ast.AST], Dict[int, List[ast.AST]]]:
@@ -429,8 +473,7 @@ def scan(source: str) -> List[Tuple[int, str, str]]:
         # The descent appends the function to its own body first, so body[0] is it.
         if "patcher" in guard(body[0]):
             continue
-        for line, name in _unstopped_patchers(body):
-            findings.append((line, f"{name}.start() with no stop()"))
+        findings.extend(_unstopped_patchers(body))
 
     hits: List[Tuple[int, str, str]] = []
     seen: Set[Tuple[int, str]] = set()

@@ -33,6 +33,7 @@ cost noise and never a missed bug.
 | cli_flags | entry_point | production | --help, --version flag handling |
 | cli_ux | entry_point | production | CLI navigation + output quality (Nav/Output scoring) |
 | commented_logger | all_files | everywhere | No commented-out logger/logging calls |
+| conftest_fixtures *(tests only)* | all_files | tests | A branch's `tests/conftest.py` carries item 20's two fixtures, both reported on ONE check — **C1** a session-scope autouse fixture pinning `.width` on the consoles the PRODUCT exports (`display.CONSOLE`, `display.err_console`), and **C2** an autouse fixture calling `display.reset_command_state()` AFTER the yield. Only `conftest.py` is ever judged; every other file in `tests/` passes silently, because item 16 puts these fixtures in exactly one place. A `Console(width=200)` the fixture builds itself pins nothing — the pin has to land on the product's consoles. The checker never convicts a branch for a conftest that is not there |
 | dead_code | branch_level | production | Unreachable functions and dead imports |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |

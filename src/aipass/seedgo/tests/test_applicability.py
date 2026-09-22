@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.8.0
+# Version: 1.9.0
 # Created: 2026-08-09
 # Modified: 2026-09-22
 # =============================================
@@ -191,6 +191,12 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     put it back. `tests`, because its whole vocabulary of cures is
     `monkeypatch`, a fixture that exists only in a test; production code that
     writes `os.environ` is doing its job.
+    `conftest_fixtures` is the tenth, 2026-09-22: template v1 item 20 and the
+    page's conftest section, @devpulse dispatch faced7be — the branch conftest
+    pins the console width once and resets the command state after every test.
+    `tests`, and narrower still: only `conftest.py` is ever judged, because
+    item 16 puts these two fixtures in exactly one place and a rule that read
+    them anywhere else would convict 563 files for not being the conftest.
 
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
@@ -203,6 +209,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
     assert tests_only == [
         "calendar_bound",
+        "conftest_fixtures",
         "file_top",
         "import_site",
         "literal_path",
