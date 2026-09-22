@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: imports_check.py
 # Description: Imports Standards Checker Handler
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2026-03-05
-# Modified: 2026-09-19
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -12,6 +12,13 @@ Imports Standards Checker Handler
 Validates module compliance with AIPass import standards for pip packages.
 Checks for clean pip-style imports: no AIPASS_ROOT, no sys.path hacking,
 proper aipass.* namespace usage, correct import order.
+
+FIVE OF THE SIX SUB-RULES ARE TRUE OF A TEST FILE. The sixth is not: a test
+file owes no logger, and asking it for one is asking it to log. That sub-rule
+is gated by ``applicability.is_test_path`` rather than by declaring the whole
+checker production -- ordering, grouping, namespace, AIPASS_ROOT and sys.path
+all read the same in a test, and demoting the checker would have muted them on
+more than a third of every branch's Python to silence one rule.
 """
 
 import re
@@ -19,11 +26,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
-# APPLIES_TO: ordering and grouping read the same in a test file.
+# APPLIES_TO: ordering and grouping read the same in a test file. The prax
+# logger sub-rule is the one exception and gates itself below.
 APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
@@ -35,7 +44,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     Checks:
     1. No AIPASS_ROOT usage (pip packages don't need it)
     2. No sys.path hacking (pip packages resolve via installed paths)
-    3. Prax logger via aipass.prax namespace (if applicable)
+    3. Prax logger via aipass.prax namespace (production files only)
     4. Handler independence (no parent module imports)
     5. Import order (stdlib -> third-party -> aipass.*)
     6. No bare/invalid imports (must use aipass.* namespace)
@@ -106,8 +115,8 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not is_init_file:
         checks.append(check_no_sys_path(import_lines, module_path, bypass_rules))
 
-    # Check 3: Prax logger via aipass.prax (not for handlers, small files, or __init__)
-    if not is_init_file and not is_small_file and not is_handler:
+    # Check 3: Prax logger via aipass.prax (production only — see check_prax_logger)
+    if not is_init_file and not is_small_file and not is_handler and not applicability.is_test_path(module_path):
         prax_check = check_prax_logger(import_lines, module_path, bypass_rules)
         if prax_check:
             checks.append(prax_check)
@@ -301,6 +310,21 @@ def check_no_sys_path(lines: List[str], file_path: str = "", bypass_rules: list 
 
 def check_prax_logger(lines: List[str], file_path: str = "", bypass_rules: list | None = None) -> Optional[Dict]:
     """Check that logging is routed through the `aipass.prax` namespace.
+
+    A TEST FILE IS NEVER ASKED. The caller gates this sub-rule on
+    ``applicability.is_test_path``, and the reason is what the rule actually
+    says: it is about ROUTING -- that a file which logs does so through prax
+    rather than round a side channel. A test file does not log. pytest owns its
+    output, capsys reads it, and a logger in a test writes into the product's
+    real log stream from a run that is not the product. So the rule's premise is
+    absent, and a rule whose premise is absent must not convict: when tests/
+    joined the audit corpus on 2026-09-21 this one line scored 42 of @memory's
+    43 test files at 80% for not importing something they were right not to
+    import. Measured, reported by @devpulse, gated the same day.
+
+    The gate is here and not on APPLIES_TO because the checker's other five
+    sub-rules are all true of a test file. Demoting the whole checker to
+    production would have been the cheap fix and the wrong one.
 
     BOTH BINDING FORMS PASS, and the reason is the standard's own intent:
 

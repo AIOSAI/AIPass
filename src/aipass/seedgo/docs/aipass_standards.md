@@ -59,6 +59,7 @@ cost noise and never a missed bug.
 | log_visibility | all_files | production | Log output in key operations |
 | meta | all_files | production | File header metadata block |
 | modules | all_files | production | Module structure and naming |
+| named_encoding *(tests only)* | all_files | tests | A text read or write with no encoding named — `open()` in a text mode, `read_text()`, `write_text()` — test template v1 item 21. Binary modes, a positional encoding, and a deliberate non-utf-8 encoding (counted in the passing message) are never convicted. Scored per test file; also convicts in the checklist lane on the write |
 | naming | all_files | everywhere | snake_case, column-0 constants |
 | oversize_test_file *(tests only)* | all_files | tests | A test file over 1,500 CODE lines — multi-line string payload, docstrings included, is subtracted first. Scored per test file since 2026-09-21, when `tests/` joined the audit corpus; also convicts in the checklist lane on the write |
 | output_routing | all_files | production | Status output via @cli helpers, not raw console.print |

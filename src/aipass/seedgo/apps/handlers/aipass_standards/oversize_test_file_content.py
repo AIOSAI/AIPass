@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: oversize_test_file_content.py
 # Description: Oversize Test File Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -75,11 +75,11 @@ def get_oversize_test_file_standards() -> str:
         "[yellow]SCOPE:[/yellow]",
         "  APPLIES_TO = [bold]tests[/bold] -- test files only.",
         "",
-        "  The audit's corpus is [dim]apps/[/dim], so this standard scores NOTHING in",
-        "  [dim]audit aipass[/dim] and no branch's number moved when it landed. It",
-        "  convicts in the per-file [dim]checklist[/dim] lane on the write that grows",
-        "  the file, and reports the standing backlog unscored, naming the",
-        "  largest offender so there is somewhere to start.",
+        "  The audit's corpus took in [dim]tests/[/dim] on 2026-09-21 (owner ruling",
+        "  21:20), so this standard is a [bold]scored row[/bold]: an over-cap file scores 0",
+        "  and the branch number moves. It also convicts in the per-file",
+        "  [dim]checklist[/dim] lane, on the write that grows the file. The unscored",
+        "  backlog line retired with that ruling -- the row is the record now.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
         "  Single check per file: [green]pass[/green] (at or under cap) or [red]fail[/red] (over).",

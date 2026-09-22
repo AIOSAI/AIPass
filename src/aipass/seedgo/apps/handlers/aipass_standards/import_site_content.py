@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: import_site_content.py
 # Description: Import Site Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-21
 # Modified: 2026-09-21
 # =============================================
@@ -84,9 +84,11 @@ def get_import_site_standards() -> str:
         "  was rebuilt from a stub inside the test body.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
-        "  UNSCORED. Test files are not in the audit's corpus, so no branch's",
-        "  number moves. The audit reports the standing backlog through the info",
-        "  channel; the per-file checklist convicts on the next write of a file.",
+        "  SCORED per test file since 2026-09-21 (owner ruling 21:20), when the",
+        "  audit's corpus took in tests/. A convicted file scores 0 and the branch",
+        "  number moves; the per-file checklist convicts on the next write. The",
+        "  unscored backlog line retired with that ruling -- @memory scored 4% on",
+        "  this standard the day the corpus changed.",
     ]
 
     json_handler.log_operation("content_served", {"standard": "import_site"})

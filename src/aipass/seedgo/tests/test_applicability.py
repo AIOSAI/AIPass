@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-09
 # Modified: 2026-09-21
 # =============================================
@@ -167,7 +167,10 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     argued for, and `test_quality` still has to stay gone. `import_site` is
     the third, argued on 2026-09-21: template v1 item 8, owner 20:11.
     `through_the_command` is the fourth, same day: template v1 item 10,
-    owner 2026-09-20 22:28.
+    owner 2026-09-20 22:28. `named_encoding` is the fifth, 2026-09-21:
+    template v1 item 21, @devpulse dispatch a8ef55c8 — a test that writes a
+    fixture without naming utf-8 reads it back as cp1252 in the Windows CI
+    lane, which is a failure of the test and not of the product.
 
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
@@ -181,6 +184,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     assert tests_only == [
         "calendar_bound",
         "import_site",
+        "named_encoding",
         "oversize_test_file",
         "router_assert",
         "through_the_command",

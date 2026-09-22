@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: through_the_command_content.py
 # Description: Through The Command Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-21
 # Modified: 2026-09-21
 # =============================================
@@ -76,9 +76,11 @@ def get_through_the_command_standards() -> str:
         "  of them is a test that will survive a product break, or die on a rename.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
-        "  UNSCORED. Test files are not in the audit's corpus, so no branch's",
-        "  number moves. The audit reports the standing backlog through the info",
-        "  channel; the per-file checklist convicts on the next write of a file.",
+        "  SCORED per test file since 2026-09-21 (owner ruling 21:20), when the",
+        "  audit's corpus took in tests/. A convicted file scores 0 and the branch",
+        "  number moves; the per-file checklist convicts on the next write. The",
+        "  unscored backlog line retired with that ruling -- @memory scored 58% on",
+        "  this standard the day the corpus changed.",
     ]
 
     json_handler.log_operation("content_served", {"standard": "through_the_command"})

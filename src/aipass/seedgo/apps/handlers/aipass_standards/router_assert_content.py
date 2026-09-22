@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_assert_content.py
 # Description: Router Assert Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -84,12 +84,12 @@ def get_router_assert_standards() -> str:
         "[yellow]SCOPE:[/yellow]",
         "  APPLIES_TO = [bold]tests[/bold] -- test files only.",
         "",
-        "  The audit's corpus is [dim]apps/[/dim], so this standard scores NOTHING in",
-        "  [dim]audit aipass[/dim] and no branch's number moved when it landed. It",
-        "  convicts in the per-file [dim]checklist[/dim] lane, which the PostToolUse",
-        "  hook runs on the write -- so it meets an agent creating the shape.",
-        "  The standing backlog is reported once per branch, unscored, through",
-        "  the audit's info channel.",
+        "  The audit's corpus took in [dim]tests/[/dim] on 2026-09-21 (owner ruling",
+        "  21:20), so this standard is a [bold]scored row[/bold]: a convicted file scores 0",
+        "  and the branch number moves. It also convicts in the per-file",
+        "  [dim]checklist[/dim] lane, which the PostToolUse hook runs on the write --",
+        "  so it meets an agent creating the shape. The unscored backlog line",
+        "  retired with that ruling; the row is the record now.",
         "",
         "[bold cyan]SCORING:[/bold cyan]",
         "  Single check per file: [green]pass[/green] (0 units) or [red]fail[/red] (any units).",
