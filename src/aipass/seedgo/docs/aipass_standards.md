@@ -55,6 +55,7 @@ cost noise and never a missed bug.
 | json_structure | all_files | production | json_handler import + log_operation calls |
 | log_handler | all_files | production | Prax logger usage (not stdlib logging) |
 | log_level | all_files | production | Correct log level usage |
+| literal_path *(tests only)* | all_files | tests | An absolute path literal HANDED TO A CALL in a test — `Path("/nonexistent/path")`, `classify("/fake/repo/x.py")`, or a name bound only to one — test template v1 item 22. A literal that merely sits somewhere is data: mock return values, URL routes, dict keys and oracles are never convicted, nor are system roots, pure path classes or home-rooted paths (`hardcoded_path` owns those). Drive-rooted literals are counted in the passing message, never charged |
 | log_structure | all_files | production | Structured log message format |
 | log_visibility | all_files | production | Log output in key operations |
 | meta | all_files | production | File header metadata block |

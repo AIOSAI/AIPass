@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-09
 # Modified: 2026-09-21
 # =============================================
@@ -171,6 +171,11 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     template v1 item 21, @devpulse dispatch a8ef55c8 — a test that writes a
     fixture without naming utf-8 reads it back as cp1252 in the Windows CI
     lane, which is a failure of the test and not of the product.
+    `literal_path` is the sixth, 2026-09-22: template v1 item 22, @devpulse
+    dispatch cfcb4191. It declares `tests` rather than `everywhere` because
+    its cure is `tmp_path`, a fixture that exists only in a test: production
+    code builds its paths from config and a rule telling it to use a pytest
+    fixture would be nonsense. `hardcoded_path` keeps the production half.
 
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
@@ -184,6 +189,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     assert tests_only == [
         "calendar_bound",
         "import_site",
+        "literal_path",
         "named_encoding",
         "oversize_test_file",
         "router_assert",
