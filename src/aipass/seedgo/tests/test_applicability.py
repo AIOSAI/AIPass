@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-09
 # Modified: 2026-09-21
 # =============================================
@@ -166,10 +166,12 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     rather than being deleted — a further name appearing here still has to be
     argued for, and `test_quality` still has to stay gone. `import_site` is
     the third, argued on 2026-09-21: template v1 item 8, owner 20:11.
+    `through_the_command` is the fourth, same day: template v1 item 10,
+    owner 2026-09-20 22:28.
     """
     checkers = discover_checkers()
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
-    assert tests_only == ["import_site", "oversize_test_file", "router_assert"]
+    assert tests_only == ["import_site", "oversize_test_file", "router_assert", "through_the_command"]
     assert "test_quality" not in checkers
 
 
@@ -178,13 +180,28 @@ def test_the_tests_only_bucket_is_an_exact_roster():
 # ---------------------------------------------------------------------------
 
 
-def test_checklist_lane_honours_the_declaration():
-    production_only = _checker("production", AUDIT_SCOPE="all_files", check_module=lambda *a, **k: {})
-    everywhere = _checker(None, AUDIT_SCOPE="all_files", check_module=lambda *a, **k: {})
+def test_checklist_lane_honours_the_declaration(tmp_path, monkeypatch):
+    """Through the command: which standards the lane REPORTS on each kind of file.
 
-    assert checklist._is_applicable(production_only, "/repo/b/apps/modules/thing.py") is True
-    assert checklist._is_applicable(production_only, "/repo/b/tests/test_thing.py") is False
-    assert checklist._is_applicable(everywhere, "/repo/b/tests/test_thing.py") is True
+    Reads the pack's real declarations rather than a stand-in checker, so the
+    lane is measured end to end -- `architecture` is production-only,
+    `import_site` is tests-only, `naming` is everywhere.
+    """
+    monkeypatch.setattr(checklist, "is_throwaway_path", lambda _p: False)
+
+    source = tmp_path / "apps" / "modules" / "thing.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("X = 1\n", encoding="utf-8")
+    test_file = tmp_path / "tests" / "test_thing.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+    on_source = {r["standard"] for r in checklist.run_checklist(str(source))}
+    on_test = {r["standard"] for r in checklist.run_checklist(str(test_file))}
+
+    assert "architecture" in on_source and "architecture" not in on_test
+    assert "import_site" in on_test and "import_site" not in on_source
+    assert {"naming"} <= on_source & on_test
 
 
 def test_checklist_lane_skips_retired_files(tmp_path, monkeypatch):
@@ -206,6 +223,12 @@ def test_checklist_lane_skips_retired_files(tmp_path, monkeypatch):
 
 
 def test_audit_lane_does_not_collect_retired_files(tmp_path, monkeypatch):
+    """Through the command: the audit's own corpus count and violation lines.
+
+    `x=1` is a naming violation in both files, so an archived file that reached
+    the corpus would name itself in the report. Asserting on the audit's output
+    rather than on the collector proves no checker ever saw it.
+    """
     monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
 
     live = tmp_path / "apps" / "modules" / "live.py"
@@ -215,5 +238,7 @@ def test_audit_lane_does_not_collect_retired_files(tmp_path, monkeypatch):
     archived.parent.mkdir(parents=True)
     archived.write_text("x=1\n", encoding="utf-8")
 
-    collected = {f["name"] for f in branch_audit._collect_py_files(tmp_path)}
-    assert collected == {"live.py"}
+    output = branch_audit.audit_branch({"name": "tmpb", "path": str(tmp_path), "entry_file": ""}, [])
+
+    assert output["corpus_size"] == 1
+    assert {v["file"] for v in output["naming_violations"]} == {"live.py"}

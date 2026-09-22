@@ -66,6 +66,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | stderr_routing | all_files | everywhere | Proper stderr vs stdout usage |
 | subcommand_help | entry_point | everywhere | Subcommand --help interception before dispatch |
 | template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |
+| through_the_command *(tests only)* | all_files | tests | A test importing an underscore name from a product module, or reaching one on a base it imported — test template v1 item 10. Dunders, the test's own helpers, reads on returned values, and WRITES (item 15's shape) are never convicted. Scores nothing in `audit aipass`; convicts in the checklist lane on the write, and reports the standing backlog unscored |
 | todo | all_files | everywhere | No unresolved TODO/FIXME/HACK comments |
 | trigger | all_files | production | Trigger integration patterns |
 | trinity | branch_level | everywhere | `.trinity/` document set — schema, caps, ordering, freshness |
