@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-08-09
 # Modified: 2026-09-21
 # =============================================
@@ -181,6 +181,11 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     production-only, so a test file's header and docstring had no checker at
     all; this one declares `tests` because its third sub-rule, the declared
     pass, is a statement about tests and nothing else.
+    `mock_console` is the eighth, 2026-09-22: template v1 item 14, @devpulse
+    dispatch b552d057 — a console stand-in installed over the product, where
+    the oracle should be the channel. `tests`, because `cli` and
+    `output_routing` already own how production BUILDS a console, and this one
+    is about what a test puts in its place.
 
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
@@ -196,6 +201,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "file_top",
         "import_site",
         "literal_path",
+        "mock_console",
         "named_encoding",
         "oversize_test_file",
         "router_assert",
