@@ -1,22 +1,28 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-08
-# Modified: 2026-08-08
+# Modified: 2026-09-22
 # =============================================
 
-"""Tests for caller-CWD resolution.
+"""Tests for src/aipass/backup/apps/handlers/path/caller.py and caller-CWD resolution."""
 
-Backup runs as an installed entry point, so ``Path.cwd()`` is backup's own
-branch directory. Drone exports ``AIPASS_CALLER_CWD``; every user-supplied
-relative path must resolve against that, not against the process CWD.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/path/ and modules/share, register, status parse and import
+# seedgo: no-test-needed(documentation) — that functions like resolve_caller_path, run_share carry docstrings
+# seedgo: no-test-needed(constant) — AIPASS_CALLER_CWD environment variable name
+# seedgo: no-test-needed(stdlib) — Path.resolve() and pathlib behavior
+# seedgo: no-test-needed(generated) — mock call arguments and assertion shapes
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.backup.apps.handlers.path.caller import caller_cwd, resolve_caller_path
+from aipass.backup.apps.modules import register as register_mod
+from aipass.backup.apps.modules import share as share_mod
+from aipass.backup.apps.modules import status as status_mod
+from aipass.backup.apps.modules.register import resolve_project
 
 
 class TestResolveCallerPath:
@@ -69,8 +75,6 @@ class TestShareUsesCallerCwd:
 
     def _run(self, file_arg: str, caller: Path):
         """Run run_share with Drive fully mocked; return the path share_file saw."""
-        from aipass.backup.apps.modules import share as share_mod
-
         client = MagicMock()
         client.authenticate.return_value = True
         share_file = MagicMock(return_value={"success": True, "link": "https://x", "file_id": "1", "error": None})
@@ -109,8 +113,6 @@ class TestRegisterUsesCallerCwd:
 
     def test_resolve_project_relative_dir(self, tmp_path: Path, monkeypatch) -> None:
         """A relative dir resolves in the caller's tree."""
-        from aipass.backup.apps.modules.register import resolve_project
-
         caller = tmp_path / "workspace"
         (caller / "myproj").mkdir(parents=True)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
@@ -119,8 +121,6 @@ class TestRegisterUsesCallerCwd:
 
     def test_resolve_project_dot(self, tmp_path: Path, monkeypatch) -> None:
         """`.` means the caller's directory — not backup's branch directory."""
-        from aipass.backup.apps.modules.register import resolve_project
-
         caller = tmp_path / "workspace"
         caller.mkdir()
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
@@ -129,8 +129,6 @@ class TestRegisterUsesCallerCwd:
 
     def test_register_command_relative_path(self, tmp_path: Path, monkeypatch) -> None:
         """handle_command scaffolds .backup/ in the caller's project."""
-        from aipass.backup.apps.modules import register as register_mod
-
         caller = tmp_path / "workspace"
         (caller / "myproj").mkdir(parents=True)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
@@ -150,8 +148,6 @@ class TestStatusUsesCallerCwd:
 
     def test_status_relative_path(self, tmp_path: Path, monkeypatch) -> None:
         """backup_root is asked about the caller's project."""
-        from aipass.backup.apps.modules import status as status_mod
-
         caller = tmp_path / "workspace"
         caller.mkdir()
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))

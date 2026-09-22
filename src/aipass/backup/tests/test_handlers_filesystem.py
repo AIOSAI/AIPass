@@ -1,19 +1,30 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Tests for filesystem handlers -- scan, ignore, path, project
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-12
-# Modified: 2026-09-11
+# Modified: 2026-09-22
 # =============================================
 
-"""Test filesystem handlers -- scan, ignore, path, copy, project."""
+"""Tests for aipass/backup/apps/handlers/scan/walk.py, filter.py and related packages."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/ parse without errors
+# seedgo: no-test-needed(documentation) — handler functions carry docstrings
+# seedgo: no-test-needed(constant) — config defaults (backup_mode, max_versions, max_backup_files, etc.)
+# seedgo: no-test-needed(stdlib) — os, pathlib, pathspec, shutil usage
 
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-# All handler imports go through mocked prax logger since handlers
-# import from aipass.prax at module level.
+from aipass.backup.apps.handlers.path.builder import backup_root, build_snapshot_path
+from aipass.backup.apps.handlers.project.config import load_project_config
+from aipass.backup.apps.handlers.project.setup import create_backup_dir
+from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.scan.filter import filter_paths
+from aipass.backup.apps.handlers.scan.walk import walk_project
+from aipass.backup.apps.handlers.ignore.patterns import load_spec
 
 
 class TestScanWalk:
@@ -27,8 +38,6 @@ class TestScanWalk:
         the claim this test's name makes.
         """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.scan.walk import walk_project
-
             result = list(walk_project(str(tmp_path)))
             assert result == []
 
@@ -37,8 +46,6 @@ class TestScanWalk:
         (tmp_path / "file1.txt").write_text("content1", encoding="utf-8")
         (tmp_path / "file2.py").write_text("content2", encoding="utf-8")
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.scan.walk import walk_project
-
             result = list(walk_project(str(tmp_path)))
             assert len(result) >= 2
 
@@ -51,8 +58,6 @@ class TestScanWalk:
         """
         bad_path = tmp_path / "nonexistent"
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.scan.walk import walk_project
-
             result = list(walk_project(str(bad_path)))
             assert result == []
 
@@ -71,8 +76,6 @@ class TestScanFilter:
         ):
             import pathspec
 
-            from aipass.backup.apps.handlers.scan.filter import filter_paths
-
             empty_spec = pathspec.PathSpec.from_lines("gitignore", [])
             result = filter_paths([], empty_spec, [], 100)
             assert result == []
@@ -89,10 +92,6 @@ class TestScanFilter:
                 return_value={"whitelist": []},
             ),
         ):
-            from aipass.backup.apps.handlers.scan.filter import filter_paths
-
-            from aipass.backup.apps.handlers.ignore.patterns import load_spec
-
             spec = load_spec(str(tmp_path))
             result = filter_paths(files, spec, [], 100)
 
@@ -114,8 +113,6 @@ class TestIgnorePatterns:
         "matched" and none got copied. The behaviour is the claim.
         """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.ignore.patterns import load_spec
-
             import pathspec
 
             result = load_spec(str(tmp_path))
@@ -133,8 +130,6 @@ class TestIgnorePatterns:
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.pyc\n__pycache__/\n", encoding="utf-8")
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.ignore.patterns import load_spec
-
             import pathspec
 
             result = load_spec(str(tmp_path))
@@ -150,8 +145,6 @@ class TestProjectSetup:
     def test_create_backup_dir(self, tmp_path: Path) -> None:
         """create_backup_dir creates .backup/ -- mkdir, .exists()."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.project.setup import create_backup_dir
-
             create_backup_dir(str(tmp_path))
             backup_dir = tmp_path / ".backup"
             assert backup_dir.exists()
@@ -159,8 +152,6 @@ class TestProjectSetup:
     def test_create_backup_dir_idempotent(self, tmp_path: Path) -> None:
         """Second call doesn't fail -- no_overwrite, already_exists."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.project.setup import create_backup_dir
-
             create_backup_dir(str(tmp_path))
             create_backup_dir(str(tmp_path))
             assert (tmp_path / ".backup").exists()
@@ -178,8 +169,6 @@ class TestProjectConfig:
         a runaway tree would either not arm or refuse everything.
         """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.project.config import load_project_config
-
             result = load_project_config(str(tmp_path))
             assert isinstance(result, dict)
             assert result["backup_mode"] == "snapshot"
@@ -197,9 +186,6 @@ class TestProjectConfig:
         config could point at another project's tree.
         """
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.project.config import load_project_config
-            from aipass.backup.apps.handlers.project.setup import create_backup_dir
-
             create_backup_dir(str(tmp_path))
             result = load_project_config(str(tmp_path))
 
@@ -215,8 +201,6 @@ class TestPathBuilder:
     def test_backup_root(self, tmp_path: Path) -> None:
         """backup_root returns .backup path."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.path.builder import backup_root
-
             result = backup_root(str(tmp_path))
             assert isinstance(result, Path)
             assert result.name == ".backup"
@@ -224,8 +208,6 @@ class TestPathBuilder:
     def test_build_snapshot_path(self, tmp_path: Path) -> None:
         """build_snapshot_path returns snapshots/ under .backup."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.path.builder import build_snapshot_path
-
             result = build_snapshot_path(str(tmp_path))
             assert isinstance(result, Path)
             assert "snapshots" in str(result)
@@ -237,8 +219,6 @@ class TestBackupResult:
     def test_result_creation(self) -> None:
         """BackupResult can be created with mode."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             result = BackupResult(mode="snapshot", project_root=str(Path(tempfile.gettempdir()) / "test"))
             assert result.mode == "snapshot"
             assert result.files_copied == 0
@@ -246,8 +226,6 @@ class TestBackupResult:
     def test_result_fields(self) -> None:
         """BackupResult has expected fields."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             result = BackupResult(mode="versioned", files_copied=10, bytes_copied=1024)
             assert result.files_copied == 10
             assert result.bytes_copied == 1024

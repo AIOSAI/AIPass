@@ -1,39 +1,43 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_module_isolation.py
 # Description: Regression pair for the sys.modules/parent-attr desync class
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-08
-# Modified: 2026-08-08
+# Modified: 2026-09-22
 # =============================================
 
-"""Regression tests for the stale parent-attribute class (CI-only xdist red).
+"""Tests for apps/handlers/drive/client.py resolving through a re-imported parent package."""
 
-Fixtures like test_drive_pipeline's _fresh_import evict submodules from
-sys.modules and re-import them under mocked dependencies. patch.dict restores
-the sys.modules DICT afterwards but never the parent package's ATTRIBUTE,
-which keeps pointing at a throwaway twin — one that can lack submodule
-attributes entirely (they resolved to sys.modules mocks during its import).
-mock.patch then walks the stale attribute and dies with
-``AttributeError: module '...drive' has no attribute 'client'`` even though a
-clean import works — but only when an unlucky xdist worker ran a polluter
-module before a victim, so serial runs never see it.
-
-conftest._resync_module_attrs heals the desync after every test. This pair
-recreates the exact CI failure shape deterministically: the first test
-manufactures the desync the way _fresh_import does; the second asserts a
-string-target patch works afterwards. Order within one file is guaranteed,
-and loadscope keeps a file on one worker.
-
-Version note: Python 3.12+ mock resolves patch targets with
-pkgutil.resolve_name (sys.modules truth, self-healing), so the un-fixed red
-only shows on 3.10/3.11, whose mock walks parent attributes and retries
-getattr on the stale object. The final coherence assert in test_b holds the
-repair honest on every version.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the drive package parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on module and class attributes
+# seedgo: no-test-needed(constant) — DRIVE_PKG string value
+# seedgo: no-test-needed(stdlib) — importlib.import_module and mock.patch behavior
 
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+
+# The defect this pair pins (CI-only xdist red). Fixtures like
+# test_drive_pipeline's _fresh_import evict submodules from sys.modules and
+# re-import them under mocked dependencies. patch.dict restores the sys.modules
+# DICT afterwards but never the parent package's ATTRIBUTE, which keeps pointing
+# at a throwaway twin - one that can lack submodule attributes entirely (they
+# resolved to sys.modules mocks during its import). mock.patch then walks the
+# stale attribute and dies with AttributeError: module '...drive' has no
+# attribute 'client' even though a clean import works - but only when an unlucky
+# xdist worker ran a polluter before a victim, so serial runs never see it.
+# _resync_module_attrs heals the desync after every test; this pair recreates the
+# failure shape deterministically. Order within one file is guaranteed, and
+# loadscope keeps a file on one worker.
+# Version note: Python 3.12+ mock resolves patch targets with
+# pkgutil.resolve_name (sys.modules truth, self-healing), so the un-fixed red
+# only shows on 3.10/3.11, whose mock walks parent attributes and retries getattr
+# on the stale object. The final coherence assert in test_b holds the repair
+# honest on every version.
 
 DRIVE_PKG = "aipass.backup.apps.handlers.drive"
 
@@ -41,11 +45,11 @@ DRIVE_PKG = "aipass.backup.apps.handlers.drive"
 class TestStaleParentAttrHealed:
     """First test poisons like _fresh_import; second must still patch clean."""
 
-    def test_a_manufacture_the_desync(self) -> None:
+    def test_a_manufacture_the_desync(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Evict drive*, import a twin with client mocked away — the polluter shape."""
         for key in list(sys.modules.keys()):
             if key.startswith(DRIVE_PKG):
-                del sys.modules[key]
+                monkeypatch.delitem(sys.modules, key, raising=False)
 
         with patch.dict(sys.modules, {f"{DRIVE_PKG}.client": MagicMock()}):
             twin = importlib.import_module(f"{DRIVE_PKG}.share")

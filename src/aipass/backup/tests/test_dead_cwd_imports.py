@@ -1,35 +1,18 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — guard shape, safe path helper, both worlds
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-22
 # =============================================
 
-"""The dead-cwd import defect (Windows round 4).
+"""Tests for apps/handlers/path/module_paths.py and the kinship fence in apps/handlers/__init__.py."""
 
-``ntpath.realpath`` reads ``os.getcwd()`` UNCONDITIONALLY -- posixpath only does
-so for relative paths -- and ``Path.resolve()`` routes through it. So on Windows
-every ``resolve()`` REACHED AT IMPORT is an import-time crash for a process whose
-cwd was deleted: the module cannot be imported at all.
-
-Two injections are needed because they convict different code:
-
-* **World A** wraps ``os.path.realpath`` to read the cwd first, then denies
-  ``os.getcwd``. This convicts a raw ``resolve()``. It CANNOT convict
-  ``inspect.stack()`` -- denying getcwd also kills ``abspath``, so ``getmodule``
-  dies at ``getabsfile`` inside its own ``except`` and ``stack()`` completes
-  green for the wrong reason.
-* **World B** denies ``os.path.realpath`` directly and leaves ``abspath``
-  working. This convicts ``inspect.stack()`` via ``getmodule``'s unguarded
-  ``realpath`` at inspect.py:1009.
-
-Every probe rides a **string pseudo-frame** (a ``-c`` child), never stdin:
-linecache caches stdin and the probe would report green while lying.
-
-Measured on this branch 2026-08-31: 57/57 modules red in both worlds before the
-cure, 0/57 after.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the handlers module parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on public guard functions
+# seedgo: no-test-needed(constant) — PROBE_MODULES list values and preload strings
+# seedgo: no-test-needed(stdlib) — os.path.realpath and Path.resolve behaviour
 
 import ast
 import importlib.util
@@ -45,6 +28,24 @@ import coverage
 import pytest
 
 from aipass.backup.apps.handlers.path import module_paths
+
+# The defect (Windows round 4). ntpath.realpath reads os.getcwd()
+# UNCONDITIONALLY - posixpath only does so for relative paths - and
+# Path.resolve() routes through it. So on Windows every resolve() REACHED AT
+# IMPORT is an import-time crash for a process whose cwd was deleted: the module
+# cannot be imported at all.
+# Two injections are needed because they convict different code. World A wraps
+# os.path.realpath to read the cwd first, then denies os.getcwd: this convicts a
+# raw resolve(). It CANNOT convict inspect.stack() - denying getcwd also kills
+# abspath, so getmodule dies at getabsfile inside its own except and stack()
+# completes green for the wrong reason. World B denies os.path.realpath directly
+# and leaves abspath working: this convicts inspect.stack() via getmodule's
+# unguarded realpath at inspect.py:1009.
+# Every probe rides a string pseudo-frame (a -c child), never stdin: linecache
+# caches stdin and the probe would report green while lying.
+# Measured on this branch 2026-08-31: 57/57 modules red in both worlds before the
+# cure, 0/57 after.
+
 
 #: The real guard file. It is loaded from disk rather than imported by name
 #: because conftest installs a stub for the handlers package (to keep the
@@ -167,6 +168,7 @@ PROBE_MODULES = [
 
 _PROBE = """
 import json, os, os.path, sys
+
 world, targets, preload = sys.argv[1], json.loads(sys.argv[2]), json.loads(sys.argv[3])
 for name in preload:
     try:
@@ -265,7 +267,7 @@ class TestSafePathHelper:
         def _boom(self, *args, **kwargs):
             raise OSError(2, "cwd denied")
 
-        module_paths._REPORTED_DEGRADED.discard(__file__)
+        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
         monkeypatch.setattr(Path, "resolve", _boom)
         result = module_paths.module_file(__file__)
         monkeypatch.setattr(Path, "resolve", original)
@@ -281,6 +283,51 @@ class TestSafePathHelper:
 
         monkeypatch.setattr(Path, "resolve", _boom)
         assert module_paths.branch_root(__file__, 1).is_absolute()
+
+
+class TestDegradedResolutionIsAnnouncedOnce:
+    """A dead cwd fails EVERY resolve, so the report is once per file, not per call.
+
+    One line per call buries the traceback that actually explains the run under
+    its own noise. The set that remembers what was already reported is isolated
+    per test rather than read, so the pin is the stderr the user sees.
+    """
+
+    def test_two_degraded_resolutions_of_one_file_write_one_line(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """module_file called twice on the same file announces once."""
+
+        def _boom(self, *args, **kwargs):
+            raise OSError(2, "cwd denied")
+
+        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
+        monkeypatch.setattr(Path, "resolve", _boom)
+
+        module_paths.module_file(__file__)
+        module_paths.module_file(__file__)
+
+        out, err = capsys.readouterr()
+        assert out == "", "the degraded report belongs on stderr, which drone piping relies on"
+        assert err.count("cwd unreadable") == 1
+        assert Path(__file__).name in err
+
+    def test_a_second_file_gets_its_own_line(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Once-per-file, not once-per-process: a different file is still reported."""
+
+        def _boom(self, *args, **kwargs):
+            raise OSError(2, "cwd denied")
+
+        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
+        monkeypatch.setattr(Path, "resolve", _boom)
+
+        module_paths.module_file(__file__)
+        module_paths.module_file(str(Path(__file__).parent / "conftest.py"))
+
+        _out, err = capsys.readouterr()
+        assert err.count("cwd unreadable") == 2
 
 
 def _inspect_stack_calls(source: str) -> list[int]:
@@ -469,14 +516,14 @@ class TestKinshipSurvivesTheWindowsSpelling:
         lowered = str(self.WIN_KIN).replace("C:", "c:", 1)
         assert guard._is_kin(lowered, str(self.WIN_ROOT), windows=True)
 
-    def test_case_does_not_fold_on_posix(self, guard) -> None:
+    def test_case_does_not_fold_on_posix(self, guard, tmp_path: Path) -> None:
         """The negative control for the fold: POSIX case-sensitivity is not weakened.
 
         Folding unconditionally would ADMIT a foreign BACKUP dir under a temp
         root on Linux, so
         the fold is gated on the platform rather than applied to be safe.
         """
-        root = "/home/x/src/aipass/backup"
+        root = str(tmp_path / "src" / "aipass" / "backup")
         assert not guard._is_kin(f"{root.upper()}/apps/evil.py", root, windows=False)
         assert guard._is_kin(f"{root}/apps/ok.py", root, windows=False)
 

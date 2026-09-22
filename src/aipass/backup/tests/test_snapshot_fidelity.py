@@ -1,18 +1,28 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_snapshot_fidelity.py
 # Description: Tests for snapshot fidelity -- mirror-delete, quick-check, long paths, error semantics
-# Version: 2.0.0
+# Version: 2.1.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-22
 # =============================================
 
-"""Test snapshot fidelity -- mirror-delete, quick-check, long paths, error semantics."""
+"""Tests for aipass/backup/apps/handlers/report/result.py, cleanup/mirror.py, copy/snapshot.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — cleanup/, copy/, report/ handlers parse without errors
+# seedgo: no-test-needed(documentation) — handler functions carry docstrings
+# seedgo: no-test-needed(constant) — dryrun mode and file size thresholds
+# seedgo: no-test-needed(stdlib) — shutil, pathlib, os standard library usage
 
 import shutil
 from pathlib import Path
 from unittest.mock import patch
 
 import pathspec
+
+from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
+from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
+from aipass.backup.apps.handlers.report.result import BackupResult
 
 
 class TestBackupResultErrors:
@@ -21,8 +31,6 @@ class TestBackupResultErrors:
     def test_add_error_non_critical(self) -> None:
         """Non-critical error appends to errors but keeps success True."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             r = BackupResult(mode="snapshot")
             r.add_error("minor issue")
             assert len(r.errors) == 1
@@ -32,8 +40,6 @@ class TestBackupResultErrors:
     def test_add_error_critical(self) -> None:
         """Critical error marks success False and appears in critical_errors."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             r = BackupResult(mode="snapshot")
             r.add_error("disk failure", is_critical=True)
             assert r.success is False
@@ -43,8 +49,6 @@ class TestBackupResultErrors:
     def test_add_warning(self) -> None:
         """Warnings are tracked separately and do not affect success."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             r = BackupResult(mode="snapshot")
             r.add_warning("path too long")
             assert len(r.warnings) == 1
@@ -53,8 +57,6 @@ class TestBackupResultErrors:
     def test_files_deleted_field(self) -> None:
         """files_deleted field defaults to 0 and is assignable."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             r = BackupResult(mode="snapshot")
             assert r.files_deleted == 0
             r.files_deleted = 5
@@ -63,8 +65,6 @@ class TestBackupResultErrors:
     def test_errors_list_still_works(self) -> None:
         """Backward compat -- errors as list[str] assignment still works."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             r = BackupResult(mode="snapshot")
             r.errors = ["err1", "err2"]
             assert len(r.errors) == 2
@@ -76,9 +76,6 @@ class TestCleanupMirror:
     def test_cleanup_removes_deleted_source(self, tmp_path: Path) -> None:
         """File in snapshot but not in source is deleted from snapshot."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             source = tmp_path / "source"
             source.mkdir()
             (source / "keep.txt").write_text("keep", encoding="utf-8")
@@ -98,9 +95,6 @@ class TestCleanupMirror:
     def test_cleanup_deletes_all_orphans(self, tmp_path: Path) -> None:
         """All files whose source is gone are deleted (no exceptions list)."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             source = tmp_path / "source"
             source.mkdir()
 
@@ -118,9 +112,6 @@ class TestCleanupMirror:
     def test_cleanup_empty_dir_removed(self, tmp_path: Path) -> None:
         """Empty dirs cleaned up after file deletion."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             source = tmp_path / "source"
             source.mkdir()
 
@@ -136,9 +127,6 @@ class TestCleanupMirror:
     def test_cleanup_nonexistent_backup(self, tmp_path: Path) -> None:
         """No error if backup_path does not exist."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             result = BackupResult(mode="snapshot")
             cleanup_deleted_files(
                 tmp_path / "nonexistent",
@@ -151,9 +139,6 @@ class TestCleanupMirror:
     def test_cleanup_dry_run(self, tmp_path: Path) -> None:
         """Dry run counts deletions but does not actually delete."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
-            from aipass.backup.apps.handlers.report.result import BackupResult
-
             source = tmp_path / "source"
             source.mkdir()
             snapshot = tmp_path / "snapshot"
@@ -177,8 +162,6 @@ class TestCopySnapshotUpgrade:
     def test_copy_skips_unchanged(self, tmp_path: Path) -> None:
         """Files with same mtime are skipped."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
-
             source = tmp_path / "project"
             source.mkdir()
             f = source / "file.txt"
@@ -197,8 +180,6 @@ class TestCopySnapshotUpgrade:
     def test_copy_handles_new_file(self, tmp_path: Path) -> None:
         """New file is copied to snapshot destination."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
-
             source = tmp_path / "project"
             source.mkdir()
             f = source / "new.txt"
@@ -213,8 +194,6 @@ class TestCopySnapshotUpgrade:
     def test_copy_mirror_deletes(self, tmp_path: Path) -> None:
         """Existing snapshot files not in source are mirror-deleted."""
         with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
-
             source = tmp_path / "project"
             source.mkdir()
             f = source / "keep.txt"

@@ -1,9 +1,9 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- shared pytest fixtures
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-12
-# Modified: 2026-09-03
+# Modified: 2026-09-22
 # =============================================
 
 """Backup test configuration -- ported from skills conftest pattern."""
@@ -22,6 +22,9 @@ from typing import Generator  # noqa: E402
 from unittest.mock import MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
+
+from aipass.backup.apps.handlers.json import json_handler  # noqa: E402
+from aipass.cli.apps.modules import display  # noqa: E402
 
 BRANCH_MODULE = "aipass.backup"
 
@@ -144,11 +147,29 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
         log = logging.getLogger(logger_name)
         monkeypatch.setattr(log, "handlers", [logging.NullHandler()])
 
-    from aipass.backup.apps.handlers.json import json_handler
-
     sandbox = json_handler.get_json_path("probe", "config").parent
     sandbox.mkdir(parents=True, exist_ok=True)
     return sandbox
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Pin the product's consoles to one width for the whole run.
+
+    Rich sizes an unpinned console on every print: 80 columns on POSIX and 79
+    on Windows under pytest's capture, the terminal's width under -s, COLUMNS
+    when it is exported. A line that wraps on one OS and not another turns a
+    substring assertion into a coin toss (DPLAN-0354, test template v1 item 20).
+    """
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture()

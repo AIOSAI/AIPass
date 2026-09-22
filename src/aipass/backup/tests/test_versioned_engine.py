@@ -1,20 +1,40 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 1.0.0
+# Version: 2.0.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-22
+# =============================================
 
-"""Test versioned engine — baseline, diff, skip, never-delete, restore."""
+"""Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file under apps/handlers/copy, diff and path parses and imports
+# seedgo: no-test-needed(documentation) — that the public handler and module functions carry docstrings
+# seedgo: no-test-needed(constant) — BACKUP_DIR's ".backup" text and the store's "versioned" directory name
+# seedgo: no-test-needed(stdlib) — hashlib.md5's digest and shutil.copy2's mtime-preserving copy
+# seedgo: no-test-needed(generated) — the date inside a baseline name and the timestamp inside a diff name
 
 import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch
+
+from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+from aipass.backup.apps.handlers.diff.generator import generate_diff_content, is_binary_file, should_create_diff
+from aipass.backup.apps.handlers.diff.restore import list_versions, restore_file
+from aipass.backup.apps.handlers.path.builder import build_versioned_file_path, build_versioned_store
+from aipass.backup.apps.modules import restore as restore_module
 
 # Inert path input for the path builder — never touched on disk, so it only
 # needs to be a valid absolute path on the running OS.
 FAKE_PROJECT_ROOT = str(Path(tempfile.gettempdir()) / "project")
+
+# The audit trail is deliberately NOT mocked here, though every test in this
+# file used to wrap itself in patch("...audit.trail.log_operation"). conftest's
+# autouse mock_infrastructure points AIPASS_TEST_LOG_DIR into tmp_path for each
+# test and trail.log_path() recomputes on every call, so the only write that
+# left tmp_path is already redirected for real. Template v1 item 15: mock at
+# the edge, and only where no real redirect exists.
 
 
 class TestVersionedBaseline:
@@ -22,41 +42,33 @@ class TestVersionedBaseline:
 
     def test_first_run_creates_baseline(self, tmp_path: Path):
         """New file -> baseline + current in file-folder."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "hello.py").write_text("print('hello')", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            (project / "hello.py").write_text("print('hello')", encoding="utf-8")
+        files = [(str(project / "hello.py"), "hello.py")]
+        result = copy_versioned(files, str(project))
 
-            files = [(str(project / "hello.py"), "hello.py")]
-            result = copy_versioned(files, str(project))
+        assert result["files_copied"] == 1
 
-            assert result["files_copied"] == 1
+        target = Path(build_versioned_file_path(str(project), "hello.py"))
+        assert target.exists()
 
-            target = Path(build_versioned_file_path(str(project), "hello.py"))
-            assert target.exists()
-
-            # Check baseline exists in same folder
-            baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
-            assert len(baselines) == 1
-            assert baselines[0].name.endswith(".py")
+        # Check baseline exists in same folder
+        baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
+        assert len(baselines) == 1
+        assert baselines[0].name.endswith(".py")
 
     def test_first_run_current_matches_source(self, tmp_path: Path):
         """Current copy has same content as source."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "data.txt").write_text("original content", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            (project / "data.txt").write_text("original content", encoding="utf-8")
+        copy_versioned([(str(project / "data.txt"), "data.txt")], str(project))
 
-            copy_versioned([(str(project / "data.txt"), "data.txt")], str(project))
-
-            target = Path(build_versioned_file_path(str(project), "data.txt"))
-            assert target.read_text(encoding="utf-8") == "original content"
+        target = Path(build_versioned_file_path(str(project), "data.txt"))
+        assert target.read_text(encoding="utf-8") == "original content"
 
 
 class TestVersionedDiff:
@@ -64,72 +76,60 @@ class TestVersionedDiff:
 
     def test_change_creates_diff(self, tmp_path: Path):
         """Modified file -> diff file appears in _diffs/ folder."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "code.py"
+        src.write_text("v1", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "code.py"
-            src.write_text("v1", encoding="utf-8")
+        # First run
+        copy_versioned([(str(src), "code.py")], str(project))
 
-            # First run
-            copy_versioned([(str(src), "code.py")], str(project))
+        # Modify source (ensure different mtime)
+        time.sleep(0.05)
+        src.write_text("v2", encoding="utf-8")
 
-            # Modify source (ensure different mtime)
-            time.sleep(0.05)
-            src.write_text("v2", encoding="utf-8")
+        # Second run
+        copy_versioned([(str(src), "code.py")], str(project))
 
-            # Second run
-            copy_versioned([(str(src), "code.py")], str(project))
-
-            target = Path(build_versioned_file_path(str(project), "code.py"))
-            diff_dir = target.parent / f"{target.name}_diffs"
-            assert diff_dir.exists()
-            diffs = list(diff_dir.glob("*.diff"))
-            assert len(diffs) == 1
+        target = Path(build_versioned_file_path(str(project), "code.py"))
+        diff_dir = target.parent / f"{target.name}_diffs"
+        assert diff_dir.exists()
+        diffs = list(diff_dir.glob("*.diff"))
+        assert len(diffs) == 1
 
     def test_change_overwrites_current(self, tmp_path: Path):
         """After change, current has new content."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "file.txt"
+        src.write_text("old", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "file.txt"
-            src.write_text("old", encoding="utf-8")
+        copy_versioned([(str(src), "file.txt")], str(project))
 
-            copy_versioned([(str(src), "file.txt")], str(project))
+        time.sleep(0.05)
+        src.write_text("new", encoding="utf-8")
+        copy_versioned([(str(src), "file.txt")], str(project))
 
-            time.sleep(0.05)
-            src.write_text("new", encoding="utf-8")
-            copy_versioned([(str(src), "file.txt")], str(project))
-
-            target = Path(build_versioned_file_path(str(project), "file.txt"))
-            assert target.read_text(encoding="utf-8") == "new"
+        target = Path(build_versioned_file_path(str(project), "file.txt"))
+        assert target.read_text(encoding="utf-8") == "new"
 
     def test_baseline_untouched_after_change(self, tmp_path: Path):
         """Baseline is never overwritten after first creation."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "config.py"
+        src.write_text("original", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "config.py"
-            src.write_text("original", encoding="utf-8")
+        copy_versioned([(str(src), "config.py")], str(project))
 
-            copy_versioned([(str(src), "config.py")], str(project))
+        time.sleep(0.05)
+        src.write_text("modified", encoding="utf-8")
+        copy_versioned([(str(src), "config.py")], str(project))
 
-            time.sleep(0.05)
-            src.write_text("modified", encoding="utf-8")
-            copy_versioned([(str(src), "config.py")], str(project))
-
-            target = Path(build_versioned_file_path(str(project), "config.py"))
-            baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
-            assert len(baselines) == 1
-            assert baselines[0].read_text(encoding="utf-8") == "original"
+        target = Path(build_versioned_file_path(str(project), "config.py"))
+        baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
+        assert len(baselines) == 1
+        assert baselines[0].read_text(encoding="utf-8") == "original"
 
 
 class TestVersionedSkip:
@@ -137,20 +137,17 @@ class TestVersionedSkip:
 
     def test_unchanged_skipped(self, tmp_path: Path):
         """File with same mtime -> files_unchanged incremented."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "stable.txt"
+        src.write_text("no change", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "stable.txt"
-            src.write_text("no change", encoding="utf-8")
+        copy_versioned([(str(src), "stable.txt")], str(project))
 
-            copy_versioned([(str(src), "stable.txt")], str(project))
-
-            # Run again without modifying
-            result = copy_versioned([(str(src), "stable.txt")], str(project))
-            assert result["files_unchanged"] == 1
-            assert result["files_copied"] == 0
+        # Run again without modifying
+        result = copy_versioned([(str(src), "stable.txt")], str(project))
+        assert result["files_unchanged"] == 1
+        assert result["files_copied"] == 0
 
 
 class TestVersionedNeverDelete:
@@ -158,27 +155,23 @@ class TestVersionedNeverDelete:
 
     def test_deleted_source_preserved_in_store(self, tmp_path: Path):
         """Source file deleted -> versioned store still has it."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "temp.py"
+        src.write_text("temp data", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "temp.py"
-            src.write_text("temp data", encoding="utf-8")
+        copy_versioned([(str(src), "temp.py")], str(project))
 
-            copy_versioned([(str(src), "temp.py")], str(project))
+        # Delete source
+        src.unlink()
 
-            # Delete source
-            src.unlink()
+        # Run versioned again WITHOUT the deleted file
+        copy_versioned([], str(project))
 
-            # Run versioned again WITHOUT the deleted file
-            copy_versioned([], str(project))
-
-            # Store still has the file
-            target = Path(build_versioned_file_path(str(project), "temp.py"))
-            assert target.exists()
-            assert target.read_text(encoding="utf-8") == "temp data"
+        # Store still has the file
+        target = Path(build_versioned_file_path(str(project), "temp.py"))
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == "temp data"
 
 
 class TestDiffGenerator:
@@ -186,44 +179,35 @@ class TestDiffGenerator:
 
     def test_text_diff(self, tmp_path: Path):
         """Text files produce unified diff."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.diff.generator import generate_diff_content
+        old = tmp_path / "old.py"
+        new = tmp_path / "new.py"
+        old.write_text("line1\nline2\n", encoding="utf-8")
+        new.write_text("line1\nline3\n", encoding="utf-8")
 
-            old = tmp_path / "old.py"
-            new = tmp_path / "new.py"
-            old.write_text("line1\nline2\n", encoding="utf-8")
-            new.write_text("line1\nline3\n", encoding="utf-8")
+        diff = generate_diff_content(old, new)
 
-            diff = generate_diff_content(old, new)
-
-            # Three clauses joined by 'or', all three about the result: the
-            # last one ("line" in diff) is true of literally any output that
-            # echoes either file, so the assertion could not fail. Measured
-            # 2026-09-08 -- all three headers are present, and so are the two
-            # changed lines with their unified-diff signs.
-            assert "--- a/old.py" in diff
-            assert "+++ b/new.py" in diff
-            assert "@@ -1,2 +1,2 @@" in diff
-            assert "-line2" in diff
-            assert "+line3" in diff
+        # Three clauses joined by 'or', all three about the result: the
+        # last one ("line" in diff) is true of literally any output that
+        # echoes either file, so the assertion could not fail. Measured
+        # 2026-09-08 -- all three headers are present, and so are the two
+        # changed lines with their unified-diff signs.
+        assert "--- a/old.py" in diff
+        assert "+++ b/new.py" in diff
+        assert "@@ -1,2 +1,2 @@" in diff
+        assert "-line2" in diff
+        assert "+line3" in diff
 
     def test_binary_marker(self, tmp_path: Path):
         """Binary files get marker instead of diff."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.diff.generator import is_binary_file
-
-            binary = tmp_path / "image.bin"
-            binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00" + b"\x00" * 100)
-            assert is_binary_file(binary) is True
+        binary = tmp_path / "image.bin"
+        binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00" + b"\x00" * 100)
+        assert is_binary_file(binary) is True
 
     def test_should_create_diff_patterns(self):
         """Include patterns override ignore patterns."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.diff.generator import should_create_diff
-
-            assert should_create_diff(Path("app.py")) is True
-            assert should_create_diff(Path("image.png")) is False
-            assert should_create_diff(Path("data.json")) is True
+        assert should_create_diff(Path("app.py")) is True
+        assert should_create_diff(Path("image.png")) is False
+        assert should_create_diff(Path("data.json")) is True
 
 
 class TestRestore:
@@ -231,47 +215,37 @@ class TestRestore:
 
     def test_restore_current(self, tmp_path: Path):
         """Restore current version from store."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.diff.restore import restore_file
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "app.py"
+        src.write_text("print('app')", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "app.py"
-            src.write_text("print('app')", encoding="utf-8")
+        copy_versioned([(str(src), "app.py")], str(project))
 
-            copy_versioned([(str(src), "app.py")], str(project))
-
-            target = Path(build_versioned_file_path(str(project), "app.py"))
-            output = tmp_path / "restored" / "app.py"
-            assert restore_file(target.parent, output) is True
-            assert output.read_text(encoding="utf-8") == "print('app')"
+        target = Path(build_versioned_file_path(str(project), "app.py"))
+        output = tmp_path / "restored" / "app.py"
+        assert restore_file(target.parent, output) is True
+        assert output.read_text(encoding="utf-8") == "print('app')"
 
     def test_list_versions(self, tmp_path: Path):
         """list_versions finds baseline + current + diffs."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
-            from aipass.backup.apps.handlers.diff.restore import list_versions
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "mod.py"
+        src.write_text("v1", encoding="utf-8")
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "mod.py"
-            src.write_text("v1", encoding="utf-8")
+        copy_versioned([(str(src), "mod.py")], str(project))
 
-            copy_versioned([(str(src), "mod.py")], str(project))
+        time.sleep(0.05)
+        src.write_text("v2", encoding="utf-8")
+        copy_versioned([(str(src), "mod.py")], str(project))
 
-            time.sleep(0.05)
-            src.write_text("v2", encoding="utf-8")
-            copy_versioned([(str(src), "mod.py")], str(project))
-
-            target = Path(build_versioned_file_path(str(project), "mod.py"))
-            versions = list_versions(target.parent)
-            types = {v["type"] for v in versions}
-            assert "baseline" in types
-            assert "current" in types
-            assert "diff" in types
+        target = Path(build_versioned_file_path(str(project), "mod.py"))
+        versions = list_versions(target.parent)
+        types = {v["type"] for v in versions}
+        assert "baseline" in types
+        assert "current" in types
+        assert "diff" in types
 
 
 class TestVersionedFilePath:
@@ -279,117 +253,124 @@ class TestVersionedFilePath:
 
     def test_root_level_file(self):
         """Root-level file -> root/<name>/<name>."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
-
-            result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
-            assert "root" in str(result)
-            assert result.name == "README.md"
+        result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
+        assert "root" in str(result)
+        assert result.name == "README.md"
 
     def test_nested_file(self):
         """Nested file -> <parent>/<name>/<name>."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
-
-            result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
-            assert "src" in str(result)
-            assert result.name == "main.py"
-            assert result.parent.name == "main.py"
+        result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
+        assert "src" in str(result)
+        assert result.name == "main.py"
+        assert result.parent.name == "main.py"
 
     def test_long_filename_hashed(self):
         """Filename >50 chars -> shortened with hash."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.path.builder import build_versioned_file_path
-
-            long_name = "a" * 60 + ".py"
-            result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
-            assert result.name == long_name
-            assert len(result.parent.name) < 50
+        long_name = "a" * 60 + ".py"
+        result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
+        assert result.name == long_name
+        assert len(result.parent.name) < 50
 
 
 class TestRestoreModule:
-    """Restore module — version discovery and file restore via module layer."""
+    """The `restore` command — version discovery and file restore, the way a user reaches them."""
 
-    def test_find_file_folder(self, tmp_path: Path):
-        """_find_file_folder locates a file-folder in the versioned store."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+    # Three of these used to import aipass.backup.apps.modules.restore._find_file_folder
+    # and assert on the Path it returned. Both of its callers — run_list_versions
+    # and run_restore_file — are public and reachable from the command, so the
+    # lookup is exercised here through
+    # `restore <project> list <file>` and `restore <project> file <file> <out>`,
+    # which is what a user types. Nothing was weakened: every claim the old
+    # tests made about the folder is now made about the bytes or the line the
+    # user gets.
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "config.py"
-            src.write_text("cfg = True", encoding="utf-8")
-            copy_versioned([(str(src), "config.py")], str(project))
+    def test_restore_list_names_the_stored_versions_of_a_file(self, tmp_path: Path, capsys):
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "config.py"
+        src.write_text("cfg = True", encoding="utf-8")
+        copy_versioned([(str(src), "config.py")], str(project))
 
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.modules.restore import _find_file_folder
+        assert restore_module.handle_command("restore", [str(project), "list", "config.py"]) is True
 
-            folder = _find_file_folder(str(project), "config.py")
-            assert folder is not None
-            assert folder.name == "config.py"
-            assert (folder / "config.py").is_file()
+        # Read on the filenames, not on the "[baseline]"/"[current]" type
+        # labels the module formats: console.print parses Rich markup, so
+        # those square brackets are consumed as unknown style tags and never
+        # reach the user at all. Shipped defect, reported 2026-09-22.
+        out = capsys.readouterr().out
+        assert "Versions of config.py:" in out
+        assert "config-baseline-" in out
+        assert "config.py" in out
 
-    def test_find_file_folder_path_shaped(self, tmp_path: Path):
-        """A relative path finds its file-folder, and picks the right one of two same-named files.
+    def test_a_relative_path_restores_the_right_one_of_two_same_named_files(self, tmp_path: Path, capsys):
+        """The documented form is `restore <project> file src/main.py out`; a basename cannot tell two main.py apart."""
+        # The lookup used to join the WHOLE argument onto the matched folder,
+        # so it looked for <store>/src/main.py/src/main.py and never found
+        # anything — only a bare basename worked, and a basename is ambiguous
+        # the moment two directories hold the same name.
+        project = tmp_path / "project"
+        for sub in ("src", "tools"):
+            (project / sub).mkdir(parents=True)
+            (project / sub / "main.py").write_text(f"where = {sub!r}", encoding="utf-8")
+        pairs = [(str(project / sub / "main.py"), f"{sub}/main.py") for sub in ("src", "tools")]
+        copy_versioned(pairs, str(project))
 
-        The documented form is 'restore @myapp list src/main.py'. The lookup
-        used to join the WHOLE argument onto the matched folder, so it looked
-        for <store>/src/main.py/src/main.py and never found anything - only a
-        bare basename worked, and a basename cannot tell two main.py apart.
-        """
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+        out_path = tmp_path / "restored" / "main.py"
+        assert restore_module.handle_command("restore", [str(project), "file", "tools/main.py", str(out_path)]) is True
 
-            project = tmp_path / "project"
-            for sub in ("src", "tools"):
-                (project / sub).mkdir(parents=True)
-                (project / sub / "main.py").write_text(f"where = {sub!r}", encoding="utf-8")
-            pairs = [(str(project / sub / "main.py"), f"{sub}/main.py") for sub in ("src", "tools")]
-            copy_versioned(pairs, str(project))
+        assert out_path.read_text(encoding="utf-8") == "where = 'tools'"
+        assert f"Restored tools/main.py to {out_path}" in capsys.readouterr().out
 
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.modules.restore import _find_file_folder
+    def test_a_file_that_was_never_stored_is_named_back_and_nothing_is_written(self, tmp_path: Path, capsys):
+        out_path = tmp_path / "restored" / "nonexistent.py"
 
-            folder = _find_file_folder(str(project), "tools/main.py")
-            assert folder is not None
-            assert folder.parent.name == "tools"
-            assert (folder / "main.py").read_text(encoding="utf-8") == "where = 'tools'"
+        assert restore_module.run_restore_file(str(tmp_path), "nonexistent.py", str(out_path)) is False
 
-    def test_find_file_folder_missing(self, tmp_path: Path):
-        """_find_file_folder returns None for missing file."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.modules.restore import _find_file_folder
+        assert "No versioned file found for: nonexistent.py" in capsys.readouterr().out
+        assert not out_path.exists()
 
-            result = _find_file_folder(str(tmp_path), "nonexistent.py")
-            assert result is None
+    def test_a_filename_over_50_chars_is_stored_but_the_restore_command_cannot_find_it(self, tmp_path: Path, capsys):
+        """Pins a shipped defect: >50 chars stores under name[:30]_md5, and the lookup globs the full name."""
+        project = tmp_path / "project"
+        project.mkdir()
+        long_name = "a" * 60 + ".py"
+        src = project / long_name
+        src.write_text("long name payload", encoding="utf-8")
+        copy_versioned([(str(src), long_name)], str(project))
 
-    def test_run_restore_file_roundtrip(self, tmp_path: Path):
+        stored = Path(build_versioned_file_path(str(project), long_name))
+        assert stored.read_text(encoding="utf-8") == "long name payload"
+        assert stored.parent.name != long_name
+
+        assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
+
+        # The backup is on disk and the command says it is not. Remove this
+        # block when the shortened folder name is taught to the lookup.
+        assert f"No versioned file found for: {long_name}" in capsys.readouterr().out
+        assert build_versioned_store(str(project)).exists()
+
+    def test_run_restore_file_roundtrip(self, tmp_path: Path, capsys):
         """run_restore_file restores a file to an output path."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            from aipass.backup.apps.handlers.copy.versioned import copy_versioned
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "data.txt"
+        src.write_text("important data", encoding="utf-8")
+        copy_versioned([(str(src), "data.txt")], str(project))
 
-            project = tmp_path / "project"
-            project.mkdir()
-            src = project / "data.txt"
-            src.write_text("important data", encoding="utf-8")
-            copy_versioned([(str(src), "data.txt")], str(project))
+        out = str(tmp_path / "restored" / "data.txt")
+        result = restore_module.run_restore_file(str(project), "data.txt", out)
 
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            with patch("aipass.backup.apps.modules.restore.console"):
-                from aipass.backup.apps.modules.restore import run_restore_file
+        assert result is True
+        assert Path(out).read_text(encoding="utf-8") == "important data"
+        assert f"Restored data.txt to {out}" in capsys.readouterr().out
 
-                out = str(tmp_path / "restored" / "data.txt")
-                result = run_restore_file(str(project), "data.txt", out)
-                assert result is True
-                assert Path(out).read_text(encoding="utf-8") == "important data"
+    def test_a_help_flag_prints_the_module_and_both_usage_lines(self, capsys):
+        assert restore_module.handle_command("restore", ["--help"]) is True
 
-    def test_handle_command_help(self):
-        """handle_command responds to --help."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            with patch("aipass.backup.apps.modules.restore.console"):
-                from aipass.backup.apps.modules.restore import handle_command
-
-                assert handle_command("restore", ["--help"]) is True
+        out = capsys.readouterr().out
+        assert "restore Module" in out
+        assert "restore <project> list <file>" in out
+        assert "restore <project> file <file> <out>" in out
 
 
 # =============================================

@@ -1,134 +1,167 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_cli_routing.py
-# Description: Tests for CLI routing -- help flags, introspection, return types
-# Version: 1.0.0
+# Description: Tests for CLI routing -- the help gate, introspection, refusals
+# Version: 2.0.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-22
 # =============================================
 
-"""Test CLI routing -- help flags, introspection, return types, unknown commands."""
+"""Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
 
-import importlib
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in apps/modules/ parses and carries no unused import
+# seedgo: no-test-needed(constant) — the literal text of VERSION, MODULE_NAME and each PRIMARY_COMMAND
+# seedgo: no-test-needed(stdlib) — importlib's ability to import a module by dotted name, which discover_modules rides
+
 import sys
 import tempfile
-import types
 from contextlib import ExitStack, contextmanager
 from io import StringIO
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.backup.apps import backup as entry
+from aipass.backup.apps.modules import all as all_module
+from aipass.backup.apps.modules import (
+    display,
+    drive_check,
+    drive_clear,
+    drive_stats,
+    drive_sync,
+    register,
+    restore,
+    settings,
+    share,
+    snapshot,
+    status,
+    versioned,
+)
 
-def _make_mock_console():
-    """Create a mock console for cli modules."""
-    mock = MagicMock()
-    mock.print = MagicMock()
-    return mock
-
-
-def _mock_cli_modules():
-    """Set up sys.modules mocks for aipass.cli dependencies."""
-    mocks = {}
-    cli_mod = types.ModuleType("aipass.cli")
-    cli_apps = types.ModuleType("aipass.cli.apps")
-    cli_modules = types.ModuleType("aipass.cli.apps.modules")
-    mock_console = _make_mock_console()
-    setattr(cli_modules, "console", mock_console)
-    setattr(cli_modules, "header", MagicMock())
-    setattr(cli_modules, "success", MagicMock())
-    setattr(cli_modules, "warning", MagicMock())
-    setattr(cli_modules, "error", MagicMock())
-    mocks["aipass.cli"] = cli_mod
-    mocks["aipass.cli.apps"] = cli_apps
-    mocks["aipass.cli.apps.modules"] = cli_modules
-    return mocks, mock_console
-
-
-def _load_module_fresh(module_path: str, extra_mocks: dict | None = None):
-    """Load a backup module with mocked dependencies."""
-    cli_mocks, console = _mock_cli_modules()
-
-    prax_mod = types.ModuleType("aipass.prax")
-    setattr(prax_mod, "logger", MagicMock())
-    cli_mocks["aipass.prax"] = prax_mod
-
-    audit_pkg = types.ModuleType("aipass.backup.apps.handlers.audit")
-    trail_mod = types.ModuleType("aipass.backup.apps.handlers.audit.trail")
-    setattr(trail_mod, "log_operation", MagicMock())
-    cli_mocks["aipass.backup.apps.handlers.audit"] = audit_pkg
-    cli_mocks["aipass.backup.apps.handlers.audit.trail"] = trail_mod
-
-    json_mod = types.ModuleType("aipass.backup.apps.handlers.json")
-    json_handler_mod = types.ModuleType(
-        "aipass.backup.apps.handlers.json.json_handler",
-    )
-    setattr(json_handler_mod, "read_json", MagicMock(return_value={}))
-    setattr(json_handler_mod, "write_json", MagicMock(return_value=True))
-    setattr(json_handler_mod, "InvalidDocument", ValueError)
-    setattr(json_handler_mod, "WriteFailed", OSError)
-    cli_mocks["aipass.backup.apps.handlers.json"] = json_mod
-    cli_mocks["aipass.backup.apps.handlers.json.json_handler"] = json_handler_mod
-
-    if extra_mocks:
-        cli_mocks.update(extra_mocks)
-
-    with patch.dict(sys.modules, cli_mocks):
-        if module_path in sys.modules:
-            del sys.modules[module_path]
-        mod = importlib.import_module(module_path)
-        return mod, console
+# Every product module above is imported HERE, at the top, and never inside a
+# test (template v1 item 8). Until 2026-09-22 this file built each of the five
+# routing modules from a sys.modules stub inside a helper -- a fake
+# aipass.cli.apps.modules carrying a MagicMock console -- and then read
+# `console.print.assert_called()` as its oracle. That oracle passes for a module
+# that printed the wrong page, printed to the wrong channel, or was never the
+# product at all. The real console writes to sys.stdout at print time and
+# error()/warning() write to sys.stderr, so capsys reads both with no Rich
+# import and no console built here (item 14). conftest.py pins both console
+# widths for the session and clears the command-failed flag after every test
+# (items 20 and 18) -- neither belongs in this file.
 
 
+#: The five modules whose whole job is routing: one command they own, a help
+#: gate, an introspection page.
 SIMPLE_MODULES = [
-    "aipass.backup.apps.modules.drive_sync",
-    "aipass.backup.apps.modules.drive_check",
-    "aipass.backup.apps.modules.drive_stats",
-    "aipass.backup.apps.modules.drive_clear",
-    "aipass.backup.apps.modules.settings",
+    pytest.param(drive_sync, id="drive_sync"),
+    pytest.param(drive_check, id="drive_check"),
+    pytest.param(drive_stats, id="drive_stats"),
+    pytest.param(drive_clear, id="drive_clear"),
+    pytest.param(settings, id="settings"),
 ]
+
+#: The verb each simple module reaches once an argument gets PAST the help
+#: gate. The help tests spy it, so a gate that stops screening fails the test
+#: instead of doing the work: 'drive_check foo --help' made a live Drive auth
+#: call before the gate screened the whole sequence (proven 2026-08-13).
+#: settings is absent on purpose -- its post-gate path raises rather than
+#: calling a verb, and a test sees that without a spy.
+VERB_AFTER_THE_GATE: dict[ModuleType, str] = {
+    drive_sync: "run_drive_sync",
+    drive_check: "run_drive_check",
+    drive_stats: "run_drive_stats",
+    drive_clear: "run_drive_clear",
+}
+
+#: The line print_help adds that print_introspection does not, per module, so a
+#: help test pins the HELP page and not merely "some page". drive_check and
+#: settings are absent because their print_help renders the introspection and
+#: nothing else -- there is no extra line to pin, and claiming one would lie.
+HELP_ONLY_LINE: dict[ModuleType, str] = {
+    drive_sync: "Usage: drive_sync",
+    drive_stats: "Usage: drive_stats",
+    drive_clear: "Usage: drive_clear",
+}
+
+
+def _spy_the_verb(mod: ModuleType, monkeypatch: pytest.MonkeyPatch) -> list:
+    """Replace the module's post-gate verb with a recorder; return what it records."""
+    calls: list = []
+    name = VERB_AFTER_THE_GATE.get(mod)
+    if name is not None:
+        monkeypatch.setattr(mod, name, lambda *a, **k: calls.append((a, k)))
+    return calls
+
+
+def _assert_help_page(mod: ModuleType, out: str, err: str, ran: list) -> None:
+    """The help page reached stdout, stderr stayed clean, the verb never ran."""
+    assert f"{mod.MODULE_NAME} Module" in out
+    assert f"Primary command: {mod.PRIMARY_COMMAND}" in out
+    extra = HELP_ONLY_LINE.get(mod)
+    if extra is not None:
+        assert extra in out, f"help printed the introspection but not the help page: {out!r}"
+    assert err == "", f"a help request wrote to stderr: {err!r}"
+    assert ran == [], f"the help gate let the verb run: {ran!r}"
+
+
+def _rows(block: str) -> list[str]:
+    """The non-blank lines of one rendered help block, stripped."""
+    return [line.strip() for line in block.splitlines() if line.strip()]
 
 
 class TestHelpFlags:
-    """Test --help, -h, help flags across modules -- help_flag, short_help, help_word."""
+    """--help, -h and the bare word 'help' print the page and run nothing."""
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_help_flag(self, mod_path: str) -> None:
-        """--help triggers introspection and returns True."""
-        mod, _console = _load_module_fresh(mod_path)
-        result = mod.handle_command(mod.PRIMARY_COMMAND, ["--help"])
-        assert result is True
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_help_flag(self, mod: ModuleType, capsys: pytest.CaptureFixture[str], monkeypatch) -> None:
+        """'--help' prints the module's help page and never reaches the verb."""
+        ran = _spy_the_verb(mod, monkeypatch)
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_short_help_flag(self, mod_path: str) -> None:
-        """'-h' triggers introspection and returns True."""
-        mod, _console = _load_module_fresh(mod_path)
-        result = mod.handle_command(mod.PRIMARY_COMMAND, ["-h"])
-        assert result is True
+        assert mod.handle_command(mod.PRIMARY_COMMAND, ["--help"]) is True
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_help_word(self, mod_path: str) -> None:
-        """'help' triggers introspection and returns True."""
-        mod, _console = _load_module_fresh(mod_path)
-        result = mod.handle_command(mod.PRIMARY_COMMAND, ["help"])
-        assert result is True
+        out, err = capsys.readouterr()
+        _assert_help_page(mod, out, err, ran)
+
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_short_help_flag(self, mod: ModuleType, capsys: pytest.CaptureFixture[str], monkeypatch) -> None:
+        """'-h' prints the module's help page and never reaches the verb."""
+        ran = _spy_the_verb(mod, monkeypatch)
+
+        assert mod.handle_command(mod.PRIMARY_COMMAND, ["-h"]) is True
+
+        out, err = capsys.readouterr()
+        _assert_help_page(mod, out, err, ran)
+
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_help_word(self, mod: ModuleType, capsys: pytest.CaptureFixture[str], monkeypatch) -> None:
+        """The bare word 'help' prints the same page the flags print."""
+        ran = _spy_the_verb(mod, monkeypatch)
+
+        assert mod.handle_command(mod.PRIMARY_COMMAND, ["help"]) is True
+
+        out, err = capsys.readouterr()
+        _assert_help_page(mod, out, err, ran)
 
 
 class TestIntrospection:
-    """Test no-args introspection -- test_no_args, test_introspection, no_args tokens."""
+    """No args prints the module's self-map, read off the real console."""
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_no_args(self, mod_path: str) -> None:
-        """test_no_args -- no args triggers print_introspection."""
-        mod, console = _load_module_fresh(mod_path)
-        result = mod.handle_command(mod.PRIMARY_COMMAND, [])
-        assert result is True
-        console.print.assert_called()
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_no_args(self, mod: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+        """No args prints the introspection page: the module's name and the command it owns."""
+        assert mod.handle_command(mod.PRIMARY_COMMAND, []) is True
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_introspection_exists(self, mod_path: str) -> None:
-        """test_introspection -- print_introspection function exists."""
-        mod, _ = _load_module_fresh(mod_path)
+        out, err = capsys.readouterr()
+        assert f"{mod.MODULE_NAME} Module" in out
+        assert f"Primary command: {mod.PRIMARY_COMMAND}" in out
+        assert err == "", f"introspection wrote to stderr: {err!r}"
+
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_introspection_exists(self, mod: ModuleType) -> None:
+        """print_introspection exists and is callable."""
         assert hasattr(mod, "print_introspection")
         assert callable(mod.print_introspection)
 
@@ -136,97 +169,106 @@ class TestIntrospection:
 class TestUnknownCommand:
     """Test unknown_command / invalid_command / unrecognized handling."""
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_unknown_command(self, mod_path: str) -> None:
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_unknown_command(self, mod: ModuleType) -> None:
         """unknown_command / invalid_command returns False -- unrecognized."""
-        mod, _ = _load_module_fresh(mod_path)
-        result = mod.handle_command("totally_invalid_command_xyz", [])
-        assert result is False
+        assert mod.handle_command("totally_invalid_command_xyz", []) is False
 
 
 class TestReturnBool:
-    """Test return_bool -- is True / is False contracts."""
+    """The True/False contract: a claimed command answers, a declined one is silent."""
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_known_routes_true(self, mod_path: str) -> None:
-        """assert result is True -- known command returns True."""
-        mod, _ = _load_module_fresh(mod_path)
-        result = mod.handle_command(mod.PRIMARY_COMMAND, [])
-        assert result is True
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_known_routes_true(self, mod: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+        """A command the module owns is claimed AND answered on stdout."""
+        assert mod.handle_command(mod.PRIMARY_COMMAND, []) is True
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_unknown_returns_false(self, mod_path: str) -> None:
-        """assert result is False -- unknown command returns False."""
-        mod, _ = _load_module_fresh(mod_path)
-        result = mod.handle_command("nonexistent", [])
-        assert result is False
+        assert capsys.readouterr().out != "", "the module claimed the command and said nothing"
+
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_unknown_returns_false(self, mod: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+        """A command the module does not own is declined in silence."""
+        # Silence is the other half of the contract, not decoration: route_command
+        # asks every discovered module in turn, so a module that prints while
+        # declining speaks over the one that owns the command. That is exactly
+        # the display.py regression pinned further down this file.
+        assert mod.handle_command("nonexistent", []) is False
+
+        out, err = capsys.readouterr()
+        assert out == "" and err == "", f"a decline printed: {out!r} / {err!r}"
 
 
 class TestPrintHelp:
-    """Test print_help and print_introspection existence."""
+    """The entry point's curated command reference, read on the channel a user reads."""
 
-    def test_entry_point_has_print_help(self) -> None:
-        """print_help is callable on the real entry module and prints the verbs.
-
-        This unit used to be a bare 'assert True' under a docstring saying the
-        function was "verified by reading backup.py source" -- it was true of
-        every program, including one with no print_help at all. The heavy
-        imports the old comment worried about are already paid for elsewhere in
-        this file (TestHelpNeverExecutes imports the same module), so the
-        function can simply be called and read.
-        """
-        from aipass.backup.apps import backup as entry
-
+    def test_entry_point_has_print_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """print_help lists every verb as a COMMANDS row and every flag as an OPTIONS row."""
+        # This unit used to be a bare 'assert True' under a docstring saying the
+        # function was "verified by reading backup.py source" -- a claim that was
+        # true of every program, including one with no print_help at all.
         assert callable(entry.print_help)
 
-        with patch.object(entry, "console") as console:
-            entry.print_help()
+        entry.print_help()
 
-        printed = "\n".join(str(call) for call in console.print.call_args_list)
+        out, err = capsys.readouterr()
+        assert err == "", f"the help page wrote to stderr: {err!r}"
 
-        # The COMMANDS block marks each verb with [green]; the EXAMPLES block
-        # below it spells the same words in [dim]. A bare "versioned" in printed
-        # was satisfied by the examples alone -- measured: renaming the COMMANDS
-        # row left that weaker pin green. The marker is what makes it a claim
-        # about the command reference rather than about the whole page.
+        # The page is read BY BLOCK, not by substring over the whole thing.
+        # Every verb is also spelled in EXAMPLES, so a bare "versioned" in the
+        # page was satisfied by the examples alone -- measured: renaming the
+        # COMMANDS row left that weaker pin green. The previous cure required
+        # the literal "[green]versioned[/green]", which only read as markup
+        # because the console was a MagicMock holding unrendered strings; the
+        # real console renders the markup away (color_system is None under
+        # capture), so the block slice is what pins the same claim on the text
+        # the user actually sees -- and it pins POSITION too, which the markup
+        # never did.
+        commands = _rows(out.split("COMMANDS:", 1)[1].split("OPTIONS:", 1)[0])
+        options = _rows(out.split("OPTIONS:", 1)[1].split("EXAMPLES:", 1)[0])
+
+        # The first word of a row is the thing the row is about. Matching that,
+        # rather than "appears anywhere in the block", keeps 'snapshot' from
+        # being satisfied by the 'all' row's description of its own stages.
+        listed_verbs = [row.split()[0] for row in commands]
         for verb in ("snapshot", "versioned", "all", "register", "status", "settings", "restore"):
-            assert f"[green]{verb}[/green]" in printed, f"COMMANDS block lost {verb}"
+            assert verb in listed_verbs, f"COMMANDS block has no row for {verb}"
 
         # modules/all.py runs drive_sync after versioned; the row used to say
         # only "snapshot then versioned", so the verb that uploads read as local.
-        all_row = next(line for line in printed.splitlines() if "[green]all[/green]" in line)
+        all_row = next(row for row in commands if row.split()[0] == "all")
         assert "drive" in all_row.lower(), f"'all' row hides its drive stage: {all_row}"
 
-        # Flags live in the verbs, not the router, so the page has to name them.
-        # --quiet, --project and --note were live and unnamed anywhere in this
-        # help until 2026-09-15; --force was named only by drive_clear's own page.
+        # Flags live in the verbs, not the router, so the page has to name them --
+        # and name them in OPTIONS, where a reader looks for them. --quiet,
+        # --project and --note were live and unnamed anywhere in this help until
+        # 2026-09-15; --force was named only by drive_clear's own page.
+        documented_flags = [row.split()[0] for row in options]
         for flag in ("--name", "--quiet", "--force", "--project", "--note", "--public"):
-            assert flag in printed, f"help page never names {flag}"
+            assert flag in documented_flags, f"OPTIONS block has no row for {flag}"
 
-    @pytest.mark.parametrize("mod_path", SIMPLE_MODULES)
-    def test_print_introspection_exists(self, mod_path: str) -> None:
+    @pytest.mark.parametrize("mod", SIMPLE_MODULES)
+    def test_print_introspection_exists(self, mod: ModuleType) -> None:
         """print_introspection callable exists on module."""
-        mod, _ = _load_module_fresh(mod_path)
         assert callable(mod.print_introspection)
 
 
 #: (module, sentinel called right after the help gate, args after the project arg)
 STANDALONE_ENTRY_MODULES = [
-    ("all", "run_snapshot", []),
+    pytest.param(all_module, "run_snapshot", [], id="all"),
     # drive_check was NOT in seedgo's list of 10 -- its precision cut saw the
     # args[0] == "run" comparison and passed it. Measured live anyway: the
     # default branch runs the check for any unrecognised first arg, so
     # 'drive_check foo --help' made a real Drive auth call. Covered here.
-    ("drive_check", "run_drive_check", []),
-    ("drive_clear", "run_drive_clear", []),
-    ("drive_stats", "run_drive_stats", []),
-    ("drive_sync", "run_drive_sync", []),
-    ("register", "resolve_caller_path", []),
-    ("restore", "run_list_versions", ["list"]),
-    ("share", "run_share", []),
-    ("snapshot", "run_snapshot", []),
-    ("status", "resolve_caller_path", []),
-    ("versioned", "run_versioned", []),
+    pytest.param(drive_check, "run_drive_check", [], id="drive_check"),
+    pytest.param(drive_clear, "run_drive_clear", [], id="drive_clear"),
+    pytest.param(drive_stats, "run_drive_stats", [], id="drive_stats"),
+    pytest.param(drive_sync, "run_drive_sync", [], id="drive_sync"),
+    pytest.param(register, "resolve_caller_path", [], id="register"),
+    pytest.param(restore, "run_list_versions", ["list"], id="restore"),
+    pytest.param(share, "run_share", [], id="share"),
+    pytest.param(snapshot, "run_snapshot", [], id="snapshot"),
+    pytest.param(status, "resolve_caller_path", [], id="status"),
+    pytest.param(versioned, "run_versioned", [], id="versioned"),
 ]
 
 #: Real work that runs AFTER the sentinel and must be neutralised too.
@@ -235,18 +277,20 @@ STANDALONE_ENTRY_MODULES = [
 #: run_snapshot, then run_versioned, then a LIVE run_drive_sync. With only
 #: run_snapshot spied, the rest of the production pipeline really executed --
 #: the Drive step authenticated through @api and refreshed the machine's real
-#: ~/.secrets/aipass/google_creds.json (mkdir + chmod 0700 + open('w') +
-#: chmod 0600 in api/apps/handlers/google/auth.py:261-265). An open(..., 'w')
-#: truncates on open, so a failure mid-write could corrupt live credentials on
-#: any machine that ran this suite. Found 2026-08-30 by @seedgo's audit-tests
+#: ~/.secrets/aipass/google_creds.json (mkdir + chmod 0700 + a write-mode
+#: open + chmod 0600 in api/apps/handlers/google/auth.py:261-265). A write-mode
+#: open truncates the file as it opens, so a failure mid-write could corrupt
+#: live credentials on any machine that ran this suite. Found 2026-08-30 by
+#: @seedgo's audit-tests
 #: lane -- the only write any branch made outside the audit copy.
 #:
-#: run_drive_sync is imported INSIDE handle_command, so it has to be patched at
-#: its source module, not as an attribute of 'all'.
-DOWNSTREAM_AFTER_SENTINEL: dict[str, tuple[str, ...]] = {
-    "all": (
-        "aipass.backup.apps.modules.all.run_versioned",
-        "aipass.backup.apps.modules.drive_sync.run_drive_sync",
+#: run_drive_sync is imported INSIDE all.handle_command, so it has to be
+#: patched on its OWN module, not as an attribute of 'all' -- which is why the
+#: pairs below name the module the attribute lives on.
+DOWNSTREAM_AFTER_SENTINEL: dict[ModuleType, tuple[tuple[ModuleType, str], ...]] = {
+    all_module: (
+        (all_module, "run_versioned"),
+        (drive_sync, "run_drive_sync"),
     ),
 }
 
@@ -261,17 +305,12 @@ class TestHelpGateInsideHandleCommand:
     snapshot (proven live, 2026-08-13). Reported by @seedgo via help_flag_safety.
     """
 
-    @staticmethod
-    def _load(name: str):
-        return importlib.import_module(f"aipass.backup.apps.modules.{name}")
-
-    @pytest.mark.parametrize(("name", "sentinel", "extra"), STANDALONE_ENTRY_MODULES)
+    @pytest.mark.parametrize(("mod", "sentinel", "extra"), STANDALONE_ENTRY_MODULES)
     @pytest.mark.parametrize("flag", ["--help", "-h"])
     def test_trailing_help_flag_does_not_execute(
-        self, name: str, sentinel: str, extra: list[str], flag: str, tmp_path: Path
+        self, mod: ModuleType, sentinel: str, extra: list[str], flag: str, tmp_path: Path
     ) -> None:
         """A help flag after the project argument runs nothing."""
-        mod = self._load(name)
         args = [str(tmp_path), *extra, flag]
 
         with patch.object(mod, sentinel) as spy:
@@ -280,16 +319,17 @@ class TestHelpGateInsideHandleCommand:
         assert handled is True
         spy.assert_not_called()
 
-    @pytest.mark.parametrize(("name", "sentinel", "extra"), STANDALONE_ENTRY_MODULES)
-    def test_real_invocation_still_dispatches(self, name: str, sentinel: str, extra: list[str], tmp_path: Path) -> None:
+    @pytest.mark.parametrize(("mod", "sentinel", "extra"), STANDALONE_ENTRY_MODULES)
+    def test_real_invocation_still_dispatches(
+        self, mod: ModuleType, sentinel: str, extra: list[str], tmp_path: Path
+    ) -> None:
         """Guard does not block a normal run -- the sentinel is still reached."""
-        mod = self._load(name)
         args = [str(tmp_path), *extra, "some_file.py"] if extra else [str(tmp_path)]
 
         with ExitStack() as stack:
             spy = stack.enter_context(patch.object(mod, sentinel))
-            for target in DOWNSTREAM_AFTER_SENTINEL.get(name, ()):
-                stack.enter_context(patch(target))
+            for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL.get(mod, ()):
+                stack.enter_context(patch.object(target_mod, target_attr))
             mod.handle_command(mod.PRIMARY_COMMAND, args)
 
         spy.assert_called()
@@ -332,9 +372,9 @@ class TestNoWriteEscapesToRealSecrets:
     any branch made outside the audit copy. test_real_invocation_still_dispatches
     patched run_snapshot only, so handle_command fell straight through to a REAL
     run_drive_sync, which authenticated through @api and rewrote
-    ~/.secrets/aipass/google_creds.json (auth.py:261-265: mkdir, chmod 0700,
-    open('w'), chmod 0600). open(..., 'w') truncates on open, so a failure
-    mid-write could corrupt the machine's live Google credentials.
+    ~/.secrets/aipass/google_creds.json (auth.py:261-265: mkdir, chmod 0700, a
+    write-mode open, chmod 0600). That open truncates the file as it opens, so
+    a failure mid-write could corrupt the machine's live Google credentials.
 
     The audit hook here RECORDS and does not block. Blocking mid-auth pushes the
     Google client into its interactive browser flow, which hangs forever -- a pin
@@ -345,12 +385,13 @@ class TestNoWriteEscapesToRealSecrets:
 
     def test_all_stops_at_the_patched_doubles(self, tmp_path: Path) -> None:
         """Every step after the sentinel is a double, so no real work runs."""
-        mod = importlib.import_module("aipass.backup.apps.modules.all")
-
         with ExitStack() as stack:
-            snap = stack.enter_context(patch.object(mod, "run_snapshot"))
-            doubles = [stack.enter_context(patch(target)) for target in DOWNSTREAM_AFTER_SENTINEL["all"]]
-            mod.handle_command(mod.PRIMARY_COMMAND, [str(tmp_path)])
+            snap = stack.enter_context(patch.object(all_module, "run_snapshot"))
+            doubles = [
+                stack.enter_context(patch.object(target_mod, target_attr))
+                for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL[all_module]
+            ]
+            all_module.handle_command(all_module.PRIMARY_COMMAND, [str(tmp_path)])
 
         snap.assert_called()
         for double in doubles:
@@ -358,13 +399,11 @@ class TestNoWriteEscapesToRealSecrets:
 
     def test_no_write_reaches_real_secret_storage(self, tmp_path: Path) -> None:
         """Running 'all' touches nothing under ~/.secrets."""
-        mod = importlib.import_module("aipass.backup.apps.modules.all")
-
         with _secrets_watch() as touched, ExitStack() as stack:
-            stack.enter_context(patch.object(mod, "run_snapshot"))
-            for target in DOWNSTREAM_AFTER_SENTINEL["all"]:
-                stack.enter_context(patch(target))
-            mod.handle_command(mod.PRIMARY_COMMAND, [str(tmp_path)])
+            stack.enter_context(patch.object(all_module, "run_snapshot"))
+            for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL[all_module]:
+                stack.enter_context(patch.object(target_mod, target_attr))
+            all_module.handle_command(all_module.PRIMARY_COMMAND, [str(tmp_path)])
 
         assert touched == [], f"test reached real secret storage: {touched}"
 
@@ -385,30 +424,30 @@ class TestStubFailsHonestly:
 
     def test_settings_stub_refuses_and_names_the_reason(self) -> None:
         """The stub raises rather than returning a success the caller believes."""
-        mod, _console = _load_module_fresh("aipass.backup.apps.modules.settings")
-
         with pytest.raises(NotImplementedError) as caught:
-            mod.handle_command("settings", ["/some/project"])
+            settings.handle_command("settings", ["/some/project"])
 
         # The exact sentence the operator gets, not an either/or over two words.
         assert str(caught.value) == (
-            "settings is not implemented \u2014 the settings UI is deferred (Phase 3). "
+            "settings is not implemented — the settings UI is deferred (Phase 3). "
             "Edit .backup/config.json in the project directly for now."
         )
 
-    def test_settings_stub_leaves_the_run_marked_failed(self) -> None:
-        """main() turns the raise into exit 1, naming module and reason.
-
-        The whole point of the sweep row: a refusal that exits 0 is a refusal
-        nobody downstream can see. This drives the REAL entry point, so the
-        route_command handler and main's failure branch are both on the path.
-        """
-        from aipass.backup.apps import backup as entry
-
+    def test_settings_stub_leaves_the_run_marked_failed(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """main() turns the raise into exit 1, naming the module and the reason on stderr."""
+        # The whole point of the sweep row: a refusal that exits 0 is a refusal
+        # nobody downstream can see. This drives the REAL entry point, so the
+        # route_command handler and main's failure branch are both on the path.
+        # The exit code alone does not prove the operator was told WHICH module
+        # refused -- route_command's `failure` string is what carries that, and
+        # error() puts it on stderr, where drone's piping reads it.
         with patch.object(sys, "argv", ["backup", "settings", "/some/project"]):
             code = entry.main()
 
         assert code == 1
+        err = capsys.readouterr().err
+        assert "settings failed" in err
+        assert "settings is not implemented" in err
 
 
 class TestUnknownCommandNotSwallowed:
@@ -420,20 +459,23 @@ class TestUnknownCommandNotSwallowed:
     printed the display module's introspection and exited 0.
     """
 
-    def test_display_rejects_foreign_command(self) -> None:
-        """display.handle_command returns False for a command it does not own."""
-        mod, _ = _load_module_fresh("aipass.backup.apps.modules.display")
-        assert mod.handle_command("wibble", []) is False
+    def test_display_rejects_foreign_command(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """display.handle_command declines a command it does not own, printing nothing."""
+        assert display.handle_command("wibble", []) is False
 
-    def test_display_rejects_foreign_command_with_help_flag(self) -> None:
+        # Printing nothing IS the regression: the bug was not a wrong return
+        # value alone, it was this module's introspection page reaching the
+        # operator in place of the unknown-command error.
+        assert capsys.readouterr().out == ""
+
+    def test_display_rejects_foreign_command_with_help_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A help flag does not make display claim someone else's command."""
-        mod, _ = _load_module_fresh("aipass.backup.apps.modules.display")
-        assert mod.handle_command("wibble", ["--help"]) is False
+        assert display.handle_command("wibble", ["--help"]) is False
 
-    def test_entry_point_reports_unknown_command(self) -> None:
-        """main() returns exit code 1 for a command no module handles."""
-        from aipass.backup.apps import backup as entry
+        assert capsys.readouterr().out == ""
 
+    def test_entry_point_reports_unknown_command(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """main() returns exit code 1 for a command no module handles, and names it."""
         fake_module = MagicMock()
         fake_module.handle_command = MagicMock(return_value=False)
 
@@ -442,6 +484,8 @@ class TestUnknownCommandNotSwallowed:
             patch.object(sys, "argv", ["backup", "wibble"]),
         ):
             assert entry.main() == 1
+
+        assert "Unknown command: wibble" in capsys.readouterr().err
 
 
 class TestHelpNeverExecutes:
@@ -486,8 +530,6 @@ class TestHelpNeverExecutes:
     @pytest.mark.parametrize("argv", HELP_ARGV)
     def test_help_after_project_never_runs_the_verb(self, argv: list[str]) -> None:
         """A trailing help flag reaches the module as a help request only."""
-        from aipass.backup.apps import backup as entry
-
         fake_module = MagicMock()
         fake_module.handle_command = MagicMock(return_value=True)
 
@@ -504,8 +546,6 @@ class TestHelpNeverExecutes:
 
     def test_help_flag_alone_still_prints_help(self) -> None:
         """The plain 'snapshot --help' form keeps working."""
-        from aipass.backup.apps import backup as entry
-
         fake_module = MagicMock()
         fake_module.handle_command = MagicMock(return_value=True)
 
@@ -519,8 +559,6 @@ class TestHelpNeverExecutes:
 
     def test_real_run_without_help_still_dispatches(self) -> None:
         """Guard does not block a normal run -- args reach the module intact."""
-        from aipass.backup.apps import backup as entry
-
         project = str(Path(tempfile.gettempdir()) / "probe_project")
         fake_module = MagicMock()
         fake_module.handle_command = MagicMock(return_value=True)

@@ -1,25 +1,84 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_error_resilience.py
 # Description: Tests for error resilience -- corrupt JSON, missing files
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-12
-# Modified: 2026-06-12
+# Modified: 2026-09-22
 # =============================================
 
-"""Test error resilience -- file not found, corrupt JSON, empty files, bad paths."""
+"""Tests for src/aipass/backup/apps/modules/snapshot.py, versioned.py, and handlers."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that all handler files parse and import
+# seedgo: no-test-needed(documentation) — handler docstrings
+# seedgo: no-test-needed(constant) — error codes and messages
+# seedgo: no-test-needed(stdlib) — json module parsing and dumps
+
+import json
 from pathlib import Path
 
 import pytest
 
+from aipass.backup.apps.handlers.audit import trail
+from aipass.backup.apps.handlers.drive.tracker import load_tracker
 from aipass.backup.apps.handlers.json import json_handler
-from aipass.backup.apps.modules.snapshot import _build_current_timestamps, _build_saved_timestamps
+from aipass.backup.apps.handlers.project import config, registry, setup
+from aipass.backup.apps.handlers.project.config import DEFAULTS, load_project_config
+from aipass.backup.apps.handlers.state import timestamps
+from aipass.backup.apps.handlers.state.changelog import append_changelog
+from aipass.backup.apps.handlers.state.timestamps import load_timestamps
+from aipass.backup.apps.modules import snapshot
+from aipass.backup.apps.modules.snapshot import run_snapshot
+from aipass.backup.apps.modules.versioned import run_versioned
+
+
+# The live-tree race is reached through run_snapshot, at the two windows the
+# product actually has: the quick-check reads mtimes straight after the scan,
+# and the timestamp map is saved after the copy returns. Both seams below wrap
+# a sibling handler, run the real one, and then change the tree under the run.
+
+
+def _vanish_after_copy(monkeypatch: pytest.MonkeyPatch, victims: list[Path] | None = None) -> None:
+    """Delete files from the live tree once the copy has taken them.
+
+    run_snapshot saves the timestamp map AFTER copy_snapshot returns, so a file
+    the scan listed can already be gone by the time its mtime is read. With no
+    victims named, every file the copy was handed vanishes.
+    """
+    real_copy = snapshot.copy_snapshot
+
+    def _copy_then_vanish(files: list[tuple[str, str]], *args: object, **kwargs: object) -> dict:
+        outcome = real_copy(files, *args, **kwargs)
+        doomed = victims if victims is not None else [Path(abs_p) for abs_p, _rel in files]
+        for path in doomed:
+            path.unlink()
+        return outcome
+
+    monkeypatch.setattr(snapshot, "copy_snapshot", _copy_then_vanish)
+
+
+def _vanish_after_scan(monkeypatch: pytest.MonkeyPatch, victim: Path) -> None:
+    """Delete a file the moment the scan has listed it, before the quick-check.
+
+    This is the earlier window: the quick-check builds its mtime map from the
+    filtered list, so a file that dies here is one the comparison cannot read.
+    """
+    real_filter = snapshot.filter_paths
+
+    def _filter_then_vanish(*args: object, **kwargs: object) -> list[tuple[str, str]]:
+        filtered = real_filter(*args, **kwargs)
+        victim.unlink()
+        return filtered
+
+    monkeypatch.setattr(snapshot, "filter_paths", _filter_then_vanish)
 
 
 class TestVanishedFileRace:
     """Files deleted between scan and timestamp save (live-tree TOCTOU)."""
 
-    def test_saved_timestamps_skip_vanished_file(self, tmp_path: Path) -> None:
+    def test_a_file_that_vanishes_before_the_save_is_skipped_not_raised_on(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """A file gone since the scan is skipped, not raised on.
 
         Regression: error 33f74c75 -- another branch's pytest fixture created
@@ -27,33 +86,73 @@ class TestVanishedFileRace:
         The unguarded comprehension raised FileNotFoundError, which escaped
         run_snapshot and killed the whole 'all' cycle.
         """
-        real = tmp_path / "here.txt"
-        real.write_text("x", encoding="utf-8")
-        filtered = [
-            (str(real), "here.txt"),
-            (str(tmp_path / "vanished.txt"), "vanished.txt"),
-        ]
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "here.txt").write_text("x", encoding="utf-8")
+        (project / "vanished.txt").write_text("x", encoding="utf-8")
+        _vanish_after_copy(monkeypatch, [project / "vanished.txt"])
 
-        timestamps = _build_saved_timestamps(filtered)
+        result = run_snapshot(str(project), show_panels=False)
 
-        assert "here.txt" in timestamps
-        assert "vanished.txt" not in timestamps
+        assert not result.errors, "the vanished file escaped as an error"
+        saved = load_timestamps(str(project))
+        assert "here.txt" in saved
+        assert "vanished.txt" not in saved
 
-    def test_saved_timestamps_all_vanished(self, tmp_path: Path) -> None:
-        """Every file gone -- returns empty dict, still never raises."""
-        filtered = [(str(tmp_path / "gone.txt"), "gone.txt")]
+    def test_every_file_vanishing_persists_an_empty_map_and_still_never_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Every file gone -- an empty map is persisted, the run still completes."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "gone.txt").write_text("x", encoding="utf-8")
+        _vanish_after_copy(monkeypatch)
 
-        assert _build_saved_timestamps(filtered) == {}
+        result = run_snapshot(str(project), show_panels=False)
 
-    def test_quick_check_still_invalidates_on_missing(self, tmp_path: Path) -> None:
-        """The quick-check helper keeps its stricter contract: None, not a partial dict.
+        assert not result.errors
+        assert load_timestamps(str(project)) == {}
 
-        A partial dict would compare unequal to the stored one and silently
-        force a full re-copy; None is the explicit 'cannot compare' signal.
+    def test_an_unreadable_mtime_forbids_the_quick_check_skip(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A quick-check that could not read every mtime must not skip the run.
+
+        The quick-check map is the stricter of the two: None, never a partial
+        dict. A partial dict is a comparison made out of whichever files
+        survived, and it compares EQUAL exactly when the vanished entries are
+        missing from the stored map too -- the shape built below, where the
+        racy file was created after the stored map was written. A forgiving
+        helper would report "no changes" for a tree it never finished reading.
         """
-        filtered = [(str(tmp_path / "gone.txt"), "gone.txt")]
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "kept.txt").write_text("x", encoding="utf-8")
+        run_snapshot(str(project), show_panels=False)
 
-        assert _build_current_timestamps(filtered) is None
+        racy = project / "racy.txt"
+        racy.write_text("x", encoding="utf-8")
+        _vanish_after_scan(monkeypatch, racy)
+
+        second = run_snapshot(str(project), show_panels=False)
+
+        assert second.backup_path, "quick-check skipped a run whose mtimes it could not read"
+
+    def test_an_unchanged_tree_does_take_the_quick_check_skip(self, tmp_path: Path) -> None:
+        """The control for the pin above: with nothing vanished the skip is real.
+
+        Without this, a quick-check that never skips anything would make the
+        test above vacuously green.
+        """
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "kept.txt").write_text("x", encoding="utf-8")
+        run_snapshot(str(project), show_panels=False)
+
+        second = run_snapshot(str(project), show_panels=False)
+
+        assert not second.backup_path
+        assert second.files_skipped == second.files_checked
 
 
 class TestMissingProjectRoot:
@@ -68,8 +167,6 @@ class TestMissingProjectRoot:
 
     def test_snapshot_refuses_missing_root(self, tmp_path: Path) -> None:
         """run_snapshot on a missing path errors and writes nothing."""
-        from aipass.backup.apps.modules.snapshot import run_snapshot
-
         missing = tmp_path / "no_such_project"
 
         result = run_snapshot(str(missing), show_panels=False)
@@ -80,7 +177,6 @@ class TestMissingProjectRoot:
 
     def test_versioned_refuses_missing_root(self, tmp_path: Path) -> None:
         """run_versioned on a missing path errors and writes nothing."""
-        from aipass.backup.apps.modules.versioned import run_versioned
 
         missing = tmp_path / "no_such_project"
 
@@ -92,7 +188,6 @@ class TestMissingProjectRoot:
 
     def test_snapshot_refuses_file_as_root(self, tmp_path: Path) -> None:
         """A file (not a directory) passed as the project root is refused."""
-        from aipass.backup.apps.modules.snapshot import run_snapshot
 
         a_file = tmp_path / "notadir.txt"
         a_file.write_text("x", encoding="utf-8")
@@ -104,7 +199,6 @@ class TestMissingProjectRoot:
 
     def test_existing_project_still_runs(self, tmp_path: Path) -> None:
         """Guard does not block a real project -- normal snapshot still works."""
-        from aipass.backup.apps.modules.snapshot import run_snapshot
 
         project = tmp_path / "real_project"
         project.mkdir()
@@ -133,7 +227,6 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_missing_config_still_falls_back_to_defaults(self, tmp_path: Path) -> None:
         """A project with no config yet is not an error -- absence is absence."""
-        from aipass.backup.apps.handlers.project.config import DEFAULTS, load_project_config
 
         config = load_project_config(str(tmp_path))
 
@@ -141,7 +234,6 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_corrupt_config_raises(self, tmp_path: Path) -> None:
         """A corrupt config must not silently become DEFAULTS mid-backup."""
-        from aipass.backup.apps.handlers.project.config import load_project_config
 
         self._corrupt(tmp_path / ".backup" / "config.json")
 
@@ -156,7 +248,6 @@ class TestUnreadableDocumentsAreLoud:
         Answering {} here and carrying on would have register_project write a
         one-project registry over every other registration, with no copy left.
         """
-        from aipass.backup.apps.handlers.project import registry
 
         corrupt = tmp_path / "project_registry.json"
         self._corrupt(corrupt)
@@ -169,7 +260,6 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_corrupt_changelog_raises(self, tmp_path: Path) -> None:
         """A corrupt changelog must not be overwritten with a one-entry one."""
-        from aipass.backup.apps.handlers.state.changelog import append_changelog
 
         self._corrupt(tmp_path / ".backup" / "changelog.json")
 
@@ -178,7 +268,6 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_corrupt_timestamps_raises(self, tmp_path: Path) -> None:
         """A corrupt timestamp map is an error, not 'every file changed'."""
-        from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 
         self._corrupt(tmp_path / ".backup" / "timestamps.json")
 
@@ -187,7 +276,6 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_corrupt_tracker_raises(self, tmp_path: Path) -> None:
         """A corrupt drive tracker is an error, not 'nothing uploaded yet'."""
-        from aipass.backup.apps.handlers.drive.tracker import load_tracker
 
         self._corrupt(tmp_path / ".backup" / "drive_tracker.json")
 
@@ -201,7 +289,6 @@ class TestUnreadableDocumentsAreLoud:
         yet". A truncated write leaves exactly this state, so it is the one
         corruption most likely to be real.
         """
-        from aipass.backup.apps.handlers.project.config import load_project_config
 
         empty = tmp_path / ".backup" / "config.json"
         empty.parent.mkdir(parents=True, exist_ok=True)
@@ -212,7 +299,6 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_readable_but_not_an_object_raises(self, tmp_path: Path) -> None:
         """Valid JSON of the wrong shape used to reach an AttributeError."""
-        from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 
         ts = tmp_path / ".backup" / "timestamps.json"
         ts.parent.mkdir(parents=True, exist_ok=True)
@@ -227,7 +313,6 @@ class TestWriteResultsAreChecked:
 
     def test_save_project_config_reports_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """False from the primitive is False from the handler, not True."""
-        from aipass.backup.apps.handlers.project import config
 
         monkeypatch.setattr(config.json_handler, "write_json", lambda *a, **k: False)
 
@@ -235,7 +320,6 @@ class TestWriteResultsAreChecked:
 
     def test_save_timestamps_raises_on_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """A versioned run whose timestamps never landed is not a success."""
-        from aipass.backup.apps.handlers.state import timestamps
 
         monkeypatch.setattr(timestamps.json_handler, "write_json", lambda *a, **k: False)
 
@@ -244,7 +328,6 @@ class TestWriteResultsAreChecked:
 
     def test_setup_reports_a_config_it_could_not_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """create_backup_dir used to answer a path after a failed config write."""
-        from aipass.backup.apps.handlers.project import setup
 
         monkeypatch.setattr(setup.json_handler, "write_json", lambda *a, **k: False)
 
@@ -256,10 +339,6 @@ class TestAuditLog:
 
     def test_record_shape_flattens_the_payload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """timestamp + operation + the operation's own fields, one line."""
-        import json
-
-        from aipass.backup.apps.handlers.audit import trail
-
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
         trail.log_operation("probe_op", {"project_root": "/some/project"})
 
@@ -275,7 +354,6 @@ class TestAuditLog:
         This is what keeps the suite off the branch's live
         logs/operations.jsonl -- the reason 37 real writes used to land there.
         """
-        from aipass.backup.apps.handlers.audit import trail
 
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "first"))
         first = trail.log_path()
@@ -285,7 +363,6 @@ class TestAuditLog:
 
     def test_an_empty_seam_is_absence_not_a_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An empty env value must not redirect the stream to the cwd."""
-        from aipass.backup.apps.handlers.audit import trail
 
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
 
@@ -294,7 +371,6 @@ class TestAuditLog:
 
     def test_a_failed_append_never_takes_the_backup_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The audit trail is a record of work, not the work."""
-        from aipass.backup.apps.handlers.audit import trail
 
         def _refuse(*args: object, **kwargs: object) -> None:
             raise OSError("audit stream unwritable")
