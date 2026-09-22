@@ -74,6 +74,7 @@ cost noise and never a missed bug.
 | ruff *(advisory)* | branch_level | everywhere | Ruff linter compliance — surfaces violations, never gates the score |
 | shebang | all_files | everywhere | No shebang lines in library code |
 | silent_catch | all_files | everywhere | No bare except/pass patterns |
+| state_leak *(tests only)* | all_files | tests | A write to shared state at TEST TIME with nothing to put it back — test template v1 item 18. Three shapes: a direct write (`os.environ[k] = v`, `sys.path.insert`, `sys.modules[k] = v`, `mod.attr = x` / `setattr(mod, ...)` on an imported product module), a patcher `.start()`ed and never stopped, and `os.chdir` with no restore. Every `monkeypatch` verb credits its own family only; `with patch(...)`, `@patch`, a `try`/`finally`, and a restoring fixture the test REQUESTS are never convicted, nor is a `sys.modules` key naming an aipass module (`import_site` owns it). Depth ONE only — `mod.helper.return_value = x` configures an object, not the module. A write at import time is counted in the passing message, never charged |
 | stderr_routing | all_files | production | Proper stderr vs stdout usage |
 | subcommand_help | branch_level | production | Subcommand --help interception before dispatch |
 | template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |

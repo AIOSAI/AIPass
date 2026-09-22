@@ -15,6 +15,8 @@ variable per test, so every test lands in its own tmp_path without knowing it.
 # =============================================
 
 import os
+import sys
+from types import ModuleType
 import tempfile
 
 # Redirect prax logs to temp directory during tests
@@ -27,6 +29,7 @@ from pathlib import Path
 from typing import Generator, List, Tuple
 
 import pytest
+from unittest.mock import MagicMock
 
 from aipass.cli.apps.modules import display
 from aipass.seedgo.apps.handlers.json import json_handler
@@ -123,3 +126,58 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
     monkeypatch.setattr(seedgo_entry, "logger", _CapturingLogger())
     return captured
+
+
+#: The package whose modules a test's sys.modules stubs can poison. A checker
+#: imported while its infrastructure is a MagicMock binds that mock at import
+#: time, and monkeypatch cannot undo a name another module already bound.
+_CHECKER_PKG = "aipass.seedgo.apps.handlers.aipass_standards"
+
+
+@pytest.fixture(autouse=True)
+def _evict_modules_imported_under_a_stub():
+    """Drop any checker module a test imported while its infrastructure was mocked.
+
+    THE LEAK THIS CLOSES (todo 139, template v1 item 18). Twenty-five files in
+    this suite share one fixture shape: monkeypatch.setitem(sys.modules,
+    "...handlers.bypass", MagicMock()) followed by monkeypatch.delitem of the
+    checker they are about to exercise, so it re-imports against the mocks.
+    monkeypatch restores the sys.modules ENTRIES, but trigger_check does
+    `from ...bypass.utils import matching_rule` at import time -- the name is
+    bound before teardown and stays bound. delitem with raising=False records
+    nothing when the key is absent, which is the cold-run case, so the poisoned
+    module was left in sys.modules and test_bypass.py later read
+    `mock.utils.matching_rule()` out of it. Alphabetical order hid it for
+    months: test_bypass runs FIRST in a forward run and last in a reverse one.
+
+    Scoped by measurement, not by name: only modules that ARRIVED during the
+    test, and only the ones actually HOLDING a MagicMock, so a clean test pays
+    nothing and re-imports nothing. Reading the arrived module rather than the
+    stub is deliberate -- a conftest fixture tears down LAST, after monkeypatch
+    has already put sys.modules back, so the stub is gone by then and only the
+    bound name is left to see.
+    """
+    yield
+    package = sys.modules.get(_CHECKER_PKG)
+    poisoned = {
+        name
+        for name in list(sys.modules)
+        if name.startswith(_CHECKER_PKG + ".")
+        and sys.modules.get(name) is not None
+        and any(isinstance(value, MagicMock) for value in vars(sys.modules[name]).values())
+    }
+    # sys.modules is only half of it. Importing a submodule also sets it as an
+    # ATTRIBUTE on its parent package, and `from pkg import sub` reads that
+    # attribute before it ever consults sys.modules -- so a module already
+    # popped from sys.modules comes straight back through the package, still
+    # holding its mock. Both have to go.
+    if package is not None:
+        for leaf, value in list(vars(package).items()):
+            if isinstance(value, ModuleType) and any(isinstance(v, MagicMock) for v in vars(value).values()):
+                poisoned.add(f"{_CHECKER_PKG}.{leaf}")
+    for name in poisoned:
+        sys.modules.pop(name, None)
+        if package is not None:
+            leaf = name.rsplit(".", 1)[-1]
+            if isinstance(getattr(package, leaf, None), ModuleType):
+                delattr(package, leaf)

@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-08-09
-# Modified: 2026-09-21
+# Modified: 2026-09-22
 # =============================================
 
 from types import SimpleNamespace
@@ -186,6 +186,11 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     the oracle should be the channel. `tests`, because `cli` and
     `output_routing` already own how production BUILDS a console, and this one
     is about what a test puts in its place.
+    `state_leak` is the ninth, 2026-09-22: template v1 item 18, @devpulse
+    dispatch 56121e07 — a write to shared state at test time with nothing to
+    put it back. `tests`, because its whole vocabulary of cures is
+    `monkeypatch`, a fixture that exists only in a test; production code that
+    writes `os.environ` is doing its job.
 
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
@@ -205,6 +210,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "named_encoding",
         "oversize_test_file",
         "router_assert",
+        "state_leak",
         "through_the_command",
     ]
     assert "test_quality" not in checkers
