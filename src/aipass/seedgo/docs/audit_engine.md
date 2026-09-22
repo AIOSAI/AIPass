@@ -45,10 +45,28 @@ globs `*_REGISTRY.json` rather than hardcoding a filename.
 
 ## Two lanes, and a finding can exist in only one
 
-The **audit** walks a branch's `apps/**/*.py`; `tests/` is not in its corpus. The
-PostToolUse **checklist** hook checks whatever file was just edited, including tests. A
+The **audit** walks a branch's `apps/**/*.py` plus the `test_*.py` and `conftest.py` files
+under `tests/`. The PostToolUse **checklist** hook checks whatever file was just edited. A
 bypass rule can therefore be live in one lane and dead in the other — the mistake a naive
 rot detector makes.
+
+`tests/` joined the corpus on **2026-09-21** (owner ruling 21:20). Four standards in the pack
+are written for test files, and an `apps/`-only corpus handed them nothing: they printed a
+grey unscored backlog line and never a row. They score like any other standard now, and
+branch scores dropped on arrival — which is the ruling of 2026-09-20, *let all files fail*.
+
+Which files enter and which do not:
+
+| | In the corpus |
+|---|---|
+| `apps/**/*.py` | yes (`__init__.py` only for `INCLUDE_INIT_FILES` checkers) |
+| `tests/**/test_*.py`, `tests/**/conftest.py` | yes |
+| `tests/helpers.py` and anything else beside the tests | no — a standard for a test's author has nothing to say to it |
+| `tests/parked/**`, `.archive/`, `deprecated/`, `(disabled)` names | no — retired code is not lintable |
+
+WHICH checkers run on each file is still decided per checker by `APPLIES_TO`, never by the
+corpus. Every checker in the pack declares one as of the same ruling; the default is still
+`everywhere`, and forgetting it still costs noise rather than a missed bug.
 
 A pack declares its own corpus in `pack.json`, and the banner printed over its scores is that
 declaration, not the engine's file count.

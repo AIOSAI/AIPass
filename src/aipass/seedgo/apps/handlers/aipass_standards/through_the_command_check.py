@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: through_the_command_check.py
 # Description: Through The Command Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-21
 # Modified: 2026-09-21
 # =============================================
@@ -55,14 +55,17 @@ m`` -- the plain-import form of shape (a) -- is not convicted, because item 10
 names the ``from`` form. No fleet test file uses it today (0 of 591 checked
 2026-09-21); the day one does, this is where it goes.
 
-Two lanes, exactly as ``router_assert``, ``oversize_test_file`` and
-``import_site``:
+Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
 
-  * ``check_module`` -- APPLIES_TO tests, so only the per-file checklist lane
-    runs it, on the write that creates the shape.
-  * ``check_branch_info`` -- the standing backlog, UNSCORED. Test files are
-    not in the audit's corpus (``_collect_py_files`` walks ``apps/``), so no
-    branch's number moves on the day this lands.
+  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
+    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
+    real row with a percentage and it moves the branch score.
+  * ``check_module`` in the per-file checklist lane -- the same function, fired
+    by the PostToolUse hook, so the rule also meets an author on the write.
+
+The ``check_branch_info`` backlog line retired with that ruling: an unscored
+grey line was the workaround for a corpus that handed this checker no files,
+and the scored row is the record now.
 """
 
 import ast
@@ -70,7 +73,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -267,38 +269,3 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         {"file": str(module_path), "score": 0, "standard": STANDARD_KEY, "hits": len(hits)},
     )
     return _result(False, _one_check(False, detail), 0)
-
-
-def check_branch_info(branch_path: str) -> List[str]:
-    """The standing backlog, reported with no score attached.
-
-    The audit's corpus is ``apps/``, so nothing under ``tests/`` can move a
-    branch's number through the scoring lane. The two shapes are counted
-    separately because they are cured differently: one is an import to delete
-    once the call sites move, the other is a rewrite of how the test reaches
-    its unit.
-    """
-    tests_dir = Path(branch_path) / "tests"
-    if not tests_dir.is_dir():
-        return []
-    imports, reaches, files = 0, 0, 0
-    for test_file in sorted(tests_dir.rglob("*.py")):
-        if not (test_file.name.startswith("test_") or test_file.name == "conftest.py"):
-            continue
-        # Retired code is not lintable and the per-file lane already refuses
-        # it through applies_to_file(); without the same guard the backlog
-        # would count hits the lane can never convict.
-        if applicability.is_retired_path(str(test_file)):
-            continue
-        hits = _scan_path(test_file)
-        if not hits:
-            continue
-        files += 1
-        imports += sum(1 for _ln, name, _fix in hits if name.startswith("imports"))
-        reaches += sum(1 for _ln, name, _fix in hits if name.startswith("reaches"))
-    if not (imports or reaches):
-        return []
-    return [
-        f"through_the_command backlog: {imports} private import(s) and {reaches} private helper reach(es) "
-        f"across {files} test file(s) (unscored - convicted on the next write of the file)"
-    ]

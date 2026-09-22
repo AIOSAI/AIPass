@@ -28,6 +28,8 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 if sys.stderr and hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
+# APPLIES_TO: tests read stdout with capsys; raw print is their idiom.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 _TEST_FILE_RE = re.compile(r"^(test_.+|.+_test|conftest)\.py$")

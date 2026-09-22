@@ -46,6 +46,8 @@ from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_D
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
 
 # Audit scope: entry points only (apps/{name}.py)
+# APPLIES_TO: README.md through the entry point.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 

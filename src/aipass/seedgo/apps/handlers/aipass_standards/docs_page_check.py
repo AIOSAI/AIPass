@@ -48,6 +48,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as budget
 
 # Audit scope: entry points only (apps/{name}.py) — one call per branch
+# APPLIES_TO: scores docs/*.md through the entry point.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 #: Page content decides the score, so a page edit must bust the audit cache.

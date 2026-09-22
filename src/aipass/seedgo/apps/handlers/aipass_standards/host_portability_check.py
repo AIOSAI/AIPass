@@ -116,6 +116,8 @@ from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored,
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: its own corpus already reads tests/; a /proc read in a test is real.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "branch_level"
 
 STANDARD_NAME = "HOST_PORTABILITY"

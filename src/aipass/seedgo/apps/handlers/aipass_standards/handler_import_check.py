@@ -22,6 +22,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: reads apps/__init__.py only.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "branch_level"
 
 

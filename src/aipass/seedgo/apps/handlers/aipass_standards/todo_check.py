@@ -23,6 +23,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: a TODO in a test is as unfinished as one in a module.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # Tags to detect, case-insensitive

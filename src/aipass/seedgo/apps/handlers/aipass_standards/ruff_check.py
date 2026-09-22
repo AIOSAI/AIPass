@@ -13,7 +13,7 @@ Runs both ``ruff check`` (lint) and ``ruff format --check`` (formatting).
 
 Two modes:
 - check_branch(): runs ruff across entire apps/ tree (used by audit pipeline,
-  AUDIT_SCOPE = branch_level, ADVISORY = always-passes)
+AUDIT_SCOPE = branch_level, ADVISORY = always-passes)
 - check_module(): runs ruff on a single file (used by checklist/per-file hooks,
   returns passed=False on violations so subagent_stop_gate can block)
 
@@ -33,6 +33,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: ruff already lints tests/; advisory, so it gates nothing either way.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "branch_level"
 ADVISORY = True
 

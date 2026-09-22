@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-09
 # Modified: 2026-09-21
 # =============================================
@@ -168,10 +168,23 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     the third, argued on 2026-09-21: template v1 item 8, owner 20:11.
     `through_the_command` is the fourth, same day: template v1 item 10,
     owner 2026-09-20 22:28.
+
+    `calendar_bound` joined on 2026-09-21 for a different reason and is the
+    one name here that is not a template item: it is branch_level, so it walks
+    its own corpus and this constant filters nothing for it — but that corpus
+    has always been tests/ and lib/*/tests/, and every one of the 36 checkers
+    that had no declaration got an explicit one when tests/ entered the audit
+    corpus. Declaring it `everywhere` would have been the convenient lie.
     """
     checkers = discover_checkers()
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
-    assert tests_only == ["import_site", "oversize_test_file", "router_assert", "through_the_command"]
+    assert tests_only == [
+        "calendar_bound",
+        "import_site",
+        "oversize_test_file",
+        "router_assert",
+        "through_the_command",
+    ]
     assert "test_quality" not in checkers
 
 
@@ -242,3 +255,119 @@ def test_audit_lane_does_not_collect_retired_files(tmp_path, monkeypatch):
 
     assert output["corpus_size"] == 1
     assert {v["file"] for v in output["naming_violations"]} == {"live.py"}
+
+
+# ---------------------------------------------------------------------------
+# The corpus: tests/ joined it on 2026-09-21 (owner ruling 21:20)
+# ---------------------------------------------------------------------------
+
+
+def _branch(tmp_path, **files):
+    """A throwaway branch tree: keys are branch-relative paths, values are source."""
+    for rel, body in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    return tmp_path
+
+
+#: Every file these corpus tests write carries this line. It is a naming
+#: violation, so any file the audit actually measured names itself in
+#: naming_violations — which is how the corpus is read here through the
+#: command rather than off the collector.
+NAMES_ITSELF = "x = 1\n"
+
+
+def _corpus(branch_path):
+    """The file names the audit measured, read from its own output."""
+    output = branch_audit.audit_branch({"name": "tmpb", "path": str(branch_path), "entry_file": ""}, [])
+    return {v["file"] for v in output["naming_violations"]}
+
+
+def test_the_corpus_takes_test_files_and_conftest(tmp_path, monkeypatch):
+    """The whole point of the ruling: a tests-only standard needs files to score."""
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    root = _branch(
+        tmp_path,
+        **{
+            "apps/modules/live.py": NAMES_ITSELF,
+            "tests/test_thing.py": NAMES_ITSELF,
+            "tests/conftest.py": NAMES_ITSELF,
+        },
+    )
+
+    assert _corpus(root) == {"live.py", "test_thing.py", "conftest.py"}
+
+
+def test_a_helper_beside_the_tests_is_not_in_the_corpus(tmp_path, monkeypatch):
+    """A standard written for a test's author has nothing to say to a helper module."""
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    root = _branch(
+        tmp_path,
+        **{"apps/modules/live.py": NAMES_ITSELF, "tests/helpers.py": NAMES_ITSELF, "tests/test_x.py": NAMES_ITSELF},
+    )
+
+    assert _corpus(root) == {"live.py", "test_x.py"}
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "tests/parked/conftest.py",
+        "tests/parked/dead_lane/test_old.py",
+        "tests/.archive/test_scaffold.py",
+        "tests/test_thing(disabled).py",
+    ],
+)
+def test_set_aside_test_code_never_enters_the_corpus(tmp_path, monkeypatch, rel):
+    """Four ways a test file is already retired, and each keeps it out.
+
+    `parked` is the one that had to be ADDED (2026-09-21): six of the fleet's
+    nine parked files carry the house `(disabled)` suffix, but the three
+    `tests/parked/conftest.py` collection barriers carry nothing, and they
+    would have entered the corpus as live test files.
+    """
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    root = _branch(tmp_path, **{"apps/modules/live.py": NAMES_ITSELF, rel: NAMES_ITSELF})
+
+    assert _corpus(root) == {"live.py"}
+
+
+def test_a_tests_only_standard_scores_a_row_when_the_branch_has_tests(tmp_path, monkeypatch):
+    """The gate fix: a tests-only checker used to be dropped at the ENTRY file.
+
+    applies_to_file(checker, entry_file) is False for a tests-only standard,
+    because the entry file is production source. That `continue` skipped the
+    whole checker, so the all_files scan below it never ran and the standard
+    stayed off the board even with tests/ in the corpus.
+    """
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    root = _branch(
+        tmp_path,
+        **{
+            "apps/modules/live.py": "X = 1\n",
+            "tests/test_thing.py": "def test_x():\n    from aipass.prax import logger\n    assert logger\n",
+        },
+    )
+
+    output = branch_audit.audit_branch({"name": "tmpb", "path": str(root), "entry_file": ""}, [])
+
+    assert "import_site" in output["scores"]
+    assert output["scores"]["import_site"] == 0
+    assert {v["file"] for v in output["import_site_violations"]} == {"test_thing.py"}
+
+
+def test_a_branch_with_no_tests_stands_the_standard_down_rather_than_dropping_it(tmp_path, monkeypatch):
+    """The CI tripwire counts standards CONSULTED, so the slot has to stay filled.
+
+    Scoring 0 would blame the branch for having no tests yet; scoring 100 would
+    claim a measurement that never happened; reporting nothing would trip the
+    tripwire on the first branch that ships without a tests/ directory.
+    """
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    root = _branch(tmp_path, **{"apps/modules/live.py": "X = 1\n"})
+
+    output = branch_audit.audit_branch({"name": "tmpb", "path": str(root), "entry_file": ""}, [])
+
+    assert "import_site" not in output["scores"]
+    assert output["results"]["import_site"]["not_applicable"] is True

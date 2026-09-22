@@ -105,7 +105,7 @@ def test_print_branch_summary_basic():
 
     lines = [call.args[0] for call in console.print.call_args_list if call.args]
     branch_line = (
-        "[bold cyan]seedgo[/bold cyan] [dim](10 production files measured — apps/ only, tests/ not in the corpus)[/dim]"
+        "[bold cyan]seedgo[/bold cyan] [dim](10 files measured — apps/ plus tests/ test_*.py and conftest.py)[/dim]"
     )
     assert branch_line in lines
     assert "  Meta            100% ✅    Naming           90% ✅" in lines
@@ -134,8 +134,7 @@ def test_print_branch_summary_with_violations():
 
     lines = [call.args[0] for call in console.print.call_args_list if call.args]
     branch_line = (
-        "[bold cyan]testbranch[/bold cyan] "
-        "[dim](5 production files measured — apps/ only, tests/ not in the corpus)[/dim]"
+        "[bold cyan]testbranch[/bold cyan] [dim](5 files measured — apps/ plus tests/ test_*.py and conftest.py)[/dim]"
     )
     assert branch_line in lines
     assert "  [bold red]META VIOLATIONS (1 files):[/bold red]" in lines

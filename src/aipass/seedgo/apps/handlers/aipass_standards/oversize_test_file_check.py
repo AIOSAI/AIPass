@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: oversize_test_file_check.py
 # Description: Oversize Test File Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -24,13 +24,17 @@ The cap is not tuned to land a number. Measured across the fleet 2026-09-20:
 therefore sits above nine files in ten and convicts 34 — the tail, not the
 body — and it is the same figure the product side already uses.
 
-Two lanes, exactly as ``router_assert``:
+Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
 
-  * ``check_module`` -- APPLIES_TO tests, so only the per-file checklist lane
-    runs it, on the write that grows the file.
-  * ``check_branch_info`` -- the standing backlog, UNSCORED. Test files are
-    not in the audit's corpus (``_collect_py_files`` walks ``apps/``), so no
-    branch's number moves.
+  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
+    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
+    real row with a percentage and it moves the branch score.
+  * ``check_module`` in the per-file checklist lane -- the same function, fired
+    by the PostToolUse hook, so the rule also meets an author on the write.
+
+The ``check_branch_info`` backlog line retired with that ruling: an unscored
+grey line was the workaround for a corpus that handed this checker no files,
+and the scored row is the record now.
 
 One honest limit, stated because it is the whole reason this rule is a
 prohibition and not a requirement: the cure for an oversize file is a split,
@@ -41,10 +45,9 @@ never implies they can perform it unasked.
 
 import ast
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -152,29 +155,3 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         {"file": str(module_path), "score": 0, "standard": STANDARD_KEY, "code_lines": code},
     )
     return _result(False, message, 0)
-
-
-def check_branch_info(branch_path: str) -> List[str]:
-    """The standing backlog, reported with no score attached.
-
-    Names the largest offender rather than only counting them: "3 files over
-    the cap" gives an owner nothing to start on, and the biggest file is
-    almost always where the split is worth doing first.
-    """
-    tests_dir = Path(branch_path) / "tests"
-    if not tests_dir.is_dir():
-        return []
-    over: List[Tuple[int, str]] = []
-    for test_file in sorted(tests_dir.rglob("test_*.py")):
-        if applicability.is_retired_path(str(test_file)):
-            continue
-        code, _total, _payload = _measure_path(test_file)
-        if code > CODE_LINE_CAP:
-            over.append((code, test_file.name))
-    if not over:
-        return []
-    worst_code, worst_name = max(over)
-    return [
-        f"oversize_test_file backlog: {len(over)} test file(s) over {CODE_LINE_CAP} code lines, "
-        f"largest {worst_name} at {worst_code} (unscored - convicted on the next write of the file)"
-    ]

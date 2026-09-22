@@ -269,56 +269,6 @@ class TestCheckModuleIsThePerFileLane:
         assert "bypassed" in result["checks"][0]["message"]
 
 
-class TestTheBacklogIsReportedUnscored:
-    def test_a_branch_without_tests_reports_nothing(self, tmp_path):
-        assert import_site_check.check_branch_info(str(tmp_path)) == []
-
-    def test_a_clean_tests_tree_reports_nothing(self, tmp_path):
-        _write(tmp_path, "from aipass.prax import logger\n\n\ndef test_x():\n    assert logger\n")
-
-        assert import_site_check.check_branch_info(str(tmp_path)) == []
-
-    def test_both_shapes_are_counted_separately(self, tmp_path):
-        """They are cured differently: one is a line move, the other a rewrite."""
-        _write(
-            tmp_path,
-            "def test_x():\n"
-            "    from aipass.prax import logger\n"
-            '    monkeypatch.setitem(sys.modules, "aipass.cli", stub)\n'
-            "    assert logger\n",
-        )
-
-        line = import_site_check.check_branch_info(str(tmp_path))[0]
-
-        assert "1 deferred product import(s) and 1 sys.modules stub(s) across 1 test file(s)" in line
-
-    def test_the_line_says_it_is_unscored(self, tmp_path):
-        _write(tmp_path, "def test_x():\n    from aipass.prax import logger\n    assert logger\n")
-
-        assert "unscored" in import_site_check.check_branch_info(str(tmp_path))[0]
-
-    def test_a_conftest_counts(self, tmp_path):
-        _write(tmp_path, "def fixture_x():\n    from aipass.prax import logger\n    return logger\n", "conftest.py")
-
-        assert import_site_check.check_branch_info(str(tmp_path))[0].startswith("import_site backlog: 1 deferred")
-
-    def test_a_plain_helper_module_does_not_count(self, tmp_path):
-        """The rule is about test files. A helper beside them is not one."""
-        _write(tmp_path, "def helper():\n    from aipass.prax import logger\n    return logger\n", "helpers.py")
-
-        assert import_site_check.check_branch_info(str(tmp_path)) == []
-
-    def test_a_retired_file_does_not_count(self, tmp_path):
-        """Archived code is not lintable, and the lane that convicts refuses it too."""
-        archive = tmp_path / "tests" / ".archive"
-        archive.mkdir(parents=True)
-        (archive / "test_old.py").write_text(
-            "def test_x():\n    from aipass.prax import logger\n    assert logger\n", encoding="utf-8"
-        )
-
-        assert import_site_check.check_branch_info(str(tmp_path)) == []
-
-
 class TestThroughTheChecklistCommand:
     """The door an agent actually meets the rule through: the PostToolUse lane."""
 

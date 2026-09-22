@@ -262,53 +262,6 @@ class TestCheckModuleIsThePerFileLane:
         assert "bypassed" in result["checks"][0]["message"]
 
 
-class TestTheBacklogIsReportedUnscored:
-    def test_a_branch_without_tests_reports_nothing(self, tmp_path):
-        assert through_the_command_check.check_branch_info(str(tmp_path)) == []
-
-    def test_a_clean_tests_tree_reports_nothing(self, tmp_path):
-        _write(tmp_path, f"from {_PRODUCT} import handle_command\n\n\ndef test_x():\n    handle_command([])\n")
-
-        assert through_the_command_check.check_branch_info(str(tmp_path)) == []
-
-    def test_both_shapes_are_counted_separately(self, tmp_path):
-        """They are cured differently: one is an import to drop, the other a rewrite."""
-        _write(
-            tmp_path,
-            f"from {_PRODUCT} import _source_matches\nimport {_PRODUCT} as cs\n\n\ndef test_x():\n    cs._check()\n",
-        )
-
-        line = through_the_command_check.check_branch_info(str(tmp_path))[0]
-
-        assert "1 private import(s) and 1 private helper reach(es) across 1 test file(s)" in line
-
-    def test_the_line_says_it_is_unscored(self, tmp_path):
-        _write(tmp_path, f"from {_PRODUCT} import _source_matches\n")
-
-        assert "unscored" in through_the_command_check.check_branch_info(str(tmp_path))[0]
-
-    def test_a_conftest_counts(self, tmp_path):
-        _write(tmp_path, f"from {_PRODUCT} import _source_matches\n", "conftest.py")
-
-        assert through_the_command_check.check_branch_info(str(tmp_path))[0].startswith(
-            "through_the_command backlog: 1 private import(s)"
-        )
-
-    def test_a_plain_helper_module_does_not_count(self, tmp_path):
-        """The rule is about test files. A helper beside them is not one."""
-        _write(tmp_path, f"from {_PRODUCT} import _source_matches\n", "helpers.py")
-
-        assert through_the_command_check.check_branch_info(str(tmp_path)) == []
-
-    def test_a_retired_file_does_not_count(self, tmp_path):
-        """Archived code is not lintable, and the lane that convicts refuses it too."""
-        archive = tmp_path / "tests" / ".archive"
-        archive.mkdir(parents=True)
-        (archive / "test_old.py").write_text(f"from {_PRODUCT} import _source_matches\n", encoding="utf-8")
-
-        assert through_the_command_check.check_branch_info(str(tmp_path)) == []
-
-
 class TestThroughTheChecklistCommand:
     """The door an agent actually meets the rule through: the PostToolUse lane."""
 

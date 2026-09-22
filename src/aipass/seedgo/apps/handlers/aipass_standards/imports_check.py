@@ -23,6 +23,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: ordering and grouping read the same in a test file.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 

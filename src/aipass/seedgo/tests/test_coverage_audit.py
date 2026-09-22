@@ -817,9 +817,9 @@ class TestPrintBranchSummary:
         monkeypatch.setattr(audit_display, "console", mock_con)
         print_branch_summary(self._make_audit_result(files_checked=171))
         rendered = " ".join(str(c) for c in mock_con.print.call_args_list)
-        assert "171 production files measured" in rendered
-        assert "apps/ only" in rendered
-        assert "tests/ not in the corpus" in rendered
+        assert "171 files measured" in rendered
+        assert "apps/ plus tests/" in rendered
+        assert "test_*.py and conftest.py" in rendered
 
     def test_the_scope_words_are_not_hardcoded_around_the_count(self, monkeypatch):
         """Negative control on the pin above: the number still has to be real.
@@ -837,7 +837,7 @@ class TestPrintBranchSummary:
         monkeypatch.setattr(audit_display, "console", mock_con)
         print_branch_summary(self._make_audit_result(files_checked=3))
         rendered = " ".join(str(c) for c in mock_con.print.call_args_list)
-        assert "3 production files measured" in rendered
+        assert "3 files measured" in rendered
 
     def test_post_check_crash_prints_even_at_a_perfect_score(self):
         """A crashed post-check reaches the CONSOLE on a branch scoring 100.

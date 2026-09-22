@@ -1518,35 +1518,6 @@ class TestRouterAssertLanes:
         assert "test_two:4" in result["checks"][0]["message"]
         assert "test_one" not in result["checks"][0]["message"]
 
-    def test_the_backlog_line_skips_retired_tests(self, tmp_path):
-        """A unit under tests/.archive/ can never be convicted, so it is not owed.
-
-        Reddens if the is_retired_path guard goes. Measured 2026-09-20: the
-        backlog reported daemon 8 against a lane that could only ever convict
-        7, because tests/.archive/test_actions_module.py was counted. A
-        backlog nobody can burn down is a number, not a debt.
-        """
-        live = tmp_path / "tests"
-        (live / ".archive").mkdir(parents=True)
-        unit = "def test_x():\n    assert handle_command('x', []) is True\n"
-        (live / "test_live.py").write_text(unit, encoding="utf-8")
-        (live / ".archive" / "test_retired.py").write_text(unit, encoding="utf-8")
-
-        lines = router_assert.check_branch_info(str(tmp_path))
-
-        assert len(lines) == 1
-        assert "1 test(s) in 1 file(s)" in lines[0]
-        assert "unscored" in lines[0]
-
-    def test_a_clean_branch_says_nothing_at_all(self, tmp_path):
-        """No backlog, no line — an info channel that always speaks is noise."""
-        (tmp_path / "tests").mkdir()
-        (tmp_path / "tests" / "test_clean.py").write_text(
-            "def test_x():\n    assert handle_command('x', []) is False\n", encoding="utf-8"
-        )
-
-        assert router_assert.check_branch_info(str(tmp_path)) == []
-
     def test_the_standard_scores_nothing_because_it_declares_tests(self):
         """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely.
 
@@ -1660,36 +1631,6 @@ class TestOversizeTestFileLanes:
 
         assert "@devpulse" in message
         assert "moving tests is not adding them" in message.lower()
-
-    def test_the_backlog_names_the_largest_offender(self, tmp_path):
-        """ "3 files over the cap" gives an owner nowhere to start.
-
-        Reddens if the info line degrades to a count.
-        """
-        tests = tmp_path / "tests"
-        tests.mkdir()
-        (tests / "test_small.py").write_text("x = 1\n" * 10, encoding="utf-8")
-        (tests / "test_mid.py").write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 5), encoding="utf-8")
-        (tests / "test_worst.py").write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 900), encoding="utf-8")
-
-        lines = oversize.check_branch_info(str(tmp_path))
-
-        assert len(lines) == 1
-        assert "2 test file(s) over" in lines[0]
-        assert "largest test_worst.py at 2400" in lines[0]
-        assert "unscored" in lines[0]
-
-    def test_the_backlog_skips_retired_tests(self, tmp_path):
-        """A file under tests/.archive/ can never be convicted, so it is not owed.
-
-        Same defect router_assert's backlog shipped with: a debt nobody can
-        burn down is a number, not a backlog.
-        """
-        tests = tmp_path / "tests"
-        (tests / ".archive").mkdir(parents=True)
-        (tests / ".archive" / "test_old.py").write_text("x = 1\n" * (oversize.CODE_LINE_CAP + 1), encoding="utf-8")
-
-        assert oversize.check_branch_info(str(tmp_path)) == []
 
     def test_the_standard_scores_nothing_because_it_declares_tests(self):
         """APPLIES_TO=tests keeps it out of the audit's apps/ corpus entirely.

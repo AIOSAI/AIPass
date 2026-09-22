@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: incremental_cache.py
 # Description: Audit Fingerprint Cache Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-31
 # Modified: 2026-09-21
 # =============================================
@@ -53,7 +53,14 @@ from aipass.seedgo.apps.handlers.module_root import module_file
 # "2": the pack stamp stopped covering the checker files themselves, which now
 # carry one stamp each. Every entry written under "1" must bust once, because
 # its single stamp claims a coverage the new one deliberately no longer has.
-CACHE_VERSION = "2"
+# "3": the audit's CORPUS grew to include tests/ (owner ruling 2026-09-21
+# 21:20). Nothing else would have caught this. The branch stamp already
+# fingerprinted tests/ through _collect_watch_files, so an unchanged branch
+# hits the fast path and serves results computed from an apps/-only corpus --
+# a stale 100% with no test row in it. The corpus is defined in branch_audit,
+# which neither the pack stamp nor the per-checker stamps cover, so the version
+# is the only thing that can bust it.
+CACHE_VERSION = "3"
 # Bump when the on-disk DOC SHAPE changes — checked separately from the
 # checker/bypass/version stamp so schema churn during development doesn't
 # piggyback on version bumps. Deliberately NOT bumped for checker_stamps: the

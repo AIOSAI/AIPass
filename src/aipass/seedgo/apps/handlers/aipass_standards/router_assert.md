@@ -82,16 +82,13 @@ def test_handle_command_unknown_subcommand():
 
 ---
 
-## Scope, and why no score moved
+## Scope, and how it scores
 
-`APPLIES_TO = "tests"`. The audit's corpus is `apps/` (`branch_audit._collect_py_files`), so no test file enters the scoring lane and **this standard contributes nothing to any branch's audit number**.
+`APPLIES_TO = "tests"`, and since **2026-09-21** (owner ruling 21:20) the audit's corpus includes `tests/`, so every `test_*.py` and `conftest.py` is measured and **this standard is a scored row that moves the branch number**.
 
-It convicts in the per-file `checklist` lane, which the PostToolUse hook runs on the write — so it meets an agent at the moment the shape is created, and the existing 223 are not charged to whoever runs the audit next. The standing backlog is reported once per branch through the audit's unscored info channel:
+It also convicts in the per-file `checklist` lane, which the PostToolUse hook runs on the write — so it still meets an agent at the moment the shape is created, rather than only in a report someone runs later.
 
-```
-router_assert backlog: 51 test(s) in 10 file(s) assert only a router's True
-(unscored - convicted on the next write of the file)
-```
+The unscored `check_branch_info` backlog line retired with that ruling. It existed because the corpus handed this checker no files; the row is the record now, and branch scores dropped on arrival exactly as the owner intended (*let all files fail*, 2026-09-20).
 
 ---
 

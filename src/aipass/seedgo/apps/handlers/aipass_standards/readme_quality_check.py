@@ -28,6 +28,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: entry points only (apps/{name}.py)
+# APPLIES_TO: README.md through the entry point.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "entry_point"
 
 # Internal AIPass branch names — a stranger would not recognise these

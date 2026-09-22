@@ -29,6 +29,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: a test that chmods 0o777 leaves the same hole.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 

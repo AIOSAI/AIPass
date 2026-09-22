@@ -30,6 +30,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
+# APPLIES_TO: except/pass in a test is how a broken assertion goes green.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # Logger attribute names that count as "logging present"

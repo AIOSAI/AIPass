@@ -16,6 +16,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: Windows CI runs the suite, so /home/... in a test breaks the build.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 _POSIX_HOME = re.compile(r"/home/[a-zA-Z][a-zA-Z0-9_.-]+/")

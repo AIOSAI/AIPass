@@ -93,18 +93,15 @@ If the helper's logic cannot be reached through any command at all, **that is a 
 
 ---
 
-## Scope, and why no score moves
+## Scope, and how it scores
 
-`APPLIES_TO = "tests"`, so only the per-file checklist lane runs it — on the write that creates the shape. The audit's corpus is `apps/` (`_collect_py_files` never walks `tests/`), so no branch's number moves on the day this lands. The audit reports the standing backlog through `check_branch_info`, **unscored**:
+`APPLIES_TO = "tests"`, and since **2026-09-21** (owner ruling 21:20) the audit's corpus includes `tests/`, so every `test_*.py` and `conftest.py` is measured and **this standard is a scored row that moves the branch number**. @memory scored 58% on it the day the corpus changed.
 
-```
-through_the_command backlog: 291 private import(s) and 138 private helper reach(es)
-across 32 test file(s) (unscored - convicted on the next write of the file)
-```
+It also convicts in the per-file checklist lane, on the write that creates the shape.
 
-Files are allowed to fail on arrival — the owner's ruling, 2026-09-20.
+The unscored `check_branch_info` backlog line retired with that ruling — it existed because the corpus handed this checker no files. Files are allowed to fail on arrival, the owner's ruling of 2026-09-20, and now they fail in the score rather than in a grey line under it.
 
-**Seedgo is under this rule like everyone else.** Item 3 grants this branch its own per-checker test layout, not a pass on item 10: the backlog quoted above is seedgo's own, 433 hits across 32 of its files, and the cure is the public entry — `scan`, `check_module`, `handle_command`.
+**Seedgo is under this rule like everyone else.** Item 3 grants this branch its own per-checker test layout, not a pass on item 10: 433 hits across 32 of its own test files, and the cure is the public entry — `scan`, `check_module`, `handle_command`.
 
 ---
 

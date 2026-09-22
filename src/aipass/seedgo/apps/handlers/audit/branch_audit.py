@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-03-05
 # Modified: 2026-09-21
 # =============================================
@@ -61,31 +61,54 @@ def _rel_path(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
+def _is_collectable_test(path: Path) -> bool:
+    """Whether a file under tests/ is a TEST file rather than something beside one.
+
+    The same two names the test checkers have always used: ``test_*.py`` and
+    ``conftest.py``. A helper module sitting beside the tests is neither, and a
+    standard written for a test's author would have nothing to say to it.
+    """
+    return path.name.startswith("test_") or path.name == "conftest.py"
+
+
 def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dict[str, str]]:
-    """Collect auditable .py files from apps/, respecting ignore patterns.
+    """Collect auditable .py files from apps/ AND tests/, respecting ignore patterns.
 
     __init__.py package markers are excluded by default — most checkers are
     content-focused (dead code, naming, nesting) and __init__.py is typically
     boilerplate. Pass include_init=True for import-statement checkers, where a
     real cross-handler import hiding in a package marker must not go unseen.
 
-    This is the audit's CORPUS, not its applicability: every file here is
-    production source, and which checkers actually run against it is decided
-    per checker by applicability.applies_to_file(). is_retired_path() is
-    applied on top of the ignore patterns because those match on a substring
-    of the whole path ("/.archive/"), which never matches on Windows.
+    tests/ joined the corpus on 2026-09-21 (owner ruling 21:20): four checkers
+    in this pack are written FOR test files, and a corpus of apps/ only handed
+    them nothing, so they reported a grey unscored backlog line instead of a
+    row. Only ``test_*.py`` and ``conftest.py`` enter, under exactly the same
+    exclusions apps/ gets — disabled names, throwaway roots, retired
+    directories (which is what keeps the three ``tests/parked/`` collection
+    barriers out), the audit ignore patterns and .seedgoignore.
+
+    This is the audit's CORPUS, not its applicability: WHICH checkers run
+    against each file is still decided per checker by
+    applicability.applies_to_file(). is_retired_path() is applied on top of the
+    ignore patterns because those match on a substring of the whole path
+    ("/.archive/"), which never matches on Windows.
     """
-    apps_dir = branch_path / "apps"
-    if not apps_dir.exists():
-        return []
     root = branch_path.resolve()
     ign = ignore_handler.get_audit_ignore_patterns()
     ignore_entries = ignore_handler.load_ignore_entries(branch_path)
+
+    candidates: List[Path] = []
+    apps_dir = branch_path / "apps"
+    if apps_dir.exists():
+        candidates += [f for f in apps_dir.rglob("*.py") if include_init or f.name != "__init__.py"]
+    tests_dir = branch_path / "tests"
+    if tests_dir.exists():
+        candidates += [f for f in tests_dir.rglob("*.py") if _is_collectable_test(f)]
+
     return [
         {"file": str(f), "name": f.name, "rel": _rel_path(f, root)}
-        for f in apps_dir.rglob("*.py")
-        if (include_init or f.name != "__init__.py")
-        and not is_disabled_file(f.name)
+        for f in candidates
+        if not is_disabled_file(f.name)
         and not is_throwaway_path(str(f))
         and not applicability.is_retired_path(str(f))
         and not any(p in str(f).lower() for p in ign)
@@ -194,9 +217,18 @@ def _collect_watch_files(branch_path: Path, checkers: Dict[str, Any] | None = No
     readme = branch_path / "README.md"
     if readme.exists():
         files.append({"file": str(readme), "name": readme.name, "rel": _rel_path(readme, root)})
+    # tests/ again, WIDER than the corpus: _collect_py_files takes only
+    # test_*.py and conftest.py, while test_map's scan_branch reads every .py
+    # under tests/. Deduped on rel, because since 2026-09-21 the two sets
+    # overlap and a doubled entry would fingerprint the same file twice.
     tests_dir = branch_path / "tests"
     if tests_dir.exists():
-        files.extend({"file": str(f), "name": f.name, "rel": _rel_path(f, root)} for f in tests_dir.rglob("*.py"))
+        already = {entry["rel"] for entry in files}
+        files.extend(
+            {"file": str(f), "name": f.name, "rel": _rel_path(f, root)}
+            for f in tests_dir.rglob("*.py")
+            if _rel_path(f, root) not in already
+        )
     custom_config = branch_path / f"{branch_path.name}_json" / "custom_config"
     if custom_config.is_dir():
         files.extend(
@@ -387,6 +419,69 @@ def _get_or_compute_branch(
         if cached is not None:
             return cached
     return checker.check_branch(str(branch_path), bypass_rules=bypass_rules)
+
+
+def _stood_down(name: str) -> Dict[str, Any]:
+    """A result that holds a standard's slot without claiming a measurement.
+
+    A tests-only standard never runs on the production entry file, and on a
+    branch with no test files in the corpus its all_files scan measures
+    nothing either. Reporting nothing would drop the standard off that
+    branch's board and trip the CI tripwire, which counts standards CONSULTED;
+    scoring it 0 would blame the branch for having no tests yet and scoring it
+    100 would claim a measurement that never happened. not_applicable is the
+    existing third answer, already honoured by the branch-level lane above.
+    """
+    return {
+        "passed": True,
+        "score": 0,
+        "not_applicable": True,
+        "checks": [
+            {
+                "name": "Applicable files",
+                "passed": True,
+                "message": f"{name} applies to test files; this branch has none in the corpus",
+            }
+        ],
+    }
+
+
+def _entry_point_pass(
+    checker,
+    name: str,
+    scope: str,
+    runs_on_entry_file: bool,
+    entry_file: str,
+    entry_rel: str,
+    bypass_rules: list,
+    file_result_cache: Dict[str, Dict[str, Any]] | None,
+    unchanged_files: set | None,
+) -> Dict[str, Any]:
+    """One checker's result for the branch's entry file.
+
+    Genuine entry_point-scope checkers skip the cache: AUDIT_SCOPE says where a
+    result is REPORTED, not what a checker READS, and readme_check reads
+    README.md, a file outside entry_file. all_files-scope checkers get their
+    real answer from the _run_all_files scan, so their preliminary pass here
+    may use the normal cache path.
+
+    A crashed checker scores 0 with the error carried in the result, so the
+    number always arrives with its reason attached.
+    """
+    if not runs_on_entry_file:
+        return _stood_down(name)
+    try:
+        if scope == "all_files":
+            return _get_or_compute(
+                checker, name, entry_file, entry_rel, bypass_rules, file_result_cache, unchanged_files
+            )
+        result = checker.check_module(entry_file, bypass_rules=bypass_rules)
+        if file_result_cache is not None:
+            file_result_cache.setdefault(entry_rel, {})[name] = result
+        return result
+    except Exception as e:
+        logger.info("Entry-point checker %s failed: %s", name, e)
+        return {"passed": False, "score": 0, "error": str(e)}
 
 
 def _run_all_files(
@@ -580,7 +675,15 @@ def audit_branch(
         # nothing here could filter it without also filtering it away. The
         # example read `test_quality` until that standard retired on
         # 2026-09-07; the live pack makes the same point and still exists.
-        if not applicability.applies_to_file(checker, entry_file):
+        #
+        # The entry file is production source, so a tests-only standard fails
+        # this gate. That must skip the ENTRY-POINT PASS and not the checker:
+        # skipping the checker outright is what kept the four test standards
+        # off the board even after tests/ joined the corpus (2026-09-21) --
+        # they were dropped here, before the all_files scan below could ever
+        # hand them a test file.
+        runs_on_entry_file = applicability.applies_to_file(checker, entry_file)
+        if not runs_on_entry_file and scope != "all_files":
             continue
         # Entry-point: always run on entry file. Genuine entry_point-scope
         # checkers (readme_check, cli_ux_check, ...) skip the cache here:
@@ -593,19 +696,20 @@ def audit_branch(
         # checkers get their real answer from the _run_all_files scan below
         # (which already recomputes/reuses correctly per file), so their
         # preliminary entry-file pass here may still use the normal cache path.
-        try:
-            if scope == "all_files":
-                r = _get_or_compute(
-                    checker, name, entry_file, entry_rel, bypass_rules, file_result_cache, unchanged_files
-                )
-            else:
-                r = checker.check_module(entry_file, bypass_rules=bypass_rules)
-                if file_result_cache is not None:
-                    file_result_cache.setdefault(entry_rel, {})[name] = r
-            results[name], scores[name] = r, r.get("score", 0)
-        except Exception as e:
-            logger.info("Entry-point checker %s failed: %s", name, e)
-            results[name], scores[name] = {"passed": False, "score": 0, "error": str(e)}, 0
+        r = _entry_point_pass(
+            checker,
+            name,
+            scope,
+            runs_on_entry_file,
+            entry_file,
+            entry_rel,
+            bypass_rules,
+            file_result_cache,
+            unchanged_files,
+        )
+        results[name] = r
+        if r.get("not_applicable") is not True:
+            scores[name] = r.get("score", 0)
         # All-files scope: scan every .py file, override score with average
         if scope == "all_files" and all_files:
             scan_files = all_files

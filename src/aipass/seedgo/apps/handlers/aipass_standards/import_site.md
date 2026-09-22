@@ -100,16 +100,13 @@ def test_list_plans_prints_the_table(monkeypatch, capsys):
 
 ---
 
-## Scope, and why no score moves
+## Scope, and how it scores
 
-`APPLIES_TO = "tests"`, so only the per-file checklist lane runs it — on the write that creates the shape. The audit's corpus is `apps/` (`_collect_py_files` never walks `tests/`), so no branch's number moves on the day this lands. The audit reports the standing backlog through `check_branch_info`, **unscored**:
+`APPLIES_TO = "tests"`, and since **2026-09-21** (owner ruling 21:20) the audit's corpus includes `tests/`, so every `test_*.py` and `conftest.py` is measured and **this standard is a scored row that moves the branch number**. @memory scored 4% on it the day the corpus changed.
 
-```
-import_site backlog: 1554 deferred product import(s) and 270 sys.modules stub(s)
-across 47 test file(s) (unscored - convicted on the next write of the file)
-```
+It also convicts in the per-file checklist lane, on the write that creates the shape.
 
-Files are allowed to fail on arrival — the owner's ruling, 2026-09-20.
+The unscored `check_branch_info` backlog line retired with that ruling — it existed because the corpus handed this checker no files. Files are allowed to fail on arrival, the owner's ruling of 2026-09-20, and now they fail in the score rather than in a grey line under it.
 
 ---
 

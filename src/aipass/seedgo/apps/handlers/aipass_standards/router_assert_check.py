@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_assert_check.py
 # Description: Router Assert Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-20
-# Modified: 2026-09-20
+# Modified: 2026-09-21
 # =============================================
 
 """
@@ -26,16 +26,17 @@ contain a particular string -- the v4 ``test_quality_check.py`` scored the
 literal ``"is True"`` as a positive and agents duly supplied 224 of them,
 which is how this defect was manufactured in the first place.
 
-Two lanes, by design:
+Two lanes, both SCORED since 2026-09-21 (owner ruling 21:20):
 
-  * ``check_module`` -- APPLIES_TO tests, so only the per-file checklist lane
-    runs it, and only on a test file. That lane fires from the PostToolUse
-    hook, so the rule meets an agent on the write that creates the shape.
-  * ``check_branch_info`` -- the standing backlog, reported UNSCORED through
-    the audit's info channel. Test files are not in the audit's corpus
-    (``_collect_py_files`` walks ``apps/`` only), so no branch's number moves
-    on the day this lands. The backlog is a list to work through, not a debt
-    charged to whoever happens to run the audit next.
+  * ``check_module`` in the audit -- APPLIES_TO tests, and the audit's corpus
+    now includes ``tests/`` test_*.py and conftest.py, so this standard is a
+    real row with a percentage and it moves the branch score.
+  * ``check_module`` in the per-file checklist lane -- the same function, fired
+    by the PostToolUse hook, so the rule also meets an author on the write.
+
+The ``check_branch_info`` backlog line retired with that ruling: an unscored
+grey line was the workaround for a corpus that handed this checker no files,
+and the scored row is the record now.
 """
 
 import ast
@@ -43,7 +44,6 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -236,35 +236,3 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         {"file": str(module_path), "score": 0, "standard": STANDARD_KEY},
     )
     return _result(False, message, 0)
-
-
-def check_branch_info(branch_path: str) -> List[str]:
-    """The standing backlog, reported with no score attached.
-
-    The audit's corpus is ``apps/``, so nothing under ``tests/`` can move a
-    branch's number through the scoring lane. This line is the whole of what
-    the audit says about the rule: how many units are already in the shape,
-    so the work is visible without being charged.
-    """
-    tests_dir = Path(branch_path) / "tests"
-    if not tests_dir.is_dir():
-        return []
-    units, files = 0, 0
-    for test_file in sorted(tests_dir.rglob("test_*.py")):
-        # Retired code is not lintable and the per-file lane already refuses
-        # it through applies_to_file(). Without the same guard here the
-        # backlog counted units the rule can never convict: measured
-        # 2026-09-20, daemon reported 8 because of one file under
-        # tests/.archive/, while the lane that does the convicting saw 7.
-        if applicability.is_retired_path(str(test_file)):
-            continue
-        hits = _scan_path(test_file)
-        if hits:
-            units += len(hits)
-            files += 1
-    if not units:
-        return []
-    return [
-        f"router_assert backlog: {units} test(s) in {files} file(s) assert only a router's True "
-        f"(unscored - convicted on the next write of the file)"
-    ]

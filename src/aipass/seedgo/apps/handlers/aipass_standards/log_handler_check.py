@@ -28,6 +28,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: a test importing stdlib logging to assert on it is legitimate.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 

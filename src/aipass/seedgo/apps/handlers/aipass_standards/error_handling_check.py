@@ -22,6 +22,8 @@ from aipass.seedgo.apps.handlers.aipass_standards import exception_handling
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: all Python files
+# APPLIES_TO: pytest.raises is the test idiom; a test's except blocks are deliberate.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 

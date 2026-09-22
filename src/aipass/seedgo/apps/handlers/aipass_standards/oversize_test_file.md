@@ -68,16 +68,13 @@ If the file is large because it pins rules that are themselves being retired, th
 
 ---
 
-## Scope, and why no score moved
+## Scope, and how it scores
 
-`APPLIES_TO = "tests"`. The audit's corpus is `apps/` (`branch_audit._collect_py_files`), so no test file enters the scoring lane and **this standard contributes nothing to any branch's audit number**.
+`APPLIES_TO = "tests"`, and since **2026-09-21** (owner ruling 21:20) the audit's corpus includes `tests/`, so every `test_*.py` and `conftest.py` is measured and **this standard is a scored row that moves the branch number**.
 
-It convicts in the per-file `checklist` lane on the write that grows the file. The standing backlog is one unscored info line, which names the largest offender rather than only counting them — "3 files over the cap" gives an owner nothing to start on:
+It also convicts in the per-file `checklist` lane on the write that grows the file.
 
-```
-oversize_test_file backlog: 8 test file(s) over 1500 code lines,
-largest test_pytest_quality_pack.py at 4595 (unscored - convicted on the next write of the file)
-```
+The unscored `check_branch_info` backlog line retired with that ruling. It existed because the corpus handed this checker no files; the row is the record now, and a branch over the cap wears it in its score.
 
 ---
 

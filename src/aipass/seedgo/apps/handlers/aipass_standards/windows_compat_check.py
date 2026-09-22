@@ -20,6 +20,8 @@ from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
+# APPLIES_TO: Windows CI runs the suite; a Unix-only API in a test fails it.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 _POSIX_ONLY_MODULES = frozenset({"fcntl", "pwd", "grp", "termios", "resource"})

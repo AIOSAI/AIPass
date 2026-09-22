@@ -28,6 +28,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: --help content; a test file has none.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 # ── Detection patterns (extracted from devpulse help_text_scanner_v1) ───

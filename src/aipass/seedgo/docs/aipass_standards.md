@@ -18,59 +18,66 @@ verified against `discover_checkers()` on every regeneration rather than carried
 the 2026-08-25 pass wrote a row count that matched by accident while the table silently
 omitted `trinity`. If this table and the directory disagree, the directory is right.
 
+**The corpus is `apps/` plus `tests/`** as of 2026-09-21 (owner ruling 21:20) — `test_*.py`
+and `conftest.py`, under the same exclusions `apps/` gets. Until then it was `apps/` only,
+36 of these checkers declared no `APPLIES_TO` at all, and the four written for test files
+had no files to score. Every checker declares one now, and the four are real rows.
+`everywhere` is still the default for a checker that forgets, because forgetting should
+cost noise and never a missed bug.
+
 | Standard | Scope | Applies to | What It Checks |
 |----------|-------|-----------|----------------|
 | architecture | all_files | production | Module/handler separation, entry point structure |
-| calendar_bound | branch_level | everywhere | A test that asserts a date literal against code that computes with the clock, and does not own the clock — true only while the calendar agrees (corpus: tests/ and lib/*/tests/) |
+| calendar_bound | branch_level | tests | A test that asserts a date literal against code that computes with the clock, and does not own the clock — true only while the calendar agrees (corpus: tests/ and lib/*/tests/) |
 | cli | all_files | production | Rich console usage, no bare print() |
-| cli_flags | entry_point | everywhere | --help, --version flag handling |
-| cli_ux | entry_point | everywhere | CLI navigation + output quality (Nav/Output scoring) |
+| cli_flags | entry_point | production | --help, --version flag handling |
+| cli_ux | entry_point | production | CLI navigation + output quality (Nav/Output scoring) |
 | commented_logger | all_files | everywhere | No commented-out logger/logging calls |
-| dead_code | branch_level | everywhere | Unreachable functions and dead imports |
+| dead_code | branch_level | production | Unreachable functions and dead imports |
 | debug_print | all_files | everywhere | No debug print/pprint statements |
 | deep_nesting | all_files | everywhere | Max nesting depth 4 (AST-measured) |
-| docs_page | entry_point | everywhere | Every docs/*.md in one shape: a README back-link and one H1, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap, and no retired defect register by name — plus advisory story and defect-prose lines |
+| docs_page | entry_point | production | Every docs/*.md in one shape: a README back-link and one H1, a purpose paragraph, depth ≤3, links resolve, size under the context pack's cap, and no retired defect register by name — plus advisory story and defect-prose lines |
 | documentation | all_files | production | Docstrings on public functions |
 | encapsulation | all_files | production | No cross-branch imports, proper isolation |
-| error_handling | all_files | everywhere | Try/except patterns, error propagation |
+| error_handling | all_files | production | Try/except patterns, error propagation |
 | gateway_boundary | all_files | production | A branch writes its OWN private storage; another branch's goes through that branch's door |
-| handler_import | branch_level | everywhere | apps/__init__.py contains `from . import handlers` |
+| handler_import | branch_level | production | apps/__init__.py contains `from . import handlers` |
 | handlers | all_files | production | Handler directory structure + handler independence |
 | hardcoded_key | all_files | everywhere | No hardcoded API keys or secrets |
 | hardcoded_path | all_files | everywhere | No hardcoded absolute paths |
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
-| help_text | all_files | everywhere | --help content quality |
+| help_text | all_files | production | --help content quality |
 | host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, and a test skip that names Windows on a Linux recipe (corpus: apps/, tests/ **and** lib/) |
-| import_site *(tests only)* | all_files | tests | A product import inside a function, or a `sys.modules` stub naming an aipass module — test template v1 item 8. Module-level imports and third-party imports inside a function are never convicted. Scores nothing in `audit aipass`; convicts in the checklist lane on the write, and reports the standing backlog unscored |
+| import_site *(tests only)* | all_files | tests | A product import inside a function, or a `sys.modules` stub naming an aipass module — test template v1 item 8. Module-level imports and third-party imports inside a function are never convicted. Scored per test file since 2026-09-21, when `tests/` joined the audit corpus; also convicts in the checklist lane on the write |
 | imports | all_files | everywhere | Import ordering and grouping |
-| introspection | all_files | everywhere | No-args introspection gate |
-| json_handler | branch_level | everywhere | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |
-| json_structure | all_files | everywhere | json_handler import + log_operation calls |
-| log_handler | all_files | everywhere | Prax logger usage (not stdlib logging) |
-| log_level | all_files | everywhere | Correct log level usage |
-| log_structure | all_files | everywhere | Structured log message format |
-| log_visibility | all_files | everywhere | Log output in key operations |
+| introspection | all_files | production | No-args introspection gate |
+| json_handler | branch_level | production | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |
+| json_structure | all_files | production | json_handler import + log_operation calls |
+| log_handler | all_files | production | Prax logger usage (not stdlib logging) |
+| log_level | all_files | production | Correct log level usage |
+| log_structure | all_files | production | Structured log message format |
+| log_visibility | all_files | production | Log output in key operations |
 | meta | all_files | production | File header metadata block |
 | modules | all_files | production | Module structure and naming |
 | naming | all_files | everywhere | snake_case, column-0 constants |
-| oversize_test_file *(tests only)* | all_files | tests | A test file over 1,500 CODE lines — multi-line string payload, docstrings included, is subtracted first. Scores nothing in `audit aipass`; convicts in the checklist lane on the write, and reports the standing backlog unscored |
-| output_routing | all_files | everywhere | Status output via @cli helpers, not raw console.print |
+| oversize_test_file *(tests only)* | all_files | tests | A test file over 1,500 CODE lines — multi-line string payload, docstrings included, is subtracted first. Scored per test file since 2026-09-21, when `tests/` joined the audit corpus; also convicts in the checklist lane on the write |
+| output_routing | all_files | production | Status output via @cli helpers, not raw console.print |
 | permission_flags | all_files | everywhere | No dangerous permission overrides |
-| readme | entry_point | everywhere | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
-| readme_quality | entry_point | everywhere | README content depth and section quality |
+| readme | entry_point | production | README.md exists and is current — plus the advisory lane: docs index, named paths, rot bait, and the eight `##` sections in order |
+| readme_quality | entry_point | production | README content depth and section quality |
 | rich_markup | all_files | production | Literal `[placeholders]` Rich silently eats at render time |
-| router_assert *(tests only)* | all_files | tests | A test whose every assertion is a command router returning `is True` — `is False` is never convicted. Scores nothing in `audit aipass` (the corpus is `apps/`); it convicts in the checklist lane on the write, and reports the standing backlog unscored |
+| router_assert *(tests only)* | all_files | tests | A test whose every assertion is a command router returning `is True` — `is False` is never convicted. Scored per test file since 2026-09-21, when `tests/` joined the audit corpus; also convicts in the checklist lane on the write |
 | ruff *(advisory)* | branch_level | everywhere | Ruff linter compliance — surfaces violations, never gates the score |
 | shebang | all_files | everywhere | No shebang lines in library code |
 | silent_catch | all_files | everywhere | No bare except/pass patterns |
-| stderr_routing | all_files | everywhere | Proper stderr vs stdout usage |
-| subcommand_help | entry_point | everywhere | Subcommand --help interception before dispatch |
+| stderr_routing | all_files | production | Proper stderr vs stdout usage |
+| subcommand_help | branch_level | production | Subcommand --help interception before dispatch |
 | template *(advisory)* | branch_level | everywhere | No unresolved spawn template markers |
-| through_the_command *(tests only)* | all_files | tests | A test importing an underscore name from a product module, or reaching one on a base it imported — test template v1 item 10. Dunders, the test's own helpers, reads on returned values, and WRITES (item 15's shape) are never convicted. Scores nothing in `audit aipass`; convicts in the checklist lane on the write, and reports the standing backlog unscored |
+| through_the_command *(tests only)* | all_files | tests | A test importing an underscore name from a product module, or reaching one on a base it imported — test template v1 item 10. Dunders, the test's own helpers, reads on returned values, and WRITES (item 15's shape) are never convicted. Scored per test file since 2026-09-21, when `tests/` joined the audit corpus; also convicts in the checklist lane on the write |
 | todo | all_files | everywhere | No unresolved TODO/FIXME/HACK comments |
 | trigger | all_files | production | Trigger integration patterns |
-| trinity | branch_level | everywhere | `.trinity/` document set — schema, caps, ordering, freshness |
-| unused_function | branch_level | everywhere | No unreferenced public functions |
+| trinity | branch_level | production | `.trinity/` document set — schema, caps, ordering, freshness |
+| unused_function | branch_level | production | No unreferenced public functions |
 | windows_compat | all_files | everywhere | Cross-platform compatibility (no Unix-only APIs) |
 
 The audit consults one entry more than this table has rows: `diagnostics` (pyright) has no

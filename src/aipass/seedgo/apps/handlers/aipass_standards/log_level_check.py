@@ -28,6 +28,8 @@ from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Audit scope: all Python files
+# APPLIES_TO: level choice is a product decision.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 

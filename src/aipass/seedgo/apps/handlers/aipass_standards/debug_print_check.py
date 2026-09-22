@@ -22,6 +22,8 @@ from aipass.prax import logger
 from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
+# APPLIES_TO: a stray print in a test pollutes the same stdout a test asserts on.
+APPLIES_TO = "everywhere"
 AUDIT_SCOPE = "all_files"
 
 # Matches a bare print( call: not preceded by a word char, dot, or #

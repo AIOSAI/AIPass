@@ -27,6 +27,8 @@ from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Run on ALL .py files so modules (apps/modules/*.py) are checked, not just entry points
+# APPLIES_TO: the no-args gate is a module behaviour.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 

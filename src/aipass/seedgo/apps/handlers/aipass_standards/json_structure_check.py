@@ -32,6 +32,8 @@ from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _is_
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 
 # Audit scope: scan every .py file, not just entry point
+# APPLIES_TO: a test does not log_operation and should not.
+APPLIES_TO = "production"
 AUDIT_SCOPE = "all_files"
 
 ALLOWED_JSON_SUBDIRS: frozenset[str] = frozenset({"custom_config"})
