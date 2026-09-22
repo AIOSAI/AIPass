@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for pathspec-based ignore matching (gitignore parity)
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-12
 # Modified: 2026-09-22
 # =============================================
@@ -350,6 +350,30 @@ class TestSeedTemplate:
 
         with pytest.raises(FileNotFoundError):
             create_backup_dir(str(project))
+
+    def test_a_missing_template_raises_and_leaves_no_ignore_file_behind(self, tmp_path, monkeypatch):
+        """The raise writes nothing, so the project can still be seeded later.
+
+        Opening the destination before the content was built truncated it
+        first: a missing template left a ZERO-BYTE .backupignore, and the
+        `if not exists()` guard then made that permanent — the project
+        shipped ignoring nothing but the built-in *.tmp floor.
+        """
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        ignore = project / ".backupignore"
+        monkeypatch.setattr(setup, "_TEMPLATE_PATH", tmp_path / "nonexistent.template")
+
+        with pytest.raises(FileNotFoundError):
+            create_backup_dir(str(project))
+        assert not ignore.exists()
+
+        template = tmp_path / "recovered.template"
+        template.write_text("target/\n.venv/\n", encoding="utf-8")
+        monkeypatch.setattr(setup, "_TEMPLATE_PATH", template)
+        create_backup_dir(str(project))
+        assert ignore.read_text(encoding="utf-8") == "target/\n.venv/\n"
 
     def test_seed_writes_only_when_absent(self, tmp_path):
         """Seeding does not overwrite an existing .backupignore."""

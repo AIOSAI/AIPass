@@ -24,6 +24,7 @@ from aipass.backup.apps.handlers.diff.generator import generate_diff_content, is
 from aipass.backup.apps.handlers.diff.restore import list_versions, restore_file
 from aipass.backup.apps.handlers.path.builder import build_versioned_file_path, build_versioned_store
 from aipass.backup.apps.modules import restore as restore_module
+from aipass.cli.apps.modules import command_failed
 
 # Inert path input for the path builder — never touched on disk, so it only
 # needs to be a valid absolute path on the running OS.
@@ -302,6 +303,33 @@ class TestRestoreModule:
         assert "config-baseline-" in out
         assert "config.py" in out
 
+    def test_a_listed_diff_row_names_its_type_instead_of_losing_it_to_rich_markup(self, tmp_path: Path, capsys):
+        """console.print parses markup, so "[diff]" was read as a style tag and dropped: a bare timestamp."""
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "mod.py"
+        src.write_text("v1", encoding="utf-8")
+        copy_versioned([(str(src), "mod.py")], str(project))
+
+        time.sleep(0.05)
+        src.write_text("v2", encoding="utf-8")
+        copy_versioned([(str(src), "mod.py")], str(project))
+
+        assert restore_module.handle_command("restore", [str(project), "list", "mod.py"]) is True
+
+        # The diff row is the one that cannot survive the loss: baseline and
+        # current repeat their type in the timestamp column, a diff row does not.
+        out = capsys.readouterr().out
+        diff_rows = [line for line in out.splitlines() if ".diff" in line]
+        assert len(diff_rows) == 1
+        assert "[diff]" in diff_rows[0]
+        assert "[baseline]" in out
+        assert "[current]" in out
+
+        # The heading two lines above still renders as markup, not as literal tags.
+        assert "Versions of mod.py:" in out
+        assert "[bold]" not in out
+
     def test_a_relative_path_restores_the_right_one_of_two_same_named_files(self, tmp_path: Path, capsys):
         """The documented form is `restore <project> file src/main.py out`; a basename cannot tell two main.py apart."""
         # The lookup used to join the WHOLE argument onto the matched folder,
@@ -326,11 +354,56 @@ class TestRestoreModule:
 
         assert restore_module.run_restore_file(str(tmp_path), "nonexistent.py", str(out_path)) is False
 
-        assert "No versioned file found for: nonexistent.py" in capsys.readouterr().out
+        # Same claim as before — the user is told which file was not found —
+        # restated on the channel that now carries it. The line moved from
+        # console.print (stdout) to error() (stderr) so a pipe can tell a
+        # failure from a restored file; nothing about the text changed.
+        assert "No versioned file found for: nonexistent.py" in capsys.readouterr().err
         assert not out_path.exists()
 
-    def test_a_filename_over_50_chars_is_stored_but_the_restore_command_cannot_find_it(self, tmp_path: Path, capsys):
-        """Pins a shipped defect: >50 chars stores under name[:30]_md5, and the lookup globs the full name."""
+    def test_a_missing_versioned_file_is_named_on_stderr_and_never_on_stdout(self, tmp_path: Path, capsys):
+        """Both lookup failures used console.print, so a pipe could not separate them from success output."""
+        missing = "ghost.py"
+
+        assert restore_module.handle_command("restore", [str(tmp_path), "list", missing]) is True
+        out, err = capsys.readouterr()
+        assert f"No versioned file found for: {missing}" in err
+        assert "No versioned file found" not in out
+        assert command_failed() is True
+
+        out_path = tmp_path / "restored" / missing
+        assert restore_module.handle_command("restore", [str(tmp_path), "file", missing, str(out_path)]) is True
+        out, err = capsys.readouterr()
+        assert f"No versioned file found for: {missing}" in err
+        assert "No versioned file found" not in out
+        assert not out_path.exists()
+
+    def test_a_restore_that_fails_says_so_on_stderr_beside_no_success_line(self, tmp_path: Path, capsys, monkeypatch):
+        """ "Restore failed for X" used to print on stdout, the same channel as "Restored X to Y"."""
+        project = tmp_path / "project"
+        project.mkdir()
+        src = project / "data.txt"
+        src.write_text("payload", encoding="utf-8")
+        copy_versioned([(str(src), "data.txt")], str(project))
+
+        # The handler is the edge: once the module has found a stored file the
+        # copy succeeds, so the only route to the failure line is to make the
+        # handler refuse (template v1 item 15 — mock at the edge, and only there).
+        monkeypatch.setattr(restore_module, "restore_file", lambda folder, out: False)
+
+        out_path = tmp_path / "restored" / "data.txt"
+        assert restore_module.handle_command("restore", [str(project), "file", "data.txt", str(out_path)]) is True
+
+        out, err = capsys.readouterr()
+        assert "Restore failed for data.txt" in err
+        assert "Restore failed" not in out
+        assert "Restored data.txt" not in out
+        assert command_failed() is True
+
+    def test_a_filename_over_50_chars_is_stored_under_a_hashed_folder_and_the_command_still_restores_it(
+        self, tmp_path: Path, capsys
+    ):
+        """Was a shipped defect: >50 chars store under name[:30]_md5, and the lookup globbed the full name."""
         project = tmp_path / "project"
         project.mkdir()
         long_name = "a" * 60 + ".py"
@@ -344,10 +417,37 @@ class TestRestoreModule:
 
         assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
 
-        # The backup is on disk and the command says it is not. Remove this
-        # block when the shortened folder name is taught to the lookup.
-        assert f"No versioned file found for: {long_name}" in capsys.readouterr().out
+        # The bytes are on disk under a folder named nothing like the file, and
+        # the command reaches them anyway — both the lookup and the handler.
+        out, err = capsys.readouterr()
+        assert f"Versions of {long_name}:" in out
+        assert "[current]" in out
+        assert f"No versioned file found for: {long_name}" not in err
+
+        out_path = tmp_path / "restored" / long_name
+        assert restore_module.handle_command("restore", [str(project), "file", long_name, str(out_path)]) is True
+        assert out_path.read_text(encoding="utf-8") == "long name payload"
         assert build_versioned_store(str(project)).exists()
+
+    def test_a_hashed_long_name_folder_lists_its_diffs_and_not_only_baseline_and_current(self, tmp_path: Path, capsys):
+        """The diffs live in <full name>_diffs, so a handler reading the folder name found no diff at all."""
+        project = tmp_path / "project"
+        project.mkdir()
+        long_name = "b" * 60 + ".py"
+        src = project / long_name
+        src.write_text("v1", encoding="utf-8")
+        copy_versioned([(str(src), long_name)], str(project))
+
+        time.sleep(0.05)
+        src.write_text("v2", encoding="utf-8")
+        copy_versioned([(str(src), long_name)], str(project))
+
+        assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
+
+        out = capsys.readouterr().out
+        assert len([line for line in out.splitlines() if "[diff]" in line]) == 1
+        assert "[baseline]" in out
+        assert "[current]" in out
 
     def test_run_restore_file_roundtrip(self, tmp_path: Path, capsys):
         """run_restore_file restores a file to an output path."""
@@ -363,6 +463,30 @@ class TestRestoreModule:
         assert result is True
         assert Path(out).read_text(encoding="utf-8") == "important data"
         assert f"Restored data.txt to {out}" in capsys.readouterr().out
+
+    def test_list_without_a_filename_is_refused_as_a_usage_error_not_answered_with_the_help_page(
+        self, tmp_path: Path, capsys
+    ):
+        """A malformed `restore <project> list` used to print help and report success — same answer as `--help`."""
+        # True: the command is ours and was handled; the failure travels as
+        # command_failed() (exit 2), never as "Unknown command: restore".
+        assert restore_module.handle_command("restore", [str(tmp_path), "list"]) is True
+
+        out, err = capsys.readouterr()
+        assert "restore <project> list <file>" in err
+        assert "Unknown command" not in err
+        assert "Usage:" not in out
+        assert "restore Module" not in out
+        assert command_failed() is True
+
+    def test_no_arguments_at_all_still_answers_with_the_module_introspection(self, capsys):
+        """The usage refusal must not swallow the bare `restore` path, which is not malformed."""
+        assert restore_module.handle_command("restore", []) is True
+
+        out, err = capsys.readouterr()
+        assert "restore Module" in out
+        assert err == ""
+        assert command_failed() is False
 
     def test_a_help_flag_prints_the_module_and_both_usage_lines(self, capsys):
         assert restore_module.handle_command("restore", ["--help"]) is True

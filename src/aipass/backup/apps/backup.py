@@ -116,7 +116,7 @@ def print_help() -> None:
     console.print("    [dim]drone @backup restore @myapp file src/main.py ./restored.py[/dim]")
     console.print()
     console.print("  [bold dim]Drive sync:[/bold dim]")
-    console.print("    [dim]drone @backup drive_check @myapp[/dim]")
+    console.print("    [dim]drone @backup drive_check run[/dim]")
     console.print("    [dim]drone @backup drive_sync @myapp[/dim]")
     console.print("    [dim]drone @backup share report.pdf --public[/dim]")
     console.print()

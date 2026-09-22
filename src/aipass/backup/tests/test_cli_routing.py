@@ -253,22 +253,27 @@ class TestPrintHelp:
 
 
 #: (module, sentinel called right after the help gate, args after the project arg)
+#: Each row builds the module's OWN executing invocation from a tmp_path.
+#: A builder rather than a shared "<project> plus extras" shape, because the
+#: shape is not shared: drive_check takes no project at all, and assuming it
+#: did was what made a bare tmp_path read as a normal run (see its row).
 STANDALONE_ENTRY_MODULES = [
-    pytest.param(all_module, "run_snapshot", [], id="all"),
-    # drive_check was NOT in seedgo's list of 10 -- its precision cut saw the
-    # args[0] == "run" comparison and passed it. Measured live anyway: the
-    # default branch runs the check for any unrecognised first arg, so
-    # 'drive_check foo --help' made a real Drive auth call. Covered here.
-    pytest.param(drive_check, "run_drive_check", [], id="drive_check"),
-    pytest.param(drive_clear, "run_drive_clear", [], id="drive_clear"),
-    pytest.param(drive_stats, "run_drive_stats", [], id="drive_stats"),
-    pytest.param(drive_sync, "run_drive_sync", [], id="drive_sync"),
-    pytest.param(register, "resolve_caller_path", [], id="register"),
-    pytest.param(restore, "run_list_versions", ["list"], id="restore"),
-    pytest.param(share, "run_share", [], id="share"),
-    pytest.param(snapshot, "run_snapshot", [], id="snapshot"),
-    pytest.param(status, "resolve_caller_path", [], id="status"),
-    pytest.param(versioned, "run_versioned", [], id="versioned"),
+    pytest.param(all_module, "run_snapshot", lambda p: [str(p)], id="all"),
+    # drive_check is account-wide and takes NO project: "run" is its only
+    # executing route. It has no default branch any more — an unrecognised
+    # first arg is refused, never executed (2026-09-22). Before that cure the
+    # default ran the check for ANY first arg, so a bare tmp_path counted as a
+    # normal run and 'drive_check foo --help' made a real Drive auth call.
+    pytest.param(drive_check, "run_drive_check", lambda p: ["run"], id="drive_check"),
+    pytest.param(drive_clear, "run_drive_clear", lambda p: [str(p)], id="drive_clear"),
+    pytest.param(drive_stats, "run_drive_stats", lambda p: [str(p)], id="drive_stats"),
+    pytest.param(drive_sync, "run_drive_sync", lambda p: [str(p)], id="drive_sync"),
+    pytest.param(register, "resolve_caller_path", lambda p: [str(p)], id="register"),
+    pytest.param(restore, "run_list_versions", lambda p: [str(p), "list", "some_file.py"], id="restore"),
+    pytest.param(share, "run_share", lambda p: [str(p)], id="share"),
+    pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], id="snapshot"),
+    pytest.param(status, "resolve_caller_path", lambda p: [str(p)], id="status"),
+    pytest.param(versioned, "run_versioned", lambda p: [str(p)], id="versioned"),
 ]
 
 #: Real work that runs AFTER the sentinel and must be neutralised too.
@@ -305,13 +310,13 @@ class TestHelpGateInsideHandleCommand:
     snapshot (proven live, 2026-08-13). Reported by @seedgo via help_flag_safety.
     """
 
-    @pytest.mark.parametrize(("mod", "sentinel", "extra"), STANDALONE_ENTRY_MODULES)
+    @pytest.mark.parametrize(("mod", "sentinel", "build_args"), STANDALONE_ENTRY_MODULES)
     @pytest.mark.parametrize("flag", ["--help", "-h"])
     def test_trailing_help_flag_does_not_execute(
-        self, mod: ModuleType, sentinel: str, extra: list[str], flag: str, tmp_path: Path
+        self, mod: ModuleType, sentinel: str, build_args, flag: str, tmp_path: Path
     ) -> None:
-        """A help flag after the project argument runs nothing."""
-        args = [str(tmp_path), *extra, flag]
+        """A help flag trailing a module's own real invocation runs nothing."""
+        args = [*build_args(tmp_path), flag]
 
         with patch.object(mod, sentinel) as spy:
             handled = mod.handle_command(mod.PRIMARY_COMMAND, args)
@@ -319,12 +324,10 @@ class TestHelpGateInsideHandleCommand:
         assert handled is True
         spy.assert_not_called()
 
-    @pytest.mark.parametrize(("mod", "sentinel", "extra"), STANDALONE_ENTRY_MODULES)
-    def test_real_invocation_still_dispatches(
-        self, mod: ModuleType, sentinel: str, extra: list[str], tmp_path: Path
-    ) -> None:
+    @pytest.mark.parametrize(("mod", "sentinel", "build_args"), STANDALONE_ENTRY_MODULES)
+    def test_real_invocation_still_dispatches(self, mod: ModuleType, sentinel: str, build_args, tmp_path: Path) -> None:
         """Guard does not block a normal run -- the sentinel is still reached."""
-        args = [str(tmp_path), *extra, "some_file.py"] if extra else [str(tmp_path)]
+        args = build_args(tmp_path)
 
         with ExitStack() as stack:
             spy = stack.enter_context(patch.object(mod, sentinel))

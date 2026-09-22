@@ -18,10 +18,13 @@ from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, dr
 
 # MEASURED, and the reason every routing test below stops at the no-args route.
 # These modules reach a REAL Google account one positional argument in.
-# drive_check is the sharp one: the bottom of its handle_command is
+# drive_check WAS the sharp one: the bottom of its handle_command used to be
 # ``run_drive_check()`` as the DEFAULT branch, not a usage line, so any
-# unrecognised first ARGUMENT is a live Drive auth (the module's own 2026-08-13
+# unrecognised first ARGUMENT was a live Drive auth (the module's own 2026-08-13
 # comment records that `drive_check foo --help` used to do exactly that).
+# That default branch is gone -- an unknown verb is now refused through error()
+# before it can dial -- and the three pins in TestDriveCheckRouting hold it
+# shut. The recorder they install is still what keeps THIS file off the network.
 # drive_sync, drive_stats and drive_clear take args[0] as a project root and run.
 # So the tests here pass [] or a command the module does not own; the run_*
 # pipelines are exercised against a mocked Drive client in test_drive_pipeline.py
@@ -91,6 +94,54 @@ class TestDriveCheckRouting:
         out, err = capsys.readouterr()
         assert out == ""
         assert err == ""
+
+    # The three pins below are the ARGUMENT guard, not the command guard above.
+    # The command guard only screens args the router never sends here; these
+    # screen what a user actually types after `drone @backup drive_check`.
+    # The recorder on run_drive_check IS the oracle: it is a lambda, so a verb
+    # that reaches it records instead of authenticating, and an empty list is
+    # the proof that no OAuth round trip was attempted. Never replace it with a
+    # bare call-through -- that turns a typo pin into a live Drive auth.
+
+    def test_an_unknown_verb_is_refused_on_stderr_and_never_dials_drive(self, capsys, monkeypatch) -> None:
+        """A typo is named back to the user, not answered with a real Google auth."""
+        dialled: list = []
+        monkeypatch.setattr(drive_check, "run_drive_check", lambda *a, **k: dialled.append((a, k)))
+
+        # True, not False: route_command stops at the first module that claims
+        # the command, so returning False here sends the operator the router's
+        # own "Unknown command: drive_check" -- naming the command that DOES
+        # exist instead of the verb that does not. error() marks the process
+        # failed, so True still exits non-zero.
+        assert drive_check.handle_command(drive_check.PRIMARY_COMMAND, ["statuss"]) is True
+
+        out, err = capsys.readouterr()
+        assert dialled == [], f"an unknown verb reached the Drive auth: {dialled!r}"
+        assert "statuss" in err, f"the refusal did not name the bad verb: {err!r}"
+        assert "run" in err, f"the refusal did not list the valid verbs: {err!r}"
+        assert "Drive connectivity test" not in out
+
+    def test_a_mistyped_flag_is_refused_the_same_way_as_a_mistyped_word(self, capsys, monkeypatch) -> None:
+        """`--froce` is one keystroke from `--force` and was a live auth; it must be a refusal."""
+        dialled: list = []
+        monkeypatch.setattr(drive_check, "run_drive_check", lambda *a, **k: dialled.append((a, k)))
+
+        assert drive_check.handle_command(drive_check.PRIMARY_COMMAND, ["--froce"]) is True
+
+        out, err = capsys.readouterr()
+        assert dialled == [], f"a mistyped flag reached the Drive auth: {dialled!r}"
+        assert "--froce" in err, f"the refusal did not name the bad flag: {err!r}"
+        assert "Drive connectivity test" not in out
+
+    def test_the_run_verb_still_reaches_the_check_after_the_unknown_verb_guard(self, monkeypatch, capsys) -> None:
+        """The guard refuses typos, not the one verb that is supposed to work."""
+        dialled: list = []
+        monkeypatch.setattr(drive_check, "run_drive_check", lambda *a, **k: dialled.append((a, k)))
+
+        assert drive_check.handle_command(drive_check.PRIMARY_COMMAND, ["run"]) is True
+
+        assert dialled == [((), {})], f"the guard swallowed the run verb: {dialled!r}"
+        assert capsys.readouterr().err == ""
 
 
 # ---------------------------------------------------------------------------
