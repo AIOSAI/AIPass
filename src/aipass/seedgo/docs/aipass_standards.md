@@ -41,6 +41,7 @@ omitted `trinity`. If this table and the directory disagree, the directory is ri
 | help_flag_safety | all_files | production | A help flag ANYWHERE means explain, never execute |
 | help_text | all_files | everywhere | --help content quality |
 | host_portability | branch_level | everywhere | Linux-only host assumptions — `/proc` reads (direct or through a bound name), non-portable binaries, and a test skip that names Windows on a Linux recipe (corpus: apps/, tests/ **and** lib/) |
+| import_site *(tests only)* | all_files | tests | A product import inside a function, or a `sys.modules` stub naming an aipass module — test template v1 item 8. Module-level imports and third-party imports inside a function are never convicted. Scores nothing in `audit aipass`; convicts in the checklist lane on the write, and reports the standing backlog unscored |
 | imports | all_files | everywhere | Import ordering and grouping |
 | introspection | all_files | everywhere | No-args introspection gate |
 | json_handler | branch_level | everywhere | The canonical json shim by sha256 + bidirectional config/data/log triplet completeness |

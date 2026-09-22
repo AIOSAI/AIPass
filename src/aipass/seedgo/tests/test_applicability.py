@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-09
-# Modified: 2026-08-09
+# Modified: 2026-09-21
 # =============================================
 
 from types import SimpleNamespace
@@ -13,8 +13,11 @@ from types import SimpleNamespace
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
+from aipass.seedgo.apps.handlers.audit import branch_audit
+from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 from aipass.seedgo.apps.handlers.bypass.ignore_handler import AUDIT_IGNORE_PATTERNS
+from aipass.seedgo.apps.modules import checklist
 
 
 @pytest.fixture(autouse=True)
@@ -131,8 +134,6 @@ def test_no_checker_applies_to_retired_code():
 
 def test_structural_standards_are_declared_production_only():
     """These failed on 25-96% of every branch's test files before they were scoped."""
-    from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
-
     checkers = discover_checkers()
     for name in ("architecture", "encapsulation", "handlers", "modules", "meta", "documentation", "cli"):
         assert applicability.applies_to(checkers[name]) == applicability.PRODUCTION, name
@@ -140,8 +141,6 @@ def test_structural_standards_are_declared_production_only():
 
 def test_bug_finding_standards_still_apply_to_tests():
     """Scoping, not muting: Windows CI runs the whole suite, so a bad path in a test is real."""
-    from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
-
     checkers = discover_checkers()
     for name in ("windows_compat", "hardcoded_path", "silent_catch", "hardcoded_key", "ruff"):
         assert applicability.applies_to(checkers[name]) == applicability.EVERYWHERE, name
@@ -153,8 +152,6 @@ def test_trigger_is_production_only():
     All 19 test-file hits fleet-wide were that; a test that fired real events to
     satisfy the standard would pollute the bus for every other branch.
     """
-    from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
-
     assert applicability.applies_to(discover_checkers()["trigger"]) == applicability.PRODUCTION
 
 
@@ -166,14 +163,13 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     precisely so that a future checker declaring `tests` would be a deliberate
     act and not an inherited one. `router_assert` is that act (owner ruling,
     gold seal phase 2 rules 1 and 2), so the assertion is an exact roster
-    rather than being deleted — a third name appearing here still has to be
-    argued for, and `test_quality` still has to stay gone.
+    rather than being deleted — a further name appearing here still has to be
+    argued for, and `test_quality` still has to stay gone. `import_site` is
+    the third, argued on 2026-09-21: template v1 item 8, owner 20:11.
     """
-    from aipass.seedgo.apps.handlers.audit.branch_audit import discover_checkers
-
     checkers = discover_checkers()
     tests_only = sorted(n for n, c in checkers.items() if applicability.applies_to(c) == applicability.TESTS)
-    assert tests_only == ["oversize_test_file", "router_assert"]
+    assert tests_only == ["import_site", "oversize_test_file", "router_assert"]
     assert "test_quality" not in checkers
 
 
@@ -183,8 +179,6 @@ def test_the_tests_only_bucket_is_an_exact_roster():
 
 
 def test_checklist_lane_honours_the_declaration():
-    from aipass.seedgo.apps.modules import checklist
-
     production_only = _checker("production", AUDIT_SCOPE="all_files", check_module=lambda *a, **k: {})
     everywhere = _checker(None, AUDIT_SCOPE="all_files", check_module=lambda *a, **k: {})
 
@@ -200,8 +194,6 @@ def test_checklist_lane_skips_retired_files(tmp_path, monkeypatch):
     throwaway before anything else — neutered here so the retired rule is what
     is actually under test.
     """
-    from aipass.seedgo.apps.modules import checklist
-
     monkeypatch.setattr(checklist, "is_throwaway_path", lambda _p: False)
 
     archived = tmp_path / "apps" / "handlers" / ".archive" / "bulletin_created.py"
@@ -214,8 +206,6 @@ def test_checklist_lane_skips_retired_files(tmp_path, monkeypatch):
 
 
 def test_audit_lane_does_not_collect_retired_files(tmp_path, monkeypatch):
-    from aipass.seedgo.apps.handlers.audit import branch_audit
-
     monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
 
     live = tmp_path / "apps" / "modules" / "live.py"
