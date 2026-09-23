@@ -109,7 +109,7 @@ written down.
 import ast
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Union
 
 from aipass.prax import logger
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
@@ -277,7 +277,7 @@ def _verdict(node: ast.AST, bare: Set[str], modules: Dict[str, str]) -> Tuple[st
     return _STRONG, ""
 
 
-def _tests(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.AST]]]:
+def _tests(tree: ast.Module) -> List[Tuple[Union[ast.FunctionDef, ast.AsyncFunctionDef], List[ast.AST]]]:
     """Each test and its own nodes, in ONE descent.
 
     Walking the tree to find the tests and then walking each test again to
@@ -285,12 +285,18 @@ def _tests(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.AST]]]:
     the enclosing test down took the fleet from 9.0s with identical findings.
     """
     nodes: Dict[int, List[ast.AST]] = {}
-    owners: Dict[int, ast.AST] = {}
-    stack: List[Tuple[ast.AST, ast.AST | None]] = [(tree, None)]
+    owners: Dict[int, Union[ast.FunctionDef, ast.AsyncFunctionDef]] = {}
+    stack: List[Tuple[ast.AST, Union[ast.FunctionDef, ast.AsyncFunctionDef, None]]] = [(tree, None)]
     while stack:
         node, enclosing = stack.pop()
-        is_test = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(TEST_PREFIX)
-        if enclosing is None and is_test:
+        # isinstance INLINE, not through an `is_test` flag: pyright narrows a
+        # type test, never a bool that holds its answer, and `owners` needs the
+        # narrowed type to give `.lineno` and `.name` to the finding.
+        if (
+            enclosing is None
+            and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith(TEST_PREFIX)
+        ):
             enclosing = node
             nodes[id(node)], owners[id(node)] = [], node
         if enclosing is not None:
@@ -300,9 +306,9 @@ def _tests(tree: ast.Module) -> List[Tuple[ast.AST, List[ast.AST]]]:
     return [(owners[key], nodes[key]) for key in nodes]
 
 
-def _oracles(function_nodes: List[ast.AST]) -> Tuple[List[ast.AST], bool]:
+def _oracles(function_nodes: List[ast.AST]) -> Tuple[List[Union[ast.Assert, ast.Call]], bool]:
     """Every oracle in a test, and whether a ``pytest.raises`` guards it."""
-    found: List[ast.AST] = []
+    found: List[Union[ast.Assert, ast.Call]] = []
     raises = False
     for node in function_nodes:
         if isinstance(node, ast.Assert):

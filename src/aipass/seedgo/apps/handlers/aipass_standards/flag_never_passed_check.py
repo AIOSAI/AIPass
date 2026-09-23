@@ -134,7 +134,9 @@ def declared_flags(branch_root: Path) -> Dict[str, Tuple[Path, int]]:
         tree = _parse(path)
         if tree is None:
             continue
-        functions = {f.name: f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        functions: Dict[str, ast.AST] = {
+            f.name: f for f in ast.walk(tree) if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
         if ENTRY in functions:
             _parsed_here(functions, path, found)
     return found

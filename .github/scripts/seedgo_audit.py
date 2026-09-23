@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 65  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 69  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -71,6 +71,13 @@ EXPECTED_STANDARDS = 65  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          rules that compare a branch's apps/ against its whole tests/ tree. P convicts
 #                          a --flag a parser reads that no test ever hands it; O convicts a public
 #                          function of a test file's DECLARED SUBJECT that no test calls.
+#                          +4 on 2026-09-23: constant_predicate, sleep_in_test, stdlib_patch and
+#                          unused_conftest_fixture, CRACK classes C, N, Q and G (dispatch f66ac9d0).
+#                          C convicts a bool-returning constant lambda handed to the product; N convicts
+#                          any sleep in a test; Q convicts a patch whose target resolves to stdlib rather
+#                          than aipass; G convicts a conftest fixture the branch never requests. C and Q
+#                          score only what cannot be right -- inert None stubs and unresolvable local
+#                          targets ride as counts. Measured: cli and seedgo both consult 69.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"
