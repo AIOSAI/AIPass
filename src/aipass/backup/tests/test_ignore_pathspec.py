@@ -14,7 +14,6 @@
 # seedgo: no-test-needed(constant) — pattern strings and glyphs
 # seedgo: no-test-needed(stdlib) — pathspec library's matching behavior
 
-import pathspec
 from unittest.mock import patch
 
 import pytest
@@ -37,113 +36,121 @@ from aipass.backup.apps.handlers.path.builder import (
 from aipass.backup.apps.handlers.report.result import BackupResult
 
 
-# --- gitignore parity ---
+# --- gitignore parity, read through the product's own matcher ---
+
+# Every claim in this section is the gitignore claim it always made, now asserted
+# on BACKUP's verdict instead of on a pathspec.PathSpec the test built for itself:
+# the pattern is written into a real .backupignore under tmp_path and read back
+# through load_spec + is_ignored, the matcher every copy lane and the Drive
+# re-filter use. load_spec prepends the built-in "*.tmp" floor ahead of the
+# project's lines, so no path asserted here ends in .tmp -- the floor can neither
+# satisfy a positive claim nor break a negative one.
 
 
 class TestGitignoreNegation:
     """Negation re-includes excluded paths."""
 
-    def test_negation_re_includes(self):
+    def test_negation_re_includes(self, tmp_path):
         """Negated pattern re-includes a previously excluded file."""
-        lines = ["*.log", "!important.log"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("debug.log")
-        assert not spec.match_file("important.log")
+        (tmp_path / ".backupignore").write_text("*.log\n!important.log\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("logs/debug.log", spec)
+        assert not is_ignored("logs/important.log", spec)
 
-    def test_negation_last_match_wins(self):
+    def test_negation_last_match_wins(self, tmp_path):
         """Re-excluding after negation still excludes."""
-        lines = ["*.txt", "!keep.txt", "keep.txt"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("keep.txt")
+        (tmp_path / ".backupignore").write_text("*.txt\n!keep.txt\nkeep.txt\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("keep.txt", spec)
 
-    def test_negation_in_subdir(self):
+    def test_negation_in_subdir(self, tmp_path):
         """Negation works for files inside an excluded directory."""
-        lines = ["logs/", "!logs/audit.log"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("logs/debug.log")
-        assert not spec.match_file("logs/audit.log")
+        (tmp_path / ".backupignore").write_text("logs/\n!logs/audit.log\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("logs/debug.log", spec)
+        assert not is_ignored("logs/audit.log", spec)
 
 
 class TestGitignoreAnchoring:
     """Leading slash anchors to root."""
 
-    def test_anchored_pattern(self):
+    def test_anchored_pattern(self, tmp_path):
         """Leading / anchors pattern to root only."""
-        lines = ["/build"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("build")
-        assert not spec.match_file("src/build")
+        (tmp_path / ".backupignore").write_text("/build\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("build", spec)
+        assert not is_ignored("src/build", spec)
 
-    def test_unanchored_matches_anywhere(self):
+    def test_unanchored_matches_anywhere(self, tmp_path):
         """Unanchored dir pattern matches at any depth."""
-        lines = ["build/"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("build/output.o")
-        assert spec.match_file("src/build/output.o")
+        (tmp_path / ".backupignore").write_text("build/\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("build/output.o", spec)
+        assert is_ignored("src/build/output.o", spec)
 
 
 class TestGitignoreDirOnly:
     """Trailing / means dir-only."""
 
-    def test_dir_only_pattern(self):
+    def test_dir_only_pattern(self, tmp_path):
         """Trailing / matches directory contents but not a bare file."""
-        lines = ["logs/"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("logs/app.log")
-        assert not spec.match_file("logs")
+        (tmp_path / ".backupignore").write_text("logs/\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("logs/app.log", spec)
+        assert not is_ignored("logs", spec)
 
 
 class TestGitignoreWildcard:
     """Wildcard boundary behavior."""
 
-    def test_star_no_slash_cross(self):
+    def test_star_no_slash_cross(self, tmp_path):
         """Single * matches files at any depth for simple extensions."""
-        lines = ["*.py"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("test.py")
-        assert spec.match_file("src/test.py")
+        (tmp_path / ".backupignore").write_text("*.py\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("test.py", spec)
+        assert is_ignored("src/test.py", spec)
 
-    def test_doublestar_crosses_dirs(self):
+    def test_doublestar_crosses_dirs(self, tmp_path):
         """Double ** explicitly crosses directory boundaries."""
-        lines = ["**/test.py"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("test.py")
-        assert spec.match_file("a/b/c/test.py")
+        (tmp_path / ".backupignore").write_text("**/test.py\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("test.py", spec)
+        assert is_ignored("a/b/c/test.py", spec)
 
 
 class TestGitignoreComments:
     """Comment and blank line handling."""
 
-    def test_comments_ignored(self):
+    def test_comments_ignored(self, tmp_path):
         """Lines starting with # are treated as comments."""
-        lines = ["# this is a comment", "*.log"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("app.log")
-        assert not spec.match_file("# this is a comment")
+        (tmp_path / ".backupignore").write_text("# this is a comment\n*.log\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("app.log", spec)
+        assert not is_ignored("# this is a comment", spec)
 
-    def test_blank_lines_ignored(self):
+    def test_blank_lines_ignored(self, tmp_path):
         """Blank lines do not affect matching."""
-        lines = ["", "*.log", "", ""]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("app.log")
-        assert not spec.match_file("app.txt")
+        (tmp_path / ".backupignore").write_text("\n*.log\n\n\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("app.log", spec)
+        assert not is_ignored("app.txt", spec)
 
 
 class TestGitignoreLastMatchWins:
     """Last matching rule wins."""
 
-    def test_last_match_wins(self):
+    def test_last_match_wins(self, tmp_path):
         """Negation after exclude re-includes the file."""
-        lines = ["*.txt", "!important.txt"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert not spec.match_file("important.txt")
-        assert spec.match_file("other.txt")
+        (tmp_path / ".backupignore").write_text("*.txt\n!important.txt\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert not is_ignored("important.txt", spec)
+        assert is_ignored("other.txt", spec)
 
-    def test_re_exclude_after_negation(self):
+    def test_re_exclude_after_negation(self, tmp_path):
         """Re-excluding after negation excludes again."""
-        lines = ["*.txt", "!important.txt", "important.txt"]
-        spec = pathspec.PathSpec.from_lines("gitignore", lines)
-        assert spec.match_file("important.txt")
+        (tmp_path / ".backupignore").write_text("*.txt\n!important.txt\nimportant.txt\n", encoding="utf-8")
+        spec = load_spec(str(tmp_path))
+        assert is_ignored("important.txt", spec)
 
 
 # --- load_spec + is_ignored integration ---
@@ -489,7 +496,13 @@ class TestMirrorCleanupNoExceptions:
     """Mirror cleanup deletes when source is gone — no exception list."""
 
     def test_deletes_when_source_gone(self, tmp_path):
-        """Files in backup whose source is gone get deleted."""
+        """Files in backup whose source is gone get deleted — the predicate buys no exception.
+
+        The should_ignore callable NAMES gone.txt, and gone.txt is deleted
+        anyway: source-existence is the whole decision. A predicate that
+        answered the same for every path could not tell that apart from a
+        product that never consults the callable at all.
+        """
 
         source = tmp_path / "source"
         source.mkdir()
@@ -501,7 +514,7 @@ class TestMirrorCleanupNoExceptions:
         (backup / "kept.txt").write_text("here", encoding="utf-8")
 
         result = BackupResult(mode="snapshot", project_root=str(source))
-        cleanup_deleted_files(backup, source, lambda p: False, result)
+        cleanup_deleted_files(backup, source, lambda p: p.name == "gone.txt", result)
         assert result.files_deleted == 1
         assert not (backup / "gone.txt").exists()
         assert (backup / "kept.txt").exists()

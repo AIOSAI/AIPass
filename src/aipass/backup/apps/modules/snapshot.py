@@ -20,9 +20,10 @@ if sys.platform == "win32":
             _reconfigure(encoding="utf-8", errors="replace")
 
 from aipass.prax import logger
-from aipass.cli.apps.modules import console
+from aipass.cli.apps.modules import console, error
 
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
+from aipass.backup.apps.handlers.json.json_handler import WriteFailed
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
 from aipass.backup.apps.handlers.ignore.whitelist import load_whitelist
 from aipass.backup.apps.handlers.audit import trail
@@ -100,6 +101,45 @@ def _build_saved_timestamps(
         except OSError as e:
             logger.info(f"[backup] Vanished before timestamp save, skipping {rel_p}: {e}")
     return timestamps
+
+
+def _persist_timestamps(
+    project_root: str,
+    filtered: list[tuple[str, str]],
+    result: BackupResult,
+) -> None:
+    """Save the timestamp map for the next quick-check, reporting a lost map.
+
+    Called AFTER the changelog entry and the ``snapshot_complete`` audit line,
+    and that ordering is the whole point. ``save_timestamps`` raises
+    WriteFailed, so while it ran first a run whose files were already copied to
+    the destination left the branch's own history saying nothing had happened:
+    no changelog entry, no audit record, and an exception out of run_snapshot on
+    top. The map is state for the NEXT run; the record is the evidence for THIS
+    one, and losing the map must not cost the record.
+
+    The failure is reported, never swallowed: on the result (so the summary
+    shows it), on stderr through ``error()`` (which marks the command failed, so
+    the CLI exits non-zero), and in the audit trail. A stale map only costs a
+    full re-copy next run, so raising here — after the copy is on disk and
+    recorded — would abort a run that in every other respect succeeded.
+
+    Args:
+        project_root: Absolute path to the project root.
+        filtered: The (absolute, relative) file pairs this run copied.
+        result: The run's result, which carries any failure back to the caller.
+    """
+    try:
+        save_timestamps(project_root, _build_saved_timestamps(filtered))
+    except WriteFailed as e:
+        message = f"Snapshot copied, but the timestamp map was not saved: {e}"
+        logger.error(f"[backup] {message}")
+        error(message)
+        trail.log_operation(
+            "snapshot_timestamps_failed",
+            {"project_root": project_root, "error": str(e)},
+        )
+        result.add_error(message, is_critical=True)
 
 
 def _quick_check_early_return(
@@ -195,8 +235,6 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
 
     duration = time.time() - start
 
-    save_timestamps(project_root, _build_saved_timestamps(filtered))
-
     result.files_copied = copy_result.get("files_copied", 0)
     result.files_skipped = result.files_checked - result.files_copied
     result.bytes_copied = copy_result.get("bytes_copied", 0)
@@ -211,6 +249,10 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
         {"project_root": project_root, "files": result.files_copied},
     )
     logger.info(f"[backup] Snapshot complete: {result.files_copied} files")
+
+    # Last, and deliberately: the copy is on disk and in the record before the
+    # map that only the next run reads is allowed to fail anything.
+    _persist_timestamps(project_root, filtered, result)
 
     if show_panels:
         show_result_summary(result)

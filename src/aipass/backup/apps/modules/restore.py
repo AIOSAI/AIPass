@@ -3,7 +3,7 @@
 # Description: Restore module — version discovery and file restoration
 # Version: 1.0.0
 # Created: 2026-06-12
-# Modified: 2026-09-14
+# Modified: 2026-09-23
 # =============================================
 
 """Restore Module — list versions and restore files from versioned store."""
@@ -89,7 +89,15 @@ def run_list_versions(project_root: str, filename: str) -> bool:
 
     versions = list_versions(file_folder)
     if not versions:
-        console.print(f"No versions found for: {filename}")
+        # Same channel as the lookup failure above, for the same reason: this
+        # is a listing that did not happen. On console.print it landed on
+        # stdout beside the "Versions of X:" heading it is denying, and left
+        # the process unmarked, so `restore <p> list <f>` exited 0 having
+        # listed nothing. The guard above does NOT cover this case -- it fires
+        # when the file is absent, and here the file is present but the store
+        # holds no version the handler can read (a pruned hashed folder whose
+        # current version is no longer the only non-baseline file in it).
+        error(f"No versions found for: {filename}")
         return False
 
     console.print(f"[bold]Versions of {filename}:[/bold]")
@@ -183,7 +191,26 @@ def handle_command(command: str, args: list) -> bool:
         run_restore_file(project_root, args[2], args[3])
         return True
 
-    print_help()
+    # The 2026-09-22 refusal only reached `list` with no filename; everything
+    # else still fell through to print_help() and returned a success nobody
+    # could question. `restore <p> file <f>` with no output path and a
+    # mistyped verb both got the usage page on STDOUT and exit 0, so a script
+    # could not tell a restore that ran from one that never started. Same
+    # shape as the cure above and as drive_check's refusal: error() names what
+    # was wrong on stderr and marks the process failed, True keeps the command
+    # ours so resolve_exit reports 2 instead of the router adding a false
+    # "Unknown command: restore" on top of a true line.
+    if subcommand == "file":
+        error(
+            "restore file needs an output path",
+            suggestion="restore <project> file <file> <out>",
+        )
+        return True
+
+    error(
+        f"restore has no verb named: {subcommand}",
+        suggestion="restore <project> list <file>  |  restore <project> file <file> <out>",
+    )
     return True
 
 

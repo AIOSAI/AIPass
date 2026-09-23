@@ -14,6 +14,9 @@
 # seedgo: no-test-needed(constant) — the Rich colour tags the introspection lines carry; capsys strips them
 # seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
+import pytest
+
+from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync, settings
 
 # MEASURED, and the reason every routing test below stops at the no-args route.
@@ -36,6 +39,40 @@ from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, dr
 # IS display.CONSOLE, a real Rich console printing to sys.stdout, and error()/warning()
 # write to display.err_console on sys.stderr — capsys reads both, and conftest.py
 # already pins both widths to 200 for the session.
+
+
+# ---------------------------------------------------------------------------
+# the seal itself — what stands between this file and the real account
+# ---------------------------------------------------------------------------
+
+
+class TestSuiteWideDriveSeal:
+    """conftest's autouse sealed_google_edge, proven from inside THIS file."""
+
+    def test_the_oauth_flow_is_refused_rather_than_dialled(self) -> None:
+        """Reaching for Drive auth from this file raises instead of authenticating.
+
+        Until 2026-09-23 ``sealed_google_edge`` was a file-level autouse fixture
+        declared inside test_drive_pipeline.py, so it covered that ONE file. This
+        file drives the same four drive_* modules and had no seal of its own: the
+        only thing keeping it off the network was each test's own recorder, and a
+        route that slipped past a recorder reached the real account BEFORE the
+        assertion that would have failed it -- the dial happens first, the red
+        arrives after, and the account has already been touched.
+
+        The fixture now lives in conftest.py as suite-wide autouse. This is the
+        pin that shows the move reached here: get_drive_service is the OAuth flow
+        itself, and calling it inside this file must be a RuntimeError, not a
+        round trip. If the fixture is ever moved back, or shadowed by a file-level
+        fixture of the same name, this test goes red and names the reason.
+        """
+        with pytest.raises(RuntimeError, match="live Google Drive edge"):
+            drive_client.get_drive_service()
+
+    def test_every_drive_request_is_refused_rather_than_sent(self) -> None:
+        """The second door: api_call_with_retry carries every request the client sends."""
+        with pytest.raises(RuntimeError, match="live Google Drive edge"):
+            drive_client.api_call_with_retry(lambda: None)
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +213,39 @@ class TestDriveClearRouting:
         out, err = capsys.readouterr()
         assert "drive_clear Module" in out
         assert "Handlers: drive/tracker (requires --force)" in out
+        assert err == ""
+
+    # --force is the arming switch of the branch's one destructive verb, so it
+    # is pinned AT THE SEAM: run_drive_clear is replaced by a recorder, and
+    # what the recorder was handed is the flag's whole effect. A call-through
+    # would reach clear_all for real, which is why this test never lets
+    # handle_command past the recorder. The recorder is the FIRST thing standing
+    # between args[0] and a live account; since 2026-09-23 conftest's autouse
+    # sealed_google_edge stands behind it for every test in this file too, so a
+    # route that slips past the recorder raises instead of dialling
+    # (TestSuiteWideDriveSeal above is the pin on that).
+    def test_force_arms_the_clear_and_the_same_command_without_it_does_not(
+        self,
+        tmp_path,
+        capsys,
+        monkeypatch,
+    ) -> None:
+        """--force reaches run_drive_clear as force=True; drop the flag and the same args are False."""
+        armed: list = []
+        monkeypatch.setattr(
+            drive_clear,
+            "run_drive_clear",
+            lambda project_root, force=False: armed.append((project_root, force)),
+        )
+
+        assert drive_clear.handle_command(drive_clear.PRIMARY_COMMAND, [str(tmp_path), "--force"]) is True
+        assert drive_clear.handle_command(drive_clear.PRIMARY_COMMAND, [str(tmp_path)]) is True
+
+        out, err = capsys.readouterr()
+        # Both rows, in order: the ONLY difference between them is the flag, so
+        # a parse that hardcodes force -- in either direction -- fails here.
+        assert armed == [(str(tmp_path), True), (str(tmp_path), False)], f"the flag did not reach the verb: {armed!r}"
+        assert out == "", f"the route printed instead of delegating: {out!r}"
         assert err == ""
 
 

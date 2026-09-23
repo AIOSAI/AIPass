@@ -19,7 +19,7 @@ from contextlib import ExitStack, contextmanager
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -51,6 +51,16 @@ from aipass.backup.apps.modules import (
 # import and no console built here (item 14). conftest.py pins both console
 # widths for the session and clears the command-failed flag after every test
 # (items 20 and 18) -- neither belongs in this file.
+#
+# THE ARGV SEAM IS SPELLED `patch("sys.argv", ...)`, NOT `patch.object(sys,
+# "argv", ...)`. Same object, same restore, one difference that matters: the
+# dotted string is the spelling seedgo's stdlib_patch standard names in its
+# sanctioned-edge list, and the standard's reader -- ast -- only ever looks at
+# the FIRST argument of a patch call. Written as patch.object(sys, "argv"), the
+# target it sees is bare `sys`, which is the un-sanctioned "the product's own
+# work through the stdlib" case, and all five sites scored (measured
+# 2026-09-23). main() reads sys.argv itself, so argv IS the entry point's
+# input; there is no product seam to prefer. Do not rewrite these back.
 
 
 #: The five modules whose whole job is routing: one command they own, a help
@@ -166,6 +176,31 @@ class TestIntrospection:
         assert callable(mod.print_introspection)
 
 
+class TestModuleDiscovery:
+    """The importlib walk under main(), run for real instead of replaced by a list."""
+
+    def test_discovery_imports_the_command_modules_that_exist_in_apps_modules(self) -> None:
+        """discover_modules returns the modules on disk, imported -- not a list a patch handed it."""
+        # Every other discover_modules in this file is a patch target: the
+        # routing tests below replace it with [fake_module], which is right for
+        # a routing test and leaves the discovery itself unrun. The glob, the
+        # leading-underscore skip and the handle_command filter are exercised
+        # here and nowhere else.
+        discovered = entry.discover_modules()
+
+        found = sorted(module.__name__.split(".")[-1] for module in discovered)
+        on_disk = sorted(path.stem for path in entry.MODULES_DIR.glob("*.py") if not path.name.startswith("_"))
+        assert found == on_disk, f"discovery and apps/modules/ disagree: {found!r} vs {on_disk!r}"
+        # Not decoration: MODULES_DIR pointed somewhere empty would make both
+        # sides [] and the equality above pass on nothing. These name modules
+        # that must be in the list, and the identity check says the walk
+        # imported THE module rather than a throwaway twin of it.
+        assert {"drive_sync", "register", "restore", "share"} <= set(found)
+        assert drive_sync in discovered and register in discovered
+        assert all(callable(module.handle_command) for module in discovered)
+        assert "__init__" not in found, "a private file reached the router as a command module"
+
+
 class TestUnknownCommand:
     """Test unknown_command / invalid_command / unrecognized handling."""
 
@@ -247,33 +282,86 @@ class TestPrintHelp:
             assert flag in documented_flags, f"OPTIONS block has no row for {flag}"
 
     @pytest.mark.parametrize("mod", SIMPLE_MODULES)
-    def test_print_introspection_exists(self, mod: ModuleType) -> None:
-        """print_introspection callable exists on module."""
-        assert callable(mod.print_introspection)
+    def test_print_introspection_prints_the_page_when_called_directly(
+        self, mod: ModuleType, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """print_introspection, called on its own, prints the module's name and command."""
+        # This used to be `assert callable(mod.print_introspection)` -- the same
+        # claim TestIntrospection.test_introspection_exists already makes, one
+        # assertion shorter. Calling the function closes a gap neither of its
+        # neighbours reaches: TestIntrospection.test_no_args gets the page
+        # through handle_command, so a print_introspection hollowed out to
+        # `pass` while handle_command printed the page inline leaves BOTH of
+        # them green -- the attribute still exists, the routed page still
+        # appears. Only a direct call sees it. That matters because the module's
+        # standalone __main__ entry and print_help both reach this function
+        # without going through handle_command at all.
+        mod.print_introspection()
+
+        out, err = capsys.readouterr()
+        assert f"{mod.MODULE_NAME} Module" in out
+        assert f"Primary command: {mod.PRIMARY_COMMAND}" in out
+        assert err == "", f"introspection wrote to stderr: {err!r}"
 
 
-#: (module, sentinel called right after the help gate, args after the project arg)
+#: (module, sentinel called right after the help gate, args after the project
+#: arg, the ONE call that invocation must produce)
 #: Each row builds the module's OWN executing invocation from a tmp_path.
 #: A builder rather than a shared "<project> plus extras" shape, because the
 #: shape is not shared: drive_check takes no project at all, and assuming it
 #: did was what made a bare tmp_path read as a normal run (see its row).
+#:
+#: The fourth column is the argument BINDING, and it is the half the dispatch
+#: test used to leave free. `spy.assert_called()` said only "something called
+#: it": drive_clear could pass force=True unconditionally, restore could look
+#: up args[1] instead of args[2], drive_sync could drop --note into --project,
+#: and every row stayed green. The expected call is built from the same
+#: tmp_path the args are, so the row states the whole contract in one place.
 STANDALONE_ENTRY_MODULES = [
-    pytest.param(all_module, "run_snapshot", lambda p: [str(p)], id="all"),
+    pytest.param(all_module, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p)), id="all"),
     # drive_check is account-wide and takes NO project: "run" is its only
-    # executing route. It has no default branch any more — an unrecognised
-    # first arg is refused, never executed (2026-09-22). Before that cure the
-    # default ran the check for ANY first arg, so a bare tmp_path counted as a
-    # normal run and 'drive_check foo --help' made a real Drive auth call.
-    pytest.param(drive_check, "run_drive_check", lambda p: ["run"], id="drive_check"),
-    pytest.param(drive_clear, "run_drive_clear", lambda p: [str(p)], id="drive_clear"),
-    pytest.param(drive_stats, "run_drive_stats", lambda p: [str(p)], id="drive_stats"),
-    pytest.param(drive_sync, "run_drive_sync", lambda p: [str(p)], id="drive_sync"),
-    pytest.param(register, "resolve_caller_path", lambda p: [str(p)], id="register"),
-    pytest.param(restore, "run_list_versions", lambda p: [str(p), "list", "some_file.py"], id="restore"),
-    pytest.param(share, "run_share", lambda p: [str(p)], id="share"),
-    pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], id="snapshot"),
-    pytest.param(status, "resolve_caller_path", lambda p: [str(p)], id="status"),
-    pytest.param(versioned, "run_versioned", lambda p: [str(p)], id="versioned"),
+    # executing route, and it reaches run_drive_check with NO arguments. It has
+    # no default branch any more — an unrecognised first arg is refused, never
+    # executed (2026-09-22). Before that cure the default ran the check for ANY
+    # first arg, so a bare tmp_path counted as a normal run and
+    # 'drive_check foo --help' made a real Drive auth call.
+    pytest.param(drive_check, "run_drive_check", lambda p: ["run"], lambda p: call(), id="drive_check"),
+    pytest.param(
+        drive_clear,
+        "run_drive_clear",
+        lambda p: [str(p)],
+        # force is a FLAG the row never passes, so False is the claim: a
+        # tracker deletion that self-confirms is the regression this pins.
+        lambda p: call(str(p), force=False),
+        id="drive_clear",
+    ),
+    pytest.param(drive_stats, "run_drive_stats", lambda p: [str(p)], lambda p: call(str(p)), id="drive_stats"),
+    pytest.param(
+        drive_sync,
+        "run_drive_sync",
+        lambda p: [str(p)],
+        # The empty defaults are what a plain flagless run must hand the verb.
+        # Measured 2026-09-23: this row does NOT pin the --note / --project
+        # pair-scan -- with no flags in the args the scan never fires, and a
+        # mutant that drops --note's value into project_name still produces
+        # this exact call. That gap is flag_never_passed's, not this row's.
+        lambda p: call(str(p), project_name="", note="", force=False),
+        id="drive_sync",
+    ),
+    pytest.param(register, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="register"),
+    pytest.param(
+        restore,
+        "run_list_versions",
+        lambda p: [str(p), "list", "some_file.py"],
+        # args[2] is the FILE. args[1] is the verb, and a module that reads it
+        # instead looks up a file literally named "list" on every restore.
+        lambda p: call(str(p), "some_file.py"),
+        id="restore",
+    ),
+    pytest.param(share, "run_share", lambda p: [str(p)], lambda p: call(str(p), public=False), id="share"),
+    pytest.param(snapshot, "run_snapshot", lambda p: [str(p)], lambda p: call(str(p)), id="snapshot"),
+    pytest.param(status, "resolve_caller_path", lambda p: [str(p)], lambda p: call(str(p)), id="status"),
+    pytest.param(versioned, "run_versioned", lambda p: [str(p)], lambda p: call(str(p)), id="versioned"),
 ]
 
 #: Real work that runs AFTER the sentinel and must be neutralised too.
@@ -310,12 +398,14 @@ class TestHelpGateInsideHandleCommand:
     snapshot (proven live, 2026-08-13). Reported by @seedgo via help_flag_safety.
     """
 
-    @pytest.mark.parametrize(("mod", "sentinel", "build_args"), STANDALONE_ENTRY_MODULES)
+    @pytest.mark.parametrize(("mod", "sentinel", "build_args", "build_call"), STANDALONE_ENTRY_MODULES)
     @pytest.mark.parametrize("flag", ["--help", "-h"])
     def test_trailing_help_flag_does_not_execute(
-        self, mod: ModuleType, sentinel: str, build_args, flag: str, tmp_path: Path
+        self, mod: ModuleType, sentinel: str, build_args, build_call, flag: str, tmp_path: Path
     ) -> None:
         """A help flag trailing a module's own real invocation runs nothing."""
+        # build_call is the dispatch test's column; a help request must produce
+        # NO call at all, so it is the one shape this test never expects.
         args = [*build_args(tmp_path), flag]
 
         with patch.object(mod, sentinel) as spy:
@@ -324,9 +414,17 @@ class TestHelpGateInsideHandleCommand:
         assert handled is True
         spy.assert_not_called()
 
-    @pytest.mark.parametrize(("mod", "sentinel", "build_args"), STANDALONE_ENTRY_MODULES)
-    def test_real_invocation_still_dispatches(self, mod: ModuleType, sentinel: str, build_args, tmp_path: Path) -> None:
-        """Guard does not block a normal run -- the sentinel is still reached."""
+    @pytest.mark.parametrize(("mod", "sentinel", "build_args", "build_call"), STANDALONE_ENTRY_MODULES)
+    def test_real_invocation_still_dispatches(
+        self, mod: ModuleType, sentinel: str, build_args, build_call, tmp_path: Path
+    ) -> None:
+        """A normal run reaches the sentinel ONCE, with the arguments the row built."""
+        # `spy.assert_called()` was the whole oracle until 2026-09-23, and it
+        # left every argument-binding line in these eleven modules free: the
+        # sentinel could be handed the wrong operand, the wrong flag value or
+        # the project root hardcoded, and "was it called" still answered yes.
+        # The expected call comes off the row, so what the module OWES its verb
+        # is written beside the invocation that is supposed to produce it.
         args = build_args(tmp_path)
 
         with ExitStack() as stack:
@@ -335,7 +433,9 @@ class TestHelpGateInsideHandleCommand:
                 stack.enter_context(patch.object(target_mod, target_attr))
             mod.handle_command(mod.PRIMARY_COMMAND, args)
 
-        spy.assert_called()
+        assert spy.call_args_list == [build_call(tmp_path)], (
+            f"{mod.MODULE_NAME} dispatched {sentinel} as {spy.call_args_list}, not {[build_call(tmp_path)]}"
+        )
 
 
 #: sys.addaudithook can never be uninstalled, so the hook goes in once at module
@@ -387,18 +487,42 @@ class TestNoWriteEscapesToRealSecrets:
     """
 
     def test_all_stops_at_the_patched_doubles(self, tmp_path: Path) -> None:
-        """Every step after the sentinel is a double, so no real work runs."""
+        """Every step of the cycle lands on a double, each with the run's own arguments."""
+        # `assert_called()` on each double proved only that the cycle got as far
+        # as three calls. What keeps DOWNSTREAM_AFTER_SENTINEL honest is that
+        # each double is standing where a REAL run would have gone, so each is
+        # checked against the arguments the real step takes -- a double called
+        # with the wrong project root is not covering the call that would have
+        # escaped. The doubles are collected BY NAME and compared as a whole
+        # map, so a step added to the table without an expectation here fails
+        # rather than riding along unasserted.
+        project = str(tmp_path)
+
         with ExitStack() as stack:
             snap = stack.enter_context(patch.object(all_module, "run_snapshot"))
-            doubles = [
-                stack.enter_context(patch.object(target_mod, target_attr))
+            doubles = {
+                target_attr: stack.enter_context(patch.object(target_mod, target_attr))
                 for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL[all_module]
-            ]
-            all_module.handle_command(all_module.PRIMARY_COMMAND, [str(tmp_path)])
+            }
+            all_module.handle_command(all_module.PRIMARY_COMMAND, [project])
 
-        snap.assert_called()
-        for double in doubles:
-            double.assert_called()
+        assert snap.call_args_list == [call(project)]
+        assert sorted(doubles) == ["run_drive_sync", "run_versioned"]
+
+        # show_panels is derived from the absence of --quiet, and this run has
+        # no flags: True is the claim, not a placeholder.
+        assert doubles["run_drive_sync"].call_args_list == [call(project, show_panels=True)]
+
+        # The single-scan rule: versioned is handed the list 'all' already
+        # walked, never a path to re-walk. The seed .backupignore that
+        # create_backup_dir writes is the one entry a bare project is
+        # guaranteed to carry, so it is what proves the list came from the
+        # shared scan. (The list also carries conftest's json seam, which lives
+        # inside tmp_path -- see the retirement note in the reply for 09-23.)
+        versioned_call = doubles["run_versioned"].call_args
+        assert doubles["run_versioned"].call_count == 1
+        assert versioned_call.args == (project,)
+        assert (str(tmp_path / ".backupignore"), ".backupignore") in versioned_call.kwargs["pre_scanned"]
 
     def test_no_write_reaches_real_secret_storage(self, tmp_path: Path) -> None:
         """Running 'all' touches nothing under ~/.secrets."""
@@ -444,13 +568,64 @@ class TestStubFailsHonestly:
         # The exit code alone does not prove the operator was told WHICH module
         # refused -- route_command's `failure` string is what carries that, and
         # error() puts it on stderr, where drone's piping reads it.
-        with patch.object(sys, "argv", ["backup", "settings", "/some/project"]):
+        with patch("sys.argv", ["backup", "settings", "/some/project"]):
             code = entry.main()
 
         assert code == 1
         err = capsys.readouterr().err
         assert "settings failed" in err
         assert "settings is not implemented" in err
+
+
+class TestRestoreRefusesAMalformedInvocation:
+    """A restore invocation that cannot run must fail loudly, not print help and exit 0.
+
+    The 2026-09-22 refusal cure covered ONE shape -- `restore <project> list`
+    with no filename. The two shapes below fell through to the same
+    `print_help(); return True` tail at restore.py:186-187, so
+    `restore <project> file notes.txt` (no output path) and any fat-fingered
+    verb answered exactly like `restore --help`: the usage page on stdout and
+    exit 0. A script reading the code saw success for a restore that never
+    happened.
+
+    Both pins drive the REAL entry point, because the exit code is half the
+    defect and handle_command alone cannot show it. Exit 2 -- not 1 -- is the
+    claim: 1 is what the router returns for a command nobody handled, and
+    returning False here would buy the refusal a second, false line
+    ("Unknown command: restore") on top of the true one.
+    """
+
+    def test_a_missing_output_path_is_refused_instead_of_exiting_zero(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`restore <project> file <f>` with no output path printed help and exited 0."""
+        with patch("sys.argv", ["backup", "restore", str(tmp_path), "file", "notes.txt"]):
+            code = entry.main()
+
+        assert code == 2, f"a restore that never ran exited {code}"
+
+        out, err = capsys.readouterr()
+        # The channel is the other half: a refusal on stdout is indistinguishable
+        # from the "Restored X to Y" line a pipe is reading for.
+        assert "restore <project> file <file> <out>" in err, f"the missing operand was never named on stderr: {err!r}"
+        assert "Unknown command" not in err, f"the refusal returned False and drew a second, false line: {err!r}"
+        assert "Usage:" not in out, "the malformed invocation still answered with the help page"
+        assert f"{restore.MODULE_NAME} Module" not in out, "the malformed invocation still printed the introspection"
+
+    def test_an_unknown_verb_is_refused_on_stderr_instead_of_answered_with_the_help_page(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Any verb but list/file printed the help page on stdout and exited 0."""
+        with patch("sys.argv", ["backup", "restore", str(tmp_path), "lsit", "notes.txt"]):
+            code = entry.main()
+
+        assert code == 2, f"an unknown verb exited {code}"
+
+        out, err = capsys.readouterr()
+        assert "lsit" in err, f"the refusal never named the verb the user typed: {err!r}"
+        assert "Unknown command" not in err, f"the refusal returned False and drew a second, false line: {err!r}"
+        assert "restore <project> list <file>" not in out, "an unknown verb still answered with the usage page"
+        assert f"{restore.MODULE_NAME} Module" not in out, "an unknown verb still printed the introspection"
 
 
 class TestUnknownCommandNotSwallowed:
@@ -484,7 +659,7 @@ class TestUnknownCommandNotSwallowed:
 
         with (
             patch.object(entry, "discover_modules", return_value=[fake_module]),
-            patch.object(sys, "argv", ["backup", "wibble"]),
+            patch("sys.argv", ["backup", "wibble"]),
         ):
             assert entry.main() == 1
 
@@ -519,12 +694,20 @@ class TestHelpNeverExecutes:
         main()'s 'any arg is a help flag' scan to miss.
         """
         assert len(self.HELP_ARGV) == 5
+        # BY NAME, not by literal. The file's declared pass says each module's
+        # PRIMARY_COMMAND text needs no test -- and it was asserting 'all' as a
+        # literal three lines from that promise. Reading the constants closes
+        # the contradiction and pins MORE than the literals did: a module that
+        # renames its PRIMARY_COMMAND now fails here, which is correct, because
+        # a sweep that dispatches a command no module owns sweeps nothing. The
+        # row order is the sweep's shape (long flag, short flag, flag behind a
+        # flag, flag behind operands) and is what the comparison holds.
         assert [row[0] for row in self.HELP_ARGV] == [
-            "snapshot",
-            "versioned",
-            "all",
-            "drive_clear",
-            "restore",
+            snapshot.PRIMARY_COMMAND,
+            versioned.PRIMARY_COMMAND,
+            all_module.PRIMARY_COMMAND,
+            drive_clear.PRIMARY_COMMAND,
+            restore.PRIMARY_COMMAND,
         ]
         # Every row must actually carry a help flag, or it sweeps nothing.
         assert all(row[-1] in ("--help", "-h") for row in self.HELP_ARGV)
@@ -538,12 +721,12 @@ class TestHelpNeverExecutes:
 
         with (
             patch.object(entry, "discover_modules", return_value=[fake_module]),
-            patch.object(sys, "argv", ["backup"] + argv),
+            patch("sys.argv", ["backup"] + argv),
         ):
             exit_code = entry.main()
 
         assert exit_code == 0
-        forwarded = [call.args[1] for call in fake_module.handle_command.call_args_list]
+        forwarded = [dispatched.args[1] for dispatched in fake_module.handle_command.call_args_list]
         for passed_args in forwarded:
             assert passed_args == ["--help"], f"verb was dispatched with real args: {passed_args}"
 
@@ -554,7 +737,7 @@ class TestHelpNeverExecutes:
 
         with (
             patch.object(entry, "discover_modules", return_value=[fake_module]),
-            patch.object(sys, "argv", ["backup", "snapshot", "--help"]),
+            patch("sys.argv", ["backup", "snapshot", "--help"]),
         ):
             assert entry.main() == 0
 
@@ -568,7 +751,7 @@ class TestHelpNeverExecutes:
 
         with (
             patch.object(entry, "discover_modules", return_value=[fake_module]),
-            patch.object(sys, "argv", ["backup", "snapshot", project]),
+            patch("sys.argv", ["backup", "snapshot", project]),
         ):
             assert entry.main() == 0
 

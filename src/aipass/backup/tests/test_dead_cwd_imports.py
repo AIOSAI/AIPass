@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the handlers module parses and imports
 # seedgo: no-test-needed(documentation) — docstrings on public guard functions
-# seedgo: no-test-needed(constant) — PROBE_MODULES list values and preload strings
 # seedgo: no-test-needed(stdlib) — os.path.realpath and Path.resolve behaviour
 
 import ast
@@ -253,6 +252,30 @@ class TestImportsSurviveADeadCwd:
         assert _run_probe(world)["red"] == {}
 
 
+class _ResolveDeniedPath(Path):
+    """A ``Path`` whose ``resolve()`` refuses, standing in for the dead cwd.
+
+    THE PRODUCT'S OWN SEAM, and the reason these tests no longer reach into
+    ``pathlib``. ``module_paths`` does ``from pathlib import Path``, so
+    ``module_paths.Path`` is the branch's binding: installing this over it
+    denies ``resolve()`` to the module under test and to nothing else. The
+    earlier spelling, ``monkeypatch.setattr(Path, "resolve", ...)``, replaced
+    the method on the pathlib class itself -- for pytest's capture, for
+    coverage, for every module alive in the process while the test ran -- and
+    pinned the product's SPELLING of the call rather than its behaviour: move
+    ``module_file`` to ``os.path.realpath`` and the degradation stops being
+    tested with nothing going red.
+
+    ``module_file``'s fallback, ``Path(os.path.abspath(dunder_file))``, is
+    reached through the same binding, so what it returns is one of these. It is
+    a real ``Path`` in every other respect and compares equal to one.
+    """
+
+    def resolve(self, strict: bool = False) -> Path:
+        """Refuse the way a deleted cwd refuses: OSError, not a crash."""
+        raise OSError(2, "cwd denied")
+
+
 class TestSafePathHelper:
     """module_file degrades to the raw absolute spelling, never to a crash."""
 
@@ -262,26 +285,16 @@ class TestSafePathHelper:
 
     def test_falls_back_when_resolve_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An OSError from resolve() yields an absolute path, not an exception."""
-        original = Path.resolve
-
-        def _boom(self, *args, **kwargs):
-            raise OSError(2, "cwd denied")
-
         monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(Path, "resolve", _boom)
+        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
         result = module_paths.module_file(__file__)
-        monkeypatch.setattr(Path, "resolve", original)
 
         assert result.is_absolute()
         assert result.name == Path(__file__).name
 
     def test_branch_root_climbs_without_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """branch_root still answers when resolve() is unavailable."""
-
-        def _boom(self, *args, **kwargs):
-            raise OSError(2, "cwd denied")
-
-        monkeypatch.setattr(Path, "resolve", _boom)
+        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
         assert module_paths.branch_root(__file__, 1).is_absolute()
 
 
@@ -297,12 +310,8 @@ class TestDegradedResolutionIsAnnouncedOnce:
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """module_file called twice on the same file announces once."""
-
-        def _boom(self, *args, **kwargs):
-            raise OSError(2, "cwd denied")
-
         monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(Path, "resolve", _boom)
+        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
 
         module_paths.module_file(__file__)
         module_paths.module_file(__file__)
@@ -316,12 +325,8 @@ class TestDegradedResolutionIsAnnouncedOnce:
         self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Once-per-file, not once-per-process: a different file is still reported."""
-
-        def _boom(self, *args, **kwargs):
-            raise OSError(2, "cwd denied")
-
         monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
-        monkeypatch.setattr(Path, "resolve", _boom)
+        monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
 
         module_paths.module_file(__file__)
         module_paths.module_file(str(Path(__file__).parent / "conftest.py"))
@@ -447,6 +452,59 @@ class TestFenceStillRefusesForeignCallers:
         """
         real_sibling = str(Path(guard._BRANCH_ROOT).parent / "memory" / "apps" / "x.py")
         assert not guard._is_kin(real_sibling, guard._BRANCH_ROOT)
+
+    def test_a_sibling_named_backup_old_is_not_kin(self, guard) -> None:
+        """A sibling whose name merely EXTENDS this branch's name is foreign.
+
+        Measured 2026-09-22 against the real root: ``_is_kin`` compared the two
+        paths as plain text, so ``<root>_old`` CONTAINS ``<root>`` and every
+        file in a stale copy of this branch was admitted. The failure this
+        excludes is a substring reading of kinship -- only a whole path SEGMENT
+        equal to the branch directory is kin, and ``backup_old`` is not
+        ``backup``. Pure helper, real tree, compiles nothing.
+        """
+        stale = str(Path(guard._BRANCH_ROOT + "_old") / "apps" / "x.py")
+        assert not guard._is_kin(stale, guard._BRANCH_ROOT)
+
+    def test_a_sibling_named_backup2_is_not_kin(self, guard) -> None:
+        """The same hole without the separator: a digit suffix is still foreign.
+
+        ``backup_old`` could be excluded by a rule that only refused a trailing
+        underscore; ``backup2`` cannot. Two names, because one name admits a
+        cure that special-cases that name.
+        """
+        numbered = str(Path(guard._BRANCH_ROOT + "2") / "apps" / "x.py")
+        assert not guard._is_kin(numbered, guard._BRANCH_ROOT)
+
+    def test_a_copy_of_the_branch_nested_under_a_foreign_root_is_not_kin(self, guard, tmp_path: Path) -> None:
+        """The same defect from the other direction: kinship must be ANCHORED.
+
+        ``<tmp>/<root>/apps/x.py`` carries the whole root mid-string, so plain
+        containment admitted an unpacked copy of the branch sitting anywhere on
+        the disk. The failure this excludes is an unanchored comparison: the
+        root's segments must begin where the caller's path begins, which on
+        POSIX means the leading empty segment of an absolute root has to line
+        up with the caller's.
+        """
+        nested = f"{tmp_path}{guard._BRANCH_ROOT}/apps/x.py"
+        assert not guard._is_kin(nested, guard._BRANCH_ROOT)
+
+    def test_a_sibling_named_backup_old_is_refused_end_to_end(self, guard, tmp_path, monkeypatch) -> None:
+        """The whole decision, not just the helper: the fence RAISES on backup_old.
+
+        Drives the real ``_guard_branch_access`` through a fabricated
+        ``co_filename`` under ``tmp_path``, the same mechanism a cross-branch
+        import presents, and asserts the branch the message names -- so a fence
+        that refused for some other reason, or named the wrong citizen, is not
+        mistaken for this claim.
+        """
+        fake = _fake_tree(tmp_path)
+        monkeypatch.setattr(guard, "_BRANCH_ROOT", str(fake / "backup"))
+        stale = str(fake / "backup_old" / "apps" / "x.py")
+
+        with pytest.raises(ImportError, match="ACCESS DENIED") as refused:
+            self._call_guard_as(guard, stale)
+        assert "Caller branch: backup_old" in str(refused.value)
 
     def test_own_branch_file_is_allowed(self, guard, tmp_path, monkeypatch) -> None:
         """A file under the branch root passes -- the fence is not always-refuse.
@@ -825,15 +883,28 @@ class TestFabricatedFilenamesNeverReachCoverage:
         with pytest.raises(AssertionError, match="coverage source tree"):
             _compile_as(str(BRANCH_ROOT / "apps" / "never_written.py"), guard)
 
-    def test_the_mint_guard_permits_a_pseudo_frame(self, guard) -> None:
+    def test_the_mint_guard_permits_a_pseudo_frame(self, guard, monkeypatch, tmp_path: Path) -> None:
         """Narrowness control: <string> has no source and must stay permitted.
 
-        Two claims in one line, both now asserted: the mint guard does not fire
-        (it would raise AssertionError, which _fence_verdict deliberately lets
-        through) and the fence admits the frame (verdict None). A guard widened
-        until it refused every name would fail the sibling above; a guard
-        widened until it refused pseudo-frames fails here.
+        THE CWD IS MOVED OUT OF THE BRANCH FIRST, and that is the failure this
+        excludes which ``test_pseudo_frame_caller_is_allowed`` does not. Run
+        from inside the branch -- which is where the brief's own command and
+        the ``branch_cwd`` leg below put pytest -- "<string>" resolved against
+        the cwd lands at ``<branch_root>/<string>``, which is kin, so deleting
+        ``filename.startswith(_PSEUDO_FRAME_PREFIX) or`` from the skip at
+        ``apps/handlers/__init__.py`` leaves that test green for a reason that
+        has nothing to do with the skip. From ``tmp_path`` the same deletion
+        lands outside the root, the fence refuses, and this pin goes red.
+
+        Two further claims, both asserted by the same line: the mint guard does
+        not fire (it would raise AssertionError, which _fence_verdict
+        deliberately lets through) and the fence admits the frame (verdict
+        None). A guard widened until it refused every name would fail the
+        sibling above; a guard widened until it refused pseudo-frames fails
+        here.
         """
+        monkeypatch.chdir(tmp_path)
+
         assert _fence_verdict("<string>", guard) is None
 
     def test_the_structural_check_can_say_no(self) -> None:

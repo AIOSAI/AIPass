@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the drive package parses and imports
 # seedgo: no-test-needed(documentation) — docstrings on module and class attributes
-# seedgo: no-test-needed(constant) — DRIVE_PKG string value
 # seedgo: no-test-needed(stdlib) — importlib.import_module and mock.patch behavior
 
 import importlib
@@ -53,6 +52,7 @@ class TestStaleParentAttrHealed:
 
         with patch.dict(sys.modules, {f"{DRIVE_PKG}.client": MagicMock()}):
             twin = importlib.import_module(f"{DRIVE_PKG}.share")
+            twin_pkg = sys.modules[DRIVE_PKG]
 
         # The twin imported under a mocked client never gained a .client attr,
         # and patch.dict's exit evicted the whole drive subtree again. Sanity:
@@ -60,6 +60,23 @@ class TestStaleParentAttrHealed:
         # only at teardown, which runs after this assert.
         assert twin is not None
         assert f"{DRIVE_PKG}.client" not in sys.modules
+
+        # The desync itself, which is what this test manufactures: one dotted
+        # name, two answers. The parent package's ATTRIBUTE still holds the
+        # throwaway twin that the import inside the block bound there, while
+        # sys.modules — the truth importlib reads — carries no entry for that
+        # name at all, because patch.dict restored the DICT and nothing
+        # restored the attribute. If patch.dict ever unwound the attribute too,
+        # or an eager repair ran before teardown, the first assert goes red and
+        # the pair stops meaning anything.
+        parent_pkg = sys.modules[DRIVE_PKG.rpartition(".")[0]]
+        assert parent_pkg.drive is twin_pkg
+        assert DRIVE_PKG not in sys.modules
+
+        # And the twin is the damaged object, not merely a second copy: it has
+        # no .client attribute, so the parent-attribute walk that pre-3.12
+        # mock.patch performs lands on the AttributeError CI reported.
+        assert not hasattr(twin_pkg, "client")
 
     def test_b_string_patch_resolves_after_repair(self) -> None:
         """CI's failing shape: mock.patch by dotted string must find drive.client."""

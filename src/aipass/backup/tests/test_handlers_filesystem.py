@@ -14,14 +14,15 @@
 # seedgo: no-test-needed(constant) — config defaults (backup_mode, max_versions, max_backup_files, etc.)
 # seedgo: no-test-needed(stdlib) — os, pathlib, pathspec, shutil usage
 
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import backup_root, build_snapshot_path
 from aipass.backup.apps.handlers.project.config import load_project_config
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
-from aipass.backup.apps.handlers.report.result import BackupResult
+from aipass.backup.apps.handlers.report.formatter import format_result
+from aipass.backup.apps.handlers.report.result import BackupResult, new_result
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
 from aipass.backup.apps.handlers.ignore.patterns import load_spec
@@ -36,18 +37,44 @@ class TestScanWalk:
         isinstance(result, list) was true of a walker that invented entries and
         true of one that returned the caller's own tree; only the emptiness is
         the claim this test's name makes.
+
+        Walks its OWN subdirectory rather than tmp_path, and the seam is no
+        longer inside tmp_path either -- two independent guards, kept both.
+
+        The history, because it is the reason this test reads the way it does.
+        conftest used to point the json seam at tmp_path/_aipass_json_seam,
+        INSIDE tmp_path, and the walker logs its own start before os.walk runs,
+        so a walk of BARE tmp_path found the seam's four files
+        (backup/logs/operations.jsonl and three prax_json documents). The trail
+        patch that used to wrap this call was the only thing keeping the list
+        empty: the emptiness was the patch's, not the walker's. Giving the walk
+        a root of its own put the audit write beside proj instead of within it,
+        so the patch went and the record it used to swallow is asserted below.
+        As of 2026-09-23 conftest's seam sits BESIDE tmp_path as well, so a bare
+        tmp_path now walks to nothing on its own account -- measured, four
+        entries before the move and zero after. This test does not rely on that:
+        proj is its root either way, and the emptiness it asserts is the
+        walker's.
         """
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = list(walk_project(str(tmp_path)))
-            assert result == []
+        proj = tmp_path / "proj"
+        proj.mkdir()
+
+        result = list(walk_project(str(proj)))
+
+        assert result == []
+        audit = trail.log_path().read_text(encoding="utf-8")
+        assert f'"operation": "walk_project", "root": "{proj}"' in audit
 
     def test_walk_with_files(self, tmp_path: Path) -> None:
         """Walk a directory with files returns file tuples."""
-        (tmp_path / "file1.txt").write_text("content1", encoding="utf-8")
-        (tmp_path / "file2.py").write_text("content2", encoding="utf-8")
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = list(walk_project(str(tmp_path)))
-            assert len(result) >= 2
+        proj = tmp_path / "proj"
+        proj.mkdir()
+        (proj / "file1.txt").write_text("content1", encoding="utf-8")
+        (proj / "file2.py").write_text("content2", encoding="utf-8")
+
+        result = list(walk_project(str(proj)))
+
+        assert len(result) >= 2
 
     def test_walk_nonexistent_dir(self, tmp_path: Path) -> None:
         """A missing directory walks to empty, and does not raise.
@@ -57,9 +84,10 @@ class TestScanWalk:
         not fail. Measured 2026-09-08 -- the real answer is the empty list.
         """
         bad_path = tmp_path / "nonexistent"
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = list(walk_project(str(bad_path)))
-            assert result == []
+
+        result = list(walk_project(str(bad_path)))
+
+        assert result == []
 
 
 class TestScanFilter:
@@ -67,12 +95,9 @@ class TestScanFilter:
 
     def test_filter_empty_list(self) -> None:
         """Filter empty file list returns empty."""
-        with (
-            patch("aipass.backup.apps.handlers.audit.trail.log_operation"),
-            patch(
-                "aipass.backup.apps.handlers.ignore.whitelist.config.load_project_config",
-                return_value={"whitelist": []},
-            ),
+        with patch(
+            "aipass.backup.apps.handlers.ignore.whitelist.config.load_project_config",
+            return_value={"whitelist": []},
         ):
             import pathspec
 
@@ -85,12 +110,9 @@ class TestScanFilter:
         f = tmp_path / "keep.txt"
         f.write_text("data", encoding="utf-8")
         files = [(str(f), "keep.txt")]
-        with (
-            patch("aipass.backup.apps.handlers.audit.trail.log_operation"),
-            patch(
-                "aipass.backup.apps.handlers.ignore.whitelist.config.load_project_config",
-                return_value={"whitelist": []},
-            ),
+        with patch(
+            "aipass.backup.apps.handlers.ignore.whitelist.config.load_project_config",
+            return_value={"whitelist": []},
         ):
             spec = load_spec(str(tmp_path))
             result = filter_paths(files, spec, [], 100)
@@ -112,13 +134,13 @@ class TestIgnorePatterns:
         for a backup tool is the silent-data-loss direction: every file
         "matched" and none got copied. The behaviour is the claim.
         """
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            import pathspec
+        import pathspec
 
-            result = load_spec(str(tmp_path))
-            assert isinstance(result, pathspec.PathSpec)
-            assert result.match_file("a.pyc") is False
-            assert result.match_file("src/main.py") is False
+        result = load_spec(str(tmp_path))
+
+        assert isinstance(result, pathspec.PathSpec)
+        assert result.match_file("a.pyc") is False
+        assert result.match_file("src/main.py") is False
 
     def test_load_spec_with_file(self, tmp_path: Path) -> None:
         """The patterns in .backupignore are the ones the spec enforces.
@@ -129,14 +151,14 @@ class TestIgnorePatterns:
         """
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.pyc\n__pycache__/\n", encoding="utf-8")
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            import pathspec
+        import pathspec
 
-            result = load_spec(str(tmp_path))
-            assert isinstance(result, pathspec.PathSpec)
-            assert result.match_file("a.pyc") is True
-            assert result.match_file("__pycache__/mod.py") is True
-            assert result.match_file("src/main.py") is False
+        result = load_spec(str(tmp_path))
+
+        assert isinstance(result, pathspec.PathSpec)
+        assert result.match_file("a.pyc") is True
+        assert result.match_file("__pycache__/mod.py") is True
+        assert result.match_file("src/main.py") is False
 
 
 class TestProjectSetup:
@@ -144,17 +166,17 @@ class TestProjectSetup:
 
     def test_create_backup_dir(self, tmp_path: Path) -> None:
         """create_backup_dir creates .backup/ -- mkdir, .exists()."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            create_backup_dir(str(tmp_path))
-            backup_dir = tmp_path / ".backup"
-            assert backup_dir.exists()
+        create_backup_dir(str(tmp_path))
+
+        backup_dir = tmp_path / ".backup"
+        assert backup_dir.exists()
 
     def test_create_backup_dir_idempotent(self, tmp_path: Path) -> None:
         """Second call doesn't fail -- no_overwrite, already_exists."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            create_backup_dir(str(tmp_path))
-            create_backup_dir(str(tmp_path))
-            assert (tmp_path / ".backup").exists()
+        create_backup_dir(str(tmp_path))
+        create_backup_dir(str(tmp_path))
+
+        assert (tmp_path / ".backup").exists()
 
 
 class TestProjectConfig:
@@ -168,14 +190,14 @@ class TestProjectConfig:
         max_backup_files came back missing or zero, the run ceiling that refuses
         a runaway tree would either not arm or refuse everything.
         """
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = load_project_config(str(tmp_path))
-            assert isinstance(result, dict)
-            assert result["backup_mode"] == "snapshot"
-            assert result["max_versions"] == 10
-            assert result["max_backup_files"] == 25000
-            assert result["max_backup_size_gb"] == 10
-            assert result["whitelist"] == []
+        result = load_project_config(str(tmp_path))
+
+        assert isinstance(result, dict)
+        assert result["backup_mode"] == "snapshot"
+        assert result["max_versions"] == 10
+        assert result["max_backup_files"] == 25000
+        assert result["max_backup_size_gb"] == 10
+        assert result["whitelist"] == []
 
     def test_config_written_by_setup_identifies_the_project(self, tmp_path: Path) -> None:
         """create_backup_dir writes a config that names the project it belongs to.
@@ -185,14 +207,14 @@ class TestProjectConfig:
         defaults is the identity block, and mixing that up is how one project's
         config could point at another project's tree.
         """
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            create_backup_dir(str(tmp_path))
-            result = load_project_config(str(tmp_path))
+        create_backup_dir(str(tmp_path))
 
-            assert isinstance(result, dict)
-            assert result["project_name"] == tmp_path.name
-            assert Path(result["project_path"]) == tmp_path
-            assert result["max_backup_files"] == 25000
+        result = load_project_config(str(tmp_path))
+
+        assert isinstance(result, dict)
+        assert result["project_name"] == tmp_path.name
+        assert Path(result["project_path"]) == tmp_path
+        assert result["max_backup_files"] == 25000
 
 
 class TestPathBuilder:
@@ -200,32 +222,72 @@ class TestPathBuilder:
 
     def test_backup_root(self, tmp_path: Path) -> None:
         """backup_root returns .backup path."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = backup_root(str(tmp_path))
-            assert isinstance(result, Path)
-            assert result.name == ".backup"
+        result = backup_root(str(tmp_path))
+
+        assert isinstance(result, Path)
+        assert result.name == ".backup"
 
     def test_build_snapshot_path(self, tmp_path: Path) -> None:
-        """build_snapshot_path returns snapshots/ under .backup."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = build_snapshot_path(str(tmp_path))
-            assert isinstance(result, Path)
-            assert "snapshots" in str(result)
+        """build_snapshot_path returns snapshots/ under THIS project's .backup.
+
+        '"snapshots" in str(result)' is a substring test on an unpinned parent:
+        it is true of Path("snapshots"), true of tmp_path / "snapshots" with
+        .backup gone, and true of any snapshots/ directory anywhere on the
+        disk. For a backup tool the parent is the whole point -- a destination
+        that drifts out of the project writes a user's files somewhere they
+        will never look for them. The full path is the claim the name makes.
+        """
+        result = build_snapshot_path(str(tmp_path))
+
+        assert isinstance(result, Path)
+        assert result == tmp_path / ".backup" / "snapshots"
+        assert "snapshots" in str(result)
 
 
 class TestBackupResult:
     """Test BackupResult dataclass -- module coverage for 'report' package."""
 
-    def test_result_creation(self) -> None:
-        """BackupResult can be created with mode."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = BackupResult(mode="snapshot", project_root=str(Path(tempfile.gettempdir()) / "test"))
-            assert result.mode == "snapshot"
-            assert result.files_copied == 0
+    def test_result_creation(self, tmp_path: Path) -> None:
+        """new_result builds a run's result under the mode and root it was handed.
 
-    def test_result_fields(self) -> None:
-        """BackupResult has expected fields."""
-        with patch("aipass.backup.apps.handlers.audit.trail.log_operation"):
-            result = BackupResult(mode="versioned", files_copied=10, bytes_copied=1024)
-            assert result.files_copied == 10
-            assert result.bytes_copied == 1024
+        The old spelling constructed a BackupResult with mode="snapshot" and
+        read mode straight back: @dataclass decided that, not backup, and it
+        held with every line of result.py deleted. new_result is the product's
+        own constructor for a run's outcome, so what it decides -- which
+        argument lands in which field -- is the claim now. A new_result that
+        crossed mode with project_root passed the old test.
+        """
+        result = new_result("snapshot", str(tmp_path))
+
+        assert result.mode == "snapshot"
+        assert result.project_root == str(tmp_path)
+        assert result.files_copied == 0
+
+    def test_result_fields(self, tmp_path: Path) -> None:
+        """The counts a result carries are the counts the report renders.
+
+        files_copied=10 and bytes_copied=1024 read back off the constructor
+        asserted @dataclass a second time. Routed through format_result, those
+        two numbers are what the product computes WITH: the file count it
+        prints, and _human_bytes turning 1024 bytes into "1.0 KB" rather than
+        the raw number. The whole summary is pinned, so a field rendered from
+        the wrong attribute has nowhere to hide.
+        """
+        result = BackupResult(
+            mode="versioned",
+            project_root=str(tmp_path),
+            files_copied=10,
+            bytes_copied=1024,
+        )
+
+        summary = format_result(result)
+
+        assert summary == "\n".join(
+            [
+                "Backup complete (versioned)",
+                f"  Project:  {tmp_path}",
+                "  Files:    10",
+                "  Size:     1.0 KB",
+                "  Duration: 0.0s",
+            ]
+        )

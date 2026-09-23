@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -26,6 +26,7 @@ from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.handlers.drive import test as drive_test
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
 from aipass.backup.apps.handlers.drive import upload as drive_upload
+from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync
 
 # WHAT THIS FILE KNOWS ABOUT ITS EDGE, measured, and why the product is imported
@@ -44,19 +45,6 @@ from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, dr
 # Everything else in the pipeline is exercised for real. The tracker writes to
 # ``<project>/.backup/drive_tracker.json``, which is under ``tmp_path``, and the
 # audit trail and logger are redirected by conftest's ``mock_infrastructure``.
-
-
-def _no_live_google(*args, **kwargs):
-    """Stand where Google stands. A test that reaches the wire dies here instead."""
-    raise RuntimeError("a test reached the live Google Drive edge")
-
-
-@pytest.fixture(autouse=True)
-def sealed_google_edge(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Seal both doors to the real account, and the media reader, before every test."""
-    monkeypatch.setattr(drive_client, "get_drive_service", _no_live_google)
-    monkeypatch.setattr(drive_client, "api_call_with_retry", _no_live_google)
-    monkeypatch.setattr(drive_upload, "MediaFileUpload", MagicMock(name="MediaFileUpload"))
 
 
 @pytest.fixture
@@ -237,6 +225,27 @@ class TestDriveClient:
         assert client.get_or_create_backup_folder() == "new_folder_456"
         assert client.backup_folder_id == "new_folder_456"
         service.files.return_value.create.assert_called_once()
+        # The third answer is the verify at client.py:213-216. Counting the calls
+        # is what makes it required: an unconsumed side_effect entry is not an
+        # error, so without this the guard could be deleted and stay green.
+        assert drive_api.call_count == 3
+        service.files.return_value.get.assert_called_once_with(fileId="new_folder_456", fields="id,trashed")
+
+    def test_get_or_create_backup_folder_created_but_not_accessible(self, drive_api: MagicMock) -> None:
+        """A created folder that does not verify is refused: no id, and last_error names it."""
+        service = MagicMock(name="drive_service")
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        drive_api.side_effect = [
+            {"files": []},
+            {"id": "unreachable_789"},
+            {"id": "unreachable_789", "trashed": True},
+        ]
+
+        assert client.get_or_create_backup_folder() is None
+        assert client.backup_folder_id is None
+        assert client.last_error == "Backup folder unreachable_789 created but not accessible"
+        assert drive_api.call_count == 3
 
     def test_get_or_create_backup_folder_no_service(self, drive_api: MagicMock) -> None:
         """With no service there is no folder and no request -- not a crash."""
@@ -337,9 +346,15 @@ class TestDriveClient:
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="main_service")
         drive_api.side_effect = [RuntimeError("transient error"), {"retried": True}]
+        request = MagicMock(name="request")
 
-        assert client._api_call(MagicMock(name="request")) == {"retried": True}
+        assert client._api_call(request) == {"retried": True}
         assert client._thread_local.service is thread_service
+        # Both answers are claimed, and the budgets with them: the retry runs on
+        # the SHRUNKEN budget (client.py:124), which the returned value alone
+        # leaves free to be widened back to 3.
+        assert drive_api.call_count == 2
+        drive_api.assert_has_calls([call(request, max_retries=3), call(request, max_retries=1)])
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +463,7 @@ class TestDriveTracker:
         drive_tracker.save_tracker(str(tmp_path), {"file.txt": {"drive_id": "abc"}})
 
         assert drive_tracker.clear_all(str(tmp_path)) is True
-        written = tmp_path / ".backup" / "drive_tracker.json"
+        written = tmp_path / ".backup" / drive_tracker.TRACKER_FILENAME
         assert json.loads(written.read_text(encoding="utf-8")) == {}
 
     def test_load_tracker(self, tmp_path: Path) -> None:
@@ -459,7 +474,7 @@ class TestDriveTracker:
         # it. So the value is pinned, and the file the reader went to beside it.
         seeded = {"seen.txt": {"drive_id": "abc"}}
         (tmp_path / ".backup").mkdir()
-        (tmp_path / ".backup" / "drive_tracker.json").write_text(json.dumps(seeded), encoding="utf-8")
+        (tmp_path / ".backup" / drive_tracker.TRACKER_FILENAME).write_text(json.dumps(seeded), encoding="utf-8")
 
         assert drive_tracker.load_tracker(str(tmp_path)) == seeded
         assert drive_tracker.load_tracker(str(tmp_path / "unseeded")) == {}
@@ -468,7 +483,7 @@ class TestDriveTracker:
         """The tracker lands on disk as JSON, under the project's .backup/."""
         drive_tracker.save_tracker(str(tmp_path), {"file.txt": {"drive_id": "abc"}})
 
-        written = tmp_path / ".backup" / "drive_tracker.json"
+        written = tmp_path / ".backup" / drive_tracker.TRACKER_FILENAME
         assert json.loads(written.read_text(encoding="utf-8")) == {"file.txt": {"drive_id": "abc"}}
 
 
@@ -582,6 +597,60 @@ class TestDriveUpload:
 
 
 # ---------------------------------------------------------------------------
+# build_drive_path — the destination the upload lane builds out of folder ids
+# ---------------------------------------------------------------------------
+
+
+class TestDriveDestinationPath:
+    """Tests for build_drive_path -- the layout upload.py creates, written as one path.
+
+    The lane never holds this path: it walks folder IDs. The root folder comes
+    from ``get_or_create_backup_folder`` (client.py:150-227, named
+    BACKUP_FOLDER_NAME), the project folder from
+    ``get_or_create_project_folder`` (upload.py:67), the parents of the
+    store-relative path from ``get_or_create_nested_folder`` (upload.py:78-83),
+    and the leaf from the create body's ``"name": local_file.name``
+    (upload.py:122-125). These pins are pure computation -- no auth, no upload,
+    no tracker file -- so the Google edge is never approached.
+    """
+
+    def test_drive_path_opens_with_the_root_and_project_folders_the_lane_creates(self, tmp_path: Path) -> None:
+        """A store-root file lands under <root folder>/<project dir name>/, not at the Drive root."""
+        project = tmp_path / "myproject"
+
+        result = path_builder.build_drive_path(str(project), "notes.txt")
+
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "notes.txt"
+
+    def test_drive_path_keeps_the_relative_files_parent_folders_instead_of_flattening(self, tmp_path: Path) -> None:
+        """A nested store-relative file keeps every parent segment -- upload creates one folder each."""
+        # The shape is the versioned store's own: <parent>/<name-folder>/<name>
+        # (builder.build_versioned_file_path), which is what drive_sync hands the
+        # engine as backup_root-relative. Flattening to the bare leaf is exactly
+        # upload.py:75-76's not-relative fallback, and it is NOT this path.
+        project = tmp_path / "myproject"
+
+        result = path_builder.build_drive_path(str(project), "src/app.py/app.py")
+
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "src" / "app.py" / "app.py"
+
+    def test_drive_path_does_not_re_hash_a_long_name_the_store_already_hashed(self, tmp_path: Path) -> None:
+        """A >50-char name passes through untouched: the Drive lane has no hashing step."""
+        # build_versioned_file_path applies name[:30]_md5[:8] on the way INTO the
+        # store, so the store-relative path already carries the shortened folder.
+        # Nothing in handlers/drive/ hashes anything; borrowing the local twin's
+        # recipe here would rename the file a second time, and the upload would
+        # then publish under a name no tracker key or restore lookup matches.
+        project = tmp_path / "myproject"
+        long_name = "a" * 51 + ".txt"
+
+        result = path_builder.build_drive_path(str(project), f"docs/{long_name}")
+
+        assert result.name == long_name
+        assert result == Path(drive_client.BACKUP_FOLDER_NAME) / "myproject" / "docs" / long_name
+
+
+# ---------------------------------------------------------------------------
 # test_connectivity — the connectivity probe
 # ---------------------------------------------------------------------------
 
@@ -661,7 +730,7 @@ class TestDriveSync:
         assert result["success"] is True
         assert result["uploaded"] == 0 and result["total"] == 0
         assert uploads == []
-        assert not (project / ".backup" / "drive_tracker.json").exists()
+        assert not (project / ".backup" / drive_tracker.TRACKER_FILENAME).exists()
 
     def test_run_drive_sync_auth_failure(
         self,
@@ -716,7 +785,7 @@ class TestDriveSync:
         assert result["uploaded"] == 3 and result["total"] == 3
         assert len(uploads) == 1
         assert sorted(f.name for f in uploads[0]) == ["file_0.txt", "file_1.txt", "file_2.txt"]
-        assert (project / ".backup" / "drive_tracker.json").exists()
+        assert (project / ".backup" / drive_tracker.TRACKER_FILENAME).exists()
 
     def test_run_drive_sync_filters_ignored_files(
         self,
@@ -779,6 +848,50 @@ class TestDriveSync:
         assert ran == []
         assert "Usage: drive_sync <project_root> [options]" in printed
         assert "--force" in printed
+
+    def test_note_and_project_reach_the_upload_instead_of_the_defaults(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """--project and --note change what upload_batch is handed; without them it gets the defaults."""
+
+        # Two projects, not one run twice: the first run writes a tracker, and a
+        # second run over the same store would skip every file and never reach
+        # the upload at all. build_versioned_store is NOT patched here -- the
+        # real builder already answers <project>/.backup/versioned, which is
+        # inside tmp_path, so the product's own path code runs.
+        # The Google edge is sealed by the autouse fixture above, the client is
+        # a MagicMock, and upload_batch is the recorder below: nothing dials.
+        def _seed(name: str) -> Path:
+            """A project whose versioned store holds one file to upload."""
+            project = tmp_path / name
+            store = project / ".backup" / "versioned"
+            store.mkdir(parents=True)
+            (store / "file.txt").write_text("content", encoding="utf-8")
+            return project
+
+        flagged = _seed("flagged")
+        plain = _seed("plain")
+        _install_offline_client(monkeypatch)
+
+        handed: list[tuple[str, str | None]] = []
+
+        def _record(client, files, project_name, backup_root, tracker, **kwargs) -> dict:
+            """Stand in for upload_batch: keep the project name and the note it was given."""
+            handed.append((project_name, kwargs.get("note")))
+            return {"success": True, "uploaded": len(files), "failed": 0, "bytes_uploaded": 0}
+
+        monkeypatch.setattr(drive_upload, "upload_batch", _record)
+
+        flagged_args = [str(flagged), "--project", "renamed", "--note", "nightly"]
+        assert drive_sync.handle_command("drive_sync", flagged_args) is True
+        assert drive_sync.handle_command("drive_sync", [str(plain)]) is True
+
+        # The flagged row carries the values the flags spelled; the plain row
+        # carries the fallbacks (the directory's own name, and no note). Delete
+        # either parse and the first row collapses onto the second.
+        assert handed == [("renamed", "nightly"), ("plain", "")], f"the flags did not reach the upload: {handed!r}"
 
     def test_handle_command_no_args(self, capsys: pytest.CaptureFixture) -> None:
         """No args names the module and the handlers behind it."""
@@ -1034,6 +1147,10 @@ class TestThreadSafety:
         assert client.get_or_create_backup_folder() == "brand_new_folder"
         assert client.file_tracker == {}
         assert client.project_folder_cache == {}
+        # Search, create, then the verify at client.py:213-216 -- the reset only
+        # stands if the folder it reset for verified, so the third call is part
+        # of the claim, not spare change.
+        assert drive_api.call_count == 3
 
     def test_tracker_not_reset_on_new_folder_empty_tracker(self, drive_api: MagicMock) -> None:
         """An empty tracker is still empty after a new folder -- and no reset is logged."""
@@ -1049,6 +1166,9 @@ class TestThreadSafety:
         assert client.get_or_create_backup_folder() == "new_folder"
         assert client.file_tracker == {}
         assert client.project_folder_cache == {"keep": "keep_folder"}
+        # Same three: search, create, verify. The empty tracker skips the reset
+        # block but NOT the verify, so the count is still 3.
+        assert drive_api.call_count == 3
 
 
 class TestDedup:

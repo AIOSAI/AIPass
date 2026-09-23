@@ -8,8 +8,14 @@
 
 """Timestamp state handler.
 
-Persists per-file modification timestamps recorded at the last backup so the
-versioned copy strategy can detect changes.
+Persists per-file modification timestamps recorded at the last snapshot so
+``run_snapshot``'s quick-check can tell a changed tree from an unchanged one in
+one comparison, without walking the destination.
+
+This map belongs to the SNAPSHOT strategy alone. ``run_versioned`` never reads
+or writes it: the versioned store keeps the previous copy of every file, so
+``copy_versioned`` compares each source mtime against its own stored copy and
+needs no project-level map at all.
 """
 
 from ..audit import trail
@@ -51,7 +57,7 @@ def save_timestamps(project_root: str, data: dict) -> None:
         data: Mapping of relative_path to mtime (float seconds).
 
     Raises:
-        WriteFailed: The map could not be written. A versioned run whose
+        WriteFailed: The map could not be written. A snapshot run whose
             timestamps never landed copies everything again next time, so the
             failure is surfaced rather than counted as a success.
     """

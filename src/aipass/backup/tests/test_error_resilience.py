@@ -30,6 +30,7 @@ from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 from aipass.backup.apps.modules import snapshot
 from aipass.backup.apps.modules.snapshot import run_snapshot
 from aipass.backup.apps.modules.versioned import run_versioned
+from aipass.cli.apps.modules import command_failed
 
 
 # The live-tree race is reached through run_snapshot, at the two windows the
@@ -47,7 +48,7 @@ def _vanish_after_copy(monkeypatch: pytest.MonkeyPatch, victims: list[Path] | No
     """
     real_copy = snapshot.copy_snapshot
 
-    def _copy_then_vanish(files: list[tuple[str, str]], *args: object, **kwargs: object) -> dict:
+    def _copy_then_vanish(files: list[tuple[str, str]], *args, **kwargs) -> dict:
         outcome = real_copy(files, *args, **kwargs)
         doomed = victims if victims is not None else [Path(abs_p) for abs_p, _rel in files]
         for path in doomed:
@@ -65,7 +66,7 @@ def _vanish_after_scan(monkeypatch: pytest.MonkeyPatch, victim: Path) -> None:
     """
     real_filter = snapshot.filter_paths
 
-    def _filter_then_vanish(*args: object, **kwargs: object) -> list[tuple[str, str]]:
+    def _filter_then_vanish(*args, **kwargs) -> list[tuple[str, str]]:
         filtered = real_filter(*args, **kwargs)
         victim.unlink()
         return filtered
@@ -314,24 +315,156 @@ class TestWriteResultsAreChecked:
     def test_save_project_config_reports_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """False from the primitive is False from the handler, not True."""
 
-        monkeypatch.setattr(config.json_handler, "write_json", lambda *a, **k: False)
+        attempted: list[tuple[Path, object]] = []
+
+        # The stand-in answers per document instead of always False: only the
+        # project's own config.json is refused, so a handler that wrote to any
+        # other path would be told True and the False below could not come from
+        # anywhere but the document this handler is named for.
+        def _refuse_only_the_config(file_path: Path, data: object, *a: object, **k: object) -> bool:
+            attempted.append((Path(file_path), data))
+            return Path(file_path).name != "config.json"
+
+        monkeypatch.setattr(config.json_handler, "write_json", _refuse_only_the_config)
 
         assert config.save_project_config(str(tmp_path), {"backup_mode": "snapshot"}) is False
+        assert attempted == [(tmp_path / ".backup" / "config.json", {"backup_mode": "snapshot"})]
 
     def test_save_timestamps_raises_on_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """A versioned run whose timestamps never landed is not a success."""
+        """A snapshot run whose timestamps never landed is not a success.
 
-        monkeypatch.setattr(timestamps.json_handler, "write_json", lambda *a, **k: False)
+        Snapshot, not versioned: ``run_snapshot``'s quick-check is the only
+        reader and writer of this map, and ``run_versioned`` never touches it.
+        """
+
+        attempted: list[tuple[Path, object]] = []
+
+        def _refuse_only_the_map(file_path: Path, data: object, *a: object, **k: object) -> bool:
+            attempted.append((Path(file_path), data))
+            return Path(file_path).name != "timestamps.json"
+
+        monkeypatch.setattr(timestamps.json_handler, "write_json", _refuse_only_the_map)
 
         with pytest.raises(json_handler.WriteFailed):
             timestamps.save_timestamps(str(tmp_path), {"a.txt": 1.0})
 
+        assert attempted == [(tmp_path / ".backup" / "timestamps.json", {"a.txt": 1.0})]
+
     def test_setup_reports_a_config_it_could_not_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """create_backup_dir used to answer a path after a failed config write."""
 
-        monkeypatch.setattr(setup.json_handler, "write_json", lambda *a, **k: False)
+        attempted: list[Path] = []
+
+        def _refuse_only_the_config(file_path: Path, *a: object, **k: object) -> bool:
+            attempted.append(Path(file_path))
+            return Path(file_path).name != "config.json"
+
+        monkeypatch.setattr(setup.json_handler, "write_json", _refuse_only_the_config)
 
         assert setup.create_backup_dir(str(tmp_path)) is None
+        assert attempted == [tmp_path / ".backup" / "config.json"]
+
+
+class TestACompletedCopyIsAlwaysRecorded:
+    """Files on disk and a branch history that says nothing happened is the lie.
+
+    The timestamp map is state for the NEXT run's quick-check; the changelog and
+    the audit stream are the record of THIS one. Losing the map costs one
+    re-copy. Losing the record costs the only evidence the copy ever happened,
+    so the record is written first and the map's failure is reported after it.
+    """
+
+    def test_a_failed_timestamp_write_still_records_the_copy_and_reports_the_failure(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Copy done, map refused: changelog, trail and stderr all say so.
+
+        The defect: ``save_timestamps`` ran BEFORE ``append_changelog`` and the
+        ``snapshot_complete`` audit line, and it raises WriteFailed. So a run
+        whose files were already copied to the destination left the branch's own
+        history empty -- no changelog entry, no audit record -- and the
+        exception escaped ``run_snapshot`` on top of it.
+
+        This excludes both failures the defect allows: a silent swallow (the
+        run reports clean and the user never learns the map is stale) and a
+        raise that takes the record down with it. The branch fails to errors:
+        the copy is recorded, and the lost map is an error on the result, a
+        line on stderr, and its own audit entry.
+        """
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
+
+        refused: list[Path] = []
+        real_write = timestamps.json_handler.write_json
+
+        # Refuses the timestamp map and DELEGATES every other document to the
+        # real primitive, so the changelog asserted below is one the product
+        # actually wrote. A blanket False, or a blanket True that writes
+        # nothing, would prove nothing about the ordering this pins.
+        def _refuse_only_the_map(file_path: Path, data: object, indent: int = 2) -> bool:
+            if Path(file_path).name != "timestamps.json":
+                return real_write(file_path, data, indent)
+            refused.append(Path(file_path))
+            return False
+
+        monkeypatch.setattr(timestamps.json_handler, "write_json", _refuse_only_the_map)
+
+        result = run_snapshot(str(project), show_panels=False)
+        out, err = capsys.readouterr()
+
+        assert refused == [project / ".backup" / "timestamps.json"]
+        assert (Path(result.backup_path) / "code.py").read_text(encoding="utf-8") == "print('hi')"
+        # code.py plus the .backupignore create_backup_dir writes for a new project.
+        assert "Processing completed: 2/2 files checked" in out
+
+        entries = json.loads((project / ".backup" / "changelog.json").read_text(encoding="utf-8"))["entries"]
+        assert [entry["mode"] for entry in entries] == ["snapshot"], "the changelog forgot a completed copy"
+        assert entries[-1]["files_copied"] == 2
+
+        recorded = [
+            json.loads(line)["operation"]
+            for line in trail.log_path().read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert "snapshot_complete" in recorded, "the audit trail forgot a completed copy"
+        assert "snapshot_timestamps_failed" in recorded, "the lost map was never recorded"
+
+        assert "timestamp map" in err, "the lost map was never reported to the user"
+        assert [e for e in result.errors if "timestamp map" in e] == result.errors
+        assert result.errors, "a run that lost its timestamp map answered a clean result"
+        assert result.success is False
+        assert command_failed() is True, "the lost map did not fail the command"
+
+    def test_a_clean_run_records_the_copy_without_the_failure_line(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The control: with the map written, no failure is reported anywhere.
+
+        Without this, a run_snapshot that reported a lost map unconditionally
+        would make the pin above vacuously green.
+        """
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
+
+        result = run_snapshot(str(project), show_panels=False)
+        _out, err = capsys.readouterr()
+
+        saved = load_timestamps(str(project))
+        assert sorted(saved) == [".backupignore", "code.py"]
+        assert saved["code.py"] == (project / "code.py").stat().st_mtime
+        assert not result.errors
+        assert "timestamp map" not in err
+        assert command_failed() is False
+
+        recorded = [
+            json.loads(line)["operation"]
+            for line in trail.log_path().read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert "snapshot_complete" in recorded
+        assert "snapshot_timestamps_failed" not in recorded
 
 
 class TestAuditLog:
@@ -369,13 +502,71 @@ class TestAuditLog:
         assert trail.log_path().name == "operations.jsonl"
         assert trail.log_path().parent.parent.name == "backup"
 
-    def test_a_failed_append_never_takes_the_backup_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The audit trail is a record of work, not the work."""
+    def test_an_empty_seam_answers_the_branch_absolute_path_never_a_relative_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Absence falls back to the branch's OWN stream, spelled absolutely.
 
-        def _refuse(*args: object, **kwargs: object) -> None:
+        The guard is ``if test_dir:``. Mutated to ``if test_dir is not None:``
+        an empty value takes the redirect branch and builds ``Path("") /
+        "backup" / "logs" / "operations.jsonl"`` -- the RELATIVE
+        ``backup/logs/operations.jsonl``, which lands in whatever directory the
+        process happens to be running from. That is the 37-writes regression:
+        the suite's own audit lines written into the branch tree.
+
+        Its name is ``operations.jsonl`` and its grandparent is named ``backup``
+        either way, so the mutant survives every assertion the sibling test
+        makes. These two are what it cannot answer: the path is ABSOLUTE, and
+        it is the one computed from this module's own location.
+        """
+
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
+        absent = trail.log_path()
+
+        assert absent.is_absolute(), f"an empty seam answered a relative path: {absent}"
+        assert absent == trail.branch_root(trail.__file__, 3) / "logs" / trail.LOG_FILENAME
+
+        redirected = tmp_path / "seam"
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(redirected))
+
+        assert trail.log_path() == redirected / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
+
+    def test_a_failed_append_never_takes_the_backup_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The audit trail is a record of work, not the work.
+
+        "Never takes the backup down" is a claim about the backup, so the
+        backup is what this asserts: with every append to the stream refused,
+        a real run still copies the file and still answers a clean result,
+        and each refusal is recorded as a warning rather than swallowed whole.
+        """
+
+        attempted: list[Path] = []
+        warned: list[str] = []
+
+        def _refuse(path: Path, *args: object, **kwargs: object) -> None:
+            attempted.append(Path(path))
             raise OSError("audit stream unwritable")
+
+        class _WarningRecorder:
+            """Stands in for the module's logger to catch what it records."""
+
+            def warning(self, message: object, *args: object, **kwargs: object) -> None:
+                warned.append(str(message))
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
 
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
         monkeypatch.setattr(trail, "append_jsonl", _refuse)
+        monkeypatch.setattr(trail, "logger", _WarningRecorder())
 
         assert trail.log_operation("probe_op", {}) is None
+        probe_attempts = len(attempted)
+
+        result = run_snapshot(str(project), show_panels=False)
+
+        assert not result.errors
+        assert (Path(result.backup_path) / "code.py").read_text(encoding="utf-8") == "print('hi')"
+        assert len(attempted) > probe_attempts, "the run never reached the audit stream"
+        assert warned.count("Failed to write operation log: audit stream unwritable") == len(attempted)

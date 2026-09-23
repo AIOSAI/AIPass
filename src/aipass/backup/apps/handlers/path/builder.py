@@ -91,8 +91,37 @@ def build_versioned_file_path(
 
 
 def build_drive_path(project_root: str, file: str) -> Path:
-    """Drive-sync path for a single file (deferred to DPLAN-003)."""
-    return Path()
+    """Drive destination for one store-relative file, as a single path.
+
+    This is a REMOTE path, not a local one: it names the folder hierarchy the
+    Drive lane creates, which the lane itself only ever holds as folder ids.
+    Read off the shipped sync (DPLAN-003 is closed), in the order the ids are
+    resolved:
+
+        drive/client.py:150-227   the root folder, BACKUP_FOLDER_NAME
+        drive/upload.py:67        the project folder, named by the caller;
+                                  drive_sync.py:139-140 defaults that name to
+                                  the project directory's own name
+        drive/upload.py:78-83     rel_path.parent, one nested folder a segment
+        drive/upload.py:122-125   the create body's "name", the file's leaf
+
+    Layout:
+        <BACKUP_FOLDER_NAME>/<project dir name>/<rel_path>
+
+    Args:
+        project_root: Absolute path to the project.
+        file: Path of the file relative to the versioned store -- the same
+            key drive/tracker.py records it under.
+
+    Returns:
+        The Drive-side path of the file.
+    """
+    # No name shortening here, unlike build_versioned_file_path above: the
+    # store already applied it on the way in, so rel_path arrives carrying the
+    # hashed folder. Nothing under handlers/drive/ hashes a name.
+    from ..drive.client import BACKUP_FOLDER_NAME
+
+    return Path(BACKUP_FOLDER_NAME) / Path(project_root).name / file
 
 
 # =============================================

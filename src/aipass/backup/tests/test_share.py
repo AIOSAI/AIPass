@@ -15,7 +15,7 @@
 # seedgo: no-test-needed(stdlib) — pathlib's resolve()/is_file() and mimetypes' type guessing
 # seedgo: no-test-needed(generated) — the Drive file, folder and permission IDs; the API mints them
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -135,6 +135,34 @@ class TestShareModuleRouting:
         assert share_module.handle_command(share_module.PRIMARY_COMMAND, []) is True
         assert "Primary command: share" in capsys.readouterr().out
 
+    def test_the_public_flag_opens_the_share_wherever_the_user_puts_it(self, monkeypatch) -> None:
+        """DEFECT: `share --public report.pdf` took "--public" as the FILENAME.
+
+        Flag-before-operand is the ordinary shell form, and it authenticated against
+        the real account with "--public" as the path. Both orders must forward the
+        same thing: the file as the file, the flag as public=True.
+        """
+        ran: list = []
+        monkeypatch.setattr(share_module, "run_share", lambda path, **kwargs: ran.append((path, kwargs)))
+
+        assert share_module.handle_command(share_module.PRIMARY_COMMAND, ["report.pdf", "--public"]) is True
+        assert ran == [("report.pdf", {"public": True})]
+
+        assert share_module.handle_command(share_module.PRIMARY_COMMAND, ["--public", "report.pdf"]) is True
+        assert ran[1] == ("report.pdf", {"public": True})
+
+    def test_a_flag_with_no_filename_is_refused_instead_of_authenticating(self, capsys, monkeypatch) -> None:
+        """A bare `share --public` has no path to share; run_share would authenticate first."""
+        ran: list = []
+        monkeypatch.setattr(share_module, "run_share", lambda path, **kwargs: ran.append((path, kwargs)))
+
+        assert share_module.handle_command(share_module.PRIMARY_COMMAND, ["--public"]) is True
+
+        out, err = capsys.readouterr()
+        assert ran == []
+        assert "file" in err.lower()
+        assert out == ""
+
 
 # ---------------------------------------------------------------------------
 # share_file — upload, permission, link, in one pipeline
@@ -162,6 +190,17 @@ class TestShareFile:
         assert result["error"] is None
         assert client.get_or_create_project_folder.call_args_list[0].args == ("Shared",)
         assert client.drive_service.permissions().create.call_args.kwargs["body"]["type"] == "anyone"
+        assert client.drive_service.permissions().create.call_args.kwargs["fileId"] == "file-abc-123"
+        assert client.drive_service.files().get.call_args.kwargs["fields"] == "webViewLink,webContentLink"
+        assert client.drive_service.files().create.call_count == 1
+        assert client._api_call.call_count == 3
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.files().create.return_value),
+                call(client.drive_service.permissions().create.return_value),
+                call(client.drive_service.files().get.return_value),
+            ]
+        )
 
     def test_a_restricted_share_names_the_authenticated_user_and_not_anyone(self, tmp_path, client) -> None:
         test_file = tmp_path / "data.csv"
@@ -170,6 +209,7 @@ class TestShareFile:
         client._api_call.side_effect = [
             {"id": "file-def-456"},
             {"user": {"emailAddress": "test@gmail.com"}},
+            {"permissions": [{"id": "owner-perm", "type": "user"}]},
             {"id": "perm-abc-123"},
             {"webViewLink": "https://drive.google.com/file/d/file-def-456/view"},
         ]
@@ -177,11 +217,23 @@ class TestShareFile:
         result = share_handler.share_file(client, str(test_file), public=False)
 
         assert result["success"] is True
-        assert result["link"] is not None
+        assert result["link"] == "https://drive.google.com/file/d/file-def-456/view"
         assert result["error"] is None
         body = client.drive_service.permissions().create.call_args.kwargs["body"]
         assert body["type"] == "user"
         assert body["emailAddress"] == "test@gmail.com"
+        assert client.drive_service.permissions().create.call_args.kwargs["fileId"] == "file-def-456"
+        assert client.drive_service.permissions().delete.called is False
+        assert client._api_call.call_count == 5
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.files().create.return_value),
+                call(client.drive_service.about().get.return_value),
+                call(client.drive_service.permissions().list.return_value),
+                call(client.drive_service.permissions().create.return_value),
+                call(client.drive_service.files().get.return_value),
+            ]
+        )
 
     def test_a_path_that_is_not_there_is_refused_before_anything_is_uploaded(self, tmp_path, client) -> None:
         result = share_handler.share_file(client, str(tmp_path / "nonexistent.txt"))
@@ -218,6 +270,7 @@ class TestShareFile:
 
         client._api_call.side_effect = [
             {"user": {"emailAddress": "test@gmail.com"}},
+            {"permissions": []},
             None,
         ]
         client.last_error = "Permission denied"
@@ -231,6 +284,15 @@ class TestShareFile:
         assert "Permission failed" in result["error"]
         assert result["file_id"] == "existing-file-id"
         assert result["link"] is None
+        assert client.drive_service.files().get.called is False
+        assert client._api_call.call_count == 3
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.about().get.return_value),
+                call(client.drive_service.permissions().list.return_value),
+                call(client.drive_service.permissions().create.return_value),
+            ]
+        )
 
     def test_a_failed_link_lookup_is_a_failure_even_though_the_permission_was_set(self, tmp_path, client) -> None:
         client._find_existing_file.return_value = {"id": "file-id"}
@@ -250,6 +312,14 @@ class TestShareFile:
         assert "Link retrieval failed" in result["error"]
         assert result["file_id"] == "file-id"
         assert result["link"] is None
+        assert client.drive_service.files().get.call_args.kwargs["fields"] == "webViewLink,webContentLink"
+        assert client._api_call.call_count == 2
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.permissions().create.return_value),
+                call(client.drive_service.files().get.return_value),
+            ]
+        )
 
     def test_a_file_already_on_drive_is_reused_rather_than_uploaded_twice(self, tmp_path, client) -> None:
         client._find_existing_file.return_value = {"id": "already-on-drive"}
@@ -268,6 +338,14 @@ class TestShareFile:
         assert result["file_id"] == "already-on-drive"
         client.get_or_create_project_folder.assert_called_once_with("Shared")
         assert client.drive_service.files().create.called is False
+        assert client.drive_service.permissions().create.call_args.kwargs["fileId"] == "already-on-drive"
+        assert client._api_call.call_count == 2
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.permissions().create.return_value),
+                call(client.drive_service.files().get.return_value),
+            ]
+        )
 
     def test_a_file_with_no_view_link_is_shared_by_its_download_link(self, tmp_path, client) -> None:
         client._find_existing_file.return_value = {"id": "file-id"}
@@ -284,6 +362,96 @@ class TestShareFile:
 
         assert result["success"] is True
         assert "uc?id=file-id" in result["link"]
+        assert client._api_call.call_count == 2
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.permissions().create.return_value),
+                call(client.drive_service.files().get.return_value),
+            ]
+        )
+
+    def test_a_restricted_share_revokes_the_public_link_an_earlier_run_left_behind(self, tmp_path, client) -> None:
+        """DEFECT: a restricted share after a public one never revoked `anyone`.
+
+        `share report.pdf --public` then `share report.pdf` reused the same Drive
+        file, created a user permission beside the public one, and the module
+        printed "Shared (restricted)" over a file the whole web could still read.
+        """
+        client._find_existing_file.return_value = {"id": "already-public"}
+
+        client._api_call.side_effect = [
+            {"user": {"emailAddress": "owner@example.com"}},
+            {"permissions": [{"id": "anyone-perm", "type": "anyone"}, {"id": "owner-perm", "type": "user"}]},
+            "",
+            {"id": "perm-restricted"},
+            {"webViewLink": "https://drive.google.com/file/d/already-public/view"},
+        ]
+
+        test_file = tmp_path / "report.pdf"
+        test_file.write_text("report", encoding="utf-8")
+
+        result = share_handler.share_file(client, str(test_file), public=False)
+
+        deleted = client.drive_service.permissions().delete
+        assert deleted.call_count == 1
+        assert deleted.call_args.kwargs["fileId"] == "already-public"
+        assert deleted.call_args.kwargs["permissionId"] == "anyone-perm"
+        assert result["success"] is True
+        assert result["link"] == "https://drive.google.com/file/d/already-public/view"
+        assert client._api_call.call_count == 5
+
+    def test_a_stale_tracker_entry_cannot_send_the_upload_to_a_dead_drive_id(self, tmp_path, client) -> None:
+        """upload_for_share clears client.file_tracker before it uploads.
+
+        Without that reset a leftover entry for the same name takes the upload down
+        files().update against a drive_id that may no longer exist.
+        """
+        client.file_tracker = {"report.pdf": {"drive_id": "dead-drive-id"}}
+
+        client._api_call.side_effect = [
+            {"id": "fresh-file-id"},
+            {"id": "perm-id"},
+            {"webViewLink": "https://drive.google.com/file/d/fresh-file-id/view"},
+        ]
+
+        test_file = tmp_path / "report.pdf"
+        test_file.write_bytes(b"PDF content")
+
+        result = share_handler.share_file(client, str(test_file), public=True)
+
+        assert result["file_id"] == "fresh-file-id"
+        assert client.drive_service.files().create.called is True
+        assert client.drive_service.files().update.called is False
+        assert client._api_call.call_count == 3
+
+    def test_a_completed_share_is_written_to_the_audit_trail(self, tmp_path, client, monkeypatch) -> None:
+        """Delete the trail.log_operation block and every share vanishes from the stream."""
+        records: list = []
+        monkeypatch.setattr(
+            share_handler.trail,
+            "log_operation",
+            lambda operation, data: records.append((operation, data)),
+        )
+        client._find_existing_file.return_value = {"id": "audited-file-id"}
+
+        client._api_call.side_effect = [
+            {"id": "perm-id"},
+            {"webViewLink": "https://drive.google.com/file/d/audited-file-id/view"},
+        ]
+
+        test_file = tmp_path / "audited.txt"
+        test_file.write_text("audited", encoding="utf-8")
+
+        result = share_handler.share_file(client, str(test_file), public=True)
+
+        shares = [data for operation, data in records if operation == "share_file"]
+        assert result["success"] is True
+        assert len(shares) == 1
+        assert shares[0]["file"] == str(test_file.resolve())
+        assert shares[0]["file_id"] == "audited-file-id"
+        assert shares[0]["public"] is True
+        assert shares[0]["link"] == "https://drive.google.com/file/d/audited-file-id/view"
+        assert client._api_call.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -304,10 +472,12 @@ class TestSetSharePermission:
         assert body["type"] == "anyone"
         assert body["role"] == "reader"
         assert "emailAddress" not in body
+        assert client.drive_service.permissions().create.call_args.kwargs["fileId"] == "file-123"
 
     def test_a_restricted_permission_is_the_authenticated_user_and_nobody_else(self, client) -> None:
         client._api_call.side_effect = [
             {"user": {"emailAddress": "user@example.com"}},
+            {"permissions": [{"id": "owner-perm", "type": "user"}]},
             {"id": "perm-id"},
         ]
 
@@ -318,6 +488,30 @@ class TestSetSharePermission:
         assert body["type"] == "user"
         assert body["role"] == "reader"
         assert body["emailAddress"] == "user@example.com"
+        assert client.drive_service.permissions().create.call_args.kwargs["fileId"] == "file-123"
+        assert client.drive_service.permissions().delete.called is False
+        assert client._api_call.call_count == 3
+        client._api_call.assert_has_calls(
+            [
+                call(client.drive_service.about().get.return_value),
+                call(client.drive_service.permissions().list.return_value),
+                call(client.drive_service.permissions().create.return_value),
+            ]
+        )
+
+    def test_a_public_permission_that_cannot_be_revoked_is_refused_rather_than_called_restricted(self, client) -> None:
+        """A restricted share is a claim about the file; Drive must confirm it, not the product."""
+        client._api_call.side_effect = [
+            {"user": {"emailAddress": "user@example.com"}},
+            None,
+        ]
+
+        permission_id = share_handler.set_share_permission(client, "file-123", public=False)
+
+        assert permission_id is None
+        assert "file-123" in client.last_error
+        assert client.drive_service.permissions().create.called is False
+        assert client._api_call.call_count == 2
 
     def test_an_unknown_account_refuses_the_permission_rather_than_opening_it_to_anyone(self, client) -> None:
         """No email must never fall through to type=anyone — that is a private file published."""
@@ -348,6 +542,7 @@ class TestGetShareLink:
 
         assert link == "https://view-link"
         assert client.drive_service.files().get.call_args.kwargs["fileId"] == "file-id"
+        assert client.drive_service.files().get.call_args.kwargs["fields"] == "webViewLink,webContentLink"
 
     def test_the_download_link_is_used_when_drive_reports_no_view_link(self, client) -> None:
         client._api_call.return_value = {

@@ -125,10 +125,21 @@ def handle_command(command: str, args: list) -> bool:
         print_help()
         return True
 
-    file_path = args[0]
+    # Separate flags from operands before picking the path. `share --public f.pdf`
+    # is the ordinary shell form, and args[0] used to hand "--public" to run_share
+    # as the filename — which authenticates against the real Drive account before
+    # anything discovers the path is a flag.
     public = "--public" in args
+    operands = [arg for arg in args if not arg.startswith("--")]
 
-    run_share(file_path, public=public)
+    if not operands:
+        cli_error(
+            "share needs a file path",
+            suggestion="drone @backup share <file_path> [--public]",
+        )
+        return True
+
+    run_share(operands[0], public=public)
     return True
 
 

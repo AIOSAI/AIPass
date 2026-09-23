@@ -23,6 +23,8 @@ from unittest.mock import MagicMock  # noqa: E402
 
 import pytest  # noqa: E402
 
+from aipass.backup.apps.handlers.drive import client as drive_client  # noqa: E402
+from aipass.backup.apps.handlers.drive import upload as drive_upload  # noqa: E402
 from aipass.backup.apps.handlers.json import json_handler  # noqa: E402
 from aipass.cli.apps.modules import display  # noqa: E402
 
@@ -127,17 +129,30 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     the service actually does. The same seam covers backup's own audit stream
     (``apps/handlers/audit/trail.py``), which recomputes its path per call too.
 
-    The seam gets its OWN subdirectory rather than tmp_path itself. The service
+    The seam gets its OWN directory rather than tmp_path itself. The service
     spells the sandbox ``<seam>/<branch>/<branch>_json``, so pointing the seam
     straight at tmp_path creates ``tmp_path/backup/`` in every single test --
     and this branch is NAMED backup, so a test building its own ``backup/``
     directory under tmp_path collided with the fixture rather than with
     anything it did (test_ignore_pathspec's mirror-cleanup pair, 2026-09-03).
 
+    And that directory sits BESIDE tmp_path, not inside it (2026-09-23). Until
+    now the seam was ``tmp_path/_aipass_json_seam``, so the sandbox the fixture
+    builds -- ``<seam>/backup/backup_json/`` plus the audit stream's
+    ``<seam>/backup/logs/`` -- lived INSIDE the directory tests hand to the
+    product as a project root. Any test that walked, counted or mirrored a bare
+    tmp_path saw files the product never created and the test never wrote, and
+    a count written against that total was measuring the fixture. A fixture
+    that changes the answer to the question under test is a lie in the
+    scaffolding, so the seam moved out: a sibling under the same per-test
+    pytest directory, still unique per test, still swept up with it, but never
+    inside a tree under measurement.
+
     Returns:
         The sandbox directory the handler now writes into.
     """
-    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "_aipass_json_seam"))
+    seam = tmp_path.parent / f"{tmp_path.name}_aipass_json_seam"
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(seam))
 
     logger_names = [
         BRANCH_MODULE,
@@ -170,6 +185,45 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+def _no_live_google(*args, **kwargs):
+    """Stand where Google stands. A test that reaches the wire dies here instead."""
+    raise RuntimeError("a test reached the live Google Drive edge")
+
+
+@pytest.fixture(autouse=True)
+def sealed_google_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seal both doors to the real account, and the media reader, before EVERY test.
+
+    autouse and suite-wide on purpose. This fixture used to live inside
+    test_drive_pipeline.py, where a file-level autouse reaches exactly one
+    file -- so test_drive_mocked.py, which drives the same four drive_*
+    modules, ran unsealed. ``drive_check``, ``drive_clear`` and ``drive_sync``
+    reach a REAL Google account (drive_check's own 2026-08-13 comment records
+    ``drive_check foo --help`` making a live auth), and in an unsealed file the
+    dial happens BEFORE the assertion that would have failed the test: the
+    account is touched either way, and the red only arrives afterwards.
+
+    Exactly two calls can reach the live account --
+    ``google_client.get_drive_service`` (the OAuth flow) and
+    ``google_client.api_call_with_retry`` (every request) -- and both are bound
+    as module attributes of ``handlers/drive/client.py`` at import time, so one
+    monkeypatch on that one module closes both doors for the whole process.
+    ``googleapiclient.http.MediaFileUpload`` opens the local file for a
+    resumable upload, so it is replaced as well.
+
+    A call that gets through RAISES rather than dials, so the seal is
+    self-reporting: reaching the edge is a loud RuntimeError, never a quiet
+    network round trip. test_drive_mocked.py pins that refusal directly.
+
+    Both modules are bound at this file's top, which is the same object
+    sys.modules hands the product: patching the attribute here is patching the
+    name the product resolves at call time.
+    """
+    monkeypatch.setattr(drive_client, "get_drive_service", _no_live_google)
+    monkeypatch.setattr(drive_client, "api_call_with_retry", _no_live_google)
+    monkeypatch.setattr(drive_upload, "MediaFileUpload", MagicMock(name="MediaFileUpload"))
 
 
 @pytest.fixture()

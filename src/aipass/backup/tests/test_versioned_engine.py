@@ -15,8 +15,8 @@
 # seedgo: no-test-needed(stdlib) — hashlib.md5's digest and shutil.copy2's mtime-preserving copy
 # seedgo: no-test-needed(generated) — the date inside a baseline name and the timestamp inside a diff name
 
+import os
 import tempfile
-import time
 from pathlib import Path
 
 from aipass.backup.apps.handlers.copy.versioned import copy_versioned
@@ -85,14 +85,20 @@ class TestVersionedDiff:
         # First run
         copy_versioned([(str(src), "code.py")], str(project))
 
-        # Modify source (ensure different mtime)
-        time.sleep(0.05)
+        target = Path(build_versioned_file_path(str(project), "code.py"))
+
+        # Modify the source and stamp it ten seconds past the copy the store
+        # already holds. copy_versioned decides on src_mtime != tgt_mtime, so
+        # the relationship the diff depends on is stated here instead of hoped
+        # for: a sleep moves nothing at all where mtimes have one-second
+        # granularity, and costs the suite real time where they do not.
         src.write_text("v2", encoding="utf-8")
+        newer = target.stat().st_mtime + 10
+        os.utime(src, (newer, newer))
 
         # Second run
         copy_versioned([(str(src), "code.py")], str(project))
 
-        target = Path(build_versioned_file_path(str(project), "code.py"))
         diff_dir = target.parent / f"{target.name}_diffs"
         assert diff_dir.exists()
         diffs = list(diff_dir.glob("*.diff"))
@@ -107,11 +113,15 @@ class TestVersionedDiff:
 
         copy_versioned([(str(src), "file.txt")], str(project))
 
-        time.sleep(0.05)
+        target = Path(build_versioned_file_path(str(project), "file.txt"))
+
+        # Ten seconds past the store's copy, stated rather than slept for.
         src.write_text("new", encoding="utf-8")
+        newer = target.stat().st_mtime + 10
+        os.utime(src, (newer, newer))
+
         copy_versioned([(str(src), "file.txt")], str(project))
 
-        target = Path(build_versioned_file_path(str(project), "file.txt"))
         assert target.read_text(encoding="utf-8") == "new"
 
     def test_baseline_untouched_after_change(self, tmp_path: Path):
@@ -123,11 +133,15 @@ class TestVersionedDiff:
 
         copy_versioned([(str(src), "config.py")], str(project))
 
-        time.sleep(0.05)
+        target = Path(build_versioned_file_path(str(project), "config.py"))
+
+        # Ten seconds past the store's copy, stated rather than slept for.
         src.write_text("modified", encoding="utf-8")
+        newer = target.stat().st_mtime + 10
+        os.utime(src, (newer, newer))
+
         copy_versioned([(str(src), "config.py")], str(project))
 
-        target = Path(build_versioned_file_path(str(project), "config.py"))
         baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
         assert len(baselines) == 1
         assert baselines[0].read_text(encoding="utf-8") == "original"
@@ -237,11 +251,17 @@ class TestRestore:
 
         copy_versioned([(str(src), "mod.py")], str(project))
 
-        time.sleep(0.05)
+        target = Path(build_versioned_file_path(str(project), "mod.py"))
+
+        # Ten seconds past the store's copy, stated rather than slept for. The
+        # diff's own name is built from the OLD copy's mtime (versioned.py:68),
+        # which this leaves untouched, so the stored timestamp stays real.
         src.write_text("v2", encoding="utf-8")
+        newer = target.stat().st_mtime + 10
+        os.utime(src, (newer, newer))
+
         copy_versioned([(str(src), "mod.py")], str(project))
 
-        target = Path(build_versioned_file_path(str(project), "mod.py"))
         versions = list_versions(target.parent)
         types = {v["type"] for v in versions}
         assert "baseline" in types
@@ -311,8 +331,14 @@ class TestRestoreModule:
         src.write_text("v1", encoding="utf-8")
         copy_versioned([(str(src), "mod.py")], str(project))
 
-        time.sleep(0.05)
+        # Ten seconds past the store's copy, stated rather than slept for: one
+        # diff row is what this test reads, and it only exists if the engine
+        # sees the second write as a change.
+        stored = Path(build_versioned_file_path(str(project), "mod.py"))
         src.write_text("v2", encoding="utf-8")
+        newer = stored.stat().st_mtime + 10
+        os.utime(src, (newer, newer))
+
         copy_versioned([(str(src), "mod.py")], str(project))
 
         assert restore_module.handle_command("restore", [str(project), "list", "mod.py"]) is True
@@ -389,10 +415,24 @@ class TestRestoreModule:
         # The handler is the edge: once the module has found a stored file the
         # copy succeeds, so the only route to the failure line is to make the
         # handler refuse (template v1 item 15 — mock at the edge, and only there).
-        monkeypatch.setattr(restore_module, "restore_file", lambda folder, out: False)
+        # The stand-in answers FROM its argument — it refuses this file's folder
+        # and would succeed for any other — and records what it was handed, so a
+        # module that stopped consulting restore_file, or consulted it with the
+        # wrong folder or the wrong output path, cannot reach the line below.
+        # A `lambda folder, out: False` could not tell those apart.
+        asked: list[tuple[Path, Path]] = []
+
+        def refuse_only_this_files_folder(file_folder: Path, output_path: Path) -> bool:
+            asked.append((file_folder, output_path))
+            return file_folder.name != "data.txt"
+
+        monkeypatch.setattr(restore_module, "restore_file", refuse_only_this_files_folder)
 
         out_path = tmp_path / "restored" / "data.txt"
         assert restore_module.handle_command("restore", [str(project), "file", "data.txt", str(out_path)]) is True
+
+        stored_folder = Path(build_versioned_file_path(str(project), "data.txt")).parent
+        assert asked == [(stored_folder, out_path)]
 
         out, err = capsys.readouterr()
         assert "Restore failed for data.txt" in err
@@ -438,8 +478,14 @@ class TestRestoreModule:
         src.write_text("v1", encoding="utf-8")
         copy_versioned([(str(src), long_name)], str(project))
 
-        time.sleep(0.05)
+        # Ten seconds past the store's copy, stated rather than slept for: the
+        # [diff] row this test demands exists only if the engine reads the
+        # second write as a change.
+        stored = Path(build_versioned_file_path(str(project), long_name))
         src.write_text("v2", encoding="utf-8")
+        newer = stored.stat().st_mtime + 10
+        os.utime(src, (newer, newer))
+
         copy_versioned([(str(src), long_name)], str(project))
 
         assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
@@ -477,6 +523,47 @@ class TestRestoreModule:
         assert "Unknown command" not in err
         assert "Usage:" not in out
         assert "restore Module" not in out
+        assert command_failed() is True
+
+    def test_a_stored_folder_with_no_readable_version_is_refused_on_stderr_not_noted_on_stdout(
+        self, tmp_path: Path, capsys
+    ):
+        """The "No versions found" line printed on stdout and left the run at exit 0, reporting success."""
+        # Reaching the line is the work. `_find_file_folder` only answers with a
+        # folder that HOLDS the file, and for a short name the folder is named
+        # after the file, so `_stored_file` always recognises a current version
+        # and the list is never empty. The one route left open is a hashed
+        # folder (>50 chars: the folder is name[:30]_md5, the file keeps its
+        # full name), where the current version is identified by being the only
+        # non-baseline file in there. A store pruned down to its current file
+        # plus one leftover has two of those, so no version is readable at all
+        # while the file the user named is sitting right there -- which is why
+        # the earlier `No versioned file found` guard does NOT cover this and
+        # the message is the only thing the user gets.
+        project = tmp_path / "project"
+        project.mkdir()
+        long_name = "c" * 60 + ".py"
+        src = project / long_name
+        src.write_text("payload", encoding="utf-8")
+        copy_versioned([(str(src), long_name)], str(project))
+
+        folder = Path(build_versioned_file_path(str(project), long_name)).parent
+        for stored in folder.iterdir():
+            if "-baseline-" in stored.name:
+                stored.unlink()
+        (folder / "leftover.tmp").write_text("half a write", encoding="utf-8")
+
+        assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
+
+        out, err = capsys.readouterr()
+        assert f"No versions found for: {long_name}" in err
+        assert "No versions found" not in out
+        # The file the user asked about was found -- this is the OTHER failure,
+        # and answering it with the lookup's line would send them hunting for a
+        # backup that exists.
+        assert "No versioned file found" not in err
+        # error() marks the process failed, which resolve_exit turns into 2. On
+        # console.print the same run reported success for a listing it refused.
         assert command_failed() is True
 
     def test_no_arguments_at_all_still_answers_with_the_module_introspection(self, capsys):

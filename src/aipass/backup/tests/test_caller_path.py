@@ -142,6 +142,38 @@ class TestRegisterUsesCallerCwd:
 
         assert reg.call_args.args[1] == str((caller / "myproj").resolve())
 
+    def test_name_keys_the_registry_by_the_given_name_not_the_directory_name(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+        capsys,
+    ) -> None:
+        """--name is the registry key and the line the user reads back; without it the dir name is."""
+        # The registry key is the whole point of the flag: it is what `@shortname`
+        # resolves against later. Both rows below register the SAME directory and
+        # differ only by the flag, so a parse that drops --name collapses the
+        # first row onto the second.
+        caller = tmp_path / "workspace"
+        (caller / "myproj").mkdir(parents=True)
+        monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
+
+        create_dir = MagicMock(return_value=str(caller / "myproj" / ".backup"))
+        with (
+            patch.object(register_mod, "create_backup_dir", create_dir),
+            patch.object(register_mod, "register_project", MagicMock()) as reg,
+        ):
+            assert register_mod.handle_command("register", ["myproj", "--name", "shortname"]) is True
+            assert register_mod.handle_command("register", ["myproj"]) is True
+
+        registered = [dispatched.args[0] for dispatched in reg.call_args_list]
+        paths = {dispatched.args[1] for dispatched in reg.call_args_list}
+        out, err = capsys.readouterr()
+        assert registered == ["shortname", "myproj"], f"--name did not reach the registry: {registered!r}"
+        assert paths == {str((caller / "myproj").resolve())}, f"--name moved the path too: {paths!r}"
+        assert "Registered: shortname" in out
+        assert "Registered: myproj" in out
+        assert err == ""
+
 
 class TestStatusUsesCallerCwd:
     """status — a relative path used to report on backup's own branch dir."""
