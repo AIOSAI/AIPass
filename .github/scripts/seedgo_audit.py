@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 61  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 63  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -62,6 +62,10 @@ EXPECTED_STANDARDS = 61  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          ten above passed all 107 tests that carry a finding. These measure what shape
 #                          cannot see: whether a test reaches the product at all, and whether another
 #                          test in the same file already asserts everything it asserts.
+#                          +2 the same day: discarded_patch and weak_oracle, CRACK classes R and D
+#                          (dispatch eb5602d0). R convicts a mock of the branch's OWN code that nothing
+#                          ever observes; D convicts a test whose WHOLE oracle cannot fail. D is scored
+#                          only on the forms that cannot be right -- the soft forms ride as a count.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"

@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.10.0
+# Version: 1.11.0
 # Created: 2026-08-09
 # Modified: 2026-09-22
 # =============================================
@@ -104,7 +104,10 @@ def test_an_unrecognised_declaration_is_reported_not_swallowed(monkeypatch):
     warnings = []
     monkeypatch.setattr(applicability.logger, "warning", lambda *a, **k: warnings.append(a))
     applicability.applies_to(_checker("prod"))
-    assert warnings, "a typo'd APPLIES_TO must announce itself"
+    # The typo itself has to be IN the warning: "something was wrong" sends the
+    # author looking, "prod" tells them where. weak_oracle D2 convicted the
+    # bare `assert warnings` that stood here.
+    assert warnings[0][2] == "prod"
 
 
 @pytest.mark.parametrize(
@@ -208,6 +211,14 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     the same file already said everything it says. Both declare `tests`
     because their unit is a `def test_*`, which production code does not have.
 
+    `discarded_patch` and `weak_oracle` are the thirteenth and fourteenth,
+    2026-09-22, @devpulse dispatch eb5602d0 — crack classes R and D from the
+    same ruling, and D is the largest verdict class the reviewers found: 51
+    WEAK rows out of 285 tests. R judges a patch of the test's OWN branch,
+    which is why it needs a `tests` corpus and a path that names a branch; D
+    judges a `def test_*`'s complete set of assertions, which production code
+    does not have either.
+
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
     its own corpus and this constant filters nothing for it — but that corpus
@@ -220,6 +231,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     assert tests_only == [
         "calendar_bound",
         "conftest_fixtures",
+        "discarded_patch",
         "duplicate_test",
         "file_top",
         "import_site",
@@ -231,6 +243,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "router_assert",
         "state_leak",
         "through_the_command",
+        "weak_oracle",
     ]
     assert "test_quality" not in checkers
 
