@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 59  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 61  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -57,6 +57,11 @@ EXPECTED_STANDARDS = 59  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          +1 the same day: mock_console, test template v1 item 14.
 #                          +1 the same day: state_leak, test template v1 item 18.
 #                          +1 the same day: conftest_fixtures, test template v1 item 20.
+#                          +2 the same day: no_product_call and duplicate_test, the first two CRACK
+#                          classes from the eyes-on review of backup's tests. Not template items -- the
+#                          ten above passed all 107 tests that carry a finding. These measure what shape
+#                          cannot see: whether a test reaches the product at all, and whether another
+#                          test in the same file already asserts everything it asserts.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"

@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.9.0
+# Version: 1.10.0
 # Created: 2026-08-09
 # Modified: 2026-09-22
 # =============================================
@@ -198,6 +198,16 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     item 16 puts these two fixtures in exactly one place and a rule that read
     them anywhere else would convict 563 files for not being the conftest.
 
+    `no_product_call` and `duplicate_test` are the eleventh and twelfth,
+    2026-09-22, @devpulse dispatch a3ad380b — the first two of the CRACK
+    classes, and the first two names here that are not template items at all.
+    They come from the owner's ruling on the eyes-on review of @backup's
+    tests: 285 tests, 107 carrying a finding, and every one of the 107 passes
+    all ten template checkers above. Those ten measure shape; these two
+    measure whether a test reaches the product, and whether another test in
+    the same file already said everything it says. Both declare `tests`
+    because their unit is a `def test_*`, which production code does not have.
+
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
     its own corpus and this constant filters nothing for it — but that corpus
@@ -210,11 +220,13 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     assert tests_only == [
         "calendar_bound",
         "conftest_fixtures",
+        "duplicate_test",
         "file_top",
         "import_site",
         "literal_path",
         "mock_console",
         "named_encoding",
+        "no_product_call",
         "oversize_test_file",
         "router_assert",
         "state_leak",
