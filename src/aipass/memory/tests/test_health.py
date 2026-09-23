@@ -160,7 +160,7 @@ class TestUnknownBranch:
         health = _get_health()
         branch = _make_branch(tmp_path)
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("nosuchbranch")
 
         assert result == {"success": False, "error": "Unknown branch: nosuchbranch"}
@@ -168,11 +168,29 @@ class TestUnknownBranch:
     def test_empty_registry_is_unknown(self, tmp_path: Path):
         health = _get_health()
 
-        with patch.object(health, "_read_registry", return_value=[]):
+        with patch.object(health, "read_scope", return_value=[]):
             result = health.get_branch_health("anything")
 
         assert result["success"] is False
         assert "anything" in result["error"]
+
+    def test_a_declared_external_branch_is_not_unknown(self, tmp_path: Path):
+        """Health reads, so it resolves names through the scope holding the external tier.
+
+        The write fence of 2026-09-18 was right and stays; it also left this
+        lane resolving through the WRITE scope, so ``health @vera`` answered
+        "Unknown branch" for a read that was never fenced. ``read_scope`` is
+        the binding under test: reach back for ``_read_registry`` and this
+        patch raises AttributeError instead of passing quietly.
+        """
+        health = _get_health()
+        external = _make_branch(tmp_path, name="vera")
+
+        with patch.object(health, "read_scope", return_value=[external]):
+            result = health.get_branch_health("vera")
+
+        assert result["success"] is True, result.get("error")
+        assert result["branch"] == "vera"
 
 
 # ===========================================================================
@@ -185,7 +203,7 @@ class TestKnownBranchNoViolations:
         health = _get_health()
         branch = _make_branch(tmp_path, name="clean_branch")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("clean_branch")
 
         assert result["success"] is True
@@ -203,7 +221,7 @@ class TestKnownBranchNoViolations:
         health = _get_health()
         branch = _make_branch(tmp_path, name="clean_branch")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("CLEAN_BRANCH")
 
         assert result["success"] is True
@@ -241,7 +259,7 @@ class TestKnownBranchRolloverDue:
         )
 
         branch = {"name": "full_branch", "path": str(branch_dir)}
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("full_branch")
 
         assert result["success"] is True
@@ -264,7 +282,7 @@ class TestMissingMemoryFile:
         health = _get_health()
         branch = _make_branch(tmp_path, name="partial_branch", with_observations=False)
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("partial_branch")
 
         assert result["success"] is True
@@ -309,7 +327,7 @@ class TestEntrySizeViolations:
         }
 
         branch = {"name": "loud_branch", "path": str(branch_dir)}
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             with patch.object(lint_handler, "load_entry_limits", return_value=limits):
                 result = health.get_branch_health("loud_branch")
 
@@ -336,7 +354,7 @@ class TestReadOnly:
         local_before = local_path.read_text(encoding="utf-8")
         obs_before = obs_path.read_text(encoding="utf-8")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             health.get_branch_health("untouched_branch")
 
         assert local_path.read_text(encoding="utf-8") == local_before, "local.json was modified!"
@@ -355,7 +373,7 @@ class TestPublicSurface:
 
     def test_unknown_branch_return_shape(self, tmp_path: Path):
         health = _get_health()
-        with patch.object(health, "_read_registry", return_value=[]):
+        with patch.object(health, "read_scope", return_value=[]):
             result = health.get_branch_health("ghost")
         assert set(result.keys()) == {"success", "error"}
 
@@ -363,7 +381,7 @@ class TestPublicSurface:
         health = _get_health()
         branch = _make_branch(tmp_path, name="shape_branch")
 
-        with patch.object(health, "_read_registry", return_value=[branch]):
+        with patch.object(health, "read_scope", return_value=[branch]):
             result = health.get_branch_health("shape_branch")
 
         assert set(result.keys()) == {"success", "branch", "entry_count", "entry_size"}
@@ -408,7 +426,7 @@ class TestRealTrinityFiles:
         local_before = local_file.read_text(encoding="utf-8")
         obs_before = obs_file.read_text(encoding="utf-8")
 
-        with patch.object(health, "_read_registry", return_value=[{"name": "memory", "path": str(self.BRANCH_ROOT)}]):
+        with patch.object(health, "read_scope", return_value=[{"name": "memory", "path": str(self.BRANCH_ROOT)}]):
             result = health.get_branch_health("memory")
 
         # Read-only: real files must be byte-identical after the call.

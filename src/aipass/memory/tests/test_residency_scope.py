@@ -346,6 +346,36 @@ class TestEveryLaneReadsTheOneDefinition:
         accepted = rs.accepted_resident_paths(fleet)
         assert accepted == {str(fleet / "projects/live/src/live/live")}
 
+    def test_the_read_scope_names_a_declared_external_the_write_scope_does_not(self, fleet, monkeypatch, tmp_path):
+        """The write fence of 2026-09-18 took the NAME RESOLVER with it.
+
+        ``lint @vera`` and ``health @vera`` answered "Unknown branch" from the
+        day the fence landed — reported by @vera through @devpulse on 09-19.
+        The fence is right and stays: reads were simply never in its scope. So
+        the cure is not a wider write scope, it is a READ scope reaching the
+        external tier through the DECLARED roots, never through a caller's
+        cwd. Reads see the declared fleet; writes stop at the repo edge.
+        """
+        from aipass.memory.apps.handlers.monitor import detector
+
+        outside = tmp_path / "outside"
+        _write(outside / "OUTSIDE_REGISTRY.json", _registry(_branch("ext", "src/ext/ext")))
+        _write(outside / "src/ext/ext/.trinity/passport.json", _passport(None))
+        _write(
+            fleet / "AIPASS_ROOTS.json",
+            {"roots": [{"path": str(outside), "label": "outside", "status": "active"}]},
+        )
+
+        monkeypatch.setattr(detector, "_REPO_ROOT", fleet)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+
+        write_names = {Path(branch["path"]).name for branch in detector._read_registry()}
+        read_names = {Path(branch["path"]).name for branch in detector.read_scope()}
+
+        assert "ext" not in write_names, "the write scope reached a branch outside the repo"
+        assert "ext" in read_names, "a declared external branch cannot be named for a read"
+        assert write_names <= read_names, "the read scope dropped a branch the write scope holds"
+
     def test_the_caller_lane_is_deliberately_not_classified(self):
         """External callers are a different mechanism — pinned so it stays a choice.
 

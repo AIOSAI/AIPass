@@ -54,10 +54,12 @@ from aipass.memory.apps.handlers.json.lint_handler import run_lint
 
 # Cross-handler access for branch discovery + rollover check (module
 # layer bridges handlers — established precedent, see apps/modules/lint.py)
+# read_scope, not _read_registry: health reads and never writes, so its scope
+# is the declared fleet including externals. The write scope stops at the edge.
 from aipass.memory.apps.handlers.monitor.detector import (
     _get_memory_file_path,
-    _read_registry,
     check_single_file,
+    read_scope,
 )
 
 __all__ = ["get_branch_health"]
@@ -74,7 +76,7 @@ def get_branch_health(branch_name: str) -> dict:
     Read-only. Never writes, modifies, truncates, or deletes any file.
 
     Resolves ``branch_name`` case-insensitively against the registry
-    (``_read_registry()``). For each of ``local`` and ``observations``:
+    (``read_scope()``). For each of ``local`` and ``observations``:
     resolves the ``.trinity`` file path via ``_get_memory_file_path`` and,
     if it exists, runs ``check_single_file`` (entry-count / rollover-
     trigger check). A memory_type whose file does not exist is skipped
@@ -106,7 +108,7 @@ def get_branch_health(branch_name: str) -> dict:
         consumer should apply to ``should_rollover`` and to a non-empty
         ``violations`` list — this function itself assigns none.
     """
-    branches = _read_registry()
+    branches = read_scope()
 
     branch = None
     for candidate in branches:

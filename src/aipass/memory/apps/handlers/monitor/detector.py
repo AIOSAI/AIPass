@@ -233,6 +233,51 @@ def _read_registry() -> List[Dict[str, Any]]:
     return branches
 
 
+def read_scope() -> List[Dict[str, Any]]:
+    """Every branch a READ-ONLY lane may name: the write scope plus declared externals.
+
+    ``_read_registry()`` above is the WRITE scope -- what rollover, the
+    normalizer and the watcher walk -- and it stops at the repo edge on
+    purpose. The fence that made it stop there (2026-09-18) took the NAME
+    RESOLVER with it: ``lint @vera`` and ``health @vera`` began answering
+    "Unknown branch" for a read that was never in the fence's scope. @vera
+    reported it through @devpulse on 09-19.
+
+    The cure is not a wider write scope. It is this second, read-only answer,
+    reaching the external tier the way the fleet definition already does --
+    through the roots DECLARED in ``AIPASS_ROOTS.json``, which someone wrote
+    down, and never through whatever directory a caller happened to stand in.
+    That distinction is the whole lesson of ``known_registries.json``: one
+    call from another project's cwd put four of its branches into every later
+    rollover. A declaration cannot do that, because it does not accumulate.
+
+    Nothing here writes, and no caller of this function may: a lane that
+    resolves a branch through ``read_scope`` and then writes to it has crossed
+    the fence, and ``write_fence`` refuses it at the write itself.
+
+    Returns:
+        ``_read_registry()`` rows, then declared-external rows in the same
+        shape (``path`` as a string), deduplicated by resolved path.
+    """
+    from aipass.memory.apps.handlers.monitor import registry_scope
+
+    branches = _read_registry()
+    seen_paths = {str(Path(branch["path"]).resolve()) for branch in branches if branch.get("path")}
+
+    # name_from="path": the DIRECTORY is the address. @drone routes by it, the
+    # other fleet lanes key on it, and Demo's registry spells its citizen
+    # MY_AGENT while the branch answers to @my-agent -- a resolver naming it
+    # from the registry refuses the only spelling anyone can type.
+    for item in registry_scope.external_branches(_REPO_ROOT, name_from="path"):
+        key = str(Path(item["path"]).resolve())
+        if key in seen_paths:
+            continue
+        branches.append({**item, "path": str(item["path"])})
+        seen_paths.add(key)
+
+    return branches
+
+
 def _get_memory_file_path(branch: Dict, memory_type: str) -> Path | None:
     """
     Get path to memory file for branch.

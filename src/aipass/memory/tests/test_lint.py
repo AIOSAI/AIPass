@@ -447,7 +447,7 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "error") as errored:
                 with patch.object(lint, "run_lint") as scanned:
                     lint._execute_lint(branch_filter="nosuchbrnach")
@@ -460,7 +460,7 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "error"):
                 with patch.object(lint, "success") as succeeded:
                     lint._execute_lint(branch_filter="nosuchbrnach")
@@ -472,7 +472,7 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter="memory")
@@ -484,7 +484,7 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter="MEMORY")
@@ -495,11 +495,33 @@ class TestUnknownBranchIsAnError:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter=None)
 
+        scanned.assert_called_once()
+
+    def test_a_declared_external_branch_is_not_refused(self) -> None:
+        """The read lane resolves names through the scope that holds the external tier.
+
+        From the write fence of 2026-09-18 until this pin, ``lint @vera``
+        answered "Unknown branch": the lane resolved through the WRITE scope,
+        which stops at the repo edge, so a declared external citizen could not
+        be named even for a read. Patching ``read_scope`` is the binding under
+        test — if the lane ever reaches back for ``_read_registry`` this call
+        raises AttributeError rather than passing quietly.
+        """
+        lint = self._lint_module()
+        external = [{"name": "vera", "path": str(Path(tempfile.gettempdir()) / "vera")}]
+
+        with patch.object(lint, "read_scope", return_value=external):
+            with patch.object(lint, "error") as errored:
+                with patch.object(lint, "run_lint", return_value={"success": True, "violations": []}) as scanned:
+                    with patch.object(lint, "_display_results"):
+                        lint._execute_lint(branch_filter="vera")
+
+        errored.assert_not_called()
         scanned.assert_called_once()
 
 
@@ -554,9 +576,9 @@ class TestTheEmptyRegistryRefusalReachesTheExitCode:
 
         lint = self._lint_module()
         reset_command_state()
-        # The name the module actually binds: _read_registry is imported from
+        # The name the module actually binds: read_scope is imported from
         # the monitor detector into lint's own namespace, so patch it there.
-        with patch.object(lint, "_read_registry", return_value=[]):
+        with patch.object(lint, "read_scope", return_value=[]):
             assert lint.handle_command("lint", ["run"]) is True
         assert resolve_exit(True) == 2, "lint found no branches but would exit 0"
         captured = capsys.readouterr()
@@ -1064,7 +1086,7 @@ class TestFieldsModeDisplay:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "run_lint_fields", return_value={"success": True}) as scanned:
                 with patch.object(lint, "_display_field_results") as displayed:
                     lint._execute_lint_fields(branch_filter="memory")
@@ -1076,7 +1098,7 @@ class TestFieldsModeDisplay:
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
-        with patch.object(lint, "_read_registry", return_value=registry):
+        with patch.object(lint, "read_scope", return_value=registry):
             with patch.object(lint, "error") as errored:
                 with patch.object(lint, "run_lint_fields") as scanned:
                     lint._execute_lint_fields(branch_filter="nosuchbrnach")
