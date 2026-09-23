@@ -32,6 +32,18 @@ assert tracker_path.name == "drive_tracker.json"    # pins exactly what was decl
 The constant is `DEFAULT_MAX_TOTAL_GB`. A promise about a symbol that does not exist covers
 nothing at all, and the real constant stays uncovered behind it.
 
+### The cure is not always "repoint it"
+
+@backup cured its H2 convictions on 2026-09-23 and **dropped** two of the lines rather than
+correcting the name. `DRIVE_PKG` and `PROBE_MODULES` are constants of the *test file itself* —
+fixtures' own scaffolding, with no product counterpart anywhere in `apps/`. There is nothing to
+repoint them at, because the declaration was never about the product in the first place. A
+declared pass is a promise about what the *product* does not need covered; a line naming the
+test's own furniture makes no such promise and belongs deleted.
+
+Repoint when the symbol was a typo for a real one. Drop when the symbol was never the
+product's.
+
 ---
 
 ## The judgement this rule makes

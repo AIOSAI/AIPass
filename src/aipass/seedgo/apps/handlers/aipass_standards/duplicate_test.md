@@ -168,6 +168,24 @@ means a genuinely duplicated parametrized pair is missed.
 
 ---
 
+## Curing a conviction: adding asserts alone moves it, it does not clear it
+
+The obvious cure — give one twin a stronger oracle — **flips the conviction onto the other
+twin through subsumption**. The rule matches a body that is contained in its neighbour's, so
+widening A makes B a subset of A, and B is now the duplicate. The verdict changes address
+without changing count.
+
+@backup hit this curing `tests/test_dead_cwd_imports.py:828` on 2026-09-23. The cure that
+landed was to widen the test with a **`chdir`** — a different starting state, not a longer
+oracle. Once the two tests run from different working directories they assert different
+things, and neither body subsumes the other.
+
+**The shape to reach for is a different premise, not a longer body.** Change what the test
+starts from — the cwd, the fixture, the input — so the pair stops being two spellings of one
+scenario. If you cannot name a premise that differs, the honest cure is to delete one.
+
+---
+
 ## Provenance
 
 Crack class B of the owner's 2026-09-22 ruling on the eyes-on review of @backup's tests,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_check.py
 # Description: Stdlib Patch Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-23
 # =============================================
 
 """
@@ -50,6 +50,26 @@ FOUR CUTS, 6,926 -> 916, and the third is the one worth remembering:
   the root resolved through the file's imports 208 files, 1,993 hits
   aipass name-collisions checked ON DISK       175 files, 1,584 hits
   edges sanctioned                             155 files,   916 hits
+
+THEN A HOLE, found by @backup against this source on 2026-09-23 and closed the
+same day. A stdlib CLASS reached through a product binding --
+``monkeypatch.setattr(upload.Path, "resolve", ...)`` -- acquitted, while
+``patch("pathlib.Path.resolve")``, the same process-wide replacement spelled
+through the module, scored. The target is now judged by what it IS: an
+unresolved name is looked up in the product module's OWN imports, so
+``upload.Path`` is ``pathlib.Path`` and ``agent.TranscriptScanner``, which that
+module defines, stays acquitted. On the same 572-file corpus that closed 152
+files / 905 hits, the fix reads 159 / 1,002 -- 97 acquittals were this shape,
+every one of them ``pathlib.Path``, spread over 19 files, 7 of which scored 100
+the day before.
+
+THE RELATIVE IMPORT IS PART OF THE SAME ANSWER. Reading a product module's
+imports means reading ``from ..json import json_handler``, whose ``node.module``
+is the bare string ``json``. Taken at face value that is stdlib ``json`` and it
+convicted 4 lines in @backup on the first run of the fix. A relative import
+keeps its leading dots now, which makes its root empty -- neither aipass nor
+stdlib -- and a sibling package can never be mistaken for the library it shares
+a name with.
 
 ``aipass/ai_mail/apps/handlers/contacts/email.py`` is a product module whose
 name collides with stdlib ``email``, and 291 hits were that one collision. A
@@ -136,6 +156,15 @@ def _source_root() -> Path:
     return here.parent
 
 
+def _module_file(dotted: str) -> Path | None:
+    """The source file for ``aipass.a.b``, as a module or a package."""
+    base = _source_root().joinpath(*dotted.split("."))
+    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 @lru_cache(maxsize=2048)
 def is_product_module(dotted: str) -> bool:
     """Whether ``aipass.a.b`` names a real file or package on disk.
@@ -144,20 +173,49 @@ def is_product_module(dotted: str) -> bool:
     @ai_mail's own module, not stdlib ``email``, and only the filesystem can
     say so -- that one collision was 291 false convictions.
     """
-    base = _source_root().joinpath(*dotted.split("."))
-    return base.with_suffix(".py").is_file() or (base / "__init__.py").is_file()
+    return _module_file(dotted) is not None
+
+
+@lru_cache(maxsize=2048)
+def bound_to(dotted: str, name: str) -> str:
+    """What ``name`` inside product module ``dotted`` was imported from.
+
+    ``upload.Path`` is ``pathlib.Path`` because ``upload.py`` says
+    ``from pathlib import Path``. Reading the product module's own imports is
+    what lets the rule judge a target by what it IS rather than by which name
+    reached it; a class the module DEFINES has no import and answers "".
+    """
+    source = _module_file(dotted)
+    if source is None:
+        return ""
+    try:
+        tree = ast.parse(source.read_text(encoding="utf-8", errors="ignore"))
+    except (SyntaxError, OSError) as exc:
+        logger.info("[stdlib_patch] Cannot read %s: %s", source, exc)
+        return ""
+    return _imports(tree).get(name, "")
 
 
 def _imports(tree: ast.Module) -> Dict[str, str]:
-    """Local name -> the dotted module or member it was imported from."""
+    """Local name -> the dotted module or member it was imported from.
+
+    A RELATIVE import keeps its leading dots. ``from ..json import
+    json_handler`` in @backup's product code has ``node.module == "json"``, and
+    storing that bare would make a sibling package indistinguishable from
+    stdlib ``json`` -- 4 false convictions when the resolution first started
+    reading product imports. The dots make the root empty, which is neither
+    ``aipass`` nor stdlib, so the target is acquitted where it should be.
+    """
     found: Dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 found[alias.asname or alias.name.split(".")[0]] = alias.name
-        elif isinstance(node, ast.ImportFrom) and node.module:
+        elif isinstance(node, ast.ImportFrom):
+            here = "." * node.level
             for alias in node.names:
-                found[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+                origin = f"{node.module}.{alias.name}" if node.module else alias.name
+                found[alias.asname or alias.name] = f"{here}{origin}"
     return found
 
 
@@ -166,13 +224,29 @@ def _through_product(segments: List[str]) -> str:
 
     ``ceiling.os.path`` resolves to ``aipass.backup...ceiling.os.path``: walk
     the chain while it is still a real product module, and the first segment
-    that is stdlib AND is not a product module on disk is the answer.
+    that leaves the product is the one to judge.
+
+    That segment is stdlib in two ways, and the second one was a hole @backup
+    found in this checker on 2026-09-23. A stdlib MODULE announces itself --
+    ``ceiling.os`` is ``os``. A stdlib CLASS does not: ``upload.Path`` is a
+    plain name, and reading only ``sys.stdlib_module_names`` acquitted it while
+    ``patch("pathlib.Path.resolve")`` -- the same replacement, spelled through
+    the import instead of through the module -- scored. A branch could turn the
+    row green one character at a time. So the name is resolved through the
+    PRODUCT MODULE'S OWN IMPORTS: ``upload.py`` says ``from pathlib import
+    Path``, so the target is ``pathlib``, and a class the module DEFINES
+    (``agent_handler.TranscriptScanner``) still answers "".
     """
     for index in range(1, len(segments)):
         prefix = segments[: index + 1]
         if is_product_module(".".join(prefix)):
             continue
-        return segments[index] if segments[index] in sys.stdlib_module_names else ""
+        name = segments[index]
+        if name in sys.stdlib_module_names:
+            return name
+        origin = bound_to(".".join(segments[:index]), name)
+        root = origin.split(".")[0]
+        return root if root in sys.stdlib_module_names and not is_product_module(root) else ""
     return ""
 
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_import_site_check.py
 # Description: import_site_check — test template v1 item 8, product imports at the top of a test file
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-21
-# Modified: 2026-09-22
+# Modified: 2026-09-23
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/import_site_check.py."""
@@ -12,7 +12,7 @@
 # seedgo: no-test-needed(stdlib) — that ast.parse builds the tree it documents
 # seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
 # seedgo: no-test-needed(shared) — applies_to_file's production/tests split; tests/test_applicability.py
-# seedgo: no-test-needed(constant) — the prose of FIX_IMPORT and FIX_STUB; the shapes are asserted
+# seedgo: no-test-needed(constant) — the prose of FIX_IMPORT and FIX_STUB; both are asserted BY NAME
 
 import pytest
 
@@ -98,7 +98,7 @@ class TestADeferredProductImportIsConvicted:
     def test_the_fix_names_the_move(self):
         source = "def test_x():\n    from aipass.prax import logger\n    assert logger\n"
 
-        assert import_site_check.scan(source)[0][2] == "move the import to the top of the file"
+        assert import_site_check.scan(source)[0][2] == import_site_check.FIX_IMPORT
 
 
 class TestModuleLevelAndForeignImportsAreLeftAlone:
@@ -199,9 +199,7 @@ class TestTheStubMechanismIsConvicted:
     def test_the_fix_names_the_edge(self):
         source = 'def test_x():\n    monkeypatch.setitem(sys.modules, "aipass.prax", stub)\n'
 
-        assert import_site_check.scan(source)[0][2] == (
-            "import the real module at the top and patch at the edge with monkeypatch"
-        )
+        assert import_site_check.scan(source)[0][2] == import_site_check.FIX_STUB
 
 
 class TestCheckModuleIsThePerFileLane:
@@ -241,11 +239,10 @@ class TestCheckModuleIsThePerFileLane:
 
         message = import_site_check.check_module(str(path))["checks"][0]["message"]
 
+        fix = import_site_check.FIX_IMPORT
         assert message.splitlines() == [
-            "test_thing.py:2 product import inside a function (from aipass.prax import ...) - "
-            "move the import to the top of the file",
-            "test_thing.py:7 product import inside a function (from aipass.cli import ...) - "
-            "move the import to the top of the file",
+            f"test_thing.py:2 product import inside a function (from aipass.prax import ...) - {fix}",
+            f"test_thing.py:7 product import inside a function (from aipass.cli import ...) - {fix}",
         ]
 
     def test_a_missing_file_fails_rather_than_passes_quietly(self, tmp_path):
@@ -285,7 +282,7 @@ class TestThroughTheChecklistCommand:
 
         out = capsys.readouterr().out
         assert "[FAIL] — import_site" in out
-        assert "move the import to the top of the file" in out
+        assert import_site_check.FIX_IMPORT in out
 
     def test_the_command_stays_quiet_on_a_clean_file(self, tmp_path, capsys):
         """The standard still prints — as a tick. The absence to assert is the conviction."""
@@ -295,4 +292,4 @@ class TestThroughTheChecklistCommand:
 
         out = capsys.readouterr().out
         assert "✓ import_site" in out
-        assert "move the import to the top of the file" not in out
+        assert import_site_check.FIX_IMPORT not in out

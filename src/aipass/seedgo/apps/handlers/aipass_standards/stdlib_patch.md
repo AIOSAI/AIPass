@@ -77,6 +77,42 @@ list above is drawn on the edge/own-work line, not tuned toward the smaller numb
 
 ---
 
+## The fifth cut: a stdlib class reached through a product binding
+
+@backup measured this checker against its own source on 2026-09-23 and found a hole. These two
+lines replace the same function for the same whole process:
+
+```python
+patch("pathlib.Path.resolve", ...)                       # scored
+monkeypatch.setattr(upload.Path, "resolve", ...)         # acquitted
+```
+
+The second one acquitted because the resolution asked only whether the offending segment was in
+`sys.stdlib_module_names`. A stdlib *module* announces itself that way; a stdlib *class* does
+not. **A branch could turn the row green one character at a time without changing anything.**
+
+The target is now judged by what it IS. When the segment that leaves the product is not itself a
+module name, it is looked up in the **product module's own imports**: `upload.py` says
+`from pathlib import Path`, so `upload.Path` is `pathlib.Path`. A class the module *defines* has
+no import and stays acquitted — `agent.py` both imports `Path` and defines `TranscriptScanner`,
+and the same rule gives opposite verdicts on the two names in that one file.
+
+A **relative** import is part of the same answer. `from ..json import json_handler` has
+`node.module == "json"`, which read as stdlib `json` and convicted 4 lines in @backup on the
+first run of the fix. Relative imports keep their leading dots now, so their root is empty —
+neither aipass nor stdlib — and a sibling package can never be mistaken for the library it
+shares a name with.
+
+| | files | hits |
+|---|---|---|
+| before, module names only | 152 | 905 |
+| **after, the class resolved through imports** | **159** | **1,002** |
+
+**97 acquittals were this shape**, every one of them `pathlib.Path`, spread over 19 files, 7 of
+which scored 100 the day before.
+
+---
+
 ## What it refuses to judge
 
 Targets bound to a local name by assignment rather than an import:
@@ -94,6 +130,7 @@ everything it convicts** — the honest edge of a resolution-based rule.
 ## Fleet standing on arrival
 
 Measured 2026-09-22 over 565 test files. **155 files, 916 hits, 5.5s.**
+Re-measured 2026-09-23 over 572, after the fifth cut: **159 files, 1,002 hits, 9.2s.**
 
 `test_ceiling_guard.py:103` convicts as `ceiling.os.path` → `os`, which is the evidence line.
 

@@ -11,7 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/tests_lane/ parses and imports
 # seedgo: no-test-needed(documentation) — that the public handler functions carry docstrings
-# seedgo: no-test-needed(constant) — RECEIPT_FILE's spelling and the BUMP_EVENT string
+# seedgo: no-test-needed(constant) — RECEIPT_FILE's spelling and the BUMP_EVENT string; both asserted BY NAME
 # seedgo: no-test-needed(stdlib) — shutil.move's ability to move a file
 # seedgo: no-test-needed(cli) — Rich's rendering of the status table
 
@@ -239,7 +239,7 @@ class TestTemplateStatus:
         assert "alpha: NO RECEIPT" in printed
 
     def test_a_branch_carrying_gold_is_counted_current(self, capsys, fleet, gold):
-        receipt = fleet / "src" / "aipass" / "alpha" / "tests" / ".template_version.json"
+        receipt = fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE
         receipt.write_text(json.dumps({"template_versions": {"test_template": "9.9.9"}}), encoding="utf-8")
 
         tests_lane.handle_command("tests", ["template-status"])
@@ -249,7 +249,7 @@ class TestTemplateStatus:
         assert "alpha:" not in printed
 
     def test_an_old_version_is_reported_with_the_version_it_carries(self, capsys, fleet, gold):
-        receipt = fleet / "src" / "aipass" / "alpha" / "tests" / ".template_version.json"
+        receipt = fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE
         receipt.write_text(json.dumps({"template_versions": {"test_template": "0.1.0"}}), encoding="utf-8")
 
         tests_lane.handle_command("tests", ["template-status"])
@@ -277,13 +277,13 @@ class TestTemplateBump:
         printed = capsys.readouterr().out
         assert "DRY RUN" in printed and "would-stamp   alpha" in printed
         assert "Nothing was written" in printed
-        assert not (fleet / "src" / "aipass" / "alpha" / "tests" / ".template_version.json").exists()
+        assert not (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).exists()
 
     def test_confirm_writes_the_receipt_and_the_page_into_the_branch(self, fleet, gold):
         tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
 
         tests_dir = fleet / "src" / "aipass" / "alpha" / "tests"
-        receipt = json.loads((tests_dir / ".template_version.json").read_text(encoding="utf-8"))
+        receipt = json.loads((tests_dir / template_ops.RECEIPT_FILE).read_text(encoding="utf-8"))
         assert receipt["template_versions"] == {"test_template": "9.9.9"}
         assert receipt["stamped_by"] == "seedgo tests template bump"
         assert "the page body" in (tests_dir / "TEST_TEMPLATE.md").read_text(encoding="utf-8")
@@ -298,17 +298,17 @@ class TestTemplateBump:
         tests_lane.handle_command("tests", ["template", "bump", "@beta", "--confirm"])
 
         assert "skipped       alpha" in capsys.readouterr().out
-        assert not (fleet / "src" / "aipass" / "alpha" / "tests" / ".template_version.json").exists()
+        assert not (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).exists()
 
     def test_a_second_bump_leaves_a_current_branch_untouched(self, capsys, fleet, gold):
         tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
-        stamped = (fleet / "src" / "aipass" / "alpha" / "tests" / ".template_version.json").read_text(encoding="utf-8")
+        stamped = (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).read_text(encoding="utf-8")
         capsys.readouterr()
 
         tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
 
         assert "current       alpha" in capsys.readouterr().out
-        assert (fleet / "src" / "aipass" / "alpha" / "tests" / ".template_version.json").read_text(
+        assert (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).read_text(
             encoding="utf-8"
         ) == stamped
 
@@ -321,7 +321,7 @@ class TestTemplateBump:
 
         assert mine.read_text(encoding="utf-8") == "# alpha's own test\n"
         landed = {p.name for p in (fleet / "src" / "aipass" / "alpha" / "tests").iterdir()}
-        assert landed == {"test_theirs.py", "TEST_TEMPLATE.md", ".template_version.json"}
+        assert landed == {"test_theirs.py", "TEST_TEMPLATE.md", template_ops.RECEIPT_FILE}
 
     def test_an_unknown_verb_under_template_refuses_with_the_argument_exit_code(self, capsys, fleet, gold):
         with pytest.raises(CommandRefused) as refusal:

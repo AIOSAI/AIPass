@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 72  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 73  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -85,6 +85,14 @@ EXPECTED_STANDARDS = 72  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          wrote; F convicts a multi-answer side_effect no assertion counts. H and E
 #                          score only what cannot be right -- prose declarations, dotted stdlib names
 #                          and durability re-reads ride as counts. Measured: cli and seedgo consult 72.
+#                          +1 the same day: accepted_and_never_used_parameter, CRACK class M (dispatch
+#                          a752532e) -- the pack's first PRODUCTION-only crack rule, and the first that
+#                          reads a branch's whole apps/ tree to decide who owns a signature. It convicts
+#                          a parameter no path in the body reads, and acquits four shapes that say the
+#                          signature belongs to somebody else: the branch never calls the function, the
+#                          name is handed off as a value, the def is an except-ImportError shim, or the
+#                          name is defined twice. Class L was CHECKED and NOT built -- unused_function
+#                          already convicts its specimen. Measured: cli and seedgo consult 73.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"

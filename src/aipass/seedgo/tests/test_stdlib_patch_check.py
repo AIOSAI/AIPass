@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stdlib_patch_check.py
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-23
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""
@@ -28,6 +28,15 @@ CEILING = "aipass.backup.apps.handlers.scan"
 
 #: @ai_mail's real module whose LAST segment is the name of a stdlib package.
 COLLIDING = "aipass.ai_mail.apps.modules.email"
+
+#: @backup's own module, which says `from pathlib import Path` — the specimen's home.
+UPLOAD = "aipass.backup.apps.handlers.drive"
+
+#: A module that both imports Path AND defines a class: one file, both verdicts.
+WATCHDOG = "aipass.devpulse.apps.handlers.watchdog"
+
+#: @backup's package whose sibling import `from ..json import json_handler` reads as stdlib json.
+RELATIVE = "aipass.backup.apps.handlers.project"
 
 
 def _scored(source):
@@ -121,6 +130,48 @@ class TestTheNameCollisionDefence:
         """ceiling.os is where aipass ends and the stdlib begins, one segment earlier."""
         source = f"from {CEILING} import ceiling\ndef test_it():\n    patch.object(ceiling.os, 'remove')\n"
         assert _scored(source) == [(3, "ceiling.os", "os")]
+
+
+class TestAStdlibClassReachedThroughAProductBinding:
+    """@backup's finding, 2026-09-23: the same replacement, spelled two ways.
+
+    ``patch("pathlib.Path.resolve")`` scored and
+    ``monkeypatch.setattr(upload.Path, "resolve", ...)`` acquitted, though both
+    replace ``pathlib.Path.resolve`` for the whole process. A branch could turn
+    the row green one character at a time.
+    """
+
+    def test_backups_exact_form_is_convicted(self):
+        """monkeypatch.setattr(product_module.Path, 'resolve') — the specimen."""
+        body = "def test_it(monkeypatch):\n    monkeypatch.setattr(upload.Path, 'resolve', fake)\n"
+        assert _scored(f"from {UPLOAD} import upload\n{body}") == [(3, "upload.Path", "pathlib")]
+
+    def test_the_two_spellings_reach_the_same_verdict(self):
+        """Which name reached the class cannot change what the class IS."""
+        body = "def test_it(monkeypatch):\n    monkeypatch.setattr(upload.Path, 'resolve', fake)\n"
+        binding = _scored(f"from {UPLOAD} import upload\n{body}")
+        string = _scored("def test_it():\n    patch('pathlib.Path.resolve')\n")
+        assert [row[2] for row in binding] == [row[2] for row in string] == ["pathlib"]
+
+    def test_a_class_the_product_module_defines_is_acquitted(self):
+        """agent.TranscriptScanner is @devpulse's own: patching it is the cure, not the defect."""
+        body = "def test_it(monkeypatch):\n    monkeypatch.setattr(agent.TranscriptScanner, 'tick', fake)\n"
+        assert _scored(f"from {WATCHDOG} import agent\n{body}") == []
+
+    def test_a_name_the_module_imported_from_aipass_is_acquitted(self):
+        """agent.py says `from aipass.devpulse...json import json_handler` — product, not stdlib."""
+        body = "def test_it():\n    patch.object(agent.json_handler, 'read')\n"
+        assert _scored(f"from {WATCHDOG} import agent\n{body}") == []
+
+    def test_one_module_answers_both_ways(self):
+        """The same file imports Path and defines TranscriptScanner — the discriminator is the import."""
+        assert stdlib_patch_check.bound_to(f"{WATCHDOG}.agent", "Path") == "pathlib.Path"
+        assert stdlib_patch_check.bound_to(f"{WATCHDOG}.agent", "TranscriptScanner") == ""
+
+    def test_a_sibling_package_named_for_a_stdlib_module_is_acquitted(self):
+        """`from ..json import json_handler` is relative, and a relative import is never stdlib."""
+        body = "def test_it():\n    patch.object(config.json_handler, 'read')\n"
+        assert _scored(f"from {RELATIVE} import config\n{body}") == []
 
 
 class TestWhatItRefusesToJudge:

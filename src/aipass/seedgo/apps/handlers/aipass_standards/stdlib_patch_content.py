@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stdlib_patch_content.py
 # Description: Stdlib Patch Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-23
 # =============================================
 
 """
@@ -65,6 +65,17 @@ def get_stdlib_patch_standards() -> str:
         "  name collides with stdlib email, and [red]291 hits were that one collision[/red]. A",
         "  segment is only stdlib when the aipass path up to it does NOT exist as a",
         "  file on disk. Guessing from the name alone convicts a third of @ai_mail.",
+        "",
+        "[bold cyan]THE FIFTH CUT — A STDLIB CLASS THROUGH A PRODUCT BINDING:[/bold cyan]",
+        "  patch('pathlib.Path.resolve') scored while monkeypatch.setattr(upload.Path,",
+        "  'resolve') acquitted — the same process-wide replacement, two spellings, so",
+        "  [red]a branch could turn the row green one character at a time[/red]. The target is now",
+        "  judged by what it IS: a name that is not a module is looked up in the PRODUCT",
+        "  MODULE'S OWN imports, so upload.Path is pathlib.Path, while a class the module",
+        "  defines (agent.TranscriptScanner) has no import and stays acquitted. A relative",
+        "  import keeps its leading dots — from ..json import json_handler is a sibling",
+        "  package, never stdlib json. [yellow]152 files / 905 hits → 159 / 1,002: 97 acquittals",
+        "  were this shape, every one of them pathlib.Path.[/yellow]",
         "",
         "[bold cyan]WHAT IT REFUSES TO JUDGE:[/bold cyan]",
         "  Targets bound to a local name by assignment — mod = importlib.import_module",
