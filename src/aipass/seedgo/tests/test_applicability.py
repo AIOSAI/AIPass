@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.11.0
+# Version: 1.12.0
 # Created: 2026-08-09
 # Modified: 2026-09-22
 # =============================================
@@ -219,6 +219,14 @@ def test_the_tests_only_bucket_is_an_exact_roster():
     judges a `def test_*`'s complete set of assertions, which production code
     does not have either.
 
+    `flag_never_passed` and `uncalled_public_function` are the fifteenth and
+    sixteenth, 2026-09-22, @devpulse dispatch cb55cc37 — crack classes P and O,
+    and the first two here that are `branch_level`. Both compare a branch's
+    `apps/` against its whole `tests/` tree, so no single file owns the
+    verdict, and both declare `tests` because the question each asks is about
+    what a TEST does: does any test pass this flag to the parser, does any test
+    call this public function.
+
     `calendar_bound` joined on 2026-09-21 for a different reason and is the
     one name here that is not a template item: it is branch_level, so it walks
     its own corpus and this constant filters nothing for it — but that corpus
@@ -234,6 +242,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "discarded_patch",
         "duplicate_test",
         "file_top",
+        "flag_never_passed",
         "import_site",
         "literal_path",
         "mock_console",
@@ -243,6 +252,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "router_assert",
         "state_leak",
         "through_the_command",
+        "uncalled_public_function",
         "weak_oracle",
     ]
     assert "test_quality" not in checkers
