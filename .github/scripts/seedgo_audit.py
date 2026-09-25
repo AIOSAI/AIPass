@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 79  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 80  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -113,6 +113,9 @@ EXPECTED_STANDARDS = 79  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          os.walk call with no onerror=, which swallows scandir errors. The first rule of the
 #                          product pack; its sibling logged_fallback was measured and STOPPED for the owner.
 #                          Measured: cli consults 79.
+#                          +1 on 2026-09-25: logged_fallback, product pack pair one's second half (dispatch
+#                          3144dd93, owner 12:17 'narrow it then land it') - an except returning a literal
+#                          default the success path can also return; silent_catch's log acquittal closed.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"
