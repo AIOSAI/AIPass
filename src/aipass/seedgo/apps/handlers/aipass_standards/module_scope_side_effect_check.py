@@ -175,7 +175,11 @@ def import_time(node: ast.AST) -> Iterator[ast.AST]:
 def _bindings(node: ast.AST) -> List[Tuple[str, str]]:
     """(local name, dotted name) pairs one import statement binds."""
     if isinstance(node, ast.Import):
-        return [(alias.asname, alias.name) if alias.asname else (alias.name.split(".")[0],) * 2 for alias in node.names]
+        pairs: List[Tuple[str, str]] = []
+        for alias in node.names:
+            top = alias.name.split(".")[0]
+            pairs.append((alias.asname, alias.name) if alias.asname else (top, top))
+        return pairs
     if isinstance(node, ast.ImportFrom):
         base = "." * node.level + (node.module or "")
         return [(alias.asname or alias.name, f"{base}.{alias.name}") for alias in node.names if alias.name != "*"]
