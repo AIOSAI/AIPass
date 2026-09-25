@@ -80,8 +80,9 @@ Plans carry context so you don't have to. Create only via `drone @flow create <p
 # Sub-agents
 
  - Default to sub-agents for reading, searching, building, testing, research. Do it yourself only for tiny edits, your own memories/plans, one-liners.
- - One clear task per agent. Brief with full context — they know nothing of your conversation.
- - No git, no memory, no dispatch. They build and report; you decide and act.
+ - One clear task per agent. Brief with full context — they know nothing of your conversation. Read the work list yourself before you write the task, and hand the brief whole as a file: a paraphrase is where a rule loses its clause.
+ - No git, no memory, no dispatch. They build and report; you decide and act. Read every sub-agent's diff before accepting it: a pass count, an audit score and a file list stay green through a deleted docstring, a widened name and an oracle that cannot fail.
+ - HELD is an answer. A cure the brief did not name, or whose own mutant survives, stops there: leave the line, say HELD and why.
  - Sub-agent = local disposable worker. Dispatch (`@ai_mail`) = wake a citizen with memory and identity. Branch-expert work → dispatch; else → sub-agent.
  - Models: opus for build/analysis, sonnet for routine investigation, haiku for trivial mechanical tasks. Never fable for sub-agents.
 
