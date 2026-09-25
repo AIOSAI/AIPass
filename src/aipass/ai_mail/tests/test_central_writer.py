@@ -1,14 +1,16 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for central_writer -- inbox stats aggregation, central file output."""
 
 import json
+import os
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -143,6 +145,29 @@ def test_find_all_inbox_files_discovers_inboxes(tmp_path, monkeypatch):
     assert len(result) == 2
     names = {p.parent.parent.name for p in result}
     assert names == {"seedgo", "drone"}
+
+
+# The only route to an unlistable directory is a permission bit: Windows
+# ignores mode 000 on directories and root reads through it, so both skip.
+@pytest.mark.skipif(
+    sys.platform == "win32" or getattr(os, "geteuid", lambda: -1)() == 0,
+    reason="mode 000 does not deny a directory listing on Windows or to root",
+)
+def test_find_all_inbox_files_raises_on_an_unreadable_subtree(tmp_path, monkeypatch):
+    """An unlistable directory raises; it never drops out of a list that looks complete."""
+    monkeypatch.setattr(mod, "_REPO_ROOT", tmp_path)
+    for branch in ("readable", "locked"):
+        mail_dir = tmp_path / branch / ".ai_mail.local"
+        mail_dir.mkdir(parents=True)
+        (mail_dir / "inbox.json").write_text("{}", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            mod.find_all_inbox_files()
+    finally:
+        locked.chmod(0o755)
+    assert excinfo.value.filename == str(locked)
 
 
 def test_find_all_inbox_files_skips_archive(tmp_path, monkeypatch):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: AI_MAIL Central File Writer
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2025-11-27
-# Modified: 2025-11-27
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -75,6 +75,23 @@ BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 # =============================================================================
 
 
+def _raise_walk_error(err: OSError) -> None:
+    """
+    os.walk's onerror hook: a directory it cannot list is raised, not skipped.
+
+    Raised rather than recorded because the callers consume a plain list and
+    every one of them already wraps update_central() and logs its failure: a
+    stale central file is honest, counts over a partly unread tree are not.
+
+    Args:
+        err: The OSError os.walk's scandir raised.
+
+    Raises:
+        OSError: Always, the error as given.
+    """
+    raise err
+
+
 def find_all_inbox_files() -> List[Path]:
     """
     Find all inbox.json files in .ai_mail.local directories.
@@ -101,7 +118,7 @@ def find_all_inbox_files() -> List[Path]:
     """
     inbox_files = []
 
-    for dirpath, dirnames, _filenames in os.walk(_REPO_ROOT):
+    for dirpath, dirnames, _filenames in os.walk(_REPO_ROOT, onerror=_raise_walk_error):
         # Mutating dirnames in place is what stops os.walk descending.
         dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_NAMES]
 
