@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_drive_mocked.py
 # Description: Tests for the drive_* command modules, the settings stub and the suite-wide Drive seal
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -9,7 +9,7 @@
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
+# seedgo: no-test-needed(ruff) — that the five modules imported below parse; ruff parses, it does not import
 # seedgo: no-test-needed(documentation) — that each module's public functions carry docstrings
 # seedgo: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
 # seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
@@ -19,10 +19,14 @@ import pytest
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync, settings
 
-# What is not pinned here, and where it is. These modules reach a REAL Google
-# account through their run_* verbs, so every test below that passes an argument
-# a run_* could act on first replaces that run_* with a recorder; conftest's
-# autouse sealed_google_edge stands behind the recorder (TestSuiteWideDriveSeal).
+# What is not pinned here, and where it is. Two run_* verbs reach a REAL Google
+# account: run_drive_check builds a DriveClient (drive_check.py:58-62) and
+# run_drive_sync authenticates one (drive_sync.py:104-105). run_drive_clear
+# overwrites the local tracker for real (handlers/drive/tracker.py:192-206),
+# run_drive_stats only reads it (drive_stats.py:55-65), and settings has no run_*.
+# Every test below that passes an argument a run_* could act on first replaces
+# that run_* with a recorder; for the two that dial, conftest's autouse
+# sealed_google_edge stands behind the recorder (TestSuiteWideDriveSeal).
 # The run_* pipelines run against a mocked Drive client in test_drive_pipeline.py.
 # The project_root routes of drive_sync and drive_stats (drive_sync's --note and
 # --project included) and settings' NotImplementedError on any argument other
@@ -40,7 +44,7 @@ from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, dr
 
 
 class TestSuiteWideDriveSeal:
-    """conftest's autouse sealed_google_edge, proven from inside THIS file."""
+    """Pins the harness, not the product: conftest's autouse sealed_google_edge, proven from inside THIS file."""
 
     def test_the_oauth_flow_is_refused_rather_than_dialled(self) -> None:
         """Reaching for Drive auth from this file raises instead of authenticating."""

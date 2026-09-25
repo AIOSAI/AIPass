@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-08
 # Modified: 2026-09-25
 # =============================================
 
-"""Tests for src/aipass/backup/apps/handlers/path/caller.py and caller-CWD resolution."""
+"""Tests for apps/handlers/path/caller.py and caller-CWD resolution."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/path/ and modules/share, register, status parse and import
@@ -25,6 +25,11 @@ from aipass.backup.apps.modules import status as status_mod
 from aipass.backup.apps.modules.register import resolve_project
 
 
+def _arguments(func, call) -> dict:
+    """Bind a recorded call to func's signature, so an oracle reads a parameter by name."""
+    return inspect.signature(func).bind(*call.args, **call.kwargs).arguments
+
+
 class TestResolveCallerPath:
     """The shared helper — relative re-anchored, absolute untouched."""
 
@@ -32,6 +37,9 @@ class TestResolveCallerPath:
         """A relative path lands in the caller's dir, not the process CWD."""
         caller = tmp_path / "some_project"
         caller.mkdir()
+        process_cwd = tmp_path / "process_cwd"
+        process_cwd.mkdir()
+        monkeypatch.chdir(process_cwd)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
 
         resolved = resolve_caller_path("docs/notes.md")
@@ -47,17 +55,19 @@ class TestResolveCallerPath:
         assert resolve_caller_path(str(target)) == target.resolve()
         assert resolve_caller_path(target) == Path(target).resolve()
 
-    def test_unset_caller_env_resolves_against_process_cwd(self, monkeypatch) -> None:
+    def test_unset_caller_env_resolves_against_process_cwd(self, tmp_path: Path, monkeypatch) -> None:
         """Without the env var (direct invocation), process CWD is the caller."""
+        monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 
-        assert resolve_caller_path("rel.txt") == (Path.cwd() / "rel.txt").resolve()
+        assert resolve_caller_path("rel.txt") == (tmp_path / "rel.txt").resolve()
 
-    def test_empty_caller_env_means_process_cwd_not_root(self, monkeypatch) -> None:
+    def test_empty_caller_env_means_process_cwd_not_root(self, tmp_path: Path, monkeypatch) -> None:
         """An empty AIPASS_CALLER_CWD is treated as unset, not as '/'."""
+        monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_CALLER_CWD", "")
 
-        assert caller_cwd() == Path.cwd()
+        assert caller_cwd() == tmp_path.resolve()
 
     def test_caller_cwd_returns_the_exported_dir(self, tmp_path: Path, monkeypatch) -> None:
         """caller_cwd() returns exactly what drone exported."""
@@ -81,9 +91,7 @@ class TestShareUsesCallerCwd:
         ):
             share_mod.run_share(file_arg)
 
-        call = share_file.call_args
-        bound = inspect.signature(share_handler.share_file).bind(*call.args, **call.kwargs)
-        return bound.arguments["local_file"]
+        return _arguments(share_handler.share_file, share_file.call_args)["local_file"]
 
     def test_share_relative_path_uploads_from_caller_dir_not_backup_dir(
         self, tmp_path: Path, monkeypatch, capsys
@@ -107,7 +115,6 @@ class TestShareUsesCallerCwd:
         """Absolute input reaches the handler unchanged — no behaviour drift."""
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path / "irrelevant"))
         target = tmp_path / "real.md"
-        target.write_text("x", encoding="utf-8")
 
         seen = self._run(str(target))
 
@@ -137,7 +144,7 @@ class TestRegisterUsesCallerCwd:
 
         assert resolve_project(".") == str(caller.resolve())
 
-    def test_register_relative_path_registers_caller_project_not_backup_dir(
+    def test_register_relative_path_scaffolds_and_hands_registry_the_caller_project_not_backup_dir(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         """handle_command scaffolds .backup/ in the caller's project."""
@@ -146,17 +153,15 @@ class TestRegisterUsesCallerCwd:
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
         expected = str((caller / "myproj").resolve())
 
-        create_dir = MagicMock(return_value=str(caller / "myproj" / ".backup"))
-        with (
-            patch.object(register_mod, "create_backup_dir", create_dir),
-            patch.object(register_mod, "register_project", MagicMock()) as reg,
-        ):
+        with patch.object(register_mod, "register_project", MagicMock()) as reg:
             register_mod.handle_command("register", ["myproj"])
 
         out, err = capsys.readouterr()
-        assert reg.call_args.args[1] == expected
+        assert _arguments(register_mod.register_project, reg.call_args)["path"] == expected
+        assert (caller / "myproj" / ".backup").is_dir()
         assert "Registered: myproj" in out
         assert f"Path: {expected}" in out
+        assert f"Backup dir: {Path(expected) / '.backup'}" in out
         assert err == ""
 
     def test_name_keys_the_registry_by_the_given_name_not_the_directory_name(
@@ -174,16 +179,13 @@ class TestRegisterUsesCallerCwd:
         (caller / "myproj").mkdir(parents=True)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
 
-        create_dir = MagicMock(return_value=str(caller / "myproj" / ".backup"))
-        with (
-            patch.object(register_mod, "create_backup_dir", create_dir),
-            patch.object(register_mod, "register_project", MagicMock()) as reg,
-        ):
+        with patch.object(register_mod, "register_project", MagicMock()) as reg:
             assert register_mod.handle_command("register", ["myproj", "--name", "shortname"]) is True
             assert register_mod.handle_command("register", ["myproj"]) is True
 
-        registered = [dispatched.args[0] for dispatched in reg.call_args_list]
-        paths = {dispatched.args[1] for dispatched in reg.call_args_list}
+        bound = [_arguments(register_mod.register_project, dispatched) for dispatched in reg.call_args_list]
+        registered = [arguments["name"] for arguments in bound]
+        paths = {arguments["path"] for arguments in bound}
         out, err = capsys.readouterr()
         assert registered == ["shortname", "myproj"], f"--name did not reach the registry: {registered!r}"
         assert paths == {str((caller / "myproj").resolve())}, f"--name moved the path too: {paths!r}"
@@ -198,20 +200,19 @@ class TestStatusUsesCallerCwd:
     def test_status_relative_path_reports_on_caller_project_not_backup_dir(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """backup_root is asked about the caller's project."""
+        """The status report is read from, and names, the caller's project."""
         caller = tmp_path / "workspace"
-        caller.mkdir()
+        (caller / "myproj" / ".backup").mkdir(parents=True)
+        monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller))
         expected = str((caller / "myproj").resolve())
 
-        missing = MagicMock()
-        missing.exists.return_value = False
-        with patch.object(status_mod, "backup_root", MagicMock(return_value=missing)) as root:
-            status_mod.handle_command("status", ["myproj"])
+        status_mod.handle_command("status", ["myproj"])
 
         out, err = capsys.readouterr()
-        assert root.call_args.args[0] == expected
-        assert f"Run: backup register {expected}" in out
+        assert "Backup Status: myproj" in out
+        assert f"Path:         {expected}" in out
+        assert "Run: backup register" not in out
         assert err == ""
 
 

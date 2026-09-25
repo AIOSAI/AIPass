@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_module_isolation.py
 # Description: drive/client.py resolving through a re-imported parent package (ordered pair)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-08
 # Modified: 2026-09-25
 # =============================================
@@ -27,15 +27,17 @@ import pytest
 # import). A dotted mock.patch that walks the stale attribute then dies with
 # AttributeError: module '...drive' has no attribute 'client', but only when an
 # xdist worker ran a polluter before a victim. No other file in this suite does
-# that surgery today; test_a does it on purpose. conftest's autouse
-# _resync_module_attrs heals the desync after every test. test_b runs second
-# because pytest collects a class in definition order, and CI's
-# --dist loadscope keeps the class on one worker.
+# that surgery in this process today (test_dead_cwd_imports.py:190-191 evicts
+# aipass.backup inside a child interpreter); test_a does it on purpose.
+# conftest's autouse _resync_module_attrs heals the desync after every test.
+# test_b runs second because pytest collects a class in definition order, and
+# CI's --dist loadscope keeps the class on one worker.
 # Version note: Python 3.12+ mock resolves patch targets with
 # pkgutil.resolve_name (sys.modules truth), so the stale attribute breaks a
 # dotted patch only on 3.10/3.11, whose mock walks parent attributes. test_b
 # walks the parent attributes itself, so it goes red without the heal on every
-# version.
+# version — because test_a evicts with monkeypatch.delitem (line 54), whose undo
+# puts the real modules back while the parent attribute stays on the twin.
 
 DRIVE_PKG = "aipass.backup.apps.handlers.drive"
 
@@ -58,8 +60,10 @@ class TestStaleParentAttrHealed:
         # The twin imported under a mocked client never gained a .client attr,
         # and patch.dict's exit evicted the whole drive subtree again. Sanity:
         # the desync is real at this point — the conftest fixture repairs it
-        # only at teardown, which runs after this assert.
-        assert twin is not None
+        # only at teardown, which runs after this assert. share names
+        # DriveClient only under TYPE_CHECKING, so the twin bound nothing from
+        # the mocked client: the missing .client below is the parent attr alone.
+        assert "DriveClient" not in vars(twin)
         assert f"{DRIVE_PKG}.client" not in sys.modules
 
         # The desync itself, which is what this test manufactures: one dotted

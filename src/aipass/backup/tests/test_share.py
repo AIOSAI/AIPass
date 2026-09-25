@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_share.py
 # Description: Tests for the share module and the drive/share handler it drives
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-07-01
 # Modified: 2026-09-25
 # =============================================
@@ -28,7 +28,8 @@ from aipass.backup.apps.modules import share as share_module
 # is_file() check lives further down, inside share_file. So one
 # handle_command("share", ["anything"]) is live OAuth. Two rules follow:
 #   * a routing test either stops inside print_introspection / print_help, or it
-#     replaces run_share with a recorder and asserts what it was (or was not) handed;
+#     replaces run_share with a recorder and asserts what it was (or was not) handed,
+#     or it names a command that is not ours, declined before either branch;
 #   * a handler test is handed the MagicMock `client` below.
 # Behind both, conftest.py's autouse sealed_google_edge replaces the two calls that
 # reach Google, raising instead of dialling, and MediaFileUpload with a MagicMock.
@@ -46,7 +47,7 @@ def no_live_media_upload(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def client() -> MagicMock:
-    """A stand-in DriveClient — the network edge, and the only thing this file mocks."""
+    """A stand-in DriveClient — the network edge every handler test is handed."""
     stand_in = MagicMock()
     stand_in.last_error = None
     stand_in.file_tracker = {}
@@ -504,7 +505,7 @@ class TestSetSharePermission:
         result = share_handler.set_share_permission(client, "file-123", public=False)
 
         assert result is None
-        assert "email" in client.last_error.lower()
+        assert client.last_error == "Could not determine authenticated email"
         assert client.drive_service.permissions().create.called is False
 
 

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-20
 # Modified: 2026-09-25
 # =============================================
@@ -73,6 +73,7 @@ class TestCheckCeiling:
         assert refusals[0]["reason"] == "file_count"
         assert refusals[0]["measured"] == 6
         assert refusals[0]["limit"] == 5
+        # A list, not a tuple: the row has been through JSON. breach.offenders itself holds tuples.
         assert refusals[0]["offenders"] == [["t", 6, 0]]
 
     def test_equal_to_limit_is_allowed(self, tmp_path: Path) -> None:
@@ -118,6 +119,7 @@ class TestCheckCeiling:
         assert breach is not None
         assert breach.reason == "file_count"
         assert breach.measured == 7
+        # Anchored to the log literal at apps/handlers/scan/ceiling.py:149; reword it and this goes vacuous.
         assert [line for line in measured if "Ceiling measure skipped" in line] == []
 
     def test_vanished_file_does_not_abort_measurement(self, tmp_path: Path) -> None:
@@ -126,7 +128,7 @@ class TestCheckCeiling:
         files.append((str(tmp_path / "src" / "ghost.py"), "src/ghost.py"))
         assert check_ceiling(files, {"max_backup_files": 100, "max_backup_size_gb": 10}) is None
 
-    def test_defaults_apply_when_config_is_empty(self, tmp_path: Path) -> None:
+    def test_absent_max_backup_files_uses_default_limit(self, tmp_path: Path) -> None:
         """Without max_backup_files a small set passes and one file past DEFAULT_MAX_FILES refuses."""
         files = _files(tmp_path, ["src/a.py"])
         assert check_ceiling(files, {}) is None
@@ -149,32 +151,32 @@ class TestOffenderReporting:
         """baud's shape: the offender is app/src-tauri/target, not the deps leaf."""
         rels = [f"app/src-tauri/target/debug/deps/o{i}.rcgu.o" for i in range(10)]
         rels += ["app/src/main.rs", "README.md"]
-        breach = check_ceiling(_files(tmp_path, rels), {"max_backup_files": 5})
+        breach = check_ceiling(_files(tmp_path, rels), {"max_backup_files": 5, "max_backup_size_gb": 10})
         assert breach is not None
         top_dir = breach.offenders[0][0]
         assert top_dir == "app/src-tauri/target"
 
-    def test_offender_counts_are_real(self, tmp_path: Path) -> None:
+    def test_offender_row_does_not_miscount_its_directory(self, tmp_path: Path) -> None:
         """The reported count matches the files under that directory."""
         rels = [f"target/debug/o{i}.o" for i in range(7)]
-        breach = check_ceiling(_files(tmp_path, rels), {"max_backup_files": 3})
+        breach = check_ceiling(_files(tmp_path, rels), {"max_backup_files": 3, "max_backup_size_gb": 10})
         assert breach is not None
         assert breach.offenders[0] == ("target/debug", 7, 0)
 
     def test_root_level_files_group_under_dot(self, tmp_path: Path) -> None:
         """Files at the project root have no directory to blame."""
-        breach = check_ceiling(_files(tmp_path, ["a.txt", "b.txt", "c.txt"]), {"max_backup_files": 2})
+        breach = check_ceiling(
+            _files(tmp_path, ["a.txt", "b.txt", "c.txt"]), {"max_backup_files": 2, "max_backup_size_gb": 10}
+        )
         assert breach is not None
         assert breach.offenders[0][0] == "."
 
     def test_detail_lines_name_the_config_escape_hatch(self, tmp_path: Path) -> None:
         """The refusal names the offender row, .backupignore, and the max_backup_files escape hatch."""
-        breach = check_ceiling(_files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5})
+        breach = check_ceiling(
+            _files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5, "max_backup_size_gb": 10}
+        )
         assert breach is not None
-        text = "\n".join(breach.detail_lines())
-        assert "max_backup_files" in text
-        assert ".backupignore" in text
-
         lines = breach.detail_lines()
         assert len(lines) == 4
         assert lines[0] == "Largest directories in this run:"
@@ -184,10 +186,10 @@ class TestOffenderReporting:
 
     def test_summary_reads_as_a_refusal(self, tmp_path: Path) -> None:
         """summary() states the measurement, then the ceiling, as one exact sentence."""
-        breach = check_ceiling(_files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5})
+        breach = check_ceiling(
+            _files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5, "max_backup_size_gb": 10}
+        )
         assert breach is not None
-        assert "6" in breach.summary()
-        assert "5" in breach.summary()
         assert breach.summary() == "6 files exceeds the 5-file ceiling"
 
 
@@ -317,9 +319,6 @@ class TestSharedScanSeeding:
         store = build_versioned_store(str(root))
         leaked = list(store.rglob("*rcgu*")) if store.exists() else []
         assert leaked == [], f"seed-excluded artifacts reached the versioned store: {leaked}"
-
-
-# =============================================
 
 
 # =============================================

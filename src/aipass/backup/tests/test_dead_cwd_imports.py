@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — guard shape, safe path helper, both worlds
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-31
 # Modified: 2026-09-25
 # =============================================
@@ -9,9 +9,9 @@
 """Tests for apps/handlers/path/module_paths.py and the kinship fence in apps/handlers/__init__.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the handlers module parses and imports
-# seedgo: no-test-needed(documentation) — docstrings on public guard functions
-# seedgo: no-test-needed(stdlib) — os.path.realpath and Path.resolve behaviour
+# seedgo: no-test-needed(ruff) — that handlers/__init__.py and handlers/path/module_paths.py lint clean
+# seedgo: no-test-needed(documentation) — the docstrings of module_file() and branch_root()
+# seedgo: no-test-needed(stdlib) — linecache.getline(), which fills the fence message's Blocked: line
 
 import ast
 import importlib.util
@@ -44,9 +44,9 @@ from aipass.backup.apps.handlers.path import module_paths
 # caches stdin and the probe would report green while lying.
 
 
-#: The real guard file. It is loaded from disk rather than imported by name
-#: because conftest installs a stub for the handlers package (to keep the
-#: cross-branch guard out of the suite's way), and a stub cannot be tested.
+#: The real guard file, executed fresh from disk by _load_guard_module. No stub is in the
+#: way of a name import: tests/conftest.py:26 imports the real handlers package before
+#: conftest.py:35 tests for it, so the stub at conftest.py:36-39 never installs.
 TEST_FILE = Path(__file__).resolve()
 BRANCH_ROOT = TEST_FILE.parents[1]
 GUARD_FILE = BRANCH_ROOT / "apps" / "handlers" / "__init__.py"
@@ -140,7 +140,9 @@ def guard():
 #: import inside drive/client, because a preload is a claim you stop testing.
 PRELOAD = ["aipass.prax", "aipass.cli.apps.modules"]
 
-#: One module per cured site, plus the entry point that pulls the whole tree.
+#: The five live cured sites (handlers, state.backup_timestamps, project.setup,
+#: project.registry, audit.trail); two entry points (apps, apps.backup);
+#: json.json_handler, now a shim over aipass.prax; drive.client, for its optional @api import.
 PROBE_MODULES = [
     "aipass.backup.apps",
     "aipass.backup.apps.backup",
@@ -170,14 +172,12 @@ def _dead_getcwd(*a, **k):
     raise FileNotFoundError(2, "probe: cwd denied")
 def _dead_realpath(*a, **k):
     raise OSError(2, "probe: realpath denied")
-if world == "A":
+if world in ("A", "CONTROL"):
     os.path.realpath = _realpath_reads_cwd
     os.getcwd = _dead_getcwd
 elif world == "B":
     os.path.realpath = _dead_realpath
 if world == "CONTROL":
-    os.path.realpath = _realpath_reads_cwd
-    os.getcwd = _dead_getcwd
     from pathlib import Path
     try:
         Path("relative/thing").resolve()
@@ -269,8 +269,9 @@ class TestSafePathHelper:
 
     def test_branch_root_climbs_without_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """branch_root still answers when resolve() is unavailable."""
+        monkeypatch.setattr(module_paths, "_REPORTED_DEGRADED", set())
         monkeypatch.setattr(module_paths, "Path", _ResolveDeniedPath)
-        assert module_paths.branch_root(__file__, 1).is_absolute()
+        assert module_paths.branch_root(__file__, 1) == Path(os.path.abspath(__file__)).parents[1]
 
 
 class TestDegradedResolutionIsAnnouncedOnce:
@@ -330,14 +331,9 @@ def _inspect_stack_calls(source: str) -> list[int]:
 class TestGuardNeverCallsInspectStack:
     """An AST ban, because no import-shaped test can reach the deleted walk.
 
-    @trigger measured that the caller-is-None branch is UNREACHABLE from any
-    import-shaped pin -- apps/__init__ always supplies a real-file frame -- so
-    restoring the second inspect.stack() walk leaves every behavioural test
-    green. This pin is the only thing that convicts it.
-
-    It must be an AST ban and never a string ban: the guard's own docstring
-    names inspect.stack() while explaining the defect, and a spelling ban would
-    convict the explanation.
+    The caller-is-None branch is unreachable from an import: apps/__init__ always
+    supplies a real-file frame. An AST ban, never a string ban: the guard's own
+    docstring names inspect.stack(), and a spelling ban would convict it.
     """
 
     def test_guard_file_has_no_inspect_stack_call(self) -> None:
@@ -523,21 +519,18 @@ class TestKinshipSurvivesTheWindowsSpelling:
         with pytest.raises(ImportError, match="ACCESS DENIED"):
             _compile_as(str(foreign), guard)
 
-    def test_self_skip_uses_the_same_spelling_rule(self, guard) -> None:
-        """The guard's own-frame skip compares both sides through _spell_for_kinship."""
+    def test_self_skip_uses_the_same_spelling_rule(self, guard, monkeypatch, tmp_path: Path) -> None:
+        """Under the Windows case fold, a case-variant spelling of the guard's own file still skips its frame."""
         # A missed self-skip returns __init__.py as the (kin) caller and opens the fence.
-        source = GUARD_FILE.read_text(encoding="utf-8")
-        assert "if this_file in resolved:" not in source
-        assert source.count("_spell_for_kinship(") >= 4
+        monkeypatch.setattr(guard, "_IS_WINDOWS", True)
+        monkeypatch.setattr(guard, "__file__", str(GUARD_FILE).upper())
+        with pytest.raises(ImportError, match="ACCESS DENIED"):
+            _compile_as(str(tmp_path / "outsider.py"), guard)
 
 
-#: Behavioural sibling to the AST ban, spawn's shape (relayed by devpulse).
-#: The round-4 guidance said the caller-is-None branch is unreachable and only a
-#: parse-tree pin can watch it. The true sentence is narrower: it is unreachable
-#: from IMPORT-shaped pins. Called DIRECTLY from a ``-c`` child every frame is
-#: string-pseudo or importlib, both skipped, ``_find_real_caller`` returns None,
-#: and the branch RUNS -- so a regrown ``inspect.stack()`` walk dies there under
-#: a realpath denial while the cured plain return survives.
+#: Behavioural sibling to the AST ban. Called DIRECTLY from a ``-c`` child every frame
+#: is string-pseudo or importlib, both skipped, ``_find_real_caller`` returns None and
+#: the branch RUNS: a regrown ``inspect.stack()`` walk dies there under a realpath denial.
 _NONE_BRANCH_PROBE = textwrap.dedent(
     """
     import json, os, os.path, sys
@@ -553,8 +546,8 @@ _NONE_BRANCH_PROBE = textwrap.dedent(
     # construct under test. inspect.stack() routes to os.path.realpath through
     # getmodule (3.12: inspect.py:1009), and an interpreter that spells that
     # route differently makes this world inert rather than wrong. The child
-    # reports; the parent decides (seedgo round 6: an arming probe must measure
-    # the call ITS OWN WORLD denies, and the ordering travels, the line does not).
+    # reports; the parent decides. It measures the call THIS world denies: the
+    # route travels across versions, the line number does not.
     import inspect
     try:
         inspect.stack()
@@ -647,10 +640,9 @@ _COMPILING_CLASSES = (
 )
 
 _INNER_COVERAGE_WINDOWS_SKIP = (
-    "skipped on Windows by the 2026-09-01 one-fix ruling: the inner "
-    "coverage run failed on the real Windows host (5dee751a, windows-setup) "
-    "- unverifiable from this box; the pin stays live on POSIX where the "
-    "report-step landmine was caught; owner to diagnose after PR 750"
+    "skipped on Windows: measured 2026-09-01 (5dee751a, windows-setup), the inner "
+    "coverage run failed on the real Windows host, unverifiable from this box; "
+    "the pin stays live on POSIX, where the report-step failure was caught"
 )
 
 

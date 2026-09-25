@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: conftest.py
-# Description: Backup test configuration -- shared pytest fixtures
-# Version: 1.3.1
+# Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
+# Version: 1.3.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -18,7 +18,7 @@ import logging
 import sys
 import types
 from pathlib import Path
-from typing import Generator
+from typing import Generator, NoReturn
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,16 +45,18 @@ def _resync_module_attrs() -> Generator[None, None, None]:
 
     A test that deletes modules from sys.modules and re-imports them under
     mocked dependencies (in this suite, only test_module_isolation's test_a,
-    which does it on purpose) leaves the parent behind. patch.dict restores the sys.modules DICT at
-    exit, but never the parent package's ATTRIBUTE, which keeps pointing at
-    the throwaway twin — one that may lack submodule attributes entirely when
-    they resolved to sys.modules mocks during its import. The next test then
-    resolves two different objects for one dotted name: mock.patch walks the
-    stale attribute (AttributeError: module ...drive has no attribute
-    'client') while importlib walks sys.modules. Only surfaces when an
-    unlucky xdist worker runs a polluting module before a victim — CI-only
-    red, invisible in serial runs — and only on Python 3.10/3.11: 3.12+
-    mock.patch resolves its target through sys.modules (pkgutil.resolve_name).
+    which does it on purpose; test_dead_cwd_imports' _PROBE deletes them too,
+    but in a child interpreter, never in this process) leaves the parent
+    behind. patch.dict restores the sys.modules DICT at exit, but never the
+    parent package's ATTRIBUTE, which keeps pointing at the throwaway twin —
+    one that may lack submodule attributes entirely when they resolved to
+    sys.modules mocks during its import. The next test then resolves two
+    different objects for one dotted name: mock.patch walks the stale attribute
+    (AttributeError: module ...drive has no attribute 'client') while importlib
+    walks sys.modules. Only surfaces when an unlucky xdist worker runs a
+    polluting module before a victim — CI-only red, invisible in serial runs —
+    and only on Python 3.10/3.11: 3.12+ mock.patch resolves its target through
+    sys.modules (pkgutil.resolve_name).
 
     After every test: point parent attributes back at the sys.modules entry,
     and drop attributes whose module was evicted from sys.modules entirely so
@@ -188,7 +190,7 @@ def clean_command_state() -> Generator[None, None, None]:
     display.reset_command_state()
 
 
-def _no_live_google(*args, **kwargs):
+def _no_live_google(*args: object, **kwargs: object) -> NoReturn:
     """Stand where Google stands. A test that reaches the wire dies here instead."""
     raise RuntimeError("a test reached the live Google Drive edge")
 

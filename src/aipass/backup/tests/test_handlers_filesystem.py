@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
-# Description: Tests for backup's handlers: scan/walk.py, scan/filter.py, ignore/patterns.py, project/, path/, report/
-# Version: 1.2.3
+# Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
+# Version: 1.2.4
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
 
-"""Tests for backup's handlers: scan/walk.py, scan/filter.py, ignore/patterns.py, project/, path/, report/."""
+"""Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/, audit/ parse without errors
@@ -14,6 +14,7 @@
 # seedgo: no-test-needed(constant) — project/config.py DEFAULTS' max_file_size_mb, auto_ignore_git and drive_sync values
 # seedgo: no-test-needed(stdlib) — os.walk, os.path.islink and os.path.getsize in scan/walk.py and scan/filter.py
 
+import json
 from pathlib import Path
 
 from aipass.backup.apps.handlers.audit import trail
@@ -24,7 +25,7 @@ from aipass.backup.apps.handlers.report.formatter import format_result
 from aipass.backup.apps.handlers.report.result import BackupResult, new_result
 from aipass.backup.apps.handlers.scan.filter import filter_paths
 from aipass.backup.apps.handlers.scan.walk import walk_project
-from aipass.backup.apps.handlers.ignore.patterns import load_spec
+from aipass.backup.apps.handlers.ignore.patterns import is_ignored, load_spec
 
 
 class TestScanWalk:
@@ -38,8 +39,8 @@ class TestScanWalk:
         result = list(walk_project(str(proj)))
 
         assert result == []
-        audit = trail.log_path().read_text(encoding="utf-8")
-        assert f'"operation": "walk_project", "root": "{proj}"' in audit
+        records = [json.loads(line) for line in trail.log_path().read_text(encoding="utf-8").splitlines()]
+        assert [r["root"] for r in records if r["operation"] == "walk_project"] == [str(proj)]
 
     def test_walk_yields_each_file_as_absolute_and_relative_path(self, tmp_path: Path) -> None:
         """Walk a directory with files yields one (absolute, relative) tuple per file."""
@@ -68,7 +69,7 @@ class TestScanFilter:
     """Test filtering -- patterns, whitelist."""
 
     def test_filter_of_no_paths_is_empty(self) -> None:
-        """Filter empty file list returns empty."""
+        """No paths in, none out -- a filter that drops real files is the next test's to catch."""
         import pathspec
 
         empty_spec = pathspec.PathSpec.from_lines("gitignore", [])
@@ -76,7 +77,7 @@ class TestScanFilter:
         assert result == []
 
     def test_filter_without_ignore_rules_keeps_every_file(self, tmp_path: Path) -> None:
-        """Filter with no ignore patterns preserves all files."""
+        """With no ignore rules a real file comes through the filter, not dropped and not rewritten."""
         f = tmp_path / "keep.txt"
         f.write_text("data", encoding="utf-8")
         files = [(str(f), "keep.txt")]
@@ -91,37 +92,35 @@ class TestIgnorePatterns:
     """Test ignore pattern loading."""
 
     def test_spec_without_backupignore_matches_no_ordinary_file(self, tmp_path: Path) -> None:
-        """With no .backupignore the spec matches nothing but the *.tmp floor."""
-        import pathspec
+        """With no .backupignore only the *.tmp floor is ignored -- no ordinary file is."""
+        spec = load_spec(str(tmp_path))
 
-        result = load_spec(str(tmp_path))
-
-        assert isinstance(result, pathspec.PathSpec)
-        assert result.match_file("a.pyc") is False
-        assert result.match_file("src/main.py") is False
+        assert is_ignored("x.tmp", spec) is True
+        assert is_ignored("a.pyc", spec) is False
+        assert is_ignored("src/main.py", spec) is False
 
     def test_spec_enforces_the_backupignore_patterns(self, tmp_path: Path) -> None:
-        """The patterns in .backupignore are the ones the spec enforces."""
+        """.backupignore's patterns ignore their matches, backslash-separated too, and spare the rest."""
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.pyc\n__pycache__/\n", encoding="utf-8")
-        import pathspec
 
-        result = load_spec(str(tmp_path))
+        spec = load_spec(str(tmp_path))
 
-        assert isinstance(result, pathspec.PathSpec)
-        assert result.match_file("a.pyc") is True
-        assert result.match_file("__pycache__/mod.py") is True
-        assert result.match_file("src/main.py") is False
+        assert is_ignored("a.pyc", spec) is True
+        assert is_ignored("__pycache__/mod.py", spec) is True
+        assert is_ignored("__pycache__\\mod.py", spec) is True
+        assert is_ignored("src/main.py", spec) is False
 
 
 class TestProjectSetup:
     """create_backup_dir scaffolds a project's .backup/ and leaves an existing one alone."""
 
     def test_setup_creates_the_backup_dir(self, tmp_path: Path) -> None:
-        """create_backup_dir creates the project's .backup directory."""
-        create_backup_dir(str(tmp_path))
+        """Setup returns the .backup it made -- a None beside a made directory is a failed setup."""
+        created = create_backup_dir(str(tmp_path))
 
         backup_dir = tmp_path / ".backup"
+        assert created == backup_dir
         assert backup_dir.exists()
 
     def test_second_setup_keeps_the_existing_config(self, tmp_path: Path) -> None:
@@ -166,7 +165,7 @@ class TestPathBuilder:
     """Test path builder handler -- module coverage for 'path' package."""
 
     def test_backup_root_is_the_projects_own_backup_dir(self, tmp_path: Path) -> None:
-        """backup_root returns .backup path."""
+        """backup_root is this project's own .backup, not a .backup under any other root."""
         result = backup_root(str(tmp_path))
 
         assert isinstance(result, Path)

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_snapshot_fidelity.py
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
-# Version: 2.1.2
+# Version: 2.1.3
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -24,12 +24,19 @@ from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
 from aipass.backup.apps.handlers.report.result import BackupResult
 
+
+def _empty_spec() -> pathspec.PathSpec:
+    """Build an empty PathSpec for tests."""
+    return pathspec.PathSpec.from_lines("gitignore", [])
+
+
 # Why trail.log_operation is NOT patched out anywhere in this file:
 # conftest's autouse mock_infrastructure points AIPASS_TEST_LOG_DIR at
-# tmp_path/_aipass_json_seam, and trail.log_path() recomputes its path on every
-# call, so the real audit append already lands inside the test's own directory.
-# The seam sits BESIDE every tree these tests walk (source/, snapshot/, project/),
-# never inside one, so no walk sees it. test_cleanup_writes_started_and_complete_to_audit_stream reads the
+# tmp_path.parent / f"{tmp_path.name}_aipass_json_seam" (conftest.py:155), and
+# trail.log_path() recomputes its path on every call, so the real audit append
+# lands in a per-test directory. The seam sits BESIDE tmp_path and every tree
+# these tests walk (source/, snapshot/, project/), never inside one, so no walk
+# sees it. test_cleanup_writes_started_and_complete_to_audit_stream reads the
 # real stream back through the product's own log_path().
 #
 # Why the should_ignore predicates name "keep.txt":
@@ -48,7 +55,7 @@ class TestBackupResultErrors:
         """Non-critical error appends to errors but keeps success True."""
         r = BackupResult(mode="snapshot")
         r.add_error("minor issue")
-        assert len(r.errors) == 1
+        assert r.errors == ["minor issue"]
         assert r.success is True
         assert len(r.critical_errors) == 0
 
@@ -64,7 +71,7 @@ class TestBackupResultErrors:
         """Warnings are tracked separately and do not affect success."""
         r = BackupResult(mode="snapshot")
         r.add_warning("path too long")
-        assert len(r.warnings) == 1
+        assert r.warnings == ["path too long"]
         assert r.success is True
 
     def test_files_deleted_starts_at_zero_and_carries_the_cleanup_count(self, tmp_path: Path) -> None:
@@ -139,6 +146,7 @@ class TestCleanupMirror:
         result = BackupResult(mode="snapshot")
         cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result)
         assert not subdir.exists()
+        assert result.files_deleted == 1
 
     def test_cleanup_of_missing_snapshot_dir_deletes_nothing_without_raising(self, tmp_path: Path) -> None:
         """No error if backup_path does not exist."""
@@ -187,11 +195,6 @@ class TestCleanupMirror:
         assert completed[0]["dry_run"] is False
 
 
-def _empty_spec() -> pathspec.PathSpec:
-    """Build an empty PathSpec for tests."""
-    return pathspec.PathSpec.from_lines("gitignore", [])
-
-
 class TestCopySnapshotUpgrade:
     """Snapshot copy with mirror-delete and mtime skip."""
 
@@ -205,11 +208,13 @@ class TestCopySnapshotUpgrade:
         dest = tmp_path / "snapshot"
         dest.mkdir()
         target = dest / "file.txt"
-        shutil.copy2(str(f), str(target))
+        target.write_text("older bytes", encoding="utf-8")
+        shutil.copystat(str(f), str(target))
 
         files = [(str(f), "file.txt")]
         result = copy_snapshot(files, str(dest), str(source), _empty_spec())
         assert result["files_copied"] == 0
+        assert target.read_text(encoding="utf-8") == "older bytes"
 
     def test_copy_copies_file_absent_from_snapshot(self, tmp_path: Path) -> None:
         """New file is copied to snapshot destination."""
@@ -222,7 +227,7 @@ class TestCopySnapshotUpgrade:
         files = [(str(f), "new.txt")]
         result = copy_snapshot(files, str(dest), str(source), _empty_spec())
         assert result["files_copied"] == 1
-        assert (dest / "new.txt").exists()
+        assert (dest / "new.txt").read_text(encoding="utf-8") == "new content"
 
     def test_copy_mirror_deletes_snapshot_file_absent_from_source(self, tmp_path: Path) -> None:
         """Existing snapshot files not in source are mirror-deleted."""
@@ -239,7 +244,7 @@ class TestCopySnapshotUpgrade:
         files = [(str(f), "keep.txt")]
         result = copy_snapshot(files, str(dest), str(source), _empty_spec())
         assert not (dest / "stale.txt").exists()
-        assert result.get("files_deleted", 0) >= 1
+        assert result["files_deleted"] == 1
 
 
 # =============================================

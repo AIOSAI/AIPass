@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -37,10 +37,9 @@ FAKE_PROJECT_ROOT = str(Path(tempfile.gettempdir()) / "project")
 
 
 class TestVersionedBaseline:
-    """First run creates baseline + current."""
+    """`copy_versioned` on a file the store has never seen — the baseline and the current copy it lays down."""
 
     def test_a_first_run_stores_one_baseline_beside_the_current_copy(self, tmp_path: Path):
-        """New file -> baseline + current in file-folder."""
         project = tmp_path / "project"
         project.mkdir()
         (project / "hello.py").write_text("print('hello')", encoding="utf-8")
@@ -56,10 +55,10 @@ class TestVersionedBaseline:
         # Check baseline exists in same folder
         baselines = [f for f in target.parent.iterdir() if "-baseline-" in f.name]
         assert len(baselines) == 1
-        assert baselines[0].name.endswith(".py")
+        assert baselines[0].name.startswith("hello-baseline-")
+        assert baselines[0].read_text(encoding="utf-8") == "print('hello')"
 
     def test_a_first_run_stores_the_current_copy_with_the_source_text(self, tmp_path: Path):
-        """Current copy has same content as source."""
         project = tmp_path / "project"
         project.mkdir()
         (project / "data.txt").write_text("original content", encoding="utf-8")
@@ -71,10 +70,9 @@ class TestVersionedBaseline:
 
 
 class TestVersionedDiff:
-    """Change creates diff + overwrites current."""
+    """`copy_versioned` on a source newer than its stored copy — the diff it adds, the copy it overwrites."""
 
     def test_a_changed_source_adds_exactly_one_diff_to_the_files_diffs_folder(self, tmp_path: Path):
-        """Modified file -> diff file appears in _diffs/ folder."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "code.py"
@@ -103,7 +101,6 @@ class TestVersionedDiff:
         assert len(diffs) == 1
 
     def test_a_changed_source_overwrites_the_current_copy_with_the_new_text(self, tmp_path: Path):
-        """After change, current has new content."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "file.txt"
@@ -122,8 +119,7 @@ class TestVersionedDiff:
 
         assert target.read_text(encoding="utf-8") == "new"
 
-    def test_baseline_untouched_after_change(self, tmp_path: Path):
-        """Baseline is never overwritten after first creation."""
+    def test_a_changed_source_leaves_one_baseline_still_holding_the_first_text(self, tmp_path: Path):
         project = tmp_path / "project"
         project.mkdir()
         src = project / "config.py"
@@ -146,10 +142,9 @@ class TestVersionedDiff:
 
 
 class TestVersionedSkip:
-    """Unchanged files are skipped."""
+    """`copy_versioned` on a source whose mtime matches its stored copy — counted, not copied."""
 
     def test_an_unchanged_source_is_counted_unchanged_and_not_copied_again(self, tmp_path: Path):
-        """File with same mtime -> files_unchanged incremented."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "stable.txt"
@@ -157,6 +152,8 @@ class TestVersionedSkip:
 
         copy_versioned([(str(src), "stable.txt")], str(project))
 
+        # Green only because shutil.copy2 gave the stored copy the source's mtime
+        # (versioned.py:52) and the engine skips on src_mtime == tgt_mtime (129-131).
         # Run again without modifying
         result = copy_versioned([(str(src), "stable.txt")], str(project))
         assert result["files_unchanged"] == 1
@@ -164,10 +161,9 @@ class TestVersionedSkip:
 
 
 class TestVersionedNeverDelete:
-    """Versioned NEVER deletes — append-only."""
+    """`copy_versioned` on a run that no longer lists a stored file — the stored copy stays."""
 
-    def test_deleted_source_preserved_in_store(self, tmp_path: Path):
-        """Source file deleted -> versioned store still has it."""
+    def test_a_deleted_source_left_out_of_the_next_run_keeps_its_stored_copy_and_text(self, tmp_path: Path):
         project = tmp_path / "project"
         project.mkdir()
         src = project / "temp.py"
@@ -188,12 +184,11 @@ class TestVersionedNeverDelete:
 
 
 class TestDiffGenerator:
-    """Diff generator — binary detection, unified diff."""
+    """The diff generator — a unified diff for text, a marker for binary, and which file types get a diff at all."""
 
     def test_a_text_change_yields_a_unified_diff_with_both_headers_the_hunk_and_both_changed_lines(
         self, tmp_path: Path
     ):
-        """Text files produce unified diff."""
         old = tmp_path / "old.py"
         new = tmp_path / "new.py"
         old.write_text("line1\nline2\n", encoding="utf-8")
@@ -208,7 +203,6 @@ class TestDiffGenerator:
         assert "+line3" in diff
 
     def test_a_binary_file_gets_the_changed_marker_instead_of_a_unified_diff(self, tmp_path: Path):
-        """Binary files get marker instead of diff."""
         binary = tmp_path / "image.bin"
         binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00" + b"\x00" * 100)
         text = tmp_path / "notes.txt"
@@ -224,10 +218,9 @@ class TestDiffGenerator:
 
 
 class TestRestore:
-    """Restore handler — reconstruct from store."""
+    """The restore handlers — writing a file-folder's current copy out, and listing what the folder holds."""
 
     def test_restore_file_writes_the_stored_current_copy_to_the_output_path(self, tmp_path: Path):
-        """Restore current version from store."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "app.py"
@@ -241,7 +234,6 @@ class TestRestore:
         assert output.read_text(encoding="utf-8") == "print('app')"
 
     def test_list_versions_reports_baseline_current_and_diff_after_one_change(self, tmp_path: Path):
-        """list_versions finds baseline + current + diffs."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "mod.py"
@@ -268,23 +260,22 @@ class TestRestore:
 
 
 class TestVersionedFilePath:
-    """Path builder — file-folder packaging."""
+    """`build_versioned_file_path` — where in the store a file's folder sits, and what the folder is called."""
 
     def test_a_root_level_file_is_stored_under_root_in_a_folder_of_its_own_name(self):
-        """Root-level file -> root/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
-        assert "root" in str(result)
-        assert result.name == "README.md"
+        # Segments below the store, not a substring of the whole path: the prefix
+        # comes from tempfile.gettempdir(), which may itself contain "root".
+        store = build_versioned_store(FAKE_PROJECT_ROOT)
+        assert result.relative_to(store).parts == ("root", "README.md", "README.md")
 
     def test_a_nested_file_is_stored_under_its_parent_in_a_folder_of_its_own_name(self):
-        """Nested file -> <parent>/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
         assert "src" in str(result)
         assert result.name == "main.py"
         assert result.parent.name == "main.py"
 
     def test_a_name_over_50_chars_is_stored_in_a_folder_named_its_first_30_chars_and_md5(self):
-        """Filename >50 chars -> shortened with hash."""
         long_name = "a" * 60 + ".py"
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
         assert result.name == long_name
@@ -307,11 +298,13 @@ class TestRestoreModule:
 
         assert restore_module.handle_command("restore", [str(project), "list", "config.py"]) is True
 
-        # Read on the filenames; the "[type]" labels are pinned by the diff-row test below.
-        out = capsys.readouterr().out
+        # Read on the stored filenames; the "[type]" labels are pinned by the diff-row test below.
+        out, err = capsys.readouterr()
         assert "Versions of config.py:" in out
         assert "config-baseline-" in out
-        assert "config.py" in out
+        # A row whose last column is the current copy's name — the heading ends "config.py:".
+        assert any(row.split()[-1] == "config.py" for row in out.splitlines() if row.strip())
+        assert err == ""
 
     def test_a_listed_diff_row_names_its_type_instead_of_losing_it_to_rich_markup(self, tmp_path: Path, capsys):
         """console.print parses markup, so "[diff]" was read as a style tag and dropped: a bare timestamp."""
@@ -335,7 +328,8 @@ class TestRestoreModule:
 
         # The diff row is the one that cannot survive the loss: baseline and
         # current repeat their type in the timestamp column, a diff row does not.
-        out = capsys.readouterr().out
+        out, err = capsys.readouterr()
+        assert err == ""
         diff_rows = [line for line in out.splitlines() if ".diff" in line]
         assert len(diff_rows) == 1
         assert "[diff]" in diff_rows[0]
@@ -363,7 +357,9 @@ class TestRestoreModule:
         assert restore_module.handle_command("restore", [str(project), "file", "tools/main.py", str(out_path)]) is True
 
         assert out_path.read_text(encoding="utf-8") == "where = 'tools'"
-        assert f"Restored tools/main.py to {out_path}" in capsys.readouterr().out
+        out, err = capsys.readouterr()
+        assert f"Restored tools/main.py to {out_path}" in out
+        assert err == ""
 
     def test_a_file_that_was_never_stored_is_named_back_and_nothing_is_written(self, tmp_path: Path, capsys):
         out_path = tmp_path / "restored" / "nonexistent.py"
@@ -374,7 +370,9 @@ class TestRestoreModule:
         # restated on the channel that now carries it. The line moved from
         # console.print (stdout) to error() (stderr) so a pipe can tell a
         # failure from a restored file; nothing about the text changed.
-        assert "No versioned file found for: nonexistent.py" in capsys.readouterr().err
+        out, err = capsys.readouterr()
+        assert "No versioned file found for: nonexistent.py" in err
+        assert out == ""
         assert not out_path.exists()
 
     def test_a_missing_versioned_file_is_named_on_stderr_and_never_on_stdout(self, tmp_path: Path, capsys):
@@ -480,13 +478,13 @@ class TestRestoreModule:
 
         assert restore_module.handle_command("restore", [str(project), "list", long_name]) is True
 
-        out = capsys.readouterr().out
+        out, err = capsys.readouterr()
+        assert err == ""
         assert len([line for line in out.splitlines() if "[diff]" in line]) == 1
         assert "[baseline]" in out
         assert "[current]" in out
 
     def test_run_restore_file_writes_the_stored_text_and_names_where_it_went(self, tmp_path: Path, capsys):
-        """run_restore_file restores a file to an output path."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "data.txt"
@@ -498,7 +496,9 @@ class TestRestoreModule:
 
         assert result is True
         assert Path(out).read_text(encoding="utf-8") == "important data"
-        assert f"Restored data.txt to {out}" in capsys.readouterr().out
+        stdout, stderr = capsys.readouterr()
+        assert f"Restored data.txt to {out}" in stdout
+        assert stderr == ""
 
     def test_list_without_a_filename_is_refused_as_a_usage_error_not_answered_with_the_help_page(
         self, tmp_path: Path, capsys
@@ -568,10 +568,11 @@ class TestRestoreModule:
     def test_a_help_flag_prints_the_module_and_both_usage_lines(self, capsys):
         assert restore_module.handle_command("restore", ["--help"]) is True
 
-        out = capsys.readouterr().out
+        out, err = capsys.readouterr()
         assert "restore Module" in out
         assert "restore <project> list <file>" in out
         assert "restore <project> file <file> <out>" in out
+        assert err == ""
 
 
 # =============================================

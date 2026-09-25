@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.2
+# Version: 2.0.3
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -13,6 +13,7 @@
 # seedgo: no-test-needed(constant) — the literal text of VERSION, MODULE_NAME and each PRIMARY_COMMAND
 # seedgo: no-test-needed(stdlib) — importlib's ability to import a module by dotted name, which discover_modules rides
 
+import os
 import sys
 from collections.abc import Generator
 from contextlib import ExitStack
@@ -101,6 +102,7 @@ def _assert_help_page(mod: ModuleType, out: str, err: str, ran: list) -> None:
     if extra is not None:
         assert extra in out, f"help printed the introspection but not the help page: {out!r}"
     assert err == "", f"a help request wrote to stderr: {err!r}"
+    # settings has no spy, so `ran` stays empty for it; its gate is proven by the call not raising.
     assert ran == [], f"the help gate let the verb run: {ran!r}"
 
 
@@ -261,7 +263,8 @@ class TestPrintHelp:
         # rather than "appears anywhere in the block", keeps 'snapshot' from
         # being satisfied by the 'all' row's description of its own stages.
         listed_verbs = [row.split()[0] for row in commands]
-        for verb in ("snapshot", "versioned", "all", "register", "status", "settings", "restore"):
+        for mod in (snapshot, versioned, all_module, register, status, settings, restore):
+            verb = mod.PRIMARY_COMMAND
             assert verb in listed_verbs, f"COMMANDS block has no row for {verb}"
 
         # modules/all.py runs drive_sync after versioned, so the row must say
@@ -284,6 +287,7 @@ class TestPrintHelp:
         # so a print_introspection hollowed to `pass` while handle_command
         # printed the page inline would leave them green. The module's __main__
         # entry and print_help reach this function without handle_command.
+        # It subsumes test_every_simple_module_carries_a_callable_print_introspection (owner's call).
         mod.print_introspection()
 
         out, err = capsys.readouterr()
@@ -344,6 +348,9 @@ STANDALONE_ENTRY_MODULES = [
     pytest.param(versioned, "run_versioned", lambda p: [str(p)], lambda p: call(str(p)), id="versioned"),
 ]
 
+#: The same rows without the expected-call column: a help request produces no call.
+HELP_GATE_MODULES = [pytest.param(*row.values[:3], id=row.id) for row in STANDALONE_ENTRY_MODULES]
+
 #: Real work that runs AFTER the sentinel and must be neutralised too.
 #:
 #: Patching the sentinel alone is not enough for 'all': handle_command calls
@@ -378,14 +385,12 @@ class TestHelpGateInsideHandleCommand:
     snapshot (proven live, 2026-08-13). Reported by @seedgo via help_flag_safety.
     """
 
-    @pytest.mark.parametrize(("mod", "sentinel", "build_args", "build_call"), STANDALONE_ENTRY_MODULES)
+    @pytest.mark.parametrize(("mod", "sentinel", "build_args"), HELP_GATE_MODULES)
     @pytest.mark.parametrize("flag", ["--help", "-h"])
     def test_trailing_help_flag_does_not_execute(
-        self, mod: ModuleType, sentinel: str, build_args, build_call, flag: str, tmp_path: Path
+        self, mod: ModuleType, sentinel: str, build_args, flag: str, tmp_path: Path
     ) -> None:
         """A help flag trailing a module's own real invocation runs nothing."""
-        # build_call is the dispatch test's column; a help request must produce
-        # NO call at all, so it is the one shape this test never expects.
         args = [*build_args(tmp_path), flag]
 
         with patch.object(mod, sentinel) as spy:
@@ -428,15 +433,15 @@ class _SecretsWatch:
         """Record any touch of real secret storage while the watch is armed."""
         if self.touched is None or event not in _WATCHED_EVENTS:
             return
-        target = str(args[0]) if args else ""
+        target = os.path.normcase(os.path.realpath(str(args[0]))) if args else ""
         if target.startswith(self.root):
             self.touched.append(f"{event} {target}")
 
 
 @pytest.fixture(scope="session")
 def secrets_audit() -> _SecretsWatch:
-    """Install the audit hook once per session; sys.addaudithook can never be undone."""
-    watch = _SecretsWatch(str(Path.home() / ".secrets"))
+    """Install the audit hook once per session; it can never be undone, so every later test carries it inert."""
+    watch = _SecretsWatch(os.path.normcase(os.path.realpath(Path.home() / ".secrets")))
     sys.addaudithook(watch.hook)
     return watch
 
@@ -504,14 +509,13 @@ class TestNoWriteEscapesToRealSecrets:
 
     def test_no_write_reaches_real_secret_storage(self, tmp_path: Path, secrets_watch: list[str]) -> None:
         """Running 'all' touches nothing under ~/.secrets."""
-        touched = secrets_watch
         with ExitStack() as stack:
             stack.enter_context(patch.object(all_module, "run_snapshot"))
             for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL[all_module]:
                 stack.enter_context(patch.object(target_mod, target_attr))
             all_module.handle_command(all_module.PRIMARY_COMMAND, [str(tmp_path)])
 
-        assert touched == [], f"test reached real secret storage: {touched}"
+        assert secrets_watch == [], f"test reached real secret storage: {secrets_watch}"
 
 
 class TestStubFailsHonestly:
@@ -667,7 +671,7 @@ class TestHelpNeverExecutes:
     ]
 
     def test_the_help_sweep_still_covers_every_shape_it_was_built_for(self) -> None:
-        """HELP_ARGV keeps its five help-flag positions: long, short, behind a flag, behind operands."""
+        """HELP_ARGV keeps its five rows in order, every one ending in a help flag and exactly one in -h."""
         assert len(self.HELP_ARGV) == 5
         # By name, not by literal: a sweep that dispatches a command no module
         # owns sweeps nothing. The row order is the sweep's shape.

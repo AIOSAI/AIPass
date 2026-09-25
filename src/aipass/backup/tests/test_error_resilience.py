@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_error_resilience.py
 # Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -9,7 +9,7 @@
 """Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that all handler files parse
+# seedgo: no-test-needed(ruff) — that handlers/ and modules/ lint clean; the imports below prove only that they parse
 # seedgo: no-test-needed(documentation) — handler docstrings
 # seedgo: no-test-needed(constant) — the message each InvalidDocument carries; the tests pin the type only
 # seedgo: no-test-needed(stdlib) — json module parsing and dumps
@@ -25,7 +25,6 @@ from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.project import config, registry, setup
 from aipass.backup.apps.handlers.project.config import DEFAULTS, load_project_config
 from aipass.backup.apps.handlers.state import timestamps
-from aipass.backup.apps.handlers.state.changelog import append_changelog
 from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 from aipass.backup.apps.modules import snapshot
 from aipass.backup.apps.modules.snapshot import run_snapshot
@@ -204,11 +203,11 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_a_corrupt_config_raises_never_falls_back_to_defaults(self, tmp_path: Path) -> None:
         """A corrupt config must not silently become DEFAULTS mid-backup."""
-
-        self._corrupt(tmp_path / ".backup" / "config.json")
+        project = tmp_path / "proj"
+        self._corrupt(project / ".backup" / "config.json")
 
         with pytest.raises(json_handler.InvalidDocument):
-            load_project_config(str(tmp_path))
+            run_snapshot(str(project), show_panels=False)
 
     def test_corrupt_registry_raises_and_survives_on_disk(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -226,19 +225,23 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_a_corrupt_changelog_raises_never_starts_a_fresh_one(self, tmp_path: Path) -> None:
         """A corrupt changelog must not be overwritten with a one-entry one."""
-
-        self._corrupt(tmp_path / ".backup" / "changelog.json")
+        project = tmp_path / "proj"
+        corrupt = project / ".backup" / "changelog.json"
+        self._corrupt(corrupt)
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
 
         with pytest.raises(json_handler.InvalidDocument):
-            append_changelog(str(tmp_path), {"mode": "snapshot"})
+            run_snapshot(str(project), show_panels=False)
+
+        assert corrupt.read_text(encoding="utf-8") == "{not valid json"
 
     def test_a_corrupt_timestamp_map_raises_never_reads_as_empty(self, tmp_path: Path) -> None:
         """A corrupt timestamp map is an error, not 'every file changed'."""
-
-        self._corrupt(tmp_path / ".backup" / "timestamps.json")
+        project = tmp_path / "proj"
+        self._corrupt(project / ".backup" / "timestamps.json")
 
         with pytest.raises(json_handler.InvalidDocument):
-            load_timestamps(str(tmp_path))
+            run_snapshot(str(project), show_panels=False)
 
     def test_a_corrupt_drive_tracker_raises_never_reads_as_nothing_uploaded(self, tmp_path: Path) -> None:
         """A corrupt drive tracker is an error, not 'nothing uploaded yet'."""
@@ -250,23 +253,23 @@ class TestUnreadableDocumentsAreLoud:
 
     def test_empty_file_is_unreadable_not_empty(self, tmp_path: Path) -> None:
         """Zero bytes, the state a truncated write leaves, is not a valid document."""
-
-        empty = tmp_path / ".backup" / "config.json"
+        project = tmp_path / "proj"
+        empty = project / ".backup" / "config.json"
         empty.parent.mkdir(parents=True, exist_ok=True)
         empty.write_text("", encoding="utf-8")
 
         with pytest.raises(json_handler.InvalidDocument):
-            load_project_config(str(tmp_path))
+            run_snapshot(str(project), show_panels=False)
 
     def test_valid_json_that_is_not_an_object_raises_invalid_document(self, tmp_path: Path) -> None:
         """Valid JSON of the wrong shape is an InvalidDocument, never an AttributeError."""
-
-        ts = tmp_path / ".backup" / "timestamps.json"
+        project = tmp_path / "proj"
+        ts = project / ".backup" / "timestamps.json"
         ts.parent.mkdir(parents=True, exist_ok=True)
         ts.write_text('["not", "an", "object"]', encoding="utf-8")
 
         with pytest.raises(json_handler.InvalidDocument):
-            load_timestamps(str(tmp_path))
+            run_snapshot(str(project), show_panels=False)
 
 
 class TestWriteResultsAreChecked:
@@ -307,7 +310,10 @@ class TestWriteResultsAreChecked:
         assert attempted == [(tmp_path / ".backup" / "timestamps.json", {"a.txt": 1.0})]
 
     def test_setup_reports_a_config_it_could_not_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """create_backup_dir used to answer a path after a failed config write."""
+        """A config setup could not write refuses the run; no later document is attempted."""
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
 
         attempted: list[Path] = []
 
@@ -317,8 +323,11 @@ class TestWriteResultsAreChecked:
 
         monkeypatch.setattr(setup.json_handler, "write_json", _refuse_only_the_config)
 
-        assert setup.create_backup_dir(str(tmp_path)) is None
-        assert attempted == [tmp_path / ".backup" / "config.json"]
+        result = run_snapshot(str(project), show_panels=False)
+
+        assert result.errors
+        assert result.files_copied == 0
+        assert attempted == [project / ".backup" / "config.json"]
 
 
 class TestACompletedCopyIsAlwaysRecorded:
@@ -409,24 +418,40 @@ class TestAuditLog:
     def test_record_shape_flattens_the_payload(self, tmp_path: Path) -> None:
         """timestamp + operation + the operation's own fields, one line."""
         stream = trail.log_path()
-        assert stream.is_relative_to(tmp_path.parent), f"conftest's seam did not hold: {stream}"
-        project_root = str(tmp_path / "proj")
-        trail.log_operation("probe_op", {"project_root": project_root})
+        seam = tmp_path.parent / f"{tmp_path.name}_aipass_json_seam"
+        assert stream == seam / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME, f"the seam did not hold: {stream}"
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
 
-        entry = json.loads(stream.read_text(encoding="utf-8").strip())
-        assert entry["operation"] == "probe_op"
-        assert entry["project_root"] == project_root
+        run_snapshot(str(project), show_panels=False)
+
+        lines = stream.read_text(encoding="utf-8").splitlines()
+        [entry] = [json.loads(line) for line in lines if '"snapshot_complete"' in line]
+        assert sorted(entry) == ["files", "operation", "project_root", "timestamp"]
+        assert entry["operation"] == "snapshot_complete"
+        assert entry["project_root"] == str(project)
+        assert entry["files"] == 2
         assert entry["timestamp"]
 
     def test_the_path_is_recomputed_per_call(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The seam is read on every call, never captured at import."""
-
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "code.py").write_text("print('hi')", encoding="utf-8")
         first, second = tmp_path / "first", tmp_path / "second"
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(first))
-        assert trail.log_path() == first / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(second))
+        first_stream = first / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
+        second_stream = second / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
 
-        assert trail.log_path() == second / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(first))
+        run_snapshot(str(project), show_panels=False)
+        first_after_one_run = first_stream.read_text(encoding="utf-8")
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(second))
+        run_snapshot(str(project), show_panels=False)
+
+        assert '"snapshot_complete"' in first_after_one_run
+        assert first_stream.read_text(encoding="utf-8") == first_after_one_run
+        assert '"snapshot_skipped"' in second_stream.read_text(encoding="utf-8")
 
     def test_an_empty_seam_is_absence_not_a_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An empty env value must not redirect the stream to the cwd."""
@@ -443,6 +468,7 @@ class TestAuditLog:
 
         # Kills ``if test_dir is not None:``, under which an empty seam answers
         # the RELATIVE backup/logs/operations.jsonl, written into whatever the cwd is.
+        # That mutant's name is operations.jsonl and its grandparent is backup, so it survives the sibling above.
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
         absent = trail.log_path()
 
@@ -457,11 +483,11 @@ class TestAuditLog:
     def test_a_failed_append_never_takes_the_backup_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """With every audit append refused, a real run still copies and answers clean; each refusal warns."""
 
-        attempted: list[Path] = []
+        attempted: list[tuple[Path, str]] = []
         warned: list[str] = []
 
-        def _refuse(path: Path, *args: object, **kwargs: object) -> None:
-            attempted.append(Path(path))
+        def _refuse(path: Path, entry: dict, *args: object, **kwargs: object) -> None:
+            attempted.append((Path(path), entry["operation"]))
             raise OSError("audit stream unwritable")
 
         class _WarningRecorder:
@@ -477,12 +503,27 @@ class TestAuditLog:
         monkeypatch.setattr(trail, "append_jsonl", _refuse)
         monkeypatch.setattr(trail, "logger", _WarningRecorder())
 
-        assert trail.log_operation("probe_op", {}) is None
-        probe_attempts = len(attempted)
-
         result = run_snapshot(str(project), show_panels=False)
 
         assert not result.errors
         assert (Path(result.backup_path) / "code.py").read_text(encoding="utf-8") == "print('hi')"
-        assert len(attempted) > probe_attempts, "the run never reached the audit stream"
+        assert {path for path, _op in attempted} == {trail.log_path()}
+        assert [op for _path, op in attempted] == [
+            "setup_complete",
+            "project_config_loaded",
+            "load_spec",
+            "project_config_loaded",
+            "load_whitelist",
+            "walk_project",
+            "filter_paths",
+            "load_timestamps",
+            "build_snapshot_path",
+            "cleanup_started",
+            "cleanup_complete",
+            "copy_snapshot",
+            "build_metadata",
+            "append_changelog",
+            "snapshot_complete",
+            "save_timestamps",
+        ], "a refused append stopped the run's later audit calls"
         assert warned.count("Failed to write operation log: audit stream unwritable") == len(attempted)

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.1
+# Version: 3.0.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, call
 
@@ -339,7 +340,11 @@ class TestDriveClient:
         assert client._api_call(request) == {"ok": True}
         drive_api.assert_called_once_with(request, max_retries=3)
 
-    def test_api_call_retry_on_failure(self, monkeypatch: pytest.MonkeyPatch, drive_api: MagicMock) -> None:
+    def test_api_call_failure_retries_once_on_a_rebuilt_thread_service_with_a_budget_of_one(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        drive_api: MagicMock,
+    ) -> None:
         """A first failure rebuilds the THREAD's service and retries once."""
         thread_service = MagicMock(name="thread_service")
         monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=thread_service))
@@ -424,13 +429,15 @@ class TestDriveTracker:
         test_file = tmp_path / "uploaded.txt"
         test_file.write_text("uploaded content", encoding="utf-8")
 
+        before = datetime.now(timezone.utc)
         drive_tracker.update_entry(tracker, test_file, tmp_path, "drive_id_xyz")
+        after = datetime.now(timezone.utc)
 
         entry = tracker["uploaded.txt"]
         assert entry["drive_id"] == "drive_id_xyz"
         assert entry["local_size"] == test_file.stat().st_size
         assert entry["local_mtime"] == test_file.stat().st_mtime
-        assert "last_sync" in entry
+        assert before <= datetime.fromisoformat(entry["last_sync"]) <= after
 
     def test_clean_tracker_removes_and_names_the_entries_whose_file_is_gone(self) -> None:
         """Entries whose file is gone are removed and named back to the caller."""
@@ -724,7 +731,7 @@ class TestDriveSync:
     def _store(tmp_path: Path) -> tuple[Path, Path]:
         """A project with an empty versioned store where the real builder looks for it."""
         project = tmp_path / "project"
-        store = project / ".backup" / "versioned"
+        store = path_builder.build_versioned_store(str(project))
         store.mkdir(parents=True)
         return project, store
 
@@ -771,7 +778,7 @@ class TestDriveSync:
         """A missing versioned store is named back, and nothing is uploaded."""
         project = tmp_path / "project"
         project.mkdir()
-        missing = project / ".backup" / "versioned"
+        missing = path_builder.build_versioned_store(str(project))
         _install_offline_client(monkeypatch)
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
@@ -882,7 +889,7 @@ class TestDriveSync:
         def _seed(name: str) -> Path:
             """A project whose versioned store holds one file to upload."""
             project = tmp_path / name
-            store = project / ".backup" / "versioned"
+            store = path_builder.build_versioned_store(str(project))
             store.mkdir(parents=True)
             (store / "file.txt").write_text("content", encoding="utf-8")
             return project
@@ -891,11 +898,11 @@ class TestDriveSync:
         plain = _seed("plain")
         _install_offline_client(monkeypatch)
 
-        handed: list[tuple[str, str | None]] = []
+        handed: list[tuple[str, str]] = []
 
         def _record(client, files, project_name, backup_root, tracker, **kwargs) -> dict:
             """Stand in for upload_batch: keep the project name and the note it was given."""
-            handed.append((project_name, kwargs.get("note")))
+            handed.append((project_name, kwargs["note"]))
             return {"success": True, "uploaded": len(files), "failed": 0, "bytes_uploaded": 0}
 
         monkeypatch.setattr(drive_upload, "upload_batch", _record)
@@ -916,6 +923,7 @@ class TestDriveSync:
         printed = capsys.readouterr().out
         assert "drive_sync Module" in printed
         assert "Handlers: drive/client, drive/upload, drive/tracker" in printed
+        assert "Usage: drive_sync" not in printed
 
     def test_drive_sync_declines_a_foreign_command_in_silence(self, capsys: pytest.CaptureFixture) -> None:
         """A command that is not ours is declined in silence."""
@@ -946,6 +954,7 @@ class TestDriveCheckModule:
         assert ran == []
         assert "drive_check Module" in printed
         assert "Handlers: drive/client, drive/test" in printed
+        assert "drive_check run — test Drive auth and folder access" not in printed
 
     def test_drive_check_help_flag_anywhere_prints_usage_and_never_runs_the_check(
         self,
@@ -1020,6 +1029,7 @@ class TestDriveStatsModule:
         printed = capsys.readouterr().out
         assert "drive_stats Module" in printed
         assert "Handlers: drive/tracker" in printed
+        assert "Usage: drive_stats" not in printed
 
     def test_drive_stats_help_flag_prints_usage_and_never_reads_a_tracker(
         self,
@@ -1065,6 +1075,7 @@ class TestDriveClearModule:
         printed = capsys.readouterr().out
         assert "drive_clear Module" in printed
         assert "Handlers: drive/tracker (requires --force)" in printed
+        assert "Usage: drive_clear" not in printed
 
     def test_drive_clear_help_flag_prints_usage_and_clears_nothing(
         self,
@@ -1114,11 +1125,11 @@ class TestDriveClearModule:
 
 
 # ---------------------------------------------------------------------------
-# TestThreadSafety — folder get-or-create: concurrency, short-circuit, tracker reset
+# TestFolderGetOrCreate — folder get-or-create: concurrency, short-circuit, tracker reset
 # ---------------------------------------------------------------------------
 
 
-class TestThreadSafety:
+class TestFolderGetOrCreate:
     """Folder get-or-create: one create under concurrent callers, the verify short-circuit, the tracker reset."""
 
     def test_concurrent_project_folder_single_create(self, drive_api: MagicMock) -> None:
