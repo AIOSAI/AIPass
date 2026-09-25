@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_auth.py
 # Description: Init handler — provision a project for manager-class git (owner-tier)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-04
-# Modified: 2026-08-04
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -180,11 +180,14 @@ def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
 
     Used only when the registry records no path at all. The repo root is never
     a candidate — a root-level passport would mean root-level path-binding,
-    which is exactly what the guardrail exists to prevent.
+    which is exactly what the guardrail exists to prevent. A miss over a tree
+    with unreadable directories refuses and names them: None would claim the
+    passport is absent when it may sit inside one of them.
     """
     wanted = name.lower()
     root_depth = len(repo_root.parts)
-    for dirpath, dirnames, _filenames in os.walk(repo_root):
+    unread: List[OSError] = []
+    for dirpath, dirnames, _filenames in os.walk(repo_root, onerror=unread.append):
         current = Path(dirpath)
         if len(current.parts) - root_depth >= _MAX_SCAN_DEPTH:
             dirnames[:] = []
@@ -198,6 +201,14 @@ def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
         branch_name = passport.get("branch_info", {}).get("branch_name") or passport.get("identity", {}).get("name")
         if str(branch_name or "").lower() == wanted:
             return current.resolve()
+    if unread:
+        shown = ", ".join(sorted(str(err.filename) for err in unread)[:3])
+        more = f" and {len(unread) - 3} more" if len(unread) > 3 else ""
+        raise GitAuthRefusal(
+            f"no readable directory under {repo_root} holds a passport for '{name}', but {len(unread)} "
+            f"could not be read ({shown}{more}) — the passport may be inside one; fix its permissions, or "
+            'add "path" pointing at the citizen\'s own branch directory, then re-run'
+        )
     return None
 
 

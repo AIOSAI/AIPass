@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_auth.py
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-04
-# Modified: 2026-08-04
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for ``aipass init update``'s git-auth provisioning (DPLAN-0281 P2).
@@ -14,6 +14,8 @@ and the independent post-repair verification.
 """
 
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -222,6 +224,29 @@ def test_records_missing_path_from_the_citizens_own_passport(tmp_path: Path) -> 
 
     assert owner_entry(registry_path)["path"] == "src/demo/vera"
     assert result["verified"] is True
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits: Windows still lists a 0o000 directory")
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads a 0o000 directory, so nothing is unreadable"
+)
+def test_an_unreadable_directory_is_named_in_the_refusal_not_reported_as_absent(tmp_path: Path) -> None:
+    # A real permission bit is the only route to an unreadable subtree (template item 10).
+    build_project(tmp_path, owner_path=None)
+    (tmp_path / "src" / "demo" / "writer").mkdir(parents=True)
+    locked = tmp_path / "src" / "demo" / "vera"
+    _write(locked / ".trinity" / "passport.json", {"branch_info": {"branch_name": "VERA"}})
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(GitAuthRefusal) as exc:
+            provision_git_auth(tmp_path)
+    finally:
+        locked.chmod(0o755)
+
+    message = str(exc.value)
+    assert "could not be read" in message
+    assert str(Path("src", "demo", "vera")) in message
+    assert "holds a passport with that branch_name" not in message
 
 
 def test_honest_no_op_when_everything_already_holds(tmp_path: Path) -> None:
