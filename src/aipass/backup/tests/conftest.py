@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- shared pytest fixtures
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
 
-"""Backup test configuration -- ported from skills conftest pattern."""
+"""Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
 
 import os
 import tempfile
@@ -43,9 +43,9 @@ if HANDLER_PKG not in sys.modules:
 def _resync_module_attrs() -> Generator[None, None, None]:
     """Keep parent-package attributes honest after sys.modules surgery.
 
-    _fresh_import (test_drive_pipeline) and _load_module_fresh
-    (test_cli_routing) delete modules from sys.modules and re-import them
-    under mocked dependencies. patch.dict restores the sys.modules DICT at
+    A test that deletes modules from sys.modules and re-imports them under
+    mocked dependencies (in this suite, only test_module_isolation's test_a,
+    which does it on purpose) leaves the parent behind. patch.dict restores the sys.modules DICT at
     exit, but never the parent package's ATTRIBUTE, which keeps pointing at
     the throwaway twin — one that may lack submodule attributes entirely when
     they resolved to sys.modules mocks during its import. The next test then
@@ -53,7 +53,8 @@ def _resync_module_attrs() -> Generator[None, None, None]:
     stale attribute (AttributeError: module ...drive has no attribute
     'client') while importlib walks sys.modules. Only surfaces when an
     unlucky xdist worker runs a polluting module before a victim — CI-only
-    red, invisible in serial runs.
+    red, invisible in serial runs — and only on Python 3.10/3.11: 3.12+
+    mock.patch resolves its target through sys.modules (pkgutil.resolve_name).
 
     After every test: point parent attributes back at the sys.modules entry,
     and drop attributes whose module was evicted from sys.modules entirely so

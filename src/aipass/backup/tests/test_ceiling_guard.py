@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-20
 # Modified: 2026-09-25
 # =============================================
@@ -11,7 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that scan/ceiling and modules/snapshot, versioned, all parse and import
 # seedgo: no-test-needed(documentation) — that check_ceiling and breach methods carry docstrings
-# seedgo: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB's value; DEFAULT_MAX_FILES only as > 0
+# seedgo: no-test-needed(constant) — DEFAULT_MAX_TOTAL_GB and DEFAULT_MAX_FILES values (the latter tested as the limit)
 # seedgo: no-test-needed(stdlib) — the byte count os.path.getsize() returns; its OSError skip is tested here
 
 import json
@@ -42,7 +42,7 @@ def _files(tmp_path: Path, rel_paths: list[str], size: int = 8) -> list[tuple[st
 
 
 class TestCheckCeiling:
-    """check_ceiling measures the filtered set before any copying."""
+    """check_ceiling measures the filtered set and records each refusal in the audit trail."""
 
     def test_under_both_limits_returns_none(self, tmp_path: Path) -> None:
         """A normal project passes and the run proceeds."""
@@ -60,22 +60,7 @@ class TestCheckCeiling:
         assert breach.config_key == "max_backup_files"
 
     def test_breach_is_recorded_in_the_audit_trail(self, tmp_path: Path, mock_infrastructure: Path) -> None:
-        """A refusal lands in backup's own operations stream, its only forensic trace.
-
-        Every test in this file used to wrap check_ceiling in a discarded
-        patch of trail.log_operation, so _log_breach could be deleted whole
-        with all 21 green. The patch was redundant as well as blind:
-        conftest's mock_infrastructure already points AIPASS_TEST_LOG_DIR at a
-        seam beside this test's tmp_path, and trail.log_path() recomputes per
-        call, so the real append lands inside that sandbox and is read back.
-
-        The sandbox is MEASURED off the fixture, never spelled out: it returns
-        <seam>/backup/backup_json and the audit stream is <seam>/backup/logs/
-        operations.jsonl, so both share one parent. Asserting the seam's own
-        address instead broke the day the seam moved out of tmp_path
-        (2026-09-23); asserting the shared parent cannot break that way, and it
-        still refuses an append that escaped to the real branch's logs/.
-        """
+        """A refusal lands in backup's own operations stream inside the mock_infrastructure sandbox."""
         files = _files(tmp_path, [f"t/{i}.o" for i in range(6)])
         breach = check_ceiling(files, {"max_backup_files": 5, "max_backup_size_gb": 10})
         assert breach is not None
@@ -117,19 +102,7 @@ class TestCheckCeiling:
         assert check_ceiling(files, {"max_backup_files": 1000, "max_backup_size_gb": 0}) is None
 
     def test_count_breach_skips_the_stat_pass(self, tmp_path: Path) -> None:
-        """A count breach must not stat the tree it is refusing.
-
-        The whole point is to fail fast: statting 300k files to confirm a
-        refusal already decided is the grind we are preventing.
-
-        The oracle is a ghost entry the byte pass cannot pass over quietly: a
-        stat of a path that is not there raises OSError, and ceiling.py's only
-        answer to that is its "Ceiling measure skipped" info line. No such line
-        means the loop never ran. That reads the product's own logging seam
-        instead of replacing posixpath.getsize for the whole process, so
-        respelling the measurement as Path(...).stat() keeps the claim alive
-        rather than silently retiring it.
-        """
+        """A count breach never stats: the ghost entry logs no "Ceiling measure skipped" line."""
         files = _files(tmp_path, [f"t/{i}.o" for i in range(6)])
         files.append((str(tmp_path / "t" / "ghost.o"), "t/ghost.o"))
 
@@ -154,10 +127,16 @@ class TestCheckCeiling:
         assert check_ceiling(files, {"max_backup_files": 100, "max_backup_size_gb": 10}) is None
 
     def test_defaults_apply_when_config_is_empty(self, tmp_path: Path) -> None:
-        """A config with no ceiling keys still gets the default ceilings."""
-        assert DEFAULT_MAX_FILES > 0
+        """Without max_backup_files a small set passes and one file past DEFAULT_MAX_FILES refuses."""
         files = _files(tmp_path, ["src/a.py"])
         assert check_ceiling(files, {}) is None
+
+        over = [(str(tmp_path / "t" / f"{i}.o"), f"t/{i}.o") for i in range(DEFAULT_MAX_FILES + 1)]
+        breach = check_ceiling(over, {"max_backup_size_gb": 0})
+        assert breach is not None
+        assert breach.reason == "file_count"
+        assert breach.measured == DEFAULT_MAX_FILES + 1
+        assert breach.limit == DEFAULT_MAX_FILES
 
 
 # --- offender naming ---
@@ -189,14 +168,7 @@ class TestOffenderReporting:
         assert breach.offenders[0][0] == "."
 
     def test_detail_lines_name_the_config_escape_hatch(self, tmp_path: Path) -> None:
-        """The operator is told how to raise the ceiling deliberately.
-
-        The two containment checks below both land in the final two lines, so
-        they survive the offender block being deleted -- and naming the
-        directory to add is the module's stated purpose. The line-by-line
-        equalities pin the whole refusal: the heading, the offender row the
-        operator is meant to paste, and the two closing instructions.
-        """
+        """The refusal names the offender row, .backupignore, and the max_backup_files escape hatch."""
         breach = check_ceiling(_files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5})
         assert breach is not None
         text = "\n".join(breach.detail_lines())
@@ -211,13 +183,7 @@ class TestOffenderReporting:
         assert lines[3].startswith("If the project really is this large, raise 'max_backup_files'")
 
     def test_summary_reads_as_a_refusal(self, tmp_path: Path) -> None:
-        """summary() states the measurement and the ceiling.
-
-        Whole-string equality, because '6' in / '5' in cannot tell the
-        measurement from the ceiling: swap the two operands in the f-string
-        and the refusal reads '5 files exceeds the 6-file ceiling' with both
-        containment checks still green.
-        """
+        """summary() states the measurement, then the ceiling, as one exact sentence."""
         breach = check_ceiling(_files(tmp_path, [f"t/{i}.o" for i in range(6)]), {"max_backup_files": 5})
         assert breach is not None
         assert "6" in breach.summary()
@@ -234,10 +200,7 @@ class TestRunRefusal:
     def _project(self, tmp_path: Path, n: int = 40, max_files: int = 5) -> Path:
         """Build a project whose heavy dir is NOT covered by .backupignore.
 
-        Deliberately not named target/ or build/: those are now seeded into
-        every .backupignore, so a fixture using them measures the ignore
-        rule rather than the ceiling. The ceiling exists precisely for the
-        artifact dir nobody has thought of yet.
+        Not named target/ or build/: those are seeded into every .backupignore.
         """
         root = tmp_path / "proj"
         heavy = root / "artifacts" / "obj" / "cache"
@@ -268,10 +231,7 @@ class TestRunRefusal:
 
         # Measured 2026-09-08 on a fresh tree: the refusal DOES leave the
         # snapshot directory behind (setup scaffolds .backup/snapshots before
-        # the ceiling is read) and leaves it completely empty. The old
-        # "does not exist OR holds no blob" spelling could not fail -- the
-        # first clause was false on every run, so only the second was ever
-        # asked, and neither said which world was the real one.
+        # the ceiling is read) and leaves it completely empty.
         dest = build_snapshot_path(str(root))
         assert dest.exists() is True
         assert list(dest.rglob("*")) == []
@@ -291,11 +251,7 @@ class TestRunRefusal:
         assert store.exists() is False
 
     def test_versioned_refuses_a_pre_scanned_set(self, tmp_path: Path) -> None:
-        """The 'all' path hands versioned a pre-scanned list — still measured.
-
-        Before this guard, run_versioned skipped config entirely on the
-        pre_scanned branch, so the orchestrated path was the unguarded one.
-        """
+        """The 'all' path hands versioned a pre-scanned list — still measured."""
 
         root = self._project(tmp_path)
         pre = [(str(p), str(p.relative_to(root))) for p in root.rglob("*") if p.is_file() and ".backup" not in p.parts]
@@ -323,14 +279,7 @@ class TestRunRefusal:
         assert list(dest.rglob("*")) == []
 
     def test_all_refuses_without_re_walking_the_tree(self, tmp_path: Path) -> None:
-        """'all' must refuse on its own shared scan, not delegate to the sub-guards.
-
-        This is what the guard in all.py buys: run_snapshot does its OWN full
-        walk (it takes no pre_scanned), so letting the breach fall through
-        means walking a runaway tree a second time before refusing it. On
-        baud's 33k-file target tree that second walk is the expensive half
-        of a refusal that should cost seconds.
-        """
+        """'all' refuses on its own shared scan and never calls run_snapshot or run_versioned."""
         root = self._project(tmp_path)
         with patch.object(all_mod, "run_snapshot") as snap, patch.object(all_mod, "run_versioned") as ver:
             assert all_mod.handle_command("all", [str(root), "--quiet"]) is True
@@ -352,16 +301,7 @@ class TestSharedScanSeeding:
     """The 'all' shared scan must run against a seeded .backupignore."""
 
     def test_first_run_seeds_ignore_before_the_shared_scan(self, tmp_path: Path) -> None:
-        """A project's FIRST 'all' run must not back up what the seed excludes.
-
-        create_backup_dir() is what writes .backupignore, and it used to run
-        first inside run_snapshot — AFTER 'all' had already taken the shared
-        scan. So on run one, load_spec() read a file that did not exist,
-        returned an empty spec, and handed versioned every path the seed was
-        about to exclude. Live-proven on a fresh Rust project: snapshot
-        skipped target/ correctly while versioned copied it anyway. Both
-        printed "3/3 files checked", which is what hid it.
-        """
+        """A project's FIRST 'all' run keeps seed-excluded artifacts out of the versioned store."""
 
         root = tmp_path / "rustproj"
         (root / "app" / "src-tauri" / "target" / "debug" / "deps").mkdir(parents=True)

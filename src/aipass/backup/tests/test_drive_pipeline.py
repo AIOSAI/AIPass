@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.0
+# Version: 3.0.1
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -29,18 +29,10 @@ from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.path import builder as path_builder
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync
 
-# WHAT THIS FILE KNOWS ABOUT ITS EDGE, measured, and why the product is imported
-# for real here rather than stubbed into sys.modules:
-#
-#   * The upload path publishes to a REAL Google account. Exactly two calls can
-#     reach it -- ``google_client.get_drive_service`` (the OAuth flow) and
-#     ``google_client.api_call_with_retry`` (every request) -- and both are bound
-#     as module attributes of ``handlers/drive/client.py`` at import time, so one
-#     monkeypatch on that one module closes both doors for the whole process.
-#   * ``googleapiclient.http.MediaFileUpload`` opens the local file for a
-#     resumable upload, so it is replaced as well.
-#   * ``sealed_google_edge`` below is autouse: all three are sealed before every
-#     test in this file, and a call that gets through raises rather than dials.
+# The product is imported for real, not stubbed into sys.modules. The upload path
+# publishes to a REAL Google account; conftest's autouse ``sealed_google_edge``
+# seals both doors to it and the media reader before every test, and a call that
+# gets through raises rather than dials.
 #
 # Everything else in the pipeline is exercised for real. The tracker writes to
 # ``<project>/.backup/drive_tracker.json``, which is under ``tmp_path``, and the
@@ -48,7 +40,7 @@ from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, dr
 
 
 @pytest.fixture
-def drive_api(sealed_google_edge, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+def drive_api(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """The Drive request edge, recorded: every request the client would send lands here."""
     edge = MagicMock(name="api_call_with_retry", return_value=None)
     monkeypatch.setattr(drive_client, "api_call_with_retry", edge)
@@ -100,7 +92,7 @@ def _install_offline_client(
 class TestDriveClient:
     """Tests for DriveClient -- auth, folders, file lookup."""
 
-    def test_authenticate_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_authenticate_keeps_the_gateway_service_and_returns_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A service from the gateway is kept, and authenticate() says so."""
         service = MagicMock(name="drive_service")
         monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=service))
@@ -110,7 +102,11 @@ class TestDriveClient:
         assert client._drive_service is service
         assert client.last_error is None
 
-    def test_authenticate_no_api(self, monkeypatch: pytest.MonkeyPatch, recorded_logger: MagicMock) -> None:
+    def test_authenticate_without_google_libraries_refuses_at_error_with_the_install_hint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        recorded_logger: MagicMock,
+    ) -> None:
         """GOOGLE_API_AVAILABLE=False: refused at ERROR, carrying the install hint."""
         monkeypatch.setattr(drive_client, "GOOGLE_API_AVAILABLE", False)
         client = drive_client.DriveClient()
@@ -121,7 +117,7 @@ class TestDriveClient:
         assert "pip install" in recorded_logger.error.call_args[0][0]
         recorded_logger.warning.assert_not_called()
 
-    def test_authenticate_service_returns_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_authenticate_fails_when_the_gateway_returns_no_service(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A gateway that hands back None is a failure, not a client with no service."""
         monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=None))
         client = drive_client.DriveClient()
@@ -130,7 +126,11 @@ class TestDriveClient:
         assert client.last_error == "get_drive_service returned None"
         assert client.drive_service is None
 
-    def test_authenticate_exception(self, monkeypatch: pytest.MonkeyPatch, recorded_logger: MagicMock) -> None:
+    def test_authenticate_reports_a_raising_gateway_as_a_warning(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        recorded_logger: MagicMock,
+    ) -> None:
         """A raising gateway is reported, kept in last_error, and stays a WARNING."""
         monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(side_effect=RuntimeError("boom")))
         client = drive_client.DriveClient()
@@ -183,7 +183,7 @@ class TestDriveClient:
         recorded_logger.warning.assert_called_once()
         recorded_logger.error.assert_not_called()
 
-    def test_drive_service_property_main(self) -> None:
+    def test_drive_service_is_the_main_service_when_no_thread_local_is_set(self) -> None:
         """drive_service returns the main service when no thread-local is set."""
         client = drive_client.DriveClient()
         service = MagicMock(name="main_service")
@@ -191,7 +191,7 @@ class TestDriveClient:
 
         assert client.drive_service is service
 
-    def test_drive_service_property_thread_local(self) -> None:
+    def test_drive_service_prefers_the_thread_local_service_over_the_main_one(self) -> None:
         """A thread-local service wins over the main one -- that is what keeps threads apart."""
         client = drive_client.DriveClient()
         main = MagicMock(name="main_service")
@@ -201,7 +201,7 @@ class TestDriveClient:
 
         assert client.drive_service is thread
 
-    def test_get_or_create_backup_folder_existing(self, drive_api: MagicMock) -> None:
+    def test_backup_folder_found_by_search_is_used_without_a_create(self, drive_api: MagicMock) -> None:
         """A search that finds the root folder uses it and never asks for a create."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -211,7 +211,7 @@ class TestDriveClient:
         assert client.backup_folder_id == "folder_123"
         assert drive_api.call_count == 1
 
-    def test_get_or_create_backup_folder_new(self, drive_api: MagicMock) -> None:
+    def test_backup_folder_not_found_is_created_then_verified(self, drive_api: MagicMock) -> None:
         """An empty search creates the root folder, then verifies it is reachable."""
         service = MagicMock(name="drive_service")
         client = drive_client.DriveClient()
@@ -231,7 +231,7 @@ class TestDriveClient:
         assert drive_api.call_count == 3
         service.files.return_value.get.assert_called_once_with(fileId="new_folder_456", fields="id,trashed")
 
-    def test_get_or_create_backup_folder_created_but_not_accessible(self, drive_api: MagicMock) -> None:
+    def test_backup_folder_created_but_unverified_is_refused_with_last_error(self, drive_api: MagicMock) -> None:
         """A created folder that does not verify is refused: no id, and last_error names it."""
         service = MagicMock(name="drive_service")
         client = drive_client.DriveClient()
@@ -247,7 +247,7 @@ class TestDriveClient:
         assert client.last_error == "Backup folder unreachable_789 created but not accessible"
         assert drive_api.call_count == 3
 
-    def test_get_or_create_backup_folder_no_service(self, drive_api: MagicMock) -> None:
+    def test_backup_folder_without_a_service_is_none_and_sends_no_request(self, drive_api: MagicMock) -> None:
         """With no service there is no folder and no request -- not a crash."""
         client = drive_client.DriveClient()
 
@@ -255,7 +255,7 @@ class TestDriveClient:
         assert client.backup_folder_id is None
         drive_api.assert_not_called()
 
-    def test_get_or_create_project_folder(self, drive_api: MagicMock) -> None:
+    def test_project_folder_found_is_returned_and_cached_by_project_name(self, drive_api: MagicMock) -> None:
         """A found project folder is returned and cached under its project name."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -265,7 +265,7 @@ class TestDriveClient:
         assert client.get_or_create_project_folder("myproject") == "proj_folder_789"
         assert client.project_folder_cache["myproject"] == "proj_folder_789"
 
-    def test_get_or_create_project_folder_cached(self, drive_api: MagicMock) -> None:
+    def test_project_folder_cached_costs_one_verify_and_no_search(self, drive_api: MagicMock) -> None:
         """A cached project folder costs one verify and no search."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -275,7 +275,7 @@ class TestDriveClient:
         assert client.get_or_create_project_folder("cached_proj") == "cached_id"
         assert drive_api.call_count == 1
 
-    def test_get_or_create_nested_folder(self, drive_api: MagicMock) -> None:
+    def test_nested_folder_is_created_and_cached_segment_by_segment(self, drive_api: MagicMock) -> None:
         """A nested path is created segment by segment, and every segment is cached."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -297,7 +297,7 @@ class TestDriveClient:
         assert client.project_folder_cache["parent_id:a"] == "folder_2"
         assert client.project_folder_cache["parent_id:a/b"] == "folder_4"
 
-    def test_find_existing_file_found(self, drive_api: MagicMock) -> None:
+    def test_find_existing_file_returns_the_drive_entry_when_present(self, drive_api: MagicMock) -> None:
         """A file that is in the folder comes back with its Drive id."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -305,7 +305,7 @@ class TestDriveClient:
 
         assert client._find_existing_file("test.txt", "parent_folder") == {"id": "file_abc", "name": "test.txt"}
 
-    def test_find_existing_file_not_found(self, drive_api: MagicMock) -> None:
+    def test_find_existing_file_returns_none_on_an_empty_search(self, drive_api: MagicMock) -> None:
         """An empty result is None, never an invented entry."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -313,7 +313,7 @@ class TestDriveClient:
 
         assert client._find_existing_file("missing.txt", "parent_folder") is None
 
-    def test_verify_folder_id_exists(self, drive_api: MagicMock) -> None:
+    def test_verify_folder_id_accepts_a_live_untrashed_folder(self, drive_api: MagicMock) -> None:
         """A folder that exists and is not trashed verifies."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -321,7 +321,7 @@ class TestDriveClient:
 
         assert client._verify_folder_id("folder_ok") is True
 
-    def test_verify_folder_id_trashed(self, drive_api: MagicMock) -> None:
+    def test_verify_folder_id_rejects_a_trashed_folder(self, drive_api: MagicMock) -> None:
         """A trashed folder does NOT verify -- uploading into it loses the files."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -329,7 +329,7 @@ class TestDriveClient:
 
         assert client._verify_folder_id("folder_trash") is False
 
-    def test_api_call_success(self, drive_api: MagicMock) -> None:
+    def test_api_call_hands_the_request_to_the_gateway_with_a_budget_of_three(self, drive_api: MagicMock) -> None:
         """_api_call hands the request straight to the gateway, with the retry budget."""
         client = drive_client.DriveClient()
         client._drive_service = MagicMock(name="drive_service")
@@ -365,14 +365,14 @@ class TestDriveClient:
 class TestDriveTracker:
     """Tests for drive tracker -- mtime+size dedup."""
 
-    def test_check_needs_upload_new_file(self, tmp_path: Path) -> None:
+    def test_check_needs_upload_is_true_for_an_untracked_file(self, tmp_path: Path) -> None:
         """A file the tracker has never seen needs upload."""
         test_file = tmp_path / "new_file.txt"
         test_file.write_text("hello", encoding="utf-8")
 
         assert drive_tracker.check_needs_upload({}, test_file, tmp_path) is True
 
-    def test_check_needs_upload_unchanged(self, tmp_path: Path) -> None:
+    def test_check_needs_upload_is_false_when_mtime_and_size_match(self, tmp_path: Path) -> None:
         """Matching mtime AND size is the whole dedup rule: no upload."""
         test_file = tmp_path / "unchanged.txt"
         test_file.write_text("same", encoding="utf-8")
@@ -388,7 +388,7 @@ class TestDriveTracker:
 
         assert drive_tracker.check_needs_upload(tracker, test_file, tmp_path) is False
 
-    def test_check_needs_upload_changed_size(self, tmp_path: Path) -> None:
+    def test_check_needs_upload_is_true_when_the_size_changed(self, tmp_path: Path) -> None:
         """A size that no longer matches needs upload."""
         test_file = tmp_path / "changed.txt"
         test_file.write_text("changed content", encoding="utf-8")
@@ -403,7 +403,7 @@ class TestDriveTracker:
 
         assert drive_tracker.check_needs_upload(tracker, test_file, tmp_path) is True
 
-    def test_check_needs_upload_changed_mtime(self, tmp_path: Path) -> None:
+    def test_check_needs_upload_is_true_when_the_mtime_changed(self, tmp_path: Path) -> None:
         """An mtime that no longer matches needs upload."""
         test_file = tmp_path / "mtime.txt"
         test_file.write_text("data", encoding="utf-8")
@@ -418,7 +418,7 @@ class TestDriveTracker:
 
         assert drive_tracker.check_needs_upload(tracker, test_file, tmp_path) is True
 
-    def test_update_entry(self, tmp_path: Path) -> None:
+    def test_update_entry_records_the_drive_id_and_stat_under_the_relative_path(self, tmp_path: Path) -> None:
         """An uploaded file is recorded under its relative path with the stat that dedups it."""
         tracker: dict = {}
         test_file = tmp_path / "uploaded.txt"
@@ -432,7 +432,7 @@ class TestDriveTracker:
         assert entry["local_mtime"] == test_file.stat().st_mtime
         assert "last_sync" in entry
 
-    def test_clean_tracker(self) -> None:
+    def test_clean_tracker_removes_and_names_the_entries_whose_file_is_gone(self) -> None:
         """Entries whose file is gone are removed and named back to the caller."""
         tracker = {
             "exists.txt": {"drive_id": "a"},
@@ -445,7 +445,7 @@ class TestDriveTracker:
         assert sorted(removed) == ["also_gone.txt", "gone.txt"]
         assert tracker == {"exists.txt": {"drive_id": "a"}}
 
-    def test_get_stats(self) -> None:
+    def test_get_stats_counts_every_entry_and_samples_at_most_five(self) -> None:
         """Stats count every entry and sample at most five of them."""
         tracker = {name: {"drive_id": name} for name in ("a", "b", "c", "d", "e", "f", "g")}
 
@@ -454,11 +454,11 @@ class TestDriveTracker:
         assert stats["total"] == 7
         assert len(stats["sample"]) == 5
 
-    def test_get_stats_empty(self) -> None:
+    def test_get_stats_on_an_empty_tracker_is_zero_and_an_empty_sample(self) -> None:
         """An empty tracker reports zero and an empty sample, not None."""
         assert drive_tracker.get_stats({}) == {"total": 0, "sample": {}}
 
-    def test_clear_all(self, tmp_path: Path) -> None:
+    def test_clear_all_leaves_an_empty_tracker_document_instead_of_deleting_it(self, tmp_path: Path) -> None:
         """clear_all leaves an EMPTY tracker document, not a deleted file."""
         drive_tracker.save_tracker(str(tmp_path), {"file.txt": {"drive_id": "abc"}})
 
@@ -466,7 +466,7 @@ class TestDriveTracker:
         written = tmp_path / ".backup" / drive_tracker.TRACKER_FILENAME
         assert json.loads(written.read_text(encoding="utf-8")) == {}
 
-    def test_load_tracker(self, tmp_path: Path) -> None:
+    def test_load_tracker_reads_the_seeded_file_and_is_empty_when_unseeded(self, tmp_path: Path) -> None:
         """An unseeded project loads the EMPTY tracker, from .backup/drive_tracker.json."""
         # isinstance(result, dict) alone was satisfied by a tracker that had
         # invented entries, which for this handler is the dangerous direction: a
@@ -479,7 +479,7 @@ class TestDriveTracker:
         assert drive_tracker.load_tracker(str(tmp_path)) == seeded
         assert drive_tracker.load_tracker(str(tmp_path / "unseeded")) == {}
 
-    def test_save_tracker(self, tmp_path: Path) -> None:
+    def test_save_tracker_writes_json_under_the_projects_backup_dir(self, tmp_path: Path) -> None:
         """The tracker lands on disk as JSON, under the project's .backup/."""
         drive_tracker.save_tracker(str(tmp_path), {"file.txt": {"drive_id": "abc"}})
 
@@ -495,7 +495,11 @@ class TestDriveTracker:
 class TestDriveUpload:
     """Tests for drive upload engine."""
 
-    def test_upload_single_file_new(self, tmp_path: Path, drive_api: MagicMock) -> None:
+    def test_upload_single_file_creates_an_untracked_file_and_records_its_id(
+        self,
+        tmp_path: Path,
+        drive_api: MagicMock,
+    ) -> None:
         """A file with no tracked id is CREATED, and the new id lands in the tracker."""
         client = drive_client.DriveClient()
         service = MagicMock(name="drive_service")
@@ -510,7 +514,11 @@ class TestDriveUpload:
         service.files.return_value.update.assert_not_called()
         assert client.file_tracker["hello.py"]["drive_id"] == "new_file_id"
 
-    def test_upload_single_file_update(self, tmp_path: Path, drive_api: MagicMock) -> None:
+    def test_upload_single_file_updates_a_tracked_file_in_place_instead_of_creating(
+        self,
+        tmp_path: Path,
+        drive_api: MagicMock,
+    ) -> None:
         """A file with a tracked id is UPDATED in place, never created a second time."""
         client = drive_client.DriveClient()
         service = MagicMock(name="drive_service")
@@ -526,14 +534,18 @@ class TestDriveUpload:
         service.files.return_value.create.assert_not_called()
         assert service.files.return_value.update.call_args.kwargs["fileId"] == "existing_drive_id"
 
-    def test_upload_single_file_missing(self, tmp_path: Path, drive_api: MagicMock) -> None:
+    def test_upload_single_file_refuses_a_missing_file_before_any_request(
+        self,
+        tmp_path: Path,
+        drive_api: MagicMock,
+    ) -> None:
         """A file that is not there is refused before any folder is touched."""
         client = drive_client.DriveClient()
 
         assert drive_upload.upload_single_file(client, tmp_path / "ghost.txt", "testproj", tmp_path) is False
         drive_api.assert_not_called()
 
-    def test_upload_batch_empty(self, tmp_path: Path, drive_api: MagicMock) -> None:
+    def test_upload_batch_of_nothing_succeeds_without_a_request(self, tmp_path: Path, drive_api: MagicMock) -> None:
         """An empty list is a success that costs nothing and asks Drive for nothing."""
         client = drive_client.DriveClient()
 
@@ -542,7 +554,7 @@ class TestDriveUpload:
         assert result == {"success": True, "uploaded": 0, "failed": 0}
         drive_api.assert_not_called()
 
-    def test_upload_batch_progress(
+    def test_upload_batch_advances_progress_once_per_file_and_tracks_each(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -583,7 +595,11 @@ class TestDriveUpload:
         assert result["uploaded"] == 3 and result["failed"] == 0
         assert sorted(tracker) == ["file_0.txt", "file_1.txt", "file_2.txt"]
 
-    def test_upload_single_file_no_media(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_upload_single_file_without_media_upload_fails_and_tracks_nothing(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Without MediaFileUpload there is no upload, and no half-written tracker entry."""
         monkeypatch.setattr(drive_upload, "MEDIA_UPLOAD_AVAILABLE", False)
         client = drive_client.DriveClient()
@@ -602,17 +618,7 @@ class TestDriveUpload:
 
 
 class TestDriveDestinationPath:
-    """Tests for build_drive_path -- the layout upload.py creates, written as one path.
-
-    The lane never holds this path: it walks folder IDs. The root folder comes
-    from ``get_or_create_backup_folder`` (client.py:150-227, named
-    BACKUP_FOLDER_NAME), the project folder from
-    ``get_or_create_project_folder`` (upload.py:67), the parents of the
-    store-relative path from ``get_or_create_nested_folder`` (upload.py:78-83),
-    and the leaf from the create body's ``"name": local_file.name``
-    (upload.py:122-125). These pins are pure computation -- no auth, no upload,
-    no tracker file -- so the Google edge is never approached.
-    """
+    """build_drive_path: <BACKUP_FOLDER_NAME>/<project dir name>/<store-relative path>, pure computation."""
 
     def test_drive_path_opens_with_the_root_and_project_folders_the_lane_creates(self, tmp_path: Path) -> None:
         """A store-root file lands under <root folder>/<project dir name>/, not at the Drive root."""
@@ -658,7 +664,11 @@ class TestDriveDestinationPath:
 class TestDriveTest:
     """Tests for drive connectivity test handler."""
 
-    def test_connectivity_success(self, monkeypatch: pytest.MonkeyPatch, drive_api: MagicMock) -> None:
+    def test_connectivity_passes_and_names_the_folder_it_reached(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        drive_api: MagicMock,
+    ) -> None:
         """Auth plus folder access is a pass, and it names the folder it reached."""
         service = MagicMock(name="drive_service")
         monkeypatch.setattr(drive_client, "get_drive_service", MagicMock(return_value=service))
@@ -668,7 +678,7 @@ class TestDriveTest:
 
         assert result == {"success": True, "folder_id": "folder_ok", "error": None}
 
-    def test_connectivity_auth_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_connectivity_stops_at_auth_and_reports_the_clients_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A failed auth stops at step one and reports the client's own error."""
         monkeypatch.setattr(
             drive_client,
@@ -682,7 +692,11 @@ class TestDriveTest:
         assert result["error"] == "No credentials"
         assert result["folder_id"] is None
 
-    def test_connectivity_folder_fail(self, monkeypatch: pytest.MonkeyPatch, drive_api: MagicMock) -> None:
+    def test_connectivity_fails_with_the_fallback_reason_when_folder_access_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        drive_api: MagicMock,
+    ) -> None:
         """Auth can pass and folder access still fail -- that is a FAIL with the fallback reason."""
         monkeypatch.setattr(
             drive_client,
@@ -707,22 +721,21 @@ class TestDriveSync:
     """Tests for drive sync orchestrator module."""
 
     @staticmethod
-    def _store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
-        """A project with a versioned store, and the product pointed at it."""
+    def _store(tmp_path: Path) -> tuple[Path, Path]:
+        """A project with an empty versioned store where the real builder looks for it."""
         project = tmp_path / "project"
         store = project / ".backup" / "versioned"
         store.mkdir(parents=True)
-        monkeypatch.setattr(drive_sync, "build_versioned_store", lambda project_root: store)
         return project, store
 
-    def test_run_drive_sync_no_files(
+    def test_run_drive_sync_on_an_empty_store_uploads_nothing_and_saves_no_tracker(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         uploads: list,
     ) -> None:
         """An empty store is a success that uploads nothing and saves no tracker."""
-        project, _store = self._store(tmp_path, monkeypatch)
+        project, _store = self._store(tmp_path)
         _install_offline_client(monkeypatch)
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
@@ -732,7 +745,7 @@ class TestDriveSync:
         assert uploads == []
         assert not (project / ".backup" / drive_tracker.TRACKER_FILENAME).exists()
 
-    def test_run_drive_sync_auth_failure(
+    def test_run_drive_sync_stops_on_a_failed_auth_before_any_upload(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -749,7 +762,7 @@ class TestDriveSync:
         assert result["error"] == "No creds"
         assert uploads == []
 
-    def test_run_drive_sync_no_store(
+    def test_run_drive_sync_names_a_missing_versioned_store_and_uploads_nothing(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -758,9 +771,8 @@ class TestDriveSync:
         """A missing versioned store is named back, and nothing is uploaded."""
         project = tmp_path / "project"
         project.mkdir()
-        missing = tmp_path / "nonexistent"
+        missing = project / ".backup" / "versioned"
         _install_offline_client(monkeypatch)
-        monkeypatch.setattr(drive_sync, "build_versioned_store", lambda project_root: missing)
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
 
@@ -768,14 +780,14 @@ class TestDriveSync:
         assert result["error"] == f"Versioned store not found: {missing}"
         assert uploads == []
 
-    def test_run_drive_sync_with_files(
+    def test_run_drive_sync_hands_every_untracked_file_to_one_upload_batch(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
         uploads: list,
     ) -> None:
         """Every untracked file in the store is handed to the upload engine, once."""
-        project, store = self._store(tmp_path, monkeypatch)
+        project, store = self._store(tmp_path)
         for index in range(3):
             (store / f"file_{index}.txt").write_text(f"content {index}", encoding="utf-8")
         _install_offline_client(monkeypatch)
@@ -794,7 +806,7 @@ class TestDriveSync:
         uploads: list,
     ) -> None:
         """Files matching .backupignore are excluded from the upload list."""
-        project, store = self._store(tmp_path, monkeypatch)
+        project, store = self._store(tmp_path)
         for rel in (
             "src/app.py/app.py",
             "node_modules/pkg/index.js/index.js",
@@ -820,7 +832,7 @@ class TestDriveSync:
         # The store is re-filtered through load_spec, so the built-in *.tmp floor
         # reaches copies made before it existed -- for a .backupignore that never
         # names *.tmp, which is every one seeded before the rule.
-        project, store = self._store(tmp_path, monkeypatch)
+        project, store = self._store(tmp_path)
         for rel in (
             "data_json/state.json/state.json",
             "data_json/tmpab12cd34.tmp/tmpab12cd34.tmp",
@@ -837,7 +849,11 @@ class TestDriveSync:
         assert result["total"] == 1
         assert [f.relative_to(store).as_posix() for f in uploads[0]] == ["data_json/state.json/state.json"]
 
-    def test_handle_command_help(self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_drive_sync_help_flag_prints_usage_and_never_runs_the_sync(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """`drive_sync --help` describes the run and never performs it."""
         ran: list = []
         monkeypatch.setattr(drive_sync, "run_drive_sync", lambda *args, **kwargs: ran.append(args))
@@ -861,7 +877,7 @@ class TestDriveSync:
         # the upload at all. build_versioned_store is NOT patched here -- the
         # real builder already answers <project>/.backup/versioned, which is
         # inside tmp_path, so the product's own path code runs.
-        # The Google edge is sealed by the autouse fixture above, the client is
+        # The Google edge is sealed by conftest's autouse seal, the client is
         # a MagicMock, and upload_batch is the recorder below: nothing dials.
         def _seed(name: str) -> Path:
             """A project whose versioned store holds one file to upload."""
@@ -893,7 +909,7 @@ class TestDriveSync:
         # either parse and the first row collapses onto the second.
         assert handed == [("renamed", "nightly"), ("plain", "")], f"the flags did not reach the upload: {handed!r}"
 
-    def test_handle_command_no_args(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_sync_no_args_names_the_module_and_its_handlers(self, capsys: pytest.CaptureFixture) -> None:
         """No args names the module and the handlers behind it."""
         assert drive_sync.handle_command("drive_sync", []) is True
 
@@ -901,7 +917,7 @@ class TestDriveSync:
         assert "drive_sync Module" in printed
         assert "Handlers: drive/client, drive/upload, drive/tracker" in printed
 
-    def test_handle_command_wrong_command(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_sync_declines_a_foreign_command_in_silence(self, capsys: pytest.CaptureFixture) -> None:
         """A command that is not ours is declined in silence."""
         assert drive_sync.handle_command("wrong", []) is False
         assert capsys.readouterr().out == ""
@@ -915,7 +931,11 @@ class TestDriveSync:
 class TestDriveCheckModule:
     """Tests for drive_check module."""
 
-    def test_handle_command_primary(self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_drive_check_no_args_introspects_without_running_the_check(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """No args introspects; it must not authenticate against the real account."""
         ran: list = []
         monkeypatch.setattr(drive_check, "run_drive_check", lambda: ran.append(1))
@@ -927,10 +947,14 @@ class TestDriveCheckModule:
         assert "drive_check Module" in printed
         assert "Handlers: drive/client, drive/test" in printed
 
-    def test_handle_command_help(self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_drive_check_help_flag_anywhere_prints_usage_and_never_runs_the_check(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A help flag anywhere in the sequence explains instead of making a live call."""
-        # The default branch runs the check for ANY unrecognised first arg, so
-        # 'drive_check foo --help' made a live Drive auth call (proven 2026-08-13).
+        # 'run --help' opens with a real verb: only the whole-sequence screen
+        # keeps it from reaching run_drive_check.
         ran: list = []
         monkeypatch.setattr(drive_check, "run_drive_check", lambda: ran.append(1))
 
@@ -939,14 +963,19 @@ class TestDriveCheckModule:
 
         printed = capsys.readouterr().out
         assert ran == []
-        assert printed.count("drive_check Module") == 2
+        # The usage line is print_help's own; the introspection header prints on other paths too.
+        assert printed.count("drive_check run — test Drive auth and folder access") == 2
 
-    def test_handle_command_wrong(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_check_declines_a_foreign_command_in_silence(self, capsys: pytest.CaptureFixture) -> None:
         """A command that is not ours is declined in silence."""
         assert drive_check.handle_command("wrong", []) is False
         assert capsys.readouterr().out == ""
 
-    def test_run_drive_check_success(self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_run_drive_check_pass_prints_the_folder_it_reached(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A passing probe is reported to the user with the folder it reached."""
         _install_offline_client(monkeypatch)
         monkeypatch.setattr(
@@ -984,7 +1013,7 @@ class TestDriveCheckModule:
 class TestDriveStatsModule:
     """Tests for drive_stats module."""
 
-    def test_handle_command_primary(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_stats_no_args_names_the_module_and_its_handler(self, capsys: pytest.CaptureFixture) -> None:
         """No args names the module and the handler behind it."""
         assert drive_stats.handle_command("drive_stats", []) is True
 
@@ -992,7 +1021,11 @@ class TestDriveStatsModule:
         assert "drive_stats Module" in printed
         assert "Handlers: drive/tracker" in printed
 
-    def test_handle_command_help(self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_drive_stats_help_flag_prints_usage_and_never_reads_a_tracker(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A help flag prints the usage line and never reads a tracker."""
         ran: list = []
         monkeypatch.setattr(drive_stats, "run_drive_stats", lambda project_root: ran.append(project_root))
@@ -1003,12 +1036,12 @@ class TestDriveStatsModule:
         assert ran == []
         assert "Usage: drive_stats <project_root>" in printed
 
-    def test_handle_command_wrong(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_stats_declines_a_foreign_command_in_silence(self, capsys: pytest.CaptureFixture) -> None:
         """A command that is not ours is declined in silence."""
         assert drive_stats.handle_command("wrong", []) is False
         assert capsys.readouterr().out == ""
 
-    def test_run_drive_stats(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_run_drive_stats_prints_the_tracker_on_disk(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
         """The stats a user sees come from the tracker file on disk."""
         drive_tracker.save_tracker(str(tmp_path), {"a.txt": {"drive_id": "x"}})
 
@@ -1022,7 +1055,10 @@ class TestDriveStatsModule:
 class TestDriveClearModule:
     """Tests for drive_clear module."""
 
-    def test_handle_command_primary(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_clear_no_args_names_the_module_and_says_force_is_required(
+        self,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
         """No args names the module and says the clear needs --force."""
         assert drive_clear.handle_command("drive_clear", []) is True
 
@@ -1030,7 +1066,11 @@ class TestDriveClearModule:
         assert "drive_clear Module" in printed
         assert "Handlers: drive/tracker (requires --force)" in printed
 
-    def test_handle_command_help(self, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_drive_clear_help_flag_prints_usage_and_clears_nothing(
+        self,
+        capsys: pytest.CaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """A help flag prints the usage line and clears nothing."""
         ran: list = []
         monkeypatch.setattr(drive_clear, "run_drive_clear", lambda project_root, force=False: ran.append(project_root))
@@ -1041,12 +1081,16 @@ class TestDriveClearModule:
         assert ran == []
         assert "Usage: drive_clear <project_root> --force" in printed
 
-    def test_handle_command_wrong(self, capsys: pytest.CaptureFixture) -> None:
+    def test_drive_clear_declines_a_foreign_command_in_silence(self, capsys: pytest.CaptureFixture) -> None:
         """A command that is not ours is declined in silence."""
         assert drive_clear.handle_command("wrong", []) is False
         assert capsys.readouterr().out == ""
 
-    def test_run_drive_clear_no_force(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_run_drive_clear_without_force_leaves_the_tracker_untouched(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
         """Without --force the tracker is left exactly as it was."""
         drive_tracker.save_tracker(str(tmp_path), {"a.txt": {"drive_id": "x"}})
 
@@ -1055,7 +1099,11 @@ class TestDriveClearModule:
         assert "Use --force to confirm tracker deletion." in capsys.readouterr().out
         assert drive_tracker.load_tracker(str(tmp_path)) == {"a.txt": {"drive_id": "x"}}
 
-    def test_run_drive_clear_with_force(self, tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    def test_run_drive_clear_with_force_empties_the_tracker_and_says_so(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
         """With force the tracker document is emptied on disk and the user is told."""
         drive_tracker.save_tracker(str(tmp_path), {"a.txt": {"drive_id": "x"}})
 
@@ -1066,12 +1114,12 @@ class TestDriveClearModule:
 
 
 # ---------------------------------------------------------------------------
-# TestThreadSafety — concurrent folder operations
+# TestThreadSafety — folder get-or-create: concurrency, short-circuit, tracker reset
 # ---------------------------------------------------------------------------
 
 
 class TestThreadSafety:
-    """Verify folder get-or-create is thread-safe (GOLD lock pattern)."""
+    """Folder get-or-create: one create under concurrent callers, the verify short-circuit, the tracker reset."""
 
     def test_concurrent_project_folder_single_create(self, drive_api: MagicMock) -> None:
         """N threads calling get_or_create_project_folder -> exactly 1 create."""
@@ -1147,9 +1195,8 @@ class TestThreadSafety:
         assert client.get_or_create_backup_folder() == "brand_new_folder"
         assert client.file_tracker == {}
         assert client.project_folder_cache == {}
-        # Search, create, then the verify at client.py:213-216 -- the reset only
-        # stands if the folder it reset for verified, so the third call is part
-        # of the claim, not spare change.
+        # Search, create, then the verify at client.py:213-216 -- the reset path
+        # still verifies the new folder, so the third call is part of the claim.
         assert drive_api.call_count == 3
 
     def test_tracker_not_reset_on_new_folder_empty_tracker(self, drive_api: MagicMock) -> None:

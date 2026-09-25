@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — guard shape, safe path helper, both worlds
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-31
 # Modified: 2026-09-25
 # =============================================
@@ -42,8 +42,6 @@ from aipass.backup.apps.handlers.path import module_paths
 # unguarded realpath at inspect.py:1009.
 # Every probe rides a string pseudo-frame (a -c child), never stdin: linecache
 # caches stdin and the probe would report green while lying.
-# Measured on this branch 2026-08-31: 57/57 modules red in both worlds before the
-# cure, 0/57 after.
 
 
 #: The real guard file. It is loaded from disk rather than imported by name
@@ -67,10 +65,8 @@ def _missing_sources(measured: "Iterable[str]") -> list[str]:
 def _compile_sites(source: str) -> list[str]:
     """Names of the functions containing a ``compile()`` call.
 
-    A plain function, fed a synthetic file it must convict, rather than a loop
-    inside the assertion -- a scanner never shown a guilty input is not known to
-    work (seedgo, round 10). The invariant it serves: exactly ONE mint point, so
-    the coverage guard in ``_compile_as`` cannot be walked around by a new site.
+    The invariant it serves: exactly ONE mint point, so the coverage guard in
+    ``_compile_as`` cannot be walked around by a new site.
     """
     sites = []
     for parent in ast.walk(ast.parse(source)):
@@ -91,7 +87,7 @@ def _compile_as(caller_file: str, guard) -> None:
     resolving a RELATIVE one against the cwd at trace time -- so "is this name
     inside the source tree" is a question about ``abspath``, not about the
     literal. A fabricated name that lands inside the tree and has no file makes
-    the report step exit 1 with "No source for code" (round 12).
+    the report step exit 1 with "No source for code".
     """
     if not caller_file.startswith("<"):
         landed = Path(os.path.abspath(caller_file))
@@ -102,18 +98,10 @@ def _compile_as(caller_file: str, guard) -> None:
 
 
 def _fence_verdict(caller_file: str, guard) -> str | None:
-    """Run the fence as ``caller_file`` and RETURN its decision.
+    """Run the fence as ``caller_file``: None when admitted, the ImportError text when refused.
 
-    The admit-side units used to be bare calls: run it, and if nothing raised
-    the test passed. That is a real property but an invisible one -- no oracle
-    a reader (or the v5 no_oracle checker) can see, and the day the fence starts
-    admitting everything the unit stays green for the same reason it was green
-    before. Returning the verdict lets the admit side assert a value the way
-    the refuse side already asserts a raise.
-
-    Returns None when the caller was admitted, or the ImportError text when it
-    was refused. AssertionError from ``_compile_as``'s mint guard is NOT caught:
-    that is the coverage invariant firing, not a fence decision.
+    AssertionError from ``_compile_as``'s mint guard is NOT caught: that is the
+    coverage invariant firing, not a fence decision.
     """
     try:
         _compile_as(caller_file, guard)
@@ -229,13 +217,10 @@ def _run_probe(world: str, targets: list[str] | None = None) -> dict:
 
 
 class TestTheInjectionCanSayNo:
-    """A positive control needs its own negative control.
-
-    A CONTROL_LIVE probe that cannot fail turns every pin below vacuously green.
-    """
+    """The CONTROL world must bite, or world A's pin below is vacuously green."""
 
     def test_the_denial_actually_bites(self) -> None:
-        """Under the world-A injection, a plain resolve() must raise."""
+        """The CONTROL world (world A's injection) makes a relative resolve() raise."""
         assert _run_probe("CONTROL")["control"] == "BITES"
 
     def test_healthy_world_imports_everything(self) -> None:
@@ -255,20 +240,10 @@ class TestImportsSurviveADeadCwd:
 class _ResolveDeniedPath(Path):
     """A ``Path`` whose ``resolve()`` refuses, standing in for the dead cwd.
 
-    THE PRODUCT'S OWN SEAM, and the reason these tests no longer reach into
-    ``pathlib``. ``module_paths`` does ``from pathlib import Path``, so
-    ``module_paths.Path`` is the branch's binding: installing this over it
-    denies ``resolve()`` to the module under test and to nothing else. The
-    earlier spelling, ``monkeypatch.setattr(Path, "resolve", ...)``, replaced
-    the method on the pathlib class itself -- for pytest's capture, for
-    coverage, for every module alive in the process while the test ran -- and
-    pinned the product's SPELLING of the call rather than its behaviour: move
-    ``module_file`` to ``os.path.realpath`` and the degradation stops being
-    tested with nothing going red.
-
-    ``module_file``'s fallback, ``Path(os.path.abspath(dunder_file))``, is
-    reached through the same binding, so what it returns is one of these. It is
-    a real ``Path`` in every other respect and compares equal to one.
+    Installed over ``module_paths.Path`` (the module's own ``from pathlib import
+    Path`` binding), it denies ``resolve()`` to the module under test and to
+    nothing else. ``module_file``'s fallback is reached through the same
+    binding, so it returns one of these: a real ``Path`` in every other respect.
     """
 
     def resolve(self, strict: bool = False) -> Path:
@@ -391,8 +366,7 @@ class TestGuardNeverCallsInspectStack:
         assert _inspect_stack_calls(source) == []
 
     def test_the_guard_docstring_really_does_name_it(self) -> None:
-        """Guards the negative control above: if the prose ever stops mentioning
-        inspect.stack(), the docstring control is no longer testing anything."""
+        """The guard's prose names inspect.stack(), so the docstring control above tests something."""
         assert "inspect.stack()" in GUARD_FILE.read_text(encoding="utf-8")
 
 
@@ -403,9 +377,8 @@ def _fake_tree(tmp_path: Path) -> Path:
     and coverage.py records every executed code object BY FILENAME whether or
     not the file exists. Fabricating under the REAL tree therefore writes
     measurement for a path inside coverage's source filter: if the file does
-    not exist the report step dies with "No source for code" (round 12, the
-    coverage leg on 5bfd5b63), and if it DOES exist the run forges a covered
-    line in a file that never ran. Both are the same mistake.
+    not exist the report step dies with "No source for code", and if it DOES
+    exist the run forges a covered line in a file that never ran.
 
     Everything fabricated here lives under ``tmp_path`` -- outside the source
     filter, never recorded -- while keeping the ``aipass/<branch>`` segments the
@@ -426,14 +399,10 @@ class TestFenceStillRefusesForeignCallers:
     compiles nothing.
     """
 
-    @staticmethod
-    def _call_guard_as(guard, caller_file: str) -> None:
-        _compile_as(caller_file, guard)
-
     def test_foreign_caller_is_refused(self, guard, tmp_path: Path) -> None:
         """A caller outside the branch root raises ImportError."""
         with pytest.raises(ImportError, match="ACCESS DENIED"):
-            self._call_guard_as(guard, str(tmp_path / "outsider.py"))
+            _compile_as(str(tmp_path / "outsider.py"), guard)
 
     def test_sibling_branch_is_refused(self, guard, tmp_path, monkeypatch) -> None:
         """Another citizen's file is refused, and named in the message."""
@@ -441,78 +410,42 @@ class TestFenceStillRefusesForeignCallers:
         monkeypatch.setattr(guard, "_BRANCH_ROOT", str(fake / "backup"))
         sibling = str(fake / "memory" / "apps" / "x.py")
         with pytest.raises(ImportError, match="memory"):
-            self._call_guard_as(guard, sibling)
+            _compile_as(sibling, guard)
 
     def test_the_real_sibling_path_is_foreign_too(self, guard) -> None:
-        """The near-miss, against the REAL tree, without compiling anything.
-
-        ``src/aipass/memory`` shares the longest possible prefix with
-        ``src/aipass/backup`` short of being it. That is the property the old
-        compiled version carried, kept here where it mints no code object.
-        """
+        """The real sibling branch ``memory`` is not kin, checked without compiling anything."""
         real_sibling = str(Path(guard._BRANCH_ROOT).parent / "memory" / "apps" / "x.py")
         assert not guard._is_kin(real_sibling, guard._BRANCH_ROOT)
 
     def test_a_sibling_named_backup_old_is_not_kin(self, guard) -> None:
-        """A sibling whose name merely EXTENDS this branch's name is foreign.
-
-        Measured 2026-09-22 against the real root: ``_is_kin`` compared the two
-        paths as plain text, so ``<root>_old`` CONTAINS ``<root>`` and every
-        file in a stale copy of this branch was admitted. The failure this
-        excludes is a substring reading of kinship -- only a whole path SEGMENT
-        equal to the branch directory is kin, and ``backup_old`` is not
-        ``backup``. Pure helper, real tree, compiles nothing.
-        """
+        """A sibling whose name merely EXTENDS this branch's name is foreign."""
+        # Kinship is by whole path SEGMENT: ``<root>_old`` contains ``<root>`` as text.
         stale = str(Path(guard._BRANCH_ROOT + "_old") / "apps" / "x.py")
         assert not guard._is_kin(stale, guard._BRANCH_ROOT)
 
     def test_a_sibling_named_backup2_is_not_kin(self, guard) -> None:
-        """The same hole without the separator: a digit suffix is still foreign.
-
-        ``backup_old`` could be excluded by a rule that only refused a trailing
-        underscore; ``backup2`` cannot. Two names, because one name admits a
-        cure that special-cases that name.
-        """
+        """The same hole without the separator: a digit suffix is still foreign."""
+        # A second name, so a cure that only refuses a trailing underscore goes red.
         numbered = str(Path(guard._BRANCH_ROOT + "2") / "apps" / "x.py")
         assert not guard._is_kin(numbered, guard._BRANCH_ROOT)
 
     def test_a_copy_of_the_branch_nested_under_a_foreign_root_is_not_kin(self, guard, tmp_path: Path) -> None:
-        """The same defect from the other direction: kinship must be ANCHORED.
-
-        ``<tmp>/<root>/apps/x.py`` carries the whole root mid-string, so plain
-        containment admitted an unpacked copy of the branch sitting anywhere on
-        the disk. The failure this excludes is an unanchored comparison: the
-        root's segments must begin where the caller's path begins, which on
-        POSIX means the leading empty segment of an absolute root has to line
-        up with the caller's.
-        """
+        """A copy of the root nested mid-path is foreign: kinship is anchored at the path's start."""
         nested = f"{tmp_path}{guard._BRANCH_ROOT}/apps/x.py"
         assert not guard._is_kin(nested, guard._BRANCH_ROOT)
 
     def test_a_sibling_named_backup_old_is_refused_end_to_end(self, guard, tmp_path, monkeypatch) -> None:
-        """The whole decision, not just the helper: the fence RAISES on backup_old.
-
-        Drives the real ``_guard_branch_access`` through a fabricated
-        ``co_filename`` under ``tmp_path``, the same mechanism a cross-branch
-        import presents, and asserts the branch the message names -- so a fence
-        that refused for some other reason, or named the wrong citizen, is not
-        mistaken for this claim.
-        """
+        """The fence refuses a backup_old caller and names backup_old as the caller branch."""
         fake = _fake_tree(tmp_path)
         monkeypatch.setattr(guard, "_BRANCH_ROOT", str(fake / "backup"))
         stale = str(fake / "backup_old" / "apps" / "x.py")
 
         with pytest.raises(ImportError, match="ACCESS DENIED") as refused:
-            self._call_guard_as(guard, stale)
+            _compile_as(stale, guard)
         assert "Caller branch: backup_old" in str(refused.value)
 
     def test_own_branch_file_is_allowed(self, guard, tmp_path, monkeypatch) -> None:
-        """A file under the branch root passes -- the fence is not always-refuse.
-
-        The admit side is asserted, not merely survived: an always-refuse fence
-        used to be caught here only by the traceback it raised, which is the
-        same shape of green a test that ran nothing reports.
-        """
+        """A file under the branch root is admitted: the fence is not always-refuse."""
         fake = _fake_tree(tmp_path)
         monkeypatch.setattr(guard, "_BRANCH_ROOT", str(fake / "backup"))
         own = str(fake / "backup" / "apps" / "modules" / "snapshot.py")
@@ -525,31 +458,18 @@ class TestFenceStillRefusesForeignCallers:
         assert guard._is_kin(real_kin, guard._BRANCH_ROOT)
 
     def test_pseudo_frame_caller_is_allowed(self, guard) -> None:
-        """A <string> frame is skipped, not resolved -- that skip is the cure.
-
-        Without the skip the fence resolves "<string>" against the cwd, lands
-        outside the branch and refuses; the verdict is asserted so a regression
-        reads as a failed claim rather than an incidental traceback.
-        """
+        """A <string> frame is skipped, not resolved, so the fence admits it."""
+        # From a cwd inside the branch this passes without the skip too; the
+        # tmp_path-cwd sibling test_the_mint_guard_permits_a_pseudo_frame pins the skip.
         assert _fence_verdict("<string>", guard) is None
 
 
 class TestKinshipSurvivesTheWindowsSpelling:
     """The fence must recognise its OWN files when paths are spelled Windows.
 
-    Round 5, from the windows-setup runner on 28ee90d5: every test in this file
-    errored at import with backup's own ACCESS DENIED message -- the fence was
-    refusing backup's own ``apps/__init__.py``.
-
-    The mechanism is one-sided normalisation. The guard normalised the CALLER
-    (``caller_file.replace("\\\\", "/")``) and compared it against a
-    ``_BRANCH_ROOT`` that came straight from ``Path``, i.e. spelled with
-    BACKSLASHES on Windows. A forward-slashed caller can never contain a
-    backslashed root, so kinship failed for every file in the branch and the
-    door import that arms the fence raised instead.
-
-    Reproduced on Linux by fabricating the Windows spelling with
-    ``PureWindowsPath`` -- the bug needs a backslash, not a Windows box.
+    Both sides of the kinship comparison must be normalised: a forward-slashed
+    caller never contains a backslashed ``_BRANCH_ROOT``. Reproduced on Linux
+    with ``PureWindowsPath`` -- the bug needs a backslash, not a Windows box.
     """
 
     WIN_ROOT = PureWindowsPath(r"C:\Actions\AIPass\src\aipass\backup")
@@ -575,12 +495,8 @@ class TestKinshipSurvivesTheWindowsSpelling:
         assert guard._is_kin(lowered, str(self.WIN_ROOT), windows=True)
 
     def test_case_does_not_fold_on_posix(self, guard, tmp_path: Path) -> None:
-        """The negative control for the fold: POSIX case-sensitivity is not weakened.
-
-        Folding unconditionally would ADMIT a foreign BACKUP dir under a temp
-        root on Linux, so
-        the fold is gated on the platform rather than applied to be safe.
-        """
+        """The negative control for the fold: POSIX case-sensitivity is not weakened."""
+        # An unconditional fold would admit a foreign BACKUP dir on Linux; the fold is platform-gated.
         root = str(tmp_path / "src" / "aipass" / "backup")
         assert not guard._is_kin(f"{root.upper()}/apps/evil.py", root, windows=False)
         assert guard._is_kin(f"{root}/apps/ok.py", root, windows=False)
@@ -591,18 +507,9 @@ class TestKinshipSurvivesTheWindowsSpelling:
         assert not guard._is_kin(str(foreign), str(self.WIN_ROOT))
 
     def test_guard_allows_windows_spelled_own_file_end_to_end(self, guard, monkeypatch, tmp_path: Path) -> None:
-        """The whole decision, not just the helper -- this is what CI ran.
-
-        Red before the cure: ImportError, ACCESS DENIED, on backup's own file,
-        with "Caller branch: backup" in the message -- the fence naming ITSELF
-        as the foreigner, which is exactly what the runner printed.
-
-        Noted for the next reader: on Linux a drive-lettered path is RELATIVE,
-        so ``_find_real_caller`` resolves it under cwd and the branch root is
-        prefixed onto it. The kinship substring is still the thing under test
-        (this pin was red before the cure), but the pure-function pins above
-        are the ones that carry the argument without that artifact.
-        """
+        """The fence admits a Windows-spelled own file end to end."""
+        # On Linux a drive-lettered path is RELATIVE, so _find_real_caller resolves it
+        # under the cwd; the pure _is_kin pins above carry the argument without that artifact.
         monkeypatch.setattr(guard, "_BRANCH_ROOT", str(self.WIN_ROOT))
         monkeypatch.chdir(tmp_path)
 
@@ -617,12 +524,8 @@ class TestKinshipSurvivesTheWindowsSpelling:
             _compile_as(str(foreign), guard)
 
     def test_self_skip_uses_the_same_spelling_rule(self, guard) -> None:
-        """The guard's own-frame skip is the same comparison, and it matters more.
-
-        If the self-skip misses, ``__init__.py`` itself is returned as the
-        caller -- trivially kin -- and the foreign frame beneath it is never
-        looked at. A case-fragile self-skip OPENS the fence.
-        """
+        """The guard's own-frame skip compares both sides through _spell_for_kinship."""
+        # A missed self-skip returns __init__.py as the (kin) caller and opens the fence.
         source = GUARD_FILE.read_text(encoding="utf-8")
         assert "if this_file in resolved:" not in source
         assert source.count("_spell_for_kinship(") >= 4
@@ -683,9 +586,8 @@ _NONE_BRANCH_PROBE = textwrap.dedent(
 def _behavioural_verdict(report: dict) -> str:
     """ASSERT where the denial reaches inspect.stack(), STAND_DOWN where it does not.
 
-    A literal two-row table rather than an arm that only fires on a host I do
-    not have (spawn/devpulse round 11, fleet line A4): both rows are reachable
-    from any interpreter because the input is a measured value, not the host.
+    Both rows are reachable from any interpreter because the input is a
+    measured value, not the host.
     """
     return "ASSERT" if report.get("denial_bites") is True else "STAND_DOWN"
 
@@ -695,7 +597,7 @@ class TestTheCallerIsNoneBranchIsWatchedBehaviourally:
 
     ``-c`` and never a script: run this as a file and every frame is a real
     on-disk path, ``getsourcefile`` early-returns, and the denial is silently
-    inert (commons, round 4).
+    inert.
     """
 
     @staticmethod
@@ -710,11 +612,7 @@ class TestTheCallerIsNoneBranchIsWatchedBehaviourally:
         return json.loads(proc.stdout.strip().splitlines()[-1])
 
     def test_the_verdict_table_has_both_rows(self) -> None:
-        """Host-already-has-one control: the stand-down arm is reachable here.
-
-        Round 10's M6 -- a new world needs its stand-down pinned on day one, or
-        the mutant that deletes it is invisible on the only machine I can run.
-        """
+        """Both verdict rows are reachable on this host, the stand-down arm included."""
         armed = {"denial_bites": True, "stack_route": "raised"}
         inert = {"denial_bites": False, "stack_route": "returned"}
         assert _behavioural_verdict(armed) == "ASSERT"
@@ -727,21 +625,15 @@ class TestTheCallerIsNoneBranchIsWatchedBehaviourally:
         assert _behavioural_verdict(report) == "ASSERT", report["stack_route"]
 
     def test_the_none_branch_is_actually_entered(self) -> None:
-        """Arming probe: _find_real_caller returned None, so the branch ran.
-
-        Version-independent -- it rests on frame filenames, not on any route.
-        """
+        """Arming probe: _find_real_caller returned None, so the branch ran."""
+        # Version-independent: it rests on frame filenames, not on any route.
         assert self._run()["caller_is_none"] is True
 
     def test_the_guard_returns_instead_of_walking(self) -> None:
-        """The pin. A regrown inspect.stack() walk raises OSError here.
-
-        Stands down with the child's own reason on an interpreter where
-        inspect.stack() never reaches os.path.realpath: there the world is
-        inert, so asserting would be claiming a property this host cannot
-        contradict. The AST ban still watches the branch everywhere.
-        """
+        """The guard returns under a realpath denial, where a regrown inspect.stack() walk raises."""
         report = self._run()
+        # Where inspect.stack() never reaches realpath the world is inert: stand down;
+        # the AST ban still watches the branch everywhere.
         if _behavioural_verdict(report) == "STAND_DOWN":
             pytest.skip(f"world inert here: {report['stack_route']}")
         assert report["guard_returns"] is True
@@ -754,26 +646,35 @@ _COMPILING_CLASSES = (
     "TestKinshipSurvivesTheWindowsSpelling",
 )
 
+_INNER_COVERAGE_WINDOWS_SKIP = (
+    "skipped on Windows by the 2026-09-01 one-fix ruling: the inner "
+    "coverage run failed on the real Windows host (5dee751a, windows-setup) "
+    "- unverifiable from this box; the pin stays live on POSIX where the "
+    "report-step landmine was caught; owner to diagnose after PR 750"
+)
+
 
 class TestFabricatedFilenamesNeverReachCoverage:
-    """Round 12: the fence pins made the COVERAGE leg red with zero test failures.
+    """No fabricated caller filename may reach coverage's measured files.
 
     coverage.py records every executed code object by filename, existing file or
-    not. ``test_sibling_branch_is_refused`` compiled ``check()`` under
-    ``src/aipass/memory/apps/x.py`` -- inside coverage's ``source`` filter and
-    absent from disk -- so the suite passed and the REPORT step exited 1 with
-    "No source for code". It never bit before because every earlier coverage leg
-    died at a test failure first.
-
-    Two instruments, because they fail for different reasons: this one runs the
-    real report step, the structural one below refuses the shape without a
-    subprocess.
+    not: a fabricated name inside the ``source`` filter and absent from disk makes
+    the REPORT step exit 1 with "No source for code" while every test passes.
+    The report-step pins and the structural ones fail for different reasons.
     """
+
+    @staticmethod
+    def _empty_rcfile(tmp_path: Path) -> Path:
+        """An empty coverage config under tmp_path, so no project rcfile is read."""
+        rcfile = tmp_path / "empty.coveragerc"
+        rcfile.write_text("", encoding="utf-8")
+        return rcfile
 
     @staticmethod
     def _coverage_run(tmp_path: Path, cwd: Path) -> Path:
         """Run the compiling tests under coverage from ``cwd``; return the data file."""
         data_file = tmp_path / f"cov-{cwd.name}.dat"
+        rcfile = TestFabricatedFilenamesNeverReachCoverage._empty_rcfile(tmp_path)
         env = {**os.environ, "COVERAGE_FILE": str(data_file)}
         selected = [f"{TEST_FILE}::{name}" for name in _COMPILING_CLASSES]
         run = subprocess.run(
@@ -782,7 +683,7 @@ class TestFabricatedFilenamesNeverReachCoverage:
                 "-m",
                 "coverage",
                 "run",
-                "--rcfile=/dev/null",
+                f"--rcfile={rcfile}",
                 f"--source={SOURCE_TREE}",
                 "-m",
                 "pytest",
@@ -800,52 +701,25 @@ class TestFabricatedFilenamesNeverReachCoverage:
         assert run.returncode == 0, f"the tests themselves failed:\n{run.stdout}"
         return data_file
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="skipped on Windows by the 2026-09-01 one-fix ruling: the inner "
-        "coverage run failed on the real Windows host (5dee751a, windows-setup) "
-        "- unverifiable from this box; the pin stays live on POSIX where the "
-        "report-step landmine was caught; owner to diagnose after PR 750",
-    )
+    @pytest.mark.skipif(sys.platform == "win32", reason=_INNER_COVERAGE_WINDOWS_SKIP)
     @pytest.mark.parametrize("from_repo_root", [True, False], ids=["repo_cwd", "branch_cwd"])
     def test_no_measured_file_is_missing_from_disk(self, tmp_path: Path, from_repo_root: bool) -> None:
-        """Both cwds, because cwd decides -- and this is the cheap half.
-
-        coverage resolves a relative fabricated filename against the cwd at
-        trace time, so the same pin is inert from one directory and a minter
-        from another. The repo-root run is what CI does. The branch run is what
-        the two-rootdir rule does, and it is the one that caught the
-        Windows-spelled literals: relative on POSIX, so they land inside the
-        source tree whenever the cwd does.
-
-        A measured file with no source on disk is exactly the condition the
-        report step exits 1 on. Asserted on the data directly here because
-        ``coverage report`` parses every file in the tree and costs ~30s; the
-        run below pays that once, from the stronger cwd.
-        """
+        """Run from the repo root and from the branch, coverage measures no file missing from disk."""
+        # Both cwds, because coverage resolves a relative fabricated filename against the cwd
+        # at trace time. Asserted on the data, not `coverage report` (~30s, paid once below).
         cwd = SOURCE_TREE.parents[1] if from_repo_root else BRANCH_ROOT
         data = coverage.CoverageData(basename=str(self._coverage_run(tmp_path, cwd)))
         data.read()
         assert _missing_sources(data.measured_files()) == []
 
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="skipped on Windows by the 2026-09-01 one-fix ruling: the inner "
-        "coverage run failed on the real Windows host (5dee751a, windows-setup) "
-        "- unverifiable from this box; the pin stays live on POSIX where the "
-        "report-step landmine was caught; owner to diagnose after PR 750",
-    )
+    @pytest.mark.skipif(sys.platform == "win32", reason=_INNER_COVERAGE_WINDOWS_SKIP)
     def test_the_real_report_step_survives(self, tmp_path: Path) -> None:
-        """The actual CI command, run once, from the cwd that catches the most.
-
-        The branch cwd is a superset: it sees the absolute ``_BRANCH_ROOT``
-        minter (cwd-independent) AND the relative Windows-spelled ones. Paying
-        the ~30s once here keeps the pin standing on the real step rather than
-        on my model of what that step checks.
-        """
+        """The real `coverage report` step, run from the branch cwd, exits 0 with no missing source."""
+        # The branch cwd sees both the absolute and the relative (Windows-spelled) minters.
         env = {**os.environ, "COVERAGE_FILE": str(self._coverage_run(tmp_path, BRANCH_ROOT))}
+        rcfile = self._empty_rcfile(tmp_path)
         report = subprocess.run(
-            [sys.executable, "-m", "coverage", "report", "--rcfile=/dev/null"],
+            [sys.executable, "-m", "coverage", "report", f"--rcfile={rcfile}"],
             cwd=BRANCH_ROOT,
             env=env,
             capture_output=True,
@@ -856,65 +730,32 @@ class TestFabricatedFilenamesNeverReachCoverage:
         assert report.returncode == 0, report.stderr
 
     def test_no_compiled_filename_is_under_the_source_tree(self) -> None:
-        """Structural sibling: refuse the shape, no subprocess needed.
-
-        A future pin that fabricates under the real ``_BRANCH_ROOT`` again fails
-        here before it ever reaches a coverage leg.
-        """
+        """This file has exactly one compile() site, _compile_as, where the mint guard stands."""
         assert _compile_sites(TEST_FILE.read_text(encoding="utf-8")) == ["_compile_as"]
 
     def test_the_missing_source_predicate_can_say_no(self, tmp_path: Path) -> None:
-        """Control for the cheap half: the predicate must convict a guilty set.
-
-        Without it, blanking the predicate leaves every pin green -- a clean
-        tree cannot tell a working check from a deleted one.
-        """
+        """Control: the missing-source predicate convicts an absent file and passes a present one."""
         present = tmp_path / "real.py"
         present.write_text("x = 1\n", encoding="utf-8")
         absent = str(tmp_path / "src" / "aipass" / "memory" / "apps" / "x.py")
         assert _missing_sources([str(present), absent]) == [absent]
 
     def test_the_mint_guard_refuses_a_tree_shaped_name(self, guard) -> None:
-        """The runtime guard's own control -- it must be able to REFUSE.
-
-        Without this, deleting the assert inside ``_compile_as`` is invisible:
-        every existing site is already safe, so nothing else would go red.
-        """
+        """Control: the mint guard in _compile_as refuses a name inside the source tree."""
+        # The name is refused before compile(), so nothing is minted under the real tree.
         with pytest.raises(AssertionError, match="coverage source tree"):
             _compile_as(str(BRANCH_ROOT / "apps" / "never_written.py"), guard)
 
     def test_the_mint_guard_permits_a_pseudo_frame(self, guard, monkeypatch, tmp_path: Path) -> None:
-        """Narrowness control: <string> has no source and must stay permitted.
-
-        THE CWD IS MOVED OUT OF THE BRANCH FIRST, and that is the failure this
-        excludes which ``test_pseudo_frame_caller_is_allowed`` does not. Run
-        from inside the branch -- which is where the brief's own command and
-        the ``branch_cwd`` leg below put pytest -- "<string>" resolved against
-        the cwd lands at ``<branch_root>/<string>``, which is kin, so deleting
-        ``filename.startswith(_PSEUDO_FRAME_PREFIX) or`` from the skip at
-        ``apps/handlers/__init__.py`` leaves that test green for a reason that
-        has nothing to do with the skip. From ``tmp_path`` the same deletion
-        lands outside the root, the fence refuses, and this pin goes red.
-
-        Two further claims, both asserted by the same line: the mint guard does
-        not fire (it would raise AssertionError, which _fence_verdict
-        deliberately lets through) and the fence admits the frame (verdict
-        None). A guard widened until it refused every name would fail the
-        sibling above; a guard widened until it refused pseudo-frames fails
-        here.
-        """
+        """From a cwd outside the branch, the mint guard and the fence both admit a <string> frame."""
+        # The cwd must leave the branch: from inside it "<string>" resolves to
+        # <branch_root>/<string>, which is kin, so dropping the pseudo-frame skip stays green.
         monkeypatch.chdir(tmp_path)
 
         assert _fence_verdict("<string>", guard) is None
 
     def test_the_structural_check_can_say_no(self) -> None:
-        """Negative control: a checker that cannot convict is not a checker.
-
-        Feeds the SAME function a synthetic file carrying one offending site and
-        two innocent ones, so a mutant that blinds the scanner kills this pin
-        too. A control that re-implements the check is a second copy of it
-        wearing a control's name (spawn, round 4).
-        """
+        """Control: _compile_sites names a second compile() site in a synthetic file."""
         synthetic = textwrap.dedent(
             """
             def _compile_as(name, guard):

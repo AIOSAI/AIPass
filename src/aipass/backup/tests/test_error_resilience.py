@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_error_resilience.py
-# Description: Tests for error resilience -- corrupt JSON, missing files
-# Version: 1.1.1
+# Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
+# Version: 1.1.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
 
-"""Tests for src/aipass/backup/apps/modules/snapshot.py, versioned.py, and handlers."""
+"""Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that all handler files parse
@@ -80,13 +80,7 @@ class TestVanishedFileRace:
     def test_a_file_that_vanishes_before_the_save_is_skipped_not_raised_on(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """A file gone since the scan is skipped, not raised on.
-
-        Regression: error 33f74c75 -- another branch's pytest fixture created
-        and deleted AIPASS_REGISTRY.json.test_backup at the repo root mid-run.
-        The unguarded comprehension raised FileNotFoundError, which escaped
-        run_snapshot and killed the whole 'all' cycle.
-        """
+        """A file gone since the scan is skipped, not raised on."""
         project = tmp_path / "proj"
         project.mkdir()
         (project / "here.txt").write_text("x", encoding="utf-8")
@@ -117,20 +111,14 @@ class TestVanishedFileRace:
     def test_an_unreadable_mtime_forbids_the_quick_check_skip(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """A quick-check that could not read every mtime must not skip the run.
-
-        The quick-check map is the stricter of the two: None, never a partial
-        dict. A partial dict is a comparison made out of whichever files
-        survived, and it compares EQUAL exactly when the vanished entries are
-        missing from the stored map too -- the shape built below, where the
-        racy file was created after the stored map was written. A forgiving
-        helper would report "no changes" for a tree it never finished reading.
-        """
+        """A quick-check that could not read every mtime must not skip the run."""
         project = tmp_path / "proj"
         project.mkdir()
         (project / "kept.txt").write_text("x", encoding="utf-8")
         run_snapshot(str(project), show_panels=False)
 
+        # racy.txt is absent from the stored map, so a partial mtime map built
+        # from the survivors would compare EQUAL to it and wrongly skip.
         racy = project / "racy.txt"
         racy.write_text("x", encoding="utf-8")
         _vanish_after_scan(monkeypatch, racy)
@@ -140,11 +128,7 @@ class TestVanishedFileRace:
         assert second.backup_path, "quick-check skipped a run whose mtimes it could not read"
 
     def test_an_unchanged_tree_does_take_the_quick_check_skip(self, tmp_path: Path) -> None:
-        """The control for the pin above: with nothing vanished the skip is real.
-
-        Without this, a quick-check that never skips anything would make the
-        test above vacuously green.
-        """
+        """The control for the pin above: with nothing vanished the skip is real."""
         project = tmp_path / "proj"
         project.mkdir()
         (project / "kept.txt").write_text("x", encoding="utf-8")
@@ -157,16 +141,9 @@ class TestVanishedFileRace:
 
 
 class TestMissingProjectRoot:
-    """A project path that does not exist must be refused, never scaffolded.
+    """A project path that does not exist must be refused, never scaffolded."""
 
-    Regression: create_backup_dir already refused a non-directory (returns
-    None), but run_snapshot/run_versioned ignored that refusal and the rest of
-    the pipeline created the tree anyway -- a typo'd path produced a full
-    .backup/ scaffold plus a backup of the .backupignore it had just written,
-    and reported success.
-    """
-
-    def test_snapshot_refuses_missing_root(self, tmp_path: Path) -> None:
+    def test_snapshot_on_a_missing_root_errors_and_scaffolds_nothing(self, tmp_path: Path) -> None:
         """run_snapshot on a missing path errors and writes nothing."""
         missing = tmp_path / "no_such_project"
 
@@ -176,7 +153,7 @@ class TestMissingProjectRoot:
         assert result.files_copied == 0
         assert not missing.exists(), "refused path must not be scaffolded"
 
-    def test_versioned_refuses_missing_root(self, tmp_path: Path) -> None:
+    def test_versioned_on_a_missing_root_errors_and_scaffolds_nothing(self, tmp_path: Path) -> None:
         """run_versioned on a missing path errors and writes nothing."""
 
         missing = tmp_path / "no_such_project"
@@ -187,7 +164,7 @@ class TestMissingProjectRoot:
         assert result.files_copied == 0
         assert not missing.exists()
 
-    def test_snapshot_refuses_file_as_root(self, tmp_path: Path) -> None:
+    def test_snapshot_on_a_file_as_root_errors_and_copies_nothing(self, tmp_path: Path) -> None:
         """A file (not a directory) passed as the project root is refused."""
 
         a_file = tmp_path / "notadir.txt"
@@ -198,7 +175,7 @@ class TestMissingProjectRoot:
         assert result.errors
         assert result.files_copied == 0
 
-    def test_existing_project_still_runs(self, tmp_path: Path) -> None:
+    def test_an_existing_project_root_is_not_refused_and_is_copied(self, tmp_path: Path) -> None:
         """Guard does not block a real project -- normal snapshot still works."""
 
         project = tmp_path / "real_project"
@@ -212,15 +189,7 @@ class TestMissingProjectRoot:
 
 
 class TestUnreadableDocumentsAreLoud:
-    """A present-but-unreadable document is an error, never an empty one.
-
-    Under the old handler ``load_json`` answered ``{}`` for a missing file AND
-    for a corrupt one, so no caller could tell them apart. The registry is the
-    sharpest case: ``register_project`` writes back what it read, so the empty
-    answer replaced every registration in the file with the one being added.
-    The fleet's ``read_json`` answers None for both; backup separates them
-    here, once per document, and refuses to write over what it could not read.
-    """
+    """A present-but-unreadable document is an error, never an empty one."""
 
     def _corrupt(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -229,11 +198,11 @@ class TestUnreadableDocumentsAreLoud:
     def test_missing_config_still_falls_back_to_defaults(self, tmp_path: Path) -> None:
         """A project with no config yet is not an error -- absence is absence."""
 
-        config = load_project_config(str(tmp_path))
+        loaded = load_project_config(str(tmp_path))
 
-        assert config["backup_mode"] == DEFAULTS["backup_mode"]
+        assert loaded["backup_mode"] == DEFAULTS["backup_mode"]
 
-    def test_corrupt_config_raises(self, tmp_path: Path) -> None:
+    def test_a_corrupt_config_raises_never_falls_back_to_defaults(self, tmp_path: Path) -> None:
         """A corrupt config must not silently become DEFAULTS mid-backup."""
 
         self._corrupt(tmp_path / ".backup" / "config.json")
@@ -244,11 +213,7 @@ class TestUnreadableDocumentsAreLoud:
     def test_corrupt_registry_raises_and_survives_on_disk(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """The data-loss path: a corrupt registry must never read as empty.
-
-        Answering {} here and carrying on would have register_project write a
-        one-project registry over every other registration, with no copy left.
-        """
+        """A corrupt registry raises and is left as it was, never rewritten as one project."""
 
         corrupt = tmp_path / "project_registry.json"
         self._corrupt(corrupt)
@@ -259,7 +224,7 @@ class TestUnreadableDocumentsAreLoud:
 
         assert corrupt.read_text(encoding="utf-8") == "{not valid json"
 
-    def test_corrupt_changelog_raises(self, tmp_path: Path) -> None:
+    def test_a_corrupt_changelog_raises_never_starts_a_fresh_one(self, tmp_path: Path) -> None:
         """A corrupt changelog must not be overwritten with a one-entry one."""
 
         self._corrupt(tmp_path / ".backup" / "changelog.json")
@@ -267,7 +232,7 @@ class TestUnreadableDocumentsAreLoud:
         with pytest.raises(json_handler.InvalidDocument):
             append_changelog(str(tmp_path), {"mode": "snapshot"})
 
-    def test_corrupt_timestamps_raises(self, tmp_path: Path) -> None:
+    def test_a_corrupt_timestamp_map_raises_never_reads_as_empty(self, tmp_path: Path) -> None:
         """A corrupt timestamp map is an error, not 'every file changed'."""
 
         self._corrupt(tmp_path / ".backup" / "timestamps.json")
@@ -275,7 +240,7 @@ class TestUnreadableDocumentsAreLoud:
         with pytest.raises(json_handler.InvalidDocument):
             load_timestamps(str(tmp_path))
 
-    def test_corrupt_tracker_raises(self, tmp_path: Path) -> None:
+    def test_a_corrupt_drive_tracker_raises_never_reads_as_nothing_uploaded(self, tmp_path: Path) -> None:
         """A corrupt drive tracker is an error, not 'nothing uploaded yet'."""
 
         self._corrupt(tmp_path / ".backup" / "drive_tracker.json")
@@ -284,12 +249,7 @@ class TestUnreadableDocumentsAreLoud:
             load_tracker(str(tmp_path))
 
     def test_empty_file_is_unreadable_not_empty(self, tmp_path: Path) -> None:
-        """empty_file / empty_content -- zero bytes is not a valid document.
-
-        The old handler answered {} here, indistinguishable from "no config
-        yet". A truncated write leaves exactly this state, so it is the one
-        corruption most likely to be real.
-        """
+        """Zero bytes, the state a truncated write leaves, is not a valid document."""
 
         empty = tmp_path / ".backup" / "config.json"
         empty.parent.mkdir(parents=True, exist_ok=True)
@@ -298,8 +258,8 @@ class TestUnreadableDocumentsAreLoud:
         with pytest.raises(json_handler.InvalidDocument):
             load_project_config(str(tmp_path))
 
-    def test_readable_but_not_an_object_raises(self, tmp_path: Path) -> None:
-        """Valid JSON of the wrong shape used to reach an AttributeError."""
+    def test_valid_json_that_is_not_an_object_raises_invalid_document(self, tmp_path: Path) -> None:
+        """Valid JSON of the wrong shape is an InvalidDocument, never an AttributeError."""
 
         ts = tmp_path / ".backup" / "timestamps.json"
         ts.parent.mkdir(parents=True, exist_ok=True)
@@ -331,11 +291,7 @@ class TestWriteResultsAreChecked:
         assert attempted == [(tmp_path / ".backup" / "config.json", {"backup_mode": "snapshot"})]
 
     def test_save_timestamps_raises_on_a_failed_write(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        """A snapshot run whose timestamps never landed is not a success.
-
-        Snapshot, not versioned: ``run_snapshot``'s quick-check is the only
-        reader and writer of this map, and ``run_versioned`` never touches it.
-        """
+        """False from the primitive is WriteFailed from save_timestamps, never a quiet return."""
 
         attempted: list[tuple[Path, object]] = []
 
@@ -366,31 +322,15 @@ class TestWriteResultsAreChecked:
 
 
 class TestACompletedCopyIsAlwaysRecorded:
-    """Files on disk and a branch history that says nothing happened is the lie.
+    """A completed copy is recorded in the changelog and audit trail even when the timestamp map is lost.
 
-    The timestamp map is state for the NEXT run's quick-check; the changelog and
-    the audit stream are the record of THIS one. Losing the map costs one
-    re-copy. Losing the record costs the only evidence the copy ever happened,
-    so the record is written first and the map's failure is reported after it.
+    The record is written first and the map's failure is reported after it.
     """
 
     def test_a_failed_timestamp_write_still_records_the_copy_and_reports_the_failure(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Copy done, map refused: changelog, trail and stderr all say so.
-
-        The defect: ``save_timestamps`` ran BEFORE ``append_changelog`` and the
-        ``snapshot_complete`` audit line, and it raises WriteFailed. So a run
-        whose files were already copied to the destination left the branch's own
-        history empty -- no changelog entry, no audit record -- and the
-        exception escaped ``run_snapshot`` on top of it.
-
-        This excludes both failures the defect allows: a silent swallow (the
-        run reports clean and the user never learns the map is stale) and a
-        raise that takes the record down with it. The branch fails to errors:
-        the copy is recorded, and the lost map is an error on the result, a
-        line on stderr, and its own audit entry.
-        """
+        """Copy done, map refused: changelog, trail, stderr and the result all say so."""
         project = tmp_path / "proj"
         project.mkdir()
         (project / "code.py").write_text("print('hi')", encoding="utf-8")
@@ -439,11 +379,7 @@ class TestACompletedCopyIsAlwaysRecorded:
     def test_a_clean_run_records_the_copy_without_the_failure_line(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """The control: with the map written, no failure is reported anywhere.
-
-        Without this, a run_snapshot that reported a lost map unconditionally
-        would make the pin above vacuously green.
-        """
+        """The control: with the map written, no failure is reported anywhere."""
         project = tmp_path / "proj"
         project.mkdir()
         (project / "code.py").write_text("print('hi')", encoding="utf-8")
@@ -470,29 +406,27 @@ class TestACompletedCopyIsAlwaysRecorded:
 class TestAuditLog:
     """backup's own audit trail -- JSONL, not the fleet's per-module json log."""
 
-    def test_record_shape_flattens_the_payload(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_record_shape_flattens_the_payload(self, tmp_path: Path) -> None:
         """timestamp + operation + the operation's own fields, one line."""
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
-        trail.log_operation("probe_op", {"project_root": "/some/project"})
+        stream = trail.log_path()
+        assert stream.is_relative_to(tmp_path.parent), f"conftest's seam did not hold: {stream}"
+        project_root = str(tmp_path / "proj")
+        trail.log_operation("probe_op", {"project_root": project_root})
 
-        stream = tmp_path / "backup" / "logs" / "operations.jsonl"
         entry = json.loads(stream.read_text(encoding="utf-8").strip())
         assert entry["operation"] == "probe_op"
-        assert entry["project_root"] == "/some/project"
+        assert entry["project_root"] == project_root
         assert entry["timestamp"]
 
     def test_the_path_is_recomputed_per_call(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The seam is read on every call, never captured at import.
+        """The seam is read on every call, never captured at import."""
 
-        This is what keeps the suite off the branch's live
-        logs/operations.jsonl -- the reason 37 real writes used to land there.
-        """
+        first, second = tmp_path / "first", tmp_path / "second"
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(first))
+        assert trail.log_path() == first / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(second))
 
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "first"))
-        first = trail.log_path()
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "second"))
-
-        assert trail.log_path() != first
+        assert trail.log_path() == second / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
 
     def test_an_empty_seam_is_absence_not_a_redirect(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An empty env value must not redirect the stream to the cwd."""
@@ -505,21 +439,10 @@ class TestAuditLog:
     def test_an_empty_seam_answers_the_branch_absolute_path_never_a_relative_one(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Absence falls back to the branch's OWN stream, spelled absolutely.
+        """Absence falls back to the branch's OWN stream, spelled absolutely."""
 
-        The guard is ``if test_dir:``. Mutated to ``if test_dir is not None:``
-        an empty value takes the redirect branch and builds ``Path("") /
-        "backup" / "logs" / "operations.jsonl"`` -- the RELATIVE
-        ``backup/logs/operations.jsonl``, which lands in whatever directory the
-        process happens to be running from. That is the 37-writes regression:
-        the suite's own audit lines written into the branch tree.
-
-        Its name is ``operations.jsonl`` and its grandparent is named ``backup``
-        either way, so the mutant survives every assertion the sibling test
-        makes. These two are what it cannot answer: the path is ABSOLUTE, and
-        it is the one computed from this module's own location.
-        """
-
+        # Kills ``if test_dir is not None:``, under which an empty seam answers
+        # the RELATIVE backup/logs/operations.jsonl, written into whatever the cwd is.
         monkeypatch.setenv("AIPASS_TEST_LOG_DIR", "")
         absent = trail.log_path()
 
@@ -532,13 +455,7 @@ class TestAuditLog:
         assert trail.log_path() == redirected / trail.BRANCH_NAME / "logs" / trail.LOG_FILENAME
 
     def test_a_failed_append_never_takes_the_backup_down(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The audit trail is a record of work, not the work.
-
-        "Never takes the backup down" is a claim about the backup, so the
-        backup is what this asserts: with every append to the stream refused,
-        a real run still copies the file and still answers a clean result,
-        and each refusal is recorded as a warning rather than swallowed whole.
-        """
+        """With every audit append refused, a real run still copies and answers clean; each refusal warns."""
 
         attempted: list[Path] = []
         warned: list[str] = []
@@ -557,7 +474,6 @@ class TestAuditLog:
         project.mkdir()
         (project / "code.py").write_text("print('hi')", encoding="utf-8")
 
-        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
         monkeypatch.setattr(trail, "append_jsonl", _refuse)
         monkeypatch.setattr(trail, "logger", _WarningRecorder())
 

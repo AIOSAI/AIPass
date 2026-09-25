@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_snapshot_fidelity.py
-# Description: Tests for snapshot fidelity -- mirror-delete, quick-check, long paths, error semantics
-# Version: 2.1.1
+# Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
+# Version: 2.1.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
 
-"""Tests for aipass/backup/apps/handlers/report/result.py, cleanup/mirror.py, copy/snapshot.py."""
+"""Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — cleanup/, copy/, report/ handlers parse without errors
@@ -29,7 +29,7 @@ from aipass.backup.apps.handlers.report.result import BackupResult
 # tmp_path/_aipass_json_seam, and trail.log_path() recomputes its path on every
 # call, so the real audit append already lands inside the test's own directory.
 # The seam sits BESIDE every tree these tests walk (source/, snapshot/, project/),
-# never inside one, so no walk sees it. test_cleanup_records_audit_trail reads the
+# never inside one, so no walk sees it. test_cleanup_writes_started_and_complete_to_audit_stream reads the
 # real stream back through the product's own log_path().
 #
 # Why the should_ignore predicates name "keep.txt":
@@ -44,7 +44,7 @@ from aipass.backup.apps.handlers.report.result import BackupResult
 class TestBackupResultErrors:
     """BackupResult critical vs non-critical error semantics."""
 
-    def test_add_error_non_critical(self) -> None:
+    def test_non_critical_error_is_recorded_and_success_stays_true(self) -> None:
         """Non-critical error appends to errors but keeps success True."""
         r = BackupResult(mode="snapshot")
         r.add_error("minor issue")
@@ -52,7 +52,7 @@ class TestBackupResultErrors:
         assert r.success is True
         assert len(r.critical_errors) == 0
 
-    def test_add_error_critical(self) -> None:
+    def test_critical_error_sets_success_false_and_lands_in_critical_errors(self) -> None:
         """Critical error marks success False and appears in critical_errors."""
         r = BackupResult(mode="snapshot")
         r.add_error("disk failure", is_critical=True)
@@ -60,14 +60,14 @@ class TestBackupResultErrors:
         assert len(r.critical_errors) == 1
         assert "disk failure" in r.critical_errors
 
-    def test_add_warning(self) -> None:
+    def test_warning_is_recorded_and_success_stays_true(self) -> None:
         """Warnings are tracked separately and do not affect success."""
         r = BackupResult(mode="snapshot")
         r.add_warning("path too long")
         assert len(r.warnings) == 1
         assert r.success is True
 
-    def test_files_deleted_field(self, tmp_path: Path) -> None:
+    def test_files_deleted_starts_at_zero_and_carries_the_cleanup_count(self, tmp_path: Path) -> None:
         """files_deleted defaults to 0 and carries the count cleanup_deleted_files computed."""
         r = BackupResult(mode="snapshot")
         assert r.files_deleted == 0
@@ -82,8 +82,8 @@ class TestBackupResultErrors:
         cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", r)
         assert r.files_deleted == 5
 
-    def test_errors_list_still_works(self) -> None:
-        """Backward compat -- errors as list[str] assignment still works."""
+    def test_errors_field_accepts_direct_list_assignment(self) -> None:
+        """errors is a plain list[str] dataclass field; a list assigned to it reads back unchanged."""
         r = BackupResult(mode="snapshot")
         r.errors = ["err1", "err2"]
         assert len(r.errors) == 2
@@ -92,7 +92,7 @@ class TestBackupResultErrors:
 class TestCleanupMirror:
     """Mirror-delete -- cleanup removes vanished files from snapshot."""
 
-    def test_cleanup_removes_deleted_source(self, tmp_path: Path) -> None:
+    def test_cleanup_deletes_orphan_and_keeps_file_with_live_source(self, tmp_path: Path) -> None:
         """File in snapshot but not in source is deleted from snapshot."""
         source = tmp_path / "source"
         source.mkdir()
@@ -110,7 +110,7 @@ class TestCleanupMirror:
         assert (snapshot / "keep.txt").exists()
         assert result.files_deleted == 1
 
-    def test_cleanup_deletes_all_orphans(self, tmp_path: Path) -> None:
+    def test_cleanup_deletes_every_orphan_readme_included(self, tmp_path: Path) -> None:
         """All files whose source is gone are deleted (no exceptions list)."""
         source = tmp_path / "source"
         source.mkdir()
@@ -126,7 +126,7 @@ class TestCleanupMirror:
         assert not (snapshot / "old.txt").exists()
         assert result.files_deleted == 2
 
-    def test_cleanup_empty_dir_removed(self, tmp_path: Path) -> None:
+    def test_cleanup_removes_directory_left_empty_by_deletion(self, tmp_path: Path) -> None:
         """Empty dirs cleaned up after file deletion."""
         source = tmp_path / "source"
         source.mkdir()
@@ -140,7 +140,7 @@ class TestCleanupMirror:
         cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result)
         assert not subdir.exists()
 
-    def test_cleanup_nonexistent_backup(self, tmp_path: Path) -> None:
+    def test_cleanup_of_missing_snapshot_dir_deletes_nothing_without_raising(self, tmp_path: Path) -> None:
         """No error if backup_path does not exist."""
         result = BackupResult(mode="snapshot")
         cleanup_deleted_files(
@@ -151,7 +151,7 @@ class TestCleanupMirror:
         )
         assert result.files_deleted == 0
 
-    def test_cleanup_dry_run(self, tmp_path: Path) -> None:
+    def test_cleanup_dry_run_counts_orphan_but_leaves_it_on_disk(self, tmp_path: Path) -> None:
         """Dry run counts deletions but does not actually delete."""
         source = tmp_path / "source"
         source.mkdir()
@@ -164,7 +164,7 @@ class TestCleanupMirror:
         assert (snapshot / "gone.txt").exists()
         assert result.files_deleted == 1
 
-    def test_cleanup_records_audit_trail(self, tmp_path: Path) -> None:
+    def test_cleanup_writes_started_and_complete_to_audit_stream(self, tmp_path: Path) -> None:
         """cleanup_started and cleanup_complete reach the real JSONL audit stream."""
         source = tmp_path / "audited_source"
         source.mkdir()
@@ -195,7 +195,7 @@ def _empty_spec() -> pathspec.PathSpec:
 class TestCopySnapshotUpgrade:
     """Snapshot copy with mirror-delete and mtime skip."""
 
-    def test_copy_skips_unchanged(self, tmp_path: Path) -> None:
+    def test_copy_skips_file_whose_snapshot_copy_has_same_mtime(self, tmp_path: Path) -> None:
         """Files with same mtime are skipped."""
         source = tmp_path / "project"
         source.mkdir()
@@ -205,14 +205,13 @@ class TestCopySnapshotUpgrade:
         dest = tmp_path / "snapshot"
         dest.mkdir()
         target = dest / "file.txt"
-        target.write_text("content", encoding="utf-8")
         shutil.copy2(str(f), str(target))
 
         files = [(str(f), "file.txt")]
         result = copy_snapshot(files, str(dest), str(source), _empty_spec())
         assert result["files_copied"] == 0
 
-    def test_copy_handles_new_file(self, tmp_path: Path) -> None:
+    def test_copy_copies_file_absent_from_snapshot(self, tmp_path: Path) -> None:
         """New file is copied to snapshot destination."""
         source = tmp_path / "project"
         source.mkdir()
@@ -225,7 +224,7 @@ class TestCopySnapshotUpgrade:
         assert result["files_copied"] == 1
         assert (dest / "new.txt").exists()
 
-    def test_copy_mirror_deletes(self, tmp_path: Path) -> None:
+    def test_copy_mirror_deletes_snapshot_file_absent_from_source(self, tmp_path: Path) -> None:
         """Existing snapshot files not in source are mirror-deleted."""
         source = tmp_path / "project"
         source.mkdir()

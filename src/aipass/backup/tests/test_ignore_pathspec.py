@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
-# Description: Tests for pathspec-based ignore matching (gitignore parity)
-# Version: 1.3.1
+# Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
+# Version: 1.3.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
 
-"""Tests for src/aipass/backup/apps/handlers/ignore/patterns.py and .backupignore spec."""
+"""Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that all ignore and scan files parse and import
@@ -73,7 +73,7 @@ class TestGitignoreNegation:
 class TestGitignoreAnchoring:
     """Leading slash anchors to root."""
 
-    def test_anchored_pattern(self, tmp_path):
+    def test_leading_slash_matches_root_not_nested(self, tmp_path):
         """Leading / anchors pattern to root only."""
         (tmp_path / ".backupignore").write_text("/build\n", encoding="utf-8")
         spec = load_spec(str(tmp_path))
@@ -91,7 +91,7 @@ class TestGitignoreAnchoring:
 class TestGitignoreDirOnly:
     """Trailing / means dir-only."""
 
-    def test_dir_only_pattern(self, tmp_path):
+    def test_trailing_slash_matches_contents_not_bare_name(self, tmp_path):
         """Trailing / matches directory contents but not a bare file."""
         (tmp_path / ".backupignore").write_text("logs/\n", encoding="utf-8")
         spec = load_spec(str(tmp_path))
@@ -102,7 +102,7 @@ class TestGitignoreDirOnly:
 class TestGitignoreWildcard:
     """Wildcard boundary behavior."""
 
-    def test_star_no_slash_cross(self, tmp_path):
+    def test_single_star_extension_matches_at_any_depth(self, tmp_path):
         """Single * matches files at any depth for simple extensions."""
         (tmp_path / ".backupignore").write_text("*.py\n", encoding="utf-8")
         spec = load_spec(str(tmp_path))
@@ -120,7 +120,7 @@ class TestGitignoreWildcard:
 class TestGitignoreComments:
     """Comment and blank line handling."""
 
-    def test_comments_ignored(self, tmp_path):
+    def test_hash_line_is_a_comment_not_a_pattern(self, tmp_path):
         """Lines starting with # are treated as comments."""
         (tmp_path / ".backupignore").write_text("# this is a comment\n*.log\n", encoding="utf-8")
         spec = load_spec(str(tmp_path))
@@ -138,7 +138,7 @@ class TestGitignoreComments:
 class TestGitignoreLastMatchWins:
     """Last matching rule wins."""
 
-    def test_last_match_wins(self, tmp_path):
+    def test_negation_after_exclude_re_includes_only_the_named_file(self, tmp_path):
         """Negation after exclude re-includes the file."""
         (tmp_path / ".backupignore").write_text("*.txt\n!important.txt\n", encoding="utf-8")
         spec = load_spec(str(tmp_path))
@@ -158,7 +158,7 @@ class TestGitignoreLastMatchWins:
 class TestLoadSpec:
     """Load spec from .backupignore and match paths."""
 
-    def test_load_from_file(self, tmp_path):
+    def test_backupignore_file_excludes_and_re_includes(self, tmp_path):
         """Spec loaded from .backupignore matches correctly."""
         ignore = tmp_path / ".backupignore"
         ignore.write_text("*.log\n!important.log\n", encoding="utf-8")
@@ -187,7 +187,7 @@ class TestLoadSpec:
         assert is_ignored("app.log", spec)
         assert not is_ignored("audit.log", spec)
 
-    def test_dir_pattern_e2e(self, tmp_path):
+    def test_pycache_dir_pattern_matches_at_any_depth(self, tmp_path):
         """Directory pattern matches contents at any depth."""
         ignore = tmp_path / ".backupignore"
         ignore.write_text("__pycache__/\n", encoding="utf-8")
@@ -265,11 +265,7 @@ class TestDotfilesIncluded:
 
 
 class TestSeedTemplate:
-    """Seed template (backupignore.template) provisions new projects.
-
-    Every claim is made the way a project meets the template: register the
-    project, then read the .backupignore the setup wrote into it.
-    """
+    """Seed template (backupignore.template) provisions new projects."""
 
     def _seeded(self, project):
         """Register a fresh project and return the .backupignore it was given."""
@@ -303,22 +299,12 @@ class TestSeedTemplate:
         assert ".venv/" in self._seeded(tmp_path / "proj")
 
     def test_seeded_project_gets_rust_target(self, tmp_path):
-        """A registered project's .backupignore excludes target/ — the Rust build dir.
-
-        Regression: baud's generated .backupignore covered build/ and dist/
-        but not target/, so an 18GB src-tauri/target tree was walked and
-        copied for 7.5h, landing 50GB of .o files in the stores.
-        """
+        """A registered project's .backupignore excludes target/ — the Rust build dir."""
 
         assert "target/" in self._seeded(tmp_path / "proj")
 
     def test_seeded_target_pattern_matches_a_nested_rust_tree(self, tmp_path):
-        """target/ is unanchored, so the seeded spec matches it at any depth.
-
-        baud's tree is app/src-tauri/target, not a top-level target/ — an
-        anchored pattern would have been written and still missed it. Read
-        back through load_spec, the same matcher every copy lane uses.
-        """
+        """target/ is unanchored, so the seeded spec matches it at any depth."""
 
         project = tmp_path / "proj"
         project.mkdir()
@@ -330,11 +316,7 @@ class TestSeedTemplate:
         assert not is_ignored("app/src/target_resolver.rs", spec)
 
     def test_seed_content_is_read_from_the_template_file(self, tmp_path, monkeypatch):
-        """Editing the template file changes what a new project is seeded with.
-
-        The seed is never a string baked into the handler: point the template
-        seam at another file and the project is provisioned from that file.
-        """
+        """Editing the template file changes what a new project is seeded with."""
 
         project = tmp_path / "proj"
         project.mkdir()
@@ -358,13 +340,7 @@ class TestSeedTemplate:
             create_backup_dir(str(project))
 
     def test_a_missing_template_raises_and_leaves_no_ignore_file_behind(self, tmp_path, monkeypatch):
-        """The raise writes nothing, so the project can still be seeded later.
-
-        Opening the destination before the content was built truncated it
-        first: a missing template left a ZERO-BYTE .backupignore, and the
-        `if not exists()` guard then made that permanent — the project
-        shipped ignoring nothing but the built-in *.tmp floor.
-        """
+        """The raise writes nothing, so the project can still be seeded later."""
 
         project = tmp_path / "proj"
         project.mkdir()
@@ -417,10 +393,7 @@ def _json_folder_with_temps(root):
 class TestBuiltinTmpFloor:
     """*.tmp is ignored by every project, whatever its .backupignore says.
 
-    Measured 2026-09-11: the AIPass store held 498 temp copies in snapshots/
-    and 996 in versioned/, all from *_json folders, because no .backupignore
-    seeded before the rule named them. The floor lives in load_spec, which
-    every copy lane and the Drive re-filter read.
+    The floor lives in load_spec, which every copy lane and the Drive re-filter read.
     """
 
     def test_floor_applies_with_no_backupignore(self, tmp_path):
@@ -495,13 +468,7 @@ class TestMirrorCleanupNoExceptions:
     """Mirror cleanup deletes when source is gone — no exception list."""
 
     def test_deletes_when_source_gone(self, tmp_path):
-        """Files in backup whose source is gone get deleted — the predicate buys no exception.
-
-        The should_ignore callable NAMES gone.txt, and gone.txt is deleted
-        anyway: source-existence is the whole decision. A predicate that
-        answered the same for every path could not tell that apart from a
-        product that never consults the callable at all.
-        """
+        """Files in backup whose source is gone get deleted — the predicate buys no exception."""
 
         source = tmp_path / "source"
         source.mkdir()
@@ -513,6 +480,7 @@ class TestMirrorCleanupNoExceptions:
         (backup / "kept.txt").write_text("here", encoding="utf-8")
 
         result = BackupResult(mode="snapshot", project_root=str(source))
+        # The predicate names gone.txt, so a product that honoured it would keep the file.
         cleanup_deleted_files(backup, source, lambda p: p.name == "gone.txt", result)
         assert result.files_deleted == 1
         assert not (backup / "gone.txt").exists()

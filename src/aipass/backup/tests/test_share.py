@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_share.py
 # Description: Tests for the share module and the drive/share handler it drives
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-07-01
 # Modified: 2026-09-25
 # =============================================
@@ -23,17 +23,15 @@ from aipass.backup.apps.handlers.drive import share as share_handler
 from aipass.backup.apps.handlers.drive import upload as upload_mod
 from aipass.backup.apps.modules import share as share_module
 
-# MEASURED, and the reason this file never widens past the two shapes below.
 # `share` publishes to a REAL Google account: run_share() builds a DriveClient and
 # calls authenticate() before anything validates the path it was handed — the
 # is_file() check lives further down, inside share_file. So one
-# handle_command("share", ["anything"]) is live OAuth, and with a real path behind
-# it a live upload and a live share link. Two rules follow, and neither is style:
+# handle_command("share", ["anything"]) is live OAuth. Two rules follow:
 #   * a routing test either stops inside print_introspection / print_help, or it
-#     records run_share through monkeypatch and asserts it was NOT reached;
-#   * a handler test is handed the MagicMock DriveClient below, and
-#     googleapiclient's MediaFileUpload is replaced at the edge, so the only bytes
-#     that ever move are tmp_path's.
+#     replaces run_share with a recorder and asserts what it was (or was not) handed;
+#   * a handler test is handed the MagicMock `client` below.
+# Behind both, conftest.py's autouse sealed_google_edge replaces the two calls that
+# reach Google, raising instead of dialling, and MediaFileUpload with a MagicMock.
 # The consoles are NOT mocked, and do not need to be: aipass.cli.apps.modules.console
 # IS display.CONSOLE, a real Rich console printing to sys.stdout, and error()/warning()
 # write to display.err_console on sys.stderr — capsys reads both, and conftest.py
@@ -49,17 +47,17 @@ def no_live_media_upload(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def client() -> MagicMock:
     """A stand-in DriveClient — the network edge, and the only thing this file mocks."""
-    drive_client = MagicMock()
-    drive_client.last_error = None
-    drive_client.file_tracker = {}
-    drive_client.backup_folder_id = None
-    drive_client.project_folder_cache = {}
+    stand_in = MagicMock()
+    stand_in.last_error = None
+    stand_in.file_tracker = {}
+    stand_in.backup_folder_id = None
+    stand_in.project_folder_cache = {}
 
-    drive_client.get_or_create_project_folder.return_value = "folder-shared-123"
-    drive_client._find_existing_file.return_value = None
+    stand_in.get_or_create_project_folder.return_value = "folder-shared-123"
+    stand_in._find_existing_file.return_value = None
 
     service = MagicMock()
-    drive_client.drive_service = service
+    stand_in.drive_service = service
 
     service.permissions.return_value.create.return_value = MagicMock()
     service.files.return_value.get.return_value = MagicMock()
@@ -68,7 +66,7 @@ def client() -> MagicMock:
     service.files.return_value.list.return_value = MagicMock()
     service.about.return_value.get.return_value = MagicMock()
 
-    return drive_client
+    return stand_in
 
 
 # ---------------------------------------------------------------------------
@@ -129,19 +127,14 @@ class TestShareModuleRouting:
         assert ran == [("notes.txt", {"public": False})]
 
     def test_the_primary_command_is_the_verb_the_router_answers_to(self, capsys) -> None:
-        assert share_module.MODULE_NAME == "share"
-        assert share_module.PRIMARY_COMMAND == "share"
+        assert share_module.handle_command("share", []) is True
 
-        assert share_module.handle_command(share_module.PRIMARY_COMMAND, []) is True
-        assert "Primary command: share" in capsys.readouterr().out
+        lines = [line.strip() for line in capsys.readouterr().out.splitlines()]
+        assert "share Module" in lines
+        assert "Primary command: share" in lines
 
     def test_the_public_flag_opens_the_share_wherever_the_user_puts_it(self, monkeypatch) -> None:
-        """DEFECT: `share --public report.pdf` took "--public" as the FILENAME.
-
-        Flag-before-operand is the ordinary shell form, and it authenticated against
-        the real account with "--public" as the path. Both orders must forward the
-        same thing: the file as the file, the flag as public=True.
-        """
+        """DEFECT: `share --public report.pdf` took "--public" as the FILENAME."""
         ran: list = []
         monkeypatch.setattr(share_module, "run_share", lambda path, **kwargs: ran.append((path, kwargs)))
 
@@ -371,12 +364,7 @@ class TestShareFile:
         )
 
     def test_a_restricted_share_revokes_the_public_link_an_earlier_run_left_behind(self, tmp_path, client) -> None:
-        """DEFECT: a restricted share after a public one never revoked `anyone`.
-
-        `share report.pdf --public` then `share report.pdf` reused the same Drive
-        file, created a user permission beside the public one, and the module
-        printed "Shared (restricted)" over a file the whole web could still read.
-        """
+        """DEFECT: a restricted share after a public one never revoked `anyone`."""
         client._find_existing_file.return_value = {"id": "already-public"}
 
         client._api_call.side_effect = [
@@ -401,11 +389,7 @@ class TestShareFile:
         assert client._api_call.call_count == 5
 
     def test_a_stale_tracker_entry_cannot_send_the_upload_to_a_dead_drive_id(self, tmp_path, client) -> None:
-        """upload_for_share clears client.file_tracker before it uploads.
-
-        Without that reset a leftover entry for the same name takes the upload down
-        files().update against a drive_id that may no longer exist.
-        """
+        """upload_for_share clears client.file_tracker before it uploads."""
         client.file_tracker = {"report.pdf": {"drive_id": "dead-drive-id"}}
 
         client._api_call.side_effect = [
@@ -499,7 +483,7 @@ class TestSetSharePermission:
             ]
         )
 
-    def test_a_public_permission_that_cannot_be_revoked_is_refused_rather_than_called_restricted(self, client) -> None:
+    def test_a_restricted_share_is_refused_when_drive_cannot_list_the_files_permissions(self, client) -> None:
         """A restricted share is a claim about the file; Drive must confirm it, not the product."""
         client._api_call.side_effect = [
             {"user": {"emailAddress": "user@example.com"}},
@@ -509,7 +493,7 @@ class TestSetSharePermission:
         permission_id = share_handler.set_share_permission(client, "file-123", public=False)
 
         assert permission_id is None
-        assert "file-123" in client.last_error
+        assert client.last_error == "Could not list permissions on file-123"
         assert client.drive_service.permissions().create.called is False
         assert client._api_call.call_count == 2
 

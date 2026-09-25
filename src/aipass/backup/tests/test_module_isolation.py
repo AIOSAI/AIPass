@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_module_isolation.py
-# Description: Regression pair for the sys.modules/parent-attr desync class
-# Version: 1.0.2
+# Description: drive/client.py resolving through a re-imported parent package (ordered pair)
+# Version: 1.0.3
 # Created: 2026-08-08
 # Modified: 2026-09-25
 # =============================================
@@ -19,31 +19,33 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-# The defect this pair pins (CI-only xdist red). Fixtures like
-# test_drive_pipeline's _fresh_import evict submodules from sys.modules and
-# re-import them under mocked dependencies. patch.dict restores the sys.modules
-# DICT afterwards but never the parent package's ATTRIBUTE, which keeps pointing
-# at a throwaway twin - one that can lack submodule attributes entirely (they
-# resolved to sys.modules mocks during its import). mock.patch then walks the
-# stale attribute and dies with AttributeError: module '...drive' has no
-# attribute 'client' even though a clean import works - but only when an unlucky
-# xdist worker ran a polluter before a victim, so serial runs never see it.
-# _resync_module_attrs heals the desync after every test; this pair recreates the
-# failure shape deterministically. Order within one file is guaranteed, and
-# loadscope keeps a file on one worker.
+# The defect this pair pins (CI-only xdist red). A test that evicts submodules
+# from sys.modules and re-imports them under mocked dependencies leaves the
+# parent package's ATTRIBUTE on a throwaway twin: patch.dict restores the
+# sys.modules DICT, nothing restores the attribute, and the twin can lack
+# submodule attributes entirely (they resolved to sys.modules mocks during its
+# import). A dotted mock.patch that walks the stale attribute then dies with
+# AttributeError: module '...drive' has no attribute 'client', but only when an
+# xdist worker ran a polluter before a victim. No other file in this suite does
+# that surgery today; test_a does it on purpose. conftest's autouse
+# _resync_module_attrs heals the desync after every test. test_b runs second
+# because pytest collects a class in definition order, and CI's
+# --dist loadscope keeps the class on one worker.
 # Version note: Python 3.12+ mock resolves patch targets with
-# pkgutil.resolve_name (sys.modules truth, self-healing), so the un-fixed red
-# only shows on 3.10/3.11, whose mock walks parent attributes and retries getattr
-# on the stale object. The final coherence assert in test_b holds the repair
-# honest on every version.
+# pkgutil.resolve_name (sys.modules truth), so the stale attribute breaks a
+# dotted patch only on 3.10/3.11, whose mock walks parent attributes. test_b
+# walks the parent attributes itself, so it goes red without the heal on every
+# version.
 
 DRIVE_PKG = "aipass.backup.apps.handlers.drive"
 
 
 class TestStaleParentAttrHealed:
-    """First test poisons like _fresh_import; second must still patch clean."""
+    """test_a leaves the desync standing; test_b must reach drive.client through the healed parent."""
 
-    def test_a_manufacture_the_desync(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_reimport_under_a_mocked_client_leaves_the_parent_attr_on_a_twin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Evict drive*, import a twin with client mocked away — the polluter shape."""
         for key in list(sys.modules.keys()):
             if key.startswith(DRIVE_PKG):
@@ -77,15 +79,15 @@ class TestStaleParentAttrHealed:
         # mock.patch performs lands on the AttributeError CI reported.
         assert not hasattr(twin_pkg, "client")
 
-    def test_b_string_patch_resolves_after_repair(self) -> None:
-        """CI's failing shape: mock.patch by dotted string must find drive.client."""
+    def test_b_dotted_patch_reaches_the_real_client_through_the_healed_parent(self) -> None:
+        """CI's failing shape: the parent-attribute walk must land on the class mock.patch replaced."""
+        parent_pkg = importlib.import_module(DRIVE_PKG.rpartition(".")[0])
         with patch(f"{DRIVE_PKG}.client.DriveClient") as mocked:
-            assert mocked is not None
+            # The walk 3.10/3.11 mock.patch performs; on an unhealed twin .client is absent.
+            assert parent_pkg.drive.client.DriveClient is mocked
 
-        # And the module graph is coherent again: attribute is sys.modules truth.
-        client_mod = importlib.import_module(f"{DRIVE_PKG}.client")
-        drive_pkg = importlib.import_module(DRIVE_PKG)
-        assert drive_pkg.client is client_mod
+        # And the parent attribute is sys.modules truth again, not test_a's twin.
+        assert parent_pkg.drive is sys.modules[DRIVE_PKG]
 
 
 # =============================================

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -12,7 +12,6 @@
 # seedgo: no-test-needed(ruff) — that every file under apps/handlers/copy, diff and path parses and imports
 # seedgo: no-test-needed(documentation) — that the public handler and module functions carry docstrings
 # seedgo: no-test-needed(constant) — BACKUP_DIR's ".backup" text and the store's "versioned" directory name
-# seedgo: no-test-needed(stdlib) — hashlib.md5's digest in a long name's folder (build_versioned_file_path)
 # seedgo: no-test-needed(generated) — the dates _make_baseline_name and _copy_changed_file stamp into file names
 
 import os
@@ -30,18 +29,17 @@ from aipass.cli.apps.modules import command_failed
 # needs to be a valid absolute path on the running OS.
 FAKE_PROJECT_ROOT = str(Path(tempfile.gettempdir()) / "project")
 
-# The audit trail is deliberately NOT mocked here, though every test in this
-# file used to wrap itself in patch("...audit.trail.log_operation"). conftest's
-# autouse mock_infrastructure points AIPASS_TEST_LOG_DIR into tmp_path for each
-# test and trail.log_path() recomputes on every call, so the only write that
-# left tmp_path is already redirected for real. Template v1 item 15: mock at
-# the edge, and only where no real redirect exists.
+# The audit trail is deliberately NOT mocked here. conftest's autouse
+# mock_infrastructure points AIPASS_TEST_LOG_DIR at a per-test directory beside
+# tmp_path and trail.log_path() recomputes on every call, so the audit write is
+# already redirected for real. Template v1 item 15: mock at the edge, and only
+# where no real redirect exists.
 
 
 class TestVersionedBaseline:
     """First run creates baseline + current."""
 
-    def test_first_run_creates_baseline(self, tmp_path: Path):
+    def test_a_first_run_stores_one_baseline_beside_the_current_copy(self, tmp_path: Path):
         """New file -> baseline + current in file-folder."""
         project = tmp_path / "project"
         project.mkdir()
@@ -60,7 +58,7 @@ class TestVersionedBaseline:
         assert len(baselines) == 1
         assert baselines[0].name.endswith(".py")
 
-    def test_first_run_current_matches_source(self, tmp_path: Path):
+    def test_a_first_run_stores_the_current_copy_with_the_source_text(self, tmp_path: Path):
         """Current copy has same content as source."""
         project = tmp_path / "project"
         project.mkdir()
@@ -75,7 +73,7 @@ class TestVersionedBaseline:
 class TestVersionedDiff:
     """Change creates diff + overwrites current."""
 
-    def test_change_creates_diff(self, tmp_path: Path):
+    def test_a_changed_source_adds_exactly_one_diff_to_the_files_diffs_folder(self, tmp_path: Path):
         """Modified file -> diff file appears in _diffs/ folder."""
         project = tmp_path / "project"
         project.mkdir()
@@ -104,7 +102,7 @@ class TestVersionedDiff:
         diffs = list(diff_dir.glob("*.diff"))
         assert len(diffs) == 1
 
-    def test_change_overwrites_current(self, tmp_path: Path):
+    def test_a_changed_source_overwrites_the_current_copy_with_the_new_text(self, tmp_path: Path):
         """After change, current has new content."""
         project = tmp_path / "project"
         project.mkdir()
@@ -150,7 +148,7 @@ class TestVersionedDiff:
 class TestVersionedSkip:
     """Unchanged files are skipped."""
 
-    def test_unchanged_skipped(self, tmp_path: Path):
+    def test_an_unchanged_source_is_counted_unchanged_and_not_copied_again(self, tmp_path: Path):
         """File with same mtime -> files_unchanged incremented."""
         project = tmp_path / "project"
         project.mkdir()
@@ -192,7 +190,9 @@ class TestVersionedNeverDelete:
 class TestDiffGenerator:
     """Diff generator — binary detection, unified diff."""
 
-    def test_text_diff(self, tmp_path: Path):
+    def test_a_text_change_yields_a_unified_diff_with_both_headers_the_hunk_and_both_changed_lines(
+        self, tmp_path: Path
+    ):
         """Text files produce unified diff."""
         old = tmp_path / "old.py"
         new = tmp_path / "new.py"
@@ -201,25 +201,23 @@ class TestDiffGenerator:
 
         diff = generate_diff_content(old, new)
 
-        # Three clauses joined by 'or', all three about the result: the
-        # last one ("line" in diff) is true of literally any output that
-        # echoes either file, so the assertion could not fail. Measured
-        # 2026-09-08 -- all three headers are present, and so are the two
-        # changed lines with their unified-diff signs.
         assert "--- a/old.py" in diff
         assert "+++ b/new.py" in diff
         assert "@@ -1,2 +1,2 @@" in diff
         assert "-line2" in diff
         assert "+line3" in diff
 
-    def test_binary_marker(self, tmp_path: Path):
+    def test_a_binary_file_gets_the_changed_marker_instead_of_a_unified_diff(self, tmp_path: Path):
         """Binary files get marker instead of diff."""
         binary = tmp_path / "image.bin"
         binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00" + b"\x00" * 100)
+        text = tmp_path / "notes.txt"
+        text.write_text("line1\n", encoding="utf-8")
         assert is_binary_file(binary) is True
+        assert generate_diff_content(binary, text) == "Binary file image.bin changed\n"
 
-    def test_should_create_diff_patterns(self):
-        """Include patterns override ignore patterns."""
+    def test_code_and_data_types_get_diffs_and_an_image_type_does_not(self):
+        """A .py and a .json file get diffs; a .png file does not."""
         assert should_create_diff(Path("app.py")) is True
         assert should_create_diff(Path("image.png")) is False
         assert should_create_diff(Path("data.json")) is True
@@ -228,7 +226,7 @@ class TestDiffGenerator:
 class TestRestore:
     """Restore handler — reconstruct from store."""
 
-    def test_restore_current(self, tmp_path: Path):
+    def test_restore_file_writes_the_stored_current_copy_to_the_output_path(self, tmp_path: Path):
         """Restore current version from store."""
         project = tmp_path / "project"
         project.mkdir()
@@ -242,7 +240,7 @@ class TestRestore:
         assert restore_file(target.parent, output) is True
         assert output.read_text(encoding="utf-8") == "print('app')"
 
-    def test_list_versions(self, tmp_path: Path):
+    def test_list_versions_reports_baseline_current_and_diff_after_one_change(self, tmp_path: Path):
         """list_versions finds baseline + current + diffs."""
         project = tmp_path / "project"
         project.mkdir()
@@ -272,38 +270,33 @@ class TestRestore:
 class TestVersionedFilePath:
     """Path builder — file-folder packaging."""
 
-    def test_root_level_file(self):
+    def test_a_root_level_file_is_stored_under_root_in_a_folder_of_its_own_name(self):
         """Root-level file -> root/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
         assert "root" in str(result)
         assert result.name == "README.md"
 
-    def test_nested_file(self):
+    def test_a_nested_file_is_stored_under_its_parent_in_a_folder_of_its_own_name(self):
         """Nested file -> <parent>/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
         assert "src" in str(result)
         assert result.name == "main.py"
         assert result.parent.name == "main.py"
 
-    def test_long_filename_hashed(self):
+    def test_a_name_over_50_chars_is_stored_in_a_folder_named_its_first_30_chars_and_md5(self):
         """Filename >50 chars -> shortened with hash."""
         long_name = "a" * 60 + ".py"
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
         assert result.name == long_name
-        assert len(result.parent.name) < 50
+        # name[:30] + "_" + md5(name)[:8], the digest read off the product once.
+        assert result.parent.name == "a" * 30 + "_96e1cede"
 
 
 class TestRestoreModule:
     """The `restore` command — version discovery and file restore, the way a user reaches them."""
 
-    # Three of these used to import aipass.backup.apps.modules.restore._find_file_folder
-    # and assert on the Path it returned. Both of its callers — run_list_versions
-    # and run_restore_file — are public and reachable from the command, so the
-    # lookup is exercised here through
-    # `restore <project> list <file>` and `restore <project> file <file> <out>`,
-    # which is what a user types. Nothing was weakened: every claim the old
-    # tests made about the folder is now made about the bytes or the line the
-    # user gets.
+    # The private lookup `_find_file_folder` is reached only through what a user
+    # types: `restore <project> list <file>` and `restore <project> file <file> <out>`.
 
     def test_restore_list_names_the_stored_versions_of_a_file(self, tmp_path: Path, capsys):
         project = tmp_path / "project"
@@ -314,10 +307,7 @@ class TestRestoreModule:
 
         assert restore_module.handle_command("restore", [str(project), "list", "config.py"]) is True
 
-        # Read on the filenames, not on the "[baseline]"/"[current]" type
-        # labels the module formats: console.print parses Rich markup, so
-        # those square brackets are consumed as unknown style tags and never
-        # reach the user at all. Shipped defect, reported 2026-09-22.
+        # Read on the filenames; the "[type]" labels are pinned by the diff-row test below.
         out = capsys.readouterr().out
         assert "Versions of config.py:" in out
         assert "config-baseline-" in out
@@ -495,7 +485,7 @@ class TestRestoreModule:
         assert "[baseline]" in out
         assert "[current]" in out
 
-    def test_run_restore_file_roundtrip(self, tmp_path: Path, capsys):
+    def test_run_restore_file_writes_the_stored_text_and_names_where_it_went(self, tmp_path: Path, capsys):
         """run_restore_file restores a file to an output path."""
         project = tmp_path / "project"
         project.mkdir()

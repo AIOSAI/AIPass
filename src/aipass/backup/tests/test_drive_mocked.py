@@ -1,12 +1,12 @@
 # =================== META ====================
 # Name: test_drive_mocked.py
-# Description: Tests for the four drive_* command modules and the settings stub
-# Version: 2.0.1
+# Description: Tests for the drive_* command modules, the settings stub and the suite-wide Drive seal
+# Version: 2.0.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
 
-"""Tests for apps/modules/drive_sync.py, drive_check.py, drive_stats.py, drive_clear.py and settings.py."""
+"""Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
@@ -19,21 +19,14 @@ import pytest
 from aipass.backup.apps.handlers.drive import client as drive_client
 from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync, settings
 
-# MEASURED, and the reason every routing test below stops at the no-args route.
-# These modules reach a REAL Google account one positional argument in.
-# drive_check WAS the sharp one: the bottom of its handle_command used to be
-# ``run_drive_check()`` as the DEFAULT branch, not a usage line, so any
-# unrecognised first ARGUMENT was a live Drive auth (the module's own 2026-08-13
-# comment records that `drive_check foo --help` used to do exactly that).
-# That default branch is gone -- an unknown verb is now refused through error()
-# before it can dial -- and the three pins in TestDriveCheckRouting hold it
-# shut. The recorder they install is still what keeps THIS file off the network.
-# drive_sync, drive_stats and drive_clear take args[0] as a project root and run.
-# So the tests here pass [] or a command the module does not own; the run_*
-# pipelines are exercised against a mocked Drive client in test_drive_pipeline.py
-# (run_drive_sync) and test_cli_routing.py (the route, with run_* patched out).
-# settings is the one module that answers an argument without touching Drive: it
-# raises NotImplementedError, deliberately (refusal sweep 2026-09-07).
+# What is not pinned here, and where it is. These modules reach a REAL Google
+# account through their run_* verbs, so every test below that passes an argument
+# a run_* could act on first replaces that run_* with a recorder; conftest's
+# autouse sealed_google_edge stands behind the recorder (TestSuiteWideDriveSeal).
+# The run_* pipelines run against a mocked Drive client in test_drive_pipeline.py.
+# The project_root routes of drive_sync and drive_stats (drive_sync's --note and
+# --project included) and settings' NotImplementedError on any argument other
+# than help, --help or -h are pinned in test_cli_routing.py.
 #
 # The consoles are NOT mocked, and do not need to be: aipass.cli.apps.modules.console
 # IS display.CONSOLE, a real Rich console printing to sys.stdout, and error()/warning()
@@ -50,22 +43,7 @@ class TestSuiteWideDriveSeal:
     """conftest's autouse sealed_google_edge, proven from inside THIS file."""
 
     def test_the_oauth_flow_is_refused_rather_than_dialled(self) -> None:
-        """Reaching for Drive auth from this file raises instead of authenticating.
-
-        Until 2026-09-23 ``sealed_google_edge`` was a file-level autouse fixture
-        declared inside test_drive_pipeline.py, so it covered that ONE file. This
-        file drives the same four drive_* modules and had no seal of its own: the
-        only thing keeping it off the network was each test's own recorder, and a
-        route that slipped past a recorder reached the real account BEFORE the
-        assertion that would have failed it -- the dial happens first, the red
-        arrives after, and the account has already been touched.
-
-        The fixture now lives in conftest.py as suite-wide autouse. This is the
-        pin that shows the move reached here: get_drive_service is the OAuth flow
-        itself, and calling it inside this file must be a RuntimeError, not a
-        round trip. If the fixture is ever moved back, or shadowed by a file-level
-        fixture of the same name, this test goes red and names the reason.
-        """
+        """Reaching for Drive auth from this file raises instead of authenticating."""
         with pytest.raises(RuntimeError, match="live Google Drive edge"):
             drive_client.get_drive_service()
 
@@ -91,12 +69,10 @@ class TestDriveSyncRouting:
         assert "Handlers: drive/client, drive/upload, drive/tracker" in out
         assert err == ""
 
-    # The type alone said nothing: True is a bool too, and a module that answered
-    # True to every verb would have passed the old isinstance-only pin while
-    # swallowing every other module's command. That exact bug was live in
-    # display.py once (see test_cli_routing TestUnknownCommandNotSwallowed).
-    # Printing nothing is half the claim: a module that declines must also stay
-    # silent, or the router's next candidate prints under this one's output.
+    # `is False`, not a bool check: a module that answered True to every verb
+    # would swallow every other module's command. Printing nothing is half the
+    # claim: a module that declines must also stay silent, or the router's next
+    # candidate prints under this one's output.
     def test_drive_sync_declines_a_verb_that_is_not_its_own(self, capsys) -> None:
         """An unclaimed verb returns False, silently, so the router keeps asking."""
         assert drive_sync.handle_command("nonexistent", []) is False
@@ -107,12 +83,12 @@ class TestDriveSyncRouting:
 
 
 # ---------------------------------------------------------------------------
-# drive_check — the module whose default branch is a live auth
+# drive_check — the module whose run verb is a live auth
 # ---------------------------------------------------------------------------
 
 
 class TestDriveCheckRouting:
-    """`drone @backup drive_check ...` — the two routes that do not reach Drive."""
+    """`drone @backup drive_check ...` — which arguments reach the connectivity check."""
 
     def test_no_args_names_the_module_instead_of_running_the_connectivity_check(self, capsys) -> None:
         """No args is introspection; it must not print the check's own verdict lines."""
@@ -124,8 +100,8 @@ class TestDriveCheckRouting:
         assert "Drive connectivity test" not in out
         assert err == ""
 
-    def test_a_verb_that_is_not_ours_is_declined_before_the_default_branch_is_reached(self, capsys) -> None:
-        """The command guard is the only thing standing between an unknown verb and a live auth."""
+    def test_a_command_that_is_not_drive_check_is_declined_silently(self, capsys) -> None:
+        """An unclaimed command returns False and prints nothing, so the router keeps asking."""
         assert drive_check.handle_command("invalid_type", []) is False
 
         out, err = capsys.readouterr()
@@ -219,11 +195,9 @@ class TestDriveClearRouting:
     # is pinned AT THE SEAM: run_drive_clear is replaced by a recorder, and
     # what the recorder was handed is the flag's whole effect. A call-through
     # would reach clear_all for real, which is why this test never lets
-    # handle_command past the recorder. The recorder is the FIRST thing standing
-    # between args[0] and a live account; since 2026-09-23 conftest's autouse
-    # sealed_google_edge stands behind it for every test in this file too, so a
-    # route that slips past the recorder raises instead of dialling
-    # (TestSuiteWideDriveSeal above is the pin on that).
+    # handle_command past the recorder. conftest's autouse sealed_google_edge
+    # stands behind the recorder, so a route that slips past it raises instead
+    # of dialling (TestSuiteWideDriveSeal above is the pin on that).
     def test_force_arms_the_clear_and_the_same_command_without_it_does_not(
         self,
         tmp_path,
@@ -266,7 +240,7 @@ class TestSettingsStub:
         assert err == ""
 
     def test_a_help_flag_is_answered_rather_than_refused(self, capsys) -> None:
-        """Every other argument raises NotImplementedError; --help is the exception that describes it."""
+        """--help prints the planned handlers instead of raising the stub's refusal."""
         assert settings.handle_command(settings.PRIMARY_COMMAND, ["--help"]) is True
 
         out, err = capsys.readouterr()
