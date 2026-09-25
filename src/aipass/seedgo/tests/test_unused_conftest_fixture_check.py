@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_unused_conftest_fixture_check.py
 # Description: unused_conftest_fixture_check — crack class G, a shared fixture nothing requests
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unused_conftest_fixture_check.py."""
@@ -54,7 +54,7 @@ class TestTheModelBranchPasses:
 
 
 class TestThePlantedSpecimen:
-    """backup/tests/conftest.py 80 temp_dir, 92 sample_data, 176 mock_logger."""
+    """backup/tests/conftest.py fixtures `temp_dir`, `sample_data` and `mock_logger`, by name."""
 
     def test_a_fixture_no_test_requests_is_convicted(self, tmp_path):
         """Defined, shared, and reached by nothing."""

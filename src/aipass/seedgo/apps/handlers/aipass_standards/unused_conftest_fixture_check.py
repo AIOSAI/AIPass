@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_conftest_fixture_check.py
 # Description: Unused Conftest Fixture Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -15,8 +15,9 @@ other fixture in the branch ever requests. It is apparatus nothing uses --
 dead weight that reads as shared infrastructure, so the next author extends it
 instead of deleting it.
 
-@backup's ``tests/conftest.py`` carries three: ``temp_dir`` (80),
-``sample_data`` (92), ``mock_logger`` (176).
+@backup's ``tests/conftest.py`` carries three: ``temp_dir``, ``sample_data``
+and ``mock_logger``. Cited by name: the line numbers first written here had
+already drifted by the next edit of that conftest.
 
 THREE WAYS TO REQUEST A FIXTURE, and all three count as use:
 
@@ -44,9 +45,9 @@ CHECK FIRST, measured 2026-09-22 over the fleet:
   * The dispatch's first cut said 17 files and 51. The gap is the three
     request forms above: a rule that reads only parameter names convicts every
     fixture used through ``usefixtures`` or ``getfixturevalue``.
-  * @backup's three land at 80, 92 and 176. The review said 79, 91 and 175 --
-    the same fixtures; the review cites the ``@pytest.fixture`` decorator line
-    and this rule cites the ``def``.
+  * @backup's three are the same fixtures the review named. The review cited
+    the ``@pytest.fixture`` decorator line and this rule cites the ``def``, so
+    the two line numbers differ by one -- the finding carries the live line.
 
 WHY IT CANNOT BE SATISFIED BY ACCIDENT: if no parameter, no ``usefixtures``
 string and no ``getfixturevalue`` string in the entire branch names the

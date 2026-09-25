@@ -3,13 +3,16 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-25
 # =============================================
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 
 
 # ---------------------------------------------------------------------------
@@ -195,13 +198,9 @@ def test_run_checklist_python_file_no_checkers(tmp_path):
 
 def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):
     """Files under system temp dirs are skipped."""
-    import sys
-
     from aipass.seedgo.apps.modules.checklist import run_checklist
 
-    skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-    if skip_dirs:
-        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [tmp_path])
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [tmp_path])
 
     tmp_file = tmp_path / "test_throwaway.py"
     tmp_file.write_text("x = 1\n", encoding="utf-8")
@@ -229,11 +228,7 @@ def test_run_checklist_scratchpad_path_skipped(tmp_path):
 
 def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch):
     """prototype=True skips all standards."""
-    import sys
-
-    skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-    if skip_dirs:
-        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
     from aipass.seedgo.apps.modules.checklist import run_checklist
 
@@ -247,11 +242,7 @@ def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch):
 
 def test_run_checklist_prototype_marker_skips(tmp_path, monkeypatch):
     """In-file '# seedgo: prototype' marker skips all standards."""
-    import sys
-
-    skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-    if skip_dirs:
-        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
     from aipass.seedgo.apps.modules.checklist import run_checklist
 
@@ -266,8 +257,6 @@ def test_run_checklist_prototype_marker_skips(tmp_path, monkeypatch):
 def test_run_checklist_seedgo_ignore_skips(tmp_path, monkeypatch):
     """A file under apps/tools/ is skipped via the global .seedgoignore default."""
     import sys
-
-    from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
@@ -290,11 +279,7 @@ def test_run_checklist_seedgo_ignore_skips(tmp_path, monkeypatch):
 
 def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
     """A normal file without markers/temp path is still fully audited."""
-    import sys
-
-    skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-    if skip_dirs:
-        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
     from aipass.seedgo.apps.modules.checklist import run_checklist
 
@@ -537,3 +522,131 @@ def test_checklist_does_not_answer_for_another_command(monkeypatch):
     monkeypatch.setattr(checklist, "print_help", MagicMock())
 
     assert checklist.handle_command("audit", ["--help"]) is False
+
+
+# ---------------------------------------------------------------------------
+# Branch-level rows the checklist cannot judge are named, not silently dropped
+#
+# backup's conftest printed "All 37 standards passed" here while the audit
+# convicted it under unused_conftest_fixture -- a branch_level checker with no
+# check_module(), which this lane skips by design. The skip stays; the silence
+# does not.
+# ---------------------------------------------------------------------------
+
+
+def _fake_pack():
+    """A pack with one per-file row and branch-level rows of every applicability."""
+    from types import SimpleNamespace
+
+    def _passes(path, bypass_rules=None):
+        return {"passed": True, "checks": []}
+
+    def _branch(path, bypass_rules=None):
+        return {"passed": True, "checks": []}
+
+    return {
+        "per_file": SimpleNamespace(AUDIT_SCOPE="all_files", check_module=_passes),
+        "unused_conftest_fixture": SimpleNamespace(
+            AUDIT_SCOPE="branch_level", APPLIES_TO="tests", check_branch=_branch
+        ),
+        "dead_code": SimpleNamespace(AUDIT_SCOPE="branch_level", APPLIES_TO="production", check_branch=_branch),
+        "template": SimpleNamespace(AUDIT_SCOPE="branch_level", check_branch=_branch),
+        "ruff": SimpleNamespace(AUDIT_SCOPE="branch_level", check_module=_passes, check_branch=_branch),
+        "cli_flags": SimpleNamespace(AUDIT_SCOPE="entry_point", APPLIES_TO="production", check_module=_passes),
+    }
+
+
+def _write(tmp_path, rel):
+    target = tmp_path / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("x = 1\n", encoding="utf-8")
+    return target
+
+
+def test_a_test_file_names_its_tests_only_branch_rows(tmp_path, monkeypatch):
+    """The conftest case: unused_conftest_fixture applies and was not judged here."""
+    from aipass.seedgo.apps.modules import checklist
+
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack: _fake_pack())
+    conftest = _write(tmp_path, "branch/tests/conftest.py")
+
+    assert checklist.not_judged_here(str(conftest)) == ["template", "unused_conftest_fixture"]
+
+
+def test_a_production_file_does_not_name_tests_only_rows(tmp_path, monkeypatch):
+    """Applicability gates the list: a module never hears about a conftest standard."""
+    from aipass.seedgo.apps.modules import checklist
+
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack: _fake_pack())
+    module = _write(tmp_path, "branch/apps/modules/thing.py")
+
+    assert checklist.not_judged_here(str(module)) == ["dead_code", "template"]
+
+
+def test_rows_the_checklist_does_run_are_not_named(tmp_path, monkeypatch):
+    """ruff is branch_level but has check_module(), so it is judged here; entry_point rows are never listed."""
+    from aipass.seedgo.apps.modules import checklist
+
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack: _fake_pack())
+    entry = _write(tmp_path, "branch/apps/branch.py")
+
+    named = checklist.not_judged_here(str(entry))
+    assert "ruff" not in named and "cli_flags" not in named and "per_file" not in named
+    assert named == ["dead_code", "template"]
+
+
+def _rendered_command(monkeypatch, target, pack=None):
+    """handle_command's output on target, rendered by a real Console."""
+    import io
+
+    from rich.console import Console
+
+    from aipass.seedgo.apps.modules import checklist
+
+    # tmp_path sits under the system temp root, which the lane skips as throwaway;
+    # exempt this target only, and leave the real gate in place for anything else.
+    real_gate = checklist.is_throwaway_path
+    exempt = str(target.resolve())
+    monkeypatch.setattr(checklist, "is_throwaway_path", lambda path: path != exempt and real_gate(path))
+    chosen = pack if pack is not None else _fake_pack()
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path: chosen)
+    buffer = io.StringIO()
+    monkeypatch.setattr(checklist, "console", Console(file=buffer, force_terminal=False, width=60))
+    assert checklist.handle_command("checklist", [str(target)]) is True
+    return buffer.getvalue()
+
+
+def test_the_not_judged_line_leaves_the_count_alone(tmp_path, monkeypatch):
+    """Through the command: one unwrapped line, after the summary, and the pass count is unchanged."""
+    rendered = _rendered_command(monkeypatch, _write(tmp_path, "branch/tests/conftest.py"))
+    lines = rendered.splitlines()
+
+    # per_file + ruff ran; the two branch-only rows were named, not counted.
+    assert "All 2 standards passed" in lines
+    not_judged = [line for line in lines if line.startswith("Not judged here")]
+    assert not_judged == [
+        "Not judged here (branch-level, run by `drone @seedgo audit`): template, unused_conftest_fixture"
+    ]
+    assert lines.index(not_judged[0]) > lines.index("All 2 standards passed")
+    assert "[FAIL]" not in rendered
+
+
+def test_the_not_judged_line_is_fenced_off_from_the_last_finding(tmp_path, monkeypatch):
+    """hooks' auto_fix rejoins a finding's wrapped detail until a blank line, so one must come first."""
+    from types import SimpleNamespace
+
+    pack = _fake_pack()
+    pack["per_file"] = SimpleNamespace(
+        AUDIT_SCOPE="all_files",
+        check_module=lambda path, bypass_rules=None: {
+            "passed": False,
+            "checks": [{"passed": False, "message": "bad"}],
+        },
+    )
+    target = _write(tmp_path, "branch/tests/conftest.py")
+    rendered = _rendered_command(monkeypatch, target, pack)
+    lines = rendered.splitlines()
+
+    at = next(i for i, line in enumerate(lines) if line.startswith("Not judged here"))
+    assert lines[at - 1] == ""
+    assert rendered.count("[FAIL]") == 1

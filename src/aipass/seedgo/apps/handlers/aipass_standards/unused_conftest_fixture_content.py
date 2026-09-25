@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: unused_conftest_fixture_content.py
 # Description: Unused Conftest Fixture Standards Content Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -29,8 +29,8 @@ def get_unused_conftest_fixture_standards() -> str:
         "  — dead weight that reads as shared infrastructure, so the next author",
         "  extends it instead of deleting it.",
         "",
-        "  @backup's tests/conftest.py carries three: [red]temp_dir[/red] (80),",
-        "  [red]sample_data[/red] (92), [red]mock_logger[/red] (176).",
+        "  @backup's tests/conftest.py carries three: [red]temp_dir[/red],",
+        "  [red]sample_data[/red] and [red]mock_logger[/red] (by name; lines drift).",
         "",
         "[bold cyan]THREE WAYS TO REQUEST A FIXTURE — all three count as use:[/bold cyan]",
         "  by [green]PARAMETER NAME[/green] on a test or on another fixture — the ordinary way",
@@ -58,7 +58,7 @@ def get_unused_conftest_fixture_standards() -> str:
         "  · ai_mail, aipass, api, cli, devpulse, flow at 1 each.",
         "",
         "  The review's first cut said 17 files and 51. The gap is the three request",
-        "  forms above. @backup's three land at 80, 92 and 176; the review cites the",
+        "  forms above. @backup's three are the review's own; the review cites the",
         "  @pytest.fixture decorator line, this rule cites the def.",
         "",
         "[bold cyan]WHY IT CANNOT BE SATISFIED BY ACCIDENT:[/bold cyan]",

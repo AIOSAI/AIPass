@@ -13,8 +13,8 @@ requests.
 It is apparatus nothing uses — dead weight that reads as shared infrastructure, so the next
 author extends it instead of deleting it.
 
-@backup's `tests/conftest.py` carries three: `temp_dir` (80), `sample_data` (92),
-`mock_logger` (176).
+@backup's `tests/conftest.py` carries three: `temp_dir`, `sample_data` and `mock_logger`.
+Cited by name: line numbers written here drift with every edit of that conftest.
 
 ---
 
@@ -60,8 +60,9 @@ Measured 2026-09-22. **13 conftest files, 22 fixtures, 5.1s.**
 | commons · daemon · memory · skills · spawn | 2 each |
 | ai_mail · aipass · api · cli · devpulse · flow | 1 each |
 
-@backup's three land at 80, 92 and 176. The review said 79, 91 and 175 — the same fixtures;
-the review cites the `@pytest.fixture` decorator line and this rule cites the `def`.
+@backup's three are the same fixtures the review named. The review cited the `@pytest.fixture`
+decorator line and this rule cites the `def`, so the two line numbers differ by one — the
+finding carries the live line.
 
 @seedgo scores 100.
 
