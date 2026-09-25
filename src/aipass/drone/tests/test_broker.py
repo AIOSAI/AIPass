@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-09
-# Modified: 2026-06-10
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for the drone-broker daemon (Phase 3 + Phase 6a FPLAN-0250).
@@ -43,6 +43,9 @@ pytestmark = pytest.mark.skipif(
     sys.platform != "linux",
     reason="broker is Linux-only: AF_UNIX sockets + openat2 RESOLVE_BENEATH",
 )
+
+#: A mode-0 folder does not stop root: the walk would list it and the test would prove nothing.
+_RUNS_AS_ROOT = os.geteuid() == 0
 
 json_handler.log_operation("test_broker_load", {})
 
@@ -1100,3 +1103,27 @@ class TestBrokerFeedsDeletionRecord:
         refusals = [r for r in self._records() if r["outcome"] == "refused"]
         assert refusals, "an out-of-scope broker delete left no record"
         assert refusals[-1]["caller"] == "testbranch"
+
+
+class TestAnUnreadFolderIsNotAnAbsentBranch:
+    @pytest.mark.skipif(_RUNS_AS_ROOT, reason="root reads a mode-0 folder")
+    def test_an_identity_hidden_behind_an_unreadable_folder_refuses_naming_the_folder(
+        self, running_broker: BrokerDaemon, repo_root: Path
+    ) -> None:
+        locked = repo_root / "src" / "locked"
+        ghost = locked / "ghost"
+        (ghost / ".trinity").mkdir(parents=True)
+        target = ghost / "keep.txt"
+        target.write_text("keep", encoding="utf-8")
+        locked.chmod(0)
+        try:
+            resp = _send_identified(
+                running_broker,
+                "ghost",
+                BrokerRequest(op="delete", path="keep.txt", request_id="unread"),
+            )
+        finally:
+            locked.chmod(0o700)
+        assert resp.ok is False
+        assert str(locked) in resp.message
+        assert target.exists()

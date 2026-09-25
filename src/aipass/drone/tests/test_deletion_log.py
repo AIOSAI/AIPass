@@ -10,7 +10,9 @@ kind of event worth finding later, and it is the only trace that event leaves.
 """
 
 import json
+import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +22,11 @@ import pytest
 from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
+
+#: A mode-0 folder only stops a caller the kernel holds to permissions: not on
+#: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
+_PERMISSIONS_DO_NOT_BIND = sys.platform == "win32" or os.geteuid() == 0
+_PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
 
 
 # ---------------------------------------------------------------------------
@@ -669,3 +676,21 @@ class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
         record = json.loads(store.read_text(encoding="utf-8").strip().splitlines()[-1])
         assert record["outcome"] == deletion_log.OUTCOME_DELETED
         assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY
+
+
+class TestAnUnreadableSubtreeIsNotMeasuredAsExact:
+    @pytest.mark.skipif(_PERMISSIONS_DO_NOT_BIND, reason=_PERMISSIONS_REASON)
+    def test_a_folder_the_walk_cannot_list_marks_the_measure_partial(self, tmp_path):
+        # Through measure(), not safe_delete: rm refuses an unreadable folder before it measures.
+        target = tmp_path / "tree"
+        (target / "readable").mkdir(parents=True)
+        (target / "readable" / "seen.txt").write_text("x", encoding="utf-8")
+        locked = target / "locked"
+        locked.mkdir()
+        (locked / "unseen.txt").write_text("xxxx", encoding="utf-8")
+        locked.chmod(0)
+        try:
+            result = deletion_log.measure(target)
+        finally:
+            locked.chmod(0o700)
+        assert result["measured"] == "partial"

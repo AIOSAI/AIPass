@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Broker daemon — privileged deleter for sandboxed agents
-# Version: 2.1.1
+# Version: 2.1.2
 # Created: 2026-06-09
-# Modified: 2026-08-31
+# Modified: 2026-09-25
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
@@ -183,16 +183,26 @@ class BrokerDaemon:
         return bases
 
     def _resolve_branch_dir(self, identity: str) -> Path | None:
-        """Find a branch directory by name via .trinity/ marker walk."""
+        """Find a branch directory by name via .trinity/ marker walk.
+
+        Raises:
+            OSError: the branch was not found and part of the tree could not be
+                read, so "absent" is unproven. A found branch proves itself; an
+                unread folder only matters when the answer would be None.
+        """
         if self._repo_root is None:
             return None
-        for root, dirs, _files in os.walk(self._repo_root):
+        unlisted: list[OSError] = []
+        for root, dirs, _files in os.walk(self._repo_root, onerror=unlisted.append):
             depth = len(Path(root).relative_to(self._repo_root).parts)
             if depth > 3:
                 dirs.clear()
                 continue
             if Path(root).name == identity and (Path(root) / ".trinity").is_dir():
                 return Path(root).resolve()
+        if unlisted:
+            unread = ", ".join(str(exc.filename) for exc in unlisted)
+            raise OSError(f"branch {identity!r} not found, and the walk could not read: {unread}")
         return None
 
     def _handle_identify(self, req: BrokerRequest) -> tuple[BrokerResponse, str | None]:

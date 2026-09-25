@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: deletion_log.py
 # Description: Durable record of every delete drone performs
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-14
-# Modified: 2026-09-13
+# Modified: 2026-09-25
 # =============================================
 
 """Durable record of every delete drone performs.
@@ -196,8 +196,11 @@ def _measure_tree(path: Path) -> dict:
     total = 0
     unreadable = 0
     measured = "exact"
+    # A folder the walk cannot list is not walked; without the hook it drops out
+    # silently and the size of a tree never read goes into the record as exact.
+    unlisted: list[OSError] = []
 
-    for dirpath, dirnames, filenames in os.walk(path):
+    for dirpath, dirnames, filenames in os.walk(path, onerror=unlisted.append):
         here = Path(dirpath)
         for name in (*dirnames, *filenames):
             if entries >= _MEASURE_ENTRY_CAP:
@@ -220,6 +223,7 @@ def _measure_tree(path: Path) -> dict:
         if measured == "capped":
             break
 
+    unreadable += len(unlisted)
     if unreadable:
         if measured == "exact":
             measured = "partial"
