@@ -112,6 +112,23 @@ irreducible, because the checker file it edited *is* one of the files seedgo aud
 
 ---
 
+## Declined files: the stand-down contract
+
+An `all_files` row is the mean of its files' scores. A file leaves that mean only when the
+checker says, in a field, that it did not judge the file: every check passed and at least one
+carries `"declined": True`. A file with any failing check is always averaged, whatever else it
+declines. The engine never reads message text to decide it. Until 2026-09-25 any passing
+message containing "skipped" or "not applicable" stood a file down, so a word choice decided the
+row (owner, 14:58: *"if stuff is being skipped or ignored that is not intended we have to
+resolve that"*).
+
+Every declined file is named: `audit_branch` returns `declined` (`{row: [rel paths]}`), the
+summary prints `Not judged: <Row> N declined`, and each artifact branch entry carries the list.
+The `entry_point` and `branch_level` lanes stand a whole row down with a result-level
+`"not_applicable": True` instead; they do not read `declined`.
+
+---
+
 ## The info channel (non-scored)
 
 A checker may expose `check_branch_info(branch_path) -> list[str]`. `branch_audit` collects

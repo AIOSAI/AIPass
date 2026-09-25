@@ -10,9 +10,9 @@ every one of those caps and assert the artifact still carries all of it.
 # =================== META ====================
 # Name: test_audit_artifact.py
 # Description: Completeness + join-key tests for audit/artifact.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-08-11
+# Modified: 2026-09-25
 # =============================================
 
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
@@ -296,6 +296,13 @@ def test_branch_entries_carry_scores_and_counts(tmp_path):
     assert entry["violation_count"] == 28
     assert entry["type_errors"] == 8
     assert entry["cache_hit"] is False
+
+
+def test_branch_entries_list_the_files_each_row_declined(tmp_path):
+    results = _make_results(tmp_path / "prax")
+    results[0]["declined"] = {"cli": ["apps/__init__.py", "apps/modules/empty.py"]}
+    entry = _write_and_load(tmp_path, results)["branches"][0]
+    assert entry["declined"] == {"cli": ["apps/__init__.py", "apps/modules/empty.py"]}
 
 
 def test_multiple_branches_all_appear(tmp_path):

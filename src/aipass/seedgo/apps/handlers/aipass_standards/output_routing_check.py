@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: output_routing_check.py
 # Description: Output Routing Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-09
-# Modified: 2026-07-09
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -133,6 +133,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Output routing",
                     "passed": True,
                     "message": "__init__.py skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -147,6 +148,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Output routing",
                     "passed": True,
                     "message": "Test file skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,

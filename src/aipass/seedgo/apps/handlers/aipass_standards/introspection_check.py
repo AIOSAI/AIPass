@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: introspection_check.py
 # Description: Introspection Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -82,7 +82,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "Introspection check", "passed": True, "message": "__init__.py skipped"}],
+            "checks": [
+                {"name": "Introspection check", "passed": True, "message": "__init__.py skipped", "declined": True}
+            ],
             "score": 100,
             "standard": "INTROSPECTION",
         }
@@ -104,7 +106,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not content.strip():
         return {
             "passed": True,
-            "checks": [{"name": "Introspection check", "passed": True, "message": "Empty file skipped"}],
+            "checks": [
+                {"name": "Introspection check", "passed": True, "message": "Empty file skipped", "declined": True}
+            ],
             "score": 100,
             "standard": "INTROSPECTION",
         }
@@ -134,6 +138,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Introspection check",
                     "passed": True,
                     "message": "Not an entry point or module file (not applicable)",
+                    "declined": True,
                 }
             ],
             "score": 100,
@@ -465,6 +470,7 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
             "name": "Execution order",
             "passed": True,
             "message": f"No main() or __name__ block found in {filename} (skipped)",
+            "declined": True,
         }
 
     # Walk the body of main to find conditionals
@@ -523,6 +529,7 @@ def check_execution_order(tree: ast.Module, content: str, filename: str) -> Opti
         "name": "Execution order",
         "passed": True,
         "message": f"No args/help conditionals detected in main() of {filename} (skipped)",
+        "declined": True,
     }
 
 
@@ -570,6 +577,7 @@ def check_module_handle_command_gate(tree: ast.Module, filename: str) -> Optiona
             "name": "handle_command no-args gate",
             "passed": True,
             "message": f"No handle_command() found in {filename} (skipped)",
+            "declined": True,
         }
 
     # Walk handle_command body to find a no-args conditional that calls introspection

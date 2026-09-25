@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-09-19
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -236,6 +236,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "CLI check",
                     "passed": True,
                     "message": "File outside module/handler/entry architecture (skipped)",
+                    "declined": True,
                 }
             ],
             "score": 100,

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commented_logger_check.py
 # Description: Commented Logger Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -75,7 +75,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if path.suffix != ".py" or path.name == "__init__.py":
         return {
             "passed": True,
-            "checks": [{"name": "Commented logger calls", "passed": True, "message": "File skipped (non-target)"}],
+            "checks": [
+                {
+                    "name": "Commented logger calls",
+                    "passed": True,
+                    "message": "File skipped (non-target)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "COMMENTED_LOGGER",
         }

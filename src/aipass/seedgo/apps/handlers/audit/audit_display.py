@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-03-05
-# Modified: 2026-09-21
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -431,6 +431,12 @@ def print_branch_summary(
             console.print(f"{left_display}  {right_display}")
         else:
             console.print(left_display)
+
+    # The files each row did not judge, so a 100 over a partial corpus says so.
+    declined = audit_result.get("declined") or {}
+    if declined:
+        counts = ", ".join(f"{name.title()} {len(files)} declined" for name, files in sorted(declined.items()))
+        console.print(f"  [dim]Not judged: {counts}[/dim]")
 
     # Overall score
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"

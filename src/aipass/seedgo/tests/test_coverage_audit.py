@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-25
 # =============================================
 
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
@@ -1672,7 +1672,7 @@ class TestRunAllFiles:
         )
         checker.FILE_FILTER = None
         files = [{"file": "/foo.py", "name": "foo.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
+        violations, scores, declined = _run_all_files(checker, "naming", files, [])
         assert len(scores) == 1
         assert scores[0] == 90
 
@@ -1686,7 +1686,7 @@ class TestRunAllFiles:
         checker.check_module = MagicMock(side_effect=RuntimeError("boom"))
         checker.FILE_FILTER = None
         files = [{"file": "/foo.py", "name": "foo.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
+        violations, scores, declined = _run_all_files(checker, "naming", files, [])
         assert violations == []
         assert scores == []
 
@@ -1711,11 +1711,11 @@ class TestRunAllFiles:
             {"file": "/handler.py", "name": "handler.py"},
             {"file": "/module.py", "name": "module.py"},
         ]
-        violations, scores = _run_all_files(checker, "naming", files, [])
+        violations, scores, declined = _run_all_files(checker, "naming", files, [])
         assert checker.check_module.call_count == 1
 
-    def test_skipped_checks_excluded(self):
-        """Checks with skipped/not applicable excluded."""
+    def test_a_declined_check_is_excluded_and_named(self):
+        """A file stands down on the declined field, never on its message's words."""
         from aipass.seedgo.apps.handlers.audit.branch_audit import (
             _run_all_files,
         )
@@ -1728,15 +1728,17 @@ class TestRunAllFiles:
                 "checks": [
                     {
                         "passed": True,
-                        "message": "Skipped -- not applicable",
+                        "declined": True,
+                        "message": "Not a naming target",
                     }
                 ],
             }
         )
         checker.FILE_FILTER = None
-        files = [{"file": "/foo.py", "name": "foo.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
+        files = [{"file": "/foo.py", "name": "foo.py", "rel": "apps/foo.py"}]
+        violations, scores, declined = _run_all_files(checker, "naming", files, [])
         assert scores == []
+        assert declined == ["apps/foo.py"]
 
     def test_failing_checks_collected(self):
         """Failing checks collected as violations."""
@@ -1757,7 +1759,7 @@ class TestRunAllFiles:
         )
         checker.FILE_FILTER = None
         files = [{"file": "/bad.py", "name": "bad.py"}]
-        violations, scores = _run_all_files(checker, "naming", files, [])
+        violations, scores, declined = _run_all_files(checker, "naming", files, [])
         assert len(violations) == 1
         assert violations[0]["score"] == 40
         assert "Bad naming" in violations[0]["issues"]

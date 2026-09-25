@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: stale_header_date_check.py
 # Description: Stale Header Date Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -177,7 +177,7 @@ def _declined(reason: str) -> Dict:
         "passed": True,
         "score": 100,
         "not_applicable": True,
-        "checks": _one_check(True, f"Header date {DECLINED}: {reason}"),
+        "checks": [{**check, "declined": True} for check in _one_check(True, f"Header date {DECLINED}: {reason}")],
         "standard": STANDARD,
     }
 

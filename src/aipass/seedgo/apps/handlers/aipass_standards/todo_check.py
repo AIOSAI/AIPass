@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: todo_check.py
 # Description: TODO/FIXME Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-22
-# Modified: 2026-03-22
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -65,6 +65,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "TODO/FIXME comments",
                     "passed": True,
                     "message": "__init__.py skipped",
+                    "declined": True,
                 }
             ],
             "score": 100,

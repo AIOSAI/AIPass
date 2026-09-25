@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: gateway_boundary_check.py
 # Description: Gateway Boundary Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-25
 # =============================================
 
 """Gateway Boundary Standards Checker Handler.
@@ -293,6 +293,12 @@ def _result(passed: bool, name: str, message: str, score: int) -> Dict:
     }
 
 
+def _declined(result: Dict) -> Dict:
+    """Mark a single-check result as a file this standard does not judge (out of the row's average)."""
+    result["checks"][0]["declined"] = True
+    return result
+
+
 def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     """Check a Python file for hand-written writes into another branch's storage."""
     path = Path(module_path)
@@ -302,7 +308,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return _result(True, "Bypassed", "Standard bypassed via .seedgo/bypass.json", 100)
 
     if path.suffix != ".py" or path.name == "__init__.py":
-        return _result(True, "Gateway boundary", "File skipped (non-target)", 100)
+        return _declined(_result(True, "Gateway boundary", "File skipped (non-target)", 100))
 
     if not path.exists():
         return _result(False, "File exists", f"File not found: {module_path}", 0)

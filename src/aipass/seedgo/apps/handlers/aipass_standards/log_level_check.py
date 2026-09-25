@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_level_check.py
 # Description: Log Level Hygiene Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -86,7 +86,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not has_logger:
         return {
             "passed": True,
-            "checks": [{"name": "Log level check", "passed": True, "message": "No logger calls found (skipped)"}],
+            "checks": [
+                {
+                    "name": "Log level check",
+                    "passed": True,
+                    "message": "No logger calls found (skipped)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "LOG_LEVEL",
         }

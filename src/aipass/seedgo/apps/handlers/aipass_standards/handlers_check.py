@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handlers_check.py
 # Description: Handlers Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -99,7 +99,9 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not is_handler:
         return {
             "passed": True,
-            "checks": [{"name": "Handler check", "passed": True, "message": "Not a handler file (skipped)"}],
+            "checks": [
+                {"name": "Handler check", "passed": True, "message": "Not a handler file (skipped)", "declined": True}
+            ],
             "score": 100,
             "standard": "HANDLERS",
         }

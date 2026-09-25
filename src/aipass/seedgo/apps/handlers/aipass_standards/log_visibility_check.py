@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: log_visibility_check.py
 # Description: Log Visibility Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -112,7 +112,14 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
     if not has_getlogger and not has_filehandler:
         return {
             "passed": True,
-            "checks": [{"name": "Log visibility", "passed": True, "message": "No logging usage found (skipped)"}],
+            "checks": [
+                {
+                    "name": "Log visibility",
+                    "passed": True,
+                    "message": "No logging usage found (skipped)",
+                    "declined": True,
+                }
+            ],
             "score": 100,
             "standard": "LOG_VISIBILITY",
         }

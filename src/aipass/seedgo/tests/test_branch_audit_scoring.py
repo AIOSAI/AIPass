@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from aipass.seedgo.apps.handlers.aipass_standards import os_walk_onerror_check, skip_dirs
-from aipass.seedgo.apps.handlers.audit import branch_audit
+from aipass.seedgo.apps.handlers.aipass_standards import applicability, os_walk_onerror_check, skip_dirs
+from aipass.seedgo.apps.handlers.audit import audit_display, branch_audit
 
 WALKER = "import os\n\n\ndef files(root):\n    return [d for d, _, _ in os.walk(root)]\n"
 
@@ -62,12 +62,12 @@ class TestAFailingFileIsAlwaysAveraged:
         assert out["scores"]["os_walk_onerror"] == 50
         assert [v["file"] for v in out["os_walk_onerror_violations"]] == ["walker.py"]
 
-    def test_a_failure_beside_a_passing_skipped_check_is_averaged(self, audit):
+    def test_a_failure_beside_a_declined_check_is_averaged(self, audit):
         mixed = {
             "passed": False,
             "score": 0,
             "checks": [
-                {"passed": True, "message": "Bypassed - thin orchestration check skipped"},
+                {"passed": True, "declined": True, "message": "Bypassed - thin orchestration check skipped"},
                 {"passed": False, "message": "Business logic in a module"},
             ],
         }
@@ -75,9 +75,100 @@ class TestAFailingFileIsAlwaysAveraged:
         assert out["scores"]["modules"] == 50
 
 
-class TestAPassingNotApplicableFileStaysOut:
-    @pytest.mark.parametrize("message", ["Not an entry point (skipped)", "No try/except blocks (not applicable)"])
-    def test_its_score_does_not_reach_the_average(self, audit, message):
-        standing_down = {"passed": True, "score": 0, "checks": [{"passed": True, "message": message}]}
-        out = audit({"cli": _checker({"other.py": standing_down})}, {"other.py": "pass\n"})
+class TestADeclinedFileStandsDown:
+    def test_a_declined_check_without_the_word_leaves_the_average(self, audit):
+        declined = {"passed": True, "score": 0, "checks": [{"passed": True, "declined": True, "message": "Not judged"}]}
+        out = audit({"cli": _checker({"other.py": declined})}, {"other.py": "pass\n"})
         assert out["scores"]["cli"] == 100
+        assert out["declined"] == {"cli": ["apps/other.py"]}
+
+    @pytest.mark.parametrize("message", ["Not an entry point (skipped)", "No try/except blocks (not applicable)"])
+    def test_a_passing_message_that_says_skipped_without_declining_is_averaged(self, audit, message):
+        judged = {"passed": True, "score": 0, "checks": [{"passed": True, "message": message}]}
+        out = audit({"cli": _checker({"other.py": judged})}, {"other.py": "pass\n"})
+        assert out["scores"]["cli"] == 50
+        assert out["declined"] == {}
+
+
+class TestTheOutputNamesWhatARowDeclined:
+    def test_the_summary_counts_the_declined_files_per_row(self, audit, capsys):
+        declined = {"passed": True, "score": 100, "checks": [{"passed": True, "declined": True, "message": "n/a"}]}
+        verdicts = {"a.py": declined, "b.py": declined}
+        out = audit({"cli": _checker(verdicts), "meta": _checker({})}, {"a.py": "pass\n", "b.py": "pass\n"})
+        capsys.readouterr()
+        audit_display.print_branch_summary(out)
+        printed = capsys.readouterr().out
+        assert [line for line in printed.splitlines() if "declined" in line] == ["  Not judged: Cli 2 declined"]
+
+
+#: A clean print_introspection(): with it, introspection's other checks pass, so
+#: its three "(skipped)" sub-checks decide the file's stand-down on their own.
+INTRO = (
+    "from aipass.cli import console\n\n\n"
+    "def print_introspection():\n"
+    '    console.print("[bold]{0}[/bold] - run drone @{0} --help")\n'
+)
+MAIN = '\n\ndef main():\n    print_introspection()\n\n\nif __name__ == "__main__":\n    main()\n'
+
+#: Planted files that reach the pack's stand-down paths: a package marker, an
+#: empty module, a test file, a file that does not parse, a declarations-only
+#: handler, the json package, routing and non-routing modules, an entry point,
+#: a stream handler with no file logging, a file outside the three layers, a
+#: test-named file under apps/, and
+#: clean introspection files with no main(), no args gate and no handle_command().
+PROBES = {
+    "apps/__init__.py": "",
+    "apps/modules/__init__.py": "",
+    "apps/modules/empty.py": "",
+    "apps/modules/router.py": "def handle_command(args):\n    return True\n",
+    "apps/modules/broken.py": "def f(:\n    pass\n",
+    "apps/handlers/constants.py": "LIMIT = 3\nNAMES = ('a', 'b')\n",
+    "apps/handlers/json/json_handler.py": "def log_operation(name, data):\n    return True\n",
+    "apps/handlers/plain.py": "def add(a, b):\n    return a + b\n",
+    "apps/tools.py": "def tool():\n    return 1\n",
+    "tests/test_plain.py": "def test_add():\n    assert 1 + 1 == 2\n",
+    "apps/runner.py": "def main():\n    return 0\n",
+    "apps/modules/nohandler.py": "def run():\n    return 1\n",
+    "apps/handlers/json/helpers.py": "def shape(data):\n    return dict(data)\n",
+    "apps/handlers/stream.py": "import logging\n\nhandler = logging.StreamHandler()\n",
+    "apps/lib/helper.py": "def helper():\n    return 1\n",
+    "apps/handlers/test_fixture.py": "def fixture():\n    return 1\n",
+    "apps/nomain.py": INTRO.format("nomain"),
+    "apps/withmain.py": INTRO.format("withmain") + MAIN,
+    "apps/modules/nocommand.py": INTRO.format("nocommand"),
+}
+
+WORDS = ("skipped", "not applicable")
+
+
+def _word_rule(checks):
+    """The rule 2.4.1 read, kept here only to prove the migration changed no stand-down."""
+    failed = [c for c in checks if not c.get("passed", False)]
+    return bool(checks) and not failed and any(w in c.get("message", "").lower() for c in checks for w in WORDS)
+
+
+def _field_rule(checks):
+    failed = [c for c in checks if not c.get("passed", False)]
+    return bool(checks) and not failed and any(c.get("declined") is True for c in checks)
+
+
+class TestTheMigrationKeptEveryStandDown:
+    def test_the_field_stands_down_exactly_what_the_word_did_on_planted_files(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+        for rel, body in PROBES.items():
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text(body, encoding="utf-8")
+        pack = branch_audit.discover_checkers()
+        per_file = {n: c for n, c in pack.items() if getattr(c, "AUDIT_SCOPE", "entry_point") == "all_files"}
+        disagreements, declined = [], 0
+        for name, checker in sorted(per_file.items()):
+            for rel in PROBES:
+                path = str(tmp_path / rel)
+                if not applicability.applies_to_file(checker, path):
+                    continue
+                checks = checker.check_module(path, bypass_rules=[]).get("checks", [])
+                declined += _field_rule(checks)
+                if _word_rule(checks) != _field_rule(checks):
+                    disagreements.append((name, rel))
+        assert disagreements == []
+        assert declined >= 40

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: windows_compat_check.py
 # Description: Windows Compatibility Standards Checker Handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-05-10
-# Modified: 2026-09-18
+# Modified: 2026-09-25
 # =============================================
 
 """Windows Compatibility Standards Checker Handler."""
@@ -476,6 +476,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Windows compat",
                     "passed": True,
                     "message": "File skipped (non-target)",
+                    "declined": True,
                 }
             ],
             "score": 100,

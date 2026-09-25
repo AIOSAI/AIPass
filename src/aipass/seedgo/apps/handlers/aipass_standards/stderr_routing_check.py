@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: stderr_routing_check.py
 # Description: Stderr Routing Standards Checker
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-13
-# Modified: 2026-03-13
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -141,7 +141,12 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
         return {
             "passed": True,
             "checks": [
-                {"name": "Stderr routing", "passed": True, "message": "No error/warning output patterns (skipped)"}
+                {
+                    "name": "Stderr routing",
+                    "passed": True,
+                    "message": "No error/warning output patterns (skipped)",
+                    "declined": True,
+                }
             ],
             "score": 100,
             "standard": "STDERR_ROUTING",

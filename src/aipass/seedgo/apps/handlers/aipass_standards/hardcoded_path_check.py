@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: hardcoded_path_check.py
 # Description: Hardcoded Absolute Path Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-18
-# Modified: 2026-06-18
+# Modified: 2026-09-25
 # =============================================
 
 """Hardcoded Absolute Path Standards Checker Handler."""
@@ -103,6 +103,7 @@ def check_module(module_path: str, bypass_rules: list | None = None) -> Dict:
                     "name": "Hardcoded path",
                     "passed": True,
                     "message": "File skipped (non-target)",
+                    "declined": True,
                 }
             ],
             "score": 100,

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.4.1
+# Version: 2.5.0
 # Created: 2026-03-05
 # Modified: 2026-09-25
 # =============================================
@@ -492,12 +492,21 @@ def _run_all_files(
     file_result_cache: Dict[str, Dict[str, Any]] | None = None,
     unchanged_files: set | None = None,
 ) -> tuple:
-    """Run checker on every file. Returns (violations, scores).
+    """Run checker on every file. Returns (violations, scores, declined).
+
+    A file stands down from the row only through the explicit contract: every
+    check passed and at least one carries ``"declined": True``. The message is
+    never read to decide it. Until 2026-09-25 any passing message containing
+    "skipped" or "not applicable" stood a file down, which let a text choice,
+    not a declared intent, decide the row (owner, 14:58: "if stuff is being
+    skipped or ignored that is not intended we have to resolve that"). A file
+    with any failing check is always averaged, whatever else it declines.
+    ``declined`` names every file that stood down, so the output can say so.
 
     file_result_cache/unchanged_files let unchanged files reuse their prior
     result for this checker instead of recomputing — see _get_or_compute().
     """
-    violations, scores, ff = [], [], getattr(checker, "FILE_FILTER", None)
+    violations, scores, declined, ff = [], [], [], getattr(checker, "FILE_FILTER", None)
     for fi in files:
         if ff and ff not in fi["name"]:
             continue
@@ -510,12 +519,9 @@ def _run_all_files(
             continue
         score, checks = r.get("score", 0), r.get("checks", [])
         failed = [c for c in checks if not c.get("passed", False)]
-        # A failing file is always averaged; only a clean one may stand down.
-        # os_walk_onerror's "is skipped in silence" once read as "skipped", so
-        # a 0 was listed as a violation and left out of the row, and @aipass
-        # read 100 over a convicted line (2026-09-25).
-        standing_down = any(w in c.get("message", "").lower() for c in checks for w in ("skipped", "not applicable"))
-        if checks and (failed or not standing_down):
+        if checks and not failed and any(c.get("declined") is True for c in checks):
+            declined.append(fi.get("rel") or fi["name"])
+        elif checks:
             scores.append(score)
         # Collect violations from ANY file with failing checks, regardless of
         # overall pass/fail.  The old gate (not r["passed"]) hid violations
@@ -524,7 +530,7 @@ def _run_all_files(
             msgs = [c.get("message", "Unknown") for c in failed]
             v = {"file": fi["name"], "path": fi["file"], "score": score, "issues": msgs, "message": "; ".join(msgs)}
             violations.append(v)
-    return violations, scores
+    return violations, scores, declined
 
 
 def _load_diagnostics_checker():
@@ -631,7 +637,7 @@ def audit_branch(
     if diag_mod and hasattr(diag_mod, "check_branch") and "diagnostics" not in checkers:
         checkers["diagnostics"] = diag_mod
 
-    results, scores, all_violations = {}, {}, {}
+    results, scores, all_violations, declined_files = {}, {}, {}, {}
 
     for name, checker in checkers.items():
         scope = getattr(checker, "AUDIT_SCOPE", "entry_point")
@@ -723,8 +729,10 @@ def audit_branch(
                     files_with_init = _collect_py_files(branch_path, include_init=True)
                 scan_files = files_with_init
             scan_files = [f for f in scan_files if applicability.applies_to_file(checker, f["file"])]
-            v, s = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, unchanged_files)
+            v, s, d = _run_all_files(checker, name, scan_files, bypass_rules, file_result_cache, unchanged_files)
             all_violations[name] = v
+            if d:
+                declined_files[name] = d
             if s:
                 avg_score = int(sum(s) / len(s))
                 scores[name] = avg_score
@@ -808,6 +816,9 @@ def audit_branch(
         "branch": branch,
         "results": results,
         "scores": scores,
+        # Per row, the files it did not judge (a check declined): the row's
+        # number is an average over the rest, and this is how the reader knows.
+        "declined": declined_files,
         "advisory_standards": advisory_standards,
         "average": avg,
         "deprecated_patterns": deprecated,
