@@ -256,7 +256,7 @@ def test_a_newborn_gets_no_test_receipt_when_seedgos_manifest_is_unreadable(tmp_
     from aipass.spawn.apps.handlers import receipt_ops as ops
     from aipass.spawn.apps.modules.core import _spawn_agent
 
-    monkeypatch.setattr(ops, "_SEEDGO_TEMPLATES", tmp_path / "no_such_gold")
+    monkeypatch.setattr(ops, "_seedgo_templates_dir", lambda: tmp_path / "no_such_gold")
 
     result = _spawn_agent(str(tmp_path / "unstamped"), role="Test", purpose="no gold manifest")
 

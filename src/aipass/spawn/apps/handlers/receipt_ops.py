@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: receipt_ops.py
 # Description: Birth receipt — stamp .trinity/.template_version.json onto a newborn
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-27
-# Modified: 2026-09-21
+# Modified: 2026-09-25
 # =============================================
 
 """Stamp the trinity template receipt at birth.
@@ -70,13 +70,21 @@ _GOLD_TEMPLATES = {"local": "LOCAL.template.json", "observations": "OBSERVATIONS
 # @seedgo's gold test template (DPLAN-0354): the manifest names the versions and
 # the page each branch receives. Same gold-source rule as the trinity receipt —
 # read the owner's manifest, never a copy of it held here.
-_SEEDGO_TEMPLATES = Path(__file__).resolve().parents[3] / "seedgo" / "templates"
 _TEST_TEMPLATE_MANIFEST = "templates.json"
 
 
 def _gold_dir() -> Path:
     """Directory holding the fleet's gold trinity templates."""
     return Path(__file__).resolve().parents[3] / "memory" / "templates"
+
+
+def _seedgo_templates_dir() -> Path:
+    """Directory holding @seedgo's gold test template and its manifest.
+
+    Resolved at the call, never at import: resolve() reads the working
+    directory, and importing this module must not touch the filesystem.
+    """
+    return Path(__file__).resolve().parents[3] / "seedgo" / "templates"
 
 
 def gold_template_versions() -> dict:
@@ -120,7 +128,8 @@ def seedgo_test_template() -> tuple:
             it or none of it — a receipt stamped against a half-read manifest
             would claim a version the newborn does not carry.
     """
-    manifest_path = _SEEDGO_TEMPLATES / _TEST_TEMPLATE_MANIFEST
+    gold_dir = _seedgo_templates_dir()
+    manifest_path = gold_dir / _TEST_TEMPLATE_MANIFEST
     try:
         data = json_handler.read_json(manifest_path)
     except OSError as exc:
@@ -138,7 +147,7 @@ def seedgo_test_template() -> tuple:
         page, distributed_as = entry.get("page"), entry.get("distributed_as")
         if not isinstance(page, str) or not isinstance(distributed_as, str) or not page or not distributed_as:
             raise ValueError(f"test template manifest does not name the page for '{name}': {manifest_path}")
-        source = _SEEDGO_TEMPLATES / page
+        source = gold_dir / page
         if not source.is_file():
             raise ValueError(f"test template page missing: {source}")
         pages.append((source, distributed_as))
