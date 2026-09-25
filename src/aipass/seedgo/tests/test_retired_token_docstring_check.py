@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_retired_token_docstring_check.py
 # Description: retired_token_docstring_check — the retired v4 auditor's keywords left in test docstrings
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -34,7 +34,28 @@ SPECIMENS = [
     ),
     ("create_backup_dir creates .backup/ -- mkdir, .exists().", "T2", "mkdir, .exists()"),
     ("Second call doesn't fail -- no_overwrite, already_exists.", "T2", "no_overwrite, already_exists"),
+    (
+        "Test config loading -- returns_dict, isinstance(result, dict), json_type tokens.",
+        "T1+T2",
+        "returns_dict, isinstance(result, dict), json_type",
+    ),
 ]
+
+#: @api's tests/test_init_provisioning.py module docstring, verbatim: returns_dict is a 7cd59aa4^ item.
+API_PROVISIONING = """
+Init/Provisioning Tests for API branch.
+
+Covers 4 tests:
+  - creates_files, auto_creates_dir, no_overwrite, returns_dict
+"""
+
+#: @seedgo's tests/test_json_handler_contract.py, verbatim: a real signature quoted as code.
+QUOTED_SIGNATURE = """Skip branches whose handler addresses documents by filesystem path.
+
+    Two calling conventions exist in the fleet. Sixteen-plus branches take
+    ``(module_name, json_type)`` and resolve the path themselves; ``backup``
+    takes a path and owns none of that resolution.
+    """
 
 
 def _planted(tmp_path, *docstrings, body="    pass\n"):
@@ -150,3 +171,60 @@ class TestTheVocabulary:
     @pytest.mark.parametrize("term", ["yield", "corrupt", "overwrite", "is True", "autouse=True", "cleanup", "'help'"])
     def test_english_terms_are_not_code_shaped(self, term):
         assert not checker.is_code_shaped(term)
+
+
+class TestTheItemsOnlyTheOlderAuditorCarried:
+    """7cd59aa4^'s STANDARD_CATEGORIES held 20 items c1e0eeed^ no longer had; their bait is convicted too."""
+
+    def test_the_api_provisioning_module_docstring_names_returns_dict(self, tmp_path):
+        path = tmp_path / "test_specimen.py"
+        path.write_text(f'"""{API_PROVISIONING}"""\n', encoding="utf-8")
+        assert "[T2] creates_files, auto_creates_dir, no_overwrite, returns_dict - " in _verdict(path)[1]
+
+    def test_the_older_exception_contract_terms_make_a_list(self, tmp_path):
+        path = _planted(tmp_path, "Exception contracts: _create_default / ValueError for unknown types.")
+        assert "[T2] _create_default, ValueError - " in _verdict(path)[1]
+
+    def test_the_vocabulary_is_the_union_of_both_commits(self):
+        assert len(checker.V4_VOCABULARY) == 10
+        assert sum(len(items) for items in checker.V4_VOCABULARY.values()) == 48
+        assert checker.V4_RETIRED_EARLIER["init_provisioning"]["returns_dict"] == (
+            "isinstance(result, dict)",
+            "json_type",
+        )
+        assert checker.V4_VOCABULARY["init_provisioning"]["no_overwrite"] == (
+            "overwrite",
+            "no_clobber",
+            "already_exists",
+        )
+        assert checker.V4_VOCABULARY["infrastructure_mocking"]["reimport_after_mock"] == ("importlib.reload", "reload(")
+
+    @pytest.mark.parametrize(
+        "term", ["returns_dict", "json_type", "isinstance(result, dict)", "sys.modules", "save_json"]
+    )
+    def test_the_new_terms_count_for_a_bait_list(self, term):
+        assert term in checker.T2_TERMS
+
+    def test_the_plain_english_older_patterns_do_not(self):
+        assert "operation" not in checker.T1_TERMS
+
+
+class TestQuotedCodeAndEnglishNames:
+    def test_a_signature_quoted_in_backticks_is_not_a_list(self, tmp_path):
+        assert _verdict(_planted(tmp_path, QUOTED_SIGNATURE))[0] == 100
+
+    def test_the_same_terms_unquoted_are_convicted(self, tmp_path):
+        path = _planted(tmp_path, "Branches take module_name, json_type and resolve the path.")
+        assert "[T2] module_name, json_type - " in _verdict(path)[1]
+
+    def test_single_backticks_quote_code_as_double_ones_do(self, tmp_path):
+        path = _planted(tmp_path, "Calls `save_json(module_name, json_type, data)` like the fleet does.")
+        assert _verdict(path)[0] == 100
+
+    def test_english_item_names_alone_are_not_a_token_label(self, tmp_path):
+        path = _planted(tmp_path, "We validate tokens on login and save tokens on refresh.")
+        assert _verdict(path)[0] == 100
+
+    def test_an_english_name_beside_a_code_shaped_one_is(self, tmp_path):
+        path = _planted(tmp_path, "Loading works -- load, load_json tokens.")
+        assert "[T1] load, load_json - " in _verdict(path)[1]

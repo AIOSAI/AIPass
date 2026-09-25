@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: retired_token_docstring_check.py
 # Description: Retired Token Docstring Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -20,24 +20,39 @@ The gate is gone; the cargo stays, and it tells a reader nothing about what the
 test proves. This rule convicts it, in docstrings only (module, class,
 function). Comments and other strings are not judged.
 
-THE VOCABULARY is the retired file's own ``STANDARD_CATEGORIES`` as of
-c1e0eeed^ -- 7 categories, 28 items and their patterns -- embedded verbatim
-below. Nothing is added to it: ``patterns, whitelist`` reads like bait and is
-not v4's, so it is not convicted.
+THE VOCABULARY is the retired file's own ``STANDARD_CATEGORIES``, taken from
+two commits and embedded verbatim below as their union -- 10 categories, 48 items:
+  * c1e0eeed^ (the commit that removed the file), 7 categories and 28 items:
+    ``V4_CATEGORIES``.
+  * 7cd59aa4^ (the parent of DPLAN-0325 part B, 2026-09-03, which retired 20
+    items), the same path apps/handlers/aipass_standards/test_quality_check.py:
+    ``V4_RETIRED_EARLIER`` holds the 20 items only it carries -- whole
+    categories json_handler, exception_contracts, data_structure_contracts, and
+    mock_json_handler, ensure_returns_bool, load_correct_type, returns_dict,
+    sys_modules_mock, reimport_after_mock. The auditor graded against them for
+    months, so their bait is still in the fleet.
+Nothing is added to either: ``patterns, whitelist`` reads like bait and is not
+v4's, so it is not convicted.
 
-CODE-SHAPED. A plain English pattern (``yield``, ``corrupt``, ``overwrite``,
+CODE-SHAPED. A plain English pattern (``yield``, ``corrupt``, ``operation``,
 ``is True``) is how people write about tests and never counts on its own. A
 term is code-shaped when it is a category or item name with an underscore, or
 a pattern holding one of ``_ ( ) . -``, or CamelCase (``StringIO``,
-``FileNotFoundError``), or one of ``capsys capfd tmp_path rmtree makedirs
-mkdir``. ``cleanup`` is the one item name with no underscore: it is an English
-word, so it never counts for T2.
+``ValueError``), or one of ``capsys capfd tmp_path rmtree makedirs mkdir``.
+Four item names have no underscore -- ``cleanup``, ``load``, ``save``,
+``validate`` -- and are English: they never count for T2, and a T1 run needs a
+code-shaped term besides them ("validate tokens" is about auth, not v4).
+
+QUOTED CODE. A span in backticks is emptied before judging: inside one a
+docstring quotes code (``save_json(module_name, json_type, data)``, a real
+signature), it does not list keywords. No run crosses a quoted span.
 
 TWO SHAPES, one finding per docstring:
   * T1 TOKEN LABEL -- a run of v4 terms (any category or item name, or a
-    code-shaped pattern) that the docstring labels ``token``/``tokens``:
-    ``capsys, capfd, StringIO tokens``, ``output_capture token``. "token" was
-    the auditor's word for its patterns; the label is the fingerprint.
+    code-shaped pattern; at least one code-shaped) that the docstring labels
+    ``token``/``tokens``: ``capsys, capfd, StringIO tokens``, ``output_capture
+    token``. "token" was the auditor's word for its patterns; the label is the
+    fingerprint.
   * T2 BAIT LIST -- two or more code-shaped v4 terms in a row, separated by
     nothing but commas, slashes, ``and``/``or`` and whitespace.
 
@@ -53,6 +68,17 @@ they can lengthen a bait list but never make one. After both: 7 files
 convicted, 13 docstrings (T1 4, T2 12, both 3) -- backup 2 files / 8, api 3 / 3,
 commons 1 / 1, drone 1 / 1; every one read and every one cargo. The model file
 passes.
+
+CHECK AGAIN with the 7cd59aa4^ items (2026-09-25, 598 files; backup had cured
+its 8 live). c1e0eeed^ alone: 5 files, 5 docstrings (api 3, commons 1, drone 1).
+The union: 7 files, 8 docstrings -- api test_init_provisioning now also names
+returns_dict; memory test_contracts 2 new (``_create_default / ValueError``,
+``invalid_mode / invalid_type`` -- cargo); aipass conftest 1 new
+(``log_operation and ensure_module_jsons`` naming the two functions its
+mock_json_handler fixture patches -- read as a false positive, left standing:
+quoting them in backticks cures it). Two more in seedgo
+test_json_handler_contract.py were the signature ``(module_name, json_type)``
+in backticks -- the QUOTED CODE rule, which changes none of the other hits.
 """
 
 import ast
@@ -70,7 +96,7 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "RETIRED_TOKEN_DOCSTRING"
 STANDARD_KEY = "retired_token_docstring"
 
-#: Provenance: STANDARD_CATEGORIES of apps/handlers/aipass_standards/test_quality_check.py
+#: Provenance (1 of 2): STANDARD_CATEGORIES of apps/handlers/aipass_standards/test_quality_check.py
 #: as of c1e0eeed^ (the commit that removed it), kept in
 #: docs.local/v4_test_quality_check.py.txt. Copied, not edited: this rule convicts
 #: THAT vocabulary and no other.
@@ -119,6 +145,66 @@ V4_CATEGORIES: Dict[str, Dict[str, Tuple[str, ...]]] = {
     },
 }
 
+#: Provenance (2 of 2): the items ONLY the older STANDARD_CATEGORIES carries -- the same file
+#: as of 7cd59aa4^, the parent of the commit (DPLAN-0325 part B, 2026-09-03) that
+#: retired 20 of them, kept in docs.local/v4_test_quality_check_7cd59aa4parent.py.txt.
+#: Copied, not edited. The auditor graded against these for months, so the bait they
+#: taught is still in the fleet (``returns_dict, isinstance(result, dict), json_type
+#: tokens``). Every other item at 7cd59aa4^ is in V4_CATEGORIES with the same patterns
+#: or a subset of them (``empty_file`` gained ``test_empty``, ``command_returns_bool``
+#: gained ``, bool)`` after it), so nothing else differs.
+V4_RETIRED_EARLIER: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    "json_handler": {
+        "default_factory": (
+            "_create_default",
+            "_get_default_template",
+            "_get_default",
+            "_default_template",
+            "load_template",
+            "_default_config",
+            "_default_document",
+        ),
+        "validate": ("validate_json_structure",),
+        "get_path": ("get_json_path",),
+        "ensure_exists": ("ensure_json_exists",),
+        "load": ("load_json",),
+        "save": ("save_json",),
+        "log_operation": ("log_operation",),
+        "ensure_module": ("ensure_module_jsons",),
+    },
+    "conftest_fixtures": {
+        "mock_json_handler": ("mock_json_handler", "mock_json"),
+    },
+    "return_type_contracts": {
+        "ensure_returns_bool": ("ensure_json_exists", "is True"),
+        "load_correct_type": ("isinstance(result, dict)", "isinstance(data, dict)"),
+    },
+    "exception_contracts": {
+        "create_default_raises": ("pytest.raises(ValueError)", "ValueError", "_create_default"),
+        "save_invalid_raises": ("pytest.raises", "save_json"),
+        "invalid_mode_raises": ("pytest.raises(ValueError)", "invalid_mode", "invalid_type"),
+    },
+    "data_structure_contracts": {
+        "config_keys": ("module_name", "config_keys"),
+        "data_keys": ("last_updated", "data_keys"),
+        "log_entry_field": ("log_entry", "operation"),
+    },
+    "init_provisioning": {
+        "returns_dict": ("isinstance(result, dict)", "json_type"),
+    },
+    "infrastructure_mocking": {
+        "sys_modules_mock": ("sys.modules",),
+        "reimport_after_mock": ("importlib.reload", "reload("),
+    },
+}
+
+#: The vocabulary this rule convicts: the union of both commits' STANDARD_CATEGORIES,
+#: 10 categories and 48 items. No item name is shared, so a merge per category is the union.
+V4_VOCABULARY: Dict[str, Dict[str, Tuple[str, ...]]] = {
+    category: {**V4_CATEGORIES.get(category, {}), **V4_RETIRED_EARLIER.get(category, {})}
+    for category in {**V4_CATEGORIES, **V4_RETIRED_EARLIER}
+}
+
 #: The six lowercase single words v4 grepped for that are code, not English.
 CODE_WORDS = frozenset({"capsys", "capfd", "tmp_path", "rmtree", "makedirs", "mkdir"})
 
@@ -137,13 +223,17 @@ TOKEN_LABEL = re.compile(r"(?:[\s,/]|\band\b|\bor\b)*tokens?\b", re.IGNORECASE)
 #: module: naming them is naming product. They lengthen a bait list, never make one.
 PRODUCT_SURFACE = frozenset({"print_help", "print_introspection"})
 
+#: A quoted code span, ``like this`` or `like this`. Inside one a docstring is quoting
+#: code -- a signature ``save_json(module_name, json_type, data)`` -- not listing keywords.
+INLINE_LITERAL = re.compile(r"``.+?``|`[^`\n]+`", re.DOTALL)
+
 CURE = "drop the retired v4 keywords; say what the test proves"
 
 
 def _names() -> List[str]:
-    """The 7 category names and 28 item names."""
-    names = list(V4_CATEGORIES)
-    for items in V4_CATEGORIES.values():
+    """The 10 category names and 48 item names."""
+    names = list(V4_VOCABULARY)
+    for items in V4_VOCABULARY.values():
         names.extend(item for item in items if item not in names)
     return names
 
@@ -157,7 +247,7 @@ def _vocabulary() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
     """(T1 terms: every name plus the code-shaped patterns, T2 terms: the code-shaped ones)."""
     names = _names()
     patterns: List[str] = []
-    for items in V4_CATEGORIES.values():
+    for items in V4_VOCABULARY.values():
         for pats in items.values():
             patterns.extend(p for p in pats if p not in patterns and p not in names)
     code = [p for p in patterns if is_code_shaped(p)]
@@ -205,8 +295,12 @@ def runs(text: str, pattern: re.Pattern[str]) -> List[Tuple[List[str], int]]:
 
 
 def labelled_runs(text: str) -> List[List[str]]:
-    """T1: every run of v4 terms the docstring itself labels ``token``/``tokens``."""
-    return [terms for terms, end in runs(text, T1_PATTERN) if TOKEN_LABEL.match(text, end)]
+    """T1: every run of v4 terms, one code-shaped, the docstring labels ``token``/``tokens``."""
+    return [
+        terms
+        for terms, end in runs(text, T1_PATTERN)
+        if TOKEN_LABEL.match(text, end) and any(is_code_shaped(term) for term in terms)
+    ]
 
 
 def bait_runs(text: str) -> List[List[str]]:
@@ -219,10 +313,15 @@ def bait_runs(text: str) -> List[List[str]]:
 
 
 def judge(docstring: str) -> Tuple[str, List[str]] | None:
-    """(shape, matched terms) when a docstring carries v4 cargo, else None."""
+    """(shape, matched terms) when a docstring carries v4 cargo, else None.
+
+    Quoted code spans are emptied first, so no term inside one counts and no run
+    crosses one.
+    """
+    prose = INLINE_LITERAL.sub("``", docstring)
     shapes: List[str] = []
     terms: List[str] = []
-    for shape, found in (("T1", labelled_runs(docstring)), ("T2", bait_runs(docstring))):
+    for shape, found in (("T1", labelled_runs(prose)), ("T2", bait_runs(prose))):
         if found:
             shapes.append(shape)
             terms.extend(term for run in found for term in run)

@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.15.0
+# Version: 1.16.0
 # Created: 2026-08-09
 # Modified: 2026-09-25
 # =============================================
@@ -260,6 +260,7 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "stale_header_date",
         "state_leak",
         "stdlib_patch",
+        "subprocess_text_true",
         "through_the_command",
         "uncalled_public_function",
         "unconsumed_side_effect",

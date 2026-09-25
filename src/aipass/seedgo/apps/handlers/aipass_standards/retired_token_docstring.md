@@ -1,5 +1,5 @@
 # Retired Token Docstring Standards
-**Status:** v1
+**Status:** v1.1
 **Date:** 2026-09-25
 
 ---
@@ -23,17 +23,30 @@ literals are not judged.
 
 ## The vocabulary
 
-The retired file's own `STANDARD_CATEGORIES` as of `c1e0eeed^`
-(`docs.local/v4_test_quality_check.py.txt`), embedded verbatim: 7 category names, 28 item
-names, and each item's patterns. Nothing is added. `patterns, whitelist` reads like bait and is
-not v4's, so it is not convicted.
+The retired file's own `STANDARD_CATEGORIES`
+(`apps/handlers/aipass_standards/test_quality_check.py`) from two commits, embedded verbatim
+as their union: 10 category names, 48 item names, and each item's patterns.
+
+| source | what it carries | in the checker |
+|---|---|---|
+| `c1e0eeed^` — the commit that removed the file (`docs.local/v4_test_quality_check.py.txt`) | 7 categories, 28 items | `V4_CATEGORIES` |
+| `7cd59aa4^` — the parent of DPLAN-0325 part B, 2026-09-03, which retired 20 items (`docs.local/v4_test_quality_check_7cd59aa4parent.py.txt`) | the 20 items only it carries: whole categories `json_handler` (8), `exception_contracts` (3), `data_structure_contracts` (3); plus `mock_json_handler`, `ensure_returns_bool`, `load_correct_type`, `returns_dict`, `sys_modules_mock`, `reimport_after_mock` | `V4_RETIRED_EARLIER` |
+
+Every other item at `7cd59aa4^` has the same patterns or a subset (`empty_file` gained
+`test_empty`, `command_returns_bool` gained `, bool)` later), so the union is the two merged.
+Nothing is added. `patterns, whitelist` reads like bait and is not v4's, so it is not convicted.
 
 A term is **code-shaped** when it is a category or item name with an underscore; a pattern
-holding one of `_ ( ) . -`; CamelCase (`StringIO`, `FileNotFoundError`, `JSONDecodeError`);
+holding one of `_ ( ) . -`; CamelCase (`StringIO`, `FileNotFoundError`, `ValueError`);
 or one of `capsys capfd tmp_path rmtree makedirs mkdir`. Plain English patterns (`yield`,
 `corrupt`, `malformed`, `nonexistent`, `overwrite`, `teardown`, `autouse`, `unrecognized`,
-`is True`, `== False`, `autouse=True`) are how people write about tests and never count.
-`cleanup` is the one item name without an underscore; it is English, so it never makes a T2.
+`operation`, `is True`, `== False`, `autouse=True`) are how people write about tests and never
+count. Four item names have no underscore — `cleanup`, `load`, `save`, `validate` — and are
+English: they never make a T2, and a T1 run needs a code-shaped term besides them ("validate
+tokens" is about auth, not v4).
+
+Code quoted in backticks is emptied before judging: `` ``save_json(module_name, json_type, data)`` ``
+is a real signature, not a keyword list, and no run crosses a quoted span.
 
 ## Two shapes
 
@@ -41,7 +54,7 @@ One finding per docstring, naming its line, its shape and the terms.
 
 | shape | what | example |
 |---|---|---|
-| **T1** token label | a run of v4 terms (any name, or a code-shaped pattern) the docstring labels `token`/`tokens` | `creates_files, .exists() tokens` |
+| **T1** token label | a run of v4 terms (any name, or a code-shaped pattern; one code-shaped) the docstring labels `token`/`tokens` | `returns_dict, isinstance(result, dict), json_type tokens` |
 | **T2** bait list | two or more code-shaped terms joined only by `,` `/` `and` `or` and whitespace | `unknown_command / invalid_command` |
 
 `print_help` and `print_introspection` are v4 items AND the fleet's own CLI contract
@@ -74,6 +87,36 @@ Every one of the 13 was read, and every one is cargo: backup's keyword tails, an
 docstrings in api, commons and drone that list v4 item names as coverage ("Covers 9 items:
 help_flag, short_help, ..."). The template's model file, `tests/test_readme_update.py`,
 passes.
+
+## Check again: the 7cd59aa4^ items
+
+Measured 2026-09-25 over 598 test files, after backup had cured its 8 docstrings live (its
+`returns_dict, isinstance(result, dict), json_type tokens` class docstring, line 183 at
+`7cbe39e5`, is gone from disk).
+
+| branch | files scanned | before (c1e0eeed^): files / docstrings | after (union): files / docstrings |
+|---|---|---|---|
+| api | 49 | 3 / 3 | 3 / 3 (`test_init_provisioning.py:9` now also names `returns_dict`) |
+| commons | 23 | 1 / 1 | 1 / 1 |
+| drone | 33 | 1 / 1 | 1 / 1 |
+| memory | 45 | 0 / 0 | 1 / 2 |
+| aipass | 30 | 0 / 0 | 1 / 1 |
+| 13 others | 418 | 0 / 0 | 0 / 0 |
+| **total** | **598** | **5 / 5** | **7 / 8** |
+
+The new hits, read one by one:
+
+- `memory/tests/test_contracts.py:10` — the module docstring lists `_create_default / ValueError`
+  and `invalid_mode / invalid_type` as the "Exception contracts (3 items)". Cargo.
+- `memory/tests/test_contracts.py:75` — "reject data with an invalid_type or invalid_mode"; the
+  test raises its own `ValueError` inside `pytest.raises`. Cargo.
+- `aipass/tests/conftest.py:107` — "suppress log_operation and ensure_module_jsons side
+  effects", naming the two functions its `mock_json_handler` fixture patches. A false
+  positive, left standing: quoting the names in backticks cures it.
+
+Two more in `seedgo/tests/test_json_handler_contract.py` (lines 358 and 1802) were the
+calling convention `` ``(module_name, json_type)`` `` in backticks, a real signature: the quoted
+code rule clears them and changes none of the other hits.
 
 ## Scoring
 
