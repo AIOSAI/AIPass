@@ -19,14 +19,16 @@ contract before the capability, and an untested contract is a promise.
 # =================== META ====================
 # Name: test_audit_tests_core.py
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-25
 # =============================================
 
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
 # seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
 
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -778,6 +780,26 @@ class TestCarrierSubtraction:
 
         assert proof["probed"] is False
         assert laws.check_m10(proof) == []
+
+
+# An unlistable directory is the only route to a walk error, and it is not one
+# everywhere: Windows ignores the mode bits and root lists through them.
+_MODE_BITS_HOLD = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0
+
+
+class TestSnapshotTree:
+    @pytest.mark.skipif(not _MODE_BITS_HOLD, reason="a directory cannot be made unlistable on this platform")
+    def test_an_unlistable_subtree_fails_the_fingerprint_instead_of_vanishing_from_it(self, tmp_path):
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "state.json").write_text("{}", encoding="utf-8")
+
+        locked.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                m10.snapshot_tree(tmp_path)
+        finally:
+            locked.chmod(0o755)
 
 
 class TestCarrierLaw:
