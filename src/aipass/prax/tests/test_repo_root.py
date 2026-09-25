@@ -35,15 +35,18 @@ resolve() reads the cwd there too.
 """
 
 import ast
+import json
 import os
 import subprocess
 import sys
 import textwrap
+from datetime import datetime
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 
 import pytest
 
 from aipass.prax.apps.handlers import repo_root as repo_root_mod
+from aipass.prax.apps.handlers.dashboard import agent_status_writer
 
 
 def _answer(result) -> str:
@@ -1300,3 +1303,93 @@ class TestACallerNameIsNotAlwaysAModuleName:
             "realpath-denied": "DIED",
             "ntpath-shaped": "DIED",
         }, f"the Windows emulation does not read like the Windows runner did: {verdicts}"
+
+
+class TestRegistryRowsResolveAgainstTheRepoRoot:
+    """agent_status_writer — the same defect one door along.
+
+    @devpulse's read-only survey of every write path (DPLAN-0349, mail
+    2026-09-18) found the registry row taken as ``Path(branch["path"])`` with no
+    repo-root join, while refresh.py and template_pusher.py both join. The
+    registry stores REPO-RELATIVE rows, so an unjoined row resolves against
+    wherever the process started: the branch is dropped when the cwd has no such
+    subtree, and matched against a look-alike subtree when it does.
+
+    Read through the public section builder: the resolved path is where the
+    dispatch lock is looked for, so a lock the builder reports is a path it
+    resolved.
+    """
+
+    DEAD_PID = 999999999
+
+    @staticmethod
+    def _lock(branch_dir: Path) -> None:
+        """Lay a dispatch lock of a process that cannot be alive."""
+        mail = branch_dir / "ai_mail.local"
+        mail.mkdir(parents=True, exist_ok=True)
+        (mail / ".dispatch.lock").write_text(
+            json.dumps(
+                {
+                    "pid": TestRegistryRowsResolveAgainstTheRepoRoot.DEAD_PID,
+                    "timestamp": datetime.now().isoformat(),
+                    "branch": branch_dir.name,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _registry(repo: Path, name: str, row: str) -> None:
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "AIPASS_REGISTRY.json").write_text(
+            json.dumps({"branches": [{"name": name, "path": row}]}), encoding="utf-8"
+        )
+
+    def _world(self, tmp_path, monkeypatch):
+        """A repo root holding one relative registry row, with the process
+        standing somewhere else entirely."""
+        repo = tmp_path / "checkout"
+        self._registry(repo, "somebranch", "src/aipass/somebranch")
+        (repo / "src" / "aipass" / "somebranch").mkdir(parents=True)
+
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
+
+        return repo, elsewhere
+
+    def test_a_relative_row_resolves_against_the_repo_root(self, tmp_path, monkeypatch):
+        repo, _ = self._world(tmp_path, monkeypatch)
+        self._lock(repo / "src" / "aipass" / "somebranch")
+
+        section = agent_status_writer.build_agent_status_section()
+
+        assert [a["branch"] for a in section["stale_agents"]] == ["somebranch"]
+
+    def test_a_look_alike_subtree_under_the_cwd_is_not_the_branch(self, tmp_path, monkeypatch):
+        """The half a plain exists() check cannot see.
+
+        Dropping a branch shows up as a missing dashboard section. Reading — and
+        then writing — a decoy of the same shape under the cwd is silent.
+        """
+        _, elsewhere = self._world(tmp_path, monkeypatch)
+        self._lock(elsewhere / "src" / "aipass" / "somebranch")
+
+        section = agent_status_writer.build_agent_status_section()
+
+        assert section["stale_agents"] == []
+        assert section["active_agents"] == []
+
+    def test_an_absolute_row_is_taken_as_written(self, tmp_path, monkeypatch):
+        """External projects register absolute rows — the join must not double them."""
+        outside = tmp_path / "other_project" / "branch"
+        outside.mkdir(parents=True)
+        self._lock(outside)
+        repo = tmp_path / "checkout"
+        self._registry(repo, "outsider", str(outside))
+        monkeypatch.setattr(agent_status_writer, "_find_repo_root", lambda: repo)
+
+        section = agent_status_writer.build_agent_status_section()
+
+        assert [a["branch"] for a in section["stale_agents"]] == ["outsider"]

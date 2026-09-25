@@ -568,6 +568,38 @@ class TestDispatcherSurvivesHandlerFailure:
         assert "anything.py" in errors[0], "the report must name the file that failed"
         assert "RuntimeError" in errors[0], "the report must name the error type"
 
+    def test_a_file_that_vanished_is_a_miss_not_an_error(self, tmp_path, monkeypatch):
+        """The race the guard was built for is the ORDINARY case, not an incident.
+
+        Every create-then-delete inside one second — a test probe, an editor's
+        write-and-rename, a build step — reached the broad guard and printed a
+        full traceback at ERROR into whichever long-running process happened to
+        hold the watcher. Ten landed in api's server log from a single prax test
+        run (2026-09-15). The event is still dropped; it is just not news.
+        """
+        mod = self._real_watcher_module()
+        monkeypatch.setattr(mod, "ECOSYSTEM_ROOT", tmp_path)
+        monkeypatch.setattr(mod, "should_ignore_path", lambda p: False)
+        monkeypatch.setattr(mod, "load_module_registry", lambda: {})
+        monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
+
+        errors, infos = [], []
+        monkeypatch.setattr(mod.logger, "error", lambda msg, *a, **kw: errors.append(str(msg)))
+        monkeypatch.setattr(mod.logger, "info", lambda msg, *a, **kw: infos.append(str(msg)))
+
+        gone = tmp_path / "vanished.py"
+        event = MagicMock()
+        event.event_type = "created"
+        event.is_directory = False
+        event.src_path = str(gone)
+        handler = mod.PythonFileWatcher()
+        handler.dispatch(event)
+
+        assert not errors, f"a file vanishing before its stat is not an error: {errors}"
+        assert any("vanished.py" in line for line in infos), (
+            f"the miss must still be on the record, naming the file: {infos}"
+        )
+
     def test_a_healthy_created_file_is_still_registered(self, tmp_path, monkeypatch):
         """The guard must not have turned discovery into a no-op.
 

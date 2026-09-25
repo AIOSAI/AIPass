@@ -102,6 +102,18 @@ class TestEventTextIsUntrustedMarkup:
         output = _render(lambda m: m.print_hook_event("HOOKS", CRASHING_MESSAGE, "fired"))
         assert "[/usr/bin]" in output
 
+    def test_hook_event_says_which_branch_fired(self):
+        """The branch the hook fired in must reach the screen.
+
+        print_hook_event accepted branch and never printed it (seedgo's
+        accepted_and_never_used_parameter rule, 2026-09-24), so every hook line
+        in Mission Control read the same whether it came from hooks, drone or an
+        external project — the one column that tells them apart was dropped.
+        """
+        output = _render(lambda m: m.print_hook_event("SEEDGO", "cadence:fired loader=global", "fired"))
+        assert "SEEDGO" in output
+        assert "cadence:fired loader=global" in output
+
     def test_command_separator_is_escaped(self):
         """A command string can carry brackets too."""
         output = _render(lambda m: m.print_command_separator("DRONE", CRASHING_MESSAGE, "DEVPULSE", "PRAX"))

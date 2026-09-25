@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: watcher.py
 # Description: File System Watching
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-11-26
-# Modified: 2026-09-12
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -193,7 +193,19 @@ class PythonFileWatcher(FileSystemEventHandler):
         # ONE stat, not two. The file that reaches this line is a file some other
         # process just created, so it may vanish mid-handler; two stat() calls are
         # two chances to lose the race and describe a file with a half-torn read.
-        stat_result = py_file.stat()
+        #
+        # Losing that race is the ordinary case, not an incident: a create and a
+        # delete inside one second is what a test probe, an editor's write-and-
+        # rename and a build step all look like from here. Named here so it does
+        # not reach on_created's broad guard, which reports at ERROR with a
+        # traceback — ten of those landed in api's server log from one prax test
+        # run (2026-09-15). The dispatcher survives either way; this is about the
+        # log the rest of the fleet has to read.
+        try:
+            stat_result = py_file.stat()
+        except FileNotFoundError:
+            logger.info(f"[watcher] {py_file} vanished before it could be registered — event dropped")
+            return
 
         modules[module_name] = {
             "file_path": str(py_file),

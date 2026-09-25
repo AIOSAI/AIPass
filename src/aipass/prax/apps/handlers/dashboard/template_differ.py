@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_differ.py
 # Description: Dashboard Template Diff Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-02-25
-# Modified: 2026-09-19
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -79,8 +79,10 @@ DEPRECATED_SECTIONS = [
 # deletion of commons_mentions (a key @flow owns and writes) for weeks after the
 # pusher's list was corrected on 2026-08-13 (docs/dashboard.md, 2026-08-25).
 
-# Required sections (from template)
+# The shape a template that cannot be read is assumed to have. _diff_branch
+# prefers the template it is handed; these are what it falls back to.
 REQUIRED_SECTIONS = ["ai_mail", "flow", "memory"]
+REQUIRED_QUICK_STATUS_KEYS = ["new_mail", "opened_mail", "active_plans", "action_required", "summary"]
 
 
 # =============================================================================
@@ -139,8 +141,9 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
         result["status"] = "needs_update"
         return result
 
-    # Check for missing required sections
-    for section_name in REQUIRED_SECTIONS:
+    # The template the caller loaded is the source, not a copy of its shape:
+    # the constants below are the fallback for a template that cannot say.
+    for section_name in template.get("sections") or REQUIRED_SECTIONS:
         if section_name not in sections:
             result["additions"].append(f"{section_name} section")
 
@@ -161,9 +164,8 @@ def _diff_branch(branch_name: str, branch_path: Path, template: dict) -> Dict[st
             if dep_key in quick_status:
                 result["modifications"].append(f"quick_status: remove {dep_key}")
 
-        # Check for missing required quick_status keys
-        required_qs_keys = ["new_mail", "opened_mail", "active_plans", "action_required", "summary"]
-        for key in required_qs_keys:
+        # Same source, same fallback, for the quick_status row.
+        for key in template.get("quick_status") or REQUIRED_QUICK_STATUS_KEYS:
             if key not in quick_status:
                 result["additions"].append(f"quick_status.{key}")
 

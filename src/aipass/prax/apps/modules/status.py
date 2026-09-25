@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: status.py
 # Description: PRAX Status Command
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2025-11-15
-# Modified: 2026-09-12
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -25,7 +25,7 @@ if sys.platform == "win32":
 
 from aipass.prax.apps.modules.logger import get_system_status, system_logger as logger
 from aipass.prax.apps.handlers.status.sync import sync_status
-from aipass.cli.apps.modules import console, success, error, warning
+from aipass.cli.apps.modules import console, error, warning
 from aipass.prax.apps.handlers.json import json_handler
 from aipass.prax.apps.handlers.cli.arg_gate import refuse
 from aipass.prax.apps.handlers.cli.help_flags import wants_help
@@ -36,7 +36,9 @@ def print_help():
     console.print()
     console.print("[bold cyan]PRAX Status Commands:[/bold cyan]")
     console.print("  [white]status[/white]              Show PRAX system status")
-    console.print("  [white]status sync[/white]         Scan all branches, build STATUS.md at repo root")
+    console.print(
+        "  [white]status sync[/white]         Scan branch STATUS.local.md files (writes nothing — decommissioned)"
+    )
     console.print("  [white]status help[/white]         Show this help")
     console.print()
 
@@ -130,7 +132,12 @@ def _handle_sync() -> bool:
     synced = result["branches_synced"]
     missing = result["branches_missing"]
 
-    success(f"STATUS.md written — {len(synced)} branches synced")
+    # The scan is real; the write is not. Saying "written" over a file that is
+    # deliberately absent is the shape of report this branch refuses to print.
+    warning(
+        f"Nothing written — {len(synced)} branches scanned",
+        details=result.get("reason", ""),
+    )
 
     if missing:
         warning(

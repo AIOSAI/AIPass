@@ -277,6 +277,27 @@ class TestPushTemplateIsNotAWreckingBall:
         assert data["quick_status"]["todo_count"] == 0
         assert data["quick_status"]["new_mail"] == 0
 
+    def test_a_template_section_the_constant_never_heard_of_is_advised(self, tmp_path):
+        """The adviser's third copy of the policy.
+
+        _diff_branch accepted the loaded template and compared against
+        module-level REQUIRED_SECTIONS instead (seedgo's
+        accepted_and_never_used_parameter rule, 2026-09-24). That copy happens to
+        agree with templates/DASHBOARD.template.json today, so the drift would be
+        silent both ways: a section added to the template would never be advised,
+        and the advice would keep naming one the template had dropped.
+        """
+        differ = _load("aipass.prax.apps.handlers.dashboard.template_differ")
+        branch = _seed_branch(tmp_path, {"new_mail": 0})
+
+        result = differ._diff_branch(
+            "SOMEBRANCH",
+            branch,
+            {"sections": {"a_brand_new_section": {}}, "quick_status": {"new_mail": 0}},
+        )
+
+        assert "a_brand_new_section section" in result["additions"]
+
     def test_canary_deprecation_list_still_deletes(self):
         """Proof the first assertion can fail: the removal loop is real."""
         qs = {"commons_mentions": 4, "pending_bulletins": 1}

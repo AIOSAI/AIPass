@@ -1439,3 +1439,53 @@ class TestCreateTerminalHandler:
         fmt = self._import_formatting(tmp_path)
         handler = fmt.create_terminal_handler()
         assert handler.stream is sys.stdout
+
+
+# =============================================
+# lifecycle.py -- run_initialize / run_shutdown
+# =============================================
+
+
+class TestLifecycleRecordsWhoAskedForIt:
+    """The lifecycle doors take the caller's module name — and must use it.
+
+    seedgo's accepted_and_never_used_parameter rule found both doors accepting
+    module_name and reading neither, with a docstring promising it was 'for log
+    prefixes'. The operation record is where it belongs: initialising the fleet's
+    logging is a system-wide act, and the record of it should say who asked.
+    """
+
+    def _lifecycle(self, monkeypatch):
+        """Import the real lifecycle handler with every step stubbed out."""
+        import aipass.prax.apps.handlers.logging.lifecycle as lifecycle
+
+        for name in (
+            "create_config_file",
+            "save_module_registry",
+            "install_logger_override",
+            "start_file_watcher",
+            "stop_file_watcher",
+            "restore_original_logger",
+        ):
+            monkeypatch.setattr(lifecycle, name, lambda *a, **kw: None)
+        monkeypatch.setattr(lifecycle, "discover_python_modules", lambda *a, **kw: {})
+        monkeypatch.setattr(lifecycle, "setup_system_logger", lambda *a, **kw: MagicMock())
+        monkeypatch.setattr(lifecycle, "json_handler", MagicMock())
+
+        recorded = []
+        monkeypatch.setattr(lifecycle, "log_operation", lambda msg, data: recorded.append((msg, data)))
+        return lifecycle, recorded
+
+    def test_initialize_records_the_module_that_asked(self, monkeypatch):
+        lifecycle, recorded = self._lifecycle(monkeypatch)
+
+        lifecycle.run_initialize("some_caller")
+
+        assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]
+
+    def test_shutdown_records_the_module_that_asked(self, monkeypatch):
+        lifecycle, recorded = self._lifecycle(monkeypatch)
+
+        lifecycle.run_shutdown("some_caller")
+
+        assert [data.get("initiated_by") for _, data in recorded] == ["some_caller"]
