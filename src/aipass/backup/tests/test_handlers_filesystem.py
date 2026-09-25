@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Backup handlers: scan/{walk,filter}.py, ignore/patterns.py, audit/trail.py, project/, path/, report/
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -15,7 +15,10 @@
 # seedgo: no-test-needed(stdlib) — os.walk, os.path.islink and os.path.getsize in scan/walk.py and scan/filter.py
 
 import json
+import os
 from pathlib import Path
+
+import pytest
 
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.path.builder import backup_root, build_snapshot_path
@@ -63,6 +66,25 @@ class TestScanWalk:
         result = list(walk_project(str(bad_path)))
 
         assert result == []
+
+    @pytest.mark.skipif(
+        os.name == "nt" or getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="an unlistable directory needs POSIX modes and a non-root reader",
+    )
+    def test_a_directory_the_walk_cannot_list_raises_instead_of_dropping_out(self, tmp_path: Path) -> None:
+        proj = tmp_path / "proj"
+        locked = proj / "locked"
+        locked.mkdir(parents=True)
+        (proj / "seen.txt").write_text("seen", encoding="utf-8")
+        (locked / "hidden.txt").write_text("hidden", encoding="utf-8")
+        locked.chmod(0o000)
+        try:
+            with pytest.raises(PermissionError) as caught:
+                list(walk_project(str(proj)))
+        finally:
+            locked.chmod(0o700)
+
+        assert caught.value.filename == os.path.realpath(locked)
 
 
 class TestScanFilter:
