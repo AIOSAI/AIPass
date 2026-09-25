@@ -216,3 +216,53 @@ class TestSubagentGateExternalProject:
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
         assert "sound" not in result
+
+
+_GATE = "aipass.hooks.apps.handlers.security.subagent_gate"
+
+
+class TestSubagentGateBudget:
+    """The engine kills this hook at 60s; the gate must finish inside it on its own terms.
+
+    Measured 2026-09-25 01:49:59: 60,002ms in @devpulse's tree, 20 timeouts since
+    08-13. One `drone @seedgo checklist` per modified file, serially, 15s each,
+    with no total budget: four slow files and the engine kills the whole gate,
+    so nothing is reported at all. And one checklist timeout used to fall into
+    the outer except and abandon every file after it.
+    """
+
+    @patch(f"{_GATE}._check_hook_readme_accountability", return_value=None)
+    @patch(f"{_GATE}._run_seedgo_checklist", return_value=[])
+    @patch(f"{_GATE}._get_modified_py_files")
+    @patch(f"{_GATE}._find_repo_root")
+    def test_stops_checking_when_the_budget_is_spent(self, mock_root, mock_modified, mock_seedgo, mock_readme, caplog):
+        from pathlib import Path
+
+        mock_root.return_value = Path("/fake/repo")
+        mock_modified.return_value = [f"/fake/repo/src/aipass/hooks/apps/f{i}.py" for i in range(8)]
+        ticks = iter(range(0, 1000, 12))
+        with patch(f"{_GATE}.time.monotonic", side_effect=lambda: next(ticks)):
+            result = handle({"agent_type": "general-purpose", "cwd": "/fake/repo/src/aipass/hooks"})
+        assert result["exit_code"] == 0
+        assert mock_seedgo.call_count < 8
+        assert "unchecked" in caplog.text
+
+    @patch(f"{_GATE}._check_hook_readme_accountability", return_value=None)
+    @patch(f"{_GATE}._run_seedgo_checklist")
+    @patch(f"{_GATE}._get_modified_py_files")
+    @patch(f"{_GATE}._find_repo_root")
+    def test_one_checklist_timeout_does_not_abandon_the_rest(self, mock_root, mock_modified, mock_seedgo, mock_readme):
+        import subprocess
+        from pathlib import Path
+
+        mock_root.return_value = Path("/fake/repo")
+        mock_modified.return_value = [
+            "/fake/repo/src/aipass/hooks/apps/slow.py",
+            "/fake/repo/src/aipass/hooks/apps/bad.py",
+        ]
+        mock_seedgo.side_effect = [subprocess.TimeoutExpired(cmd="drone", timeout=15), ["Missing docstring"]]
+        result = handle({"agent_type": "general-purpose", "cwd": "/fake/repo/src/aipass/hooks"})
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
+        assert "bad.py" in reason
+        assert "slow.py" in reason
