@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import defect — guard shape, safe path helper, both worlds
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-31
 # Modified: 2026-09-25
 # =============================================
@@ -210,6 +210,7 @@ def _run_probe(world: str, targets: list[str] | None = None) -> dict:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
     assert proc.stdout.strip(), f"probe produced no stdout (stderr: {proc.stderr[-400:]})"
@@ -599,6 +600,7 @@ class TestTheCallerIsNoneBranchIsWatchedBehaviourally:
             [sys.executable, "-c", _NONE_BRANCH_PROBE],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
         )
         assert proc.returncode == 0, proc.stderr
@@ -688,6 +690,7 @@ class TestFabricatedFilenamesNeverReachCoverage:
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=600,
         )
         assert run.returncode == 0, f"the tests themselves failed:\n{run.stdout}"
@@ -716,6 +719,7 @@ class TestFabricatedFilenamesNeverReachCoverage:
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=600,
         )
         assert "No source for code" not in (report.stdout + report.stderr)
