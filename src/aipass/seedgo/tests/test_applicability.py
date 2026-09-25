@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.14.0
+# Version: 1.15.0
 # Created: 2026-08-09
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 from types import SimpleNamespace
@@ -249,9 +249,11 @@ def test_the_tests_only_bucket_is_an_exact_roster():
         "import_site",
         "literal_path",
         "mock_console",
+        "module_scope_side_effect",
         "named_encoding",
         "no_product_call",
         "oversize_test_file",
+        "retired_token_docstring",
         "router_assert",
         "self_set_assert",
         "sleep_in_test",

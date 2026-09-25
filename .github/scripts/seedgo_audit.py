@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 75  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 77  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -100,6 +100,11 @@ EXPECTED_STANDARDS = 75  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          clone, so this job's fetch-depth: 0 is load-bearing for it.
 #                          declared_pass_symbol_resolves convicts a declared-pass name that resolves
 #                          nowhere in apps/ or the stdlib. Measured: cli and seedgo consult 75.
+#                          +2 on 2026-09-25: retired_token_docstring and module_scope_side_effect, pair
+#                          two of the template compliance review (dispatch 41554e9d). The first convicts
+#                          the retired v4 test_quality keyword vocabulary (c1e0eeed^) used as bait in a
+#                          test docstring; the second convicts a side effect a test_*.py runs at import
+#                          (conftest.py exempt). Measured: cli and seedgo consult 77.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"
