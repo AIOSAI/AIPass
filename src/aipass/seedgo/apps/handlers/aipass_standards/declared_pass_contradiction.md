@@ -77,7 +77,7 @@ Measured 2026-09-23 over the fleet's 572 test files.
 
 | shape | count | why it is not scored |
 |---|---|---|
-| lines that name no symbol | 39 | prose is a legitimate declaration |
+| lines that name no symbol | 39 | prose is a legitimate declaration — since 2026-09-25 `declared_pass_symbol_resolves` scores one whose category is not a pack standard |
 | dotted stdlib names (`Path.resolve`, `os.scandir`) | 67 | a test's incidental use of the call is indistinguishable from testing it |
 | declared libraries whose call feeds an assert | 3 | `no_product_call` already convicts `test_ignore_pathspec.py:46`, the one case where the library really is the subject; the other two files score 100 there, which proves their library call is the test's reading tool |
 

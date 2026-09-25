@@ -48,7 +48,7 @@ NAME_RATCHET_GATES = False
 # scores 0 and is still counted. Only a standard that VANISHES trips this - the
 # first board with the tripwire caught exactly the not_applicable case, which
 # is why the count reads results, not scores.
-EXPECTED_STANDARDS = 73  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
+EXPECTED_STANDARDS = 75  # +4 on 2026-09-21: tests/ joined the audit corpus (owner 21:20), so router_assert,
 #                          oversize_test_file, import_site and through_the_command became scored rows.
 #                          A branch with no test files reports them not_applicable, so the count holds there too.
 #                          +1 the same day: named_encoding, test template v1 item 21.
@@ -93,6 +93,13 @@ EXPECTED_STANDARDS = 73  # +4 on 2026-09-21: tests/ joined the audit corpus (own
 #                          name is handed off as a value, the def is an except-ImportError shim, or the
 #                          name is defined twice. Class L was CHECKED and NOT built -- unused_function
 #                          already convicts its specimen. Measured: cli and seedgo consult 73.
+#                          +2 on 2026-09-25: stale_header_date and declared_pass_symbol_resolves, pair
+#                          one of the template compliance review (dispatch 303ca9e3). stale_header_date
+#                          is the first checker to READ GIT: a Modified: date older than the file's last
+#                          commit (an uncommitted file is judged as of today). It DECLINES on a shallow
+#                          clone, so this job's fetch-depth: 0 is load-bearing for it.
+#                          declared_pass_symbol_resolves convicts a declared-pass name that resolves
+#                          nowhere in apps/ or the stdlib. Measured: cli and seedgo consult 75.
 
 src = Path("src/aipass")
 pack = src / "seedgo/apps/handlers/aipass_standards"

@@ -73,10 +73,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Full history: the README-freshness check reads `git log` to find the
-          # last commit touching each branch's .py. A shallow (depth-1) checkout
-          # makes every file look born at HEAD, so every README false-fails as
-          # "stale". Full history makes CI match a local audit exactly.
+          # Full history: stale_header_date (2026-09-25) reads `git log` for the
+          # last commit touching each test file. A shallow (depth-1) checkout
+          # makes every file look born at HEAD, so that checker DECLINES there
+          # rather than guess. Full history makes CI match a local audit exactly.
+          # (This once served a README-freshness check that no longer reads git.)
           fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
