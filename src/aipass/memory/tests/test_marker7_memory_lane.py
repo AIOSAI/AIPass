@@ -1105,7 +1105,7 @@ class TestTheLiveGuardRefusesAHalfPresentWorld:
         """
         try:
             return request.getfixturevalue(name)
-        except Skipped as skipped:  # noqa: F841 — re-raised as a failure, deliberately
+        except Skipped as skipped:  # re-raised as a failure, deliberately
             pytest.fail(f"{name} skipped a world it should have accepted: {skipped}")
 
     @staticmethod

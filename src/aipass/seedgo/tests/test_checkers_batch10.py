@@ -22,12 +22,12 @@ from unittest.mock import MagicMock
 # ERROR, and the tests that prove a cap is READ from its owner would be passing
 # against nothing. Imported here, at collection time, the owners are real -- and
 # a monkeypatch on one of their constants is then what moves a row.
-from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as sb  # noqa: E402
-from aipass.seedgo.apps.handlers.context_standards import startup_ratchet as ratchet  # noqa: E402
-from aipass.seedgo.apps.handlers.context_standards import name_ratchet as names  # noqa: E402
-from aipass.seedgo.apps.handlers.aipass_standards import applicability  # noqa: E402
-from aipass.seedgo.apps.handlers.aipass_standards import router_assert_check as router_assert  # noqa: E402
-from aipass.seedgo.apps.handlers.aipass_standards import oversize_test_file_check as oversize  # noqa: E402
+from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as sb
+from aipass.seedgo.apps.handlers.context_standards import startup_ratchet as ratchet
+from aipass.seedgo.apps.handlers.context_standards import name_ratchet as names
+from aipass.seedgo.apps.handlers.aipass_standards import applicability
+from aipass.seedgo.apps.handlers.aipass_standards import router_assert_check as router_assert
+from aipass.seedgo.apps.handlers.aipass_standards import oversize_test_file_check as oversize
 
 
 # ---------------------------------------------------------------------------

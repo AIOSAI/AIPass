@@ -58,7 +58,7 @@ def _import_query_executor(monkeypatch):
     if parent is not None and hasattr(parent, "query_executor"):
         delattr(parent, "query_executor")
 
-    from aipass.memory.apps.handlers.search import query_executor  # noqa: E402
+    from aipass.memory.apps.handlers.search import query_executor
 
     return query_executor, mocks
 

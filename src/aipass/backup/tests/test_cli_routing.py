@@ -769,6 +769,6 @@ class TestOutputCapture:
 
     def test_capsys_available(self, capsys: pytest.CaptureFixture[str]) -> None:
         """capsys fixture available for stdout capture."""
-        print("hello from backup test")  # noqa: T201
+        print("hello from backup test")
         captured = capsys.readouterr()
         assert "hello" in captured.out

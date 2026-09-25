@@ -156,7 +156,7 @@ def _build_cache() -> Dict[str, Dict]:
 
 def _get_cache() -> Dict[str, Dict]:
     """Return the cached plan-type registry, building it on first access."""
-    global _plan_type_cache  # noqa: PLW0603
+    global _plan_type_cache
     if _plan_type_cache is None:
         _plan_type_cache = _build_cache()
     return _plan_type_cache
@@ -221,7 +221,7 @@ def discover_plan_types() -> Dict[str, Dict]:
     :func:`get_plan_type` for that.
     """
     # Force a fresh scan (useful after adding new plan types at runtime)
-    global _plan_type_cache  # noqa: PLW0603
+    global _plan_type_cache
     _plan_type_cache = None
     cache = _get_cache()
 

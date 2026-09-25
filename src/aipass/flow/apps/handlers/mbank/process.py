@@ -19,7 +19,6 @@ Key Functions:
 - verify_and_heal_orphaned_plans() - Orphan healing logic
 """
 
-# ruff: noqa: E402
 from pathlib import Path
 
 # Standard imports

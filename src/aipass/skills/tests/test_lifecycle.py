@@ -17,11 +17,11 @@ skills_root = Path(__file__).resolve().parent.parent.parent
 if str(skills_root) not in sys.path:
     sys.path.insert(0, str(skills_root))
 
-from aipass.skills.apps.handlers.template import copy_template, get_template  # noqa: E402
-from aipass.skills.apps.modules.creator import create_skill  # noqa: E402
-from aipass.skills.apps.modules.discovery import discover_skills_in_path, parse_frontmatter  # noqa: E402, F401
-from aipass.skills.apps.handlers.loader_handler import import_handler, parse_full_skill_md  # noqa: E402
-from aipass.skills.apps.modules.runner import run_skill  # noqa: E402
+from aipass.skills.apps.handlers.template import copy_template, get_template
+from aipass.skills.apps.modules.creator import create_skill
+from aipass.skills.apps.modules.discovery import discover_skills_in_path, parse_frontmatter  # noqa: F401
+from aipass.skills.apps.handlers.loader_handler import import_handler, parse_full_skill_md
+from aipass.skills.apps.modules.runner import run_skill
 
 
 class TestFullLifecycle:

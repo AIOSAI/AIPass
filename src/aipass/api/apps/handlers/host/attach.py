@@ -817,7 +817,7 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
             # The resize reached the kernel and the client never heard it — every
             # resize, forever. _acquire_controlling_tty does the setsid itself,
             # so the signal isolation start_new_session bought is kept.
-            preexec_fn=_acquire_controlling_tty,  # noqa: PLW1509 - see the note in that function
+            preexec_fn=_acquire_controlling_tty,  # see the note in that function
             close_fds=True,
             env=_child_env(),
         )

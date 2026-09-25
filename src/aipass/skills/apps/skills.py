@@ -33,8 +33,8 @@ except OSError as _resolve_error:
 if _script_dir in sys.path:
     sys.path.remove(_script_dir)
 
-from aipass.prax import logger  # noqa: E402
-from aipass.cli.apps.modules import console, error  # noqa: E402
+from aipass.prax import logger
+from aipass.cli.apps.modules import console, error
 
 # One version string, printed by --version and carried in this file's header.
 VERSION = "1.1.0"

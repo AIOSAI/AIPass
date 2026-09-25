@@ -380,7 +380,7 @@ def add_to_registry(registry_path, branch_name, branch_path, profile, email, pur
     else:
         import fcntl
 
-        lock_fd = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115
+        lock_fd = open(lock_path, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
     try:

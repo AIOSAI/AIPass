@@ -31,7 +31,6 @@ Commands:
     status  - Show registry status
 """
 
-# ruff: noqa: E402
 import sys
 import os
 

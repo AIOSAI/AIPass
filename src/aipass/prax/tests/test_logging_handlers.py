@@ -20,7 +20,7 @@ All imports happen inside test functions because the autouse mock_prax_infrastru
 fixture must inject sys.modules mocks before any prax module is loaded.
 """
 
-import importlib  # noqa: F401 — used inside test functions for dynamic module loading
+import importlib  # used inside test functions for dynamic module loading
 import json
 import logging
 import sys
@@ -62,13 +62,11 @@ class TestDirectRotatingFileHandlerDoRollover:
         ):
             _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
             sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
+            direct_mod = importlib.import_module(_direct_mod_name)
 
             log_file = tmp_path / "test.log"
             log_file.write_text("line1\nline2\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
+            handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
             record = logging.LogRecord(
                 name="test",
                 level=logging.INFO,
@@ -112,13 +110,11 @@ class TestDirectRotatingFileHandlerDoRollover:
         ):
             _direct_mod_name = "aipass.prax.apps.handlers.logging.direct"
             sys.modules.pop(_direct_mod_name, None)
-            direct_mod = importlib.import_module(_direct_mod_name)  # noqa: F841
+            direct_mod = importlib.import_module(_direct_mod_name)
 
             log_file = tmp_path / "test_os.log"
             log_file.write_text("data\n", encoding="utf-8")
-            handler = direct_mod.RotatingFileHandler(  # noqa: F821
-                str(log_file), maxBytes=10, backupCount=1
-            )
+            handler = direct_mod.RotatingFileHandler(str(log_file), maxBytes=10, backupCount=1)
 
             with (
                 patch(

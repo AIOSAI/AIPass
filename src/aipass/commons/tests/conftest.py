@@ -24,21 +24,21 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
 
-import logging  # noqa: E402
+import logging
 
-import pytest  # noqa: E402
+import pytest
 
 logger = logging.getLogger(__name__)
 
 try:
-    from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402, F811
+    from aipass.prax.apps.modules.logger import system_logger as logger
 except ImportError:
     logger.warning("[conftest] prax logger unavailable — using stdlib logging")
 
-from pathlib import Path  # noqa: E402
+from pathlib import Path
 
-from aipass.commons.apps.handlers.json import json_handler  # noqa: E402
-from aipass.cli.apps.modules.display import reset_command_state  # noqa: E402
+from aipass.commons.apps.handlers.json import json_handler
+from aipass.cli.apps.modules.display import reset_command_state
 
 # Never discover out of .archive/: it holds verbatim disposal copies of the
 # suites the one json service subsumed, and rglobbing into a dot-directory

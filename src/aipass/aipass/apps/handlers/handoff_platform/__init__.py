@@ -39,7 +39,7 @@ def build_cli_cmd(cli: str, flag_variant: str) -> str:
     """Build the CLI invocation string from cli name and flag variant."""
     parts = [cli]
     if cli == "claude" and flag_variant == "skip-permissions":
-        parts.append("--dangerously-skip-permissions")  # noqa: S603
+        parts.append("--dangerously-skip-permissions")
     return " ".join(parts)
 
 

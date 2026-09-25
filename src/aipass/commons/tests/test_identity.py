@@ -45,8 +45,8 @@ except ImportError:
     sys.modules.setdefault("aipass.cli.apps", MagicMock())
     sys.modules.setdefault("aipass.cli.apps.modules", MagicMock())
 
-from aipass.commons.apps.modules import commons_identity as _id_mod  # noqa: E402
-from aipass.commons.apps.handlers.identity import identity_ops as _ops  # noqa: E402
+from aipass.commons.apps.modules import commons_identity as _id_mod
+from aipass.commons.apps.handlers.identity import identity_ops as _ops
 
 
 # ---------------------------------------------------------------------------

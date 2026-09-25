@@ -76,7 +76,6 @@ def _mock_infrastructure(monkeypatch):
         monkeypatch.delitem(sys.modules, mod_name, raising=False)
 
 
-
 # ===========================================================================
 # 1. readme_check -- check_readme_exists
 # ===========================================================================

@@ -593,7 +593,7 @@ def _check_code_wiring(_path: Path, content: str) -> List[Dict]:
         }
     )
 
-    return checks  # noqa: RET504
+    return checks
 
 
 def _check_json_handler_config(_handler_path: Path, content: str, _bypass_rules: list | None = None) -> List[Dict]:

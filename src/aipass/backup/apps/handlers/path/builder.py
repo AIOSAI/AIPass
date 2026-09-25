@@ -80,7 +80,7 @@ def build_versioned_file_path(
     parent = str(p.parent)
 
     if len(name) > 50:
-        name_hash = hashlib.md5(name.encode()).hexdigest()[:8]  # noqa: S324
+        name_hash = hashlib.md5(name.encode()).hexdigest()[:8]
         folder_name = name[:30] + f"_{name_hash}"
     else:
         folder_name = name

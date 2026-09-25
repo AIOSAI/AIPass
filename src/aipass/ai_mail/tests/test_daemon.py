@@ -535,7 +535,7 @@ def test_is_protected_branch_empty_string():
 
 # ---- _has_test_token tests -----------------------------------
 
-from aipass.ai_mail.apps.handlers.dispatch.test_token import (  # noqa: E402
+from aipass.ai_mail.apps.handlers.dispatch.test_token import (
     has_test_token as _has_test_token,
     auto_ack_test_email as _auto_ack_test_email,
     scan_and_ack_test_emails,

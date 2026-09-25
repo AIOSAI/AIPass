@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from aipass.api.apps.handlers.usage.cleanup import (  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage detection
     _read_json,
     _write_json,
     cleanup_old_data,

@@ -92,7 +92,7 @@ def update_registry_path(registry_path, branch_name, new_path):
     if sys.platform != "win32":
         import fcntl  # noqa: windows_compat — guarded by platform check
 
-        lock_fd = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115
+        lock_fd = open(lock_path, "w", encoding="utf-8")
         fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
     try:

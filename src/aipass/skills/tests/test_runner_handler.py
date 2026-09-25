@@ -15,7 +15,7 @@ skills_root = Path(__file__).resolve().parent.parent.parent
 if str(skills_root) not in sys.path:
     sys.path.insert(0, str(skills_root))
 
-from aipass.skills.apps.handlers.runner_handler import run_markdown, run_handler  # noqa: E402
+from aipass.skills.apps.handlers.runner_handler import run_markdown, run_handler
 
 
 class TestRunMarkdownEmptyBody:

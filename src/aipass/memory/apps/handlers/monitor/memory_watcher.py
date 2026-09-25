@@ -44,14 +44,14 @@ except ImportError:
     logger.info("Optional dependency 'watchdog' not available")
 
 # Handler imports (relative within package — after conditional watchdog block)
-from aipass.memory.apps.handlers.tracking.line_counter import update_line_count  # noqa: E402
-from aipass.memory.apps.handlers.monitor.detector import check_single_file  # noqa: E402
+from aipass.memory.apps.handlers.tracking.line_counter import update_line_count
+from aipass.memory.apps.handlers.monitor.detector import check_single_file
 from aipass.memory.apps.handlers import repo_root
-from aipass.memory.apps.handlers.repo_root import exists_exactly  # noqa: E402
-from aipass.prax.apps.modules.logger import get_system_logger  # noqa: E402
-from aipass.memory.apps.handlers.json import json_handler  # noqa: E402
-from aipass.memory.apps.handlers.json import config_loader  # noqa: E402
-from aipass.memory.apps.handlers.repo_root import module_file  # noqa: E402
+from aipass.memory.apps.handlers.repo_root import exists_exactly
+from aipass.prax.apps.modules.logger import get_system_logger
+from aipass.memory.apps.handlers.json import json_handler
+from aipass.memory.apps.handlers.json import config_loader
+from aipass.memory.apps.handlers.repo_root import module_file
 
 logger = get_system_logger()
 

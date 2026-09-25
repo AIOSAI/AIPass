@@ -151,7 +151,7 @@ def _detect_package_names(project_root: Path) -> set:
         return set()
 
     try:
-        import tomllib  # noqa: F811 — stdlib 3.11+
+        import tomllib  # stdlib 3.11+
     except ImportError:
         try:
             import tomli as tomllib  # type: ignore[no-redef]

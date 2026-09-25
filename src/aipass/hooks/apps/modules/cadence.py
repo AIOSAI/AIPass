@@ -232,7 +232,7 @@ def _read_turn_uncounted(path: Path) -> int:
         return -1
     fd = None
     try:
-        fd = open(path, encoding="utf-8")  # noqa: SIM115
+        fd = open(path, encoding="utf-8")
         _lock(fd)
         content = fd.read()
         _close_fd(fd)
@@ -270,7 +270,7 @@ def _load_and_increment(hook_data: dict) -> int:
     fd = None
 
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -610,7 +610,7 @@ def reset_counter(hook_data: dict | None = None, caller: str = "unknown") -> Non
 
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -788,7 +788,7 @@ def _grounded_by_regroup(hook_data: dict, config: dict) -> bool:
     token = _get_turn_token(hook_data)
     fd = None
     try:
-        fd = open(path, "r+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "r+", encoding="utf-8")
         _lock(fd)
         content = fd.read()
         stamp = json.loads(content) if content.strip() else {}
@@ -835,7 +835,7 @@ def consume_regroup_pending(hook_data: dict | None = None) -> bool:
 
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -901,7 +901,7 @@ def queue_regroup_parts(total: int, hook_data: dict | None = None) -> None:
         return
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()
@@ -934,7 +934,7 @@ def pop_regroup_part(hook_data: dict | None = None) -> tuple[int, int] | None:
         return None
     fd = None
     try:
-        fd = open(path, "a+", encoding="utf-8")  # noqa: SIM115
+        fd = open(path, "a+", encoding="utf-8")
         _lock(fd)
         fd.seek(0)
         content = fd.read()

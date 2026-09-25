@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.api.apps.handlers.usage.aggregation import (  # noqa: F401 — seedgo test_coverage detection
+from aipass.api.apps.handlers.usage.aggregation import (  # seedgo test_coverage detection
     get_overall_stats,
     get_caller_usage,
     get_session_summary,

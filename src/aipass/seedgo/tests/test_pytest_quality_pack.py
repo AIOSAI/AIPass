@@ -994,7 +994,7 @@ class TestAssertionShapeBranchCheck:
         assert "NOT measured" in named[0]["message"]
 
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import unentered_assert_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import unentered_assert_check
 
 # =============================================================================
 # UNENTERED ASSERTIONS - THE ASSERT THAT MAY NEVER EXECUTE
@@ -1319,7 +1319,7 @@ class TestUnenteredAssertReachability:
 # was appended while another author was appending to the same file; E402 is
 # ignored repo-wide, and a local import cannot collide with a concurrent edit.
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import mock_drift_check, self_skip_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import mock_drift_check, self_skip_check
 
 
 def _drift_rows(root: Path) -> list:
@@ -2336,7 +2336,7 @@ class TestSelfSkipScoring:
 # CAPTURE NEVER READ - THE OUTPUT THE TEST ASKED FOR AND NEVER LOOKED AT
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import (  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import (
     capture_never_read_check,
     empty_parametrize_check,
 )
@@ -3379,7 +3379,7 @@ class TestEmptyParametrizeBranchCheck:
 # POSIX LITERAL - A ROOTED PATH LITERAL PUT THROUGH A RESOLVER
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import posix_literal_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import posix_literal_check
 
 # NOTHING IN THIS SECTION ASKS THE MACHINE ANYTHING. The rule under test is about
 # path separators, which makes it the one rule in the pack whose pins could most
@@ -4310,7 +4310,7 @@ class TestPosixLiteralRenderedAndReturnedPaths:
 # COVERAGE SLOT - THE TEST THAT SAYS OUT LOUD WHY IT EXISTS
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import coverage_slot_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import coverage_slot_check
 
 
 def _coverage_slot_project(root: Path) -> Path:
@@ -4821,7 +4821,7 @@ class TestCoverageSlotBranchCheck:
 # ENTRY POINT DIFF - THE VERB THE SUITE HAS NEVER ONCE SAID OUT LOUD
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import (  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import (
     docstring_pin_check,
     entry_point_diff_check,
 )
@@ -5723,7 +5723,7 @@ class TestTheTeachingTemplatesStillRun:
 # HOST STATE - DID THE TEST PUT THE MACHINE BACK
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import host_state_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import host_state_check
 
 # NOTHING IN THIS SECTION TOUCHES HOST STATE, and the rule under test is why that
 # has to be written down rather than assumed. A pin for a checker about services,
@@ -6769,7 +6769,7 @@ class TestHostStateBranchCheck:
 # FRESH CLONE - WOULD THIS TEST PASS ON A MACHINE THAT HAS ONLY WHAT THE REPO SHIPS
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import fresh_clone_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import fresh_clone_check
 
 # NOTHING IN THIS SECTION READS THE LIVE CHECKOUT, and the rule under test is the
 # reason that has to be written down rather than assumed. A pin for a checker
@@ -7780,7 +7780,7 @@ class TestFreshCloneBranchCheck:
 # PLATFORM ORACLE - IS THE VERDICT ABOUT THE CODE, OR ABOUT THE HOST
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import platform_oracle_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import platform_oracle_check
 
 # NOTHING IN THIS SECTION ASKS THIS MACHINE ANYTHING, and the rule under test is
 # the reason that has to be written down rather than assumed. A pin for a checker
@@ -9067,7 +9067,7 @@ class TestPlatformOracleBranchCheck:
 # MODULE EVICTION - DID THE TEST PUT THE IMPORT CACHE BACK
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import module_eviction_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import module_eviction_check
 
 # NOTHING IN THIS SECTION EVICTS A MODULE, and the rule under test is why that is
 # written down. A pin for a checker about sys.modules is the one place in this
@@ -9978,7 +9978,7 @@ class TestModuleEvictionBranchCheck:
 # HOST LEAK - IS THE FAKE WORLD FAKED ALL THE WAY
 # =============================================================================
 
-from aipass.seedgo.apps.handlers.pytest_quality_standards import host_leak_check  # noqa: E402
+from aipass.seedgo.apps.handlers.pytest_quality_standards import host_leak_check
 
 # NOTHING IN THIS SECTION FAKES A PLATFORM, and the rule under test is why that is
 # written down. A pin for a checker about units that force `sys.platform` is the

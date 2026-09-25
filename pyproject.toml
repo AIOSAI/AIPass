@@ -136,13 +136,21 @@ line-length = 120
 # READMEs are prose with illustrative snippets — keep them out of scope.
 # spawn's templates carry {{BRANCH}} placeholders in code positions — not valid
 # Python until rendered at create time; the newborn they mint IS linted.
-extend-exclude = ["*.md", "src/aipass/spawn/templates"]
+# seedgo's .seedgo/fixtures are canary trees frozen at pinned commits for the
+# audit-tests lane; a lint fix there would change the fixture, not the product
+# (RUF100 found 12 markers in 8 fixture files on 2026-09-24 and they were left).
+extend-exclude = ["*.md", "src/aipass/spawn/templates", "src/aipass/seedgo/.seedgo/fixtures"]
 
 [tool.ruff.lint]
 # Pin the pre-ruff-0.16 default rule set: 0.16.0 expanded the defaults to many
 # new families (UP/I/BLE/DTZ/SIM/...) = 6.6k instant errors. Adopting new
 # families is a deliberate cleanup, not a version-bump side effect.
-select = ["E4", "E7", "E9", "F"]
+# RUF100 (unused-noqa) adopted 2026-09-24, DPLAN-0354, owner ruling 23:18: with
+# E402 ignored repo-wide, a `# noqa: E402` suppresses a rule that never fires, and
+# no other standard reads a suppression marker. Measured before: 258 dead markers
+# in 130 files, every one auto-fixable; 246 in 122 live files were removed, the 12
+# in seedgo's frozen fixtures were left (see extend-exclude above).
+select = ["E4", "E7", "E9", "F", "RUF100"]
 ignore = ["E402"]
 
 # adopted 2026-09-08 under RPLAN-0004 decision D1 (seedgo), the cp1252 class:

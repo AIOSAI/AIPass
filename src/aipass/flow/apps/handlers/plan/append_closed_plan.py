@@ -13,7 +13,6 @@ Appends a closed plan entry to the branch's CLOSED_PLANS.local.json file.
 Creates the file if it doesn't exist.
 """
 
-# ruff: noqa: E402
 import json
 import os
 import re

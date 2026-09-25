@@ -23,7 +23,7 @@ import pytest
 # import-time guard and lets us call each function in isolation.
 # ---------------------------------------------------------------------------
 
-from aipass.flow.apps.handlers import (  # noqa: E402
+from aipass.flow.apps.handlers import (
     MY_BRANCH,
     _extract_branch_name,
     _find_real_caller,

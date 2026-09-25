@@ -163,7 +163,7 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
             {"caller": caller, "marker": marker, "searched_from": str(current), "resolved": str(SOURCE_ROOT)},
             module_name=MODULE_NAME,
         )
-    except Exception as exc:  # noqa: BLE001 - an audit line must never take an import down
+    except Exception as exc:  # an audit line must never take an import down
         # The record of the failed record. Not a swallow: the reason is kept
         # where a reader can find it, because the alternative — raising from a
         # diagnostic line reached at import — is the crash this module prevents.

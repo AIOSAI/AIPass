@@ -207,7 +207,7 @@ class TestConcurrentReadsStayUsable:
                             "filler": "x" * 4000,
                         },
                     )
-            except Exception as error:  # noqa: BLE001 - surfaced through write_failures below
+            except Exception as error:  # surfaced through write_failures below
                 with lock:
                     write_failures.append(error)
 

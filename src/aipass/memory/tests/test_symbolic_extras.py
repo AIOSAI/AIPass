@@ -145,9 +145,9 @@ def _reset_chroma_clients():
 # ---------------------------------------------------------------------------
 
 
-def _import_hook():  # noqa: D103
+def _import_hook():
     sys.modules.pop("aipass.memory.apps.handlers.symbolic.hook", None)
-    from aipass.memory.apps.handlers.symbolic.hook import (  # noqa: E402
+    from aipass.memory.apps.handlers.symbolic.hook import (
         extract_conversation_context,
         find_relevant_fragments,
         format_fragment_recall,
@@ -176,9 +176,9 @@ def _import_hook():  # noqa: D103
     }
 
 
-def _import_storage():  # noqa: D103
+def _import_storage():
     sys.modules.pop("aipass.memory.apps.handlers.symbolic.storage", None)
-    from aipass.memory.apps.handlers.symbolic.storage import (  # noqa: E402
+    from aipass.memory.apps.handlers.symbolic.storage import (
         delete_fragment,
         flatten_dimensions,
         store_fragment,
@@ -197,23 +197,23 @@ def _import_storage():  # noqa: D103
     }
 
 
-def _import_deduplicator():  # noqa: D103
+def _import_deduplicator():
     sys.modules.pop("aipass.memory.apps.handlers.symbolic.deduplicator", None)
-    from aipass.memory.apps.handlers.symbolic.deduplicator import deduplicate_fragment  # noqa: E402
+    from aipass.memory.apps.handlers.symbolic.deduplicator import deduplicate_fragment
 
     return deduplicate_fragment
 
 
-def _import_chroma_client():  # noqa: D103
+def _import_chroma_client():
     sys.modules.pop("aipass.memory.apps.handlers.symbolic.chroma_client", None)
-    from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client  # noqa: E402
+    from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
 
     return get_chroma_client
 
 
-def _import_retriever():  # noqa: D103
+def _import_retriever():
     sys.modules.pop("aipass.memory.apps.handlers.symbolic.retriever", None)
-    from aipass.memory.apps.handlers.symbolic.retriever import (  # noqa: E402
+    from aipass.memory.apps.handlers.symbolic.retriever import (
         retrieve_fragments,
         search_by_dimensions,
         search_by_triggers,
@@ -233,14 +233,14 @@ def _import_retriever():  # noqa: D103
 # ---------------------------------------------------------------------------
 
 
-def _sample_messages():  # noqa: D103
+def _sample_messages():
     return [
         {"role": "user", "content": "I found an error in the module"},
         {"role": "assistant", "content": "Let me debug that issue for you"},
     ]
 
 
-def _v1_fragment():  # noqa: D103
+def _v1_fragment():
     return {
         "id": "frag_20260401_120000_abcd1234",
         "content": "Technical debugging session",
@@ -261,7 +261,7 @@ def _v1_fragment():  # noqa: D103
     }
 
 
-def _v2_fragment():  # noqa: D103
+def _v2_fragment():
     return {
         "id": "frag_20260402_130000_efgh5678",
         "content": "LLM extracted fragment content",
@@ -319,7 +319,7 @@ class TestSaveConfig:
         hook_mod = sys.modules["aipass.memory.apps.handlers.symbolic.hook"]
         mock_mf = MagicMock()
         mock_mf.write_memory_file = MagicMock(return_value={"success": True})
-        setattr(hook_mod, "memory_files", mock_mf)  # noqa: B010
+        setattr(hook_mod, "memory_files", mock_mf)
 
         config = {"enabled": True, "threshold": 0.5}
         path = tmp_path / "config.json"
@@ -423,7 +423,7 @@ class TestFindRelevantFragments:
                 "results": [{"id": "frag1", "relevance_score": 0.8, "content": "test"}],
             }
         )
-        setattr(hook_mod, "retriever", mock_retriever)  # noqa: B010
+        setattr(hook_mod, "retriever", mock_retriever)
 
         context = {
             "keywords": ["error", "debug"],
@@ -448,7 +448,7 @@ class TestFindRelevantFragments:
                 ],
             }
         )
-        setattr(hook_mod, "retriever", mock_retriever)  # noqa: B010
+        setattr(hook_mod, "retriever", mock_retriever)
 
         context = {"keywords": ["error"], "mood": "neutral", "themes": ["debugging"]}
         result = h["find_relevant_fragments"](context)
@@ -850,7 +850,7 @@ class TestProcessHook:
                 ],
             }
         )
-        setattr(hook_mod, "retriever", mock_retriever)  # noqa: B010
+        setattr(hook_mod, "retriever", mock_retriever)
 
         config = {
             "enabled": True,
@@ -887,7 +887,7 @@ class TestProcessHook:
                 ],
             }
         )
-        setattr(hook_mod, "retriever", mock_retriever)  # noqa: B010
+        setattr(hook_mod, "retriever", mock_retriever)
 
         config = {
             "enabled": True,
@@ -1334,7 +1334,7 @@ class TestDeduplicateFragment:
         deduplicate = _import_deduplicator()
 
         keys_mod = sys.modules["aipass.api.apps.handlers.auth.keys"]
-        setattr(keys_mod, "get_api_key", MagicMock(return_value=None))  # noqa: B010
+        setattr(keys_mod, "get_api_key", MagicMock(return_value=None))
 
         new_frag = {
             "summary": "New",
@@ -1366,7 +1366,7 @@ class TestGetChromaClient:
         get_chroma_client = _import_chroma_client()
         chromadb_mod = sys.modules["chromadb"]
         mock_client = MagicMock()
-        setattr(chromadb_mod, "PersistentClient", MagicMock(return_value=mock_client))  # noqa: B010
+        setattr(chromadb_mod, "PersistentClient", MagicMock(return_value=mock_client))
 
         db_path = tmp_path / "test_chroma"
         result = get_chroma_client(db_path)
@@ -1379,7 +1379,7 @@ class TestGetChromaClient:
         get_chroma_client = _import_chroma_client()
         chromadb_mod = sys.modules["chromadb"]
         mock_client = MagicMock()
-        setattr(chromadb_mod, "PersistentClient", MagicMock(return_value=mock_client))  # noqa: B010
+        setattr(chromadb_mod, "PersistentClient", MagicMock(return_value=mock_client))
 
         db_path = tmp_path / "cached_chroma"
         client1 = get_chroma_client(db_path)
@@ -1393,7 +1393,7 @@ class TestGetChromaClient:
         get_chroma_client = _import_chroma_client()
         chromadb_mod = sys.modules["chromadb"]
         mock_client = MagicMock()
-        setattr(chromadb_mod, "PersistentClient", MagicMock(return_value=mock_client))  # noqa: B010
+        setattr(chromadb_mod, "PersistentClient", MagicMock(return_value=mock_client))
 
         result = get_chroma_client(str(tmp_path / "str_chroma"))
 

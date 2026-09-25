@@ -99,7 +99,7 @@ def _verb(token: str) -> str:
     try:
         bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
         return bw.verb_name(token)
-    except Exception as exc:  # noqa: BLE001 - any reader failure falls back to the raw token
+    except Exception as exc:  # any reader failure falls back to the raw token
         logger.warning("[HOOKS] rm_gate: bash_writes unavailable, reading %r raw: %s", token, exc)
         return token
 

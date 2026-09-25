@@ -46,7 +46,7 @@ import pytest
 # aipass is an installed package (pip install -e), so nothing here hacks
 # sys.path to reach it — a conftest that prepends src/ hides a broken install
 # and shadows the wheel the e2e job measures.
-from aipass.skills.apps.handlers.json import json_handler  # noqa: E402
+from aipass.skills.apps.handlers.json import json_handler
 
 BRANCH_MODULE = "aipass.skills"
 

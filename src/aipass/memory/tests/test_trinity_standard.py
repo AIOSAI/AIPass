@@ -348,7 +348,8 @@ class TestNoHealthStamping:
     """The owner's ruling: status.health is deleted from the standard."""
 
     def test_the_rollover_extractor_writes_no_status_block(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         extractor, _mocks = _import_extractor(monkeypatch)
         assert not hasattr(extractor, "_update_metadata_after_extraction")
@@ -444,20 +445,23 @@ class TestKeepNKeepsN:
         ]
 
     def test_nothing_is_archived_at_exactly_the_limit(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         assert ext._extract_tail_excess(self._entries(15), 15, 99, "sessions", "memory") == []
 
     def test_only_the_excess_is_archived_above_the_limit(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         archived = ext._extract_tail_excess(self._entries(17), 15, 99, "sessions", "memory")
         assert [e["number"] for e in archived] == [2, 1]
 
     def test_a_file_settles_at_the_limit_not_one_below(self, monkeypatch):
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         entries = self._entries(16)
@@ -510,7 +514,9 @@ class TestKeepNKeepsN:
         the red-first pins for B4 are the two "at exactly the limit" tests.
         """
         from aipass.memory.apps.handlers.monitor import detector
-        from .test_handlers import _import_extractor  # noqa: PLC0415  # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+
+        # relative: `tests.` resolves only on a branch-dir rootdir, not a repo-root run
+        from .test_handlers import _import_extractor
 
         ext, _ = _import_extractor(monkeypatch)
         monkeypatch.setattr(
@@ -915,12 +921,12 @@ class TestTheTabHonoursPerBranchCharCaps:
         MagicMock — a cap assertion would then pass or fail for reasons that have
         nothing to do with the resolver. Hand it the real module.
         """
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         monkeypatch.setattr(tab_renderer, "entry_limits", el)
 
     def test_an_overridden_cap_reaches_the_rendered_tab(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "baud")
         assert "≤500 chars" in tab
@@ -935,20 +941,20 @@ class TestTheTabHonoursPerBranchCharCaps:
         assert el.draft_target(cap) == draft
 
     def test_a_branch_without_an_override_still_reads_the_default(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "memory")
         assert "≤300 chars" in tab
 
     def test_the_branch_name_is_matched_case_insensitively(self):
         """Registry casing varies (MEMORY vs memory); the override must not."""
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         tab = tab_renderer.render_tab("sessions", self._rollover(), self._cfg(), "BAUD")
         assert "≤500 chars" in tab
 
     def test_todos_honours_it_too(self):
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         cfg = {
             "entry_types": {"todos": {"max_chars": 150, "field": "task"}},
@@ -962,7 +968,7 @@ class TestTheTabHonoursPerBranchCharCaps:
         load_entry_limits() is what the write gate measures against; whatever it
         calls the cap is what the tab must print.
         """
-        from aipass.memory.apps.handlers.tracking import tab_renderer  # noqa: PLC0415
+        from aipass.memory.apps.handlers.tracking import tab_renderer
 
         section = self._cfg()
         merged = el.resolve_entry_types(section, "baud")
@@ -981,7 +987,7 @@ class TestTheReceiptsGoldVersionIsSchemaVersion:
         only schema_version reproduces it — and the receipt reports the STRUCTURE
         a branch was stamped with, which is what schema_version names.
         """
-        from aipass.memory.apps.handlers.templates import receipt  # noqa: PLC0415
+        from aipass.memory.apps.handlers.templates import receipt
 
         local = json.loads((_TEMPLATES / "LOCAL.template.json").read_text(encoding="utf-8"))
         obs = json.loads((_TEMPLATES / "OBSERVATIONS.template.json").read_text(encoding="utf-8"))

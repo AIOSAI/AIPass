@@ -506,7 +506,7 @@ def _record_injection(event_type: str, outputs: list, merged: str, payload: dict
         from aipass.hooks.apps.modules import injection_ledger
 
         injection_ledger.record(event_type, outputs, merged, payload)
-    except Exception as exc:  # noqa: BLE001 - crash isolation: the ledger must never break a dispatch
+    except Exception as exc:  # crash isolation: the ledger must never break a dispatch
         logger.warning("[HOOKS] injection_ledger failed, %s injection unrecorded: %s", event_type, exc)
 
 

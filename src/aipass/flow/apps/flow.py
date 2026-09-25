@@ -15,7 +15,6 @@ Auto-discovery architecture:
 - No manual imports or routing needed
 """
 
-# ruff: noqa: E402
 # INFRASTRUCTURE IMPORT PATTERN
 import sys
 import os

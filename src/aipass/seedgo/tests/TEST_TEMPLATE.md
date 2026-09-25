@@ -1,6 +1,6 @@
 # Test template v1
 
-**Version 1.0.0** · gold source: `src/aipass/seedgo/templates/` · model file: `readme_update_model.py.txt` · plan of record: DPLAN-0354.
+**Version 1.1.0** (1.0.0 → 1.1.0 on 2026-09-24: conftest C0, the log redirect above the imports, stated as item 8's one exception) · gold source: `src/aipass/seedgo/templates/` · model file: `readme_update_model.py.txt` · plan of record: DPLAN-0354.
 
 Housed and distributed by @seedgo (owner 22:50: *"Seedgo will house the test template. It will distribute it fleetwide right, kinda like how memory houses and manages your trinity memory files."*). The machine-readable version lives in `templates.json` beside this page; a branch's receipt is `tests/.template_version.json`, written by `drone @seedgo tests template bump --confirm`.
 
@@ -46,6 +46,20 @@ OWNER 23:04 "We need to test and make sure the proposed template is cross os fro
 ## conftest.py
 
 Four fixtures belong in a branch's `tests/conftest.py`, never copied per file (item 16). The first two are items 20 and 18 made real; the last two survived the judgement of the archived April conftest template (`.archive/POINTER.md` records what did not, and why).
+
+**C0. The one stated exception to item 8: the log redirect comes before the first aipass import.** Added in 1.1.0 (2026-09-24, owner ruling 23:18). Item 8 puts product imports at the top of the file. In `conftest.py` exactly one thing goes above them: setting `AIPASS_TEST_LOG_DIR`. The fleet json service writes into the live `<branch>_json` folders unless that variable is already set when the aipass stack is imported, so it has to exist before the first `from aipass...` line runs, and the repo-root `conftest.py` raises rather than let a run reach the service without it. 18 of 18 branch conftests already do this. The shape a new branch copies:
+
+```python
+import os
+import tempfile
+
+if "AIPASS_TEST_LOG_DIR" not in os.environ:
+    os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
+
+from aipass.prax import logger
+```
+
+The stdlib imports the block needs, then the environ block, then every aipass import. **No `# noqa` markers.** `E402` is ignored repo-wide in `pyproject.toml`, so a `# noqa: E402` there suppresses a rule that never fires, and since 1.1.0 ruff's `RUF100` convicts it at edit time, in `checklist` and in CI. This is the only exception, and it lives only in `conftest.py`. A test file that needs an import below code has a different problem, and item 8 is the answer to it.
 
 **C1. `pinned_console_width`** — session scope, autouse. Item 20.
 

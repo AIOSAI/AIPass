@@ -161,7 +161,7 @@ def _verb(token: str) -> str:
     try:
         bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
         return bw.verb_name(token)
-    except Exception as exc:  # noqa: BLE001 - any reader failure falls back to the raw name
+    except Exception as exc:  # any reader failure falls back to the raw name
         logger.warning("[HOOKS] git_gate: bash_writes unavailable, reading %r raw: %s", token, exc)
         return Path(token).name
 
@@ -322,7 +322,7 @@ def _scan_text(cmd: str) -> str:
     try:
         bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
         code = bw.code_text(cmd)
-    except Exception as exc:  # noqa: BLE001 - any reader failure falls back to the raw text
+    except Exception as exc:  # any reader failure falls back to the raw text
         logger.warning("[HOOKS] git_gate: bash_writes unavailable, scanning raw command: %s", exc)
         code = cmd
     scan = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)

@@ -209,7 +209,7 @@ def _fire_job(job: dict, runstate: dict, header: str = "") -> tuple:
         return (OUTCOME_FIRED if ok else OUTCOME_FAILED), detail
 
     # Cross-branch handler import authorized by DPLAN-0204 §2.8
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch  # noqa: E402
+    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
     from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
         notify_triggered,
         notify_complete,

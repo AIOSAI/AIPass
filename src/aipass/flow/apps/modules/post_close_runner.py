@@ -21,7 +21,6 @@ running": it is logged as an error and the runner exits non-zero.
 This script lives inside the flow branch so handler import guards allow it.
 """
 
-# ruff: noqa: E402
 import sys
 import os
 

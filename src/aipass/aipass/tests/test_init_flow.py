@@ -50,7 +50,7 @@ _POLICY_MOD = "aipass.aipass.apps.modules.init_flow"
 
 # Bound at import, so the two resolver tests below measure the REAL function while
 # the autouse fixture has the module attribute patched for everyone else.
-from aipass.aipass.apps.modules.init_flow import (  # noqa: E402
+from aipass.aipass.apps.modules.init_flow import (
     _get_test_write_policy_path as _real_policy_path,
 )
 

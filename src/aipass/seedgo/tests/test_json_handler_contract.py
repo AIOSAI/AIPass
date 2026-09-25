@@ -2149,7 +2149,7 @@ def test_concurrent_writers_never_expose_a_torn_document(branch: str, tmp_path: 
             try:
                 save(payload)
                 writes["done"] += 1
-            except Exception as error:  # noqa: BLE001 - recorded and re-reported below
+            except Exception as error:  # recorded and re-reported below
                 failures.append(f"writer {seat}: {type(error).__name__}: {error}")
 
     def sampler() -> None:

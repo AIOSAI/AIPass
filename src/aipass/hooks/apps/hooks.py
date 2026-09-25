@@ -33,8 +33,8 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402
-from aipass.cli.apps.modules import console, err_console  # noqa: E402
+from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli.apps.modules import console, err_console
 
 # =============================================================================
 # MODULE DISCOVERY

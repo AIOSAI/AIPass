@@ -306,7 +306,7 @@ def _memory_service_reachable() -> bool:
     try:
         importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
         return True
-    except Exception as exc:  # noqa: BLE001 - any import failure means "not reachable here"
+    except Exception as exc:  # any import failure means "not reachable here"
         logger.info("[HOOKS] edit_gate: @memory is not reachable from this project (%s)", exc)
         return False
 

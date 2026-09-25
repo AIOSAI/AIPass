@@ -327,7 +327,7 @@ def start_file_watcher_in_background() -> None:
             start_file_watcher()
         except OSError as e:
             logger.warning("inotify limit reached, continuing without file watcher: %s", e)
-        except Exception as e:  # noqa: BLE001 - a start failure must not kill an unjoined thread silently
+        except Exception as e:  # a start failure must not kill an unjoined thread silently
             logger.error(f"[watcher] could not start the discovery watcher ({type(e).__name__}: {e})")
 
     with _SPAWN_LOCK:
@@ -373,7 +373,7 @@ def _report_watcher_death() -> None:
     queued = None
     try:
         queued = _observer.event_queue.qsize()
-    except Exception as e:  # noqa: BLE001 - a missing diagnostic must not mask the report below
+    except Exception as e:  # a missing diagnostic must not mask the report below
         logger.debug(f"[watcher] could not read queue depth for the death report: {e}")
 
     detail = "" if queued is None else f" ~{queued} events are queued with nobody draining them."
@@ -388,7 +388,7 @@ def _report_watcher_death() -> None:
     if trigger is not None:
         try:
             trigger.fire("file_watcher_died", watch_root=str(ECOSYSTEM_ROOT), queued_events=queued)
-        except Exception as e:  # noqa: BLE001 - a failed trigger must not silence the log line above
+        except Exception as e:  # a failed trigger must not silence the log line above
             logger.warning(f"[watcher] trigger.fire('file_watcher_died') failed: {e}")
 
     try:
@@ -396,7 +396,7 @@ def _report_watcher_death() -> None:
             "discovery_watcher_event",
             {"action": "died", "watch_root": str(ECOSYSTEM_ROOT), "queued_events": queued},
         )
-    except Exception as e:  # noqa: BLE001 - same reason
+    except Exception as e:  # same reason
         logger.warning(f"[watcher] could not record watcher death: {e}")
 
 
@@ -448,6 +448,6 @@ def check_file_watcher_liveness(force: bool = False) -> bool:
 
         _report_watcher_death()
         return False
-    except Exception as e:  # noqa: BLE001 - see docstring
+    except Exception as e:  # see docstring
         logger.warning(f"[watcher] liveness check itself failed: {e}")
         return True

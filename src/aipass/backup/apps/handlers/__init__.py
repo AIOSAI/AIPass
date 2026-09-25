@@ -11,7 +11,7 @@ import os
 import sys
 from pathlib import Path
 
-from .path.module_paths import branch_root, module_file  # noqa: F401  (re-exported)
+from .path.module_paths import branch_root, module_file  # (re-exported)
 
 MY_BRANCH = "backup"
 

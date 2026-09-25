@@ -17,7 +17,7 @@ skills_root = Path(__file__).resolve().parent.parent.parent
 if str(skills_root) not in sys.path:
     sys.path.insert(0, str(skills_root))
 
-from aipass.skills.apps.skills import handle_command, _parse_extra_args  # noqa: E402
+from aipass.skills.apps.skills import handle_command, _parse_extra_args
 
 
 class TestParseExtraArgs:

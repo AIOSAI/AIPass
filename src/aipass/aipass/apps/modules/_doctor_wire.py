@@ -30,7 +30,7 @@ from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
 
 from aipass.aipass.apps.handlers.json import json_handler
-from aipass.aipass.apps.handlers.provider_wire import (  # noqa: F401
+from aipass.aipass.apps.handlers.provider_wire import (
     HOOK_DESCRIPTIONS,
     ENV_DESCRIPTIONS,
     SETTINGS_DESCRIPTIONS,
@@ -50,7 +50,7 @@ from aipass.aipass.apps.handlers.ui.progress import GLYPH_PASS, GLYPH_WARN
 # STALE DENY RULE MIGRATION (implementation in handler; re-exported here)
 # =============================================================================
 
-from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny  # noqa: E402, F401
+from aipass.aipass.apps.handlers.provider_reconcile import reconcile_stale_deny  # noqa: F401
 
 
 # =============================================================================

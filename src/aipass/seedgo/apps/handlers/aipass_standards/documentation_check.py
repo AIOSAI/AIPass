@@ -251,7 +251,7 @@ def _judge(found: list) -> Dict:
     }
 
 
-def check_function_docstrings(content: str, lines: List[str]) -> Dict:  # noqa: ARG001
+def check_function_docstrings(content: str, lines: List[str]) -> Dict:
     """
     Check that public functions have docstrings.
 

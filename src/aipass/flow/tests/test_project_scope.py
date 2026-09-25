@@ -273,7 +273,7 @@ class TestDescribeProject:
         assert describe_project(None) == "no project"
 
 
-from aipass.flow.apps.handlers.plan import project_scope  # noqa: E402
+from aipass.flow.apps.handlers.plan import project_scope
 
 
 class TestTheRegisterGlobIsNotCaseFolded:

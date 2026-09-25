@@ -14,19 +14,19 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-import logging  # noqa: E402
-import sys  # noqa: E402
-import types  # noqa: E402
-from pathlib import Path  # noqa: E402
-from typing import Generator  # noqa: E402
-from unittest.mock import MagicMock  # noqa: E402
+import logging
+import sys
+import types
+from pathlib import Path
+from typing import Generator
+from unittest.mock import MagicMock
 
-import pytest  # noqa: E402
+import pytest
 
-from aipass.backup.apps.handlers.drive import client as drive_client  # noqa: E402
-from aipass.backup.apps.handlers.drive import upload as drive_upload  # noqa: E402
-from aipass.backup.apps.handlers.json import json_handler  # noqa: E402
-from aipass.cli.apps.modules import display  # noqa: E402
+from aipass.backup.apps.handlers.drive import client as drive_client
+from aipass.backup.apps.handlers.drive import upload as drive_upload
+from aipass.backup.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 
 BRANCH_MODULE = "aipass.backup"
 

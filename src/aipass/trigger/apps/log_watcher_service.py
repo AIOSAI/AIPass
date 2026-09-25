@@ -136,7 +136,7 @@ def main() -> None:
     try:
         run_error_catchup(trigger.fire)
         logger.info("[trigger-log-watcher] Startup error catch-up complete")
-    except Exception as exc:  # noqa: BLE001 - recovery must never stop the watchers
+    except Exception as exc:  # recovery must never stop the watchers
         logger.error(f"[trigger-log-watcher] Startup error catch-up failed: {exc}")
 
     # Watch our OWN handler code for changes. This process holds those modules

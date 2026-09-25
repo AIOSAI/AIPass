@@ -21,14 +21,14 @@ from pathlib import Path
 
 
 #: The REAL discovery handler, bound before any fixture replaces it in sys.modules.
-from aipass.seedgo.apps.handlers.audit import discovery as real_discovery  # noqa: E402
+from aipass.seedgo.apps.handlers.audit import discovery as real_discovery
 
 #: The REAL argv parser, bound the same way and for the opposite reason: it is
 #: pure grammar with no infrastructure to mock away, and a MagicMock in its
 #: place answers `wants_help` truthily — every audit in this file then prints
 #: help and audits nothing, which is exactly what happened when the parser was
 #: first split out of the module (2026-09-07).
-from aipass.seedgo.apps.handlers.audit import argv as real_argv  # noqa: E402
+from aipass.seedgo.apps.handlers.audit import argv as real_argv
 
 
 @pytest.fixture(autouse=True)

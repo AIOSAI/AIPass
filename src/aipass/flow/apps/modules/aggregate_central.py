@@ -29,7 +29,6 @@ Standalone:
     drone @flow aggregate --heal
 """
 
-# ruff: noqa: E402
 import sys
 import os
 

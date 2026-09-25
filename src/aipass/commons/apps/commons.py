@@ -68,9 +68,9 @@ if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 # Cross-branch imports
-from aipass.prax.apps.modules.logger import system_logger as logger  # noqa: E402
-from aipass.cli.apps.modules import console, header, error, warning  # noqa: E402
-from aipass.cli.apps.modules.display import reset_command_state, resolve_exit  # noqa: E402
+from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.cli.apps.modules import console, header, error, warning
+from aipass.cli.apps.modules.display import reset_command_state, resolve_exit
 
 
 # =============================================================================

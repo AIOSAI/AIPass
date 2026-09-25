@@ -59,7 +59,7 @@ def acquire(lock_path) -> Optional[object]:
     if fcntl is None:
         return None
 
-    handle = open(lock_path, "w", encoding="utf-8")  # noqa: SIM115
+    handle = open(lock_path, "w", encoding="utf-8")
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:

@@ -130,7 +130,7 @@ def _import_watcher(monkeypatch):
     if parent is not None and hasattr(parent, "memory_watcher"):
         delattr(parent, "memory_watcher")
 
-    from aipass.memory.apps.handlers.monitor import memory_watcher  # noqa: E402
+    from aipass.memory.apps.handlers.monitor import memory_watcher
 
     # Reset the global _observer to None for a clean slate each test
     setattr(memory_watcher, "_observer", None)
