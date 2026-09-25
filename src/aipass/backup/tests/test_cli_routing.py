@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing -- the help gate, introspection, refusals
 # Version: 2.0.0
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""

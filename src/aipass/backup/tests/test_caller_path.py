@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_caller_path.py
 # Description: Tests for caller-CWD path resolution across user-facing commands
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-08
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/path/caller.py and caller-CWD resolution."""
@@ -11,9 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that handlers/path/ and modules/share, register, status parse and import
 # seedgo: no-test-needed(documentation) — that functions like resolve_caller_path, run_share carry docstrings
-# seedgo: no-test-needed(constant) — AIPASS_CALLER_CWD environment variable name
 # seedgo: no-test-needed(stdlib) — Path.resolve() and pathlib behavior
-# seedgo: no-test-needed(generated) — mock call arguments and assertion shapes
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

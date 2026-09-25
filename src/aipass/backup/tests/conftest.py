@@ -3,7 +3,7 @@
 # Description: Backup test configuration -- shared pytest fixtures
 # Version: 1.3.0
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Backup test configuration -- ported from skills conftest pattern."""

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_mocked.py
 # Description: Tests for the four drive_* command modules and the settings stub
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/modules/drive_sync.py, drive_check.py, drive_stats.py, drive_clear.py and settings.py."""
@@ -11,7 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
 # seedgo: no-test-needed(documentation) — that each module's public functions carry docstrings
-# seedgo: no-test-needed(constant) — the Rich colour tags the introspection lines carry; capsys strips them
+# seedgo: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
 # seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
 
 import pytest

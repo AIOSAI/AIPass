@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_versioned_engine.py
 # Description: Tests for versioned engine — baseline, diff, skip, never-delete, restore
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/copy/versioned.py and the restore route in apps/modules/restore.py."""
@@ -12,8 +12,8 @@
 # seedgo: no-test-needed(ruff) — that every file under apps/handlers/copy, diff and path parses and imports
 # seedgo: no-test-needed(documentation) — that the public handler and module functions carry docstrings
 # seedgo: no-test-needed(constant) — BACKUP_DIR's ".backup" text and the store's "versioned" directory name
-# seedgo: no-test-needed(stdlib) — hashlib.md5's digest and shutil.copy2's mtime-preserving copy
-# seedgo: no-test-needed(generated) — the date inside a baseline name and the timestamp inside a diff name
+# seedgo: no-test-needed(stdlib) — hashlib.md5's digest in a long name's folder (build_versioned_file_path)
+# seedgo: no-test-needed(generated) — the dates _make_baseline_name and _copy_changed_file stamp into file names
 
 import os
 import tempfile

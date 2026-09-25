@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for pathspec-based ignore matching (gitignore parity)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py and .backupignore spec."""
@@ -11,8 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that all ignore and scan files parse and import
 # seedgo: no-test-needed(documentation) — handler docstrings and function docs
-# seedgo: no-test-needed(constant) — pattern strings and glyphs
-# seedgo: no-test-needed(stdlib) — pathspec library's matching behavior
+# seedgo: no-test-needed(constant) — handlers/project/setup.py's DEFAULT_CONFIG values; nothing here reads them
 
 from unittest.mock import patch
 

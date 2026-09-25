@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_snapshot_fidelity.py
 # Description: Tests for snapshot fidelity -- mirror-delete, quick-check, long paths, error semantics
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for aipass/backup/apps/handlers/report/result.py, cleanup/mirror.py, copy/snapshot.py."""
@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — cleanup/, copy/, report/ handlers parse without errors
 # seedgo: no-test-needed(documentation) — handler functions carry docstrings
-# seedgo: no-test-needed(constant) — dryrun mode and file size thresholds
 # seedgo: no-test-needed(stdlib) — shutil, pathlib, os standard library usage
 
 import json

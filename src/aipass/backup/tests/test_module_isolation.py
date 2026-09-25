@@ -1,17 +1,16 @@
 # =================== META ====================
 # Name: test_module_isolation.py
 # Description: Regression pair for the sys.modules/parent-attr desync class
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-08
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/drive/client.py resolving through a re-imported parent package."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the drive package parses and imports
+# seedgo: no-test-needed(ruff) — that every file under handlers/drive/ parses and lints clean
 # seedgo: no-test-needed(documentation) — docstrings on module and class attributes
-# seedgo: no-test-needed(stdlib) — importlib.import_module and mock.patch behavior
 
 import importlib
 import sys

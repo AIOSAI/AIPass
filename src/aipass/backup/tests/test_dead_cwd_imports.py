@@ -3,7 +3,7 @@
 # Description: Dead-cwd import defect — guard shape, safe path helper, both worlds
 # Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/path/module_paths.py and the kinship fence in apps/handlers/__init__.py."""

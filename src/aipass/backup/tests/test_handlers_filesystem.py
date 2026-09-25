@@ -1,18 +1,18 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Tests for filesystem handlers -- scan, ignore, path, project
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for aipass/backup/apps/handlers/scan/walk.py, filter.py and related packages."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/ parse without errors
+# seedgo: no-test-needed(ruff) — scan/, ignore/, project/, path/, report/, audit/ parse without errors
 # seedgo: no-test-needed(documentation) — handler functions carry docstrings
-# seedgo: no-test-needed(constant) — config defaults (backup_mode, max_versions, max_backup_files, etc.)
-# seedgo: no-test-needed(stdlib) — os, pathlib, pathspec, shutil usage
+# seedgo: no-test-needed(constant) — project/config.py DEFAULTS' max_file_size_mb, auto_ignore_git and drive_sync values
+# seedgo: no-test-needed(stdlib) — os.walk, os.path.islink and os.path.getsize in scan/walk.py and scan/filter.py
 
 from pathlib import Path
 from unittest.mock import patch

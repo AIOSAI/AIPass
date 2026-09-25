@@ -1,17 +1,17 @@
 # =================== META ====================
 # Name: test_error_resilience.py
 # Description: Tests for error resilience -- corrupt JSON, missing files
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-12
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for src/aipass/backup/apps/modules/snapshot.py, versioned.py, and handlers."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that all handler files parse and import
+# seedgo: no-test-needed(ruff) — that all handler files parse
 # seedgo: no-test-needed(documentation) — handler docstrings
-# seedgo: no-test-needed(constant) — error codes and messages
+# seedgo: no-test-needed(constant) — the message each InvalidDocument carries; the tests pin the type only
 # seedgo: no-test-needed(stdlib) — json module parsing and dumps
 
 import json
