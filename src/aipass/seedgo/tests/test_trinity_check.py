@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_trinity_check.py
 # Description: Unit tests for trinity_check - trinity memory file standards checker
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-08-25
-# Modified: 2026-09-16
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for trinity_check -- the trinity memory file standards checker.
@@ -1096,7 +1096,8 @@ class TestTrinityIsAGateNotAReport:
     so there was nothing to flip, and these tests exist so it stays that way.
 
     The family's own vocabulary:
-      * ``ADVISORY = True`` marks a standard that never gates (ruff, template).
+      * ``ADVISORY = True`` marks a standard that never gates (template). ruff
+        gated from 2026-09-25 (owner 00:33), once CI ruff was green fleet-wide.
         trinity does not set it, so it counts in the gating average.
       * ``passed`` is the block signal. trinity requires a PERFECT 100, which
         is stricter than every other branch_level standard -- json_handler,
@@ -1115,7 +1116,7 @@ class TestTrinityIsAGateNotAReport:
         """The pin is only meaningful if ADVISORY still means what it means."""
         from aipass.seedgo.apps.handlers.aipass_standards import ruff_check, template_check
 
-        assert ruff_check.ADVISORY is True
+        assert getattr(ruff_check, "ADVISORY", False) is False
         assert template_check.ADVISORY is True
 
     def test_a_gating_standard_is_counted_in_the_average(self, checker):

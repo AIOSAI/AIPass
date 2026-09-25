@@ -1,6 +1,6 @@
 # Ruff Check Standard
-**Status:** Draft v1
-**Date:** 2026-04-16
+**Status:** v1.1 (gating)
+**Date:** 2026-04-16, gating since 2026-09-25
 
 ---
 
@@ -8,7 +8,7 @@
 
 Ruff is the primary linter for AIPass code. Seedgo can report 100% clean while a branch carries hundreds of ruff violations — this standard closes that gap. It runs `ruff check` once per branch and scores based on violation count.
 
-This standard is **advisory**: it surfaces violations and affects branch scores but never blocks an audit. It exists to prevent ruff debt from silently re-accumulating after a cleanup.
+This standard **gates** (since 2026-09-25, owner ruling 00:33): its score counts in the branch's Overall like any other row, and `passed` is `False` whenever a non-bypassed lint or format finding exists. It was advisory from 2026-04-16 (DPLAN-0137) until CI ruff went green fleet-wide — during that time the row read 68% under 258 dead `noqa` markers while Overall read 93%, because advisory rows are left out of the average. It exists to keep ruff debt from silently re-accumulating after a cleanup.
 
 ---
 
@@ -51,11 +51,11 @@ This standard is **advisory**: it surfaces violations and affects branch scores 
 
 ---
 
-## Advisory Mode
+## Gating
 
-`ADVISORY = True` — `passed` is always `True`. The score reflects reality, but the audit never fails because of this standard alone.
+No `ADVISORY` flag — absence is how this family says "counts in the average" (`branch_audit.py` averages only standards without `ADVISORY = True`). `passed` is `False` on any active lint violation or any unformatted file; the score keeps its tiers (1–5 violations score 95, minus 2 per unformatted file, floor 25). Ruff not installed is a skip (`passed` True, score 100); a timeout or unreadable ruff output is a 0.
 
-Promotion path: once all 11 branches hold at score 100 for two or more consecutive PR cycles, promote by removing the `passed = True` override and switching to `passed = score >= 75`.
+The row covers `ruff format --check` too: on a machine where format finds unformatted files, the row fails and loses 2 points per file even with zero lint hits.
 
 ---
 

@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_checkers_batch5.py
 # Description: Unit tests for ruff_check checker handler (batch 5)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-25
 # =============================================
 
 import json
@@ -165,7 +165,7 @@ class TestCheckBranch:
         assert result["score"] == 100
         assert result["passed"] is True
         assert result["standard"] == "RUFF_CHECK"
-        assert result["advisory"] is True
+        assert "advisory" not in result
 
     def test_violations_caught_and_scored(self, mock_json, tmp_path: Path) -> None:
         """Branch with violations reports count and drops score."""
@@ -183,8 +183,25 @@ class TestCheckBranch:
             ):
                 result = check_branch(str(branch))
         assert result["score"] == 85  # 10 violations → 6–20 band
-        assert result["passed"] is True  # advisory: always True
+        assert result["passed"] is False  # the row gates since 2026-09-25
         assert "10 violation" in result["checks"][0]["message"]
+
+    def test_an_unformatted_file_alone_fails_the_row(self, mock_json, tmp_path: Path) -> None:
+        """The row covers format too: one unformatted file, zero lint hits, still gates."""
+        branch = _make_branch(tmp_path)
+        fmt_dirty = _fmt_proc([f"Would reformat: {branch / 'apps' / 'x.py'}"])
+        with patch(
+            "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.shutil.which",
+            return_value="/usr/bin/ruff",
+        ):
+            with patch(
+                "aipass.seedgo.apps.handlers.aipass_standards.ruff_check.subprocess.run",
+                side_effect=[_ruff_proc([], returncode=0), fmt_dirty],
+            ):
+                result = check_branch(str(branch))
+        assert result["score"] == 98
+        assert result["passed"] is False
+        assert "1 file(s) need formatting — x.py" in result["checks"][1]["message"]
 
     def test_standard_bypass_respected(self, mock_json, tmp_path: Path) -> None:
         """Standard-level bypass via bypass_rules returns score 100."""
