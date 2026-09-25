@@ -67,7 +67,7 @@ Commit `5444dd9a`. It polled ~19 branches' `.dispatch.lock` every 2 s to synthes
 
 ## Stall detection on one long job
 
-`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. It prints per-line events, so it needs the Monitor tool and inherits its 30-minute deadline. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.
+`watchdog agent @target [--timeout s]` remains for **mid-run stall detection** on a single long job (`[watchdog.stall]` / `[watchdog.resumed]` after 120 s of JSONL silence with no in-flight tool) — it is not needed to be woken, and arming one per dispatch is a second poller doing the receiver's job. Under background Bash its per-line events land in the task's output file and are read when it exits (a 72-minute watch ran that way on 2026-09-25), so it does not need the Monitor tool. It is not the sign-in: on 2026-09-25 a day of `watchdog agent` wires with no `baseline --once` armed left 27 completions queued as `MISSED` while the statusline read `idle`, so the verb now says at arm time whether this session holds a sign-in wire, and names it. `@target` resolves in the caller's own project, then falls back to `~/Projects` registries.
 
 ## Known caveat
 

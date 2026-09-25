@@ -1,18 +1,21 @@
 # =================== AIPass ====================
 # Name: test_watchdog_module.py
 # Description: Tests for the watchdog module router
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for the watchdog module router (Phase 1, FPLAN-0186)."""
 
+import json
+import os
 import sys
 from unittest.mock import patch
 
 import pytest
 
+from aipass.devpulse.apps.handlers.watchdog import registry as wd_registry
 from aipass.devpulse.apps.modules import watchdog as wd_mod
 
 
@@ -567,6 +570,67 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys):
     normalized = " ".join(combined.split())
     assert "Next: drone @ai_mail dispatch @drone" in normalized
     assert "state=completed" in normalized
+
+
+def _registry_holding(tmp_path, watches):
+    """A registry file holding ``watches``, in the shape the wire writes."""
+    store = tmp_path / "watchdog_active.json"
+    store.write_text(json.dumps({"version": 1, "watches": watches}), encoding="utf-8")
+    return store
+
+
+def _fake_agent_module():
+    """A watch_agent that returns at once, so the router's arm line is what the test reads."""
+    fake_module = type(sys)("fake_agent_mod")
+    fake_module.watch_agent = lambda agent_id, timeout_seconds=600: {
+        "woke": True,
+        "reason": "fake",
+        "elapsed": 1,
+        "agent_state": "completed",
+        "exit_code": 0,
+        "agent_id": agent_id,
+    }
+    return fake_module
+
+
+def test_agent_subcommand_says_no_sign_in_wire_when_none_is_registered(capsys, monkeypatch, tmp_path):
+    """With no live baseline wire for this session the arm line says completions will queue.
+
+    2026-09-25: a day of `watchdog agent` wires, no sign-in, 27 completions queued as
+    MISSED while the statusline read idle. The old line said "invoke via Monitor tool".
+    """
+    monkeypatch.setattr(wd_registry, "_default_storage_path", lambda: _registry_holding(tmp_path, []))
+    monkeypatch.setattr(wd_mod, "_agent_handler", _fake_agent_module)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-a")
+
+    wd_mod.handle_command("watchdog", ["agent", "@drone"])
+
+    err = " ".join(capsys.readouterr().err.split())
+    assert "no sign-in wire for this session" in err
+    assert "watchdog baseline --once" in err
+    assert "invoke via Monitor tool" not in err
+
+
+def test_agent_subcommand_names_the_live_sign_in_wire_of_this_session(capsys, monkeypatch, tmp_path):
+    """A live baseline wire registered for THIS session is named; another session's wire is not."""
+    mine = {
+        "handle": "baseline_wire-abc123",
+        "type": "baseline_wire",
+        "pid": os.getpid(),
+        "metadata": {"session": "session-a", "wrapper": "background"},
+        "started_epoch": 0,
+    }
+    theirs = dict(mine, handle="baseline_wire-zzz999", metadata={"session": "session-b", "wrapper": "background"})
+    monkeypatch.setattr(wd_registry, "_default_storage_path", lambda: _registry_holding(tmp_path, [theirs, mine]))
+    monkeypatch.setattr(wd_mod, "_agent_handler", _fake_agent_module)
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "session-a")
+
+    wd_mod.handle_command("watchdog", ["agent", "@drone"])
+
+    err = " ".join(capsys.readouterr().err.split())
+    assert "baseline_wire-abc123" in err
+    assert "baseline_wire-zzz999" not in err
+    assert "no sign-in wire" not in err
 
 
 # ─────────────────────────────────────────────────────────────────────────────
