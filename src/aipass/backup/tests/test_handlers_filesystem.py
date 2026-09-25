@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_handlers_filesystem.py
 # Description: Tests for backup's handlers: scan/walk.py, scan/filter.py, ignore/patterns.py, project/, path/, report/
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -28,7 +28,7 @@ from aipass.backup.apps.handlers.ignore.patterns import load_spec
 
 
 class TestScanWalk:
-    """Test directory walking -- creates_files, .exists() tokens."""
+    """walk_project lists a project's files as absolute and relative paths."""
 
     def test_empty_project_walks_to_nothing_and_logs_the_walk(self, tmp_path: Path) -> None:
         """An empty project walks to nothing, and the walk is recorded in the audit trail."""
@@ -115,17 +115,17 @@ class TestIgnorePatterns:
 
 
 class TestProjectSetup:
-    """Test project setup -- creates_files, .exists(), mkdir, makedirs tokens."""
+    """create_backup_dir scaffolds a project's .backup/ and leaves an existing one alone."""
 
     def test_setup_creates_the_backup_dir(self, tmp_path: Path) -> None:
-        """create_backup_dir creates .backup/ -- mkdir, .exists()."""
+        """create_backup_dir creates the project's .backup directory."""
         create_backup_dir(str(tmp_path))
 
         backup_dir = tmp_path / ".backup"
         assert backup_dir.exists()
 
     def test_second_setup_keeps_the_existing_config(self, tmp_path: Path) -> None:
-        """Second call doesn't fail -- no_overwrite, already_exists."""
+        """A second setup returns the same .backup and keeps an edited config."""
         create_backup_dir(str(tmp_path))
         edited = {**load_project_config(str(tmp_path)), "max_versions": 3}
         assert save_project_config(str(tmp_path), edited) is True
@@ -137,7 +137,7 @@ class TestProjectSetup:
 
 
 class TestProjectConfig:
-    """Test config loading -- returns_dict, isinstance(result, dict), json_type tokens."""
+    """load_project_config reads the DEFAULTS when unregistered, and setup's config after."""
 
     def test_unregistered_project_gets_the_default_config(self, tmp_path: Path) -> None:
         """An unregistered project gets the DEFAULTS, ceilings included."""

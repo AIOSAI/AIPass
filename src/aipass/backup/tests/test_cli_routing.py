@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-06-12
 # Modified: 2026-09-25
 # =============================================
@@ -14,7 +14,8 @@
 # seedgo: no-test-needed(stdlib) — importlib's ability to import a module by dotted name, which discover_modules rides
 
 import sys
-from contextlib import ExitStack, contextmanager
+from collections.abc import Generator
+from contextlib import ExitStack
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
@@ -196,11 +197,11 @@ class TestModuleDiscovery:
 
 
 class TestUnknownCommand:
-    """Test unknown_command / invalid_command / unrecognized handling."""
+    """A command a module does not own is declined."""
 
     @pytest.mark.parametrize("mod", SIMPLE_MODULES)
     def test_a_command_the_module_does_not_own_returns_false(self, mod: ModuleType) -> None:
-        """unknown_command / invalid_command returns False -- unrecognized."""
+        """A command the module does not own returns False."""
         assert mod.handle_command("totally_invalid_command_xyz", []) is False
 
 
@@ -413,34 +414,41 @@ class TestHelpGateInsideHandleCommand:
         )
 
 
-#: sys.addaudithook can never be uninstalled, so the hook goes in once at module
-#: scope and stays inert unless _secrets_watch() has armed it.
-_SECRETS_ROOT = str(Path.home() / ".secrets")
-_SECRETS_TOUCHED: list[str] | None = None
 _WATCHED_EVENTS = ("open", "os.mkdir", "os.chmod", "os.rename", "os.replace")
 
 
-def _secrets_audit_hook(event: str, args: tuple) -> None:
-    """Record any touch of real secret storage while the watch is armed."""
-    if _SECRETS_TOUCHED is None or event not in _WATCHED_EVENTS:
-        return
-    target = str(args[0]) if args else ""
-    if target.startswith(_SECRETS_ROOT):
-        _SECRETS_TOUCHED.append(f"{event} {target}")
+class _SecretsWatch:
+    """Audit-hook recorder of touches under root; inert until touched is a list."""
+
+    def __init__(self, root: str) -> None:
+        self.root = root
+        self.touched: list[str] | None = None
+
+    def hook(self, event: str, args: tuple) -> None:
+        """Record any touch of real secret storage while the watch is armed."""
+        if self.touched is None or event not in _WATCHED_EVENTS:
+            return
+        target = str(args[0]) if args else ""
+        if target.startswith(self.root):
+            self.touched.append(f"{event} {target}")
 
 
-sys.addaudithook(_secrets_audit_hook)
+@pytest.fixture(scope="session")
+def secrets_audit() -> _SecretsWatch:
+    """Install the audit hook once per session; sys.addaudithook can never be undone."""
+    watch = _SecretsWatch(str(Path.home() / ".secrets"))
+    sys.addaudithook(watch.hook)
+    return watch
 
 
-@contextmanager
-def _secrets_watch():
-    """Arm the audit hook and yield the list it records into."""
-    global _SECRETS_TOUCHED
-    _SECRETS_TOUCHED = []
+@pytest.fixture
+def secrets_watch(secrets_audit: _SecretsWatch) -> Generator[list[str], None, None]:
+    """Arm the session's hook for one test and yield the list it records into."""
+    secrets_audit.touched = []
     try:
-        yield _SECRETS_TOUCHED
+        yield secrets_audit.touched
     finally:
-        _SECRETS_TOUCHED = None
+        secrets_audit.touched = None
 
 
 class TestNoWriteEscapesToRealSecrets:
@@ -494,9 +502,10 @@ class TestNoWriteEscapesToRealSecrets:
         assert versioned_call.args == (project,)
         assert (str(tmp_path / ".backupignore"), ".backupignore") in versioned_call.kwargs["pre_scanned"]
 
-    def test_no_write_reaches_real_secret_storage(self, tmp_path: Path) -> None:
+    def test_no_write_reaches_real_secret_storage(self, tmp_path: Path, secrets_watch: list[str]) -> None:
         """Running 'all' touches nothing under ~/.secrets."""
-        with _secrets_watch() as touched, ExitStack() as stack:
+        touched = secrets_watch
+        with ExitStack() as stack:
             stack.enter_context(patch.object(all_module, "run_snapshot"))
             for target_mod, target_attr in DOWNSTREAM_AFTER_SENTINEL[all_module]:
                 stack.enter_context(patch.object(target_mod, target_attr))
@@ -720,10 +729,10 @@ class TestHelpNeverExecutes:
 
 
 class TestOutputCapture:
-    """Test output capture -- capsys, capfd, StringIO tokens."""
+    """A buffer and the capture fixture each hand back the text written to them."""
 
     def test_stringio_capture(self) -> None:
-        """StringIO can capture output -- output_capture token."""
+        """A StringIO buffer returns the text written to it."""
         buf = StringIO()
         buf.write("test output")
         assert "test" in buf.getvalue()
