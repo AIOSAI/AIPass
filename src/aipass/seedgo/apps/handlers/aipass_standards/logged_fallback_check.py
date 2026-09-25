@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: logged_fallback_check.py
 # Description: Logged Fallback Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -15,10 +15,11 @@ then returns a value the success path can also return hands its caller a
 failure dressed as an answer: the caller cannot tell "it failed" from "it
 worked and found nothing".
 
-  ``backup/apps/handlers/drive/client.py:128``: ``_api_call`` returns ``None``
-  when a Drive request fails, and ``None`` is also what a search that found
-  nothing returns. ``get_or_create_backup_folder`` reads the failure as "no
-  folder", creates a duplicate root and wipes the tracker.
+  ``backup/apps/handlers/drive/client.py:184``: ``get_or_create_backup_folder``
+  logs a failed folder search and returns ``None``, and ``None`` is also what
+  its success path returns when there is no Drive service. The caller cannot
+  tell "the search failed" from "no folder". ``_api_call`` at ``:128`` is NOT
+  convicted: its success path returns a call, so its ``None`` is a sentinel.
 
 THE SHAPE. An ``except`` handler that
 

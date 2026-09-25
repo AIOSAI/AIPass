@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.4.0
+# Version: 2.4.1
 # Created: 2026-03-05
-# Modified: 2026-09-21
+# Modified: 2026-09-25
 # =============================================
 """Branch Audit Handler — auto-discovers checkers from handlers/*_standards/ packs via glob."""
 
@@ -509,12 +509,17 @@ def _run_all_files(
             logger.info("Checker %s failed on %s", name, fi["name"])
             continue
         score, checks = r.get("score", 0), r.get("checks", [])
-        if checks and not any(w in c.get("message", "").lower() for c in checks for w in ("skipped", "not applicable")):
+        failed = [c for c in checks if not c.get("passed", False)]
+        # A failing file is always averaged; only a clean one may stand down.
+        # os_walk_onerror's "is skipped in silence" once read as "skipped", so
+        # a 0 was listed as a violation and left out of the row, and @aipass
+        # read 100 over a convicted line (2026-09-25).
+        standing_down = any(w in c.get("message", "").lower() for c in checks for w in ("skipped", "not applicable"))
+        if checks and (failed or not standing_down):
             scores.append(score)
         # Collect violations from ANY file with failing checks, regardless of
         # overall pass/fail.  The old gate (not r["passed"]) hid violations
         # from files scoring 75-99% — score dropped but nothing was reported.
-        failed = [c for c in checks if not c.get("passed", False)]
         if failed:
             msgs = [c.get("message", "Unknown") for c in failed]
             v = {"file": fi["name"], "path": fi["file"], "score": score, "issues": msgs, "message": "; ".join(msgs)}
