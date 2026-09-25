@@ -60,7 +60,7 @@ Branch top level: `apps/` `docs/` `docs.local/` `dropbox/` `artifacts/` `templat
 
  - `drone @backup` — live self-map. `drone @backup --help` — every verb, every flag.
  - README.md is the face for strangers; `docs/` holds the depth, one page per lane or handler group, indexed in `docs/README.md`.
- - Known defects: `docs/known_issues.md`. Ignore rules: `docs/ignores.md`. Store layout: `docs/store.md`.
+ - Ignore rules: `docs/ignores.md`. Store layout: `docs/store.md`.
 
 # Working habits
 

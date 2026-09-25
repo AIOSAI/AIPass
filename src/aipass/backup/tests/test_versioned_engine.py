@@ -124,7 +124,7 @@ class TestVersionedDiff:
         assert target.read_text(encoding="utf-8") == "new"
 
     def test_a_changed_source_leaves_one_baseline_still_holding_the_first_text(self, tmp_path: Path):
-        """Baseline is never overwritten after first creation."""
+        """One change later, the one baseline still holds the first text."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "config.py"
@@ -196,7 +196,7 @@ class TestDiffGenerator:
     def test_a_text_change_yields_a_unified_diff_with_both_headers_the_hunk_and_both_changed_lines(
         self, tmp_path: Path
     ):
-        """Text files produce unified diff."""
+        """Both headers, the hunk and both changed lines are in the diff."""
         old = tmp_path / "old.py"
         new = tmp_path / "new.py"
         old.write_text("line1\nline2\n", encoding="utf-8")
@@ -288,7 +288,7 @@ class TestVersionedFilePath:
         assert result.relative_to(store).parts == ("src", "main.py", "main.py")
 
     def test_a_name_over_50_chars_is_stored_in_a_folder_named_its_first_30_chars_and_md5(self):
-        """Filename >50 chars -> shortened with hash."""
+        """The file name is kept whole; only its folder is cut to the first 30 chars plus md5."""
         long_name = "a" * 60 + ".py"
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
         assert result.name == long_name
