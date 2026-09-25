@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_watchdog_agent.py
 # Description: Tests for the watchdog agent handler
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-14
-# Modified: 2026-09-12
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for watch_agent (Phase 1, FPLAN-0186).
@@ -654,6 +654,27 @@ def test_scanner_discovers_new_subagent_file_on_refresh(tmp_path):
 
     assert s.tick(2.0) is False  # not yet discovered — stat pass only
     assert s.tick(2.0 + agent_handler.TranscriptScanner.REFRESH_INTERVAL) is True
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or getattr(os, "geteuid", lambda: -1)() == 0,
+    reason="an unlistable directory needs POSIX modes and a non-root reader",
+)
+def test_scanner_records_a_directory_it_cannot_list_and_keeps_walking(tmp_path):
+    """A subtree the walk cannot list is named in ``unreadable``; the rest is still scanned."""
+    proj = tmp_path / "proj"
+    seen = _write_jsonl(proj, {"type": "user"}, name="seen.jsonl")
+    locked = proj / "locked"
+    _write_jsonl(locked, {"type": "user"}, name="hidden.jsonl")
+    locked.chmod(0o000)
+    try:
+        s = agent_handler.TranscriptScanner(proj, now=0.0)
+    finally:
+        locked.chmod(0o700)
+
+    assert str(seen) in s._paths
+    assert list(s.unreadable) == [str(locked)]
+    assert s.unreadable[str(locked)] != ""
 
 
 def test_scanner_vanished_file_is_not_activity(tmp_path):
