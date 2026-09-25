@@ -1364,6 +1364,44 @@ class TestWakeBranch:
         prompt = claude_part[p_idx + 1]
         assert "synchronously" in prompt.lower()
 
+    def test_prompt_puts_the_spec_before_the_build(self, tmp_path, monkeypatch):
+        """Prompt sends the builder to the standards and the test template first, the checklist last.
+
+        Measured on 66 worker transcripts: 61 ran the checklist after writing,
+        0 read the standards page before (DPLAN-0354). The spec line comes
+        ahead of every other instruction so it is read first.
+        """
+        _make_wake_fixtures(tmp_path, monkeypatch)
+        _patch_wake_deps(monkeypatch)
+
+        captured_cmds: list = []
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return _FakeProc()
+
+        monkeypatch.setattr("subprocess.Popen", fake_popen)
+        notified: list = []
+        monkeypatch.setattr(
+            "aipass.ai_mail.apps.handlers.notify.send_notification",
+            lambda *a, **kw: notified.append(kw.get("kind")),
+            raising=False,
+        )
+        status, ok = wake_branch("@testbranch")
+        assert ok is True
+        assert notified == ["wake"]  # the real feed was never written
+        cmd = captured_cmds[0]
+        sep_idx = cmd.index("--")
+        claude_part = cmd[sep_idx + 1 :]
+        p_idx = claude_part.index("-p")
+        prompt = claude_part[p_idx + 1]
+        spec_at = prompt.find("Before you build:")
+        assert spec_at != -1
+        assert "src/aipass/seedgo/docs/aipass_standards.md" in prompt
+        assert "src/aipass/seedgo/templates/test_template_v1.md" in prompt
+        assert spec_at < prompt.find("IMPORTANT: run any sub-agents")
+        assert prompt.find("checklist last") > spec_at
+
     # --- spawn errors ---
 
     def test_spawn_file_not_found(self, tmp_path, monkeypatch):

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wake.py
 # Description: Manual Branch Wake Handler
-# Version: 3.2.0
+# Version: 3.3.0
 # Created: 2026-03-02
-# Modified: 2026-09-15
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -1139,7 +1139,15 @@ def wake_branch(
     # still alive lets a second monitor spawn onto a "clear" lock, and the two
     # then race over one lock file. Rationale from reading the cleanup paths —
     # not a logged incident; the monitor's PID-verified cleanup is the guard.
+    # Spec first, build to it, audit last (DPLAN-0354): of 66 worker
+    # transcripts, 61 ran the checklist after writing and 0 read the
+    # standards before. Kept ahead of every other instruction so it is read first.
     prompt += (
+        "Before you build: read the seedgo standards rows for what you touch "
+        "(src/aipass/seedgo/docs/aipass_standards.md; drone @seedgo checklist names the "
+        "rows for a file) and the test template for tests "
+        "(src/aipass/seedgo/templates/test_template_v1.md); build to them; run the "
+        "checklist last, to find what you missed. "
         "IMPORTANT: run any sub-agents synchronously (foreground) and wait for them to "
         "finish before ending your turn — headless dispatch kills orphaned background "
         "work after 600s with no reply sent."
