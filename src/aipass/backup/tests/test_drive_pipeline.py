@@ -210,7 +210,7 @@ class TestDriveClient:
 
         assert client.get_or_create_backup_folder() == "folder_123"
         assert client.backup_folder_id == "folder_123"
-        assert drive_api.call_count == 1
+        client._drive_service.files.return_value.create.assert_not_called()
 
     def test_backup_folder_not_found_is_created_then_verified(self, drive_api: MagicMock) -> None:
         """An empty search creates the root folder, then verifies it is reachable."""
@@ -731,7 +731,7 @@ class TestDriveSync:
     def _store(tmp_path: Path) -> tuple[Path, Path]:
         """A project with an empty versioned store where the real builder looks for it."""
         project = tmp_path / "project"
-        store = path_builder.build_versioned_store(str(project))
+        store = project / ".backup" / "versioned"
         store.mkdir(parents=True)
         return project, store
 
@@ -778,7 +778,7 @@ class TestDriveSync:
         """A missing versioned store is named back, and nothing is uploaded."""
         project = tmp_path / "project"
         project.mkdir()
-        missing = path_builder.build_versioned_store(str(project))
+        missing = project / ".backup" / "versioned"
         _install_offline_client(monkeypatch)
 
         result = drive_sync.run_drive_sync(str(project), show_panels=False)
@@ -889,7 +889,7 @@ class TestDriveSync:
         def _seed(name: str) -> Path:
             """A project whose versioned store holds one file to upload."""
             project = tmp_path / name
-            store = path_builder.build_versioned_store(str(project))
+            store = project / ".backup" / "versioned"
             store.mkdir(parents=True)
             (store / "file.txt").write_text("content", encoding="utf-8")
             return project

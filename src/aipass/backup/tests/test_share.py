@@ -154,7 +154,8 @@ class TestShareModuleRouting:
 
         out, err = capsys.readouterr()
         assert ran == []
-        assert "file" in err.lower()
+        assert "share needs a file path" in err
+        assert "drone @backup share <file_path> [--public]" in err
         assert out == ""
 
 

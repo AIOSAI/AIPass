@@ -9,7 +9,7 @@
 """Tests for apps/modules/drive_*.py and settings.py, and the Drive seal on apps/handlers/drive/client.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the five modules imported below parse; ruff parses, it does not import
+# seedgo: no-test-needed(ruff) — that the six modules imported below parse; ruff parses, it does not import
 # seedgo: no-test-needed(documentation) — that each module's public functions carry docstrings
 # seedgo: no-test-needed(constant) — the [bold cyan]/[yellow] styling in print_introspection(); tests read plain text
 # seedgo: no-test-needed(stdlib) — the win32 preamble's os.environ.setdefault and stream reconfigure
@@ -66,6 +66,7 @@ class TestDriveSyncRouting:
     """`drone @backup drive_sync ...` — what the router does before the upload."""
 
     def test_no_args_names_the_module_and_the_handlers_it_drives(self, capsys) -> None:
+        """No args is introspection: it names drive_sync and its three handlers, on stdout only."""
         assert drive_sync.handle_command(drive_sync.PRIMARY_COMMAND, []) is True
 
         out, err = capsys.readouterr()
@@ -170,6 +171,7 @@ class TestDriveStatsRouting:
     """`drone @backup drive_stats ...` — the route before a tracker is read."""
 
     def test_no_args_names_the_module_and_the_tracker_handler(self, capsys) -> None:
+        """No args is introspection: it names drive_stats and the tracker handler, on stdout only."""
         assert drive_stats.handle_command(drive_stats.PRIMARY_COMMAND, []) is True
 
         out, err = capsys.readouterr()
@@ -236,6 +238,7 @@ class TestSettingsStub:
     """`drone @backup settings ...` — the two routes that answer, and what they say."""
 
     def test_no_args_names_the_module_as_a_stub_rather_than_an_opened_ui(self, capsys) -> None:
+        """No args is introspection: it calls settings a stub awaiting Phase 3, on stdout only."""
         assert settings.handle_command(settings.PRIMARY_COMMAND, []) is True
 
         out, err = capsys.readouterr()

@@ -72,7 +72,7 @@ Branch top level: `apps/` `docs/` `docs.local/` `dropbox/` `artifacts/` `templat
 
 # Gotchas
 
- - Run the suite from the repo root — from this directory the local `aipass/` tree shadows the installed package and you test something other than what ships.
+ - Run the suite from `src/aipass/backup/`, where `pytest.ini` lives.
  - `handlers/__init__.py` guards against cross-branch imports with a path-based kinship check, not a hardcoded module name. Fabricated filenames in its tests stay under `tmp_path` or the coverage report goes red with no test failure.
  - The audit trail honours AIPASS_TEST_LOG_DIR; `handlers/json/` is the byte-identical fleet shim — never add a name to it.
  - No `resolve()` reached at import anywhere: `handlers/path/module_paths.py` is the one door, stdlib-only on purpose.

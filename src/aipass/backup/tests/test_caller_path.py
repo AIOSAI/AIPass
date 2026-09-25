@@ -215,5 +215,14 @@ class TestStatusUsesCallerCwd:
         assert "Run: backup register" not in out
         assert err == ""
 
+        (caller / "named" / ".backup").mkdir(parents=True)
+        (caller / "named" / ".backup" / "config.json").write_text('{"project_name": "renamed"}', encoding="utf-8")
+
+        status_mod.handle_command("status", ["named"])
+
+        out, err = capsys.readouterr()
+        assert "Backup Status: renamed" in out
+        assert err == ""
+
 
 # =============================================

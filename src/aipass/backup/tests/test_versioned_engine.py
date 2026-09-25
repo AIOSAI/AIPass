@@ -40,6 +40,7 @@ class TestVersionedBaseline:
     """`copy_versioned` on a file the store has never seen — the baseline and the current copy it lays down."""
 
     def test_a_first_run_stores_one_baseline_beside_the_current_copy(self, tmp_path: Path):
+        """New file -> baseline + current in file-folder."""
         project = tmp_path / "project"
         project.mkdir()
         (project / "hello.py").write_text("print('hello')", encoding="utf-8")
@@ -59,6 +60,7 @@ class TestVersionedBaseline:
         assert baselines[0].read_text(encoding="utf-8") == "print('hello')"
 
     def test_a_first_run_stores_the_current_copy_with_the_source_text(self, tmp_path: Path):
+        """Current copy has same content as source."""
         project = tmp_path / "project"
         project.mkdir()
         (project / "data.txt").write_text("original content", encoding="utf-8")
@@ -73,6 +75,7 @@ class TestVersionedDiff:
     """`copy_versioned` on a source newer than its stored copy — the diff it adds, the copy it overwrites."""
 
     def test_a_changed_source_adds_exactly_one_diff_to_the_files_diffs_folder(self, tmp_path: Path):
+        """Modified file -> diff file appears in _diffs/ folder."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "code.py"
@@ -101,6 +104,7 @@ class TestVersionedDiff:
         assert len(diffs) == 1
 
     def test_a_changed_source_overwrites_the_current_copy_with_the_new_text(self, tmp_path: Path):
+        """After change, current has new content."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "file.txt"
@@ -120,6 +124,7 @@ class TestVersionedDiff:
         assert target.read_text(encoding="utf-8") == "new"
 
     def test_a_changed_source_leaves_one_baseline_still_holding_the_first_text(self, tmp_path: Path):
+        """Baseline is never overwritten after first creation."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "config.py"
@@ -145,6 +150,7 @@ class TestVersionedSkip:
     """`copy_versioned` on a source whose mtime matches its stored copy — counted, not copied."""
 
     def test_an_unchanged_source_is_counted_unchanged_and_not_copied_again(self, tmp_path: Path):
+        """File with same mtime -> files_unchanged incremented."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "stable.txt"
@@ -164,6 +170,7 @@ class TestVersionedNeverDelete:
     """`copy_versioned` on a run that no longer lists a stored file — the stored copy stays."""
 
     def test_a_deleted_source_left_out_of_the_next_run_keeps_its_stored_copy_and_text(self, tmp_path: Path):
+        """Source file deleted -> versioned store still has it."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "temp.py"
@@ -189,6 +196,7 @@ class TestDiffGenerator:
     def test_a_text_change_yields_a_unified_diff_with_both_headers_the_hunk_and_both_changed_lines(
         self, tmp_path: Path
     ):
+        """Text files produce unified diff."""
         old = tmp_path / "old.py"
         new = tmp_path / "new.py"
         old.write_text("line1\nline2\n", encoding="utf-8")
@@ -203,6 +211,7 @@ class TestDiffGenerator:
         assert "+line3" in diff
 
     def test_a_binary_file_gets_the_changed_marker_instead_of_a_unified_diff(self, tmp_path: Path):
+        """Binary files get marker instead of diff."""
         binary = tmp_path / "image.bin"
         binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00" + b"\x00" * 100)
         text = tmp_path / "notes.txt"
@@ -221,6 +230,7 @@ class TestRestore:
     """The restore handlers — writing a file-folder's current copy out, and listing what the folder holds."""
 
     def test_restore_file_writes_the_stored_current_copy_to_the_output_path(self, tmp_path: Path):
+        """Restore current version from store."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "app.py"
@@ -234,6 +244,7 @@ class TestRestore:
         assert output.read_text(encoding="utf-8") == "print('app')"
 
     def test_list_versions_reports_baseline_current_and_diff_after_one_change(self, tmp_path: Path):
+        """list_versions finds baseline + current + diffs."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "mod.py"
@@ -263,6 +274,7 @@ class TestVersionedFilePath:
     """`build_versioned_file_path` — where in the store a file's folder sits, and what the folder is called."""
 
     def test_a_root_level_file_is_stored_under_root_in_a_folder_of_its_own_name(self):
+        """Root-level file -> root/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "README.md"))
         # Segments below the store, not a substring of the whole path: the prefix
         # comes from tempfile.gettempdir(), which may itself contain "root".
@@ -270,12 +282,13 @@ class TestVersionedFilePath:
         assert result.relative_to(store).parts == ("root", "README.md", "README.md")
 
     def test_a_nested_file_is_stored_under_its_parent_in_a_folder_of_its_own_name(self):
+        """Nested file -> <parent>/<name>/<name>."""
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, "src/main.py"))
-        assert "src" in str(result)
-        assert result.name == "main.py"
-        assert result.parent.name == "main.py"
+        store = build_versioned_store(FAKE_PROJECT_ROOT)
+        assert result.relative_to(store).parts == ("src", "main.py", "main.py")
 
     def test_a_name_over_50_chars_is_stored_in_a_folder_named_its_first_30_chars_and_md5(self):
+        """Filename >50 chars -> shortened with hash."""
         long_name = "a" * 60 + ".py"
         result = Path(build_versioned_file_path(FAKE_PROJECT_ROOT, long_name))
         assert result.name == long_name
@@ -485,6 +498,7 @@ class TestRestoreModule:
         assert "[current]" in out
 
     def test_run_restore_file_writes_the_stored_text_and_names_where_it_went(self, tmp_path: Path, capsys):
+        """run_restore_file restores a file to an output path."""
         project = tmp_path / "project"
         project.mkdir()
         src = project / "data.txt"

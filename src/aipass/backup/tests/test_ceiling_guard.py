@@ -91,6 +91,7 @@ class TestCheckCeiling:
         assert breach is not None
         assert breach.reason == "total_size"
         assert breach.config_key == "max_backup_size_gb"
+        assert breach.measured == 4096
 
     def test_zero_disables_file_ceiling(self, tmp_path: Path) -> None:
         """max_backup_files=0 means unlimited, for a project that really is huge."""
@@ -312,7 +313,7 @@ class TestSharedScanSeeding:
         (root / "src" / "main.rs").write_text("fn main() {}", encoding="utf-8")
 
         assert not (root / ".backupignore").exists()
-        # 'all' calls run_drive_sync unconditionally — keep the suite off the network.
+        # Under the ceiling, 'all' goes on to run_drive_sync — keep the suite off the network.
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 

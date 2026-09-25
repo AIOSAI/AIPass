@@ -232,7 +232,7 @@ class TestFilterPathsSpec:
 
         paths = [(str(f), "special.log")]
         filtered = filter_paths(paths, spec, ["special.log"], 100)
-        assert len(filtered) == 1
+        assert filtered == [(str(f), "special.log")]
 
 
 # --- dotfiles reach Drive (no dotfile filter) ---
@@ -438,7 +438,7 @@ class TestBuiltinTmpFloor:
         """'all' shares one scan between both stores; neither gets a temp."""
         root = tmp_path / "proj"
         real = _json_folder_with_temps(root)
-        # 'all' calls run_drive_sync unconditionally -- keep the suite off the network.
+        # Under the ceiling, 'all' reaches run_drive_sync -- keep the suite off the network.
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 
