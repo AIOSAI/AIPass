@@ -67,6 +67,7 @@ Tests — routes:
 
 import concurrent.futures as cf
 import json
+import secrets
 import subprocess
 import sys
 import threading
@@ -987,6 +988,77 @@ class TestGitChangesCoalescesTheStampede:
 
         assert host_git._changes._entries == {}, "a failure must never be stored as an answer"
 
+    def test_callers_queued_behind_a_failed_flight_share_its_failure(self, fake_repo: dict) -> None:
+        """
+        The half of the promise nothing pinned, measured false 2026-09-25.
+
+        Every caller queued behind a flight that TIMED OUT used to run its own
+        subprocess the moment the lock came free — so under a stall, one card
+        re-polled N times cost N serial 30s execs, each waiter holding a server
+        thread for its own wait plus everyone's ahead of it. A timeout is not
+        remembered by refusals.py, so nothing else stopped it. Queued callers
+        get the flight's own failure; nobody waits out a second 30s for it.
+        """
+        callers = 8
+        arrivals = []
+        all_queued = threading.Event()
+        real_flight_lock = host_git._changes._flight_lock
+
+        class CountedFlight:
+            """The real per-key lock, counting who reached it."""
+
+            def __init__(self, lock: Any) -> None:
+                self._lock = lock
+
+            def __enter__(self) -> Any:
+                arrivals.append(threading.get_ident())
+                if len(arrivals) == callers:
+                    all_queued.set()
+                return self._lock.__enter__()
+
+            def __exit__(self, *exc: Any) -> Any:
+                return self._lock.__exit__(*exc)
+
+        def stalled(*_args: Any, **_kwargs: Any) -> Any:
+            # The flight stalls until every other caller is queued behind it —
+            # the stall is the real condition, not a guess at how long it takes.
+            all_queued.wait(timeout=10)
+            raise subprocess.TimeoutExpired("drone", 30)
+
+        with (
+            patch.object(host_git._changes, "_flight_lock", lambda key: CountedFlight(real_flight_lock(key))),
+            patch.object(subprocess, "run", side_effect=stalled) as mock_run,
+            cf.ThreadPoolExecutor(max_workers=callers) as pool,
+        ):
+            futures = [pool.submit(host_git.read_git_changes, "demo") for _ in range(callers)]
+            outcomes = [type(future.exception(timeout=30)) for future in futures]
+
+        assert all_queued.is_set(), "every caller must have queued behind the stalled flight"
+        assert outcomes == [host_reads.ReadUnavailable] * callers, "every queued caller must be told the failure"
+        assert mock_run.call_count == 1, "eight callers behind one stall must not mean eight stalls"
+
+    def test_a_caller_arriving_after_a_failed_flight_reads_again(self, fake_repo: dict) -> None:
+        """
+        Sharing is for the callers who were WAITING, never a remembered refusal.
+
+        A timeout is released with its flight: the next poll after it runs a
+        fresh read, so a stall that has cleared is not refused for a moment
+        longer than it lasted.
+        """
+        with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)) as mock_run:
+            for _ in range(2):
+                with pytest.raises(host_reads.ReadUnavailable):
+                    host_git.read_git_changes("demo")
+
+        assert mock_run.call_count == 2
+
+        # And a key that recovers lets go of its last failure: the exception
+        # and its traceback are not held for the life of the server.
+        with patch.object(subprocess, "run", return_value=self._completed()):
+            assert host_git.read_git_changes("demo")["branch"] == "demo"
+
+        assert host_git._changes._failures == {}, "a recovered key must not keep its old failure"
+
 
 class TestGitStaysDroneOnlyOnThisLaneToo:
     """
@@ -1028,6 +1100,24 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
             with pytest.raises(host_reads.ReadUnavailable):
                 host_git.read_git_changes("demo")
 
+    def test_a_timeout_says_which_directory_it_was_reading(self, fake_repo: dict) -> None:
+        """
+        a6a71c2d fired three times in two weeks naming only the lane, so neither
+        occurrence could say WHICH card went dark — every request on this route
+        runs the same command and differs only by the directory it runs in.
+
+        The phone's sentence stays as it was: a refusal that travels to a
+        handset carries no host path, and the log is where a path belongs.
+        """
+        with patch(PATCH_GIT_LOGGER) as log:
+            with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)):
+                with pytest.raises(host_reads.ReadUnavailable) as refused:
+                    host_git.read_git_changes("demo")
+
+        message, *values = log.error.call_args.args
+        assert str(fake_repo["branch"].resolve()) in message % tuple(values)
+        assert str(fake_repo["branch"].resolve()) not in str(refused.value)
+
     def test_a_failed_status_is_never_read_as_a_clean_tree(self, fake_repo: dict) -> None:
         """
         drone learned this one the hard way and says so in their own source: a
@@ -1057,9 +1147,9 @@ class TestGitStaysDroneOnlyOnThisLaneToo:
         sentence: inventing an empty change list would paint a foreign branch
         as clean when nothing was ever measured.
         """
+        foreign = Path(fake_repo["branch"]).parent / "projects" / "baud" / "src" / "baud"
         refusal = (
-            "No .trinity/passport.json found in directory hierarchy "
-            "(caller cwd: /home/someone/Projects/AIPass/projects/baud/src/baud) — cannot verify caller"
+            f"No .trinity/passport.json found in directory hierarchy (caller cwd: {foreign}) — cannot verify caller"
         )
 
         with patch.object(subprocess, "run", return_value=self._completed(stdout="", returncode=1, stderr=refusal)):
@@ -3335,8 +3425,11 @@ class TestRemoteCredentialsNeverTravel:
     it crosses a network.
     """
 
-    SECRET = "ghp_supersecret"
-    WITH_SECRET = "https://aiosai:ghp_supersecret@github.com/AIOSAI/AIPass.git"
+    # Generated per run rather than written down: the proof is that whatever
+    # token is handed in does not come back out, which a literal can only claim
+    # for its own value — and a token-shaped literal trips secret scanners.
+    SECRET = f"ghp_{secrets.token_hex(8)}"
+    WITH_SECRET = f"https://aiosai:{SECRET}@github.com/AIOSAI/AIPass.git"
 
     def test_a_password_in_the_url_is_redacted(self, remote_repo: dict) -> None:
         """The secret never leaves this process, in any field."""

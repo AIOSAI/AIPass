@@ -3,7 +3,7 @@
 # Description: Host API Read Cache Handler — single-flight and TTL for expensive reads
 # Version: 1.0.0
 # Created: 2026-09-07
-# Modified: 2026-09-07
+# Modified: 2026-09-25
 # =============================================
 
 """
@@ -73,6 +73,12 @@ class ReadCache:
         self.name = name
         self.ttl_seconds = ttl_seconds
         self._entries: Dict[Hashable, tuple] = {}
+        # The last failed flight per key, kept only until the next flight on
+        # that key starts: for the callers who queued behind it, never a cache.
+        # Ordered by a counter, not a clock — a tie or a frozen clock must not
+        # hand a caller who arrived AFTER a failure the failure itself.
+        self._failures: Dict[Hashable, tuple] = {}
+        self._failure_count = 0
         self._flights: Dict[Hashable, threading.Lock] = {}
         self._guard = threading.Lock()
 
@@ -90,6 +96,7 @@ class ReadCache:
         with self._guard:
             dropped = len(self._entries)
             self._entries.clear()
+            self._failures.clear()
 
         json_handler.log_operation(
             "host_api_read_cache_cleared",
@@ -121,6 +128,8 @@ class ReadCache:
         if cached is not None:
             return cached
 
+        with self._guard:
+            arrived = self._failure_count
         with self._flight_lock(key):
             # Asked again INSIDE the lock: whoever we queued behind has just
             # filled it, and re-running the read they already ran IS the
@@ -129,7 +138,26 @@ class ReadCache:
             if cached is not None:
                 return cached
 
-            answer = producer()
+            # The same rule when the flight we queued behind FAILED. Without
+            # it every waiter ran its own producer once the lock came free —
+            # under a stall, N queued callers meant N serial timeouts (measured
+            # 2026-09-25: 8 callers, 8 subprocesses). Only a failure that ended
+            # AFTER this caller arrived is shared; a later caller reads anew.
+            # One instance raised to every waiter, as concurrent.futures does.
+            with self._guard:
+                failed = self._failures.get(key)
+            if failed is not None and failed[0] > arrived:
+                raise failed[1]
+            with self._guard:
+                self._failures.pop(key, None)
+
+            try:
+                answer = producer()
+            except Exception as failure:
+                with self._guard:
+                    self._failure_count += 1
+                    self._failures[key] = (self._failure_count, failure)
+                raise
             with self._guard:
                 self._entries[key] = (time.monotonic(), copy.deepcopy(answer))
             return answer

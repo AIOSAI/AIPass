@@ -3,7 +3,7 @@
 # Description: Host API Git Read Handler — the patch, the change list, the log, one commit
 # Version: 1.0.0
 # Created: 2026-08-17
-# Modified: 2026-08-17
+# Modified: 2026-09-20
 # =============================================
 
 """
@@ -95,6 +95,11 @@ DIFF_TIMEOUT_SECONDS = 30
 #
 # Short enough that nobody watching a card sees a stale count; long enough that
 # one screen's worth of cards costs ONE exec per distinct question.
+# WHAT IT DOES NOT BOUND (09-20, a6a71c2d again): one exec per DISTINCT
+# question is one per branch, and the log asks 22. One call 0.7-1.9s, 25
+# concurrent 14.2s at the tail UNSTALLED — half the budget standing still.
+# Bounding it (one repo-grain read per screen, or a pool) changes what a card
+# is derived from: reported to @devpulse 09-20, theirs to rule.
 GIT_CHANGES_TTL_SECONDS = 1.5
 
 # Keyed by (branch, project, grain). The brief said (branch, grain) and the
@@ -227,7 +232,10 @@ def _ran(command: Any, root: Path, lane: str) -> Any:
         logger.error("[host_api] drone not found for the %s lane: %s", lane, e)
         raise ReadUnavailable(f"drone is not available on PATH — the {lane} lane routes through it") from e
     except subprocess.TimeoutExpired as e:
-        logger.error("[host_api] the %s lane timed out after %ss", lane, DIFF_TIMEOUT_SECONDS)
+        # Two calls here differ only by directory, so a timeout naming just the
+        # lane cannot say which card went dark (a6a71c2d). It stays out of the
+        # sentence below, which travels to a handset carrying no host path.
+        logger.error("[host_api] the %s lane timed out after %ss reading %s", lane, DIFF_TIMEOUT_SECONDS, root)
         raise ReadUnavailable(f"The {lane} lane timed out after {DIFF_TIMEOUT_SECONDS}s") from e
 
 
