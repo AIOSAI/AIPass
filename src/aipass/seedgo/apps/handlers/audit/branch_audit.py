@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.5.0
+# Version: 2.6.0
 # Created: 2026-03-05
 # Modified: 2026-09-25
 # =============================================
@@ -71,7 +71,9 @@ def _is_collectable_test(path: Path) -> bool:
     return path.name.startswith("test_") or path.name == "conftest.py"
 
 
-def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dict[str, str]]:
+def _collect_py_files(
+    branch_path: Path, include_init: bool = False, ignored: Dict[str, List[str]] | None = None
+) -> List[Dict[str, str]]:
     """Collect auditable .py files from apps/ AND tests/, respecting ignore patterns.
 
     __init__.py package markers are excluded by default — most checkers are
@@ -94,7 +96,6 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
     ("/.archive/"), which never matches on Windows.
     """
     root = branch_path.resolve()
-    ign = ignore_handler.get_audit_ignore_patterns()
     ignore_entries = ignore_handler.load_ignore_entries(branch_path)
 
     candidates: List[Path] = []
@@ -105,15 +106,19 @@ def _collect_py_files(branch_path: Path, include_init: bool = False) -> List[Dic
     if tests_dir.exists():
         candidates += [f for f in tests_dir.rglob("*.py") if _is_collectable_test(f)]
 
-    return [
-        {"file": str(f), "name": f.name, "rel": _rel_path(f, root)}
-        for f in candidates
-        if not is_disabled_file(f.name)
-        and not is_throwaway_path(str(f))
-        and not applicability.is_retired_path(str(f))
-        and not any(p in str(f).lower() for p in ign)
-        and not ignore_handler.is_seedgo_ignored(str(f), branch_path, ignore_entries)
-    ]
+    collected: List[Dict[str, str]] = []
+    for f in candidates:
+        if is_disabled_file(f.name) or is_throwaway_path(str(f)) or applicability.is_retired_path(str(f)):
+            continue
+        rel = _rel_path(f, root)
+        pattern = ignore_handler.audit_ignore_match(rel)
+        if pattern is not None:
+            if ignored is not None:
+                ignored.setdefault(pattern, []).append(rel)
+            continue
+        if not ignore_handler.is_seedgo_ignored(str(f), branch_path, ignore_entries):
+            collected.append({"file": str(f), "name": f.name, "rel": rel})
+    return collected
 
 
 def _declared_input_files(branch_path: Path, checkers: Dict[str, Any] | None, attribute: str) -> List[Path]:
@@ -629,7 +634,9 @@ def audit_branch(
     """
     entry_file, branch_path = branch["entry_file"], Path(branch["path"])
     entry_rel = _rel_path(Path(entry_file), branch_path.resolve())
-    checkers, all_files = discover_checkers(pack_path), _collect_py_files(branch_path)
+    ignored: Dict[str, List[str]] = {}
+    checkers, all_files = discover_checkers(pack_path), _collect_py_files(branch_path, ignored=ignored)
+    ignored_paths = sorted(rel for rels in ignored.values() for rel in rels)
     files_with_init: List[Dict[str, str]] | None = None
 
     # Discover diagnostics checker from handlers/diagnostics/ (outside pack dirs)
@@ -819,6 +826,10 @@ def audit_branch(
         # Per row, the files it did not judge (a check declined): the row's
         # number is an average over the rest, and this is how the reader knows.
         "declined": declined_files,
+        # What the audit ignore list removed from the corpus, by pattern, and
+        # the subset git does not ignore: tracked source a pattern dropped.
+        "ignored": {pattern: sorted(rels) for pattern, rels in ignored.items()},
+        "ignored_tracked": ignore_handler.ignored_tracked_source(branch_path, ignored_paths),
         "advisory_standards": advisory_standards,
         "average": avg,
         "deprecated_patterns": deprecated,

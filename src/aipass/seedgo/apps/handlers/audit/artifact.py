@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: artifact.py
 # Description: Audit Artifact Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-11
 # Modified: 2026-09-25
 # =============================================
@@ -248,6 +248,8 @@ def _branch_entry(result: Dict[str, Any], violation_count: int) -> Dict[str, Any
         "average": result.get("average", 0),
         "scores": dict(result.get("scores", {})),
         "declined": {name: list(files) for name, files in (result.get("declined") or {}).items()},
+        "ignored": {pattern: list(files) for pattern, files in (result.get("ignored") or {}).items()},
+        "ignored_tracked": list(result.get("ignored_tracked") or []),
         "advisory_standards": list(result.get("advisory_standards", [])),
         "files_checked": result.get("files_checked", 0),
         "type_errors": result.get("type_errors", 0),

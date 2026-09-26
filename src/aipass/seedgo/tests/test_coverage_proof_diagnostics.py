@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_coverage_proof_diagnostics.py
 # Description: Line-coverage tests for plugin_integrity.py and diagnostics_check.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-25
 # =============================================
 
 import ast
@@ -15,6 +15,8 @@ import subprocess
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+from aipass.seedgo.apps.handlers.bypass import ignore_handler as real_ignore_handler
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +55,9 @@ def _mock_infrastructure(monkeypatch):
     bypass_ignore = MagicMock()
     bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
     bypass_ignore.get_audit_ignore_patterns = MagicMock(return_value=[])
+    # The ignore list removes nothing here, as the empty pattern list above says.
+    bypass_ignore.audit_ignore_match = MagicMock(return_value=None)
+    bypass_ignore.ignored_tracked_source = MagicMock(return_value=[])
     bypass_pkg.ignore_handler = bypass_ignore
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(
@@ -1011,30 +1016,38 @@ class TestPluginIntegrityScan:
 class TestShouldIgnoreFile:
     """Tests for should_ignore_file."""
 
-    def test_matching_pattern(self):
-        """File matching a pattern is ignored."""
+    def test_matching_pattern(self, tmp_path):
+        """A root-anchored entry removes its path at the branch root and nowhere deeper."""
         from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
             should_ignore_file,
         )
 
-        assert should_ignore_file("/home/user/venv/lib/file.py", ["venv"]) is True
+        mod = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
+        with patch(f"{mod}.audit_ignore_match", real_ignore_handler.audit_ignore_match):
+            assert should_ignore_file(str(tmp_path / "backups" / "old.py"), tmp_path) is True
+            assert should_ignore_file(str(tmp_path / "apps" / "backups" / "ops.py"), tmp_path) is False
 
-    def test_no_matching_pattern(self):
-        """File not matching any pattern is not ignored."""
+    def test_no_matching_pattern(self, tmp_path):
+        """An unanchored entry (.archive/) removes its directory at any depth."""
         from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
             should_ignore_file,
         )
 
-        result = should_ignore_file("/home/user/src/file.py", ["venv", "node_modules"])
-        assert result is False
+        mod = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
+        with patch(f"{mod}.audit_ignore_match", real_ignore_handler.audit_ignore_match):
+            assert should_ignore_file(str(tmp_path / "apps" / "x" / ".archive" / "a.py"), tmp_path) is True
+            assert should_ignore_file(str(tmp_path / "apps" / "x" / "archive.py"), tmp_path) is False
 
-    def test_empty_patterns(self):
+    def test_empty_patterns(self, tmp_path, monkeypatch):
         """Empty pattern list means nothing is ignored."""
         from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
             should_ignore_file,
         )
 
-        assert should_ignore_file("/any/file.py", []) is False
+        monkeypatch.setattr(real_ignore_handler, "AUDIT_IGNORE_PATTERNS", [])
+        mod = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
+        with patch(f"{mod}.audit_ignore_match", real_ignore_handler.audit_ignore_match):
+            assert should_ignore_file(str(tmp_path / "apps" / "__pycache__" / "m.py"), tmp_path) is False
 
 
 # ===========================================================================
@@ -1247,21 +1260,24 @@ class TestCheckDirectory:
         assert result["results"][0]["errors"] >= result["results"][1]["errors"]
 
     def test_directory_ignores_files(self, tmp_path):
-        """Files matching ignore patterns are skipped."""
+        """Pyright's findings in the driver layer are dropped; tracked handlers/integrations/ keeps its."""
         from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
             check_directory,
         )
 
+        apps = tmp_path / "apps"
+        apps.mkdir()
+        kept = str(apps / "handlers" / "integrations" / "call.py")
         diags = [
             {
-                "file": "/src/venv/lib/bad.py",
+                "file": str(apps / "integrations" / "google" / "driver.py"),
                 "severity": "error",
                 "range": {"start": {"line": 1}},
                 "message": "Err",
                 "rule": "r1",
             },
             {
-                "file": "/src/good.py",
+                "file": kept,
                 "severity": "error",
                 "range": {"start": {"line": 1}},
                 "message": "Err",
@@ -1273,14 +1289,13 @@ class TestCheckDirectory:
         mod_prefix = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
         with (
             patch(f"{mod_prefix}.subprocess.run") as mock_run,
-            patch(f"{mod_prefix}.get_audit_ignore_patterns") as mock_ignore,
+            patch(f"{mod_prefix}.audit_ignore_match", real_ignore_handler.audit_ignore_match),
         ):
-            mock_ignore.return_value = ["venv"]
             mock_run.return_value = MagicMock(stdout=pyright_out, stderr="")
-            result = check_directory(str(tmp_path))
+            result = check_directory(str(apps))
 
         assert result["total_errors"] == 1
-        assert len(result["results"]) == 1
+        assert [r["file"] for r in result["results"]] == [kept]
 
     def test_directory_json_decode_error(self, tmp_path):
         """Non-JSON pyright output for directory returns error."""

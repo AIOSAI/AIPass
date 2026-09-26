@@ -10,9 +10,9 @@ must never mean approximate.
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-31
-# Modified: 2026-09-21
+# Modified: 2026-09-25
 # =============================================
 
 # seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
@@ -44,6 +44,9 @@ def _mock_infrastructure(monkeypatch):
 
     mock_ignore_handler = MagicMock()
     mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
+    # The ignore list removes nothing here, as the empty pattern list above says.
+    mock_ignore_handler.audit_ignore_match = MagicMock(return_value=None)
+    mock_ignore_handler.ignored_tracked_source = MagicMock(return_value=[])
     mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
     mock_ignore_handler.load_ignore_entries = real_load_ignore_entries
     mock_scan_branch = MagicMock(return_value=None)

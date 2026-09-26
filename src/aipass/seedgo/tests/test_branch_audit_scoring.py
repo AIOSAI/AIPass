@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -18,7 +18,8 @@ from pathlib import Path
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import applicability, os_walk_onerror_check, skip_dirs
-from aipass.seedgo.apps.handlers.audit import audit_display, branch_audit
+from aipass.seedgo.apps.handlers.audit import artifact, audit_display, branch_audit
+from aipass.seedgo.apps.handlers.bypass import ignore_handler
 
 WALKER = "import os\n\n\ndef files(root):\n    return [d for d, _, _ in os.walk(root)]\n"
 
@@ -172,3 +173,77 @@ class TestTheMigrationKeptEveryStandDown:
                     disagreements.append((name, rel))
         assert disagreements == []
         assert declined >= 40
+
+
+#: The repository's own two gitignore lines this cure is about: the private driver layer,
+#: and the blanket artifacts/ ignore with commons' source re-included beneath it.
+GITIGNORE = (
+    "*/apps/integrations/**\nartifacts/\n!mybranch/apps/handlers/artifacts/\n!mybranch/apps/handlers/artifacts/*.py\n"
+)
+
+FAIL = {"passed": False, "score": 0, "checks": [{"passed": False, "message": "judged"}]}
+
+LAYOUT = {
+    "apps/integrations/google/driver.py": "def drive():\n    return 1\n",
+    "apps/handlers/integrations/call.py": "def call():\n    return 1\n",
+    "apps/handlers/artifacts/trade_ops.py": "def trade():\n    return 1\n",
+    "apps/handlers/test/fixture.py": "def fixture():\n    return 1\n",
+    "apps/handlers/config.old.py": "def old():\n    return 1\n",
+}
+
+
+@pytest.fixture
+def repo_audit(tmp_path, monkeypatch):
+    """Audit a branch inside a planted git repository (a .git entry and a .gitignore)."""
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    monkeypatch.setattr(branch_audit, "_load_diagnostics_checker", lambda: None)
+    monkeypatch.setattr(branch_audit, "scan_branch", lambda path: None)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
+    apps = tmp_path / "mybranch" / "apps"
+    for rel, body in {"apps/main.py": "pass\n", **LAYOUT}.items():
+        path = tmp_path / "mybranch" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    # Every file fails, so the violations list is exactly the set of files the row judged.
+    judged = types.SimpleNamespace(AUDIT_SCOPE="all_files", check_module=lambda path, bypass_rules=None: FAIL)
+    monkeypatch.setattr(branch_audit, "discover_checkers", lambda _pack=None: {"cli": judged})
+    branch = {"name": "mybranch", "entry_file": str(apps / "main.py"), "path": str(apps.parent)}
+    return lambda: branch_audit.audit_branch(branch, [])
+
+
+class TestTheIgnoreListRemovesOnlyWhatItWasWrittenFor:
+    def test_tracked_source_under_a_like_named_directory_is_judged(self, repo_audit):
+        """Mutant: the substring patterns back ("/integrations/", "/artifacts/", "/test/", ".old")."""
+        out = repo_audit()
+        root = Path(out["branch"]["path"])
+        judged = {Path(v["path"]).relative_to(root).as_posix() for v in out["cli_violations"]}
+        assert {
+            "apps/handlers/integrations/call.py",
+            "apps/handlers/artifacts/trade_ops.py",
+            "apps/handlers/test/fixture.py",
+            "apps/handlers/config.old.py",
+        } <= judged
+
+    def test_the_gitignored_driver_layer_is_removed_and_named(self, repo_audit):
+        """Mutant: the removed-list not recorded."""
+        out = repo_audit()
+        assert out["ignored"] == {"/apps/integrations/": ["apps/integrations/google/driver.py"]}
+        assert out["ignored_tracked"] == []
+
+    def test_a_pattern_that_removes_tracked_source_is_convicted(self, repo_audit, monkeypatch):
+        """Mutant: the checker blind to a tracked file (every removed file read as gitignored)."""
+        # Unanchored, as the old substrings were: they reach tracked source under handlers/.
+        monkeypatch.setattr(ignore_handler, "AUDIT_IGNORE_PATTERNS", ["integrations/", "artifacts/"])
+        out = repo_audit()
+        assert out["ignored_tracked"] == ["apps/handlers/artifacts/trade_ops.py", "apps/handlers/integrations/call.py"]
+
+    def test_the_summary_and_the_artifact_name_what_the_list_removed(self, repo_audit, tmp_path, capsys):
+        """Mutant: the removed-list not in the output."""
+        out = repo_audit()
+        capsys.readouterr()
+        audit_display.print_branch_summary(out)
+        printed = [line for line in capsys.readouterr().out.splitlines() if "Ignored" in line]
+        assert printed == ["  Ignored by the audit list: /apps/integrations/ 1"]
+        doc = artifact.build_artifact([out])
+        assert doc["branches"][0]["ignored"] == {"/apps/integrations/": ["apps/integrations/google/driver.py"]}

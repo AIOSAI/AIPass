@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_diagnostics.py
 # Description: Unit tests for handlers/diagnostics/
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-25
 # =============================================
 
 import pytest
@@ -39,12 +39,9 @@ def _mock_infrastructure(monkeypatch):
     json_mod.log_operation = mock_json_handler.log_operation
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
 
-    # -- bypass ignore handler (imported directly by diagnostics_check) -----
-    bypass_pkg = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_audit_ignore_patterns = MagicMock(return_value=["__pycache__"])
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", bypass_ignore)
+    # -- bypass ignore handler: the REAL list, re-imported over the mocks above, so the
+    # filter tests below pin the anchors the audit uses, not a stand-in.
+    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", raising=False)
 
     # Force re-import
     monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check", raising=False)
@@ -55,25 +52,27 @@ def _mock_infrastructure(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_should_ignore_file_matches():
-    """should_ignore_file returns True when pattern is in the path."""
+def test_should_ignore_file_removes_the_gitignored_driver_layer(tmp_path):
+    """The branch-root driver layer and a bytecode cache are out of pyright's filter."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import should_ignore_file
 
-    assert should_ignore_file("/some/__pycache__/mod.py", ["__pycache__"]) is True
+    assert should_ignore_file(str(tmp_path / "apps" / "integrations" / "google" / "driver.py"), tmp_path) is True
+    assert should_ignore_file(str(tmp_path / "apps" / "__pycache__" / "mod.py"), tmp_path) is True
 
 
-def test_should_ignore_file_no_match():
-    """should_ignore_file returns False when no pattern matches."""
+def test_should_ignore_file_keeps_tracked_source_under_a_like_named_directory(tmp_path):
+    """Mutant: the substring patterns back ("/integrations/", "/artifacts/", "/test/", ".old")."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import should_ignore_file
 
-    assert should_ignore_file("/some/apps/mod.py", ["__pycache__"]) is False
+    for rel in ("handlers/integrations/call.py", "handlers/artifacts/trade_ops.py", "handlers/test/x.py", "a.old.py"):
+        assert should_ignore_file(str(tmp_path / "apps" / rel), tmp_path) is False, rel
 
 
-def test_should_ignore_file_empty_patterns():
-    """should_ignore_file returns False with empty patterns list."""
+def test_should_ignore_file_leaves_a_file_outside_the_branch_alone(tmp_path):
+    """A path the branch root does not contain is never read as ignored."""
     from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import should_ignore_file
 
-    assert should_ignore_file("/anything.py", []) is False
+    assert should_ignore_file(str(tmp_path.parent / "__pycache__" / "mod.py"), tmp_path / "branch") is False
 
 
 # ---------------------------------------------------------------------------

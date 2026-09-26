@@ -3,7 +3,7 @@
 # =================== META ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-26
 # Modified: 2026-09-25
 # =============================================
@@ -14,6 +14,8 @@
 import types
 
 import pytest
+
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import audit_ignore_match as real_audit_ignore_match
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
@@ -39,6 +41,9 @@ def _mock_infrastructure(monkeypatch):
 
     mock_ignore_handler = MagicMock()
     mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
+    # The ignore list removes nothing here, as the empty pattern list above says.
+    mock_ignore_handler.audit_ignore_match = MagicMock(return_value=None)
+    mock_ignore_handler.ignored_tracked_source = MagicMock(return_value=[])
     mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
     mock_ignore_handler.load_ignore_entries = real_load_ignore_entries
     mock_scan_branch = MagicMock(return_value=None)
@@ -1471,27 +1476,24 @@ class TestCollectPyFiles:
         """Files matching ignore patterns are excluded."""
         import sys
 
-        skip_dirs = sys.modules.get("aipass.seedgo.apps.handlers.aipass_standards.skip_dirs")
-        if skip_dirs:
-            monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+        from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 
-        # Use a unique pattern that will NOT collide with the pytest tmp_path
-        # directory name (which includes the test function name).
+        monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+
+        # The real matcher over branch-relative paths: the tmp_path name cannot collide.
         mock_ign = sys.modules["aipass.seedgo.apps.handlers.bypass"].ignore_handler
-        mock_ign.get_audit_ignore_patterns.return_value = ["xskip_"]
+        monkeypatch.setattr(mock_ign, "audit_ignore_match", real_audit_ignore_match)
 
         from aipass.seedgo.apps.handlers.audit.branch_audit import (
             _collect_py_files,
         )
 
-        apps_dir = tmp_path / "apps"
-        apps_dir.mkdir()
-        (apps_dir / "module.py").write_text("pass", encoding="utf-8")
-        (apps_dir / "xskip_bad.py").write_text("pass", encoding="utf-8")
+        for rel in ("apps/module.py", "apps/integrations/google/driver.py", "apps/handlers/integrations/call.py"):
+            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / rel).write_text("pass", encoding="utf-8")
         result = _collect_py_files(tmp_path)
         names = [f["name"] for f in result]
-        assert "module.py" in names
-        assert "xskip_bad.py" not in names
+        assert sorted(names) == ["call.py", "module.py"]
 
     def test_excludes_disabled_files(self, tmp_path, monkeypatch):
         """Files with (disabled) in the name are excluded from collection."""

@@ -129,6 +129,39 @@ The `entry_point` and `branch_level` lanes stand a whole row down with a result-
 
 ---
 
+## The audit ignore list: anchored, named, and checked against git's view
+
+`bypass/ignore_handler.AUDIT_IGNORE_RULES` removes paths from the corpus before any checker
+sees them. Each entry is a gitignore-style pattern read against the **branch-relative** path,
+and each carries its reason:
+
+| Pattern | Why it is out |
+|---|---|
+| `__pycache__/` | bytecode, never source |
+| `.archive/`, `deprecated/` | retired code, same as `applicability.RETIRED_DIRS` |
+| `.backup/` | rollover and snapshot storage |
+| `/backups/` | @backup's storage at the branch root (gitignored) |
+| `/artifacts/` | a branch's published `artifacts/` at its root (gitignored) |
+| `/apps/integrations/` | the private driver layer (gitignored) |
+
+Until 2026-09-25 these were substrings of the whole path, and `/integrations/` and
+`/artifacts/` silently removed five tracked files (1,399 lines) in api's
+`handlers/integrations/` and commons' `handlers/artifacts/`. `.temp`, `.old` and `/test/` went
+the same day: in a `*.py` corpus they could only ever hit real source.
+
+Every removal is named. `audit_branch` returns `ignored` (`{pattern: [rel paths]}`), the
+summary prints `Ignored by the audit list: <pattern> N`, and each artifact branch entry
+carries the list. It also returns `ignored_tracked`: the removed files that the repository's
+`.gitignore` files do **not** ignore, read with `pathspec` (no git subprocess, negations
+honoured). Anything there prints red, `Ignore list drops tracked source`, because a file git
+tracks is source, and source is judged. The one known gap is git's rule that a file cannot be
+re-included under an excluded parent directory, which `pathspec` does not apply.
+
+Pyright's filter in `diagnostics_check` reads the same list through `audit_ignore_match`, so
+the two lanes cannot drift.
+
+---
+
 ## The info channel (non-scored)
 
 A checker may expose `check_branch_info(branch_path) -> list[str]`. `branch_audit` collects

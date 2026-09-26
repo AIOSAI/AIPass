@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-05
 # Modified: 2026-09-25
 # =============================================
@@ -26,7 +26,7 @@ from collections import defaultdict
 # Prax logger (system-wide, always first)
 
 # CLI services (display/output formatting)
-from aipass.cli import console
+from aipass.cli import console, warning
 
 # JSON handler for tracking
 from aipass.seedgo.apps.handlers.audit.discovery import DEFAULT_PACK_CORPUS
@@ -437,6 +437,14 @@ def print_branch_summary(
     if declined:
         counts = ", ".join(f"{name.title()} {len(files)} declined" for name, files in sorted(declined.items()))
         console.print(f"  [dim]Not judged: {counts}[/dim]")
+
+    # What the audit ignore list removed, and any tracked source it should not have.
+    ignored = audit_result.get("ignored") or {}
+    if ignored:
+        counts = ", ".join(f"{pattern} {len(files)}" for pattern, files in sorted(ignored.items()))
+        console.print(f"  [dim]Ignored by the audit list: {counts}[/dim]")
+    for rel in audit_result.get("ignored_tracked") or []:
+        warning(f"Ignore list drops tracked source: {rel}")
 
     # Overall score
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"

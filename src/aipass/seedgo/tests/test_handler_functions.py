@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_handler_functions.py
 # Description: Unit tests for handler-level functions across multiple handler packages
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-25
 # =============================================
 
 import json
@@ -46,6 +46,9 @@ def _mock_infrastructure(monkeypatch):
     bypass_ignore = MagicMock()
     bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
     bypass_ignore.get_audit_ignore_patterns = MagicMock(return_value=[])
+    # The ignore list removes nothing here, as the empty pattern list above says.
+    bypass_ignore.audit_ignore_match = MagicMock(return_value=None)
+    bypass_ignore.ignored_tracked_source = MagicMock(return_value=[])
     bypass_pkg.ignore_handler = bypass_ignore
     monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
     monkeypatch.setitem(
