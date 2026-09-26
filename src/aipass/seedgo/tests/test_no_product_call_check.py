@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_no_product_call_check.py
 # Description: no_product_call_check — crack class A, a test that reaches no product code
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/no_product_call_check.py."""
@@ -336,8 +336,13 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "no_product_call", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "no_product_call"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_it():\n    assert 1 == 1\n")
-        assert no_product_call_check.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            no_product_call_check.check_module(
+                str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

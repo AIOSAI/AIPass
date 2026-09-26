@@ -19,6 +19,7 @@ seedgo proof aipass                              # Proof certification
 seedgo test_map @branch                          # Custom function test coverage
 seedgo test-inventory <path>                     # Every test function in a tree, ranked
 seedgo tests retired / restore <name>            # The retire lane — a logged move, never a delete
+seedgo bypass prune @branch [--dry-run]          # Remove bypass rules that match nothing; live/blank never
 seedgo tests template-status / template bump     # Test template v1: receipts vs gold (--confirm writes)
 seedgo shadow-cycle run                          # The three weekly v5 passes
 seedgo permissions / inbox_audit                 # Settings sweep / mailbox hygiene
@@ -49,7 +50,7 @@ apps/
     ├── aipass_proof/            # Proof certification
     ├── audit/                   # branch_audit, discovery, audit_display, artifact, incremental_cache
     ├── audit_tests/             # The execution lane: refusal vocabulary, runner, render
-    ├── bypass/                  # bypass_handler, ignore_handler, inert
+    ├── bypass/                  # bypass_handler, ignore_handler, inert, dead_rules
     ├── cli/                     # help_flags
     ├── config/                  # Package marker only — no handlers today
     ├── diagnostics/             # discovery (standalone disabled, runs via audit pipeline)

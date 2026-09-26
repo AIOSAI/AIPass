@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_uncalled_public_function_check.py
 # Description: uncalled_public_function_check — crack class O, a subject's untested export
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/uncalled_public_function_check.py."""
@@ -183,7 +183,12 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "uncalled_public_function", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "uncalled_public_function"}]])
     def test_a_bypassed_branch_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
-        assert uncalled_public_function_check.check_branch(str(_branch(tmp_path)), bypass_rules=rules)["score"] == 100
+        assert (
+            uncalled_public_function_check.check_branch(
+                str(_branch(tmp_path)), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

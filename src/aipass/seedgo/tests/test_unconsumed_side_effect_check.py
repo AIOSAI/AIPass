@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_unconsumed_side_effect_check.py
 # Description: unconsumed_side_effect_check — crack class F, queued mock answers nothing counts
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unconsumed_side_effect_check.py."""
@@ -208,8 +208,11 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "unconsumed_side_effect", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "unconsumed_side_effect"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, QUEUED)
-        assert checker.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            checker.check_module(str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules])["score"]
+            == 100
+        )

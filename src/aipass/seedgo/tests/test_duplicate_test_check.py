@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_duplicate_test_check.py
 # Description: duplicate_test_check — crack class B, a test another test already covers
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/duplicate_test_check.py."""
@@ -290,8 +290,13 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "duplicate_test", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "duplicate_test"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_a():\n    assert run()\ndef test_b():\n    assert run()\n")
-        assert duplicate_test_check.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            duplicate_test_check.check_module(
+                str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

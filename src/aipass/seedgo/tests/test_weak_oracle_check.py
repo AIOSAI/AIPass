@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_weak_oracle_check.py
 # Description: weak_oracle_check — crack class D, a test whose whole oracle cannot fail
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/weak_oracle_check.py."""
@@ -275,8 +275,18 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "weak_oracle", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "weak_oracle"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_it():\n    assert True\n")
-        assert weak_oracle_check.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            weak_oracle_check.check_module(str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules])[
+                "score"
+            ]
+            == 100
+        )
+
+    def test_a_rule_without_a_standard_does_not_silence_a_failing_check(self, tmp_path):
+        """Mutant: the matcher honouring a blank field again. A blank is a blank (owner, 2026-09-25)."""
+        path = _write(tmp_path, "def test_it():\n    assert True\n")
+        assert weak_oracle_check.check_module(str(path), bypass_rules=[{"file": str(tmp_path)}])["score"] < 100

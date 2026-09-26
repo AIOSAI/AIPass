@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_sleep_in_test_check.py
 # Description: sleep_in_test_check — crack class N, a test that waits instead of asserting
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/sleep_in_test_check.py."""
@@ -164,8 +164,13 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "sleep_in_test", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "sleep_in_test"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_it():\n    time.sleep(0.01)\n")
-        assert sleep_in_test_check.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            sleep_in_test_check.check_module(
+                str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

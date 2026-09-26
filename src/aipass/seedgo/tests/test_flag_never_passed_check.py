@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_flag_never_passed_check.py
 # Description: flag_never_passed_check — crack class P, a parsed flag no test passes
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/flag_never_passed_check.py."""
@@ -196,7 +196,12 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "flag_never_passed", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "flag_never_passed"}]])
     def test_a_bypassed_branch_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
-        assert flag_never_passed_check.check_branch(str(_branch(tmp_path)), bypass_rules=rules)["score"] == 100
+        assert (
+            flag_never_passed_check.check_branch(
+                str(_branch(tmp_path)), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

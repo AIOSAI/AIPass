@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_unused_conftest_fixture_check.py
 # Description: unused_conftest_fixture_check — crack class G, a shared fixture nothing requests
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
 # Modified: 2026-09-25
 # =============================================
@@ -175,8 +175,13 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "unused_conftest_fixture", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "unused_conftest_fixture"}]])
     def test_a_bypassed_branch_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         root = _branch(tmp_path, test_a="def test_it():\n    assert True\n")
-        assert unused_conftest_fixture_check.check_branch(str(root), bypass_rules=rules)["score"] == 100
+        assert (
+            unused_conftest_fixture_check.check_branch(
+                str(root), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: branch_audit.py
 # Description: Branch Audit Handler
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-03-05
 # Modified: 2026-09-25
 # =============================================
@@ -12,7 +12,7 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from aipass.prax import logger
-from aipass.seedgo.apps.handlers.bypass import ignore_handler, inert
+from aipass.seedgo.apps.handlers.bypass import dead_rules, ignore_handler, inert
 from aipass.seedgo.apps.handlers.aipass_standards import applicability
 from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import is_disabled_file, is_throwaway_path
 from aipass.seedgo.apps.handlers.audit import incremental_cache
@@ -610,6 +610,27 @@ def cache_key_for(branch_name: str, pack_path: Optional[Path], no_bypass: bool =
     return key
 
 
+def _bypass_hygiene(
+    branch_path: Path, bypass_rules: list, checkers: Dict[str, Any], pack_path: Path | None
+) -> Dict[str, list]:
+    """The branch's dead bypass rules and its inline bypass comments (survey rows #11-#13).
+
+    Only the aipass pack's checkers read bypass rules, so another pack's audit
+    names neither: every rule would read as naming an unknown standard there.
+    Read from disk on every run, cached or not: a deleted file kills a rule
+    without touching anything the cache watches.
+    """
+    default_pack = Path(__file__).resolve().parent.parent / "aipass_standards"
+    if pack_path is not None and pack_path.resolve() != default_pack:
+        return {"bypass_dead": [], "bypass_markers": []}
+    known = set(checkers) | {"diagnostics"}
+    corpus = [fi["file"] for fi in _collect_py_files(branch_path, include_init=True)]
+    return {
+        "bypass_dead": dead_rules.dead_rules(branch_path, bypass_rules, known),
+        "bypass_markers": dead_rules.bypass_markers(branch_path, corpus),
+    }
+
+
 def audit_branch(
     branch: Dict[str, str],
     bypass_rules: list,
@@ -830,6 +851,8 @@ def audit_branch(
         # the subset git does not ignore: tracked source a pattern dropped.
         "ignored": {pattern: sorted(rels) for pattern, rels in ignored.items()},
         "ignored_tracked": ignore_handler.ignored_tracked_source(branch_path, ignored_paths),
+        # Bypass rules that match nothing, and inline bypass comments nothing reads.
+        **_bypass_hygiene(branch_path, bypass_rules, checkers, pack_path),
         "advisory_standards": advisory_standards,
         "average": avg,
         "deprecated_patterns": deprecated,
@@ -932,6 +955,7 @@ def audit_branch_incremental(
             output["observations"] = _collect_branch_observations(
                 discover_checkers(pack_path), branch_path, branch_name, bypass_rules
             )
+            output.update(_bypass_hygiene(branch_path, bypass_rules, discover_checkers(pack_path), pack_path))
             output["_cache_hit"] = True
             return output
 

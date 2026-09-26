@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_declared_pass_contradiction_check.py
 # Description: declared_pass_contradiction_check — crack class H, a declared pass the file breaks
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/declared_pass_contradiction_check.py."""
@@ -293,7 +293,7 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "declared_pass_contradiction", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "declared_pass_contradiction"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _branch(
@@ -301,4 +301,7 @@ class TestTheBypass:
             'TRACKER_FILENAME = "drive_tracker.json"\n',
             'def test_it():\n    assert p.name == "drive_tracker.json"\n',
         )
-        assert checker.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            checker.check_module(str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules])["score"]
+            == 100
+        )

@@ -3,9 +3,9 @@
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-25
 # =============================================
 
 import json
@@ -210,23 +210,23 @@ class TestIsBypassed:
         rules = [{"standard": "architecture", "file": "file.py", "lines": [10, 20]}]
         assert is_bypassed("/some/file.py", "architecture", line=15, bypass_rules=rules) is False
 
-    def test_rule_without_standard_matches(self):
-        """Rule with no 'standard' key matches any standard."""
+    def test_rule_without_standard_matches_nothing(self):
+        """A rule with no 'standard' is a blank and silences nothing (owner, 2026-09-25 18:55)."""
         from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
             is_bypassed,
         )
 
         rules = [{"file": "file.py"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is True
+        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is False
 
-    def test_rule_without_file_matches(self):
-        """Rule with no 'file' key matches any file."""
+    def test_rule_without_file_matches_nothing(self):
+        """A rule with no 'file' is a blank and silences nothing (owner, 2026-09-25 18:55)."""
         from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
             is_bypassed,
         )
 
         rules = [{"standard": "architecture"}]
-        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is True
+        assert is_bypassed("/some/file.py", "architecture", bypass_rules=rules) is False
 
 
 # ===========================================================================

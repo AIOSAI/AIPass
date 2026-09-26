@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_self_set_assert_check.py
 # Description: self_set_assert_check — crack class E, a test asserting what it just wrote
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-23
-# Modified: 2026-09-23
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/self_set_assert_check.py."""
@@ -223,8 +223,11 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "self_set_assert", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "self_set_assert"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_it():\n    r.count = 5\n    assert r.count == 5\n")
-        assert checker.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            checker.check_module(str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules])["score"]
+            == 100
+        )

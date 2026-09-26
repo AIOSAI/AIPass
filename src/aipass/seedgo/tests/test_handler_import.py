@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_handler_import.py
 # Description: Unit tests for handler_import_check checker handler
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-04-26
 # Modified: 2026-09-25
 # =============================================
@@ -58,7 +58,7 @@ class TestHandlerImportCheck:
 
     def test_branch_bypassed(self, tmp_path: Path) -> None:
         """A bypass rule for the standard scores 100 even with no apps/ at all."""
-        result = check_branch(str(tmp_path), bypass_rules=[{"standard": "handler_import"}])
+        result = check_branch(str(tmp_path), bypass_rules=[{"file": str(tmp_path), "standard": "handler_import"}])
         assert result["passed"] is True
         assert result["score"] == 100
         assert result["checks"][0]["name"] == "Bypassed"

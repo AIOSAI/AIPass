@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: audit_display.py
 # Description: Audit Display Module
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-03-05
 # Modified: 2026-09-25
 # =============================================
@@ -445,6 +445,11 @@ def print_branch_summary(
         console.print(f"  [dim]Ignored by the audit list: {counts}[/dim]")
     for rel in audit_result.get("ignored_tracked") or []:
         warning(f"Ignore list drops tracked source: {rel}")
+    # Bypass rules that match nothing, and inline bypass comments nothing reads.
+    for dead in audit_result.get("bypass_dead") or []:
+        warning(f"Dead bypass rule [{dead['index']}] {dead['file']} / {dead['standard']}: {dead['why']}")
+    for marker in audit_result.get("bypass_markers") or []:
+        warning(f"Inline bypass comment, read by nothing: {marker}")
 
     # Overall score
     overall_icon = "✅" if avg >= 90 else "⚠️" if avg >= 75 else "❌"

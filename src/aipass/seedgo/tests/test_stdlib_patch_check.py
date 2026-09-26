@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stdlib_patch_check.py
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-22
-# Modified: 2026-09-23
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""
@@ -266,8 +266,13 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "stdlib_patch", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "stdlib_patch"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_it():\n    patch('time.time')\n")
-        assert stdlib_patch_check.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            stdlib_patch_check.check_module(
+                str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )

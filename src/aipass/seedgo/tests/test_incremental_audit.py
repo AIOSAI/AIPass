@@ -10,13 +10,10 @@ must never mean approximate.
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-07-31
 # Modified: 2026-09-25
 # =============================================
-
-# seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
-# seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
 
 import json
 import sys

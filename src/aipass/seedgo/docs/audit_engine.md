@@ -190,6 +190,25 @@ never match anything the checker can produce is noise, and it says so.
 A score of 100 with documented exceptions under it is a real score, not a clean sheet — read
 the rules with it.
 
+### Dead rules and dead comments
+
+`bypass/dead_rules.py` judges every rule on every audit, cached or not (survey rows #11-#13,
+2026-09-25). A rule is **dead** — it matches nothing, so it does nothing — when its `file` is a
+substring of no file on disk (the matcher's own semantics; retired directories and `(disabled)`
+names are never handed to a checker), its `standard` is not a checker, or every line it names
+lies past the end of every file it matches. A rule with a blank `file` or blank `standard` is
+never convicted: a blank field means *every*, and that breadth is not ruled (row #10).
+
+An inline `# seedgo:bypass …` comment is also named. No code path has ever read one, so each is
+a comment that claims an exception nobody grants; the only way to grant one is a rule in
+`bypass.json`.
+
+The audit returns `bypass_dead` (index, file, standard, why, the rule's own reason) and
+`bypass_markers` (`rel:line`), prints one warning per item, and each artifact branch entry
+carries both. `drone @seedgo bypass prune @branch [--dry-run]` removes exactly the convicted
+rules, prints each with its reason, and refuses to rewrite a file `json.dumps` cannot reproduce
+byte for byte. A dead rule matches nothing, so pruning one moves no score.
+
 ---
 
 ## `.seedgoignore` — throwaway paths, no reason required

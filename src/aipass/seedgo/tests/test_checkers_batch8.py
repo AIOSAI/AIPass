@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-25
 # =============================================
 
 import pytest
@@ -536,7 +536,6 @@ def test_no_raw_file_handler_clean():
 
 def test_no_raw_file_handler_violation():
     """File with logging.FileHandler fails."""
-    # seedgo:bypass standard=log_handler reason="test data for checker validation"
     lines: List[str] = [
         '"""Bad module."""',
         "import logging",
@@ -578,7 +577,6 @@ def test_no_raw_stream_handler_no_file_logging():
 
 def test_no_raw_stream_handler_violation():
     """StreamHandler with file logging is a violation."""
-    # seedgo:bypass standard=log_handler reason="test data for checker validation"
     lines: List[str] = [
         "import logging",
         'handler = logging.FileHandler("app.log")',
@@ -598,7 +596,6 @@ def test_no_raw_stream_handler_violation():
 
 def test_no_raw_stream_handler_clean():
     """File logging present but no StreamHandler passes."""
-    # seedgo:bypass standard=log_handler reason="test data for checker validation"
     lines: List[str] = [
         "import logging",
         'handler = logging.FileHandler("app.log")',
@@ -637,7 +634,6 @@ def test_error_not_user_input_clean():
 
 def test_error_not_user_input_violation():
     """ERROR used for user-input pattern fails."""
-    # seedgo:bypass standard=log_level reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'logger.error("Unknown command: %s", cmd)',
@@ -655,7 +651,6 @@ def test_error_not_user_input_violation():
 
 def test_error_not_user_input_in_docstring():
     """ERROR pattern inside a docstring is ignored."""
-    # seedgo:bypass standard=log_level reason="test data for checker validation"
     lines: List[str] = [
         '"""',
         'logger.error("Unknown command: %s", cmd)',
@@ -704,7 +699,6 @@ def test_command_routing_level_clean():
 
 def test_command_routing_level_violation():
     """Command routing with ERROR for user-input pattern fails."""
-    # seedgo:bypass standard=log_level reason="test data for checker validation"
     content = 'def route_command(cmd):\n    logger.error("Unknown command: %s", cmd)\n'
 
     from aipass.seedgo.apps.handlers.aipass_standards.log_level_check import (
@@ -1463,7 +1457,6 @@ def test_no_dangerous_flags_clean():
 
 def test_no_dangerous_flags_violation():
     """File with prohibited permission bypass flag fails."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--dangerously-skip-permissions"',
@@ -1481,7 +1474,6 @@ def test_no_dangerous_flags_violation():
 
 def test_no_dangerous_flags_in_docstring():
     """Prohibited flag inside docstring is ignored."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""',
         "Use --dangerously-skip-permissions for testing",
@@ -1500,7 +1492,6 @@ def test_no_dangerous_flags_in_docstring():
 
 def test_no_dangerous_flags_skip_permissions():
     """File with --skip-permissions fails."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--skip-permissions"',
@@ -1517,7 +1508,6 @@ def test_no_dangerous_flags_skip_permissions():
 
 def test_no_dangerous_flags_bypass_rule():
     """Prohibited flag bypassed by rule passes."""
-    # seedgo:bypass standard=permission_flags reason="test data for checker validation"
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--dangerously-skip-permissions"',

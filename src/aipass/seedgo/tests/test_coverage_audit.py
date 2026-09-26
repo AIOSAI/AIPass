@@ -3,13 +3,10 @@
 # =================== META ====================
 # Name: test_coverage_audit.py
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-26
 # Modified: 2026-09-25
 # =============================================
-
-# seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
-# seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
 
 import types
 

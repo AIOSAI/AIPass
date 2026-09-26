@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-09-25
 # Modified: 2026-09-25
 # =============================================
@@ -209,7 +209,7 @@ def repo_audit(tmp_path, monkeypatch):
     judged = types.SimpleNamespace(AUDIT_SCOPE="all_files", check_module=lambda path, bypass_rules=None: FAIL)
     monkeypatch.setattr(branch_audit, "discover_checkers", lambda _pack=None: {"cli": judged})
     branch = {"name": "mybranch", "entry_file": str(apps / "main.py"), "path": str(apps.parent)}
-    return lambda: branch_audit.audit_branch(branch, [])
+    return lambda rules=(): branch_audit.audit_branch(branch, list(rules))
 
 
 class TestTheIgnoreListRemovesOnlyWhatItWasWrittenFor:
@@ -247,3 +247,55 @@ class TestTheIgnoreListRemovesOnlyWhatItWasWrittenFor:
         assert printed == ["  Ignored by the audit list: /apps/integrations/ 1"]
         doc = artifact.build_artifact([out])
         assert doc["branches"][0]["ignored"] == {"/apps/integrations/": ["apps/integrations/google/driver.py"]}
+
+
+#: One rule per way to be dead, then one live rule and the two blank-field forms.
+RULES = [
+    {"file": "apps/gone.py", "standard": "cli", "reason": "gone file"},
+    {"file": "apps/main.py", "standard": "open_encoding", "reason": "retired standard"},
+    {"file": "apps/main.py", "standard": "cli", "lines": [40], "reason": "past the end"},
+    {"file": "apps/main.py", "standard": "cli", "lines": [1], "reason": "live"},
+    {"file": "", "standard": "cli", "reason": "blank file"},
+    {"file": "apps/gone.py", "standard": "", "reason": "blank standard"},
+]
+
+
+class TestADeadBypassRuleOrCommentIsNamed:
+    def test_a_gone_file_an_unknown_standard_and_lines_past_the_end_are_dead(self, repo_audit):
+        """Mutants: blind to a gone file; blind to an unknown standard; blind to lines past the end."""
+        out = repo_audit(RULES[:4])
+        assert [(d["index"], d["reason"]) for d in out["bypass_dead"]] == [
+            (0, "gone file"),
+            (1, "retired standard"),
+            (2, "past the end"),
+        ]
+
+    def test_a_blank_field_rule_is_dead_and_named(self, repo_audit):
+        """Mutant: blind to a blank field. A rule needs a file and a standard (owner, 2026-09-25 18:55)."""
+        assert [(d["index"], d["why"]) for d in repo_audit(RULES[3:])["bypass_dead"]] == [
+            (1, "blank file: a rule needs a file and a standard to be active"),
+            (2, "blank standard: a rule needs a file and a standard to be active"),
+        ]
+
+    def test_every_inline_bypass_comment_in_the_corpus_is_named(self, repo_audit, tmp_path):
+        """Mutant: blind to a marker. A string that only mentions the form is not one."""
+        marked = tmp_path / "mybranch" / "apps" / "handlers" / "marked.py"
+        marked.write_text(
+            'X = "# seedgo:bypass in a string"\n# seedgo:bypass standard=cli reason="r"\nY = 1  # seedgo:bypass\n',
+            encoding="utf-8",
+        )
+        assert repo_audit()["bypass_markers"] == ["apps/handlers/marked.py:2", "apps/handlers/marked.py:3"]
+
+    def test_the_summary_and_the_artifact_name_each_dead_rule_and_comment(self, repo_audit, tmp_path, capsys):
+        """Mutants: the warning lines dropped; the artifact fields dropped."""
+        (tmp_path / "mybranch" / "apps" / "main.py").write_text("# seedgo:bypass standard=cli\n", encoding="utf-8")
+        out = repo_audit(RULES[:1])
+        capsys.readouterr()
+        audit_display.print_branch_summary(out)
+        captured = capsys.readouterr()
+        printed = " ".join((captured.out + captured.err).split())
+        assert "Dead bypass rule [0] apps/gone.py / cli: file 'apps/gone.py' matches no file on disk" in printed
+        assert "Inline bypass comment, read by nothing: apps/main.py:1" in printed
+        entry = artifact.build_artifact([out])["branches"][0]
+        assert [(d["index"], d["file"], d["standard"]) for d in entry["bypass_dead"]] == [(0, "apps/gone.py", "cli")]
+        assert entry["bypass_markers"] == ["apps/main.py:1"]

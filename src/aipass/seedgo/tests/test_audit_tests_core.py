@@ -19,13 +19,10 @@ contract before the capability, and an untested contract is a promise.
 # =================== META ====================
 # Name: test_audit_tests_core.py
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-29
 # Modified: 2026-09-25
 # =============================================
-
-# seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
-# seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
 
 import os
 import sys

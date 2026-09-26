@@ -7,9 +7,9 @@ Was 6. The test_quality section retired 2026-09-07 with the v4 standard itself
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-25
 # =============================================
 
 from pathlib import Path
@@ -94,7 +94,7 @@ class TestStderrRoutingCheck:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed_module.py"
         _write_file(py_file, ("from rich.console import Console\nerr = Console(stderr=True)\n"))
-        bypass = [{"standard": "stderr_routing"}]
+        bypass = [{"file": py_file.name, "standard": "stderr_routing"}]
         result = stderr_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -134,7 +134,7 @@ class TestTodoCheck:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed.py"
         _write_file(py_file, ("# TODO: this should be bypassed\nx = 1\n"))
-        bypass = [{"standard": "todo"}]
+        bypass = [{"file": py_file.name, "standard": "todo"}]
         result = todo_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -170,7 +170,7 @@ class TestTriggerCheck:
         """Bypass rules produce score=100."""
         py_file = tmp_path / "bypassed_trigger.py"
         _write_file(py_file, ("def create_backup(data):\n    pass\n"))
-        bypass = [{"standard": "trigger"}]
+        bypass = [{"file": py_file.name, "standard": "trigger"}]
         result = trigger_check_module(str(py_file), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -250,7 +250,7 @@ class TestDeadCodeCheck:
             branch / "apps" / "modules" / "orphan.py",
             "def lonely():\n    pass\n",
         )
-        bypass = [{"standard": "dead_code"}]
+        bypass = [{"file": str(branch), "standard": "dead_code"}]
         result = dead_code_check_branch(str(branch), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True
@@ -395,7 +395,7 @@ class TestUnusedFunctionCheck:
             branch / "apps" / "modules" / "orphan.py",
             "def never_called():\n    pass\n",
         )
-        bypass = [{"standard": "unused_function"}]
+        bypass = [{"file": str(branch), "standard": "unused_function"}]
         result = unused_function_check_branch(str(branch), bypass_rules=bypass)
         assert result["score"] == 100
         assert result["passed"] is True

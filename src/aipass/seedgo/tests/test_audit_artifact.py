@@ -10,13 +10,10 @@ every one of those caps and assert the artifact still carries all of it.
 # =================== META ====================
 # Name: test_audit_artifact.py
 # Description: Completeness + join-key tests for audit/artifact.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-11
 # Modified: 2026-09-25
 # =============================================
-
-# seedgo:bypass standard=architecture reason="test files live in tests/, not apps/"
-# seedgo:bypass standard=encapsulation reason="tests import handlers directly for unit testing"
 
 import json
 from pathlib import Path

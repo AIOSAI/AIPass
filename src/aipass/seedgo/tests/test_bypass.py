@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-25
 # =============================================
 
 import json
@@ -938,3 +938,80 @@ def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees():
     assert is_bypassed("/b/apps/foo.py", "cli", None, rules) is True
     assert matching_rule("/b/apps/bar.py", "cli", None, rules) is None
     assert is_bypassed("/b/apps/bar.py", "cli", None, rules) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests -- the prune verb (drone @seedgo bypass prune @branch)
+# ---------------------------------------------------------------------------
+
+#: One dead rule, one live rule, and the two blank-field forms: dead too, but left for the owner.
+PRUNE_RULES = [
+    {"file": "apps/gone.py", "standard": "naming", "reason": "the file was retired"},
+    {"file": "apps/live.py", "standard": "naming", "reason": "a live exception"},
+    {"file": "", "standard": "naming", "reason": "blank file"},
+    {"file": "apps/gone.py", "standard": "", "reason": "blank standard"},
+]
+
+
+@pytest.fixture
+def prune_branch(tmp_path, monkeypatch):
+    """A branch named 'planted': one live file, and a bypass.json of dead, live and blank rules."""
+    from aipass.seedgo.apps.modules import bypass as bypass_module
+
+    branch = tmp_path / "planted"
+    (branch / "apps").mkdir(parents=True)
+    (branch / "apps" / "live.py").write_text("pass\n", encoding="utf-8")
+    (branch / ".seedgo").mkdir()
+    bypass_file = branch / ".seedgo" / "bypass.json"
+    bypass_file.write_text(json.dumps({"metadata": {}, "bypass": PRUNE_RULES, "notes": {}}, indent=2), encoding="utf-8")
+    monkeypatch.setattr(
+        bypass_module, "discover_branches", lambda include_private=False: [{"name": "PLANTED", "path": str(branch)}]
+    )
+    monkeypatch.setattr(bypass_module, "discover_checkers", lambda pack_path=None: {"naming": object()})
+    return bypass_module, bypass_file
+
+
+def _printed(capsys):
+    captured = capsys.readouterr()
+    return " ".join((captured.out + captured.err).split())
+
+
+def test_prune_removes_only_the_dead_rule_and_prints_its_reason(prune_branch, capsys):
+    """Mutant: prune removing a live rule. The live rule stays; both blank-field rules are left, named."""
+    bypass_module, bypass_file = prune_branch
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert json.loads(bypass_file.read_text(encoding="utf-8"))["bypass"] == PRUNE_RULES[1:]
+    printed = _printed(capsys)
+    assert "removed [0] apps/gone.py / naming: file 'apps/gone.py' matches no file on disk" in printed
+    assert "reason: the file was retired" in printed
+    assert "left for the owner [2] / naming: blank file" in printed
+    assert "left for the owner [3] apps/gone.py / : blank standard" in printed
+
+
+def test_a_dry_run_names_the_dead_rule_and_writes_nothing(prune_branch, capsys):
+    """--dry-run leaves the file byte for byte."""
+    bypass_module, bypass_file = prune_branch
+    before = bypass_file.read_bytes()
+    bypass_module.handle_command("bypass", ["prune", "@planted", "--dry-run"])
+    assert bypass_file.read_bytes() == before
+    assert "would remove [0] apps/gone.py / naming" in _printed(capsys)
+
+
+def test_a_file_json_cannot_reproduce_is_refused_not_rewritten(prune_branch, capsys):
+    """A rewrite would reformat every line the owner wrote, so nothing is written."""
+    bypass_module, bypass_file = prune_branch
+    bypass_file.write_text(json.dumps({"bypass": PRUNE_RULES}, indent=4), encoding="utf-8")
+    before = bypass_file.read_bytes()
+    bypass_module.handle_command("bypass", ["prune", "@planted"])
+    assert bypass_file.read_bytes() == before
+    assert "Nothing written: the file does not round-trip" in _printed(capsys)
+
+
+def test_an_unknown_branch_is_refused_with_exit_3(prune_branch):
+    """A target with nothing to act on exits 3 and names the target."""
+    from aipass.seedgo.apps.modules import CommandRefused
+
+    bypass_module, _ = prune_branch
+    with pytest.raises(CommandRefused) as refused:
+        bypass_module.handle_command("bypass", ["prune", "@nobody"])
+    assert (refused.value.code, refused.value.token) == (3, "@nobody")

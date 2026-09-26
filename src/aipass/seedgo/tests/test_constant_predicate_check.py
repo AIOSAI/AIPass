@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_constant_predicate_check.py
 # Description: constant_predicate_check — crack class C, a lambda that cannot discriminate
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-25
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/constant_predicate_check.py."""
@@ -184,8 +184,13 @@ class TestItDeclaresItsScope:
 class TestTheBypass:
     """Every checker in the pack answers to .seedgo/bypass.json."""
 
-    @pytest.mark.parametrize("rules", [[{"standard": "constant_predicate", "pattern": "*"}]])
+    @pytest.mark.parametrize("rules", [[{"standard": "constant_predicate"}]])
     def test_a_bypassed_file_passes(self, tmp_path, rules):
         """A deliberate exception is not a violation."""
         path = _write(tmp_path, "def test_it():\n    walk(root, keep=lambda p: False)\n")
-        assert constant_predicate_check.check_module(str(path), bypass_rules=rules)["score"] == 100
+        assert (
+            constant_predicate_check.check_module(
+                str(path), bypass_rules=[{**rule, "file": str(tmp_path)} for rule in rules]
+            )["score"]
+            == 100
+        )
