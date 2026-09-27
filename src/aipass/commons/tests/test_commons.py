@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_commons.py
 # Description: Integration tests for The Commons social network (posts, comments, votes, rooms, feeds)
 # Version: 1.0.0
@@ -10,6 +10,10 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the handlers this file drives parse and import
+# seedgo: no-test-needed(duplicate) — get_reactions_detailed and get_reaction_summary; test_curation.py pins them
+# seedgo: no-test-needed(duplicate) — search_all; test_search.py and test_space_catchup.py pin it
+# seedgo: no-test-needed(duplicate) — get_db and DB_PATH resolution; test_lifecycle.py pins db.py's live-path side
+# seedgo: no-test-needed(duplicate) — the commands' printed output; test_search.py, test_curation_explore_welcome_ops.py
 
 import functools
 import shutil
@@ -90,7 +94,7 @@ def _fast_db(db_path):
 class TestNotificationPreferences(unittest.TestCase):
     """Test notification preference CRUD and should_notify logic."""
 
-    def setUp(self):
+    def setup_method(self, _method):
         """Create a fresh test database with agents."""
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         self.db_path = Path(self.temp_db.name)
@@ -111,7 +115,7 @@ class TestNotificationPreferences(unittest.TestCase):
         self.should_notify = should_notify
         self.get_watchers = get_watchers
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -231,7 +235,7 @@ class TestNotificationPreferences(unittest.TestCase):
 class TestSocialProfiles(unittest.TestCase):
     """Test social profile columns, updates, and activity counters."""
 
-    def setUp(self):
+    def setup_method(self, _method):
         """Create a fresh test database with agents."""
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         self.db_path = Path(self.temp_db.name)
@@ -254,7 +258,7 @@ class TestSocialProfiles(unittest.TestCase):
         self.increment_post_count = increment_post_count
         self.increment_comment_count = increment_comment_count
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -274,56 +278,71 @@ class TestSocialProfiles(unittest.TestCase):
         self.assertEqual(row["comment_count"], 0)
 
     def test_update_bio(self):
-        """Test updating an agent's bio."""
+        """Test updating an agent's bio.
+
+        Mutant: update_bio writes (bio.upper(), branch_name) - the stored bio no longer equals the one given.
+        """
         result = self.update_bio(self.conn, "PROFILE_A", "I enforce code quality standards")
         self.assertTrue(result)
 
         profile = self.get_profile(self.conn, "PROFILE_A")
         assert profile is not None
-        self.assertEqual(profile["bio"], "I enforce code quality standards")
+        assert profile["bio"] == "I enforce code quality standards"
 
     def test_update_status(self):
-        """Test updating an agent's status."""
+        """Test updating an agent's status.
+
+        Mutant: update_status writes (status.upper(), branch_name) - the stored status no longer equals the one given.
+        """
         result = self.update_status(self.conn, "PROFILE_A", "Auditing branches")
         self.assertTrue(result)
 
         profile = self.get_profile(self.conn, "PROFILE_A")
         assert profile is not None
-        self.assertEqual(profile["status"], "Auditing branches")
+        assert profile["status"] == "Auditing branches"
 
     def test_update_role(self):
-        """Test updating an agent's role."""
+        """Test updating an agent's role.
+
+        Mutant: update_role writes (role.upper(), branch_name) - the stored role no longer equals the one given.
+        """
         result = self.update_role(self.conn, "PROFILE_A", "Standards Authority")
         self.assertTrue(result)
 
         profile = self.get_profile(self.conn, "PROFILE_A")
         assert profile is not None
-        self.assertEqual(profile["role"], "Standards Authority")
+        assert profile["role"] == "Standards Authority"
 
     def test_increment_post_count(self):
-        """Test incrementing post_count."""
+        """Test incrementing post_count.
+
+        Mutant: SET post_count = 1 instead of post_count + 1 - the second increment stays at 1.
+        """
         self.increment_post_count(self.conn, "PROFILE_A")
         self.conn.commit()
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["post_count"], 1)
+        assert stats["post_count"] == 1
 
         self.increment_post_count(self.conn, "PROFILE_A")
         self.conn.commit()
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["post_count"], 2)
+        assert stats["post_count"] == 2
 
     def test_increment_comment_count(self):
-        """Test incrementing comment_count."""
+        """Test incrementing comment_count.
+
+        Mutant: SET comment_count = 1 instead of comment_count + 1 - four increments stay at 1.
+        """
         self.increment_comment_count(self.conn, "PROFILE_A")
         self.conn.commit()
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["comment_count"], 1)
+        assert stats["comment_count"] == 1
 
         for _ in range(3):
             self.increment_comment_count(self.conn, "PROFILE_A")
@@ -331,10 +350,13 @@ class TestSocialProfiles(unittest.TestCase):
 
         stats = self.get_activity_stats(self.conn, "PROFILE_A")
         assert stats is not None
-        self.assertEqual(stats["comment_count"], 4)
+        assert stats["comment_count"] == 4
 
     def test_get_profile_returns_all_fields(self):
-        """Test that get_profile returns all expected profile fields."""
+        """Test that get_profile returns all expected profile fields.
+
+        Mutant: get_profile's SELECT drops the role column - the key set no longer matches.
+        """
         self.update_bio(self.conn, "PROFILE_B", "Test bio")
         self.update_status(self.conn, "PROFILE_B", "Testing")
         self.update_role(self.conn, "PROFILE_B", "Tester")
@@ -356,8 +378,7 @@ class TestSocialProfiles(unittest.TestCase):
             "post_count",
             "comment_count",
         ]
-        for key in expected_keys:
-            self.assertIn(key, profile, f"Missing key: {key}")
+        assert sorted(profile) == sorted(expected_keys)
 
         self.assertEqual(profile["branch_name"], "PROFILE_B")
         self.assertEqual(profile["bio"], "Test bio")
@@ -371,7 +392,7 @@ class TestSocialProfiles(unittest.TestCase):
 class TestWelcomeOnboarding(unittest.TestCase):
     """Test welcome posts, duplicate prevention, and onboarding nudges."""
 
-    def setUp(self):
+    def setup_method(self, _method):
         """Create a fresh test database with agents."""
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         self.db_path = Path(self.temp_db.name)
@@ -391,7 +412,7 @@ class TestWelcomeOnboarding(unittest.TestCase):
         self.get_onboarding_nudge = get_onboarding_nudge
         self.welcome_new_branches = welcome_new_branches
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -444,12 +465,15 @@ class TestWelcomeOnboarding(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_onboarding_nudge_new_user(self):
-        """Test that a branch with no posts and no comments gets a nudge."""
+        """Test that a branch with no posts and no comments gets a nudge.
+
+        Mutant: the new-user message reads "You have not posted yet" - the nudge no longer opens as pinned.
+        """
         nudge = self.get_onboarding_nudge(self.conn, "WELCOME_A")
 
         self.assertIsNotNone(nudge)
         assert nudge is not None
-        self.assertIn("haven't posted yet", nudge)
+        assert nudge.startswith("You haven't posted yet!")
         self.assertIn("commons post", nudge)
 
     def test_onboarding_nudge_active_user(self):
@@ -461,7 +485,10 @@ class TestWelcomeOnboarding(unittest.TestCase):
         self.assertIsNone(nudge)
 
     def test_onboarding_nudge_commenter_only(self):
-        """Test that a branch with comments but no posts gets a specific nudge."""
+        """Test that a branch with comments but no posts gets a specific nudge.
+
+        Mutant: the new-user branch tests comment_count >= 0 - a commenter gets the new-user nudge instead.
+        """
         self.conn.execute("UPDATE agents SET comment_count = 5, post_count = 0 WHERE branch_name = ?", ("WELCOME_C",))
         self.conn.commit()
 
@@ -469,7 +496,7 @@ class TestWelcomeOnboarding(unittest.TestCase):
 
         self.assertIsNotNone(nudge)
         assert nudge is not None
-        self.assertIn("commenting but never posted", nudge)
+        assert nudge.startswith("You've been commenting but never posted!")
 
     def test_welcome_new_branches(self):
         """Test that welcome_new_branches scans and welcomes all unwelcomed branches."""
@@ -490,7 +517,7 @@ class TestWelcomeOnboarding(unittest.TestCase):
 class TestSearchAndLogs(unittest.TestCase):
     """Test FTS5 search and log export."""
 
-    def setUp(self):
+    def setup_method(self, _method):
         """Create a fresh test database with agents and sample data."""
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         self.db_path = Path(self.temp_db.name)
@@ -512,7 +539,7 @@ class TestSearchAndLogs(unittest.TestCase):
         self.sync_comment_to_fts = sync_comment_to_fts
         self.export_room_log = export_room_log
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -603,7 +630,10 @@ class TestSearchAndLogs(unittest.TestCase):
         self.assertEqual(results[0]["author"], "SEARCH_B")
 
     def test_sync_post_to_fts(self):
-        """Test that syncing a post to FTS makes it searchable."""
+        """Test that syncing a post to FTS makes it searchable.
+
+        Mutant: sync_post_to_fts indexes rowid post_id + 1 - the search no longer finds this post.
+        """
         cursor = self.conn.execute(
             "INSERT INTO posts (room_name, author, title, content) VALUES (?, ?, ?, ?)",
             ("general", "SEARCH_A", "Unsynced Post", "This is not yet indexed"),
@@ -619,8 +649,7 @@ class TestSearchAndLogs(unittest.TestCase):
         self.conn.commit()
 
         results = self.search_posts(self.conn, "unsynced")
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["id"], post_id)
+        assert [r["id"] for r in results] == [post_id]
 
     def test_log_export_format(self):
         """Test that log export produces correctly formatted plaintext."""
@@ -648,7 +677,7 @@ class TestSearchAndLogs(unittest.TestCase):
 class TestReactionsAndPins(unittest.TestCase):
     """Test reactions, pins, and trending detection."""
 
-    def setUp(self):
+    def setup_method(self, _method):
         """Create a fresh test database with agents, posts, and comments."""
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         self.db_path = Path(self.temp_db.name)
@@ -686,7 +715,7 @@ class TestReactionsAndPins(unittest.TestCase):
         self.get_pinned_posts = get_pinned_posts
         self.is_pinned = is_pinned
 
-    def tearDown(self):
+    def teardown_method(self, _method):
         """Clean up test database."""
         self.conn.close()
         if self.db_path.exists():
@@ -910,5 +939,20 @@ def test_schema_creates_the_lookup_indexes(tmp_path: Path) -> None:
     assert {"idx_posts_room", "idx_posts_author", "idx_comments_post", "idx_votes_target"} <= {r["name"] for r in rows}
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+def test_schema_stores_each_of_the_four_post_types(tmp_path: Path) -> None:
+    """posts.post_type CHECK accepts discussion, review, question, announcement; drop one and its insert is refused.
+
+    Mutant: init_db applies schema.sql with 'review' dropped from the CHECK - the review insert raises IntegrityError.
+    """
+    conn = init_db(tmp_path / "commons.db")
+    conn.execute("INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES ('TEST_AGENT', 'Test Agent')")
+    four = ["discussion", "review", "question", "announcement"]
+    for post_type in four:
+        conn.execute(
+            "INSERT INTO posts (room_name, author, title, content, post_type)"
+            " VALUES ('general', 'TEST_AGENT', ?, 'c', ?)",
+            (post_type, post_type),
+        )
+    stored = [r["post_type"] for r in conn.execute("SELECT post_type FROM posts ORDER BY id").fetchall()]
+    close_db(conn)
+    assert stored == four

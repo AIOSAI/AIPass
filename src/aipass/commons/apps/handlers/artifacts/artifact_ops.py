@@ -75,7 +75,11 @@ def _validate_metadata(metadata_str: str) -> Optional[dict]:
 
 
 def _resolve_branch_name(mention: str) -> Optional[str]:
-    """Resolve a @mention to a branch name (lowercase-normalized)."""
+    """Resolve a @mention to a branch name (lowercase-normalized).
+
+    Returns None when no registered branch has that name. An unreadable
+    registry raises instead, so "not found" never stands in for "could not look".
+    """
     name = mention.lstrip("@").lower()
 
     if not os.path.exists(BRANCH_REGISTRY_PATH):
@@ -90,7 +94,7 @@ def _resolve_branch_name(mention: str) -> Optional[str]:
         return None
     except Exception:
         logger.error("[artifact_ops] Failed to resolve branch name from registry")
-        return None
+        raise
 
 
 # =============================================================================
@@ -350,6 +354,7 @@ def collab_artifact(args: List[str]) -> dict:
 
     rarity = "rare"
     signers = []
+    mentioned = []
     remaining = args[2:]
     warnings = []
     i = 0
@@ -358,14 +363,21 @@ def collab_artifact(args: List[str]) -> dict:
             rarity = remaining[i + 1]
             i += 2
         elif remaining[i].startswith("@"):
-            resolved = _resolve_branch_name(remaining[i])
-            if resolved:
-                signers.append(resolved)
-            else:
-                warnings.append(f"Branch '{remaining[i]}' not found, skipping")
+            mentioned.append(remaining[i])
             i += 1
         else:
             i += 1
+
+    try:
+        resolved_names = [(mention, _resolve_branch_name(mention)) for mention in mentioned]
+    except Exception as exc:
+        logger.warning(f"[artifact_ops] collab stopped: branch registry unreadable: {exc}")
+        return {"success": False, "error": f"Branch registry unreadable: {exc}"}
+    for mention, resolved in resolved_names:
+        if resolved:
+            signers.append(resolved)
+        else:
+            warnings.append(f"Branch '{mention}' not found, skipping")
 
     if not signers:
         return {"success": False, "error": "At least one @signer is required"}

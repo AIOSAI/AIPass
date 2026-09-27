@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_cli_and_contracts.py - CLI Routing, Contracts, and Infrastructure Tests
 # Description: main()'s help/introspection/exit-code routing, route_command, and the json shim's contracts
@@ -24,39 +24,10 @@
 
 import importlib
 import sqlite3
-import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Mock infrastructure before importing commons modules
-# ---------------------------------------------------------------------------
-
-_mock_logger = MagicMock()
-_mock_logger_module = MagicMock()
-_mock_logger_module.system_logger = _mock_logger
-
-try:
-    from aipass.prax.apps.modules.logger import system_logger  # noqa: F401
-except ImportError:
-    sys.modules.setdefault("aipass.prax", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps.modules", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps.modules.logger", _mock_logger_module)
-
-try:
-    from aipass.cli.apps.modules import console  # noqa: F401
-except ImportError:
-    _mock_cli = MagicMock()
-    _mock_cli.console = MagicMock()
-    _mock_cli.header = MagicMock()
-    _mock_cli.error = MagicMock()
-    _mock_cli.warning = MagicMock()
-    sys.modules.setdefault("aipass.cli", MagicMock())
-    sys.modules.setdefault("aipass.cli.apps", MagicMock())
-    sys.modules.setdefault("aipass.cli.apps.modules", _mock_cli)
 
 import aipass.commons.apps.commons as commons_main
 from aipass.commons.apps.commons import (
@@ -82,7 +53,7 @@ from aipass.commons.apps.modules import explore as explore_module
 def test_help_flag_returns_zero():
     """Passing --help to main() should return 0 and show help."""
     with (
-        patch.object(sys, "argv", ["commons", "--help"]),
+        patch("sys.argv", ["commons", "--help"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[MagicMock()]),
         patch.object(commons_main, "print_help") as mock_ph,
@@ -100,7 +71,7 @@ def test_help_flag_returns_zero():
 def test_short_help_flag_returns_zero():
     """Passing '-h' to main() should return 0 and show help."""
     with (
-        patch.object(sys, "argv", ["commons", "-h"]),
+        patch("sys.argv", ["commons", "-h"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[MagicMock()]),
         patch.object(commons_main, "print_help") as mock_ph,
@@ -118,7 +89,7 @@ def test_short_help_flag_returns_zero():
 def test_help_word_returns_zero():
     """Passing 'help' as a command to main() should return 0 and show help."""
     with (
-        patch.object(sys, "argv", ["commons", "help"]),
+        patch("sys.argv", ["commons", "help"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[MagicMock()]),
         patch.object(commons_main, "print_help") as mock_ph,
@@ -183,7 +154,7 @@ def test_print_introspection_is_callable():
 def test_no_args_triggers_introspection():
     """Running main() with no args should call print_introspection and return 0."""
     with (
-        patch.object(sys, "argv", ["commons"]),
+        patch("sys.argv", ["commons"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[]),
         patch.object(commons_main, "print_introspection") as mock_pi,
@@ -203,7 +174,7 @@ def test_help_preempts_command_routing():
     mock_module = MagicMock()
     mock_module.handle_command.return_value = True
     with (
-        patch.object(sys, "argv", ["commons", "--help"]),
+        patch("sys.argv", ["commons", "--help"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[mock_module]),
         patch.object(commons_main, "print_help") as mock_ph,
@@ -220,7 +191,10 @@ def test_help_preempts_command_routing():
 
 
 def test_route_command_returns_true_for_handled():
-    """route_command hands the command to the first module that takes it, then stops (mutant: loop not stopped)."""
+    """route_command returns True when a module handles the command: the first module that takes it, then stops.
+
+    Mutant killed: loop not stopped after the first module handles it.
+    """
     mock_module = MagicMock()
     mock_module.handle_command.return_value = True
     later_module = MagicMock()
@@ -287,7 +261,7 @@ def test_main_returns_nonzero_when_a_handled_command_refused(capsys):
     mock_module = MagicMock()
     mock_module.handle_command.side_effect = refusing_module
     with (
-        patch.object(sys, "argv", ["commons", "thread", "not_a_real_subarg_xyz"]),
+        patch("sys.argv", ["commons", "thread", "not_a_real_subarg_xyz"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[mock_module]),
     ):
@@ -304,7 +278,7 @@ def test_main_returns_zero_when_a_handled_command_did_not_refuse():
     mock_module = MagicMock()
     mock_module.handle_command.return_value = True
     with (
-        patch.object(sys, "argv", ["commons", "feed"]),
+        patch("sys.argv", ["commons", "feed"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[mock_module]),
     ):
@@ -338,7 +312,7 @@ def test_unknown_command_names_the_whole_invocation():
     mock_module = MagicMock()
     mock_module.handle_command.return_value = False
     with (
-        patch.object(sys, "argv", ["commons", "nosuchverb", "nosucharg"]),
+        patch("sys.argv", ["commons", "nosuchverb", "nosucharg"]),
         patch.object(commons_main, "ensure_database", return_value=True),
         patch.object(commons_main, "discover_modules", return_value=[mock_module]),
         patch.object(commons_main, "error") as mock_error,

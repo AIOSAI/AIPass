@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_curation.py - Curation Subsystem Tests
 # Description: Tests for apps/handlers/curation/reaction_queries.py, pin_queries.py and trending_queries.py

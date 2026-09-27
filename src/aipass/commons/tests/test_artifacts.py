@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_artifacts.py - Artifact, Trade, and Capsule Tests
 # Description: Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py
@@ -21,20 +21,22 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/artifacts/ parses and imports
+# seedgo: no-test-needed(constant) — the VALID_TYPES and VALID_RARITIES rosters; craft's success case names one of each
 
+import json
 import sqlite3
 from datetime import datetime, timezone, timedelta
+from typing import Any, Dict
 from unittest.mock import patch, MagicMock
 
+import pytest
 
 from aipass.commons.apps.handlers.artifacts.artifact_ops import (
-    _validate_metadata,
     craft_artifact,
     list_artifacts,
     inspect_artifact,
 )
 from aipass.commons.apps.handlers.artifacts.trade_ops import (
-    _now_utc,
     sweep_expired,
     gift_artifact,
     drop_item,
@@ -64,41 +66,80 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_BRANCH") -> N
 
 
 # =============================================================================
-# _validate_metadata — pure function, no DB needed
+# craft --metadata — the metadata validation, reached through craft_artifact
 # =============================================================================
 
 
-def test_validate_metadata_valid_json() -> None:
-    """Valid shallow JSON dict should return the parsed dict."""
-    result = _validate_metadata('{"key": "value", "count": 42}')
-    assert result is not None
-    assert isinstance(result, dict)
-    assert result["key"] == "value"
-    assert result["count"] == 42
+@pytest.fixture
+def craft_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point craft_artifact at the tmp database with TEST_BRANCH as the caller.
+
+    Every metadata test takes this, the refusals too: a mutant that lets bad metadata
+    through reaches the caller lookup and the INSERT, and both must land here.
+    """
+    monkeypatch.setattr("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.artifacts.artifact_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.artifacts.artifact_ops.json_handler.log_operation", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch", lambda: {"name": "TEST_BRANCH"}
+    )
+    _insert_test_agent(initialized_db)
+    return initialized_db
 
 
-def test_validate_metadata_malformed_json() -> None:
-    """Malformed JSON string should return None."""
-    result = _validate_metadata("{not valid json")
-    assert result is None
+def _craft_with_metadata(metadata: str) -> Dict[str, Any]:
+    """Craft an artifact the way 'commons craft "Gem" "desc" --metadata JSON' does."""
+    return craft_artifact(["Gem", "desc", "--metadata", metadata])
 
 
-def test_validate_metadata_nested_objects() -> None:
-    """JSON with nested objects or arrays should return None (shallow only)."""
-    result = _validate_metadata('{"nested": {"a": 1}}')
-    assert result is None
+def _assert_metadata_refused(conn: sqlite3.Connection, metadata: str) -> None:
+    """The craft is refused with the metadata error and nothing is stored."""
+    result = _craft_with_metadata(metadata)
+    assert result["success"] is False, result
+    assert "Invalid metadata" in result["error"]
+    assert conn.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] == 0
 
-    result = _validate_metadata('{"list": [1, 2, 3]}')
-    assert result is None
+
+def test_validate_metadata_valid_json(craft_db: sqlite3.Connection) -> None:
+    """Valid shallow JSON dict is accepted and stored as the parsed dict.
+
+    Mutant: `for value in data.values():` -> `for value in [{}]:` (every dict refused) reddens this.
+    """
+    result = _craft_with_metadata('{"key": "value", "count": 42}')
+    assert result["success"] is True, result
+    row = craft_db.execute("SELECT metadata FROM artifacts WHERE id = ?", (result["artifact_id"],)).fetchone()
+    stored = json.loads(row["metadata"])
+    assert isinstance(stored, dict)
+    assert stored["key"] == "value"
+    assert stored["count"] == 42
 
 
-def test_validate_metadata_non_dict_json() -> None:
-    """JSON that parses to a non-dict (list, string, etc.) should return None."""
-    result = _validate_metadata("[1, 2, 3]")
-    assert result is None
+def test_validate_metadata_malformed_json(craft_db: sqlite3.Connection) -> None:
+    """Malformed JSON string is refused.
 
-    result = _validate_metadata('"just a string"')
-    assert result is None
+    Mutant: the decode-error branch's `return None` -> `return {}` reddens this.
+    """
+    _assert_metadata_refused(craft_db, "{not valid json")
+
+
+def test_validate_metadata_nested_objects(craft_db: sqlite3.Connection) -> None:
+    """JSON with nested objects or arrays is refused (shallow only).
+
+    Mutant: `isinstance(value, (dict, list))` -> `isinstance(value, (list,))` reddens this (the dict case).
+    """
+    _assert_metadata_refused(craft_db, '{"nested": {"a": 1}}')
+    _assert_metadata_refused(craft_db, '{"list": [1, 2, 3]}')
+
+
+def test_validate_metadata_non_dict_json(craft_db: sqlite3.Connection) -> None:
+    """JSON that parses to a non-dict (list, string, etc.) is refused.
+
+    Mutant: the non-dict branch's `return None` -> `return {}` reddens this.
+    """
+    _assert_metadata_refused(craft_db, "[1, 2, 3]")
+    _assert_metadata_refused(craft_db, '"just a string"')
 
 
 # =============================================================================
@@ -192,18 +233,38 @@ def test_inspect_artifact_no_args() -> None:
 
 
 # =============================================================================
-# _now_utc — pure function
+# sweep's clock — the ISO-Z "now" sweep_expired compares expires_at against
 # =============================================================================
 
 
-def test_now_utc_returns_iso_format() -> None:
-    """_now_utc should return a string in ISO format ending with Z."""
-    result = _now_utc()
-    assert isinstance(result, str)
-    assert result.endswith("Z")
-    # Should parse without error
-    parsed = datetime.strptime(result, "%Y-%m-%dT%H:%M:%SZ")
-    assert parsed is not None
+@patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db")
+@patch("aipass.commons.apps.handlers.artifacts.trade_ops.close_db")
+def test_now_utc_returns_iso_format(
+    mock_close: MagicMock,
+    mock_get_db: MagicMock,
+    initialized_db: sqlite3.Connection,
+) -> None:
+    """sweep_expired's "now" is UTC in ISO format ending with Z, comparable to a stored expires_at.
+
+    An item two minutes past its ISO-Z expiry is swept; one an hour short of it is kept.
+    Mutant: _now_utc's `strftime("%Y-%m-%dT%H:%M:%SZ")` -> `strftime("%Y-%m-%d %H:%M:%S")` reddens this.
+    """
+    mock_get_db.return_value = initialized_db
+    mock_close.side_effect = lambda conn: None
+    _insert_test_agent(initialized_db)
+
+    now = datetime.now(timezone.utc)
+    for name, when in (("Just Expired", now - timedelta(minutes=2)), ("Still Fresh", now + timedelta(hours=1))):
+        initialized_db.execute(
+            "INSERT INTO artifacts (name, type, creator, owner, rarity, description, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (name, "found", "TEST_BRANCH", "TEST_BRANCH", "common", "d", when.strftime("%Y-%m-%dT%H:%M:%SZ")),
+        )
+    initialized_db.commit()
+
+    assert sweep_expired() == 1
+    left = [r["name"] for r in initialized_db.execute("SELECT name FROM artifacts")]
+    assert left == ["Still Fresh"]
 
 
 # =============================================================================
@@ -417,3 +478,39 @@ def test_capsule_handle_command_routes_capsule(
 
     assert result is True
     seal_mock.assert_called_once_with(["Title", "Content", "7"])
+
+
+def test_sweep_expired_answers_minus_one_when_the_database_fails() -> None:
+    """A failed sweep answers -1, never 0: 0 means "nothing expired", so the caller could not tell the two apart.
+
+    get_db is stubbed to raise, so nothing reaches the live database.
+    Mutant: the handler returns 0 again - the failure reads as "nothing expired".
+    """
+    with patch(
+        "aipass.commons.apps.handlers.artifacts.trade_ops.get_db",
+        side_effect=sqlite3.OperationalError("database is locked"),
+    ):
+        assert sweep_expired() == -1
+
+
+def test_gift_trade_mint_collab_name_an_unreadable_registry(tmp_path) -> None:
+    """An unreadable registry is reported as such, never as "branch not found".
+
+    The registry is a tmp_path file holding broken JSON; each command stops at the name lookup, before any
+    caller detection or database write.
+    Mutant: trade_ops/artifact_ops _resolve_branch_name returns None again - the error reads "not found".
+    """
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text("{not json", encoding="utf-8")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.BRANCH_REGISTRY_PATH", str(registry)),
+    ):
+        results = [
+            gift_artifact(["1", "@ghost"]),
+            trade_module.trade_artifact(["1", "2", "@ghost"]),
+            trade_module.mint_event_artifact(["Event", "@ghost"]),
+            artifact_module.collab_artifact(["Name", "Desc", "@ghost"]),
+        ]
+    assert [r["success"] for r in results] == [False] * 4
+    assert [r["error"].startswith("Branch registry unreadable") for r in results] == [True] * 4

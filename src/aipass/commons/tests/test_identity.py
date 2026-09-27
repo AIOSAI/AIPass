@@ -11,37 +11,11 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that commons_identity.py and identity_ops.py parse and import
 
-import logging
 import sqlite3
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-logger = logging.getLogger(__name__)
-
-_mock_logger = MagicMock()
-_mock_logger_module = MagicMock()
-_mock_logger_module.system_logger = _mock_logger
-
-try:
-    from aipass.prax.apps.modules.logger import system_logger  # noqa: F401
-except ImportError:
-    logger.warning("[test_identity] prax unavailable — injecting mock logger")
-    sys.modules.setdefault("aipass.prax", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps.modules", MagicMock())
-    sys.modules.setdefault("aipass.prax.apps.modules.logger", _mock_logger_module)
-
-try:
-    from aipass.cli.apps.modules import console  # noqa: F401
-except ImportError:
-    logger.warning("[test_identity] cli unavailable — injecting mock console")
-    _mock_cli = MagicMock()
-    sys.modules.setdefault("aipass.cli", _mock_cli)
-    sys.modules.setdefault("aipass.cli.apps", MagicMock())
-    sys.modules.setdefault("aipass.cli.apps.modules", MagicMock())
 
 from aipass.commons.apps.modules import commons_identity as _id_mod
 from aipass.commons.apps.handlers.identity import identity_ops as _ops
@@ -548,26 +522,45 @@ def test_get_caller_branch_end_to_end_for_external_citizen(
 # ---------------------------------------------------------------------------
 
 
-def test_find_caller_registries_skips_the_aipass_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """The AIPass registry is consulted first, never again during the walk."""
-    _write_registry(tmp_path / "AIPASS_REGISTRY.json", [])
-    _write_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", [])
+def test_find_caller_registries_skips_the_aipass_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path
+):
+    """
+    The AIPass registry is consulted first, never again during the walk.
+
+    Through get_branch_info_by_name: an AIPASS_REGISTRY.json met on the walk
+    up from the caller's cwd is not the caller's project registry, so a name
+    only it holds never resolves.
+    Mutant killed: dropping `and path.name != "AIPASS_REGISTRY.json"` from
+    _find_caller_registries (GHOST resolves from the walked AIPass registry).
+    """
+    _write_registry(tmp_path / "AIPASS_REGISTRY.json", [{"name": "GHOST", "path": "ghost", "email": "@ghost"}])
+    _write_registry(tmp_path / "VERA-STUDIO_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@vera"}])
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
 
-    found = _ops._find_caller_registries()
+    assert _id_mod.get_branch_info_by_name("ghost") is None
+    result = _id_mod.get_branch_info_by_name("vera")
+    assert result is not None
+    assert result["email"] == "@vera"
 
-    assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
 
+def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """
+    Multiple registries in one directory resolve in deterministic order.
 
-def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Multiple registries in one directory resolve in deterministic order."""
-    _write_registry(tmp_path / "ZEBRA_REGISTRY.json", [])
-    _write_registry(tmp_path / "ALPHA_REGISTRY.json", [])
+    Both registries hold a VERA; the alphabetically first registry answers,
+    whatever order the filesystem lists them in.
+    Mutant killed: `return matches` -> `return matches[::-1]` in
+    _find_caller_registries (ZEBRA's VERA answers).
+    """
+    _write_registry(tmp_path / "ZEBRA_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@zebra-vera"}])
+    _write_registry(tmp_path / "ALPHA_REGISTRY.json", [{"name": "VERA", "path": "vera", "email": "@alpha-vera"}])
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(tmp_path))
 
-    found = _ops._find_caller_registries()
+    result = _id_mod.get_branch_info_by_name("vera")
 
-    assert [p.name for p in found] == ["ALPHA_REGISTRY.json", "ZEBRA_REGISTRY.json"]
+    assert result is not None
+    assert result["email"] == "@alpha-vera"
 
 
 def test_find_caller_registries_without_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
@@ -581,9 +574,19 @@ def test_find_caller_registries_without_env(tmp_path: Path, monkeypatch: pytest.
     assert _id_mod.get_branch_info_by_name("vera") is None
 
 
-def test_branches_from_registry_missing_file(tmp_path: Path):
-    """A registry path that doesn't exist yields no branches."""
-    assert _ops._branches_from_registry(tmp_path / "nope.json") == []
+def test_branches_from_registry_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """
+    A registry path that doesn't exist yields no branches.
+
+    Through get_branch_info_by_name: the AIPass registry pointed at a missing
+    file, no caller walk — the lookup answers None, it does not raise.
+    Mutant killed: the missing-file `return []` in _branches_from_registry
+    -> `raise FileNotFoundError(registry_path)`.
+    """
+    monkeypatch.setattr(_REGISTRY_ATTR, tmp_path / "nope.json")
+    monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
+
+    assert _id_mod.get_branch_info_by_name("vera") is None
 
 
 def test_branches_from_registry_dict_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
@@ -707,19 +710,26 @@ def test_case_folded_registry_cannot_answer_identity(
 
 
 def test_case_folded_registry_excluded_from_caller_registries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case_insensitive_glob
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path, case_insensitive_glob
 ):
-    """The decoy is filtered at the source, so no later matcher can reach it."""
+    """
+    The decoy is filtered at the source, so no later matcher can reach it.
+
+    Through get_branch_info_by_name: the decoy's only citizen, GHOST, never
+    resolves by name, while the real project registry still answers VERA.
+    Mutant killed: `if path.name.endswith("_REGISTRY.json")` ->
+    `if path.name.lower().endswith("_registry.json")` in _find_caller_registries.
+    """
     project = tmp_path / "Vera-Studio"
     project.mkdir()
     branch_dir = _make_external_project(project)
-    decoy = _plant_case_folded_decoy(project, branch_dir)
+    _plant_case_folded_decoy(project, branch_dir)
     monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    found = _ops._find_caller_registries()
-
-    assert decoy not in found, "case-folded registry survived the suffix filter"
-    assert [p.name for p in found] == ["VERA-STUDIO_REGISTRY.json"]
+    assert _id_mod.get_branch_info_by_name("ghost") is None, "case-folded registry survived the suffix filter"
+    result = _id_mod.get_branch_info_by_name("vera")
+    assert result is not None
+    assert result["name"] == "VERA"
 
 
 # The pattern production actually globs, and a probe file whose suffix is the

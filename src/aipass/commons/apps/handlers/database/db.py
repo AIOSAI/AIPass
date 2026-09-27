@@ -3,7 +3,7 @@
 # Description: The Commons SQLite connection manager
 # Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -34,9 +34,12 @@ from aipass.commons.apps.handlers.module_root import module_file
 # =============================================================================
 
 
-def _find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
+def find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
     """
     Walk up from a starting path to find the commons branch root.
+
+    Public so a caller diagnosing a checkout (a fresh clone, a moved tree)
+    can ask which root commons would resolve without opening the database.
 
     Accepts the branch root if EITHER .trinity/ OR .aipass/ is a directory
     there. .trinity/ is checked first, but .aipass/ is git-tracked (unlike
@@ -63,9 +66,12 @@ def _find_branch_root(start_path: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def _get_db_path() -> Optional[Path]:
+def resolve_db_path() -> Optional[Path]:
     """
     Resolve the database file path.
+
+    Public for the same reason as find_branch_root: it answers where commons
+    would put its database, or None, without creating or opening anything.
 
     Resolution order:
     1. Walk up from __file__ to find branch root (.trinity/ or .aipass/
@@ -76,7 +82,7 @@ def _get_db_path() -> Optional[Path]:
         Path to the commons.db file, or None if neither resolves. Callers
         must not silently fall back to a guessed location — see get_db().
     """
-    branch_root = _find_branch_root()
+    branch_root = find_branch_root()
     if branch_root:
         return branch_root / "commons.db"
 
@@ -87,7 +93,7 @@ def _get_db_path() -> Optional[Path]:
     return None
 
 
-DB_PATH = _get_db_path()
+DB_PATH = resolve_db_path()
 
 
 class CommonsRootNotFound(RuntimeError):

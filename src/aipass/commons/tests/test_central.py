@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_central.py
 # Description: Tests for central_writer, dashboard_writer, and dashboard_pipeline handlers
 # Version: 1.0.0

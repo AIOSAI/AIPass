@@ -9,6 +9,8 @@
 """Tests for apps/handlers/module_root.py: module_file() returns the RIGHT file when resolve() cannot be asked."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — ntpath.realpath's getcwd read; resolve denied for one path here, Windows CI runs it
+# seedgo: no-test-needed(constant) — MODULE_NAME and module_file's logger.debug text
 
 from pathlib import Path
 

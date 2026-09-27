@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_rooms.py - Room and Space Module Tests
 # Description: Tests for apps/handlers/rooms/room_ops.py and apps/modules/space.py
@@ -21,11 +21,18 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/rooms/ parses and imports
+# seedgo: no-test-needed(library) — the colour rich.panel.Panel paints for a style name; a spy pins the name handed over
 
+import sqlite3
+from typing import Any
+
+import pytest
 from unittest.mock import patch
 
+from rich.panel import Panel
 
-from aipass.commons.apps.modules.space import MOOD_STYLES, _mood_style, _mood_icon
+from aipass.commons.apps.modules import space
+from aipass.commons.apps.modules.space import MOOD_STYLES
 from aipass.commons.apps.handlers.rooms.room_ops import create_room, list_rooms, join_room
 from aipass.commons.apps.modules import room as room_module
 from aipass.commons.apps.handlers.rooms.room_state_ops import (
@@ -62,30 +69,84 @@ def test_mood_styles_values_are_color_icon_tuples():
         assert isinstance(icon, str) and icon, f"Icon must be a non-empty string for '{mood}'"
 
 
-def test_mood_style_returns_correct_color():
-    """_mood_style should return the Rich color string for known moods."""
-    assert _mood_style("welcoming") == "green"
-    assert _mood_style("tense") == "red"
-    assert _mood_style("celebratory") == "magenta"
+@pytest.fixture
+def space_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point the space handlers at the tmp database and keep the caller lookup off live state."""
+    monkeypatch.setattr("aipass.commons.apps.handlers.rooms.space_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.rooms.space_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(space, "get_caller_branch", lambda: {"name": "TEST_BRANCH"})
+    return initialized_db
 
 
-def test_mood_style_unknown_mood_returns_dim():
-    """_mood_style should fall back to 'dim' for unrecognized moods."""
-    assert _mood_style("chaotic") == "dim"
-    assert _mood_style("") == "dim"
+def _set_mood(conn: sqlite3.Connection, mood: str) -> None:
+    """Give the seeded 'general' room a mood."""
+    conn.execute("UPDATE rooms SET mood = ? WHERE name = 'general'", (mood,))
+    conn.commit()
 
 
-def test_mood_icon_returns_correct_icon():
-    """_mood_icon should return the text icon for known moods."""
-    assert _mood_icon("welcoming") == "~"
-    assert _mood_icon("tense") == "!"
-    assert _mood_icon("focused") == "|"
+def _entrance_border(conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch, mood: str) -> Any:
+    """Run 'enter general' with the given mood; return the border_style the entrance panel was drawn with."""
+    _set_mood(conn, mood)
+    seen: list[Any] = []
+
+    def spy(*args: Any, **kwargs: Any) -> Panel:
+        seen.append(kwargs.get("border_style"))
+        return Panel(*args, **kwargs)
+
+    monkeypatch.setattr(space, "Panel", spy)
+    assert space.handle_command("enter", ["general"]) is True
+    assert len(seen) == 1, f"enter drew {len(seen)} panels, want 1"
+    return seen[0]
 
 
-def test_mood_icon_unknown_mood_returns_dash():
-    """_mood_icon should fall back to '-' for unrecognized moods."""
-    assert _mood_icon("mysterious") == "-"
-    assert _mood_icon("") == "-"
+def _look_mood_line(conn: sqlite3.Connection, capsys: pytest.CaptureFixture[str], mood: str) -> str:
+    """Run 'look general' with the given mood; return the printed Mood line."""
+    _set_mood(conn, mood)
+    capsys.readouterr()
+    assert space.handle_command("look", ["general"]) is True
+    lines = [line.strip() for line in capsys.readouterr().out.splitlines() if "Mood:" in line]
+    assert len(lines) == 1, f"look printed {lines!r}"
+    return lines[0]
+
+
+def test_mood_style_returns_correct_color(space_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    """'enter' draws the room panel in its mood's Rich color for known moods.
+
+    Mutant: _mood_style's `("dim", "-"))[0]` -> `("dim", "-"))[1]` (icon for colour) reddens this.
+    """
+    assert _entrance_border(space_db, monkeypatch, "welcoming") == "green"
+    assert _entrance_border(space_db, monkeypatch, "tense") == "red"
+    assert _entrance_border(space_db, monkeypatch, "celebratory") == "magenta"
+
+
+def test_mood_style_unknown_mood_returns_dim(space_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    """'enter' falls back to a 'dim' border for unrecognized moods.
+
+    An empty mood never reaches the style lookup: the command reads it as 'neutral', also 'dim'.
+    Mutant: _mood_style's fallback `("dim", "-"))[0]` -> `("red", "-"))[0]` reddens this.
+    """
+    assert _entrance_border(space_db, monkeypatch, "chaotic") == "dim"
+    assert _entrance_border(space_db, monkeypatch, "") == "dim"
+
+
+def test_mood_icon_returns_correct_icon(space_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str]) -> None:
+    """'look' prints the text icon for known moods.
+
+    Mutant: _mood_icon's `("dim", "-"))[1]` -> `("dim", "-"))[0]` (colour for icon) reddens this.
+    """
+    assert _look_mood_line(space_db, capsys, "welcoming") == "Mood: welcoming ~"
+    assert _look_mood_line(space_db, capsys, "tense") == "Mood: tense !"
+    assert _look_mood_line(space_db, capsys, "focused") == "Mood: focused |"
+
+
+def test_mood_icon_unknown_mood_returns_dash(space_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str]) -> None:
+    """'look' falls back to '-' for unrecognized moods.
+
+    An empty mood never reaches the icon lookup: the command reads it as 'neutral', also '-'.
+    Mutant: _mood_icon's fallback `("dim", "-"))[1]` -> `("dim", "?"))[1]` reddens this.
+    """
+    assert _look_mood_line(space_db, capsys, "mysterious") == "Mood: mysterious -"
+    assert _look_mood_line(space_db, capsys, "") == "Mood: neutral -"
 
 
 # =============================================================================

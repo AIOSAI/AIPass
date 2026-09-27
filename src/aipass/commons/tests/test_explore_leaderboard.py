@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_explore_leaderboard.py - Explore & Leaderboard Tests
 # Description: Tests for apps/handlers/social/leaderboard_ops.py and apps/modules/explore.py
@@ -21,25 +21,40 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/social/ parses and imports
+# seedgo: no-test-needed(covered) — what explore_rooms() and list_secrets() return: test_curation_explore_welcome_ops
 
 import sqlite3
+from typing import Any, Dict, List
 from unittest.mock import patch, MagicMock
 
+import pytest
 
-from aipass.commons.apps.handlers.social.leaderboard_ops import (
-    _query_posts,
-    _query_artifacts,
-    _query_trades,
-    _query_rooms,
-    _query_karma,
-    show_leaderboard,
-)
+from aipass.commons.apps.handlers.social.leaderboard_ops import show_leaderboard
 from aipass.commons.apps.modules.explore import handle_command as explore_handle_command
 
 
 # =============================================================================
 # HELPERS
 # =============================================================================
+
+
+@pytest.fixture
+def board_db(initialized_db: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> sqlite3.Connection:
+    """Point show_leaderboard at the tmp database, and its operation log at nothing."""
+    monkeypatch.setattr("aipass.commons.apps.handlers.social.leaderboard_ops.get_db", lambda: initialized_db)
+    monkeypatch.setattr("aipass.commons.apps.handlers.social.leaderboard_ops.close_db", lambda conn: None)
+    monkeypatch.setattr(
+        "aipass.commons.apps.handlers.social.leaderboard_ops.json_handler.log_operation", lambda *a, **k: None
+    )
+    return initialized_db
+
+
+def _board(category: str) -> List[Dict[str, Any]]:
+    """Ask show_leaderboard for one category, the way 'commons leaderboard --category X' does."""
+    result = show_leaderboard(["--category", category])
+    assert result["success"] is True, result
+    assert list(result["boards"]) == [category]
+    return result["boards"][category]
 
 
 def _insert_agent(conn: sqlite3.Connection, branch: str, display: str = "Test") -> None:
@@ -74,21 +89,27 @@ def _insert_artifact(conn: sqlite3.Connection, name: str, owner: str, creator: s
 # =============================================================================
 
 
-def test_query_posts_empty_db(initialized_db: sqlite3.Connection) -> None:
-    """_query_posts on an empty agents table (no post_count > 0) returns empty list."""
-    result = _query_posts(initialized_db)
+def test_query_posts_empty_db(board_db: sqlite3.Connection) -> None:
+    """The posts board on an empty agents table (no post_count > 0) is an empty list.
+
+    Mutant: _query_posts' return -> `return [{"branch": "x", "count": 0}]` (an invented row) reddens this.
+    """
+    result = _board("posts")
     assert result == []
 
 
-def test_query_posts_with_data_sorted_by_count(initialized_db: sqlite3.Connection) -> None:
-    """_query_posts returns agents sorted by post_count descending."""
-    _insert_agent(initialized_db, "BRANCH_A", "A")
-    _insert_agent(initialized_db, "BRANCH_B", "B")
-    initialized_db.execute("UPDATE agents SET post_count = 5 WHERE branch_name = 'BRANCH_A'")
-    initialized_db.execute("UPDATE agents SET post_count = 12 WHERE branch_name = 'BRANCH_B'")
-    initialized_db.commit()
+def test_query_posts_with_data_sorted_by_count(board_db: sqlite3.Connection) -> None:
+    """The posts board lists agents sorted by post_count descending.
 
-    result = _query_posts(initialized_db)
+    Mutant: `ORDER BY post_count DESC` -> `ORDER BY post_count ASC` reddens this.
+    """
+    _insert_agent(board_db, "BRANCH_A", "A")
+    _insert_agent(board_db, "BRANCH_B", "B")
+    board_db.execute("UPDATE agents SET post_count = 5 WHERE branch_name = 'BRANCH_A'")
+    board_db.execute("UPDATE agents SET post_count = 12 WHERE branch_name = 'BRANCH_B'")
+    board_db.commit()
+
+    result = _board("posts")
     assert len(result) == 2
     assert result[0]["branch"] == "BRANCH_B"
     assert result[0]["count"] == 12
@@ -101,21 +122,27 @@ def test_query_posts_with_data_sorted_by_count(initialized_db: sqlite3.Connectio
 # =============================================================================
 
 
-def test_query_artifacts_empty_db(initialized_db: sqlite3.Connection) -> None:
-    """_query_artifacts on an empty artifacts table returns empty list."""
-    result = _query_artifacts(initialized_db)
+def test_query_artifacts_empty_db(board_db: sqlite3.Connection) -> None:
+    """The artifacts board on an empty artifacts table is an empty list.
+
+    Mutant: _query_artifacts' return -> `return [{"branch": "x", "count": 0}]` (an invented row) reddens this.
+    """
+    result = _board("artifacts")
     assert result == []
 
 
-def test_query_artifacts_with_data_sorted(initialized_db: sqlite3.Connection) -> None:
-    """_query_artifacts returns owners sorted by artifact count descending."""
-    _insert_agent(initialized_db, "BRANCH_A", "A")
-    _insert_agent(initialized_db, "BRANCH_B", "B")
-    _insert_artifact(initialized_db, "Item1", "BRANCH_A", "BRANCH_A")
-    _insert_artifact(initialized_db, "Item2", "BRANCH_B", "BRANCH_B")
-    _insert_artifact(initialized_db, "Item3", "BRANCH_B", "BRANCH_B")
+def test_query_artifacts_with_data_sorted(board_db: sqlite3.Connection) -> None:
+    """The artifacts board lists owners sorted by artifact count descending.
 
-    result = _query_artifacts(initialized_db)
+    Mutant: `GROUP BY owner ORDER BY cnt DESC` -> `GROUP BY owner ORDER BY cnt ASC` reddens this.
+    """
+    _insert_agent(board_db, "BRANCH_A", "A")
+    _insert_agent(board_db, "BRANCH_B", "B")
+    _insert_artifact(board_db, "Item1", "BRANCH_A", "BRANCH_A")
+    _insert_artifact(board_db, "Item2", "BRANCH_B", "BRANCH_B")
+    _insert_artifact(board_db, "Item3", "BRANCH_B", "BRANCH_B")
+
+    result = _board("artifacts")
     assert len(result) == 2
     assert result[0]["branch"] == "BRANCH_B"
     assert result[0]["count"] == 2
@@ -128,9 +155,12 @@ def test_query_artifacts_with_data_sorted(initialized_db: sqlite3.Connection) ->
 # =============================================================================
 
 
-def test_query_trades_empty_db(initialized_db: sqlite3.Connection) -> None:
-    """_query_trades on an empty artifact_history table returns empty list."""
-    result = _query_trades(initialized_db)
+def test_query_trades_empty_db(board_db: sqlite3.Connection) -> None:
+    """The trades board on an empty artifact_history table is an empty list.
+
+    Mutant: _query_trades' return -> `return [{"branch": "x", "count": 0}]` (an invented row) reddens this.
+    """
+    result = _board("trades")
     assert result == []
 
 
@@ -139,22 +169,28 @@ def test_query_trades_empty_db(initialized_db: sqlite3.Connection) -> None:
 # =============================================================================
 
 
-def test_query_rooms_empty_db(initialized_db: sqlite3.Connection) -> None:
-    """_query_rooms with no posts returns empty list."""
-    result = _query_rooms(initialized_db)
+def test_query_rooms_empty_db(board_db: sqlite3.Connection) -> None:
+    """The rooms board with no posts is an empty list.
+
+    Mutant: _query_rooms' return -> `return [{"room": "general", "count": 0}]` (an invented row) reddens this.
+    """
+    result = _board("rooms")
     assert result == []
 
 
-def test_query_rooms_with_posts_sorted(initialized_db: sqlite3.Connection) -> None:
-    """_query_rooms returns rooms sorted by post count descending (last 7 days)."""
-    _insert_agent(initialized_db, "TEST_BRANCH", "Test")
-    # Insert posts into two different seeded rooms
-    _insert_post(initialized_db, "Post1", "general", "TEST_BRANCH")
-    _insert_post(initialized_db, "Post2", "general", "TEST_BRANCH")
-    _insert_post(initialized_db, "Post3", "general", "TEST_BRANCH")
-    _insert_post(initialized_db, "Post4", "dev", "TEST_BRANCH")
+def test_query_rooms_with_posts_sorted(board_db: sqlite3.Connection) -> None:
+    """The rooms board lists rooms sorted by post count descending (last 7 days).
 
-    result = _query_rooms(initialized_db)
+    Mutant: `GROUP BY room_name ORDER BY cnt DESC` -> `GROUP BY room_name ORDER BY cnt ASC` reddens this.
+    """
+    _insert_agent(board_db, "TEST_BRANCH", "Test")
+    # Insert posts into two different seeded rooms
+    _insert_post(board_db, "Post1", "general", "TEST_BRANCH")
+    _insert_post(board_db, "Post2", "general", "TEST_BRANCH")
+    _insert_post(board_db, "Post3", "general", "TEST_BRANCH")
+    _insert_post(board_db, "Post4", "dev", "TEST_BRANCH")
+
+    result = _board("rooms")
     assert len(result) == 2
     # general has 3 posts, dev has 1
     room_names = [r["room"] for r in result]
@@ -167,21 +203,27 @@ def test_query_rooms_with_posts_sorted(initialized_db: sqlite3.Connection) -> No
 # =============================================================================
 
 
-def test_query_karma_empty_db(initialized_db: sqlite3.Connection) -> None:
-    """_query_karma with no agents having karma > 0 returns empty list."""
-    result = _query_karma(initialized_db)
+def test_query_karma_empty_db(board_db: sqlite3.Connection) -> None:
+    """The karma board with no agents having karma > 0 is an empty list.
+
+    Mutant: _query_karma's return -> `return [{"branch": "x", "count": 0}]` (an invented row) reddens this.
+    """
+    result = _board("karma")
     assert result == []
 
 
-def test_query_karma_with_data(initialized_db: sqlite3.Connection) -> None:
-    """_query_karma returns agents sorted by karma descending."""
-    _insert_agent(initialized_db, "BRANCH_A", "A")
-    _insert_agent(initialized_db, "BRANCH_B", "B")
-    initialized_db.execute("UPDATE agents SET karma = 10 WHERE branch_name = 'BRANCH_A'")
-    initialized_db.execute("UPDATE agents SET karma = 25 WHERE branch_name = 'BRANCH_B'")
-    initialized_db.commit()
+def test_query_karma_with_data(board_db: sqlite3.Connection) -> None:
+    """The karma board lists agents sorted by karma descending.
 
-    result = _query_karma(initialized_db)
+    Mutant: `ORDER BY karma DESC` -> `ORDER BY karma ASC` reddens this.
+    """
+    _insert_agent(board_db, "BRANCH_A", "A")
+    _insert_agent(board_db, "BRANCH_B", "B")
+    board_db.execute("UPDATE agents SET karma = 10 WHERE branch_name = 'BRANCH_A'")
+    board_db.execute("UPDATE agents SET karma = 25 WHERE branch_name = 'BRANCH_B'")
+    board_db.commit()
+
+    result = _board("karma")
     assert len(result) == 2
     assert result[0]["branch"] == "BRANCH_B"
     assert result[0]["count"] == 25

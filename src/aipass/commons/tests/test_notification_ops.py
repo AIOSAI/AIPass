@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_notification_ops.py - Notification Operations Tests
 # Description: Tests for apps/handlers/notifications/notification_ops.py
@@ -17,24 +17,21 @@
 #   - Mocks get_db, close_db, get_caller_branch, json_handler, and logger
 # =============================================
 
-"""
-Unit tests for notification_ops.py — the high-level notification operations layer.
+"""Tests for apps/handlers/notifications/notification_ops.py."""
 
-Covers:
-- set_watch: watch a room, post, or thread
-- set_mute: mute a room, post, or thread
-- set_track: track a room, post, or thread
-- _set_notification_level: shared arg parsing, validation, target existence checks
-- show_preferences: display all preferences for the calling agent
-
-NOTE: test_notifications.py already covers the lower-level preferences.py functions
-(set_preference, get_preference, get_all_preferences, should_notify, get_watchers).
-These tests focus on the operations layer: arg parsing, caller detection, DB lifecycle,
-target validation, and error paths.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/notifications/ parses and imports
 
 import sqlite3
 from unittest.mock import patch, MagicMock
+
+from aipass.commons.apps.handlers.notifications.notification_ops import (
+    set_watch,
+    set_mute,
+    set_track,
+    show_preferences,
+)
+from aipass.commons.apps.handlers.notifications.preferences import set_preference
 
 
 # =============================================================================
@@ -112,8 +109,6 @@ def test_set_watch_room_success(
     _insert_agent(conn, "test-branch")
     # 'general' room is seeded by initialized_db
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "general"])
 
     assert result["success"] is True
@@ -146,8 +141,6 @@ def test_set_watch_post_success(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=42)
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["post", "42"])
 
@@ -183,8 +176,6 @@ def test_set_mute_room_success(
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
 
     result = set_mute(["room", "general"])
 
@@ -223,8 +214,6 @@ def test_set_track_thread_success(
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=10)
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
-
     result = set_track(["thread", "10"])
 
     assert result["success"] is True
@@ -240,8 +229,6 @@ def test_set_track_thread_success(
 
 def test_set_watch_too_few_args() -> None:
     """set_watch with fewer than 2 args should return usage error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -249,8 +236,6 @@ def test_set_watch_too_few_args() -> None:
 
 def test_set_mute_no_args() -> None:
     """set_mute with no args should return usage error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute([])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -258,8 +243,6 @@ def test_set_mute_no_args() -> None:
 
 def test_set_track_single_arg() -> None:
     """set_track with 1 arg should return usage error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
-
     result = set_track(["post"])
     assert result["success"] is False
     assert "Usage" in result["error"]
@@ -273,8 +256,6 @@ def test_set_track_single_arg() -> None:
 @patch(_MOCK_CALLER, return_value={"name": "test-branch"})
 def test_set_watch_invalid_target_type(mock_caller: MagicMock) -> None:
     """Passing an unsupported target type should return an error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["channel", "general"])
     assert result["success"] is False
     assert "Invalid target type" in result["error"]
@@ -284,8 +265,6 @@ def test_set_watch_invalid_target_type(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value={"name": "test-branch"})
 def test_set_mute_invalid_target_type(mock_caller: MagicMock) -> None:
     """Passing 'user' as target type should fail validation."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["user", "someone"])
     assert result["success"] is False
     assert "Invalid target type" in result["error"]
@@ -299,8 +278,6 @@ def test_set_mute_invalid_target_type(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value=None)
 def test_set_watch_no_caller(mock_caller: MagicMock) -> None:
     """When get_caller_branch returns None, operations should fail with caller error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "general"])
     assert result["success"] is False
     assert "Could not detect calling branch" in result["error"]
@@ -309,8 +286,6 @@ def test_set_watch_no_caller(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value=None)
 def test_set_mute_no_caller(mock_caller: MagicMock) -> None:
     """set_mute should also fail when caller is undetectable."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["room", "general"])
     assert result["success"] is False
     assert "Could not detect" in result["error"]
@@ -319,8 +294,6 @@ def test_set_mute_no_caller(mock_caller: MagicMock) -> None:
 @patch(_MOCK_CALLER, return_value=None)
 def test_set_track_no_caller(mock_caller: MagicMock) -> None:
     """set_track should also fail when caller is undetectable."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
-
     result = set_track(["post", "1"])
     assert result["success"] is False
     assert "Could not detect" in result["error"]
@@ -353,8 +326,6 @@ def test_set_watch_room_not_found(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "nonexistent-room"])
     assert result["success"] is False
     assert "not found" in result["error"]
@@ -383,8 +354,6 @@ def test_set_mute_post_not_found(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["post", "9999"])
     assert result["success"] is False
     assert "not found" in result["error"]
@@ -411,8 +380,6 @@ def test_set_track_thread_not_found(
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
 
     result = set_track(["thread", "8888"])
     assert result["success"] is False
@@ -442,8 +409,6 @@ def test_set_watch_post_id_not_numeric(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["post", "abc"])
     assert result["success"] is False
     assert "must be a number" in result["error"]
@@ -466,8 +431,6 @@ def test_set_track_thread_id_not_numeric(
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_track
 
     result = set_track(["thread", "not-a-number"])
     assert result["success"] is False
@@ -500,8 +463,6 @@ def test_set_watch_room_name_lowercased(
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     # Pass mixed-case — 'General' should resolve to 'general'
     result = set_watch(["room", "General"])
@@ -536,8 +497,6 @@ def test_set_mute_target_type_case_insensitive(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
-
     result = set_mute(["ROOM", "general"])
     assert result["success"] is True
     assert result["target_type"] == "room"
@@ -559,8 +518,6 @@ def test_set_watch_db_exception(
     mock_logger: MagicMock,
 ) -> None:
     """When get_db raises an exception, result should capture the error."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "general"])
     assert result["success"] is False
     assert "disk full" in result["error"]
@@ -593,8 +550,6 @@ def test_show_preferences_empty(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
     result = show_preferences()
     assert result["success"] is True
     assert result["agent"] == "test-branch"
@@ -624,9 +579,6 @@ def test_show_preferences_with_data(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.preferences import set_preference
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
     set_preference(conn, "test-branch", "room", "general", "watch")
     set_preference(conn, "test-branch", "post", "5", "mute")
 
@@ -643,8 +595,6 @@ def test_show_preferences_with_data(
 @patch(_MOCK_CALLER, return_value=None)
 def test_show_preferences_no_caller(mock_caller: MagicMock) -> None:
     """show_preferences should fail when caller is not detected."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
     result = show_preferences()
     assert result["success"] is False
     assert "Could not detect" in result["error"]
@@ -661,8 +611,6 @@ def test_show_preferences_db_exception(
     mock_logger: MagicMock,
 ) -> None:
     """show_preferences should handle DB exceptions gracefully."""
-    from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
-
     result = show_preferences()
     assert result["success"] is False
     assert "connection refused" in result["error"]
@@ -694,8 +642,6 @@ def test_set_watch_logs_operation(
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "general"])
     assert result["success"] is True
@@ -734,8 +680,6 @@ def test_set_watch_preference_fails(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
-
     result = set_watch(["room", "general"])
     assert result["success"] is False
     assert "Failed to set preference" in result["error"]
@@ -767,8 +711,6 @@ def test_set_watch_extra_args_ignored(
     conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_watch
 
     result = set_watch(["room", "general", "extra", "stuff"])
     assert result["success"] is True
@@ -803,8 +745,6 @@ def test_set_mute_post_id_normalized(
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=42)
-
-    from aipass.commons.apps.handlers.notifications.notification_ops import set_mute
 
     result = set_mute(["post", "042"])
     assert result["success"] is True

@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_profiles.py - Profile Handler Unit Tests
 # Description: Tests for apps/handlers/profiles/profile_queries.py

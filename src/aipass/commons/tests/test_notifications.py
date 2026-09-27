@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_notifications.py - Notification Preferences Tests
 # Description: Tests for apps/handlers/notifications/preferences.py
