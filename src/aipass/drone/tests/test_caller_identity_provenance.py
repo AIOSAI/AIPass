@@ -1,28 +1,15 @@
 # =================== AIPass ====================
 # Name: test_caller_identity_provenance.py
 # Description: Caller identity ships with the evidence it came from
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-21
+# Modified: 2026-09-27
 # =============================================
 
-"""A caller's identity and WHERE it came from must travel together.
+"""Tests for apps/handlers/router_handler.py: a caller's identity ships with the provenance it came from."""
 
-Two different questions were being answered with one string:
-
-    (a) agent assigned @commons, standing in /tmp  -> CALLER_BRANCH=commons
-    (b) nobody assigned, standing at the repo root -> CALLER_BRANCH=aipass
-
-(a) is a credential — a dispatched agent that cd'd out of its branch is still
-itself (S102). (b) is a DIRECTORY NAME that happens to collide with the citizen
-@aipass, so ai_mail's contact lookup found a real row and stamped it "verified":
-a dispatch sent from the repo root on 2026-08-21 went out as @aipass and the
-wake-back woke the wrong citizen (11 turns, $1.41, DPLAN-0315 item 3).
-
-Downstream could not tell them apart, so ai_mail's identity fence had to refuse
-BOTH — which re-broke the S102 case it was protecting. Stamping the provenance
-next to the name is what lets a consumer accept "assigned" from anywhere and
-refuse "project" everywhere.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 import shutil
@@ -34,13 +21,33 @@ from aipass.drone.apps.handlers.router_handler import (
     resolve_caller_identity,
     resolve_caller_identity_signal,
 )
+from aipass.drone.apps.handlers import router_handler
+
+
+# A caller's identity and WHERE it came from must travel together.
+#
+# Two different questions were being answered with one string:
+#
+#     (a) agent assigned @commons, standing in /tmp  -> CALLER_BRANCH=commons
+#     (b) nobody assigned, standing at the repo root -> CALLER_BRANCH=aipass
+#
+# (a) is a credential — a dispatched agent that cd'd out of its branch is still
+# itself (S102). (b) is a DIRECTORY NAME that happens to collide with the citizen
+# @aipass, so ai_mail's contact lookup found a real row and stamped it "verified":
+# a dispatch sent from the repo root on 2026-08-21 went out as @aipass and the
+# wake-back woke the wrong citizen (11 turns, $1.41, DPLAN-0315 item 3).
+#
+# Downstream could not tell them apart, so ai_mail's identity fence had to refuse
+# BOTH — which re-broke the S102 case it was protecting. Stamping the provenance
+# next to the name is what lets a consumer accept "assigned" from anywhere and
+# refuse "project" everywhere.
 
 
 def _plant_passport(directory: Path, branch_name: str) -> Path:
     """Create directory/.trinity/passport.json naming branch_name."""
     trinity = directory / ".trinity"
     trinity.mkdir(parents=True, exist_ok=True)
-    (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": branch_name}}))
+    (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": branch_name}}), encoding="utf-8")
     return directory
 
 
@@ -48,7 +55,8 @@ def _plant_registry(directory: Path, project_name: str) -> Path:
     """Create a project registry naming project_name, with no passport anywhere."""
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{project_name.upper()}_REGISTRY.json").write_text(
-        json.dumps({"metadata": {"project_name": project_name}, "branches": []})
+        json.dumps({"metadata": {"project_name": project_name}, "branches": []}),
+        encoding="utf-8",
     )
     return directory
 
@@ -132,11 +140,9 @@ class TestBareNameApiUnchanged:
 class TestProvenanceIsStampedIntoTheEnvironment:
     """A consumer in another process can only act on what drone stamps."""
 
-    def test_source_is_stamped_next_to_the_caller_branch(self, monkeypatch):
+    def test_source_is_stamped_next_to_the_caller_branch(self, tmp_path, monkeypatch):
         """AIPASS_CALLER_IDENTITY_SOURCE rides with AIPASS_CALLER_BRANCH."""
         from unittest.mock import MagicMock, patch
-
-        from aipass.drone.apps.handlers import router_handler
 
         captured = {}
 
@@ -145,7 +151,7 @@ class TestProvenanceIsStampedIntoTheEnvironment:
             return MagicMock(stdout="", stderr="", exit_code=0)
 
         with (
-            patch.object(router_handler, "find_entry_point", return_value=Path("/tmp/branch/apps/x.py")),
+            patch.object(router_handler, "find_entry_point", return_value=tmp_path / "branch" / "apps" / "x.py"),
             patch.object(router_handler, "execute_command", side_effect=_capture),
             patch.object(
                 router_handler,
@@ -153,17 +159,15 @@ class TestProvenanceIsStampedIntoTheEnvironment:
                 return_value=router_handler.CallerIdentity("commons", "assigned"),
             ),
         ):
-            router_handler.execute_branch_command(branch_path="/tmp/branch", branch_name="x", command="ping")
+            router_handler.execute_branch_command(branch_path=str(tmp_path / "branch"), branch_name="x", command="ping")
 
         env = captured["env"]
         assert env["AIPASS_CALLER_BRANCH"] == "commons"
         assert env["AIPASS_CALLER_IDENTITY_SOURCE"] == "assigned"
 
-    def test_no_identity_stamps_neither_variable(self, monkeypatch):
+    def test_no_identity_stamps_neither_variable(self, tmp_path, monkeypatch):
         """An anonymous caller must not ship an empty provenance claim."""
         from unittest.mock import MagicMock, patch
-
-        from aipass.drone.apps.handlers import router_handler
 
         captured = {}
 
@@ -172,7 +176,7 @@ class TestProvenanceIsStampedIntoTheEnvironment:
             return MagicMock(stdout="", stderr="", exit_code=0)
 
         with (
-            patch.object(router_handler, "find_entry_point", return_value=Path("/tmp/branch/apps/x.py")),
+            patch.object(router_handler, "find_entry_point", return_value=tmp_path / "branch" / "apps" / "x.py"),
             patch.object(router_handler, "execute_command", side_effect=_capture),
             patch.object(
                 router_handler,
@@ -180,7 +184,7 @@ class TestProvenanceIsStampedIntoTheEnvironment:
                 return_value=router_handler.CallerIdentity(None, None),
             ),
         ):
-            router_handler.execute_branch_command(branch_path="/tmp/branch", branch_name="x", command="ping")
+            router_handler.execute_branch_command(branch_path=str(tmp_path / "branch"), branch_name="x", command="ping")
 
         env = captured["env"]
         assert "AIPASS_CALLER_BRANCH" not in env
@@ -207,9 +211,8 @@ class TestRoutingFromADeletedDirectory:
     """
 
     def test_routing_does_not_crash_when_the_cwd_was_deleted(self, tmp_path, monkeypatch):
+        """Mutant killed: the routed command dropped from the args handed to execute_command."""
         from unittest.mock import MagicMock, patch
-
-        from aipass.drone.apps.handlers import router_handler
 
         doomed = tmp_path / "scratch"
         doomed.mkdir()
@@ -223,19 +226,17 @@ class TestRoutingFromADeletedDirectory:
             return MagicMock(stdout="", stderr="", exit_code=0)
 
         with (
-            patch.object(router_handler, "find_entry_point", return_value=Path("/tmp/branch/apps/x.py")),
+            patch.object(router_handler, "find_entry_point", return_value=tmp_path / "branch" / "apps" / "x.py"),
             patch.object(router_handler, "execute_command", side_effect=_capture),
         ):
-            router_handler.execute_branch_command(branch_path="/tmp/branch", branch_name="x", command="ping")
+            router_handler.execute_branch_command(branch_path=str(tmp_path / "branch"), branch_name="x", command="ping")
 
-        assert captured, "routing died on a cwd that no longer exists"
+        assert "ping" in captured["args"], "routing died on a cwd that no longer exists"
 
     def test_the_absent_cwd_is_not_forwarded_as_a_real_path(self, tmp_path, monkeypatch):
         """The target reads AIPASS_CALLER_CWD as a location. It must not get a lie."""
         from unittest.mock import MagicMock, patch
 
-        from aipass.drone.apps.handlers import router_handler
-
         doomed = tmp_path / "scratch"
         doomed.mkdir()
         monkeypatch.chdir(doomed)
@@ -248,16 +249,15 @@ class TestRoutingFromADeletedDirectory:
             return MagicMock(stdout="", stderr="", exit_code=0)
 
         with (
-            patch.object(router_handler, "find_entry_point", return_value=Path("/tmp/branch/apps/x.py")),
+            patch.object(router_handler, "find_entry_point", return_value=tmp_path / "branch" / "apps" / "x.py"),
             patch.object(router_handler, "execute_command", side_effect=_capture),
         ):
-            router_handler.execute_branch_command(branch_path="/tmp/branch", branch_name="x", command="ping")
+            router_handler.execute_branch_command(branch_path=str(tmp_path / "branch"), branch_name="x", command="ping")
 
         assert captured["env"].get("AIPASS_CALLER_CWD") != str(doomed)
 
     def test_assigned_identity_still_answers_without_a_cwd(self, tmp_path, monkeypatch):
         """Who this process IS never depended on where it was standing (S102)."""
-        from aipass.drone.apps.handlers import router_handler
 
         doomed = tmp_path / "scratch"
         doomed.mkdir()
@@ -304,6 +304,7 @@ class TestRoutingFromADeletedDirectory:
             [sys.executable, "-c", probe, str(doomed)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(tmp_path),
         )
 
@@ -340,8 +341,6 @@ class TestRoutingWithoutACwdOnEveryOS:
         """Route one command with execution stubbed; return the captured kwargs."""
         from unittest.mock import MagicMock, patch
 
-        from aipass.drone.apps.handlers import router_handler
-
         branch = tmp_path / "branch"
         captured = {}
 
@@ -371,7 +370,6 @@ class TestRoutingWithoutACwdOnEveryOS:
 
     def test_assigned_identity_still_answers(self, no_cwd, monkeypatch):
         """Who this process IS never depended on where it was standing (S102)."""
-        from aipass.drone.apps.handlers import router_handler
 
         monkeypatch.setenv("AIPASS_BRANCH_NAME", "commons")
 

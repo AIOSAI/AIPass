@@ -1,21 +1,15 @@
 # =================== AIPass ====================
 # Name: test_activation.py
 # Description: Tests for command activation, listing, removal, and custom execution
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for command activation, listing, removal, and custom execution.
+"""Tests for apps/drone.py: activate, list, remove, target, and running a custom command."""
 
-Covers:
-- ``drone activate @branch`` registers discovered commands
-- ``drone list`` displays custom commands
-- ``drone remove <name>`` removes a custom command
-- Custom command execution via ``main()`` flow
-- ``match_command`` integration with ``route_command``
-- Formatter output for activation, listing, removal
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 from __future__ import annotations
 
@@ -32,6 +26,9 @@ from aipass.drone.apps.handlers.command_registry.formatters import (
     format_removal,
 )
 from aipass.drone.apps.handlers.executor import CommandResult
+from aipass.drone.apps.drone import main
+from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set_registry_path
+from aipass.drone.apps.modules import BranchNotFoundError
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +55,12 @@ def _seed_commands(**commands: dict[str, Any]) -> None:
             description=data.get("description", ""),
             source_branch=data.get("source_branch", "test"),
         )
+
+
+def _drone(*argv: str) -> int:
+    """Run ``drone <argv>`` through main(), the door a user types into."""
+    with patch("sys.argv", ["drone", *argv]):
+        return main()
 
 
 # ===================================================================
@@ -175,14 +178,7 @@ class TestFormatRemoval:
 
 
 class TestHandleActivate:
-    """Tests for _handle_activate() in drone.py."""
-
-    @patch("aipass.drone.apps.drone._handle_activate.__wrapped__", create=True)
-    def _get_handler(self):
-        """Import the handler to test."""
-        from aipass.drone.apps.drone import _handle_activate
-
-        return _handle_activate
+    """``drone activate @branch`` scans and registers."""
 
     @patch("aipass.drone.apps.modules.commands.format_activation_results")
     @patch("aipass.drone.apps.modules.commands.add")
@@ -193,8 +189,7 @@ class TestHandleActivate:
         mock_add: MagicMock,
         mock_format: MagicMock,
     ) -> None:
-        """Should register all commands discovered by scan."""
-        from aipass.drone.apps.drone import _handle_activate
+        """Should register all commands discovered by scan; mutant killed: main() not routing 'activate'."""
 
         mock_scan.return_value = [
             {"name": "audit", "description": "Run audit", "source": "help"},
@@ -202,7 +197,7 @@ class TestHandleActivate:
         ]
         mock_add.return_value = True
 
-        result = _handle_activate("@seedgo")
+        result = _drone("activate", "@seedgo")
 
         assert result == 0
         assert mock_add.call_count == 2
@@ -221,15 +216,14 @@ class TestHandleActivate:
         mock_add: MagicMock,
         mock_format: MagicMock,
     ) -> None:
-        """Should skip commands that already exist in registry."""
-        from aipass.drone.apps.drone import _handle_activate
+        """Should skip commands that already exist in registry; mutant killed: main() not routing 'activate'."""
 
         mock_scan.return_value = [
             {"name": "audit", "description": "Run audit", "source": "help"},
         ]
         mock_add.return_value = False  # Already exists
 
-        result = _handle_activate("@seedgo")
+        result = _drone("activate", "@seedgo")
 
         assert result == 0
         call_args = mock_format.call_args
@@ -238,23 +232,21 @@ class TestHandleActivate:
 
     @patch("aipass.drone.apps.modules.scan.scan")
     def test_returns_1_on_resolution_failure(self, mock_scan: MagicMock) -> None:
-        """Should return 1 when scan cannot resolve the target."""
-        from aipass.drone.apps.drone import _handle_activate
+        """Should return 1 when scan cannot resolve the target; mutant killed: an unresolved target returning 0."""
 
         mock_scan.return_value = None
 
-        result = _handle_activate("@nonexistent")
+        result = _drone("activate", "@nonexistent")
 
         assert result == 1
 
     @patch("aipass.drone.apps.modules.scan.scan")
     def test_returns_0_on_empty_scan(self, mock_scan: MagicMock) -> None:
-        """Should return 0 when scan finds no commands."""
-        from aipass.drone.apps.drone import _handle_activate
+        """Should return 0 when scan finds no commands; mutant killed: main() not routing 'activate'."""
 
         mock_scan.return_value = []
 
-        result = _handle_activate("@emptybranch")
+        result = _drone("activate", "@emptybranch")
 
         assert result == 0
 
@@ -265,16 +257,15 @@ class TestHandleActivate:
 
 
 class TestHandleList:
-    """Tests for _handle_list() in drone.py."""
+    """``drone list`` shows the registered custom commands."""
 
     @patch("aipass.drone.apps.modules.commands.format_command_list")
     def test_calls_formatter(self, mock_format: MagicMock) -> None:
-        """Should load commands and pass to formatter."""
-        from aipass.drone.apps.drone import _handle_list
+        """Should load commands and pass to formatter; mutant killed: main() not routing 'list'."""
 
         ops.add_command("audit", "@seedgo", "audit")
 
-        result = _handle_list()
+        result = _drone("list")
 
         assert result == 0
         mock_format.assert_called_once()
@@ -284,10 +275,9 @@ class TestHandleList:
 
     @patch("aipass.drone.apps.modules.commands.format_command_list")
     def test_empty_registry(self, mock_format: MagicMock) -> None:
-        """Should pass empty list to formatter when no commands exist."""
-        from aipass.drone.apps.drone import _handle_list
+        """Should pass empty list to formatter when no commands exist; mutant killed: main() not routing 'list'."""
 
-        result = _handle_list()
+        result = _drone("list")
 
         assert result == 0
         mock_format.assert_called_once_with([])
@@ -299,16 +289,15 @@ class TestHandleList:
 
 
 class TestHandleRemove:
-    """Tests for _handle_remove() in drone.py."""
+    """``drone remove <name>`` removes a custom command."""
 
     @patch("aipass.drone.apps.modules.commands.format_removal")
     def test_removes_existing(self, mock_format: MagicMock) -> None:
-        """Should remove an existing command and return 0."""
-        from aipass.drone.apps.drone import _handle_remove
+        """Should remove an existing command and return 0; mutant killed: main() not routing 'remove'."""
 
         ops.add_command("audit", "@seedgo", "audit")
 
-        result = _handle_remove("audit")
+        result = _drone("remove", "audit")
 
         assert result == 0
         mock_format.assert_called_once_with("audit", True)
@@ -316,10 +305,9 @@ class TestHandleRemove:
 
     @patch("aipass.drone.apps.modules.commands.format_removal")
     def test_nonexistent_returns_1(self, mock_format: MagicMock) -> None:
-        """Should return 1 when trying to remove a nonexistent command."""
-        from aipass.drone.apps.drone import _handle_remove
+        """Should return 1 when trying to remove a nonexistent command; mutant killed: main() not routing 'remove'."""
 
-        result = _handle_remove("ghost")
+        result = _drone("remove", "ghost")
 
         assert result == 1
         mock_format.assert_called_once_with("ghost", False)
@@ -331,12 +319,11 @@ class TestHandleRemove:
 
 
 class TestHandleCustomCommand:
-    """Tests for _handle_custom_command() in drone.py."""
+    """``drone <custom name>`` routes a registered custom command."""
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_routes_matched_command(self, mock_route: MagicMock) -> None:
-        """Should route a matched custom command through route_command."""
-        from aipass.drone.apps.drone import _handle_custom_command
+        """Should route a matched custom command through route_command; mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
@@ -348,7 +335,7 @@ class TestHandleCustomCommand:
             command="audit",
         )
 
-        result = _handle_custom_command(["audit"])
+        result = _drone("audit")
 
         assert result == 0
         mock_route.assert_called_once_with(
@@ -361,8 +348,7 @@ class TestHandleCustomCommand:
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_appends_remaining_args(self, mock_route: MagicMock) -> None:
-        """Should append remaining args to configured args."""
-        from aipass.drone.apps.drone import _handle_custom_command
+        """Should append remaining args to configured args; mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
@@ -374,7 +360,7 @@ class TestHandleCustomCommand:
             command="audit",
         )
 
-        result = _handle_custom_command(["audit", "@drone"])
+        result = _drone("audit", "@drone")
 
         assert result == 0
         mock_route.assert_called_once_with(
@@ -385,18 +371,22 @@ class TestHandleCustomCommand:
             interactive=True,
         )
 
-    def test_returns_negative_1_on_no_match(self) -> None:
-        """Should return -1 when no custom command matches."""
-        from aipass.drone.apps.drone import _handle_custom_command
+    def test_an_unmatched_name_is_an_unknown_command(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """An unmatched name is an unknown command; mutant killed: an unmatched name returning 0 as if it had run."""
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text('{"metadata": {}, "branches": []}', encoding="utf-8")
+        set_registry_path(registry)
+        try:
+            result = _drone("nonexistent")
+        finally:
+            reset_registry_path()
 
-        result = _handle_custom_command(["nonexistent"])
-
-        assert result == -1
+        assert result == 1
+        assert "unknown command 'nonexistent'" in capsys.readouterr().err
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_interactive_detection_for_command(self, mock_route: MagicMock) -> None:
-        """Should set interactive=True for interactive commands."""
-        from aipass.drone.apps.drone import _handle_custom_command
+        """Should set interactive=True for interactive commands; mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("mon", "@prax", "monitor")
 
@@ -408,15 +398,14 @@ class TestHandleCustomCommand:
             command="monitor",
         )
 
-        _handle_custom_command(["mon"])
+        _drone("mon")
 
         call_kwargs = mock_route.call_args.kwargs
         assert call_kwargs["interactive"] is True
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_interactive_detection_for_branch(self, mock_route: MagicMock) -> None:
-        """Should set interactive=True for CLI branch commands."""
-        from aipass.drone.apps.drone import _handle_custom_command
+        """Should set interactive=True for CLI branch commands; mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("status", "@cli", "status")
 
@@ -428,15 +417,14 @@ class TestHandleCustomCommand:
             command="status",
         )
 
-        _handle_custom_command(["status"])
+        _drone("status")
 
         call_kwargs = mock_route.call_args.kwargs
         assert call_kwargs["interactive"] is True
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_watchdog_routes_interactive(self, mock_route: MagicMock) -> None:
-        """watchdog command should route with interactive=True (long-running poller)."""
-        from aipass.drone.apps.drone import _handle_target
+        """watchdog command should route with interactive=True (long-running poller); mutant killed: main() not routing '@target'."""
 
         mock_route.return_value = CommandResult(
             stdout="",
@@ -446,15 +434,14 @@ class TestHandleCustomCommand:
             command="watchdog",
         )
 
-        _handle_target(["@devpulse", "watchdog", "--help"])
+        _drone("@devpulse", "watchdog", "--help")
 
         call_kwargs = mock_route.call_args.kwargs
         assert call_kwargs["interactive"] is True
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_propagates_exit_code(self, mock_route: MagicMock) -> None:
-        """Should return the route_command exit code."""
-        from aipass.drone.apps.drone import _handle_custom_command
+        """Should return the route_command exit code; mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("failing", "@test", "fail")
 
@@ -466,28 +453,25 @@ class TestHandleCustomCommand:
             command="fail",
         )
 
-        result = _handle_custom_command(["failing"])
+        result = _drone("failing")
 
         assert result == 2
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_handles_route_exception(self, mock_route: MagicMock) -> None:
-        """Should return 1 when route_command raises."""
-        from aipass.drone.apps.drone import _handle_custom_command
-        from aipass.drone.apps.modules import BranchNotFoundError
+        """Should return 1 when route_command raises; mutant killed: a failed custom route returning 0."""
 
         ops.add_command("bad", "@ghost", "cmd")
 
         mock_route.side_effect = BranchNotFoundError("not found")
 
-        result = _handle_custom_command(["bad"])
+        result = _drone("bad")
 
         assert result == 1
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_no_args_passes_none(self, mock_route: MagicMock) -> None:
-        """Should pass args=None when configured args and remaining args are both empty."""
-        from aipass.drone.apps.drone import _handle_custom_command
+        """Should pass args=None when configured args and remaining args are both empty; mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("simple", "@test", "simple")
 
@@ -499,7 +483,7 @@ class TestHandleCustomCommand:
             command="simple",
         )
 
-        _handle_custom_command(["simple"])
+        _drone("simple")
 
         call_kwargs = mock_route.call_args.kwargs
         assert call_kwargs["args"] is None
@@ -516,7 +500,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone._handle_activate")
     def test_activate_route(self, mock_activate: MagicMock) -> None:
         """main() routes 'activate @branch' to _handle_activate."""
-        from aipass.drone.apps.drone import main
 
         mock_activate.return_value = 0
 
@@ -528,7 +511,6 @@ class TestMainIntegration:
 
     def test_activate_no_target(self) -> None:
         """main() returns 0 and shows help when activate has no target."""
-        from aipass.drone.apps.drone import main
 
         with patch("sys.argv", ["drone", "activate"]):
             result = main()
@@ -538,7 +520,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone._handle_list")
     def test_list_route(self, mock_list: MagicMock) -> None:
         """main() routes 'list' to _handle_list."""
-        from aipass.drone.apps.drone import main
 
         mock_list.return_value = 0
 
@@ -551,7 +532,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone._handle_remove")
     def test_remove_route(self, mock_remove: MagicMock) -> None:
         """main() routes 'remove name' to _handle_remove."""
-        from aipass.drone.apps.drone import main
 
         mock_remove.return_value = 0
 
@@ -563,7 +543,6 @@ class TestMainIntegration:
 
     def test_remove_no_name(self) -> None:
         """main() returns 1 when remove is called without a name."""
-        from aipass.drone.apps.drone import main
 
         with patch("sys.argv", ["drone", "remove"]):
             result = main()
@@ -573,7 +552,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone._handle_custom_command")
     def test_custom_command_route(self, mock_custom: MagicMock) -> None:
         """main() routes unrecognized commands to custom command matching."""
-        from aipass.drone.apps.drone import main
 
         mock_custom.return_value = 0
 
@@ -586,7 +564,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone._handle_custom_command")
     def test_unknown_command_when_no_custom_match(self, mock_custom: MagicMock) -> None:
         """main() shows unknown command when custom matching returns -1."""
-        from aipass.drone.apps.drone import main
 
         mock_custom.return_value = -1
 
@@ -598,7 +575,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone.route_command")
     def test_custom_command_end_to_end(self, mock_route: MagicMock) -> None:
         """Full integration: registered command routes through route_command."""
-        from aipass.drone.apps.drone import main
 
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
@@ -625,7 +601,6 @@ class TestMainIntegration:
     @patch("aipass.drone.apps.drone.route_command")
     def test_custom_command_with_extra_args_end_to_end(self, mock_route: MagicMock) -> None:
         """Full integration: remaining args appended to configured args."""
-        from aipass.drone.apps.drone import main
 
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
@@ -651,7 +626,6 @@ class TestMainIntegration:
 
     def test_builtin_commands_take_priority(self) -> None:
         """Built-in commands like 'systems' should NOT be overridden by custom commands."""
-        from aipass.drone.apps.drone import main
 
         # Register a custom command named 'systems' (should be shadowed)
         ops.add_command("systems", "@test", "systems")
@@ -665,7 +639,6 @@ class TestMainIntegration:
 
     def test_at_target_takes_priority_over_custom(self) -> None:
         """@target routing should take priority over custom command matching."""
-        from aipass.drone.apps.drone import main
 
         with patch("aipass.drone.apps.drone._handle_target", return_value=0) as mock_target:
             with patch("sys.argv", ["drone", "@seedgo", "audit"]):
@@ -698,7 +671,6 @@ class TestMatchCommandIntegration:
     @patch("aipass.drone.apps.drone.route_command")
     def test_multi_word_end_to_end(self, mock_route: MagicMock) -> None:
         """Multi-word custom command routes correctly through main()."""
-        from aipass.drone.apps.drone import main
 
         ops.add_command("plan create", "@flow", "create", args=["--type=plan"])
 

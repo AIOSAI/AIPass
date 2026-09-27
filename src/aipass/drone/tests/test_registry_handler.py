@@ -1,11 +1,15 @@
-"""Tests for registry loading and credential verification.
+# =================== AIPass ====================
+# Name: test_registry_handler.py
+# Description: Registry loading, lookup and credential verification
+# Version: 1.0.0
+# Created: 2026-03-14
+# Modified: 2026-09-27
+# =============================================
 
-Covers:
-- load_registry() — valid JSON, missing file, corrupt JSON, metadata parsing
-- get_all_branches() — filtering, empty results
-- find_registry() — directory walk-up, no registry found
-- _verify_registry_credential() — ID match, ID missing, ID mismatch
-"""
+"""Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import json
 import os
@@ -19,10 +23,7 @@ import pytest
 
 from aipass.drone.apps.handlers import registry_handler
 from aipass.drone.apps.handlers.registry_handler import (
-    _first_registry_in,
     _registry_matches_credential,
-    _validate_branch_path,
-    _verify_registry_credential,
     find_registry,
     get_all_branches,
     get_registry_path,
@@ -187,7 +188,7 @@ class TestLoadRegistry:
             "branches": {
                 "beta": {
                     "name": "beta",
-                    "path": "/tmp/beta",
+                    "path": str(registry_dir / "beta"),
                     "status": "active",
                 }
             },
@@ -346,26 +347,30 @@ class TestGetAllBranches:
 
 
 class TestFindRegistry:
-    def test_first_registry_in_finds_file(self, registry_dir: Path):
-        """_first_registry_in returns path when *_REGISTRY.json exists."""
+    def test_first_registry_in_finds_file(self, registry_dir: Path, monkeypatch):
+        """A registry in the cwd itself is found; mutant killed: an empty answer from a directory holding one."""
         _write_registry(registry_dir, _minimal_registry())
+        monkeypatch.chdir(registry_dir)
 
-        hit = _first_registry_in(registry_dir)
-        assert hit is not None
-        assert hit.name == "AIPASS_REGISTRY.json"
+        assert find_registry() == registry_dir / "AIPASS_REGISTRY.json"
 
-    def test_first_registry_in_returns_none_when_empty(self, registry_dir: Path):
-        """_first_registry_in returns None in an empty directory."""
-        assert _first_registry_in(registry_dir) is None
+    def test_first_registry_in_returns_none_when_empty(self, registry_dir: Path, tmp_path: Path, monkeypatch):
+        """An empty cwd yields nothing and the walk moves on; mutant killed: an empty directory answering a path."""
+        home = tmp_path / "home"
+        home.mkdir()
+        _write_registry(home, _minimal_registry())
+        monkeypatch.chdir(registry_dir)
+        monkeypatch.setenv("AIPASS_HOME", str(home))
 
-    def test_first_registry_in_alphabetical(self, registry_dir: Path):
-        """When multiple registries exist, alphabetically first wins."""
+        assert find_registry() == home / "AIPASS_REGISTRY.json"
+
+    def test_first_registry_in_alphabetical(self, registry_dir: Path, monkeypatch):
+        """When multiple registries exist, alphabetically first wins; mutant killed: the last one taken."""
         _write_registry(registry_dir, _minimal_registry(), name="A_REGISTRY.json")
         _write_registry(registry_dir, _minimal_registry(), name="Z_REGISTRY.json")
+        monkeypatch.chdir(registry_dir)
 
-        hit = _first_registry_in(registry_dir)
-        assert hit is not None
-        assert hit.name == "A_REGISTRY.json"
+        assert find_registry().name == "A_REGISTRY.json"
 
     def test_find_registry_from_child_dir(self, registry_dir: Path, monkeypatch):
         """find_registry() walks up from cwd to find registry in ancestor."""
@@ -433,33 +438,47 @@ class TestFindRegistry:
 
 
 class TestRegistryMatchesCredential:
-    def test_returns_true_when_ids_match(self, registry_dir: Path, monkeypatch):
-        """Returns True when passport and registry IDs agree."""
+    """find_registry() skips a cwd registry only when both ids exist and disagree."""
+
+    @staticmethod
+    def _home(tmp_path: Path, monkeypatch) -> Path:
+        """An AIPASS_HOME registry: where the walk lands once the cwd one is skipped."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("AIPASS_HOME", str(home))
+        return _write_registry(home, _minimal_registry())
+
+    def test_returns_true_when_ids_match(self, registry_dir: Path, tmp_path: Path, monkeypatch):
+        """Matching ids keep the cwd registry; mutant killed: a match judged a mismatch."""
         shared_id = "match-id"
         path = _write_registry(registry_dir, _minimal_registry(metadata_id=shared_id))
         _write_passport(registry_dir, {"citizenship": {"registry_id": shared_id}})
+        self._home(tmp_path, monkeypatch)
         monkeypatch.chdir(registry_dir)
-        assert _registry_matches_credential(path) is True
+        assert find_registry() == path
 
-    def test_returns_false_on_mismatch(self, registry_dir: Path, monkeypatch):
-        """Returns False when passport and registry IDs disagree."""
-        path = _write_registry(registry_dir, _minimal_registry(metadata_id="reg-A"))
+    def test_returns_false_on_mismatch(self, registry_dir: Path, tmp_path: Path, monkeypatch):
+        """Disagreeing ids skip the cwd registry; mutant killed: a mismatch accepted."""
+        _write_registry(registry_dir, _minimal_registry(metadata_id="reg-A"))
         _write_passport(registry_dir, {"citizenship": {"registry_id": "reg-B"}})
+        home = self._home(tmp_path, monkeypatch)
         monkeypatch.chdir(registry_dir)
-        assert _registry_matches_credential(path) is False
+        assert find_registry() == home
 
-    def test_returns_true_when_registry_has_no_id(self, registry_dir: Path, monkeypatch):
-        """Returns True when registry has no metadata.id."""
+    def test_returns_true_when_registry_has_no_id(self, registry_dir: Path, tmp_path: Path, monkeypatch):
+        """A registry with no metadata.id is kept; mutant killed: a missing registry id refused."""
         path = _write_registry(registry_dir, _minimal_registry())
         _write_passport(registry_dir, {"citizenship": {"registry_id": "some-id"}})
+        self._home(tmp_path, monkeypatch)
         monkeypatch.chdir(registry_dir)
-        assert _registry_matches_credential(path) is True
+        assert find_registry() == path
 
-    def test_returns_true_when_no_passport(self, registry_dir: Path, monkeypatch):
-        """Returns True when no passport.json exists."""
+    def test_returns_true_when_no_passport(self, registry_dir: Path, tmp_path: Path, monkeypatch):
+        """No passport.json keeps the cwd registry; mutant killed: a walk that finds no passport refusing."""
         path = _write_registry(registry_dir, _minimal_registry(metadata_id="some-id"))
+        self._home(tmp_path, monkeypatch)
         monkeypatch.chdir(registry_dir)
-        assert _registry_matches_credential(path) is True
+        assert find_registry() == path
 
 
 class TestCredentialCheckWithNoCurrentDirectory:
@@ -504,14 +523,16 @@ class TestCredentialCheckWithNoCurrentDirectory:
         assert log.info.called, "no line records that the check had no location to stand in"
 
     def test_an_unreadable_registry_is_still_a_warning(self, registry_dir: Path, monkeypatch):
-        """The broad except keeps its job — only the cwd left through it."""
+        """The broad except keeps its job; mutant killed: the pre-check failure warning removed."""
+        unreadable = registry_dir / "AIPASS_REGISTRY.json"
+        unreadable.mkdir()  # a directory by the registry's name: open() fails on every OS
         monkeypatch.chdir(registry_dir)
 
         with patch.object(registry_handler, "logger") as log:
-            result = _registry_matches_credential(registry_dir)
+            found = find_registry()
 
-        assert result is True
-        assert log.warning.called, "an unreadable registry must still be reported"
+        assert found == unreadable
+        assert log.warning.call_args[0][:2] == ("Credential pre-check failed for %s: %s", unreadable)
 
     def test_the_walk_that_calls_it_reaches_it_at_all(self, monkeypatch):
         """The credential fix is worthless if its CALLER raises first.
@@ -526,15 +547,17 @@ class TestCredentialCheckWithNoCurrentDirectory:
 
         assert find_registry().name.endswith("_REGISTRY.json")
 
-    def test_verification_does_not_report_a_failure_it_did_not_have(self, monkeypatch):
-        """Third site, same species: ``_verify_registry_credential``."""
+    def test_verification_does_not_report_a_failure_it_did_not_have(self, monkeypatch, tmp_path):
+        """Third site, same species; mutant killed: the no-location line logged at WARNING."""
+        registry_path = _write_registry(tmp_path, _minimal_registry(metadata_id="some-id"))
+        set_registry_path(registry_path)
         self._no_cwd(monkeypatch)
 
         with patch.object(registry_handler, "logger") as log:
-            _verify_registry_credential(Path("/nowhere/AIPASS_REGISTRY.json"), {"metadata": {"id": "some-id"}})
+            load_registry()
 
-        failures = [c for c in log.warning.call_args_list if "verification failed" in str(c).lower()]
-        assert not failures, f"an absent location was reported as a failed verification: {failures}"
+        assert log.warning.call_args_list == [], "an absent location was reported as a failed verification"
+        assert log.info.call_args[0][1] == registry_path
 
 
 # ===================================================================
@@ -543,84 +566,77 @@ class TestCredentialCheckWithNoCurrentDirectory:
 
 
 class TestVerifyRegistryCredential:
+    """load_registry() refuses a registry whose id disagrees with the caller's passport."""
+
+    @staticmethod
+    def _load(registry_dir: Path, monkeypatch) -> dict:
+        set_registry_path(registry_dir / "AIPASS_REGISTRY.json")
+        monkeypatch.chdir(registry_dir)
+        return load_registry()
+
     def test_passes_when_ids_match(self, registry_dir: Path, monkeypatch):
-        """No error when passport.citizenship.registry_id == registry.metadata.id."""
+        """Matching ids load; mutant killed: the id comparison inverted."""
         shared_id = "reg-abc-123"
-        registry_data = _minimal_registry(metadata_id=shared_id)
-        registry_path = _write_registry(registry_dir, registry_data)
+        _write_registry(registry_dir, _minimal_registry(metadata_id=shared_id))
         _write_passport(registry_dir, {"citizenship": {"registry_id": shared_id}})
 
-        monkeypatch.chdir(registry_dir)
-        # Should not raise
-        _verify_registry_credential(registry_path, registry_data)
+        assert list(self._load(registry_dir, monkeypatch)["branches"]) == ["alpha"]
 
     def test_passes_when_registry_id_missing(self, registry_dir: Path, monkeypatch):
-        """No error when registry has no metadata.id (migration period)."""
-        registry_data = _minimal_registry()  # no metadata_id
-        registry_path = _write_registry(registry_dir, registry_data)
+        """A registry with no metadata.id loads; mutant killed: the missing-registry-id pass removed."""
+        _write_registry(registry_dir, _minimal_registry())
         _write_passport(registry_dir, {"citizenship": {"registry_id": "some-id"}})
 
-        monkeypatch.chdir(registry_dir)
-        _verify_registry_credential(registry_path, registry_data)
+        assert list(self._load(registry_dir, monkeypatch)["branches"]) == ["alpha"]
 
     def test_passes_when_passport_id_missing(self, registry_dir: Path, monkeypatch):
-        """No error when passport has no citizenship.registry_id (migration period)."""
-        shared_id = "reg-xyz-789"
-        registry_data = _minimal_registry(metadata_id=shared_id)
-        registry_path = _write_registry(registry_dir, registry_data)
-        _write_passport(
-            registry_dir,
-            {
-                "citizenship": {}  # no registry_id
-            },
-        )
+        """A passport with no registry_id loads; mutant killed: the missing-passport-id pass removed."""
+        _write_registry(registry_dir, _minimal_registry(metadata_id="reg-xyz-789"))
+        _write_passport(registry_dir, {"citizenship": {}})
 
-        monkeypatch.chdir(registry_dir)
-        _verify_registry_credential(registry_path, registry_data)
+        assert list(self._load(registry_dir, monkeypatch)["branches"]) == ["alpha"]
 
     def test_passes_when_no_passport_file(self, registry_dir: Path, monkeypatch):
-        """No error when passport.json does not exist at all."""
-        shared_id = "reg-000"
-        registry_data = _minimal_registry(metadata_id=shared_id)
-        registry_path = _write_registry(registry_dir, registry_data)
-        # No passport written
+        """No passport.json loads quietly; mutant killed: the no-passport pass removed."""
+        _write_registry(registry_dir, _minimal_registry(metadata_id="reg-000"))
 
-        monkeypatch.chdir(registry_dir)
-        _verify_registry_credential(registry_path, registry_data)
+        with patch.object(registry_handler, "logger") as log:
+            loaded = self._load(registry_dir, monkeypatch)
+
+        assert list(loaded["branches"]) == ["alpha"]
+        assert log.warning.call_args_list == []
 
     def test_raises_on_id_mismatch(self, registry_dir: Path, monkeypatch):
-        """RegistryMismatchError raised when IDs differ -- security-critical."""
-        registry_data = _minimal_registry(metadata_id="registry-AAA")
-        registry_path = _write_registry(registry_dir, registry_data)
+        """RegistryMismatchError raised when IDs differ; mutant killed: the mismatch check disabled."""
+        _write_registry(registry_dir, _minimal_registry(metadata_id="registry-AAA"))
         _write_passport(registry_dir, {"citizenship": {"registry_id": "registry-BBB"}})
 
-        monkeypatch.chdir(registry_dir)
         with pytest.raises(RegistryMismatchError, match="mismatch"):
-            _verify_registry_credential(registry_path, registry_data)
+            self._load(registry_dir, monkeypatch)
 
     def test_mismatch_error_contains_both_ids(self, registry_dir: Path, monkeypatch):
-        """Error message includes both the passport and registry IDs for debugging."""
+        """The error names both ids; mutant killed: the mismatch check disabled."""
         reg_id = "registry-PROD"
         passport_id = "registry-DEV"
-        registry_data = _minimal_registry(metadata_id=reg_id)
-        registry_path = _write_registry(registry_dir, registry_data)
+        _write_registry(registry_dir, _minimal_registry(metadata_id=reg_id))
         _write_passport(registry_dir, {"citizenship": {"registry_id": passport_id}})
 
-        monkeypatch.chdir(registry_dir)
         with pytest.raises(RegistryMismatchError) as exc_info:
-            _verify_registry_credential(registry_path, registry_data)
+            self._load(registry_dir, monkeypatch)
 
         msg = str(exc_info.value)
         assert passport_id in msg
         assert reg_id in msg
 
     def test_passes_when_metadata_key_absent(self, registry_dir: Path, monkeypatch):
-        """No error when the entire metadata dict is absent."""
-        registry_data = {"branches": []}  # no metadata at all
-        registry_path = registry_dir / "FAKE_REGISTRY.json"
+        """A registry with no metadata at all loads quietly; mutant killed: metadata read as a required key."""
+        _write_registry(registry_dir, {"branches": []})
 
-        monkeypatch.chdir(registry_dir)
-        _verify_registry_credential(registry_path, registry_data)
+        with patch.object(registry_handler, "logger") as log:
+            loaded = self._load(registry_dir, monkeypatch)
+
+        assert loaded["branches"] == {}
+        assert log.warning.call_args_list == []
 
 
 # ===================================================================
@@ -689,34 +705,42 @@ class TestRegistryPathManagement:
 
 
 class TestValidateBranchPath:
-    """_validate_branch_path() security boundary checks."""
+    """load_registry() drops an entry whose path escapes the project root."""
 
-    def test_valid_path_inside_project(self, registry_dir: Path):
-        """Path within project root passes validation."""
-        branch = registry_dir / "src" / "aipass" / "trigger"
-        branch.mkdir(parents=True)
-        assert _validate_branch_path(branch, registry_dir, "trigger") is True
+    @staticmethod
+    def _loaded_names(registry_dir: Path, monkeypatch, name: str, path: str) -> list[str]:
+        """Load a registry holding one entry at *path*; return the names that survived."""
+        _write_registry(
+            registry_dir,
+            _minimal_registry(branches=[{"name": name, "path": path, "status": "active", "type": "lib"}]),
+        )
+        set_registry_path(registry_dir / "AIPASS_REGISTRY.json")
+        monkeypatch.chdir(registry_dir)
+        return list(load_registry()["branches"].keys())
 
-    def test_path_traversal_blocked(self, registry_dir: Path):
-        """Path with ../ escaping project root is rejected."""
-        evil_path = registry_dir / ".." / ".." / ".." / "tmp" / "evil"
-        assert _validate_branch_path(evil_path, registry_dir, "evil") is False
+    def test_valid_path_inside_project(self, registry_dir: Path, monkeypatch):
+        """Path within project root is kept; mutant killed: the containment check refusing everything."""
+        (registry_dir / "src" / "aipass" / "trigger").mkdir(parents=True)
+        assert self._loaded_names(registry_dir, monkeypatch, "trigger", "src/aipass/trigger") == ["trigger"]
 
-    def test_absolute_path_outside_root_blocked(self, registry_dir: Path):
-        """Absolute path outside project root is rejected."""
-        assert _validate_branch_path(Path("/tmp/evil"), registry_dir, "evil") is False
+    def test_path_traversal_blocked(self, registry_dir: Path, monkeypatch):
+        """A path that climbs out through a subdirectory is dropped; mutant killed: the containment check removed."""
+        assert self._loaded_names(registry_dir, monkeypatch, "evil", "src/../../evil") == []
 
-    def test_exact_project_root_passes(self, registry_dir: Path):
-        """Path equal to project root passes (edge case)."""
-        assert _validate_branch_path(registry_dir, registry_dir, "root") is True
+    def test_absolute_path_outside_root_blocked(self, registry_dir: Path, tmp_path: Path, monkeypatch):
+        """Absolute path outside project root is dropped; mutant killed: the containment check removed."""
+        assert self._loaded_names(registry_dir, monkeypatch, "evil", str(tmp_path / "evil")) == []
 
-    def test_symlink_resolved(self, registry_dir: Path):
-        """Symlink pointing outside project root is rejected after resolution."""
+    def test_exact_project_root_passes(self, registry_dir: Path, monkeypatch):
+        """Path equal to project root is kept; mutant killed: the containment check refusing everything."""
+        assert self._loaded_names(registry_dir, monkeypatch, "root", ".") == ["root"]
+
+    def test_symlink_resolved(self, registry_dir: Path, monkeypatch):
+        """Symlink pointing outside project root is dropped; mutant killed: the containment check removed."""
         external = Path(tempfile.mkdtemp(prefix="external_"))
         try:
-            link = registry_dir / "sneaky_link"
-            link.symlink_to(external)
-            assert _validate_branch_path(link, registry_dir, "sneaky") is False
+            (registry_dir / "sneaky_link").symlink_to(external)
+            assert self._loaded_names(registry_dir, monkeypatch, "sneaky", "sneaky_link") == []
         finally:
             shutil.rmtree(external, ignore_errors=True)
 
@@ -725,7 +749,7 @@ class TestValidateBranchPath:
         reg = _minimal_registry(
             branches=[
                 {"name": "legit", "path": "src/legit", "status": "active", "type": "lib"},
-                {"name": "evil", "path": "../../../tmp/evil", "status": "active", "type": "lib"},
+                {"name": "evil", "path": "../../../outside/evil", "status": "active", "type": "lib"},
             ]
         )
         _write_registry(registry_dir, reg)

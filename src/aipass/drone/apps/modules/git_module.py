@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-03-17
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -124,6 +124,9 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
     Returns None when the process has no CWD — this detects the branch from
     LOCATION, and there is nothing to detect from. Identity assigned at spawn
     is a different question, answered elsewhere and unaffected.
+
+    Raises ValueError when a passport is found but cannot be read: a corrupt
+    passport is a failure to report, never "not inside a branch".
     """
     cwd = caller_cwd()
     if cwd is None:
@@ -142,7 +145,7 @@ def _detect_branch_dir() -> tuple[str, Path] | None:
                     return name, current
             except Exception as exc:
                 logger.warning("Failed to read passport at %s: %s", passport, exc)
-                return None
+                raise ValueError(f"Unreadable passport at {passport}: {exc}") from exc
         parent = current.parent
         if parent == current:
             break
@@ -707,9 +710,12 @@ def _handle_status(args: list[str] | None = None, repo_root: Path | None = None)
         if result.get("ok", True):
             result["message"] = f"{result['total']} file(s) changed in {repo_root}"
     else:
-        detected = _detect_branch_dir()
-        if detected is None:
+        try:
+            detected = _detect_branch_dir()
             message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        except ValueError as exc:
+            detected, message = None, str(exc)
+        if detected is None:
             if as_json:
                 # This refusal fires BEFORE the branch is known, which is how a
                 # machine caller ends up parsing a bare sentence. Every exit from a
@@ -778,13 +784,13 @@ def _handle_diff(args: list[str], repo_root: Path | None = None) -> dict:
     if repo_root is not None:
         result = diff_handler.get_branch_diff(repo_root, staged=staged, repo_root=repo_root)
     else:
-        detected = _detect_branch_dir()
+        try:
+            detected = _detect_branch_dir()
+            message = "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/"
+        except ValueError as exc:
+            detected, message = None, str(exc)
         if detected is None:
-            return {
-                "stdout": "",
-                "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
-                "exit_code": 1,
-            }
+            return {"stdout": "", "stderr": message, "exit_code": 1}
 
         branch_name, branch_dir = detected
         show_all = "--all" in args

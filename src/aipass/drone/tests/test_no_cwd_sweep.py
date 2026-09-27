@@ -1,45 +1,62 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""No location is not a failure — pinned at every site that infers one.
+"""Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
 
-THE SPECIES. ``Path.cwd()`` raises ENOENT the moment the directory it names is
-gone. Session 68 fixed that in the deletion RECORD and session 69 fixed it on
-the ROUTING path, and both times the fix landed on the sites already in hand
-rather than on every site in the tree. @trigger reproduced the leftover live —
-``drone rm`` from a deleted directory, exit 1, ``FileNotFoundError`` at
-``rm_handler.py:37`` — and named it as the pattern rather than the incident: a
-fix that lands on some of N identical paths. This file is the N.
-
-It is also the recovery case, which is what makes it more than tidiness. The
-first ``drone rm`` succeeds and deletes the directory the caller stands in; the
-SECOND command — the one a person runs to clean up after — is the one that
-crashed. Fixing the crash in session 68 is what put a live process here to run
-it.
-
-THE RULE, identical at every site: a walk that infers something from where the
-caller STANDS has nothing to read when the caller stands nowhere. That is the
-absence of a signal, said out loud at INFO, not an error — so the walk is
-SKIPPED and every other source still answers. Sites that can honestly return
-"unknown" do. The one gate that cannot — owner-tier auth — fails CLOSED and
-says why.
-
-``caller_cwd()`` in ``router_handler`` is the single reader. A tenth private
-copy of ``try: Path.cwd() except OSError: None`` would be this file's own
-lesson repeated.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the import-time half of a dead cwd, pinned in tests/test_import_dead_cwd.py
 
 import ast
+import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+
+import aipass.drone.apps as drone_apps
+from aipass.drone.apps import drone
+from aipass.drone.apps.handlers import rm_handler
+from aipass.drone.apps.handlers.broker import daemon
+from aipass.drone.apps.handlers.git import lock_handler
+from aipass.drone.apps.modules import git_module
+from aipass.drone.apps.plugins.devpulse_ops import auth
+from aipass.drone.tests import conftest as drone_conftest
+
+# No location is not a failure — pinned at every site that infers one.
+#
+# THE SPECIES. ``Path.cwd()`` raises ENOENT the moment the directory it names is
+# gone. Session 68 fixed that in the deletion RECORD and session 69 fixed it on
+# the ROUTING path, and both times the fix landed on the sites already in hand
+# rather than on every site in the tree. @trigger reproduced the leftover live —
+# ``drone rm`` from a deleted directory, exit 1, ``FileNotFoundError`` at
+# ``rm_handler.py:37`` — and named it as the pattern rather than the incident: a
+# fix that lands on some of N identical paths. This file is the N.
+#
+# It is also the recovery case, which is what makes it more than tidiness. The
+# first ``drone rm`` succeeds and deletes the directory the caller stands in; the
+# SECOND command — the one a person runs to clean up after — is the one that
+# crashed. Fixing the crash in session 68 is what put a live process here to run
+# it.
+#
+# THE RULE, identical at every site: a walk that infers something from where the
+# caller STANDS has nothing to read when the caller stands nowhere. That is the
+# absence of a signal, said out loud at INFO, not an error — so the walk is
+# SKIPPED and every other source still answers. Sites that can honestly return
+# "unknown" do. The one gate that cannot — owner-tier auth — fails CLOSED and
+# says why.
+#
+# ``caller_cwd()`` in ``router_handler`` is the single reader. A tenth private
+# copy of ``try: Path.cwd() except OSError: None`` would be this file's own
+# lesson repeated.
 
 
 @pytest.fixture()
@@ -63,7 +80,7 @@ def home_root(tmp_path, monkeypatch):
     """An AIPass home that answers when the cwd cannot."""
     home = tmp_path / "home"
     home.mkdir()
-    (home / "AIPASS_REGISTRY.json").write_text('{"branches": []}')
+    (home / "AIPASS_REGISTRY.json").write_text('{"branches": []}', encoding="utf-8")
     monkeypatch.setenv("AIPASS_HOME", str(home))
     return home
 
@@ -74,22 +91,21 @@ def home_root(tmp_path, monkeypatch):
 
 
 class TestDroneEntryPointSurvives:
-    def test_registry_presence_check_falls_through_to_aipass_home(self, no_cwd, home_root):
-        """The cwd walk is skipped; the source that never needed a location answers."""
-        from aipass.drone.apps import drone
+    def test_registry_presence_check_falls_through_to_aipass_home(self, no_cwd, home_root, monkeypatch, capsys):
+        """Mutant killed: _cwd_has_registry dropping its AIPASS_HOME fallback (systems saw no registry)."""
+        monkeypatch.setattr("sys.argv", ["drone", "systems"])
+        assert drone.main() == 0
+        assert "No registry found" not in capsys.readouterr().out
 
-        assert drone._cwd_has_registry() is True
-
-    def test_registry_presence_check_answers_false_rather_than_raising(self, no_cwd, monkeypatch):
-        from aipass.drone.apps import drone
-
+    def test_registry_presence_check_answers_false_rather_than_raising(self, no_cwd, monkeypatch, capsys):
+        """Mutant killed: _cwd_has_registry walking a cwd it does not have (a crash, not an answer)."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
-        assert drone._cwd_has_registry() is False
+        monkeypatch.setattr("sys.argv", ["drone", "systems"])
+        assert drone.main() == 0
+        assert "No registry found in current directory tree." in capsys.readouterr().out
 
     def test_the_seat_inbox_is_unknown_not_a_crash(self, no_cwd):
         """A seat is inferred from where you stand. Standing nowhere means no seat."""
-        from aipass.drone.apps import drone
-
         assert drone._find_seat_inbox() is None
 
 
@@ -100,25 +116,26 @@ class TestDroneEntryPointSurvives:
 
 class TestTheDeleteLaneSurvives:
     def test_project_root_falls_through_to_aipass_home(self, no_cwd, home_root):
-        from aipass.drone.apps.handlers import rm_handler
-
-        assert rm_handler._find_project_root() == home_root.resolve()
+        """Mutant killed: _find_project_root dropping its AIPASS_HOME fallback (no project root allowed)."""
+        assert rm_handler.get_allowed_roots()[0] == home_root.resolve()
 
     def test_project_root_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
-        from aipass.drone.apps.handlers import rm_handler
-
+        """Mutant killed: _find_project_root walking a cwd it does not have (a crash, not an answer)."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
-        assert rm_handler._find_project_root() is None
+        temp_roots = {Path(tempfile.gettempdir()).resolve()}
+        if sys.platform != "win32":
+            temp_roots.add(Path(os.sep, "tmp").resolve())
+        assert set(rm_handler.get_allowed_roots()) == temp_roots
 
     def test_the_current_branch_is_unknown(self, no_cwd, tmp_path):
-        from aipass.drone.apps.handlers import rm_handler
-
-        assert rm_handler._detect_current_branch(tmp_path) is None
+        """Mutant killed: _current_branch_root walking a cwd it does not have; no branch is the caller's own."""
+        (tmp_path / "somebranch" / ".trinity").mkdir(parents=True)
+        blocked, reason = rm_handler.check_carveouts((tmp_path / "somebranch" / "build").resolve(), tmp_path.resolve())
+        assert blocked is True
+        assert "sibling branch somebranch/" in reason
 
     def test_an_absolute_path_still_deletes(self, no_cwd, home_root):
         """The recovery command. It names its target absolutely and needs no cwd."""
-        from aipass.drone.apps.handlers import rm_handler
-
         target = home_root / "scratch"
         target.mkdir()
 
@@ -129,8 +146,6 @@ class TestTheDeleteLaneSurvives:
 
     def test_a_relative_path_is_refused_cleanly_not_crashed(self, no_cwd, home_root):
         """A relative path is meaningless without a cwd — a refusal, not a traceback."""
-        from aipass.drone.apps.handlers import rm_handler
-
         results = rm_handler.safe_delete(["scratch"])
 
         assert results[0][1] is False
@@ -166,6 +181,7 @@ class TestTheDeleteLaneSurvivesForReal:
             [sys.executable, "-c", probe, str(stand_in), str(victim)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(tmp_path),
         )
 
@@ -181,8 +197,6 @@ class TestTheDeleteLaneSurvivesForReal:
 
 class TestTheGitLaneSurvives:
     def test_the_caller_branch_is_unknown_rather_than_a_crash(self, no_cwd):
-        from aipass.drone.apps.modules import git_module
-
         assert git_module._detect_branch_dir() is None
 
     def test_the_repo_root_comes_from_aipass_home_when_there_is_no_cwd(self, no_cwd, home_root):
@@ -193,8 +207,6 @@ class TestTheGitLaneSurvives:
         one. AIPASS_HOME is the first of them, and it is checkable against a
         stand-in rather than against this machine.
         """
-        from aipass.drone.apps.handlers.git import lock_handler
-
         assert lock_handler.find_repo_root() == home_root
 
     def test_with_no_registry_findable_anywhere_it_still_returns_a_real_directory(self, no_cwd, monkeypatch):
@@ -217,8 +229,6 @@ class TestTheGitLaneSurvives:
         directory happens to hold a registry is a fact about the checkout, not
         about the function.
         """
-        from aipass.drone.apps.handlers.git import lock_handler
-
         real_glob = Path.glob
 
         def no_registries(self, pattern, *args, **kwargs):
@@ -240,9 +250,8 @@ class TestTheGitLaneSurvives:
         # "Contains the package" alone is too weak — apps/handlers/git/ satisfies
         # it, and that is the last-resort return. A project root is a directory
         # that DECLARES itself one, and a bare checkout still has .git.
-        assert any((root / marker).exists() for marker in lock_handler._PROJECT_MARKERS), (
-            f"{root} carries no project marker — a lock would land in a subdirectory"
-        )
+        # Mutant killed: find_repo_root skipping its marker walk (the last resort answered).
+        assert (root / ".git").exists(), f"{root} carries no .git — a lock would land in a subdirectory"
 
 
 class TestTheAuthGateFailsClosed:
@@ -256,25 +265,22 @@ class TestTheAuthGateFailsClosed:
     """
 
     def test_no_cwd_is_a_refusal_that_says_why(self, no_cwd):
-        from aipass.drone.apps.plugins.devpulse_ops import auth
-
+        """Mutant killed: _resolve_caller walking a cwd it does not have (a traceback, not a refusal)."""
         with pytest.raises(PermissionError) as excinfo:
-            auth._resolve_caller()
+            auth.verify_git_access("status")
 
         assert "no current directory" in str(excinfo.value).lower(), str(excinfo.value)
 
 
 class TestTheBrokerSurvives:
     def test_broker_project_root_falls_through_to_aipass_home(self, no_cwd, home_root):
-        from aipass.drone.apps.handlers.broker import daemon
-
-        assert daemon._find_project_root() == home_root.resolve()
+        """Mutant killed: the daemon's _find_project_root dropping its AIPASS_HOME fallback."""
+        assert daemon.BrokerDaemon().socket_path.is_relative_to(home_root.resolve())
 
     def test_broker_project_root_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
-        from aipass.drone.apps.handlers.broker import daemon
-
+        """Mutant killed: the daemon's _find_project_root walking a cwd it does not have."""
         monkeypatch.delenv("AIPASS_HOME", raising=False)
-        assert daemon._find_project_root() is None
+        assert daemon.BrokerDaemon().socket_path.parent == Path(tempfile.gettempdir())
 
 
 class TestTheSweepIsComplete:
@@ -315,8 +321,6 @@ class TestTheSweepIsComplete:
         return found
 
     def test_no_bare_cwd_read_survives_outside_caller_cwd(self):
-        import aipass.drone.apps as drone_apps
-
         root = Path(drone_apps.__file__).parent
         offenders = []
         for source in sorted(root.rglob("*.py")):
@@ -365,14 +369,13 @@ class TestTheWindowsSkipIsNarrow:
     )
 
     def test_a_marked_test_runs_on_every_platform_but_windows(self):
-        import aipass.drone.apps as drone_apps
-
         branch_root = Path(drone_apps.__file__).resolve().parent.parent
         result = subprocess.run(
             [sys.executable, "-m", "pytest", self.MARKED, "-q", "-rs", "--timeout=120", "-p", "no:randomly"],
             cwd=str(branch_root),
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
 
         assert result.returncode == 0, result.stdout + result.stderr
@@ -394,9 +397,6 @@ class TestTheWindowsSkipIsNarrow:
         The hook is a function; called directly with the platform it branches
         on, both of its answers are observable anywhere.
         """
-        from types import SimpleNamespace
-
-        from aipass.drone.tests import conftest as drone_conftest
 
         def one_item():
             recorded = []

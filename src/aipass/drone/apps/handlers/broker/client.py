@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Broker client — sends delete requests over inherited fd
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-06-09
-# Modified: 2026-06-10
+# Modified: 2026-09-27
 # =============================================
 
 """Broker client — sends delete requests over an inherited socket fd.
@@ -42,19 +42,23 @@ def is_sandboxed() -> bool:
 
 
 def _get_broker_fd() -> int | None:
-    """Return the inherited broker socket fd, or None if not set."""
+    """Return the inherited broker socket fd, or None if not set.
+
+    Raises ValueError when the variable is set but is not a non-negative
+    integer, so an invalid fd is never reported as an unset one.
+    """
     raw = os.environ.get(BROKER_FD_ENV)
     if raw is None:
         return None
     try:
         fd = int(raw)
-        if fd < 0:
-            logger.warning("broker client: invalid fd %d", fd)
-            return None
-        return fd
-    except ValueError:
+    except ValueError as exc:
         logger.warning("broker client: non-integer AIPASS_BROKER_FD=%s", raw)
-        return None
+        raise ValueError(f"non-integer {BROKER_FD_ENV}={raw!r}") from exc
+    if fd < 0:
+        logger.warning("broker client: invalid fd %d", fd)
+        raise ValueError(f"negative {BROKER_FD_ENV}={fd}")
+    return fd
 
 
 def create_identified_connection(
@@ -111,7 +115,10 @@ def broker_delete(path: str) -> tuple[bool, str]:
 
     Returns ``(success, message)`` matching the pattern in ``rm_handler.safe_delete``.
     """
-    fd = _get_broker_fd()
+    try:
+        fd = _get_broker_fd()
+    except ValueError as exc:
+        return False, f"Broker fd invalid: {exc}"
     if fd is None:
         return False, "Broker fd not available (AIPASS_BROKER_FD not set)"
 

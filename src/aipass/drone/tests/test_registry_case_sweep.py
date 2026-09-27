@@ -1,37 +1,15 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: A case-insensitive filesystem must not widen what counts as a registry
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""``*_REGISTRY.json`` is a name, not a spelling the filesystem gets to choose.
+"""Tests for apps/handlers/router_handler.py registries_in and every *_REGISTRY.json walk under apps/."""
 
-THE DEFECT. ``Path.glob`` asks the FILESYSTEM to match. On a case-insensitive
-one — Windows, and macOS by default — ``*_REGISTRY.json`` also matches
-``*_registry.json``, and this repository is full of files with that ending:
-``drone_command_registry.json`` beside the drone package, ten
-``flow_json/*_registry.json`` plan counters, a ``.spawn/.template_registry.json``
-in every branch (pathlib's ``*`` matches dotfiles, unlike the ``glob`` module).
-Windows CI found it as a test red — ``find_registry()`` returned
-``D:/a/AIPass/AIPass/src/aipass/drone/drone_command_registry.json`` — and the
-red was the smaller half of it.
-
-WHY IT IS NOT COSMETIC. A ``*_REGISTRY.json`` is a project's trust anchor. The
-walks in this tree use it to answer "which installation is this caller a citizen
-of", "what project name goes on their identity", "where is the project root the
-delete lane may write a record into". A plan-id counter answering those is not a
-near miss; it is a different question. And every walk in the tree carried its
-own copy of the glob, so the fix had to land on all of them at once — the same
-species as the dead-cwd sweep, which is why this file is shaped like that one.
-
-THE INSTRUMENT. A case-insensitive filesystem is not available on the Linux box
-this was fixed on, so the fixture below supplies exactly what one returns: the
-directory listing, matched with ``re.IGNORECASE``. That is the state, not a mock
-of the guard — ``registries_in`` is never patched, and the pins run red against
-the unfixed code on every OS rather than only on the runner where it happened to
-show.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import fnmatch
 import re
@@ -40,11 +18,44 @@ from pathlib import Path
 import pytest
 
 from aipass.drone.apps.handlers import registry_handler
-from aipass.drone.apps.handlers.router_handler import _REGISTRY_SUFFIX, registries_in
+from aipass.drone.apps.handlers.router_handler import registries_in
+import aipass.drone.apps as drone_apps
+
+
+# ``*_REGISTRY.json`` is a name, not a spelling the filesystem gets to choose.
+#
+# THE DEFECT. ``Path.glob`` asks the FILESYSTEM to match. On a case-insensitive
+# one — Windows, and macOS by default — ``*_REGISTRY.json`` also matches
+# ``*_registry.json``, and this repository is full of files with that ending:
+# ``drone_command_registry.json`` beside the drone package, ten
+# ``flow_json/*_registry.json`` plan counters, a ``.spawn/.template_registry.json``
+# in every branch (pathlib's ``*`` matches dotfiles, unlike the ``glob`` module).
+# Windows CI found it as a test red — ``find_registry()`` returned
+# ``D:/a/AIPass/AIPass/src/aipass/drone/drone_command_registry.json`` — and the
+# red was the smaller half of it.
+#
+# WHY IT IS NOT COSMETIC. A ``*_REGISTRY.json`` is a project's trust anchor. The
+# walks in this tree use it to answer "which installation is this caller a citizen
+# of", "what project name goes on their identity", "where is the project root the
+# delete lane may write a record into". A plan-id counter answering those is not a
+# near miss; it is a different question. And every walk in the tree carried its
+# own copy of the glob, so the fix had to land on all of them at once — the same
+# species as the dead-cwd sweep, which is why this file is shaped like that one.
+#
+# THE INSTRUMENT. A case-insensitive filesystem is not available on the Linux box
+# this was fixed on, so the fixture below supplies exactly what one returns: the
+# directory listing, matched with ``re.IGNORECASE``. That is the state, not a mock
+# of the guard — ``registries_in`` is never patched, and the pins run red against
+# the unfixed code on every OS rather than only on the runner where it happened to
+# show.
 
 # A name that ends with the suffix in the wrong case. Real, tracked, and sitting
 # in this branch's own directory — see TestTheDecoyIsLive.
 DECOY_NAME = "drone_command_registry.json"
+
+# The naming convention itself, written here rather than read from the product,
+# so a product that changed the suffix's case is caught instead of followed.
+REGISTRY_SUFFIX = "_REGISTRY.json"
 
 
 @pytest.fixture()
@@ -88,7 +99,7 @@ class TestTheFilterIsInPython:
     """``str.endswith`` is case-sensitive on every platform. The glob is not."""
 
     def test_a_wrong_case_name_is_not_a_registry(self, tmp_path, case_insensitive_filesystem):
-        (tmp_path / DECOY_NAME).write_text("{}")
+        (tmp_path / DECOY_NAME).write_text("{}", encoding="utf-8")
 
         assert registries_in(tmp_path) == [], (
             "a lowercase-suffixed file was served as a registry — on a case-insensitive "
@@ -98,27 +109,27 @@ class TestTheFilterIsInPython:
     def test_an_exact_case_registry_still_resolves(self, tmp_path, case_insensitive_filesystem):
         """The positive control. A filter that drops everything passes the test above."""
         real = tmp_path / "AIPASS_REGISTRY.json"
-        real.write_text("{}")
-        (tmp_path / DECOY_NAME).write_text("{}")
+        real.write_text("{}", encoding="utf-8")
+        (tmp_path / DECOY_NAME).write_text("{}", encoding="utf-8")
 
         assert registries_in(tmp_path) == [real]
 
     def test_the_stem_case_is_not_constrained(self, tmp_path, case_insensitive_filesystem):
-        """Only the SUFFIX is the convention.
+        """Only the SUFFIX is the convention; mutant killed: the product's suffix constant lower-cased.
 
         External projects name the registry after themselves and nothing
         promises the project name is uppercase — matching on the whole filename
         would fence out the citizens the glob was widened for in the first place.
         """
-        odd = tmp_path / f"vera-studio{_REGISTRY_SUFFIX}"
-        odd.write_text("{}")
+        odd = tmp_path / f"vera-studio{REGISTRY_SUFFIX}"
+        odd.write_text("{}", encoding="utf-8")
 
         assert registries_in(tmp_path) == [odd]
 
     def test_the_answer_is_sorted(self, tmp_path):
         """Two registries in one directory must resolve the same way every run."""
         for name in ("ZULU_REGISTRY.json", "ALPHA_REGISTRY.json"):
-            (tmp_path / name).write_text("{}")
+            (tmp_path / name).write_text("{}", encoding="utf-8")
 
         assert [p.name for p in registries_in(tmp_path)] == ["ALPHA_REGISTRY.json", "ZULU_REGISTRY.json"]
 
@@ -134,14 +145,13 @@ class TestTheDecoyIsLive:
     """
 
     def test_the_branch_ships_a_wrong_case_registry_name(self):
-        import aipass.drone.apps as drone_apps
 
         branch_root = Path(drone_apps.__file__).resolve().parent.parent
         decoy = branch_root / DECOY_NAME
 
         assert decoy.is_file(), f"expected the tracked decoy at {decoy}"
-        assert not decoy.name.endswith(_REGISTRY_SUFFIX)
-        assert decoy.name.lower().endswith(_REGISTRY_SUFFIX.lower()), (
+        assert not decoy.name.endswith(REGISTRY_SUFFIX)
+        assert decoy.name.lower().endswith(REGISTRY_SUFFIX.lower()), (
             "the decoy no longer ends with the suffix in any case — it is not bait any more"
         )
 
@@ -164,7 +174,7 @@ class TestTheWindowsRedIsReproduced:
         finally:
             registry_handler.reset_registry_path()
 
-        assert found.name.endswith(_REGISTRY_SUFFIX), (
+        assert found.name.endswith(REGISTRY_SUFFIX), (
             f"find_registry served {found} — a case-insensitive filesystem widened the walk"
         )
 
@@ -181,7 +191,6 @@ class TestTheSweepIsComplete:
     _CALL = re.compile(r"r?glob\(\s*f?[\"'][^\"']*_registry\.json", re.IGNORECASE)
 
     def test_no_walk_globs_for_a_registry_outside_the_one_reader(self):
-        import aipass.drone.apps as drone_apps
 
         root = Path(drone_apps.__file__).parent
         offenders = []

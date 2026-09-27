@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_door.py
 # Description: The external-repo door — git verbs in another repo, admin seat only, every use recorded
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-13
-# Modified: 2026-09-13
+# Modified: 2026-09-27
 # =============================================
 
 """The external-repo door: ``drone @git <verb> --repo <path>``.
@@ -73,6 +73,7 @@ REFUSE_VERB = "'{verb}' does not take --repo. The external-repo door serves: " +
 REFUSE_MISSING = "--repo {path} does not exist."
 REFUSE_NOT_DIR = "--repo {path} is not a directory."
 REFUSE_NOT_REPO = "--repo {path} is not a git repository."
+REFUSE_GIT_FAILED = "--repo {path}: git could not run to read its top level ({reason}). Refused."
 REFUSE_NOT_TOP = "--repo {path} sits inside the git repository at {toplevel}, not at its top level. Name the repo root."
 REFUSE_AIPASS = (
     "--repo {path} is the AIPass repo. AIPass keeps its own verbs, lock, version guard and merge train; "
@@ -226,7 +227,11 @@ def admin_verdict() -> AdminVerdict:
 
 
 def _git_toplevel(directory: Path) -> Path | None:
-    """The top level of the git work tree *directory* is in, or None if it is in none."""
+    """The top level of the git work tree *directory* is in, or None if it is in none.
+
+    Raises OSError or SubprocessError when git itself cannot run: that is a
+    failure to report, never an answer of "not a repository".
+    """
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -236,7 +241,7 @@ def _git_toplevel(directory: Path) -> Path | None:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("git repo door: git rev-parse failed in %s: %s", directory, exc)
-        return None
+        raise
     if result.returncode != 0 or not result.stdout.strip():
         return None
     return Path(result.stdout.strip()).resolve()
@@ -266,7 +271,10 @@ def resolve_repo(raw: str, aipass_root: Path) -> RepoTarget:
         return RepoTarget(None, REFUSE_NOT_DIR.format(path=raw))
 
     resolved = candidate.resolve()
-    toplevel = _git_toplevel(resolved)
+    try:
+        toplevel = _git_toplevel(resolved)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return RepoTarget(None, REFUSE_GIT_FAILED.format(path=raw, reason=exc))
     if toplevel is None:
         return RepoTarget(None, REFUSE_NOT_REPO.format(path=raw))
     if is_aipass_repo(toplevel) or toplevel == aipass_root.resolve():

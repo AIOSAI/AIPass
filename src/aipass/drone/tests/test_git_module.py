@@ -1,15 +1,19 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — lock, status, sync, PR, and routing
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-04-21
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the @git module — lock, status, sync, PR, and routing."""
+"""Tests for apps/modules/git_module.py and the lock, status, sync and PR handlers it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess.run, which every git and gh call here reaches as a recorded stub
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
@@ -26,17 +30,14 @@ from aipass.drone.apps.handlers.git.lock_handler import (
     release_lock,
 )
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
-from aipass.drone.apps.handlers.git.sync_handler import sync_main
+from aipass.drone.apps.handlers.git.sync_handler import sync_main, sync_main_ref
+from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches, prune_temp_branches
+from aipass.drone.apps.handlers import module_registry_handler
+from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.drone.apps.handlers.git.commit_handler import SUBJECT_CAP
-from aipass.drone.apps.handlers.git.pr_handler import (
-    _diagnose_push_failure,
-    _has_credential_helper,
-    create_pr,
-)
+from aipass.drone.apps.handlers.git.pr_handler import create_pr
 from aipass.drone.apps.modules.git_module import (
     DRONE_MODULE,
-    _detect_branch_dir,
-    _rewrite_issue_view,
     get_help,
     get_introspective,
     handle_command,
@@ -240,12 +241,11 @@ class TestForceUnlock:
 class TestFindRepoRoot:
     """Repository root detection tests."""
 
-    def test_finds_registry_file(self, lock_dir: Path) -> None:
+    def test_finds_registry_file(self, lock_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Finds repo root by walking up to AIPASS_REGISTRY.json."""
         subdir = lock_dir / "a" / "b" / "c"
         subdir.mkdir(parents=True)
-        # monkeypatch.chdir already set to lock_dir; chdir to subdir
-        os.chdir(str(subdir))
+        monkeypatch.chdir(subdir)
         root = find_repo_root()
         assert root == lock_dir
 
@@ -565,8 +565,6 @@ class TestSyncMainRef:
 
     def test_sync_main_ref_success(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """sync_main_ref updates local main ref."""
-        from aipass.drone.apps.handlers.git.sync_handler import sync_main_ref
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -582,8 +580,6 @@ class TestSyncMainRef:
 
     def test_sync_main_ref_failure(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """sync_main_ref fails on non-fast-forward."""
-        from aipass.drone.apps.handlers.git.sync_handler import sync_main_ref
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -690,11 +686,12 @@ class TestPRHandler:
                 "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
                 return_value={"success": True, "message": "ok"},
             ):
-                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release:
                     result = create_pr("api", "test desc", tmp_path / "src" / "aipass" / "api")
 
         assert result["success"] is False
         assert "nothing to commit" in result["message"].lower()
+        mock_release.assert_called_once_with(force=True)
 
     def test_cleanup_always_runs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Release lock happens even on errors (never leaves main)."""
@@ -717,15 +714,14 @@ class TestPRHandler:
         release_mock.assert_called_once_with(force=True)
 
     def test_commit_uses_pathspec_not_whole_index(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Commit is scoped to branch_dir — pre-staged files outside it are excluded.
-
-        Regression test for FPLAN-0190: concurrent drone @git pr calls could
-        contaminate each other's commits because git commit with no pathspec
-        commits the entire index, not just files staged in this invocation.
-        """
+        """FPLAN-0190. Mutant: pathspec `str(rel_dir) + "/.."` at pr_handler.py:211 — the commit escapes branch_dir."""
+        # Concurrent drone @git pr calls could contaminate each other's commits,
+        # because git commit with no pathspec commits the entire index.
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch(
             "aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_with_staged
@@ -734,19 +730,18 @@ class TestPRHandler:
                 "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
                 return_value={"success": True, "message": "ok"},
             ):
-                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release:
                     create_pr("api", "test desc", tmp_path / "src" / "aipass" / "api")
 
-        # The commit command must include '--' separator + pathspec to scope to branch_dir
         commit_calls = [
             c.args[0] for c in mock_run.call_args_list if c.args and c.args[0][0] == "git" and c.args[0][1] == "commit"
         ]
-        assert commit_calls, "commit was never called"
-        commit_cmd = commit_calls[0]
-        assert "--" in commit_cmd, "commit missing '--' pathspec separator"
-        pathspec_idx = commit_cmd.index("--")
-        pathspec = commit_cmd[pathspec_idx + 1]
-        assert "src/aipass/api" in pathspec.replace(os.sep, "/"), f"pathspec should target branch_dir, got: {pathspec}"
+        # One commit, and its argv ends in the '--' separator plus the branch dir alone.
+        assert [cmd[-2:] for cmd in commit_calls] == [["--", str(Path("src/aipass/api")) + "/"]]
+        mock_release.assert_called_once_with(force=True)
+        mock_trigger.fire.assert_called_once_with(
+            "pr_created", branch="api", pr_url="https://github.com/test/repo/pull/1"
+        )
 
     def test_essay_description_refused_before_the_lock(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """A PR commit lands in the same oneline log, so it obeys the same cap.
@@ -790,78 +785,110 @@ class TestPRHandler:
         assert "blocked" in result["message"].lower()
 
 
+def _pr_push_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, push_stderr: str, helper: MagicMock | Exception
+) -> tuple[str, str]:
+    """Run create_pr to a refused push; answer `git config credential.helper` with *helper*.
+
+    Every git and gh call goes to a recording stub; the lock is a recorder too.
+    Returns the PR's message and the feature branch the push named.
+    """
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    calls: list[list[str]] = []
+
+    def _run(cmd: list[str], **_kwargs: object) -> MagicMock:
+        calls.append(list(cmd))
+        if cmd[:3] == ["git", "config", "--get-all"]:
+            if isinstance(helper, Exception):
+                raise helper
+            return helper
+        if cmd[1:3] == ["rev-parse", "--abbrev-ref"]:
+            return _done("main\n")
+        if cmd[1:3] == ["diff", "--cached"]:
+            return _done(returncode=1)
+        if cmd[1:2] == ["push"]:
+            return _done(returncode=1, stderr=push_stderr)
+        return _done()
+
+    with (
+        patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run),
+        patch(
+            "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
+            return_value={"success": True, "message": "ok"},
+        ),
+        patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release,
+    ):
+        result = create_pr("api", "test desc", tmp_path / "src" / "aipass" / "api")
+
+    mock_release.assert_called_once_with(force=True)
+    assert result["success"] is False
+    pushes = [cmd for cmd in calls if cmd[1:2] == ["push"]]
+    assert len(pushes) == 1
+    assert not any(cmd[:2] == ["gh", "pr"] for cmd in calls), "a refused push must not open a PR"
+    return result["message"], pushes[0][-1]
+
+
+_NO_HELPER = "Push failed: no git credential helper configured."
+_AUTH_ERROR = "Push failed: authentication error"
+
+
 class TestDiagnosePushFailure:
-    """Tests for _has_credential_helper and _diagnose_push_failure."""
+    """A refused push, diagnosed through create_pr: the credential helper first, then the stderr."""
 
-    def test_has_credential_helper_true(self) -> None:
-        """Returns True when git credential.helper is configured."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "store\n"
-        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", return_value=mock_result):
-            assert _has_credential_helper() is True
+    def test_has_credential_helper_true(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: _has_credential_helper returns False — a configured helper is reported missing."""
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "fatal: could not read Username", _done("store\n"))
+        assert msg.startswith(_AUTH_ERROR)
 
-    def test_has_credential_helper_false_no_config(self) -> None:
-        """Returns False when git config returns non-zero (no helper set)."""
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stdout = ""
-        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", return_value=mock_result):
-            assert _has_credential_helper() is False
+    def test_has_credential_helper_false_no_config(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the returncode check dropped — a failing `git config` with output counts as a helper."""
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "403", _done("store\n", returncode=1))
+        assert msg.startswith(_NO_HELPER)
 
-    def test_has_credential_helper_false_empty_stdout(self) -> None:
-        """Returns False when git config returns 0 but stdout is whitespace-only."""
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "   \n"
-        with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", return_value=mock_result):
-            assert _has_credential_helper() is False
+    def test_has_credential_helper_false_empty_stdout(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: stdout not stripped — whitespace-only output counts as a helper."""
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "403", _done("   \n"))
+        assert msg.startswith(_NO_HELPER)
 
-    def test_has_credential_helper_oserror(self) -> None:
-        """Returns False when subprocess raises OSError."""
-        with patch(
-            "aipass.drone.apps.handlers.git.pr_handler.subprocess.run",
-            side_effect=OSError("git not found"),
-        ):
-            assert _has_credential_helper() is False
+    def test_has_credential_helper_oserror(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the OSError handler answers True — an unrunnable git counts as a helper."""
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "403", OSError("git not found"))
+        assert msg.startswith(_NO_HELPER)
 
-    def test_diagnose_no_credential_helper(self) -> None:
+    def test_diagnose_no_credential_helper(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Suggests gh auth setup-git when no credential helper is configured."""
-        with patch("aipass.drone.apps.handlers.git.pr_handler._has_credential_helper", return_value=False):
-            msg = _diagnose_push_failure("fatal: could not read Username", "feat/test")
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "fatal: could not read Username", _done(returncode=1))
         assert "no git credential helper configured" in msg.lower()
         assert "gh auth setup-git" in msg
 
-    def test_diagnose_auth_error_403(self) -> None:
+    def test_diagnose_auth_error_403(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Identifies 403 as an authentication/token error."""
-        with patch("aipass.drone.apps.handlers.git.pr_handler._has_credential_helper", return_value=True):
-            msg = _diagnose_push_failure("The requested URL returned error: 403", "feat/test")
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "The requested URL returned error: 403", _done("store\n"))
         assert "authentication error" in msg.lower()
         assert "gh auth login" in msg
 
-    def test_diagnose_auth_error_terminal_prompts(self) -> None:
-        """Identifies terminal prompts disabled as an auth error."""
-        with patch("aipass.drone.apps.handlers.git.pr_handler._has_credential_helper", return_value=True):
-            msg = _diagnose_push_failure("terminal prompts disabled", "feat/test")
-        assert "authentication error" in msg.lower()
+    def test_diagnose_auth_error_terminal_prompts(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: "terminal prompts disabled" dropped from auth_indicators — read as a plain failure."""
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "terminal prompts disabled", _done("store\n"))
+        assert msg.startswith(_AUTH_ERROR)
 
-    def test_diagnose_permission_denied(self) -> None:
-        """Identifies permission denied as a repo access issue."""
-        with patch("aipass.drone.apps.handlers.git.pr_handler._has_credential_helper", return_value=True):
-            msg = _diagnose_push_failure("Permission denied to AIOSAI/repo", "feat/test")
+    def test_diagnose_permission_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the message names `branch` as "" — the refused branch is not named."""
+        msg, feature_branch = _pr_push_failure(
+            tmp_path, monkeypatch, "Permission denied to AIOSAI/repo", _done("store\n")
+        )
         assert "permission denied" in msg.lower()
-        assert "feat/test" in msg
+        assert f"branch '{feature_branch}'" in msg
 
-    def test_diagnose_unknown_error_passthrough(self) -> None:
+    def test_diagnose_unknown_error_passthrough(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Passes through unrecognized errors with stderr content."""
-        with patch("aipass.drone.apps.handlers.git.pr_handler._has_credential_helper", return_value=True):
-            msg = _diagnose_push_failure("some unknown git error", "feat/test")
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "some unknown git error", _done("store\n"))
         assert msg == "Push failed: some unknown git error"
 
-    def test_diagnose_credential_check_takes_priority(self) -> None:
+    def test_diagnose_credential_check_takes_priority(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """No credential helper is checked first, even if stderr also matches auth indicators."""
-        with patch("aipass.drone.apps.handlers.git.pr_handler._has_credential_helper", return_value=False):
-            msg = _diagnose_push_failure("403 forbidden", "feat/test")
+        msg, _ = _pr_push_failure(tmp_path, monkeypatch, "403 forbidden", _done(returncode=1))
         assert "credential helper" in msg.lower()
         assert "403" not in msg
 
@@ -1022,62 +1049,80 @@ class TestGitModuleRealAuth:
         assert json.loads(result["stdout"])["locked"] is False
 
 
+def _status_branch(expected_dir: Path | None) -> str:
+    """The branch `drone @git status --json` answers for from the CWD; status itself is a recorder."""
+    answer = {"ok": True, "files": [], "total": 0, "message": "clean"}
+    with (
+        patch(_AUTH, return_value="drone"),
+        patch(f"{_GIT_MOD}.status_handler.get_branch_status", return_value=answer) as mock_status,
+    ):
+        result = handle_command("status", ["--json"])
+    if expected_dir is not None:
+        mock_status.assert_called_once_with(expected_dir)
+    return json.loads(result["stdout"])["branch"]
+
+
 class TestDetectBranchDir:
-    """Branch directory detection tests."""
+    """Branch directory detection, read through `status --json`."""
 
     def test_detects_branch_from_passport(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Detects branch name and dir by walking up to .trinity/passport.json."""
-        # Create a fake branch directory with passport
+        """Mutant: the walk stops at CWD (range(1)) — a subdirectory finds no passport."""
         branch_dir = tmp_path / "mybranch"
-        trinity = branch_dir / ".trinity"
-        trinity.mkdir(parents=True)
-        passport = trinity / "passport.json"
-        passport.write_text(
-            json.dumps(
-                {
-                    "branch_info": {"branch_name": "mybranch"},
-                }
-            )
+        (branch_dir / ".trinity").mkdir(parents=True)
+        (branch_dir / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "mybranch"}}), encoding="utf-8"
         )
-
-        # CWD is inside a subdirectory of the branch
         sub_dir = branch_dir / "apps" / "modules"
         sub_dir.mkdir(parents=True)
         monkeypatch.chdir(sub_dir)
 
-        detected = _detect_branch_dir()
-        assert detected is not None
-        name, bdir = detected
-        assert name == "mybranch"
-        assert bdir == branch_dir.resolve()
+        assert _status_branch(branch_dir.resolve()) == "mybranch"
 
     def test_returns_none_for_unrecognized_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Returns None when CWD has no .trinity/passport.json above it."""
+        """Mutant: a missing passport answers (cwd.name, cwd) — status runs for a branch that is not there."""
         monkeypatch.chdir(tmp_path)
-        detected = _detect_branch_dir()
-        assert detected is None
+        with (
+            patch(_AUTH, return_value="drone"),
+            patch(f"{_GIT_MOD}.status_handler.get_branch_status") as mock_status,
+        ):
+            result = handle_command("status", ["--json"])
+
+        document = json.loads(result["stdout"])
+        mock_status.assert_not_called()
+        assert result["exit_code"] == 1
+        assert document["branch"] == ""
+        assert document["message"].startswith("Cannot detect branch directory from CWD")
+
+    def test_unreadable_passport_is_named_not_read_as_no_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the passport except returns None — a corrupt passport reads as "not in a branch"."""
+        branch_dir = tmp_path / "src" / "mybranch"
+        (branch_dir / ".trinity").mkdir(parents=True)
+        (branch_dir / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.chdir(branch_dir)
+        with (
+            patch(_AUTH, return_value="drone"),
+            patch(f"{_GIT_MOD}.status_handler.get_branch_status") as mock_status,
+        ):
+            result = handle_command("status", ["--json"])
+
+        document = json.loads(result["stdout"])
+        mock_status.assert_not_called()
+        assert result["exit_code"] == 1
+        assert document["message"].startswith("Unreadable passport")
+        assert "passport.json" in document["message"]
 
     def test_detects_non_aipass_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Detects branches outside src/aipass/ (e.g. commons, skills)."""
+        """Mutant: only the passport's identity.name is read — a branch_info-only passport is missed."""
         branch_dir = tmp_path / "src" / "commons"
-        trinity = branch_dir / ".trinity"
-        trinity.mkdir(parents=True)
-        passport = trinity / "passport.json"
-        passport.write_text(
-            json.dumps(
-                {
-                    "branch_info": {"branch_name": "commons"},
-                }
-            )
+        (branch_dir / ".trinity").mkdir(parents=True)
+        (branch_dir / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "commons"}}), encoding="utf-8"
         )
-
         monkeypatch.chdir(branch_dir)
 
-        detected = _detect_branch_dir()
-        assert detected is not None
-        name, bdir = detected
-        assert name == "commons"
-        assert bdir == branch_dir.resolve()
+        assert _status_branch(branch_dir.resolve()) == "commons"
 
 
 class TestGitModuleHelp:
@@ -1115,21 +1160,17 @@ class TestModuleRegistration:
     """Verify git is registered in the module registry."""
 
     def test_git_in_registry(self) -> None:
-        """git module is registered in _INTERNAL_MODULES."""
-        from aipass.drone.apps.handlers.module_registry_handler import _INTERNAL_MODULES
+        """Mutant: "git" dropped from _INTERNAL_MODULES — the registry has no info for it."""
+        info = module_registry_handler.get_module_info("git")
 
-        assert "git" in _INTERNAL_MODULES
-        assert _INTERNAL_MODULES["git"] == "aipass.drone.apps.modules.git_module"
+        assert info is not None
+        assert info.adapter_path == "aipass.drone.apps.modules.git_module"
+        assert info.version == DRONE_MODULE["version"]
 
     def test_module_importable(self) -> None:
-        """The registered module path is importable."""
-        import importlib
-
-        mod = importlib.import_module("aipass.drone.apps.modules.git_module")
-        assert hasattr(mod, "DRONE_MODULE")
-        assert hasattr(mod, "handle_command")
-        assert hasattr(mod, "get_help")
-        assert hasattr(mod, "get_introspective")
+        """Mutant: "git" registered at another module's path — the registry serves that module's help."""
+        assert module_registry_handler.get_module_help("git") == get_help(None)
+        assert module_registry_handler.get_module_introspective("git") == get_introspective()
 
 
 # ===========================================================================
@@ -1195,11 +1236,6 @@ class TestTriggerFireIntegration:
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
-        # Pin module identity: create_pr lazily does `from ...core import trigger`,
-        # which resolves via sys.modules — patch through the file-top module object
-        # and pin that same object into sys.modules so both paths agree even if an
-        # earlier test on this worker disturbed trigger's module state.
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_core)
         monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_pr_created_success):
@@ -1207,10 +1243,11 @@ class TestTriggerFireIntegration:
                 "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
                 return_value={"success": True, "message": "ok"},
             ):
-                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release:
                     result = create_pr("api", "test trigger", tmp_path / "src" / "aipass" / "api")
 
         assert result["success"] is True
+        mock_release.assert_called_once_with(force=True)
         mock_trigger.fire.assert_any_call("pr_created", branch="api", pr_url="https://github.com/org/repo/pull/99")
 
     def test_pr_handler_continues_if_trigger_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1221,7 +1258,6 @@ class TestTriggerFireIntegration:
 
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("trigger broken")
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_core)
         monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch("aipass.drone.apps.handlers.git.pr_handler.subprocess.run", side_effect=_run_pr_trigger_resilience):
@@ -1229,21 +1265,22 @@ class TestTriggerFireIntegration:
                 "aipass.drone.apps.handlers.git.pr_handler.acquire_lock",
                 return_value={"success": True, "message": "ok"},
             ):
-                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock"):
+                with patch("aipass.drone.apps.handlers.git.pr_handler.release_lock") as mock_release:
                     result = create_pr("api", "test resilience", tmp_path / "src" / "aipass" / "api")
 
         assert result["success"] is True  # PR still succeeds despite trigger failure
+        mock_release.assert_called_once_with(force=True)
+        mock_trigger.fire.assert_called_once_with(
+            "pr_created", branch="api", pr_url="https://github.com/org/repo/pull/100"
+        )
 
     def test_merge_plugin_fires_pr_merged(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """merge_plugin.merge_pr fires pr_merged event on success."""
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
 
         mock_trigger = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_core)
         monkeypatch.setattr(trigger_core, "trigger", mock_trigger)
 
         with patch(
@@ -1291,8 +1328,6 @@ class TestMergeProtectedBranch:
 
     def test_dev_head_no_delete_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When PR head is dev, merge command must NOT include --delete-branch."""
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1313,8 +1348,6 @@ class TestMergeProtectedBranch:
 
     def test_temp_branch_has_delete_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When PR head is a temp branch, merge command includes --delete-branch."""
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1338,8 +1371,6 @@ class TestMergeProtectedBranch:
         Guards the exact path that destroyed `dev` in S183 — if gh can't report
         the head ref we must not fall back to deleting the branch.
         """
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1364,8 +1395,6 @@ class TestMergeReturnToDev:
 
     def test_checkout_dev_after_merge(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """merge_pr issues 'git checkout dev' when not already on dev."""
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1385,8 +1414,6 @@ class TestMergeReturnToDev:
 
     def test_no_checkout_when_already_on_dev(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """merge_pr skips checkout dev when already on dev."""
-        from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1417,8 +1444,6 @@ class TestBranchesFetchPrune:
 
     def test_fetch_prune_before_list(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """fetch --prune is called before git branch -r."""
-        from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1445,8 +1470,6 @@ class TestBranchesFetchPrune:
 
     def test_deleted_branch_not_listed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """After prune, deleted remote branches do not appear."""
-        from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1469,8 +1492,6 @@ class TestBranchesFetchPrune:
 
     def test_offline_graceful(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When fetch --prune fails (offline), listing still works with warning."""
-        from aipass.drone.apps.handlers.git.branches_handler import list_remote_branches
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1509,8 +1530,6 @@ class TestPruneTempBranches:
 
     def test_prunes_merged_citizen_branches(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Merged citizen/* branches are deleted."""
-        from aipass.drone.apps.handlers.git.branches_handler import prune_temp_branches
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1534,8 +1553,6 @@ class TestPruneTempBranches:
 
     def test_skips_non_citizen_branches(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Non-citizen branches (main, dev, feature/*) are not pruned."""
-        from aipass.drone.apps.handlers.git.branches_handler import prune_temp_branches
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -1560,6 +1577,13 @@ class TestPruneTempBranches:
 # ===========================================================================
 
 _GIT_MOD = "aipass.drone.apps.modules.git_module"
+
+
+class _TtyStdin(io.StringIO):
+    """A terminal's stdin with a typed answer waiting: input() reads it, isatty() says yes."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 _AUTH = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
@@ -1749,25 +1773,21 @@ class TestMergeGate:
         mock_merge.assert_called_once_with("123", "devpulse")
 
     @patch(_AUTH, return_value="devpulse")
-    def test_tty_yes_proceeds(self, _mock_auth: MagicMock) -> None:
+    def test_tty_yes_proceeds(self, _mock_auth: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Interactive terminal answering y merges."""
+        monkeypatch.setattr(sys, "stdin", _TtyStdin("y\n"))
         with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
-            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
-                mock_stdin.isatty.return_value = True
-                with patch("builtins.input", return_value="y"):
-                    result = handle_command("merge", ["123"])
+            result = handle_command("merge", ["123"])
 
         assert result["exit_code"] == 0
         mock_merge.assert_called_once_with("123", "devpulse")
 
     @patch(_AUTH, return_value="devpulse")
-    def test_tty_default_aborts(self, _mock_auth: MagicMock) -> None:
+    def test_tty_default_aborts(self, _mock_auth: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Interactive terminal hitting enter (default N) aborts."""
+        monkeypatch.setattr(sys, "stdin", _TtyStdin("\n"))
         with patch(_MERGE_PR) as mock_merge:
-            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
-                mock_stdin.isatty.return_value = True
-                with patch("builtins.input", return_value=""):
-                    result = handle_command("merge", ["123"])
+            result = handle_command("merge", ["123"])
 
         assert result["exit_code"] == 1
         assert "aborted" in result["stderr"]
@@ -1789,6 +1809,17 @@ class TestMergeGate:
 # ===========================================================================
 
 
+def _spawned_issue_args(args: list[str]) -> list[str]:
+    """What `drone @git issue <args>` hands gh after 'gh issue', read off a recording subprocess stub."""
+    with patch(_AUTH, return_value="drone"), patch(f"{_GIT_MOD}.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(stdout="", stderr="", returncode=0)
+        handle_command("issue", list(args))
+    mock_run.assert_called_once()
+    spawned = mock_run.call_args[0][0]
+    assert spawned[:2] == ["gh", "issue"]
+    return spawned[2:]
+
+
 class TestIssueViewRewrite:
     """The default issue view render is rejected by GitHub — pin the fields.
 
@@ -1798,8 +1829,8 @@ class TestIssueViewRewrite:
     """
 
     def test_bare_view_pins_json_fields(self) -> None:
-        """A plain view <n> gains --json/--template and keeps the issue number."""
-        rewritten = _rewrite_issue_view(["view", "728"])
+        """Mutant: the passthrough skips _rewrite_issue_view — a plain view spawns bare."""
+        rewritten = _spawned_issue_args(["view", "728"])
 
         assert rewritten[:2] == ["view", "728"]
         assert "--json" in rewritten
@@ -1810,7 +1841,7 @@ class TestIssueViewRewrite:
 
     def test_comments_flag_swapped_for_comments_field(self) -> None:
         """--comments conflicts with --json, so it becomes a requested field."""
-        rewritten = _rewrite_issue_view(["view", "733", "--comments"])
+        rewritten = _spawned_issue_args(["view", "733", "--comments"])
 
         assert "--comments" not in rewritten
         assert "comments" in rewritten[rewritten.index("--json") + 1].split(",")
@@ -1818,29 +1849,31 @@ class TestIssueViewRewrite:
 
     def test_short_comments_flag_also_handled(self) -> None:
         """-c is the same flag and conflicts identically."""
-        rewritten = _rewrite_issue_view(["view", "733", "-c"])
+        rewritten = _spawned_issue_args(["view", "733", "-c"])
 
         assert "-c" not in rewritten
         assert "comments" in rewritten[rewritten.index("--json") + 1].split(",")
 
     def test_unrelated_flags_survive(self) -> None:
         """--repo is not a rendering choice — it must reach the CLI untouched."""
-        rewritten = _rewrite_issue_view(["view", "728", "--repo", "AIOSAI/AIPass"])
+        rewritten = _spawned_issue_args(["view", "728", "--repo", "AIOSAI/AIPass"])
 
         assert rewritten[:4] == ["view", "728", "--repo", "AIOSAI/AIPass"]
         assert "--json" in rewritten
 
     @pytest.mark.parametrize("flag", ["--json", "--jq", "-q", "--template", "-t", "--web", "-w"])
     def test_callers_own_rendering_untouched(self, flag: str) -> None:
-        """A caller who picked a rendering keeps it — ours would conflict."""
+        """Mutant: the render-flag check removed — a caller's own rendering gets ours appended."""
         args = ["view", "728", flag, "x"]
 
-        assert _rewrite_issue_view(args) == args
+        assert _spawned_issue_args(args) == args
 
     @pytest.mark.parametrize("args", [["list"], ["create", "--title", "x"], ["close", "728"], []])
     def test_other_issue_subcommands_untouched(self, args: list[str]) -> None:
-        """Only view requests projectCards — everything else passes through."""
-        assert _rewrite_issue_view(list(args)) == args
+        """Mutant: the `args[0] != "view"` test dropped — list/create/close get view's fields."""
+        spawned = _spawned_issue_args(args)
+        assert spawned == args
+        assert "--template" not in spawned
 
     @patch(_AUTH, return_value="drone")
     def test_view_never_spawned_bare(self, _mock_auth: MagicMock) -> None:
@@ -1972,3 +2005,93 @@ class TestRunLogFallback:
 
         assert mock_run.call_args[0][0] == ["gh", *argv]
         assert result == {"stdout": "ok\n", "stderr": "", "exit_code": 0}
+
+    @patch(_AUTH, return_value="drone")
+    def test_a_named_attempt_reads_that_attempts_jobs(self, _mock_auth: MagicMock) -> None:
+        """Mutant: `attempt = None` at git_module.py:402 — the jobs URL loses /attempts/2."""
+        routes = {
+            ("gh", "run", "view", "55", "--attempt", "2", "--log"): _done(),
+            (
+                "gh",
+                "api",
+                "--paginate",
+                "repos/{owner}/{repo}/actions/runs/55/attempts/2/jobs",
+                "--jq",
+                _RUN_JOBS_JQ,
+            ): _done("31\tsuccess\tlint\n"),
+            ("gh", "api", "repos/{owner}/{repo}/actions/jobs/31/logs"): _done("second try\n"),
+        }
+        with patch(f"{_GIT_MOD}.subprocess.run", side_effect=_gh_answers(routes)) as mock_run:
+            result = handle_command("run", ["view", "55", "--attempt", "2", "--log"])
+
+        assert result["stdout"] == "lint\tsecond try"
+        assert result["exit_code"] == 0
+        assert mock_run.call_count == 3
+
+
+# ===========================================================================
+# Flags the module's own verbs parse: diff --staged, sync --autostash
+# ===========================================================================
+
+
+def _passport_branch(root: Path, name: str) -> Path:
+    """A branch directory the CWD lookup recognises, built under tmp_path."""
+    branch_dir = root / name
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text(
+        json.dumps({"branch_info": {"branch_name": name}}), encoding="utf-8"
+    )
+    return branch_dir
+
+
+class TestVerbFlags:
+    """Each flag reaches the handler that acts on it; the handler is a recorder, so no git runs."""
+
+    @patch(_AUTH, return_value="drone")
+    def test_diff_staged_asks_the_handler_for_the_index(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: `staged = False` at git_module.py:776 — the handler is asked for the worktree."""
+        branch_dir = _passport_branch(tmp_path, "drone")
+        monkeypatch.chdir(branch_dir)
+        answer = {"ok": True, "diff": "diff --git a/x b/x\n", "message": ""}
+        with patch(f"{_GIT_MOD}.diff_handler.get_branch_diff", return_value=answer) as mock_diff:
+            result = handle_command("diff", ["--staged"])
+
+        mock_diff.assert_called_once_with(branch_dir.resolve(), staged=True)
+        assert result["exit_code"] == 0
+        assert result["stdout"].startswith("diff --git a/x b/x")
+
+    @patch(_AUTH, return_value="drone")
+    def test_diff_without_staged_asks_for_the_worktree(
+        self, _mock_auth: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: `staged = True` at git_module.py:776 — a plain diff reads the index."""
+        branch_dir = _passport_branch(tmp_path, "drone")
+        monkeypatch.chdir(branch_dir)
+        answer = {"ok": True, "diff": "", "message": "No changes"}
+        with patch(f"{_GIT_MOD}.diff_handler.get_branch_diff", return_value=answer) as mock_diff:
+            result = handle_command("diff", [])
+
+        mock_diff.assert_called_once_with(branch_dir.resolve(), staged=False)
+        assert result["exit_code"] == 0
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_sync_autostash_hands_autostash_to_the_sync(self, _mock_auth: MagicMock) -> None:
+        """Mutant: `autostash = False` at git_module.py:1000 — the sync runs without the stash."""
+        answer = {"success": True, "message": "synced dev with main"}
+        with patch(f"{_GIT_MOD}.sync_handler.sync_main", return_value=answer) as mock_sync:
+            result = handle_command("sync", ["--autostash"])
+
+        mock_sync.assert_called_once_with(autostash=True)
+        assert result == {"stdout": "synced dev with main", "stderr": "", "exit_code": 0}
+
+    @patch(_AUTH, return_value="devpulse")
+    def test_sync_without_autostash_leaves_the_tree_alone(self, _mock_auth: MagicMock) -> None:
+        """Mutant: `autostash = True` at git_module.py:1000 — a plain sync would stash the caller's work."""
+        answer = {"success": False, "message": "dirty tree"}
+        with patch(f"{_GIT_MOD}.sync_handler.sync_main", return_value=answer) as mock_sync:
+            result = handle_command("sync", [])
+
+        mock_sync.assert_called_once_with(autostash=False)
+        assert result == {"stdout": "", "stderr": "dirty tree", "exit_code": 1}

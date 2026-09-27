@@ -1,23 +1,15 @@
 # =================== AIPass ====================
 # Name: test_git_json_and_remote.py
 # Description: Machine output on the git read doors, and the remote read door
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""FPLAN-0438 round 4a — the two door asks from @api's boundary assessment.
+"""Tests for apps/modules/git_module.py's --json on status/log/show and apps/handlers/git/remote_handler.py."""
 
-ASK 1: ``--json`` on status / log / show, so a consumer reads a document
-instead of scraping a rendered sentence.
-
-ASK 2: ``drone @git remote`` — a door that did not exist, which is why @api
-parsed .git/config as an INI file with its own worktree-following.
-
-Every prose assertion here is a REGRESSION PIN: the asks were explicitly
-additive, so the desktop and every current caller must keep reading exactly the
-bytes they read before.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.dumps' own encoding of the documents
 
 from __future__ import annotations
 
@@ -31,6 +23,16 @@ from aipass.drone.apps.handlers.json_flags import JSON_FLAG, strip_json_flag, wa
 from aipass.drone.apps.handlers.git import remote_handler
 from aipass.drone.apps.handlers.git.status_handler import get_branch_status
 from aipass.drone.apps.modules.git_module import handle_command
+from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
+
+# FPLAN-0438 round 4a, the two door asks from @api's boundary assessment.
+# ASK 1: --json on status / log / show, so a consumer reads a document instead
+# of scraping a rendered sentence.
+# ASK 2: drone @git remote, a door that did not exist, which is why @api parsed
+# .git/config as an INI file with its own worktree-following.
+# Every prose assertion here is a REGRESSION PIN: the asks were explicitly
+# additive, so the desktop and every current caller must keep reading exactly
+# the bytes they read before.
 
 _GIT_MOD = "aipass.drone.apps.modules.git_module"
 _AUTH = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
@@ -564,8 +566,6 @@ class TestRemoteCommand:
         Unlisted commands raise 'Unknown git command' in the gate, so this pins
         the tier registration, not just the routing.
         """
-        from aipass.drone.apps.plugins.devpulse_ops.auth import GIT_ACCESS_TIERS
-
         assert "remote" in GIT_ACCESS_TIERS["global"]["commands"]
         assert "remote" not in GIT_ACCESS_TIERS["owner"]["commands"]
 

@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_devpulse_plugins.py
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for devpulse_ops plugins — merge, smart-sync, fix."""
+"""Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ import pytest
 from aipass.drone.apps.plugins.devpulse_ops.merge_plugin import merge_pr
 from aipass.drone.apps.plugins.devpulse_ops.sync_plugin import smart_sync
 from aipass.drone.apps.plugins.devpulse_ops.fix_plugin import fix_git_state
+from aipass.drone.apps.modules.git_module import get_help, get_introspective, handle_command
 
 
 # ===========================================================================
@@ -84,7 +88,6 @@ class TestAuthDenialMerge:
     """merge command should deny unauthorized callers."""
 
     def test_merge_unauthorized(self, seedgo_dir: Path) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         result = handle_command("merge", ["42"])
         assert result["exit_code"] == 1
@@ -95,7 +98,6 @@ class TestAuthDenialSmartSync:
     """smart-sync command should deny unauthorized callers."""
 
     def test_smart_sync_unauthorized(self, seedgo_dir: Path) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         result = handle_command("smart-sync", [])
         assert result["exit_code"] == 1
@@ -106,7 +108,6 @@ class TestAuthDenialFix:
     """fix command should deny unauthorized callers."""
 
     def test_fix_unauthorized(self, seedgo_dir: Path) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         result = handle_command("fix", [])
         assert result["exit_code"] == 1
@@ -462,50 +463,49 @@ class TestFixCleanState:
 class TestGitModuleRouting:
     """Test that git_module routes merge, smart-sync, fix correctly."""
 
-    def test_merge_in_commands(self) -> None:
-        from aipass.drone.apps.modules.git_module import _COMMANDS
+    @staticmethod
+    def _available_verbs() -> list[str]:
+        """The verbs an unknown git command is told it may use instead."""
+        with patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="devpulse"):
+            result = handle_command("no-such-verb", ["x"])
+        assert result["exit_code"] == 1
+        return result["stderr"].split("Available: ", 1)[1].split(", ")
 
-        assert "merge" in _COMMANDS
+    def test_merge_in_commands(self) -> None:
+        """Mutant killed: "merge" dropped from git_module's command list."""
+        assert "merge" in self._available_verbs()
 
     def test_smart_sync_in_commands(self) -> None:
-        from aipass.drone.apps.modules.git_module import _COMMANDS
-
-        assert "smart-sync" in _COMMANDS
+        """Mutant killed: "smart-sync" dropped from git_module's command list."""
+        assert "smart-sync" in self._available_verbs()
 
     def test_fix_in_commands(self) -> None:
-        from aipass.drone.apps.modules.git_module import _COMMANDS
-
-        assert "fix" in _COMMANDS
+        """Mutant killed: "fix" dropped from git_module's command list."""
+        assert "fix" in self._available_verbs()
 
     def test_get_help_includes_merge(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
 
         assert "merge" in get_help()
 
     def test_get_help_includes_smart_sync(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
 
         assert "smart-sync" in get_help()
 
     def test_get_help_includes_fix(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
 
         assert "fix" in get_help()
 
     def test_get_help_merge_specific(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
 
         help_text = get_help("merge")
         assert "merge" in help_text.lower()
 
     def test_get_help_smart_sync_specific(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
 
         help_text = get_help("smart-sync")
         assert "rebase" in help_text.lower()
 
     def test_get_help_fix_specific(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_help
 
         help_text = get_help("fix")
         # The headline the verb actually prints, plus one action from its table.
@@ -515,7 +515,6 @@ class TestGitModuleRouting:
         assert "Stuck rebase   → git rebase --abort" in help_text
 
     def test_get_introspective_includes_plugins(self) -> None:
-        from aipass.drone.apps.modules.git_module import get_introspective
 
         intro = get_introspective()
         assert "merge_plugin" in intro
@@ -527,7 +526,6 @@ class TestGitModuleRouting:
         return_value="devpulse",
     )
     def test_handle_merge_no_args(self, _mock_access: MagicMock) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         result = handle_command("merge", [])
         assert result["exit_code"] == 1
@@ -546,7 +544,6 @@ class TestGitModuleRouting:
         _mock_access: MagicMock,
         tmp_path: Path,
     ) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         mock_root.return_value = tmp_path
 
@@ -574,7 +571,6 @@ class TestGitModuleRouting:
         _mock_access: MagicMock,
         tmp_path: Path,
     ) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         mock_root.return_value = tmp_path
 
@@ -606,7 +602,6 @@ class TestGitModuleRouting:
         _mock_access: MagicMock,
         tmp_path: Path,
     ) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
 
         mock_root.return_value = tmp_path
         git_dir = tmp_path / ".git"

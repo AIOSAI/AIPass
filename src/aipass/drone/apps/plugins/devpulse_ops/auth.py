@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-30
-# Modified: 2026-09-13
+# Modified: 2026-09-27
 # =============================================
 
 """Passport-based authorization for git operations.
@@ -256,6 +256,9 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     as written, so resolve here too rather than trusting the loader to have done
     it: an unresolved relative path would resolve against CWD and bind authority
     to wherever the caller happened to be standing.
+
+    Raises OSError when a recorded path is present but cannot be resolved, so
+    that failure is never reported as an entry that records no path.
     """
     raw = entry.get("path")
     if not raw:
@@ -266,10 +269,10 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     try:
         return recorded.resolve()
     except OSError as exc:
-        # Returning None here reads downstream as "records no path", which would
+        # Raised, not None: None reads downstream as "records no path", which would
         # send someone hunting a registry entry that is in fact present and fine.
         logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
-        return None
+        raise
 
 
 def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
@@ -339,7 +342,13 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
     # The registry file's own directory is the repo root by construction, which
     # keeps path-binding anchored to the SAME registry the checks above used.
     repo_root = registry_path.parent.resolve()
-    recorded = _recorded_home(entry, repo_root)
+    try:
+        recorded = _recorded_home(entry, repo_root)
+    except OSError as exc:
+        return Refusal(
+            f"registry path for '{caller.name}' could not be resolved ({exc}) — cannot bind authority to a location",
+            _AUTHORITY,
+        )
     if recorded is None:
         return Refusal(
             f"registry entry for '{caller.name}' records no path — cannot bind authority to a location", _AUTHORITY

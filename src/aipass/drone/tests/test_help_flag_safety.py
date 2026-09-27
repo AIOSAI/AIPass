@@ -1,30 +1,41 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Rule E canaries — a help flag anywhere explains, never executes
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Rule E canaries: a help flag ANYWHERE means explain, never execute.
+"""Tests for apps/handlers/help_flags.py and the help gate of every drone module."""
 
-Every drone module gated help at one fixed slot, so `--help` typed after the
-first argument was invisible and the verb ran anyway (DPLAN-0291 round,
-help_flag_safety 9/100).
-
-Every test here mocks its dispatch target and asserts it was NEVER CALLED. No
-live verb is fired to prove the trap — `rm` deletes files and the git write
-paths mutate a repo, so the proof is that the mock stayed untouched, not that
-the damage was survivable.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the wording each print_help() prints; only that help runs instead of the verb
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from aipass.drone.apps.handlers.help_flags import help_topic, wants_help
+from aipass.drone.apps.modules import (
+    commands,
+    config,
+    discovery,
+    git_module,
+    module_registry,
+    registry,
+    resolver,
+    rm,
+    router,
+    scan,
+)
+
+# Every drone module gated help at one fixed slot, so `--help` after the first
+# argument was invisible and the verb ran anyway (DPLAN-0291, help_flag_safety 9/100).
+# Every test here mocks its dispatch target and asserts it was NEVER CALLED: `rm`
+# deletes files and the git write paths mutate a repo, so no live verb is fired.
 
 
 # ===========================================================================
@@ -111,13 +122,11 @@ class TestRmNeverDeletesOnHelp:
         ],
     )
     def test_help_never_reaches_safe_delete(self, command: str, args: list[str]) -> None:
-        from aipass.drone.apps.modules.rm import handle_command
-
         with (
             patch(f"{_M}.rm._safe_delete") as delete,
             patch(f"{_M}.rm.print_help") as help_,
         ):
-            result = handle_command(command, args)
+            result = rm.handle_command(command, args)
 
         delete.assert_not_called()
         help_.assert_called_once()
@@ -125,14 +134,12 @@ class TestRmNeverDeletesOnHelp:
 
     def test_ordinary_delete_still_reaches_the_handler(self) -> None:
         """The trap must not swallow real work."""
-        from aipass.drone.apps.modules.rm import handle_command
-
         with (
             patch(f"{_M}.rm._safe_delete", return_value=[("a.txt", True, "deleted")]) as delete,
             patch(f"{_M}.rm.print_help") as help_,
             patch(f"{_M}.rm.success"),
         ):
-            handle_command("a.txt", [])
+            rm.handle_command("a.txt", [])
 
         delete.assert_called_once_with(["a.txt"])
         help_.assert_not_called()
@@ -151,13 +158,11 @@ class TestGitModuleNeverExecutesOnHelp:
         ],
     )
     def test_help_short_circuits_before_auth_and_dispatch(self, command: str, args: list[str]) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
-
         with (
             patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access") as auth,
             patch(f"{_M}.git_module.print_help") as help_,
         ):
-            result = handle_command(command, args)
+            result = git_module.handle_command(command, args)
 
         help_.assert_called_once()
         auth.assert_not_called()
@@ -167,14 +172,12 @@ class TestGitModuleNeverExecutesOnHelp:
 class TestConfigNeverSetsOnHelp:
     """config set mutates the registry path — a stray flag must not land it."""
 
-    def test_set_with_trailing_help_does_not_set(self) -> None:
-        from aipass.drone.apps.modules.config import handle_command
-
+    def test_set_with_trailing_help_does_not_set(self, tmp_path: Path) -> None:
         with (
             patch(f"{_M}.config.set_registry_path") as setter,
             patch(f"{_M}.config.print_help") as help_,
         ):
-            result = handle_command("set", ["/tmp/somewhere", "--help"])
+            result = config.handle_command("set", [str(tmp_path / "somewhere"), "--help"])
 
         setter.assert_not_called()
         help_.assert_called_once()
@@ -185,13 +188,11 @@ class TestRouterNeverRoutesOnHelp:
     """router route dispatches an arbitrary command to another branch."""
 
     def test_route_with_trailing_help_does_not_route(self) -> None:
-        from aipass.drone.apps.modules.router import handle_command
-
         with (
             patch(f"{_M}.router.route_command") as route,
             patch(f"{_M}.router.print_help") as help_,
         ):
-            result = handle_command("route", ["@seedgo", "audit", "--help"])
+            result = router.handle_command("route", ["@seedgo", "audit", "--help"])
 
         route.assert_not_called()
         help_.assert_called_once()
@@ -202,13 +203,11 @@ class TestCommandsNeverMutatesOnHelp:
     """commands add/remove writes the shortcut registry."""
 
     def test_add_with_trailing_help_does_not_add(self) -> None:
-        from aipass.drone.apps.modules.commands import handle_command
-
         with (
             patch(f"{_M}.commands.add") as add,
             patch(f"{_M}.commands.print_help") as help_,
         ):
-            result = handle_command("add", ["name", "@target", "cmd", "--help"])
+            result = commands.handle_command("add", ["name", "@target", "cmd", "--help"])
 
         add.assert_not_called()
         help_.assert_called_once()
@@ -223,65 +222,55 @@ class TestReadOnlyModulesStillHonourRuleE:
     """
 
     def test_scan_does_not_scan(self) -> None:
-        from aipass.drone.apps.modules.scan import handle_command
-
         with (
             patch(f"{_M}.scan.scan") as target,
             patch(f"{_M}.scan.print_help") as help_,
         ):
-            result = handle_command(None, ["@seedgo", "--help"])
+            result = scan.handle_command(None, ["@seedgo", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
         assert result is True
 
     def test_resolver_does_not_resolve(self) -> None:
-        from aipass.drone.apps.modules.resolver import handle_command
-
         with (
             patch(f"{_M}.resolver.resolve_branch") as target,
             patch(f"{_M}.resolver.print_help") as help_,
         ):
-            result = handle_command("resolve", ["@seedgo", "--help"])
+            result = resolver.handle_command("resolve", ["@seedgo", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
         assert result is True
 
     def test_registry_does_not_look_up(self) -> None:
-        from aipass.drone.apps.modules.registry import handle_command
-
         with (
             patch(f"{_M}.registry.get_branch_by_name") as target,
             patch(f"{_M}.registry.print_help") as help_,
         ):
-            result = handle_command("lookup", ["seedgo", "--help"])
+            result = registry.handle_command("lookup", ["seedgo", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
         assert result is True
 
     def test_module_registry_does_not_query(self) -> None:
-        from aipass.drone.apps.modules.module_registry import handle_command
-
         with (
             patch(f"{_M}.module_registry.get_module_info") as target,
             patch(f"{_M}.module_registry.print_help") as help_,
         ):
-            result = handle_command("info", ["git", "--help"])
+            result = module_registry.handle_command("info", ["git", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
         assert result is True
 
     def test_discovery_does_not_discover(self) -> None:
-        from aipass.drone.apps.modules.discovery import handle_command
-
         with (
             patch(f"{_M}.discovery.discover_modules") as target,
             patch(f"{_M}.discovery.print_help") as help_,
         ):
-            result = handle_command("modules", ["@seedgo", "--help"])
+            result = discovery.handle_command("modules", ["@seedgo", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -295,30 +284,27 @@ class TestDiscoveryHelpSubcommandSurvives:
     whose legitimate subcommand IS the word help.
     """
 
-    def test_help_target_still_dispatches(self) -> None:
-        from aipass.drone.apps.modules.discovery import handle_command
-
+    def test_help_target_still_dispatches(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """`help @seedgo` prints the target's help (mutant: the text print removed)."""
         with (
             patch(f"{_M}.discovery.get_help") as target,
             patch(f"{_M}.discovery.print_help") as help_,
-            patch(f"{_M}.discovery.console"),
         ):
             target.return_value.text = "seedgo help text"
-            result = handle_command("help", ["@seedgo"])
+            result = discovery.handle_command("help", ["@seedgo"])
 
         target.assert_called_once_with("@seedgo", None)
         help_.assert_not_called()
         assert result is True
+        assert "seedgo help text" in capsys.readouterr().out
 
     def test_help_target_with_flag_explains_instead(self) -> None:
         """...but a dashed flag alongside it still wins."""
-        from aipass.drone.apps.modules.discovery import handle_command
-
         with (
             patch(f"{_M}.discovery.get_help") as target,
             patch(f"{_M}.discovery.print_help") as help_,
         ):
-            result = handle_command("help", ["@seedgo", "--help"])
+            result = discovery.handle_command("help", ["@seedgo", "--help"])
 
         target.assert_not_called()
         help_.assert_called_once()
@@ -379,14 +365,11 @@ class TestGitHelpNamesTheVerb:
         ],
     )
     def test_the_named_verb_reaches_get_help(self, command: str, args: list[str], topic: str | None) -> None:
-        from aipass.drone.apps.modules.git_module import handle_command
-
         with (
             patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access") as auth,
             patch(f"{_M}.git_module.get_help", return_value="") as get_help_,
-            patch(f"{_M}.git_module._get_console"),
         ):
-            result = handle_command(command, args)
+            result = git_module.handle_command(command, args)
 
         get_help_.assert_called_once_with(topic)
         auth.assert_not_called()
@@ -394,6 +377,4 @@ class TestGitHelpNamesTheVerb:
 
     def test_an_unknown_verb_still_gets_the_whole_page(self) -> None:
         """get_help falls through to the top-level text: no empty answer."""
-        from aipass.drone.apps.modules.git_module import get_help
-
-        assert get_help("not-a-verb") == get_help()
+        assert git_module.get_help("not-a-verb") == git_module.get_help()

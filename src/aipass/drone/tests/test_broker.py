@@ -1,18 +1,16 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.1
+# Version: 2.0.3
 # Created: 2026-06-09
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the drone-broker daemon (Phase 3 + Phase 6a FPLAN-0250).
+"""Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
 
-Covers: protocol serialization, path resolution (openat2 + walk fallback),
-daemon accept/delete/refuse/audit, identity handshake (HMAC), allowlist
-policy (identity-scoped), denylist backstop, confused-deputy attacks,
-client broker_delete / create_identified_connection, and rm broker routing.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — rm's direct (non-broker) delete lane, pinned in tests/test_rm.py
+# seedgo: no-test-needed(external) — the kernel's openat2 RESOLVE_BENEATH itself; the resolver's use of it is pinned
 
 from __future__ import annotations
 
@@ -37,7 +35,16 @@ from aipass.drone.apps.handlers.broker.client import (
     is_sandboxed,
     BROKER_FD_ENV,
 )
+from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.drone.apps.modules.rm import safe_delete
+
+# Tests for the drone-broker daemon (Phase 3 + Phase 6a FPLAN-0250).
+#
+# Covers: protocol serialization, path resolution (openat2 + walk fallback),
+# daemon accept/delete/refuse/audit, identity handshake (HMAC), allowlist
+# policy (identity-scoped), denylist backstop, confused-deputy attacks,
+# client broker_delete / create_identified_connection, and rm broker routing.
 
 pytestmark = pytest.mark.skipif(
     sys.platform != "linux",
@@ -64,6 +71,18 @@ def _recv_response(sock: socket.socket) -> BrokerResponse:
             break
         data += chunk
     return BrokerResponse.from_bytes(data)
+
+
+def _no_openat2(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Stand the resolver on a host with no openat2, and record each time it asks."""
+    asked: list[bool] = []
+
+    def no_openat2() -> bool:
+        asked.append(False)
+        return asked[-1]
+
+    monkeypatch.setattr(path_resolver, "_openat2_available", no_openat2)
+    return asked
 
 
 def _send_raw(sock_path: Path, req: BrokerRequest) -> BrokerResponse:
@@ -203,10 +222,11 @@ class TestPathResolver:
         result = resolve_beneath(base, "deleteme.txt")
         assert result == (base / "deleteme.txt").resolve()
 
-    def test_resolve_nested(self, repo_root: Path) -> None:
-        """Resolves a nested path."""
-        base = repo_root / "src" / "aipass" / "testbranch"
+    def test_resolve_nested_answers_the_opened_path_not_the_callers_spelling(self, repo_root: Path) -> None:
+        """Mutant killed: the kernel lane returning base / relpath instead of the fd's own path."""
+        base = repo_root / "src" / "aipass" / ".." / "aipass" / "testbranch"
         result = resolve_beneath(base, "subdir/nested.txt")
+        assert ".." not in result.parts, f"the caller's spelling came back unverified: {result}"
         assert result == (base / "subdir" / "nested.txt").resolve()
 
     def test_reject_dotdot_escape(self, repo_root: Path) -> None:
@@ -227,11 +247,11 @@ class TestPathResolver:
         with pytest.raises(OSError, match="leading /"):
             resolve_beneath(base, "/etc/passwd")
 
-    def test_reject_symlink(self, repo_root: Path) -> None:
+    def test_reject_symlink(self, repo_root: Path, tmp_path: Path) -> None:
         """Refuses paths through symlinks."""
         base = repo_root / "src" / "aipass" / "testbranch"
         link = base / "link"
-        link.symlink_to("/tmp")
+        link.symlink_to(tmp_path)
         try:
             with pytest.raises(OSError):
                 resolve_beneath(base, "link/something")
@@ -247,7 +267,7 @@ class TestPathResolver:
     # -- the walk fallback: the lane every non-Linux host takes ---------------
 
     @pytest.fixture()
-    def walk_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def walk_host(self, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
         """Stand the resolver on a host with no openat2 and no /proc to read.
 
         That is macOS, and it is the lane that used to raise FileNotFoundError
@@ -261,16 +281,20 @@ class TestPathResolver:
                 raise FileNotFoundError(2, "No such file or directory", str(path))
             return real_readlink(path, *args, **kwargs)
 
-        monkeypatch.setattr(path_resolver, "_openat2_available", lambda: False)
+        asked = _no_openat2(monkeypatch)
         monkeypatch.setattr(os, "readlink", no_proc)
+        return asked
 
-    def test_walk_resolves_with_no_proc(self, repo_root: Path, walk_host: None) -> None:
-        """The fallback resolves a nested path on a host without /proc."""
+    def test_walk_resolves_with_no_proc(self, repo_root: Path, walk_host: list[bool]) -> None:
+        """Mutant killed: resolve_beneath never asking _openat2_available (the walk lane unproven)."""
         base = repo_root / "src" / "aipass" / "testbranch"
         result = resolve_beneath(base, "subdir/nested.txt")
+        assert walk_host == [False], (
+            "the resolver never asked whether openat2 exists; the walk was not the lane under test"
+        )
         assert result == (base / "subdir" / "nested.txt").resolve()
 
-    def test_walk_resolves_the_base_itself(self, repo_root: Path, walk_host: None) -> None:
+    def test_walk_resolves_the_base_itself(self, repo_root: Path, walk_host: list[bool]) -> None:
         """'.' walks no components and still answers the base."""
         base = repo_root / "src" / "aipass" / "testbranch"
         assert resolve_beneath(base, ".") == base.resolve()
@@ -280,23 +304,24 @@ class TestPathResolver:
         different resolver wearing the same name."""
         base = repo_root / "src" / "aipass" / "testbranch"
         by_kernel = resolve_beneath(base, "subdir/nested.txt")
-        monkeypatch.setattr(path_resolver, "_openat2_available", lambda: False)
+        asked = _no_openat2(monkeypatch)
         assert resolve_beneath(base, "subdir/nested.txt") == by_kernel
+        assert asked == [False], "the second resolve never asked for the lane, so both answers may be one lane's"
 
-    def test_walk_refuses_a_symlinked_directory(self, repo_root: Path, walk_host: None) -> None:
+    def test_walk_refuses_a_symlinked_directory(self, repo_root: Path, walk_host: list[bool], tmp_path: Path) -> None:
         """O_NOFOLLOW comes from `os`, so it is the host's own value: 0o0400000
         is O_NOFOLLOW on Linux and O_NOCTTY on macOS, and the second one would
         have opened this link instead of refusing it."""
         base = repo_root / "src" / "aipass" / "testbranch"
         link = base / "link"
-        link.symlink_to("/tmp")
+        link.symlink_to(tmp_path)
         try:
             with pytest.raises(OSError, match="Component 'link' failed"):
                 resolve_beneath(base, "link/something")
         finally:
             link.unlink()
 
-    def test_walk_refuses_a_symlinked_leaf(self, repo_root: Path, walk_host: None) -> None:
+    def test_walk_refuses_a_symlinked_leaf(self, repo_root: Path, walk_host: list[bool]) -> None:
         """The leaf is stat'd rather than opened, so it needs its own refusal —
         without it a symlinked last component would resolve."""
         base = repo_root / "src" / "aipass" / "testbranch"
@@ -311,7 +336,7 @@ class TestPathResolver:
     def test_walk_refuses_a_path_swapped_under_it(
         self,
         repo_root: Path,
-        walk_host: None,
+        walk_host: list[bool],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
@@ -335,7 +360,7 @@ class TestPathResolver:
     def test_walk_refuses_when_the_verified_path_is_gone(
         self,
         repo_root: Path,
-        walk_host: None,
+        walk_host: list[bool],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
@@ -351,7 +376,7 @@ class TestPathResolver:
             resolve_beneath(base, "subdir/nested.txt")
 
     def test_walk_refuses_a_host_without_nofollow(
-        self, repo_root: Path, walk_host: None, monkeypatch: pytest.MonkeyPatch
+        self, repo_root: Path, walk_host: list[bool], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Windows has neither O_NOFOLLOW nor dir_fd, so the walk cannot hold
         its contract there and says so instead of resolving unverified."""
@@ -424,11 +449,11 @@ class TestBrokerDaemon:
         )
         assert resp.ok is False
 
-    def test_refuse_symlink_escape(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
+    def test_refuse_symlink_escape(self, running_broker: BrokerDaemon, repo_root: Path, tmp_path: Path) -> None:
         """Broker refuses confused-deputy symlink escape."""
         base = repo_root / "src" / "aipass" / "testbranch"
         link = base / "evil_link"
-        link.symlink_to("/tmp")
+        link.symlink_to(tmp_path)
         try:
             resp = _send_identified(
                 running_broker,
@@ -676,8 +701,9 @@ class TestIdentity:
         """Secret file is created with mode 0600."""
         if os.name != "posix":
             pytest.skip("POSIX permission check")
-        mode = running_broker._secret_path.stat().st_mode
-        assert stat.S_IMODE(mode) == 0o600  # noqa: windows_compat
+        else:
+            mode = running_broker._secret_path.stat().st_mode
+            assert stat.S_IMODE(mode) == 0o600
 
     def test_secret_changes_across_restarts(self, tmp_path: Path, repo_root: Path) -> None:
         """Secret is regenerated on each daemon start."""
@@ -882,12 +908,23 @@ class TestClient:
         monkeypatch.setenv(BROKER_FD_ENV, "3")
         assert is_sandboxed() is True
 
-    def test_broker_delete_no_fd(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_broker_delete_no_fd(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """broker_delete fails gracefully without fd."""
         monkeypatch.delenv(BROKER_FD_ENV, raising=False)
-        ok, msg = broker_delete("/tmp/test")
+        ok, msg = broker_delete(str(tmp_path / "test"))
         assert ok is False
         assert "not set" in msg
+
+    @pytest.mark.parametrize("raw", ["abc", "-1"])
+    def test_broker_delete_invalid_fd_says_invalid(
+        self, raw: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An invalid fd is reported as invalid, not as unset; mutant: _get_broker_fd returns None on a bad value."""
+        monkeypatch.setenv(BROKER_FD_ENV, raw)
+        ok, msg = broker_delete(str(tmp_path / "test"))
+        assert ok is False
+        assert "invalid" in msg
+        assert "not set" not in msg
 
     def test_broker_delete_via_socket(
         self,
@@ -946,8 +983,6 @@ class TestRmBrokerRouting:
         target = tmp_path / "direct_delete.txt"
         target.write_text("test", encoding="utf-8")
 
-        from aipass.drone.apps.modules.rm import safe_delete
-
         results = safe_delete([str(target)])
         assert results[0][1] is True
         assert not target.exists()
@@ -965,8 +1000,6 @@ class TestRmBrokerRouting:
         client_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         client_sock.connect(str(running_broker.socket_path))
         monkeypatch.setenv(BROKER_FD_ENV, str(client_sock.fileno()))
-
-        from aipass.drone.apps.modules.rm import safe_delete
 
         results = safe_delete([str(target)])
         assert results[0][1] is True
@@ -989,8 +1022,6 @@ class TestRmBrokerRouting:
 class TestBrokerFeedsDeletionRecord:
     @staticmethod
     def _records() -> list[dict]:
-        from aipass.drone.apps.handlers import deletion_log
-
         log = deletion_log.deletion_log_path()
         if not log.exists():
             return []
@@ -1011,7 +1042,7 @@ class TestBrokerFeedsDeletionRecord:
         assert deletions[0]["lane"] == "broker"
         assert deletions[0]["path"] == str(target.resolve())
 
-    def test_record_lands_in_the_repo_the_broker_SERVES_not_the_one_it_stands_in(
+    def test_record_lands_in_the_repo_the_broker_serves_not_the_one_it_stands_in(
         self, running_broker: BrokerDaemon, repo_root: Path, tmp_path: Path, monkeypatch
     ) -> None:
         """The daemon is handed repo_root; the record must follow it.
@@ -1027,8 +1058,6 @@ class TestBrokerFeedsDeletionRecord:
         back to the cwd walk the record lands there and this test says so,
         without any test reaching a real ledger to prove it.
         """
-        from aipass.drone.apps.handlers import deletion_log
-
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         decoy = tmp_path / "standing_project"
         decoy.mkdir()

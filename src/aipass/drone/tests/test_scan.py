@@ -1,16 +1,15 @@
 # =================== AIPass ====================
 # Name: test_scan.py
 # Description: Tests for branch command scanning
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for branch command scanning.
+"""Tests for apps/modules/scan.py and the scanning handlers it drives."""
 
-Covers handler-layer functions (scan_help_output, scan_module_files,
-scan_branch) and the orchestration module (scan.handle_command, scan.scan).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
 import subprocess
 from pathlib import Path
@@ -27,6 +26,7 @@ from aipass.drone.apps.handlers.scanning.formatters import (
     format_no_commands,
     format_scan_results,
 )
+from aipass.drone.apps.modules.scan import handle_command, scan
 
 
 # =============================================================================
@@ -388,7 +388,6 @@ class TestScanHandleCommand:
     @patch("aipass.drone.apps.modules.scan.scan")
     def test_routes_to_scan(self, mock_scan: MagicMock) -> None:
         """Should call scan() with the target argument."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         mock_scan.return_value = [{"name": "x", "description": "", "source": "help"}]
 
@@ -400,7 +399,6 @@ class TestScanHandleCommand:
     @patch("aipass.drone.apps.modules.scan.scan")
     def test_returns_false_when_scan_fails(self, mock_scan: MagicMock) -> None:
         """Should return False when scan returns None (resolution failure)."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         mock_scan.return_value = None
 
@@ -410,7 +408,6 @@ class TestScanHandleCommand:
 
     def test_no_args_shows_introspection(self) -> None:
         """Should call print_introspection when command is None and no args."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         with patch("aipass.drone.apps.modules.scan.print_introspection") as mock_intro:
             result = handle_command(command=None, args=None)
@@ -420,7 +417,6 @@ class TestScanHandleCommand:
 
     def test_empty_args_returns_false(self) -> None:
         """Should return False when command is given but no args."""
-        from aipass.drone.apps.modules.scan import handle_command
 
         result = handle_command(command="scan", args=[])
 
@@ -445,7 +441,6 @@ class TestScanFunction:
         mock_resolve: MagicMock,
     ) -> None:
         """Should resolve target, scan, format, and return results."""
-        from aipass.drone.apps.modules.scan import scan
 
         mock_resolve.return_value = "/fake/path"
         mock_scan_branch.return_value = [
@@ -462,29 +457,26 @@ class TestScanFunction:
 
     @patch("aipass.drone.apps.modules.scan.resolve_branch")
     @patch("aipass.drone.apps.modules.scan.scan_branch")
-    @patch("aipass.drone.apps.modules.scan.format_no_commands")
     def test_shows_no_commands_message(
         self,
-        mock_format_none: MagicMock,
         mock_scan_branch: MagicMock,
         mock_resolve: MagicMock,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        """Should display no-commands message when scan finds nothing."""
-        from aipass.drone.apps.modules.scan import scan
+        """Mutant killed: scan() handing format_no_commands an empty name instead of the branch's."""
 
         mock_resolve.return_value = "/fake/path"
         mock_scan_branch.return_value = []
 
         result = scan("@emptybranch")
 
-        mock_format_none.assert_called_once()
-        assert result is not None  # Empty list, not None
-        assert len(result) == 0
+        out, _ = capsys.readouterr()
+        assert "No commands discovered for @emptybranch." in out
+        assert result == []
 
     @patch("aipass.drone.apps.modules.scan.resolve_branch", side_effect=Exception("not found"))
     def test_returns_none_on_resolution_failure(self, mock_resolve: MagicMock) -> None:
         """Should return None when branch resolution fails."""
-        from aipass.drone.apps.modules.scan import scan
 
         result = scan("@nonexistent")
 

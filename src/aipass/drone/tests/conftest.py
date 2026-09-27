@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared fixtures for the drone suite
+# Version: 1.0.1
+# Created: 2026-03-05
+# Modified: 2026-09-27
+# =============================================
+
 """Shared pytest fixtures for drone tests."""
 
 import os
@@ -14,16 +22,32 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.cli.apps.modules import display
+from aipass.drone.apps.handlers import router_handler
 from aipass.drone.apps.handlers.json import json_handler
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the DPLAN-0059 stamp trio, the json-dir seam suite) that must
 # not be collected or rglob-walked into dotted module names (DPLAN-0325, spec 4c).
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -39,8 +63,6 @@ def _clean_identity_dedupe() -> Generator[None, None, None]:
     what it has already logged, so exporting a reset() just to serve this
     fixture would put a test-only function in the shipped API.
     """
-    from aipass.drone.apps.handlers import router_handler
-
     router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
     yield
     router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
@@ -166,51 +188,8 @@ def sample_registry(temp_test_dir: Path) -> Path:
         ],
     }
     registry_path = temp_test_dir / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(registry, indent=2))
+    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path
-
-
-@pytest.fixture()
-def sample_data() -> dict:
-    """Provide reusable sample data dict with required keys."""
-    return {
-        "created": "2026-01-01",
-        "last_updated": "2026-01-15",
-        "entries": [
-            {"id": 1, "name": "alpha", "status": "active"},
-            {"id": 2, "name": "beta", "status": "pending"},
-        ],
-        "metadata": {
-            "source": "test_fixture",
-            "version": "1.0.0",
-        },
-    }
-
-
-@pytest.fixture()
-def mock_logger() -> MagicMock:
-    """Standalone mock logger for testing logging calls."""
-    mock = MagicMock(spec=logging.Logger)
-    mock.debug = MagicMock()
-    mock.info = MagicMock()
-    mock.warning = MagicMock()
-    mock.error = MagicMock()
-    mock.critical = MagicMock()
-    return mock
-
-
-@pytest.fixture()
-def mock_json_handler() -> MagicMock:
-    """Standalone mock json_handler for isolation tests."""
-    handler = MagicMock()
-    handler.load_json = MagicMock(return_value={})
-    handler.save_json = MagicMock(return_value=True)
-    handler.ensure_json_exists = MagicMock(return_value=True)
-    handler.ensure_module_jsons = MagicMock(return_value=True)
-    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
-    handler.validate_json_structure = MagicMock(return_value=True)
-    handler.log_operation = MagicMock(return_value=True)
-    return handler
 
 
 # ---------------------------------------------------------------------------

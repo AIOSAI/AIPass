@@ -1,13 +1,16 @@
-"""Tests for the deletion record — every drone delete leaves a trace.
+# =================== AIPass ====================
+# Name: test_deletion_log.py
+# Description: Every drone delete, and every refused one, leaves a deletion record
+# Version: 1.0.1
+# Created: 2026-08-14
+# Modified: 2026-09-27
+# =============================================
 
-The owner's ruling (via DPLAN night round): "if something deletes, there should
-be a record of it." ``drone rm`` is the fleet's only sanctioned delete path —
-raw recursive rm is gate-blocked — so the record is written where the deleting
-happens, not where the CLI is parsed.
+"""Tests for apps/handlers/deletion_log.py and the safe_delete path that writes it."""
 
-Refusals are records too. An attempted delete the guard blocked is exactly the
-kind of event worth finding later, and it is the only trace that event leaves.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json's line encoding of a record; the tests read records back through json
+# seedgo: no-test-needed(covered_elsewhere) — the broker daemon's own records, pinned in tests/test_broker.py
 
 import json
 import os
@@ -22,6 +25,11 @@ import pytest
 from aipass.drone.apps.handlers import deletion_log
 from aipass.drone.apps.handlers.router_handler import CallerIdentity
 from aipass.drone.apps.handlers.rm_handler import safe_delete
+
+# The owner's ruling: "if something deletes, there should be a record of it."
+# ``drone rm`` is the fleet's only sanctioned delete path, so the record is
+# written where the deleting happens, not where the CLI is parsed. Refusals are
+# records too: a blocked attempt leaves no other trace.
 
 #: A mode-0 folder only stops a caller the kernel holds to permissions: not on
 #: Windows, not as root. ``or`` short-circuits, so geteuid is never read on nt.
@@ -42,7 +50,7 @@ def project(tmp_path, monkeypatch):
     audit path is, so chdir-ing into a tmp project is all a test needs to
     redirect it — no env var, no injected path.
     """
-    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}")
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("AIPASS_BRANCH_NAME", raising=False)
     monkeypatch.delenv("AIPASS_HOME", raising=False)
@@ -66,7 +74,7 @@ class TestDeletionIsRecorded:
     def test_successful_delete_writes_a_record(self, project):
         target = project / "build"
         target.mkdir()
-        (target / "a.txt").write_text("x")
+        (target / "a.txt").write_text("x", encoding="utf-8")
 
         safe_delete([str(target)])
 
@@ -111,8 +119,8 @@ class TestDeletionIsRecorded:
     def test_each_path_gets_its_own_record(self, project):
         one = project / "one.txt"
         two = project / "two.txt"
-        one.write_text("1")
-        two.write_text("2")
+        one.write_text("1", encoding="utf-8")
+        two.write_text("2", encoding="utf-8")
 
         safe_delete([str(one), str(two)])
 
@@ -141,7 +149,7 @@ class TestRecordContents:
 
     def test_every_required_field_present(self, project):
         target = project / "gone.txt"
-        target.write_text("bye")
+        target.write_text("bye", encoding="utf-8")
 
         safe_delete([str(target)])
 
@@ -155,7 +163,7 @@ class TestRecordContents:
 
     def test_file_record_carries_its_size(self, project):
         target = project / "sized.txt"
-        target.write_text("0123456789")
+        target.write_text("0123456789", encoding="utf-8")
 
         safe_delete([str(target)])
 
@@ -166,8 +174,8 @@ class TestRecordContents:
     def test_directory_record_counts_entries_and_bytes(self, project):
         target = project / "tree"
         (target / "nested").mkdir(parents=True)
-        (target / "a.txt").write_text("aa")
-        (target / "nested" / "b.txt").write_text("bbb")
+        (target / "a.txt").write_text("aa", encoding="utf-8")
+        (target / "nested" / "b.txt").write_text("bbb", encoding="utf-8")
 
         safe_delete([str(target)])
 
@@ -180,7 +188,7 @@ class TestRecordContents:
         """Size of a deleted tree is unknowable afterwards — measure first."""
         target = project / "tree"
         target.mkdir()
-        (target / "a.txt").write_text("hello")
+        (target / "a.txt").write_text("hello", encoding="utf-8")
 
         safe_delete([str(target)])
 
@@ -190,7 +198,7 @@ class TestRecordContents:
 
     def test_symlink_is_its_own_kind_and_is_not_followed(self, project):
         real = project / "real.txt"
-        real.write_text("x" * 100)
+        real.write_text("x" * 100, encoding="utf-8")
         link = project / "link.txt"
         link.symlink_to(real)
 
@@ -202,7 +210,7 @@ class TestRecordContents:
 
     def test_requested_keeps_what_the_caller_typed(self, project):
         target = project / "rel.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         safe_delete(["rel.txt"])
 
@@ -224,7 +232,7 @@ class TestCallerIdentity:
         honest gap: it would name a citizen who did not do it.
         """
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch(
             "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
@@ -237,7 +245,7 @@ class TestCallerIdentity:
     def test_identity_comes_from_the_shared_resolver(self, project):
         """Not a fifth resolver — the same one routing and git attribution use."""
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch(
             "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
@@ -259,7 +267,7 @@ class TestCallerIdentity:
         `unknown` here and the cwd field still carries the location.
         """
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch(
             "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
@@ -274,7 +282,7 @@ class TestCallerIdentity:
     def test_an_assigned_identity_is_still_honoured(self, project):
         """The fence refuses `project`, not every answer."""
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch(
             "aipass.drone.apps.handlers.deletion_log.resolve_caller_identity_signal",
@@ -294,11 +302,13 @@ class TestCallerIdentity:
         branch = project / "src" / "aipass" / "some-checkout"
         branch.mkdir(parents=True)
         (branch / ".trinity").mkdir()
-        (branch / ".trinity" / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "drone"}}))
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"branch_info": {"branch_name": "drone"}}), encoding="utf-8"
+        )
         monkeypatch.chdir(branch)
 
         target = branch / "scratch.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
         safe_delete([str(target)])
 
         assert read_records(project)[0]["caller"] == "drone"
@@ -312,7 +322,7 @@ class TestCallerIdentity:
 class TestSeverity:
     def test_record_line_is_info(self, project):
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch("aipass.drone.apps.handlers.deletion_log.logger") as log:
             safe_delete([str(target)])
@@ -342,28 +352,29 @@ class TestBounded:
         monkeypatch.setattr(deletion_log, "_MAX_BYTES", 400)
         for i in range(40):
             target = project / f"f{i}.txt"
-            target.write_text("x")
+            target.write_text("x", encoding="utf-8")
             safe_delete([str(target)])
 
         live = deletion_log.deletion_log_path()
         assert live.stat().st_size <= 400 + 1024
 
     def test_rotation_keeps_a_bounded_number_of_files(self, project, monkeypatch):
+        """Mutant killed: _rotate_if_needed keeping one generation more than it promises."""
         monkeypatch.setattr(deletion_log, "_MAX_BYTES", 400)
         for i in range(60):
             target = project / f"f{i}.txt"
-            target.write_text("x")
+            target.write_text("x", encoding="utf-8")
             safe_delete([str(target)])
 
-        siblings = list(deletion_log.deletion_log_path().parent.glob("deletions.jsonl*"))
-        assert len(siblings) <= deletion_log._ROTATIONS + 1
+        siblings = deletion_log.deletion_log_path().parent.glob("deletions.jsonl*")
+        assert sorted(p.name for p in siblings) == ["deletions.jsonl", "deletions.jsonl.1"]
 
     def test_huge_tree_measurement_is_capped(self, project, monkeypatch):
         monkeypatch.setattr(deletion_log, "_MEASURE_ENTRY_CAP", 5)
         target = project / "many"
         target.mkdir()
         for i in range(20):
-            (target / f"f{i}.txt").write_text("x")
+            (target / f"f{i}.txt").write_text("x", encoding="utf-8")
 
         safe_delete([str(target)])
 
@@ -465,10 +476,10 @@ class TestLogLocation:
         filesystem to be unwritable.
         """
         blocked = project / "not_a_directory"
-        blocked.write_text("a file where a directory would have to be")
+        blocked.write_text("a file where a directory would have to be", encoding="utf-8")
         monkeypatch.setenv("AIPASS_DELETION_LOG", str(blocked / "d.jsonl"))
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch("aipass.drone.apps.handlers.deletion_log.logger") as log:
             safe_delete([str(target)])
@@ -484,7 +495,7 @@ class TestLogLocation:
 class TestRecordFailureIsContained:
     def test_delete_still_happens_when_the_store_is_unwritable(self, project):
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch.object(deletion_log, "_append_record", side_effect=OSError("disk full")):
             results = safe_delete([str(target)])
@@ -494,7 +505,7 @@ class TestRecordFailureIsContained:
 
     def test_store_failure_is_reported_not_swallowed(self, project):
         target = project / "x.txt"
-        target.write_text("x")
+        target.write_text("x", encoding="utf-8")
 
         with patch.object(deletion_log, "_append_record", side_effect=OSError("disk full")):
             with patch("aipass.drone.apps.handlers.deletion_log.logger") as log:
@@ -513,7 +524,7 @@ class TestRecordFailureIsContained:
         """
         doomed = project / "scratch"
         doomed.mkdir()
-        (doomed / "f.txt").write_text("x")
+        (doomed / "f.txt").write_text("x", encoding="utf-8")
         monkeypatch.chdir(doomed)
 
         results = safe_delete([str(doomed)])
@@ -536,8 +547,11 @@ class TestRecordFailureIsContained:
 
         results = safe_delete([str(doomed)])
 
-        assert isinstance(results, list)
-        assert len(results) == 1
+        # Mutant killed: the success-path record raising, caught and reported as a failed delete.
+        ((path, ok, message),) = results
+        assert path == str(doomed)
+        assert ok is True, message
+        assert message.startswith("Deleted: ")
 
     @pytest.mark.deletable_cwd
     def test_record_deletion_does_not_raise_when_cwd_is_gone(self, project, monkeypatch):
@@ -572,7 +586,9 @@ class TestRecordFailureIsContained:
             safe_delete([str(doomed)])
 
         failures = [c for c in log.error.call_args_list if "delete failed" in str(c)]
-        assert not failures, f"a delete that succeeded was reported as failed: {failures}"
+        assert failures == [], f"a delete that succeeded was reported as failed: {failures}"
+        # Mutant killed: the success path writing its ledger record as outcome "failed".
+        assert [r["outcome"] for r in read_records(project)] == [deletion_log.OUTCOME_DELETED]
 
     @pytest.mark.deletable_cwd
     def test_the_record_still_lands_when_the_cwd_is_deleted(self, project, monkeypatch):
@@ -601,7 +617,7 @@ class TestRecordFailureIsContained:
         # docstring already promises is the only place left that can answer.
         store = home / "deletions.jsonl"
         assert store.exists(), "the deletion record was lost with the directory"
-        record = json.loads(store.read_text().strip().splitlines()[-1])
+        record = json.loads(store.read_text(encoding="utf-8").strip().splitlines()[-1])
         assert record["outcome"] == deletion_log.OUTCOME_DELETED
         assert record["cwd"] == deletion_log.NO_CURRENT_DIRECTORY
 

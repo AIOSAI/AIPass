@@ -1,22 +1,22 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Tests for the registry module orchestrator
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-04-26
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the registry module orchestrator (apps/modules/registry.py).
+"""Tests for apps/modules/registry.py: introspection, help, and the load, branches and lookup commands."""
 
-Covers:
-- print_introspection() output
-- print_help() output
-- handle_command() dispatch: load, branches, lookup, help, introspection, unknown
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module under test parses and imports
 
+import sys
 from unittest.mock import patch
 
 import pytest
+
+from aipass.drone.apps.modules.registry import handle_command, print_help, print_introspection
 
 _REG = "aipass.drone.apps.modules.registry"
 
@@ -31,33 +31,18 @@ class TestPrintIntrospection:
 
     def test_prints_module_info(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Prints registry module info to stdout."""
-        from aipass.drone.apps.modules.registry import print_introspection
 
         print_introspection()
         captured = capsys.readouterr()
         assert "registry" in captured.out.lower()
         assert "handler" in captured.out.lower()
 
-    def test_fallback_console(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_fallback_console(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
         """Falls back to rich.Console when CLI console unavailable."""
-        import importlib
-        import sys
-
-        import aipass.drone.apps.modules.registry as reg_mod
-
-        saved = sys.modules.pop("aipass.cli.apps.modules.display", None)
-        sys.modules["aipass.cli.apps.modules.display"] = None  # type: ignore[assignment]
-        try:
-            importlib.reload(reg_mod)
-            reg_mod.print_introspection()
-            captured = capsys.readouterr()
-            assert "registry" in captured.out.lower()
-        finally:
-            if saved is not None:
-                sys.modules["aipass.cli.apps.modules.display"] = saved
-            else:
-                sys.modules.pop("aipass.cli.apps.modules.display", None)
-            importlib.reload(reg_mod)
+        monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", None)
+        print_introspection()
+        captured = capsys.readouterr()
+        assert "registry" in captured.out.lower()
 
 
 # ===========================================================================
@@ -70,7 +55,6 @@ class TestPrintHelp:
 
     def test_prints_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Prints help text with command list."""
-        from aipass.drone.apps.modules.registry import print_help
 
         print_help()
         captured = capsys.readouterr()
@@ -89,7 +73,6 @@ class TestHandleCommandIntrospection:
 
     def test_no_command_no_args_introspection(self) -> None:
         """No command + no args triggers introspection."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         with patch(f"{_REG}.print_introspection") as mock_intro:
             result = handle_command()
@@ -98,7 +81,6 @@ class TestHandleCommandIntrospection:
 
     def test_help_flag_command(self) -> None:
         """--help as command triggers print_help."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         with patch(f"{_REG}.print_help") as mock_help:
             result = handle_command("--help")
@@ -107,7 +89,6 @@ class TestHandleCommandIntrospection:
 
     def test_h_flag_command(self) -> None:
         """-h as command triggers print_help."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         with patch(f"{_REG}.print_help") as mock_help:
             result = handle_command("-h")
@@ -116,7 +97,6 @@ class TestHandleCommandIntrospection:
 
     def test_help_in_args(self) -> None:
         """--help in args triggers print_help."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         with patch(f"{_REG}.print_help") as mock_help:
             result = handle_command("load", ["--help"])
@@ -133,21 +113,21 @@ class TestHandleCommandLoad:
     """handle_command('load') path."""
 
     def test_load_success(self) -> None:
-        """load returns True and calls load_registry."""
-        from aipass.drone.apps.modules.registry import handle_command
+        """load logs the branch count it read; mutant killed: the count logged as 0."""
 
         mock_registry = {"branches": {"drone": {}, "seedgo": {}}}
-        with patch(f"{_REG}.load_registry", return_value=mock_registry):
+        with patch(f"{_REG}.load_registry", return_value=mock_registry), patch(f"{_REG}.logger") as log:
             result = handle_command("load", [])
         assert result is True
+        log.info.assert_called_once_with("Registry loaded: %d branches", 2)
 
     def test_load_empty_registry(self) -> None:
-        """load with empty registry still returns True."""
-        from aipass.drone.apps.modules.registry import handle_command
+        """load with an empty registry logs zero branches; mutant killed: the count never logged."""
 
-        with patch(f"{_REG}.load_registry", return_value={}):
+        with patch(f"{_REG}.load_registry", return_value={}), patch(f"{_REG}.logger") as log:
             result = handle_command("load", [])
         assert result is True
+        log.info.assert_called_once_with("Registry loaded: %d branches", 0)
 
 
 # ===========================================================================
@@ -160,7 +140,6 @@ class TestHandleCommandBranches:
 
     def test_branches_no_filter(self) -> None:
         """branches with no args lists all branches."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         mock_branches = [{"name": "drone"}, {"name": "seedgo"}]
         with patch(f"{_REG}.get_all_branches", return_value=mock_branches) as mock_gab:
@@ -170,7 +149,6 @@ class TestHandleCommandBranches:
 
     def test_branches_with_type_filter(self) -> None:
         """branches with type arg filters by type."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         with patch(f"{_REG}.get_all_branches", return_value=[]) as mock_gab:
             result = handle_command("branches", ["library"])
@@ -188,23 +166,21 @@ class TestHandleCommandLookup:
 
     def test_lookup_no_args(self) -> None:
         """lookup with no args returns False."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         result = handle_command("lookup", [])
         assert result is False
 
     def test_lookup_found(self) -> None:
-        """lookup with existing branch returns True."""
-        from aipass.drone.apps.modules.registry import handle_command
+        """lookup logs the branch record it found; mutant killed: the name logged instead of the record."""
 
         mock_branch = {"name": "drone", "profile": "library"}
-        with patch(f"{_REG}.get_branch_by_name", return_value=mock_branch):
+        with patch(f"{_REG}.get_branch_by_name", return_value=mock_branch), patch(f"{_REG}.logger") as log:
             result = handle_command("lookup", ["drone"])
         assert result is True
+        log.info.assert_called_once_with("Branch: %s", mock_branch)
 
     def test_lookup_not_found(self) -> None:
         """lookup with missing branch returns False."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         with patch(f"{_REG}.get_branch_by_name", return_value=None):
             result = handle_command("lookup", ["ghost"])
@@ -221,14 +197,12 @@ class TestHandleCommandUnknown:
 
     def test_unknown_command(self) -> None:
         """Unknown command returns False."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         result = handle_command("nonexistent", ["arg"])
         assert result is False
 
     def test_none_command_with_args(self) -> None:
         """None command with args (no --help) falls through to unknown."""
-        from aipass.drone.apps.modules.registry import handle_command
 
         result = handle_command(None, ["some_arg"])
         assert result is False

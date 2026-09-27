@@ -1,11 +1,17 @@
-"""Tests for drone rm — contained safe-delete.
+# =================== AIPass ====================
+# Name: test_rm.py
+# Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
+# Version: 1.0.1
+# Created: 2026-06-02
+# Modified: 2026-09-27
+# =============================================
 
-Red-team containment tests verify that paths outside allowed roots
-are refused, including symlink escapes and traversal attempts.
-Carve-out tests verify .git, .trinity, .aipass, .codex, .agents,
-and sibling branches are protected even inside allowed roots.
-Stale-mode tests (DPLAN-0338) sit at the bottom.
-"""
+"""Tests for apps/modules/rm.py and the rm_handler containment it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the deletion record's contents, pinned in tests/test_deletion_log.py
+# seedgo: no-test-needed(covered_elsewhere) — the broker lane of a sandboxed delete, pinned in tests/test_broker.py
+# seedgo: no-test-needed(covered_elsewhere) — rm from a deleted working directory, pinned in tests/test_no_cwd_sweep.py
 
 import errno
 import json
@@ -19,9 +25,8 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.drone.apps import drone as drone_cli
 from aipass.drone.apps.handlers.rm_handler import (
-    _detect_current_branch,
-    _find_branch_root,
     check_carveouts,
     check_containment,
     format_age,
@@ -32,7 +37,12 @@ from aipass.drone.apps.handlers.rm_handler import (
     safe_delete,
     stale_sweep,
 )
-from aipass.drone.apps.modules.rm import handle_command
+from aipass.drone.apps.modules.rm import handle_command, print_help, print_introspection
+
+# Red-team containment tests: paths outside the allowed roots are refused,
+# symlink escapes and traversal included. Carve-out tests: .git, .trinity,
+# .aipass, .codex, .agents and sibling branches stay protected even inside an
+# allowed root. Stale-mode tests (DPLAN-0338) sit at the bottom.
 
 #: The canonical POSIX temp root, SPELLED BY THE RUNNING PLATFORM rather than
 #: written down. ``rm_handler.get_allowed_roots`` carves it out on POSIX only
@@ -60,7 +70,7 @@ _PERMISSIONS_REASON = "needs POSIX permissions that bind the caller"
 @pytest.fixture()
 def project_dir(tmp_path):
     """Fake project root with a registry file and src/aipass layout."""
-    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}")
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     return tmp_path
 
 
@@ -71,7 +81,7 @@ def project_with_branches(project_dir):
         d = project_dir / "src" / "aipass" / branch
         d.mkdir(parents=True)
         (d / ".trinity").mkdir()
-        (d / "README.md").write_text(f"# {branch}")
+        (d / "README.md").write_text(f"# {branch}", encoding="utf-8")
     return project_dir
 
 
@@ -82,7 +92,7 @@ def _patch_roots(project_dir):
     roots = [project_dir.resolve()]
     seen = set(roots)
     if sys.platform != "win32":
-        slash_tmp = Path("/tmp").resolve()
+        slash_tmp = POSIX_TMP.resolve()
         if slash_tmp not in seen:
             seen.add(slash_tmp)
             roots.append(slash_tmp)
@@ -211,7 +221,7 @@ class TestAllowDeletion:
     def test_delete_dir_in_tmp(self):
         target = Path(tempfile.mkdtemp())
         try:
-            (target / "file.txt").write_text("data")
+            (target / "file.txt").write_text("data", encoding="utf-8")
             results = safe_delete([str(target)])
             assert results[0][1] is True
             assert not target.exists()
@@ -225,7 +235,7 @@ class TestAllowDeletion:
         parent = Path(tempfile.mkdtemp())
         target = parent / "nested"
         target.mkdir()
-        (target / "data.txt").write_text("hello")
+        (target / "data.txt").write_text("hello", encoding="utf-8")
         try:
             results = safe_delete([str(target)])
             assert results[0][1] is True
@@ -238,7 +248,7 @@ class TestAllowDeletion:
     def test_delete_file_in_project(self, project_dir):
         target = project_dir / "build" / "output.o"
         target.parent.mkdir(parents=True)
-        target.write_text("binary")
+        target.write_text("binary", encoding="utf-8")
         results = safe_delete([str(target)])
         assert results[0][1] is True
         assert not target.exists()
@@ -247,7 +257,7 @@ class TestAllowDeletion:
     def test_delete_subdir_in_project(self, project_dir):
         target = project_dir / "sub" / "scratch"
         target.mkdir(parents=True)
-        (target / "temp.txt").write_text("scratch")
+        (target / "temp.txt").write_text("scratch", encoding="utf-8")
         results = safe_delete([str(target)])
         assert results[0][1] is True
         assert not target.exists()
@@ -270,7 +280,7 @@ class TestAllowDeletion:
     def test_pure_python_no_subprocess(self):
         """Verify shutil.rmtree is used, not subprocess rm."""
         target = Path(tempfile.mkdtemp())
-        (target / "f.txt").write_text("x")
+        (target / "f.txt").write_text("x", encoding="utf-8")
         with patch("subprocess.run") as mock_run, patch("subprocess.Popen") as mock_popen:
             results = safe_delete([str(target)])
             assert results[0][1] is True
@@ -282,7 +292,7 @@ class TestAllowDeletion:
         """Regression guard: ordinary project dirs are still deletable."""
         target = project_dir / "build"
         target.mkdir()
-        (target / "out.js").write_text("x")
+        (target / "out.js").write_text("x", encoding="utf-8")
         results = safe_delete([str(target)])
         assert results[0][1] is True
 
@@ -291,7 +301,7 @@ class TestAllowDeletion:
         """Regression guard: dist/ is not a carve-out."""
         target = project_dir / "dist"
         target.mkdir()
-        (target / "bundle.js").write_text("x")
+        (target / "bundle.js").write_text("x", encoding="utf-8")
         results = safe_delete([str(target)])
         assert results[0][1] is True
 
@@ -449,7 +459,7 @@ class TestCarveouts:
     def test_refuse_inside_dot_trinity(self, project_dir):
         passport = project_dir / ".trinity" / "passport.json"
         passport.parent.mkdir(parents=True)
-        passport.write_text("{}")
+        passport.write_text("{}", encoding="utf-8")
         resolved = passport.resolve()
         blocked, reason = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
@@ -522,7 +532,7 @@ class TestCarveouts:
         real_git = project_dir / "real_git_dir"
         real_git.mkdir()
         git_file = project_dir / ".git"
-        git_file.write_text(f"gitdir: {real_git}")
+        git_file.write_text(f"gitdir: {real_git}", encoding="utf-8")
         resolved = git_file.resolve()
         blocked, reason = check_carveouts(resolved, project_dir.resolve())
         assert blocked is True
@@ -555,12 +565,17 @@ class TestTemplateSkeletonIsNotACitizen:
         (drone / ".trinity").mkdir(parents=True)
         return project_dir
 
-    def test_find_branch_root_returns_the_outermost_citizen(self, project_with_template):
-        """Two .trinity ancestors: the citizen wins, not the skeleton."""
+    def test_safe_delete_refuses_a_skeleton_path_in_the_outer_citizens_name(self, project_with_template, monkeypatch):
+        """Mutant killed: _find_branch_root keeping the innermost .trinity (refusal named the skeleton)."""
+        monkeypatch.chdir(project_with_template / "src" / "aipass" / "drone")
         stray = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework" / ".pytest_cache"
-        root = _find_branch_root(stray.resolve(), project_with_template.resolve())
-        assert root is not None
-        assert root.name == "spawn"
+
+        ((_path, ok, message),) = safe_delete([str(stray)])
+
+        assert ok is False, message
+        assert "sibling branch spawn/" in message
+        assert "aipass_framework" not in message
+        assert stray.is_dir()
 
     def test_refusal_names_the_citizen_not_the_skeleton(self, project_with_template, monkeypatch):
         """@devpulse's report: the refusal named a thing that is not a citizen."""
@@ -580,17 +595,20 @@ class TestTemplateSkeletonIsNotACitizen:
         assert blocked is False, f"spawn refused inside its own tree: {reason}"
 
     def test_standing_in_a_template_is_standing_in_the_citizen(self, project_with_template, monkeypatch):
-        """CWD detection uses the same walk — it has to agree with the guard."""
-        skeleton = project_with_template / "src" / "aipass" / "spawn" / "templates" / "aipass_framework"
-        monkeypatch.chdir(skeleton)
-        assert _detect_current_branch(project_with_template.resolve()) == "spawn"
+        """Mutant killed: _find_branch_root keeping the innermost .trinity (the caller read as the skeleton)."""
+        spawn = project_with_template / "src" / "aipass" / "spawn"
+        monkeypatch.chdir(spawn / "templates" / "aipass_framework")
+        outside_the_skeleton = spawn / "build"
+        blocked, reason = check_carveouts(outside_the_skeleton.resolve(), project_with_template.resolve())
+        assert blocked is False, f"a caller standing in spawn's template was refused spawn's own tree: {reason}"
 
-    def test_ordinary_branch_path_is_unchanged(self, project_with_template):
-        """The fix must not over-reach: a normal branch still maps to itself."""
+    def test_ordinary_branch_path_is_unchanged(self, project_with_template, monkeypatch):
+        """Mutant killed: _find_branch_root answering None (a normal branch stopped mapping to itself)."""
+        monkeypatch.chdir(project_with_template / "src" / "aipass" / "spawn")
         target = project_with_template / "src" / "aipass" / "drone" / "build"
-        root = _find_branch_root(target.resolve(), project_with_template.resolve())
-        assert root is not None
-        assert root.name == "drone"
+        blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
+        assert blocked is True
+        assert "sibling branch drone/" in reason
 
     def test_sibling_protection_still_holds_for_real_citizens(self, project_with_template, monkeypatch):
         """Outermost-wins must not accidentally unprotect anything."""
@@ -610,16 +628,21 @@ class TestTemplateSkeletonIsNotACitizen:
 
 
 class TestGitWorktreePointerUnchanged:
-    def test_git_file_worktree_pointer_still_protected(self, project_dir):
-        """Pinned separately so the walk change cannot quietly weaken it."""
+    def test_safe_delete_refuses_a_git_worktree_pointer_and_leaves_it_on_disk(
+        self, project_dir, _patch_roots, monkeypatch
+    ):
+        """Mutant killed: _safe_delete_direct skipping check_carveouts (the pointer was deleted)."""
+        monkeypatch.chdir(project_dir)
         real_git = project_dir / "real_git_dir"
         real_git.mkdir()
         git_file = project_dir / ".git"
-        git_file.write_text(f"gitdir: {real_git}")
-        resolved = git_file.resolve()
-        blocked, reason = check_carveouts(resolved, project_dir.resolve())
-        assert blocked is True
-        assert ".git" in reason
+        git_file.write_text(f"gitdir: {real_git}", encoding="utf-8")
+
+        ((_path, ok, message),) = safe_delete([str(git_file)])
+
+        assert ok is False, message
+        assert ".git" in message
+        assert git_file.read_text(encoding="utf-8") == f"gitdir: {real_git}"
 
 
 # ---------------------------------------------------------------------------
@@ -852,22 +875,22 @@ class TestEdgeCases:
 
 
 class TestRmModule:
-    def test_handle_command_help(self):
-        from aipass.drone.apps.modules.rm import handle_command
-
+    def test_handle_command_help_prints_the_usage_and_deletes_nothing(self, capsys):
+        """Mutant killed: handle_command's --help branch returning True without print_help()."""
         result = handle_command("--help")
+
         assert result is True
+        assert "Usage: drone rm" in capsys.readouterr().out
 
-    def test_handle_command_introspection(self):
-        from aipass.drone.apps.modules.rm import handle_command
-
+    def test_handle_command_with_no_arguments_prints_the_self_map(self, capsys):
+        """Mutant killed: handle_command's no-argument branch returning True without print_introspection()."""
         result = handle_command(None, None)
+
         assert result is True
+        assert "Contained Safe-Delete" in capsys.readouterr().out
 
     def test_print_introspection(self, capsys):
         """The self-map names the module and points at --help."""
-        from aipass.drone.apps.modules.rm import print_introspection
-
         print_introspection()
 
         printed = capsys.readouterr().out
@@ -876,8 +899,6 @@ class TestRmModule:
 
     def test_print_help(self, capsys):
         """--help states the usage line and the containment rule it enforces."""
-        from aipass.drone.apps.modules.rm import print_help
-
         print_help()
 
         printed = capsys.readouterr().out
@@ -902,14 +923,12 @@ class TestRmModule:
         one sits inside a root. A containment test whose subject is inside the
         fence proves nothing about the fence.
         """
-        from aipass.drone.apps.modules.rm import handle_command
-
         root = tmp_path / "the_only_allowed_root"
         root.mkdir()
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
         target = elsewhere / "keepme.txt"
-        target.write_text("must survive")
+        target.write_text("must survive", encoding="utf-8")
 
         with patch(
             "aipass.drone.apps.handlers.rm_handler.get_allowed_roots",
@@ -919,15 +938,24 @@ class TestRmModule:
 
         assert target.exists(), "the refusal did not hold — the file was deleted"
 
-    def test_the_cli_maps_a_refusal_to_a_non_zero_exit(self, monkeypatch):
-        """The other half: False must not be flattened to 0 on the way out."""
-        from aipass.drone.apps import drone as drone_cli
+    def test_the_cli_maps_a_refusal_to_a_non_zero_exit(self, monkeypatch, tmp_path):
+        """False is not flattened to 0 on the way out; mutant killed: _handle_rm returning 0 always."""
+        target = str(tmp_path / "refused")
+        calls = []
 
-        monkeypatch.setattr(drone_cli, "_handle_rm", drone_cli._handle_rm)
-        with patch("aipass.drone.apps.modules.rm.handle_command", return_value=False):
-            assert drone_cli._handle_rm(["/some/refused/path"]) == 1
-        with patch("aipass.drone.apps.modules.rm.handle_command", return_value=True):
-            assert drone_cli._handle_rm(["/some/allowed/path"]) == 0
+        def answer(verdict):
+            def recorder(command, args=None):
+                calls.append((command, args))
+                return verdict
+
+            return recorder
+
+        monkeypatch.setattr("sys.argv", ["drone", "rm", target])
+        monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(False))
+        assert drone_cli.main() == 1
+        monkeypatch.setattr("aipass.drone.apps.modules.rm.handle_command", answer(True))
+        assert drone_cli.main() == 0
+        assert calls == [(target, None), (target, None)]
 
 
 # ---------------------------------------------------------------------------

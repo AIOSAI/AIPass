@@ -1,4 +1,15 @@
-"""Tests for the subprocess executor module."""
+# =================== AIPass ====================
+# Name: test_executor.py
+# Description: Subprocess executor - capture, stream, timeout and kill paths
+# Version: 1.0.1
+# Created: 2026-03-14
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/executor.py, the subprocess executor."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess.Popen and the OS signal delivery beneath the kill path
 
 import subprocess
 import sys
@@ -20,6 +31,7 @@ from aipass.drone.apps.handlers.executor import (
     execute_command,
     resolve_timeout,
 )
+from aipass.drone.apps.handlers.router_handler import execute_branch_command
 
 # A child that talks forever and never exits on its own. Used wherever the
 # question is "does output buy more life", so the ONLY thing that can end it
@@ -530,16 +542,12 @@ class TestDefaultTimeoutValue:
         """Same drift hazard one layer up, in router_handler."""
         import inspect
 
-        from aipass.drone.apps.handlers.router_handler import execute_branch_command
-
         sig = inspect.signature(execute_branch_command)
         assert sig.parameters["timeout"].default == 600
 
     def test_every_layer_agrees_with_the_constant(self):
         """No layer may express the default as its own literal."""
         import inspect
-
-        from aipass.drone.apps.handlers.router_handler import execute_branch_command
 
         defaults = {
             "DEFAULT_TIMEOUT": DEFAULT_TIMEOUT,
