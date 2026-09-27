@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
@@ -457,7 +457,7 @@ class TestMirrorCleanupNoExceptions:
     """Mirror cleanup deletes when source is gone — no exception list."""
 
     def test_deletes_when_source_gone(self, tmp_path):
-        """Files in backup whose source is gone get deleted — the predicate buys no exception."""
+        """Files in backup whose source is gone get deleted; a file whose source is live stays."""
         source = tmp_path / "source"
         source.mkdir()
         backup = tmp_path / "backup"
@@ -468,8 +468,7 @@ class TestMirrorCleanupNoExceptions:
         (backup / "kept.txt").write_text("here", encoding="utf-8")
 
         result = BackupResult(mode="snapshot", project_root=str(source))
-        # The predicate names gone.txt, so a product that honoured it would keep the file.
-        cleanup_deleted_files(backup, source, lambda p: p.name == "gone.txt", result)
+        cleanup_deleted_files(backup, source, result)
         assert result.files_deleted == 1
         assert not (backup / "gone.txt").exists()
         assert (backup / "kept.txt").exists()

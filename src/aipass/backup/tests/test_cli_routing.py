@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.3
+# Version: 2.0.4
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries."""
@@ -17,7 +17,6 @@ import os
 import sys
 from collections.abc import Generator
 from contextlib import ExitStack
-from io import StringIO
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, call, patch
@@ -730,19 +729,3 @@ class TestHelpNeverExecutes:
             assert entry.main() == 0
 
         fake_module.handle_command.assert_called_once_with("snapshot", [project])
-
-
-class TestOutputCapture:
-    """A buffer and the capture fixture each hand back the text written to them."""
-
-    def test_stringio_capture(self) -> None:
-        """A StringIO buffer returns the text written to it."""
-        buf = StringIO()
-        buf.write("test output")
-        assert "test" in buf.getvalue()
-
-    def test_capsys_available(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """capsys fixture available for stdout capture."""
-        print("hello from backup test")
-        captured = capsys.readouterr()
-        assert "hello" in captured.out

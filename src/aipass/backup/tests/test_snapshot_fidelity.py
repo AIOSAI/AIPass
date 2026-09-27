@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_snapshot_fidelity.py
 # Description: Tests for the snapshot handlers -- BackupResult error semantics, mirror-delete cleanup, snapshot copy
-# Version: 2.1.3
+# Version: 2.1.4
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for the snapshot handlers in apps/handlers/: report/result.py, cleanup/mirror.py, copy/snapshot.py."""
@@ -17,17 +17,10 @@ import json
 import shutil
 from pathlib import Path
 
-import pathspec
-
 from aipass.backup.apps.handlers.audit import trail
 from aipass.backup.apps.handlers.cleanup.mirror import cleanup_deleted_files
 from aipass.backup.apps.handlers.copy.snapshot import copy_snapshot
 from aipass.backup.apps.handlers.report.result import BackupResult
-
-
-def _empty_spec() -> pathspec.PathSpec:
-    """Build an empty PathSpec for tests."""
-    return pathspec.PathSpec.from_lines("gitignore", [])
 
 
 # Why trail.log_operation is NOT patched out anywhere in this file:
@@ -38,14 +31,6 @@ def _empty_spec() -> pathspec.PathSpec:
 # these tests walk (source/, snapshot/, project/), never inside one, so no walk
 # sees it. test_cleanup_writes_started_and_complete_to_audit_stream reads the
 # real stream back through the product's own log_path().
-#
-# Why the should_ignore predicates name "keep.txt":
-# mirror.py:95 accepts should_ignore and never calls it. That dead parameter is a
-# held specimen, not cured here, so every predicate below is chosen to give the
-# SAME outcome whether the product consults it or not: keep.txt either has a live
-# source (so mirror-delete never considers it) or is absent from that tree. The
-# answer depends on the path it is handed; the test's claim does not depend on the
-# product's answer to it.
 
 
 class TestBackupResultErrors:
@@ -86,7 +71,7 @@ class TestBackupResultErrors:
         for name in ("a.txt", "b.txt", "c.txt", "d.txt", "e.txt"):
             (snapshot / name).write_text(name, encoding="utf-8")
 
-        cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", r)
+        cleanup_deleted_files(snapshot, source, r)
         assert r.files_deleted == 5
 
     def test_errors_field_accepts_direct_list_assignment(self) -> None:
@@ -111,7 +96,7 @@ class TestCleanupMirror:
         (snapshot / "gone.txt").write_text("gone", encoding="utf-8")
 
         result = BackupResult(mode="snapshot")
-        cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result)
+        cleanup_deleted_files(snapshot, source, result)
 
         assert not (snapshot / "gone.txt").exists()
         assert (snapshot / "keep.txt").exists()
@@ -128,7 +113,7 @@ class TestCleanupMirror:
         (snapshot / "old.txt").write_text("old", encoding="utf-8")
 
         result = BackupResult(mode="snapshot")
-        cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result)
+        cleanup_deleted_files(snapshot, source, result)
         assert not (snapshot / "README.md").exists()
         assert not (snapshot / "old.txt").exists()
         assert result.files_deleted == 2
@@ -144,7 +129,7 @@ class TestCleanupMirror:
         (subdir / "stale.txt").write_text("stale", encoding="utf-8")
 
         result = BackupResult(mode="snapshot")
-        cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result)
+        cleanup_deleted_files(snapshot, source, result)
         assert not subdir.exists()
         assert result.files_deleted == 1
 
@@ -154,7 +139,6 @@ class TestCleanupMirror:
         cleanup_deleted_files(
             tmp_path / "nonexistent",
             tmp_path / "source",
-            lambda p: p.name == "keep.txt",
             result,
         )
         assert result.files_deleted == 0
@@ -168,7 +152,7 @@ class TestCleanupMirror:
         (snapshot / "gone.txt").write_text("gone", encoding="utf-8")
 
         result = BackupResult(mode="snapshot")
-        cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result, dry_run=True)
+        cleanup_deleted_files(snapshot, source, result, dry_run=True)
         assert (snapshot / "gone.txt").exists()
         assert result.files_deleted == 1
 
@@ -181,7 +165,7 @@ class TestCleanupMirror:
         (snapshot / "orphan.txt").write_text("orphan", encoding="utf-8")
 
         result = BackupResult(mode="snapshot")
-        cleanup_deleted_files(snapshot, source, lambda p: p.name == "keep.txt", result)
+        cleanup_deleted_files(snapshot, source, result)
 
         stream = trail.log_path()
         lines = stream.read_text(encoding="utf-8").splitlines()
@@ -212,7 +196,7 @@ class TestCopySnapshotUpgrade:
         shutil.copystat(str(f), str(target))
 
         files = [(str(f), "file.txt")]
-        result = copy_snapshot(files, str(dest), str(source), _empty_spec())
+        result = copy_snapshot(files, str(dest), str(source))
         assert result["files_copied"] == 0
         assert target.read_text(encoding="utf-8") == "older bytes"
 
@@ -225,7 +209,7 @@ class TestCopySnapshotUpgrade:
 
         dest = tmp_path / "snapshot"
         files = [(str(f), "new.txt")]
-        result = copy_snapshot(files, str(dest), str(source), _empty_spec())
+        result = copy_snapshot(files, str(dest), str(source))
         assert result["files_copied"] == 1
         assert (dest / "new.txt").read_text(encoding="utf-8") == "new content"
 
@@ -242,7 +226,7 @@ class TestCopySnapshotUpgrade:
         (dest / "stale.txt").write_text("stale", encoding="utf-8")
 
         files = [(str(f), "keep.txt")]
-        result = copy_snapshot(files, str(dest), str(source), _empty_spec())
+        result = copy_snapshot(files, str(dest), str(source))
         assert not (dest / "stale.txt").exists()
         assert result["files_deleted"] == 1
 

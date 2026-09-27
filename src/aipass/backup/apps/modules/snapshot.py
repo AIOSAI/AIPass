@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: snapshot.py
 # Description: Snapshot module — full-copy backup of a project
-# Version: 2.1.0
+# Version: 2.1.1
 # Created: 2026-04-17
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
 """Snapshot Module — full mirror backup of a project directory."""
@@ -229,7 +229,7 @@ def run_snapshot(project_root: str, show_panels: bool = True) -> BackupResult:
     progress = build_progress_bar()
     with progress:
         task = progress.add_task("Processing files...", total=len(filtered))
-        copy_result = copy_snapshot(filtered, dest, project_root, spec, on_progress=lambda: progress.advance(task))
+        copy_result = copy_snapshot(filtered, dest, project_root, on_progress=lambda: progress.advance(task))
 
     console.print(f"Processing completed: {len(filtered)}/{len(filtered)} files checked")
 
