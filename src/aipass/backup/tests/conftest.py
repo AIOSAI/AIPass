@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: conftest.py
 # Description: Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Backup test configuration -- the json seam, Google seal, console pin and module-attribute resync."""
@@ -79,40 +79,6 @@ def _resync_module_attrs() -> Generator[None, None, None]:
                 and f"{pkg_name}.{attr}" not in sys.modules
             ):
                 delattr(pkg, attr)
-
-
-@pytest.fixture()
-def temp_dir(tmp_path: Path) -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after.
-
-    Uses tmp_path (pytest builtin) and yields a temp_dir subdirectory.
-    Cleanup via rmtree is handled by pytest's tmp_path automatically.
-    """
-    test_dir = tmp_path / "test_workspace"
-    test_dir.mkdir(parents=True, exist_ok=True)
-    yield test_dir
-
-
-@pytest.fixture()
-def sample_data() -> dict:
-    """Sample test data for JSON operations."""
-    return {
-        "config": {
-            "module_name": "test_module",
-            "version": "1.0.0",
-            "config": {"max_log_entries": 50},
-            "timestamp": "2026-03-28",
-        },
-        "data": {
-            "module_name": "test_module",
-            "created": "2026-03-28",
-            "last_updated": "2026-03-28",
-            "operations_total": 0,
-            "operations_successful": 0,
-            "operations_failed": 0,
-        },
-        "log": [{"timestamp": "2026-03-28T10:00:00", "operation": "test"}],
-    }
 
 
 @pytest.fixture(autouse=True)
@@ -227,15 +193,3 @@ def sealed_google_edge(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(drive_client, "get_drive_service", _no_live_google)
     monkeypatch.setattr(drive_client, "api_call_with_retry", _no_live_google)
     monkeypatch.setattr(drive_upload, "MediaFileUpload", MagicMock(name="MediaFileUpload"))
-
-
-@pytest.fixture()
-def mock_logger() -> MagicMock:
-    """Standalone mock logger for tests that need to verify logging calls."""
-    mock = MagicMock(spec=logging.Logger)
-    mock.debug = MagicMock()
-    mock.info = MagicMock()
-    mock.warning = MagicMock()
-    mock.error = MagicMock()
-    mock.critical = MagicMock()
-    return mock
