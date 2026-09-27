@@ -30,6 +30,8 @@ from typing import Generator
 
 from aipass.cli.apps.modules import display
 from aipass.devpulse.apps.handlers.json import json_handler
+from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -37,6 +39,28 @@ def pytest_configure(config: pytest.Config) -> None:
     # -c pyproject.toml) never reads this branch's ini, and its
     # --strict-markers would turn an unknown marker into an error.
     config.addinivalue_line("markers", "integration: live-dispatch integration tests (WATCHDOG_INTEGRATION=1)")
+    config.addinivalue_line(
+        "markers", "live_default_store: reads the watchdog's real default store path; the seal stands aside"
+    )
+
+
+@pytest.fixture(autouse=True)
+def sealed_watchdog_store(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the watchdog's default stores at this test's tmp_path.
+
+    The registry and the timer resolve their default file on every call. Unsealed,
+    a test that reaches register(), a sweep or an arm without naming a store writes
+    the live .watchdog/ of the seat running the suite, and a sweep there signals
+    live wires: 2026-09-27 03:40, a mutant of the owner gate armed a real wire from
+    inside pytest and killed the seat's own. File-local seals run after this one
+    and still win; a test that measures the default path itself carries the
+    live_default_store marker.
+    """
+    if request.node.get_closest_marker("live_default_store"):
+        return
+    store = tmp_path / "_sealed_watchdog"
+    monkeypatch.setattr(watch_registry, "_default_storage_path", lambda: store / "watchdog_active.json")
+    monkeypatch.setattr(watch_timer, "_default_storage_path", lambda: store / "watchdog_timers.json")
 
 
 @pytest.fixture(autouse=True, scope="session")

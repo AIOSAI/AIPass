@@ -3,7 +3,7 @@
 # Description: Tests for the watchdog watch registry (Phase 4, FPLAN-0186)
 # Version: 1.2.0
 # Created: 2026-04-14
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for watchdog registry — register/deregister/list/kill (Phase 4)."""
@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.devpulse.apps.handlers.watchdog import registry as watch_registry
+from aipass.devpulse.apps.handlers.watchdog import timer as watch_timer
 
 
 @pytest.fixture
@@ -547,6 +548,20 @@ def test_handler_deregisters_on_exception(store_path, monkeypatch):
 # default storage path — where the store lands when nobody passes one
 
 
+def test_a_call_that_names_no_store_writes_the_sealed_tmp_store(tmp_path):
+    """conftest's sealed_watchdog_store: a test's default store is its own tmp_path, never the seat's."""
+    handle = watch_registry.register("agent", {"agent_id": "@seal-probe"})
+    started = watch_timer.timer_start("seal-probe")
+
+    sealed = tmp_path / "_sealed_watchdog"
+    watches = json.loads((sealed / "watchdog_active.json").read_text(encoding="utf-8"))["watches"]
+    timers = json.loads((sealed / "watchdog_timers.json").read_text(encoding="utf-8"))["active"]
+    assert [watch["handle"] for watch in watches] == [handle]
+    assert list(timers) == ["seal-probe"]
+    assert timers["seal-probe"]["started_at"] == started["started_at"]
+
+
+@pytest.mark.live_default_store
 class TestTheDefaultStoreNeverLandsAtTheCallersFeet:
     """The 2026-08-31 CI red: on a fresh checkout (no AIPASS_REGISTRY.json
     anywhere — the marker is machine-local runtime state, exactly like the
