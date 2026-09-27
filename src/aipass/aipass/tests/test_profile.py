@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_profile.py
 # Description: Tests for aipass profile Phase 3
-# Version: 1.2.2
+# Version: 1.2.4
 # Created: 2026-04-16
 # Modified: 2026-09-27
 # =============================================
@@ -14,6 +14,7 @@
 # seedgo: no-test-needed(ruff) — that apps/modules/profile.py parses and imports
 # seedgo: no-test-needed(constant) — USER_FIELDS' literal contents and the store's filename
 
+import io
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -56,7 +57,7 @@ def tmp_store(tmp_path):
 @pytest.fixture
 def tmp_legacy(tmp_store):
     """Return the patched legacy local.json path alongside the store."""
-    return profile_mod._LEGACY_LOCAL_JSON
+    return tmp_store.parent.parent / ".trinity" / "local.json"
 
 
 @pytest.fixture
@@ -204,9 +205,16 @@ class TestRoundTrip:
         assert get_user_profile()["name"] == "kept_name"
         assert json.loads(tmp_store.read_text(encoding="utf-8"))["profile"]["os"] == "kept_os"
 
-    def test_store_name_is_outside_the_managed_triplet(self) -> None:
-        """The filename must not collide with <module>_{config,data,log}.json."""
-        assert profile_mod._PROFILE_FILENAME not in (
+    def test_store_name_is_outside_the_managed_triplet(self, isolate_profile_store) -> None:
+        """The filename must not collide with <module>_{config,data,log}.json.
+
+        Read off the file a save actually writes (2026-09-27), not the constant.
+        """
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "NameProbe"})
+        written = {p.name for p in isolate_profile_store.iterdir() if p.is_file()}
+        assert written == {"user_profile.json"}
+        assert "user_profile.json" not in (
             "profile_config.json",
             "profile_data.json",
             "profile_log.json",
@@ -276,10 +284,20 @@ class TestGetUserProfile:
         The loop became a set comparison 2026-09-08 (v5 unentered_assert): an
         empty USER_FIELDS made the old body a silent pass, and the set says the
         same thing without a branch to not enter.
+        Premise added 2026-09-27: a store written before the other fields
+        existed, so the fill-in answers, not the defaults path.
+        Mutant: get_user_profile returns the stored dict as is (no fill-in) -> red.
         """
+        tmp_store.write_text(json.dumps({"profile": {"name": "Bob"}}), encoding="utf-8")
         result = get_user_profile()
-        assert USER_FIELDS, "USER_FIELDS is empty - there is nothing to be present"
-        assert set(USER_FIELDS) <= set(result), f"missing: {set(USER_FIELDS) - set(result)}"
+        assert result == {
+            "name": "Bob",
+            "os": None,
+            "shell": None,
+            "preferred_cli": None,
+            "install_method": None,
+            "first_seen": None,
+        }
 
 
 # =============================================================================
@@ -312,7 +330,8 @@ class TestSaveProfile:
         # one hop down makes patch() itself raise the day the name moves.
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation") as mock_log:
             save_profile({"name": "Test"})
-        mock_log.assert_called_once()
+        # Mutant: log_operation("profile_save", ...) -> ("profile_saved", ...) -> red.
+        mock_log.assert_called_once_with("profile_save", {"fields": ["name"]})
 
     def test_creates_parent_dirs(self, tmp_path) -> None:
         """Missing aipass_json/ directory is created on write."""
@@ -456,7 +475,7 @@ class TestHandleCommand:
     def test_clear_confirmed(self, tmp_store) -> None:
         """'clear' with 'aipass' confirmation resets profile."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-            with patch("builtins.input", return_value="aipass"):
+            with patch("sys.stdin", io.StringIO("aipass\n")):
                 result = handle_command("profile", ["clear"])
         assert result is True
         stored = json.loads(tmp_store.read_text(encoding="utf-8"))
@@ -472,7 +491,7 @@ class TestHandleCommand:
         clear did not happen, and the command reported success anyway.
         """
         before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
-        with patch("builtins.input", return_value="nope"):
+        with patch("sys.stdin", io.StringIO("nope\n")):
             with pytest.raises(SystemExit) as exc:
                 handle_command("profile", ["clear"])
 
@@ -506,7 +525,7 @@ class TestHandleCommand:
         sat untouched, so a script could not tell a clear from a no-op.
         """
         before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
-        with patch("builtins.input", side_effect=EOFError):
+        with patch("sys.stdin", io.StringIO("")):
             with pytest.raises(SystemExit) as exc:
                 handle_command("profile", ["clear"])
 
@@ -516,9 +535,12 @@ class TestHandleCommand:
         assert "Cancelled — no confirmation read, profile NOT cleared." in err
 
     def test_clear_confirmed_still_exits_zero(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: confirmed clear skips its 'Profile cleared.' -> red."""
+        """The counterfactual: the real clear path must NOT have become a refusal.
+
+        Mutant: confirmed clear skips its 'Profile cleared.' -> red.
+        """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-            with patch("builtins.input", return_value="aipass"):
+            with patch("sys.stdin", io.StringIO("aipass\n")):
                 assert handle_command("profile", ["clear"]) is True
         out, _err = capsys.readouterr()
         assert "Profile cleared." in out

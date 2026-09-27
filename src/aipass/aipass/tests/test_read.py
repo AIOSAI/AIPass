@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_read.py
 # Description: Tests for aipass read — branch README rendering
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-08-07
 # Modified: 2026-09-27
 # =============================================
@@ -76,7 +76,10 @@ class TestBranchList:
         assert "  hooks" in out
 
     def test_no_args_shows_introspection(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: no-args routes to branch list only -> red."""
+        """No-args gate reports module identity, per the introspection standard.
+
+        Mutant: no-args routes to branch list only -> red.
+        """
         with patch(f"{_MOD}.list_branches", return_value=["drone"]):
             with patch(f"{_MOD}.json_handler", autospec=True):
                 assert handle_command("read", []) is True
@@ -102,7 +105,10 @@ class TestRenderReadme:
     """`aipass read <branch>` renders the live README."""
 
     def test_renders_existing_readme(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: Markdown body not printed -> red."""
+        """README content is live-read and rendered.
+
+        Mutant: Markdown body not printed -> red.
+        """
         readme = tmp_path / "README.md"
         readme.write_text("# Drone\nRoutes commands.\n", encoding="utf-8")
         with patch(f"{_MOD}.get_readme_path", return_value=readme):
@@ -143,7 +149,10 @@ class TestRenderReadme:
         mock_read.assert_called_once_with(readme)
 
     def test_unreadable_file_errors(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: OSError swallowed silently -> red."""
+        """OSError on read surfaces as an error, not a crash.
+
+        Mutant: OSError swallowed silently -> red.
+        """
         missing = tmp_path / "gone" / "README.md"
         with patch(f"{_MOD}.get_readme_path", return_value=missing):
             with patch(f"{_MOD}.json_handler", autospec=True):

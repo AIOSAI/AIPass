@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-07-20
 # Modified: 2026-09-27
 # =============================================
@@ -21,11 +21,12 @@ from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
-from aipass.aipass.apps.aipass import _PUBLIC_COMMANDS
+from aipass.aipass.apps.aipass import print_introspection
 from aipass.aipass.apps.handlers.new_project.adopt import (
     GITIGNORE_MARKER,
     adopt_project,
 )
+from aipass.aipass.apps.modules import adopt as adopt_module
 from aipass.aipass.apps.modules.adopt import handle_command
 
 
@@ -364,10 +365,14 @@ def test_module_handles_no_args(capsys: pytest.CaptureFixture[str]):
 
 
 def test_module_rejects_unknown_option(host_env):
+    """An unknown flag is refused by name.
+
+    Mutant: `error(f"Unknown option: {unknown[0]}")` -> `error("Unknown option")` -> red.
+    """
     _, target = host_env
     with patch("aipass.aipass.apps.modules.adopt.error") as mock_error:
         handle_command("adopt", [str(target), "--bogus"])
-    mock_error.assert_called_once()
+    mock_error.assert_called_once_with("Unknown option: --bogus")
     assert "Unknown option" in mock_error.call_args[0][0]
 
 
@@ -442,5 +447,11 @@ def test_module_adopt_reports_refusal(host_env, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_aipass_public_commands_includes_adopt():
-    assert "adopt" in _PUBLIC_COMMANDS
+def test_aipass_public_commands_includes_adopt(capsys: pytest.CaptureFixture[str]):
+    """The bare `aipass` listing names adopt, read through print_introspection.
+
+    Mutant: the "adopt" key dropped from _PUBLIC_COMMANDS -> red.
+    """
+    print_introspection([adopt_module])
+    out = capsys.readouterr().out
+    assert "Turn an existing projects/ directory into a full project" in out

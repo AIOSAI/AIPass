@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_feedback.py
 # Description: Tests for aipass feedback — toggle alias for @hooks feedback pulse
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-07-18
 # Modified: 2026-09-27
 # =============================================
@@ -110,7 +110,10 @@ class TestHandleCommand:
         assert exc.value.code == 3
 
     def test_success_does_not_raise(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: 'on' returns True without delegating -> red."""
+        """The counterfactual: a clean run still returns True and exits 0.
+
+        Mutant: 'on' returns True without delegating -> red.
+        """
         with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
             assert handle_command("feedback", ["on"]) is True
         run.assert_called_once()

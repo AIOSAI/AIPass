@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-05-04
 # Modified: 2026-09-27
 # =============================================
@@ -31,6 +31,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     update_project,
 )
 from aipass.aipass.apps.handlers.init import bootstrap
+from aipass.aipass.apps.handlers.init.scaffold_manifest import read_manifest
 from aipass.aipass.apps.handlers.init.scaffold_manifest import sha256_text as sc_sha256
 from aipass.aipass.shared import scaffold_content as sc
 
@@ -305,7 +306,7 @@ def test_init_project_settings_no_hooks(tmp_path, monkeypatch):
     """.claude/settings.json has no hooks — all hooks fire from provider level."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -534,7 +535,7 @@ def test_managed_files_land_lf_even_where_the_platform_translates(tmp_path, monk
     target.mkdir()
     init_project(target, project_name="crlf")
 
-    for rel in bootstrap._MANIFEST_TRACKED:
+    for rel in read_manifest(target)["files"]:
         path = target / rel
         if path.is_file():
             assert b"\r\n" not in path.read_bytes(), f"{rel} landed with CRLF"
@@ -557,7 +558,7 @@ def test_update_after_init_is_clean_where_the_platform_translates(tmp_path, monk
     _windows_newline_world(monkeypatch)
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -668,7 +669,7 @@ def test_applying_a_stamp_only_plan_changes_nothing_but_the_stamp(tmp_path):
     target.mkdir()
     init_project(target, project_name="stampapply")
     _age_the_stamp(target)
-    before = {rel: (target / rel).read_bytes() for rel in bootstrap._MANIFEST_TRACKED if (target / rel).is_file()}
+    before = {rel: (target / rel).read_bytes() for rel in read_manifest(target)["files"] if (target / rel).is_file()}
 
     result = update_project(target)
 
@@ -685,7 +686,7 @@ def test_update_project_already_current_after_init(tmp_path, monkeypatch):
     """Running update immediately after init reports all managed files as already current."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -701,7 +702,7 @@ def test_update_project_idempotent(tmp_path, monkeypatch):
     """Running update twice in a row produces no changes on second run."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -855,10 +856,13 @@ def test_init_project_returns_aipass_home(tmp_path):
 
 
 def test_init_project_settings_has_aipass_home_when_detected(tmp_path, monkeypatch):
-    """When AIPASS_HOME is detected, settings.local.json (not settings.json) includes env.AIPASS_HOME."""
+    """When AIPASS_HOME is detected, settings.local.json (not settings.json) includes env.AIPASS_HOME.
+
+    Mutant: is_throwaway_path asked about str(target) instead of aipass_home -> red.
+    """
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -891,7 +895,7 @@ def test_update_project_adds_aipass_home_if_missing(tmp_path, monkeypatch):
     """update_project recreates settings.local.json with AIPASS_HOME if missing."""
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda _: False,
+        lambda home: home != _expected_aipass_home(),
     )
     target = tmp_path / "proj"
     target.mkdir()
@@ -937,8 +941,8 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
     has env.AIPASS_HOME but no claudeMdExcludes — running update_project must
     retrofit the fence without disturbing the existing env block.
     """
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
     host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
 
     claude_dir = target / ".claude"
@@ -956,8 +960,8 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
 
 def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monkeypatch):
     """Running update_project a second time after the retrofit reports no further changes."""
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
     host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
 
     claude_dir = target / ".claude"
@@ -978,8 +982,8 @@ def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monk
 
 def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, monkeypatch):
     """update_project unions in the official fence entries without dropping a user's hand-added ones."""
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
     host, target = _make_nested_project(tmp_path)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != str(host))
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
 
     claude_dir = target / ".claude"
@@ -1737,7 +1741,7 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
     """
     fake_home = str(tmp_path / f"fake_aipass_home_{uuid.uuid4().hex}")
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: fake_home)
-    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
+    monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda home: home != fake_home)
 
     target = tmp_path / "proj"
     target.mkdir()

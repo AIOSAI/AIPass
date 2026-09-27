@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-07-05
-# Modified: 2026-09-14
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -608,8 +608,10 @@ def run_install(
     # Claimed before the first mutating step (clone) and dropped before the
     # welcome chat: _end_in_chat's launch_inline REPLACES this process and never
     # returns, so a release after it would never run and would wedge the home.
-    install_lock = _acquire_install_lock(home)
-    if install_lock is None:
+    # A dry run takes no lock: it writes nothing, so it has nothing to guard,
+    # and must not mkdir the home's parent or touch a real lock file.
+    install_lock = None if dry_run else _acquire_install_lock(home)
+    if install_lock is None and not dry_run:
         return 1
 
     try:

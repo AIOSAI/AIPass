@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_readme_map.py
 # Description: Tests for readme_map handler
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-05-12
 # Modified: 2026-09-27
 # =============================================
@@ -19,10 +19,10 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import aipass.aipass.apps.handlers.readme_map as rm
 from aipass.aipass.apps.handlers.readme_map import (
-    _build_readme_map,
-    _detect_aipass_root,
     get_readme_path,
     list_branches,
     read_readme_at,
@@ -34,90 +34,88 @@ _ENCODING = "utf-8"
 _MOD = "aipass.aipass.apps.handlers.readme_map"
 
 
+def _root_at(monkeypatch: pytest.MonkeyPatch, root: Path | None) -> None:
+    """Point the module's cached root at *root* and drop the cached map.
+
+    monkeypatch restores both after the test, so the live map is never left
+    pointing at a tmp tree. A root of None makes the next lookup detect it.
+    """
+    monkeypatch.setattr(rm, "_AIPASS_ROOT", root)
+    monkeypatch.setattr(rm, "_README_MAP", None)
+
+
 # =============================================================================
-# TestDetectAipassRoot
+# TestDetectAipassRoot — reached through list_branches()
 # =============================================================================
 
 
 class TestDetectAipassRoot:
-    """Tests for _detect_aipass_root()."""
+    """Root detection, seen through the public lookup that runs it."""
 
-    def test_uses_env_var_when_set(self, monkeypatch: object, tmp_path: Path) -> None:
-        """AIPASS_HOME env var is used when set."""
-        import os
+    def test_uses_env_var_when_set(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """AIPASS_HOME env var is used when set.
 
-        with patch.dict(os.environ, {"AIPASS_HOME": str(tmp_path)}):
-            result = _detect_aipass_root()
-        assert result == tmp_path
+        Mutant: env_home ignored (`if env_home:` -> `if False:`) -> red.
+        """
+        branch = tmp_path / "src" / "aipass" / "zeta_env_only"
+        branch.mkdir(parents=True)
+        (branch / "README.md").write_text("# zeta\n", encoding=_ENCODING)
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
+        _root_at(monkeypatch, None)
 
-    def test_walks_up_to_find_src_aipass(self, monkeypatch: object, tmp_path: Path) -> None:
+        assert list_branches() == ["zeta_env_only"]
+
+    def test_walks_up_to_find_src_aipass(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Walks up from file to find parent containing src/aipass/."""
-        import os
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
+        _root_at(monkeypatch, None)
 
-        with patch.dict(os.environ, {}, clear=True):
-            with patch(f"{_MOD}.os.environ", new={}):
-                result = _detect_aipass_root()
+        readme = get_readme_path("aipass")
         # The exact value depends on the environment; what it must NAME does
         # not. Value pin added 2026-09-08 (v5 assertion_shape): isinstance
         # alone was equally true of Path.cwd(), which is exactly the wrong
         # answer this walk exists to avoid.
-        assert isinstance(result, Path)
-        assert (result / "src" / "aipass").is_dir(), f"{result} does not hold src/aipass/"
+        assert readme is not None
+        root = readme.parents[3]
+        assert (root / "src" / "aipass").is_dir(), f"{root} does not hold src/aipass/"
 
-    def test_returns_path_type(self) -> None:
+    def test_returns_path_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Returns a Path, and the Path it returns is an AIPass tree root."""
-        result = _detect_aipass_root()
-        assert isinstance(result, Path)
-        assert (result / "src" / "aipass").is_dir(), f"{result} does not hold src/aipass/"
+        _root_at(monkeypatch, None)
+        readme = get_readme_path("drone")
+        assert isinstance(readme, Path)
+        root = readme.parents[3]
+        assert (root / "src" / "aipass").is_dir(), f"{root} does not hold src/aipass/"
 
 
 # =============================================================================
-# TestBuildReadmeMap
+# TestBuildReadmeMap — reached through list_branches() / get_readme_path()
 # =============================================================================
 
 
 class TestBuildReadmeMap:
-    """Tests for _build_readme_map()."""
+    """The branch → README map, seen through the public lookups."""
 
-    def test_returns_dict(self, tmp_path: Path) -> None:
-        """Returns a dict mapping branch names to Paths."""
+    def test_returns_dict(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Maps branch names to Paths."""
         # Create fake src/aipass structure with one branch README
         src_aipass = tmp_path / "src" / "aipass"
         drone_dir = src_aipass / "drone"
         drone_dir.mkdir(parents=True)
         (drone_dir / "README.md").write_text("# Drone\n", encoding="utf-8")
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = _build_readme_map()
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
+        assert list_branches() == ["drone"]
+        assert get_readme_path("drone") == drone_dir / "README.md"
 
-        assert isinstance(result, dict)
-        assert "drone" in result
-        assert result["drone"] == drone_dir / "README.md"
-
-    def test_skips_missing_readmes(self, tmp_path: Path) -> None:
+    def test_skips_missing_readmes(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Branches without README.md are excluded."""
         src_aipass = tmp_path / "src" / "aipass"
         # Create directory but no README
         (src_aipass / "drone").mkdir(parents=True)
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = _build_readme_map()
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
-
-        assert "drone" not in result
+        assert "drone" not in list_branches()
 
 
 # =============================================================================
@@ -128,42 +126,24 @@ class TestBuildReadmeMap:
 class TestGetReadmePath:
     """Tests for get_readme_path()."""
 
-    def test_returns_path_for_known_branch(self, tmp_path: Path) -> None:
+    def test_returns_path_for_known_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Returns a Path for a branch that has a README."""
         src_aipass = tmp_path / "src" / "aipass"
         cli_dir = src_aipass / "cli"
         cli_dir.mkdir(parents=True)
         readme = cli_dir / "README.md"
         readme.write_text("# CLI\n", encoding="utf-8")
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = get_readme_path("cli")
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
+        assert get_readme_path("cli") == readme
 
-        assert result == readme
-
-    def test_returns_none_for_unknown_branch(self, tmp_path: Path) -> None:
+    def test_returns_none_for_unknown_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Returns None for a branch not in the map."""
         src_aipass = tmp_path / "src" / "aipass"
         src_aipass.mkdir(parents=True)
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = get_readme_path("nonexistent_branch")
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
-
-        assert result is None
+        assert get_readme_path("nonexistent_branch") is None
 
 
 # =============================================================================
@@ -174,7 +154,7 @@ class TestGetReadmePath:
 class TestListBranches:
     """Tests for list_branches()."""
 
-    def test_returns_list(self, tmp_path: Path) -> None:
+    def test_returns_list(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Mutant: dirs without a README.md listed -> red."""
         src_aipass = tmp_path / "src" / "aipass"
         for branch in ["drone", "prax"]:
@@ -182,35 +162,17 @@ class TestListBranches:
             d.mkdir(parents=True)
             (d / "README.md").write_text(f"# {branch}\n", encoding="utf-8")
         (src_aipass / "no_readme").mkdir()
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = list_branches()
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
+        assert list_branches() == ["drone", "prax"]
 
-        assert result == ["drone", "prax"]
-
-    def test_empty_when_no_readmes(self, tmp_path: Path) -> None:
+    def test_empty_when_no_readmes(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """Returns empty list when no branches have READMEs."""
         src_aipass = tmp_path / "src" / "aipass"
         src_aipass.mkdir(parents=True)
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = list_branches()
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
-
-        assert result == []
+        assert list_branches() == []
 
 
 # =============================================================================
@@ -221,40 +183,24 @@ class TestListBranches:
 class TestLiveDiscovery:
     """Branch roster is discovered from the tree, never hardcoded."""
 
-    def test_discovers_arbitrary_new_branch(self, tmp_path: Path) -> None:
+    def test_discovers_arbitrary_new_branch(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """A branch dir that never existed before is found by the scan."""
         src_aipass = tmp_path / "src" / "aipass"
         for branch in ["drone", "zeta_brand_new"]:
             d = src_aipass / branch
             d.mkdir(parents=True)
             (d / "README.md").write_text(f"# {branch}\n", encoding="utf-8")
+        _root_at(monkeypatch, tmp_path)
 
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = _build_readme_map()
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
-
+        result = list_branches()
         assert "zeta_brand_new" in result
         assert "drone" in result
 
-    def test_missing_src_aipass_returns_empty(self, tmp_path: Path) -> None:
+    def test_missing_src_aipass_returns_empty(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """No src/aipass dir → empty map, no crash."""
-        old_root = rm._AIPASS_ROOT
-        old_map = rm._README_MAP
-        try:
-            rm._AIPASS_ROOT = tmp_path
-            rm._README_MAP = None
-            result = _build_readme_map()
-        finally:
-            rm._AIPASS_ROOT = old_root
-            rm._README_MAP = old_map
+        _root_at(monkeypatch, tmp_path)
 
-        assert result == {}
+        assert list_branches() == []
 
     def test_live_map_covers_real_tree(self) -> None:
         """Against the real repo: every src/aipass dir with a README is mapped."""

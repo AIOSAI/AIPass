@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-31
 # Modified: 2026-09-27
 # =============================================
@@ -66,11 +66,9 @@ def case_insensitive_fs(monkeypatch: pytest.MonkeyPatch):
 
     def widened(self: Path, pattern: str, *args, **kwargs):
         rx = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
-        try:
-            entries = list(real_iterdir(self))
-        except (OSError, ValueError):
-            return iter(())
-        return iter(sorted(p for p in entries if rx.match(p.name)))
+        if not self.is_dir():
+            return iter(())  # the real glob of a missing directory is empty too
+        return iter(sorted(p for p in real_iterdir(self) if rx.match(p.name)))
 
     monkeypatch.setattr(Path, "glob", widened)
     return widened
@@ -257,14 +255,12 @@ def _private_registry_globs(root: Path) -> tuple[list[str], int]:
     scanned = 0
     for py in sorted(root.rglob("*.py")):
         rel = py.relative_to(root).as_posix()
-        if rel.startswith((".backup/", ".archive/")):
+        if {".backup", ".archive"} & set(py.relative_to(root).parts):
             continue
         if rel in {"tests/test_registry_case_sweep.py", "shared/registry_discovery.py"}:
             continue  # the pin itself, and the one sanctioned implementation
-        try:
-            tree = ast.parse(py.read_text(encoding="utf-8"))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+        # A live file that will not parse raises here: skipping it could hide a glob.
+        tree = ast.parse(py.read_text(encoding="utf-8"))
         scanned += 1
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):

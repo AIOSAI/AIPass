@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cross_os.py
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-07-02
 # Modified: 2026-09-27
 # =============================================
@@ -609,7 +609,10 @@ class TestBuildRunRecord:
         assert "✅" not in phase4
 
     def test_human_rows_marked_and_never_auto_ticked(self) -> None:
-        """Mutant: human box rendered as a ✔ tick -> red."""
+        """Human-only rows must carry the human marker and NEVER the machine ✅.
+
+        Mutant: human box rendered as a ✔ tick -> red.
+        """
         with contextlib.ExitStack() as stack:
             self._patch(stack)
             text = build_run_record(platform_name="linux")

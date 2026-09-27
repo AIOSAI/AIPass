@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-17
-# Modified: 2026-07-17
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -16,6 +16,7 @@ AIPass scaffold, and optional resident agent. Born deployable.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from aipass.aipass.apps.handlers.json import json_handler
@@ -89,8 +90,14 @@ def print_help() -> None:
     console.print()
 
 
-def _prompt_template(templates: list[str]) -> str:
-    """Prompt user to choose a template interactively."""
+def _prompt_template(templates: list[str], ask: Callable[[str], str] | None = None) -> str:
+    """Prompt user to choose a template interactively.
+
+    ``ask`` is the line reader (None means ``input``, looked up at call time):
+    the seam that lets a caller feed answers without replacing
+    ``builtins.input`` for the whole process.
+    """
+    ask = ask or input
     console.print()
     console.print("[yellow]Choose a template:[/yellow]")
     for idx, t in enumerate(templates, 1):
@@ -98,7 +105,7 @@ def _prompt_template(templates: list[str]) -> str:
     console.print()
     while True:
         try:
-            choice = input("Template [1]: ").strip()
+            choice = ask("Template [1]: ").strip()
         except (EOFError, KeyboardInterrupt):
             logger.info("template prompt interrupted, defaulting to %s", templates[0])
             return templates[0]
@@ -111,12 +118,16 @@ def _prompt_template(templates: list[str]) -> str:
         error(f"Invalid choice. Enter 1-{len(templates)} or a template name.")
 
 
-def _prompt_agent() -> bool:
-    """Prompt user whether to skip agent creation. Returns no_agent flag."""
+def _prompt_agent(ask: Callable[[str], str] | None = None) -> bool:
+    """Prompt user whether to skip agent creation. Returns no_agent flag.
+
+    ``ask`` is the line reader (None means ``input``), the same seam as _prompt_template.
+    """
+    ask = ask or input
     console.print()
     while True:
         try:
-            choice = input("Create resident agent? [Y/n]: ").strip().lower()
+            choice = ask("Create resident agent? [Y/n]: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             logger.info("agent prompt interrupted, defaulting to create agent")
             return False

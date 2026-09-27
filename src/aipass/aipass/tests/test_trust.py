@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-07-15
 # Modified: 2026-09-27
 # =============================================
@@ -25,7 +25,6 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
 from aipass.aipass.apps.modules.trust import handle_command
-from aipass.aipass.shared.project_home import _enroll_project
 from aipass.hooks.apps.handlers.config.trust_registry import (
     enroll,
     is_trusted,
@@ -187,15 +186,24 @@ def test_trust_not_a_directory(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+def _throwaway_except(keep: Path):
+    """A stand-in is_throwaway_path: every path is throwaway but *keep*."""
+    return lambda p: Path(p).resolve() != keep.resolve()
+
+
 def test_init_project_enrolls(tmp_path, monkeypatch):
-    """init_project auto-enrolls after copying hooks.json."""
+    """init_project auto-enrolls after copying hooks.json.
+
+    Mutant: project_home `is_throwaway_path(target)` -> `is_throwaway_path(target.parent)` reddens this test.
+    """
+    target = tmp_path / "newproject"
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda p: False,
+        _throwaway_except(target),
     )
     monkeypatch.setattr(
         "aipass.aipass.shared.project_home.is_throwaway_path",
-        lambda p: False,
+        _throwaway_except(target),
     )
 
     aipass_home = tmp_path / "aipass_home"
@@ -210,7 +218,6 @@ def test_init_project_enrolls(tmp_path, monkeypatch):
         lambda: str(aipass_home),
     )
 
-    target = tmp_path / "newproject"
     target.mkdir()
     init_project(target, project_name="test")
 
@@ -218,14 +225,18 @@ def test_init_project_enrolls(tmp_path, monkeypatch):
 
 
 def test_init_update_rehashes(tmp_path, monkeypatch):
-    """init update re-enrolls after merging hooks.json (hash tracks new content)."""
+    """init update re-enrolls after merging hooks.json (hash tracks new content).
+
+    Mutant: project_home `is_throwaway_path(target)` -> `is_throwaway_path(target.parent)` reddens this test.
+    """
+    target = tmp_path / "updproj"
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda p: False,
+        _throwaway_except(target),
     )
     monkeypatch.setattr(
         "aipass.aipass.shared.project_home.is_throwaway_path",
-        lambda p: False,
+        _throwaway_except(target),
     )
 
     aipass_home = tmp_path / "aipass_home"
@@ -240,7 +251,6 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
         lambda: str(aipass_home),
     )
 
-    target = tmp_path / "updproj"
     target.mkdir()
     init_project(target, project_name="test")
     assert is_trusted(str(target.resolve())) is True
@@ -261,27 +271,40 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
     assert is_trusted(str(target.resolve())) is True
 
 
-def test_enroll_project_skips_throwaway_path(tmp_path):
-    """_enroll_project() refuses to enroll a pytest/temp-dir path (GH-712 leak fix)."""
+def test_init_project_skips_trust_enrollment_for_a_throwaway_path(tmp_path, monkeypatch):
+    """init_project refuses to enroll a pytest/temp-dir path (GH-712 leak fix).
+
+    Mutant: project_home `if is_throwaway_path(target):` -> `if False:` reddens this test.
+    """
+    aipass_home = tmp_path / "aipass_home"
+    (aipass_home / ".aipass").mkdir(parents=True)
+    (aipass_home / ".aipass" / "project_hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
+    monkeypatch.setattr(
+        "aipass.aipass.apps.handlers.init.bootstrap._detect_aipass_home",
+        lambda: str(aipass_home),
+    )
     project = tmp_path / "throwaway"
     project.mkdir()
-    hooks_dir = project / ".aipass"
-    hooks_dir.mkdir()
-    (hooks_dir / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
 
-    assert _enroll_project(project) is False
+    init_project(project, project_name="test")
+
+    assert (project / ".aipass" / "hooks.json").is_file()
     assert is_trusted(str(project.resolve())) is False
 
 
 def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
-    """update_project()'s result dict flags whether enrollment happened."""
+    """update_project()'s result dict flags whether enrollment happened.
+
+    Mutant: project_home `is_throwaway_path(target)` -> `is_throwaway_path(target.parent)` reddens this test.
+    """
+    target = tmp_path / "reportproj"
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
-        lambda p: False,
+        _throwaway_except(target),
     )
     monkeypatch.setattr(
         "aipass.aipass.shared.project_home.is_throwaway_path",
-        lambda p: False,
+        _throwaway_except(target),
     )
 
     aipass_home = tmp_path / "aipass_home"
@@ -296,7 +319,6 @@ def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
         lambda: str(aipass_home),
     )
 
-    target = tmp_path / "reportproj"
     target.mkdir()
     init_project(target, project_name="test")
 

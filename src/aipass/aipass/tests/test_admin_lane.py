@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-28
 # Modified: 2026-09-27
 # =============================================
@@ -17,7 +17,6 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
@@ -277,17 +276,14 @@ def test_never_reimplements_the_signature_check():
 
 
 def test_never_reads_key_material(world, tmp_path):
-    """Presence only — the key file's CONTENT is never opened."""
+    """Presence only — the key file's CONTENT is never opened.
+    Mutant `key = KEY_PATH.is_file()` -> `... and bool(KEY_PATH.read_text(encoding="utf-8"))` goes red."""
     world()
     key_path = tmp_path / "fake_home" / ".aipass" / "admin_grant.key"
-    real_read = Path.read_text
+    # Material no text read can decode: any read of it as text raises instead of passing.
+    key_path.write_bytes(b"\xff\xfe\x00 not utf-8 \x80")
 
-    def guard(self, *args, **kwargs):
-        assert self != key_path, "admin_lane must never read key material"
-        return real_read(self, *args, **kwargs)
-
-    with patch.object(Path, "read_text", guard):
-        assert admin_lane_state()["key"] is True
+    assert admin_lane_state()["key"] is True
 
 
 def test_does_not_import_devpulses_module():

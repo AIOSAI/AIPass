@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_help_chat.py
 # Description: Tests for help_chat module — section-aware v2 (DPLAN-0282 P3)
-# Version: 2.1.1
+# Version: 2.1.3
 # Created: 2026-04-16
 # Modified: 2026-09-27
 # =============================================
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -59,12 +59,14 @@ _ENCODING = "utf-8"
 
 
 def _call_handle_command_drone_question(readme_content: str, readme_path: Path):
-    """Call handle_command for 'what does drone do' with file I/O mocked."""
+    """Call handle_command for 'what does drone do' over a real README written at readme_path."""
+    readme_path.parent.mkdir(parents=True, exist_ok=True)
+    readme_path.write_text(readme_content, encoding="utf-8")
     patches = [
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
-        patch("builtins.open", mock_open(read_data=readme_content)),
+        patch("aipass.aipass.apps.handlers.readme_map.get_readme_path", return_value=readme_path),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
@@ -94,12 +96,12 @@ def _call_handle_all_stopwords():
 
 
 def _capture_depth_offer_prints(readme_path: Path) -> None:
-    """Call handle_command for 'drone' where open() raises OSError."""
+    """Call handle_command for 'drone' where readme_path is never written, so open() raises OSError."""
     patches = [
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
-        patch("builtins.open", side_effect=OSError("no file")),
+        patch("aipass.aipass.apps.handlers.readme_map.get_readme_path", return_value=readme_path),
         patch("aipass.aipass.apps.modules.help_chat.logger"),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
@@ -340,29 +342,29 @@ class TestSearchReadme:
 class TestFormatAnswer:
     """Tests for _format_answer: section rendering, citations, truncation."""
 
-    def _path(self, branch: str) -> Path:
-        """Return a fake absolute README path for the given branch."""
-        return Path(f"/home/user/Projects/AIPass/src/aipass/{branch}/README.md")
+    def _path(self, root: Path, branch: str) -> Path:
+        """Return an absolute README path for the given branch, built under root (a tmp_path)."""
+        return root / "src" / "aipass" / branch / "README.md"
 
     def _sec(self, title: str, start: int, end: int, body: list[str]) -> dict:
         return {"title": title, "start": start, "end": end, "lines": body}
 
-    def test_citation_range_format_present(self):
+    def test_citation_range_format_present(self, tmp_path):
         """Citation must follow the (src/aipass/{branch}/README.md:{start}-{end}) format."""
-        path = self._path("drone")
+        path = self._path(tmp_path, "drone")
         result = _format_answer("drone", path, [self._sec("Drone", 3, 8, ["task-runner"])])
         assert "(src/aipass/drone/README.md:3-8)" in result
 
-    def test_branch_and_title_in_output(self):
+    def test_branch_and_title_in_output(self, tmp_path):
         """Output must include the branch name and section title."""
-        path = self._path("drone")
+        path = self._path(tmp_path, "drone")
         result = _format_answer("drone", path, [self._sec("Overview", 1, 4, ["some line"])])
         assert "drone" in result
         assert "Overview" in result
 
-    def test_multiple_sections_all_cited(self):
+    def test_multiple_sections_all_cited(self, tmp_path):
         """Every section must carry its own line-range citation."""
-        path = self._path("flow")
+        path = self._path(tmp_path, "flow")
         sections = [
             self._sec("One", 1, 4, ["a"]),
             self._sec("Two", 5, 9, ["b"]),
@@ -378,17 +380,17 @@ class TestFormatAnswer:
             result = _format_answer("drone", path, [self._sec("X", 7, 9, ["some content"])])
         assert "src/aipass/drone/README.md:7-9" in result
 
-    def test_long_section_truncated_with_read_hint(self):
+    def test_long_section_truncated_with_read_hint(self, tmp_path):
         """Bodies beyond _MAX_SECTION_LINES are cut and point at aipass read."""
-        path = self._path("drone")
+        path = self._path(tmp_path, "drone")
         body = [f"line {i}" for i in range(_MAX_SECTION_LINES + 10)]
         result = _format_answer("drone", path, [self._sec("Big", 1, len(body) + 1, body)])
         assert "aipass read drone" in result
         assert f"line {_MAX_SECTION_LINES + 5}" not in result
 
-    def test_untitled_section_labeled_intro(self):
+    def test_untitled_section_labeled_intro(self, tmp_path):
         """A preamble section with no heading renders with an (intro) label."""
-        path = self._path("drone")
+        path = self._path(tmp_path, "drone")
         result = _format_answer("drone", path, [self._sec("", 1, 2, ["preamble text"])])
         assert "(intro)" in result
 
@@ -430,7 +432,10 @@ class TestHandleCommand:
         mock_intro.assert_called_once()
 
     def test_valid_drone_question_returns_true(self, tmp_path, capsys: pytest.CaptureFixture[str]):
-        """Mutant: found answer not printed -> red."""
+        """Mutant: found answer not printed -> red.
+
+        Mutant: readme_map's `return fh.readlines()` -> `return []` (README on disk never read) -> red.
+        """
         readme_content = "# Drone\nDrone dispatches tasks to branches.\n"
         readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"
         result = _call_handle_command_drone_question(readme_content, readme_path)
@@ -452,7 +457,10 @@ class TestHandleCommand:
         assert "Could not extract keywords from question" in err
 
     def test_depth_offer_always_printed(self, tmp_path, capsys: pytest.CaptureFixture[str]):
-        """Mutant: depth-offer 'aipass read' line dropped -> red."""
+        """Depth offer lines must appear even when the README cannot be opened.
+
+        Mutant: depth-offer 'aipass read' line dropped -> red.
+        """
         readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"
         _capture_depth_offer_prints(readme_path)
         out, _err = capsys.readouterr()

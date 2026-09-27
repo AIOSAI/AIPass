@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor Phase 1
-# Version: 1.2.1
+# Version: 1.2.3
 # Created: 2026-04-16
 # Modified: 2026-09-27
 # =============================================
@@ -12,6 +12,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
 
+import io
 import json
 import os
 from unittest.mock import MagicMock, patch
@@ -72,6 +73,30 @@ def clean_env(monkeypatch):
     monkeypatch.delenv("AIPASS_HOME", raising=False)
 
 
+def _home_at(home):
+    """Point Path.home() at a scratch dir through its edge, the environment (USERPROFILE on Windows)."""
+    return patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)})
+
+
+class _Stdin(io.StringIO):
+    """A real text stream for input() to read, answering isatty() as told."""
+
+    def __init__(self, text: str, tty: bool) -> None:
+        super().__init__(text)
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+
+def _on_path(directory, name: str):
+    """Put an executable stub named ``name`` in ``directory`` for shutil.which to find through PATH."""
+    stub = directory / (name if os.name != "nt" or name.endswith(".exe") else f"{name}.exe")
+    stub.write_text("", encoding="utf-8")
+    stub.chmod(0o755)
+    return stub
+
+
 # =============================================================================
 # TestDetectPython
 # =============================================================================
@@ -118,32 +143,30 @@ class TestDetectPython:
 
 
 class TestDetectGit:
-    def test_git_found(self) -> None:
+    def test_git_found(self, tmp_path, monkeypatch) -> None:
         """When git is on PATH, found=True and version is non-empty."""
-        with patch(
-            "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value="/usr/bin/git"
-        ):
-            with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(stdout="git version 2.43.0\n", returncode=0)
-                result = detect_git()
+        _on_path(tmp_path, "git")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="git version 2.43.0\n", returncode=0)
+            result = detect_git()
         assert result["found"] is True
         assert result["version"] == "2.43.0"
 
-    def test_git_not_found(self) -> None:
+    def test_git_not_found(self, tmp_path, monkeypatch) -> None:
         """When git is not on PATH, found=False."""
-        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value=None):
-            result = detect_git()
+        monkeypatch.setenv("PATH", str(tmp_path))
+        result = detect_git()
         assert result["found"] is False
         assert result["version"] == ""
 
-    def test_git_version_parse_failure(self) -> None:
+    def test_git_version_parse_failure(self, tmp_path, monkeypatch) -> None:
         """If git --version fails, found=True but version is raw output."""
-        with patch(
-            "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value="/usr/bin/git"
-        ):
-            with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(stdout="weird\n", returncode=0)
-                result = detect_git()
+        _on_path(tmp_path, "git")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="weird\n", returncode=0)
+            result = detect_git()
         assert result["found"] is True
 
 
@@ -225,35 +248,26 @@ class TestDetectShell:
         assert result["name"] == "unknown"
         assert result["path"] == ""
 
-    def test_shell_missing_env_falls_back_to_proc_comm(self, monkeypatch) -> None:
+    def test_shell_missing_env_falls_back_to_proc_comm(self, monkeypatch, tmp_path) -> None:
         """Missing SHELL but a resolvable parent /proc comm name is used instead of 'unknown'."""
         monkeypatch.delenv("SHELL", raising=False)
-        with (
-            patch(
-                "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
-                return_value="zsh",
-            ),
-            patch(
-                "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which",
-                return_value="/usr/bin/zsh",
-            ),
+        stub = _on_path(tmp_path, "zsh")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch(
+            "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+            return_value="zsh",
         ):
             result = detect_shell()
         assert result["name"] == "zsh"
-        assert result["path"] == "/usr/bin/zsh"
+        assert os.path.samefile(result["path"], stub)
 
-    def test_shell_missing_env_proc_comm_not_on_path(self, monkeypatch) -> None:
+    def test_shell_missing_env_proc_comm_not_on_path(self, monkeypatch, tmp_path) -> None:
         """Parent comm name resolves but isn't found via which — bare name still beats 'unknown'."""
         monkeypatch.delenv("SHELL", raising=False)
-        with (
-            patch(
-                "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
-                return_value="bash",
-            ),
-            patch(
-                "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which",
-                return_value=None,
-            ),
+        monkeypatch.setenv("PATH", str(tmp_path))
+        with patch(
+            "aipass.aipass.apps.handlers.system_detect.system_detector._shell_from_parent_proc",
+            return_value="bash",
         ):
             result = detect_shell()
         assert result["name"] == "bash"
@@ -269,14 +283,21 @@ class TestDetectShell:
 makes pathlib dispatch Path() to PosixPath, which any code running inside the
 patch window (e.g. the logger call in the OSError branch) trips over with
 NotImplementedError. The code path is POSIX-gated anyway — skip on Windows;
-test_non_posix_returns_none keeps the Windows-relevant coverage."""
+test_non_posix_reports_unknown keeps the Windows-relevant coverage."""
 _posix_only = pytest.mark.skipif(os.name == "nt", reason="forces os.name='posix'; breaks pathlib dispatch on Windows")
 
 
 class TestShellFromParentProc:
-    def test_non_posix_returns_none(self, monkeypatch) -> None:
+    """The /proc fallback, reached the way doctor reaches it: detect_shell() with SHELL unset."""
+
+    @pytest.fixture(autouse=True)
+    def _no_shell_env(self, monkeypatch, tmp_path) -> None:
+        monkeypatch.delenv("SHELL", raising=False)
+        monkeypatch.setenv("PATH", str(tmp_path))
+
+    def test_non_posix_reports_unknown(self, monkeypatch) -> None:
         monkeypatch.setattr(system_detector.os, "name", "nt")
-        assert system_detector._shell_from_parent_proc() is None
+        assert detect_shell()["name"] == "unknown"
 
     @_posix_only
     def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
@@ -296,10 +317,10 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert system_detector._shell_from_parent_proc() == "bash"
+        assert detect_shell() == {"name": "bash", "path": ""}
 
     @_posix_only
-    def test_missing_comm_file_returns_none(self, monkeypatch, tmp_path) -> None:
+    def test_missing_comm_file_reports_unknown(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 999999
         monkeypatch.setattr(system_detector.os, "name", "posix")
         monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
@@ -312,10 +333,10 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert system_detector._shell_from_parent_proc() is None
+        assert detect_shell()["name"] == "unknown"
 
     @_posix_only
-    def test_read_oserror_returns_none(self, monkeypatch) -> None:
+    def test_read_oserror_reports_unknown(self, monkeypatch) -> None:
         monkeypatch.setattr(system_detector.os, "name", "posix")
         monkeypatch.setattr(system_detector.os, "getppid", lambda: 1)
 
@@ -327,7 +348,7 @@ class TestShellFromParentProc:
                 raise OSError("permission denied")
 
         monkeypatch.setattr(system_detector, "Path", lambda *a, **kw: _BoomPath())
-        assert system_detector._shell_from_parent_proc() is None
+        assert detect_shell()["name"] == "unknown"
 
 
 # =============================================================================
@@ -337,9 +358,10 @@ class TestShellFromParentProc:
 
 class TestDetectCpu:
     def test_returns_positive_count(self) -> None:
-        """CPU count is a positive integer."""
+        """CPU count is a positive integer.
+        Mutant `count = os.cpu_count() or 0` -> `count = 1` goes red on any multi-core host."""
         result = detect_cpu()
-        assert isinstance(result["count"], int)
+        assert result["count"] == os.cpu_count()
         assert result["count"] >= 1
 
 
@@ -349,29 +371,27 @@ class TestDetectCpu:
 
 
 class TestDetectOptionalTools:
-    def test_tmux_found(self) -> None:
+    def test_tmux_found(self, tmp_path, monkeypatch) -> None:
         """True when tmux binary is on PATH."""
-        with patch(
-            "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value="/usr/bin/tmux"
-        ):
-            assert detect_tmux() is True
+        _on_path(tmp_path, "tmux")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert detect_tmux() is True
 
-    def test_tmux_not_found(self) -> None:
+    def test_tmux_not_found(self, tmp_path, monkeypatch) -> None:
         """False when tmux is absent from PATH."""
-        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value=None):
-            assert detect_tmux() is False
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert detect_tmux() is False
 
-    def test_docker_found(self) -> None:
+    def test_docker_found(self, tmp_path, monkeypatch) -> None:
         """True when docker binary is on PATH."""
-        with patch(
-            "aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value="/usr/bin/docker"
-        ):
-            assert detect_docker() is True
+        _on_path(tmp_path, "docker")
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert detect_docker() is True
 
-    def test_wt_not_on_linux(self) -> None:
+    def test_wt_not_on_linux(self, tmp_path, monkeypatch) -> None:
         """False when wt.exe (Windows Terminal) is absent from PATH."""
-        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.shutil.which", return_value=None):
-            assert detect_wt() is False
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert detect_wt() is False
 
 
 # =============================================================================
@@ -459,7 +479,10 @@ class TestDoctorHandleCommand:
         assert handle_command("init", ["--verbose"]) is False
 
     def test_no_args_runs_doctor(self) -> None:
-        """Mutant: run_doctor call replaced by error_count = 0 -> red."""
+        """No args runs run_doctor (returns True when 0 errors).
+
+        Mutant: run_doctor call replaced by error_count = 0 -> red.
+        """
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as run:
             result = handle_command("doctor", [])
         assert result is True
@@ -487,7 +510,10 @@ class TestDoctorHandleCommand:
         mock_help.assert_called_once()
 
     def test_doctor_no_errors_returns_true(self) -> None:
-        """Mutant: doctor_run log_operation dropped -> red."""
+        """When run_doctor returns 0 errors, handle_command returns True.
+
+        Mutant: doctor_run log_operation dropped -> red.
+        """
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0):
             with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True) as jh:
                 result = handle_command("doctor", ["--check"])
@@ -508,6 +534,32 @@ class TestDoctorHandleCommand:
             with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
                 handle_command("doctor", ["--verbose"])
         mock_run.assert_called_once_with(verbose=True, interactive=True, fix=False)
+
+    @pytest.mark.parametrize(("args", "shown"), [(["--verbose"], True), ([], False)])
+    def test_verbose_shows_pytest_collect_errors(
+        self, args: list[str], shown: bool, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """--verbose prints the collect errors behind 'collection issues'; the plain run does not.
+
+        _BRANCH_ROOT is tmp_path, so the real pytest subprocess collects a path
+        that is not there and fails with its own ERROR line; every other group
+        and sub-check is stubbed, so nothing reads live state.
+        Mutant: `... if verbose)` -> `... if False)` (verbose ignored again) -> red.
+        """
+        mod = "aipass.aipass.apps.modules.doctor"
+        monkeypatch.setattr(f"{mod}._BRANCH_ROOT", tmp_path)
+        for name in ("_check_system", "_check_identity", "_check_community", "_check_structure"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        for name in ("_check_scaffold", "_check_sandbox", "_check_drone_systems", "check_wire_verify"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
+        with patch(f"{mod}.json_handler", autospec=True):
+            assert handle_command("doctor", args) is True
+        out = capsys.readouterr().out
+        assert "collection issues" in out
+        assert ("file or directory not found" in out) is shown
 
 
 # =============================================================================
@@ -653,7 +705,7 @@ class TestProviderManifest:
         )
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             results = _check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
@@ -683,7 +735,7 @@ class TestProviderManifest:
         provider_settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             results = _check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
@@ -731,7 +783,7 @@ class TestProviderManifest:
         provider_settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             results = _check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
@@ -762,7 +814,7 @@ class TestProviderManifest:
         provider_settings.write_text(json.dumps({"hooks": {}}), encoding="utf-8")
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             results = _check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
@@ -783,7 +835,7 @@ class TestProviderManifest:
         )
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             results = _check_provider_manifest()
         env_results = [r for r in results if r.label == "env vars"]
@@ -802,7 +854,7 @@ class TestProviderManifest:
         provider_settings.write_text(json.dumps({"env": {}}), encoding="utf-8")
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             results = _check_provider_manifest()
         env_results = [r for r in results if r.label == "env vars"]
@@ -853,7 +905,7 @@ class TestProviderSettingsScalars:
     def _run(manifest, tmp_path, **kwargs):
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
         ):
             return _check_provider_manifest(**kwargs)
 
@@ -893,13 +945,14 @@ class TestProviderSettingsScalars:
         wire.assert_not_called()
 
     def test_missing_key_alone_still_triggers_the_fix_wire(self, tmp_path) -> None:
-        """A settable gap is the one thing that still makes --fix run the wire verb."""
+        """A settable gap is the one thing that still makes --fix run the wire verb.
+        Mutant `interactive=False` -> `interactive=True` on the --fix wire call goes red."""
         manifest = self._scratch(tmp_path, {"includeGitInstructions": False}, {"env": {}})
 
         with patch("aipass.aipass.apps.modules.doctor._auto_wire_provider", return_value=[]) as wire:
             self._run(manifest, tmp_path, fix=True)
 
-        wire.assert_called_once()
+        wire.assert_called_once_with(manifest, interactive=False)
 
     def test_settings_row_from_an_earlier_pass_is_replaced_not_duplicated(self) -> None:
         """--fix/interactive re-runs the manifest check; the first pass's key row must not survive."""
@@ -1023,7 +1076,7 @@ class TestReconcileStaleDeny:
 
     def test_no_settings_file_returns_empty(self, tmp_path) -> None:
         """Missing settings.json returns no results."""
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=False)
         assert results == []
 
@@ -1035,7 +1088,7 @@ class TestReconcileStaleDeny:
             json.dumps({"permissions": {"deny": ["Bash(git push --force*)", "Bash(git reset --hard*)"]}}),
             encoding="utf-8",
         )
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=False)
         assert len(results) == 1
         assert results[0][1] == GLYPH_PASS
@@ -1049,7 +1102,7 @@ class TestReconcileStaleDeny:
             json.dumps({"permissions": {"deny": ["Bash(rm -rf*)", "Bash(git push --force*)", "Bash(rm -r *)"]}}),
             encoding="utf-8",
         )
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=False)
         assert len(results) == 1
         assert results[0][1] == GLYPH_WARN
@@ -1065,7 +1118,7 @@ class TestReconcileStaleDeny:
             "env": {"AIPASS_HOME": "/test"},
         }
         settings.write_text(json.dumps(original), encoding="utf-8")
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=True)
         assert len(results) == 1
         assert results[0][1] == GLYPH_PASS
@@ -1084,7 +1137,7 @@ class TestReconcileStaleDeny:
             json.dumps({"permissions": {"deny": ["Bash(rm -rf*)", "Bash(git reset --hard*)"]}}),
             encoding="utf-8",
         )
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=True)
         assert len(results) == 1
         assert results[0][1] == GLYPH_PASS
@@ -1099,7 +1152,7 @@ class TestReconcileStaleDeny:
             json.dumps({"permissions": {"deny": ["Bash(rm -rf*)", "Bash(rm -r *)"]}}),
             encoding="utf-8",
         )
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             reconcile_stale_deny(fix=True)
             results = reconcile_stale_deny(fix=True)
         assert len(results) == 1
@@ -1111,7 +1164,7 @@ class TestReconcileStaleDeny:
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(json.dumps({"permissions": {"deny": []}}), encoding="utf-8")
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=False)
         assert len(results) == 1
         assert results[0][1] == GLYPH_PASS
@@ -1121,7 +1174,7 @@ class TestReconcileStaleDeny:
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(json.dumps({"env": {"FOO": "bar"}}), encoding="utf-8")
-        with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = reconcile_stale_deny(fix=False)
         assert len(results) == 1
         assert results[0][1] == GLYPH_PASS
@@ -1191,40 +1244,38 @@ class TestPromptAutoWireIsatty:
         }
 
     def test_non_tty_stdin_skips_prompt_and_declines(self) -> None:
-        """Non-tty stdin must NOT call input() — it declines and warns instead."""
+        """Non-tty stdin must NOT call input() — it declines and warns instead.
+        Mutant `if not sys.stdin.isatty():` -> `if False:` reads the line and goes red."""
+        stdin = _Stdin("n\n", tty=False)
         with (
-            patch.object(_doctor_wire.sys, "stdin") as mock_stdin,
-            patch("builtins.input") as mock_input,
+            patch("sys.stdin", stdin),
             patch.object(_doctor_wire, "_print_manual_wire_warning") as mock_warn,
         ):
-            mock_stdin.isatty.return_value = False
             result = _doctor_wire._prompt_auto_wire(**self._args())
 
         assert result is False
-        mock_input.assert_not_called()
+        assert stdin.read() == "n\n"
         mock_warn.assert_called_once()
 
     def test_tty_stdin_prompts_and_respects_decline(self) -> None:
-        """Tty stdin still prompts; a 'n' answer declines."""
+        """Tty stdin still prompts; a 'n' answer declines.
+        Mutant `answer = input(...)` -> `answer = "n"` leaves stdin unread and goes red."""
+        stdin = _Stdin("n\nleft\n", tty=True)
         with (
-            patch.object(_doctor_wire.sys, "stdin") as mock_stdin,
-            patch("builtins.input", return_value="n") as mock_input,
+            patch("sys.stdin", stdin),
             patch.object(_doctor_wire, "_print_manual_wire_warning"),
         ):
-            mock_stdin.isatty.return_value = True
             result = _doctor_wire._prompt_auto_wire(**self._args())
 
         assert result is False
-        mock_input.assert_called_once()
+        assert stdin.read() == "left\n"
 
     def test_tty_stdin_accepts_and_wires(self) -> None:
         """Tty stdin with a 'y' answer runs the wire and returns True."""
         with (
-            patch.object(_doctor_wire.sys, "stdin") as mock_stdin,
-            patch("builtins.input", return_value="y"),
+            patch("sys.stdin", _Stdin("y\n", tty=True)),
             patch.object(_doctor_wire, "_auto_wire_provider", return_value=["wired hook"]) as mock_wire,
         ):
-            mock_stdin.isatty.return_value = True
             result = _doctor_wire._prompt_auto_wire(**self._args())
 
         assert result is True
@@ -1247,7 +1298,7 @@ class TestCheckGlobalAipassHome:
             json.dumps({"env": {"AIPASS_HOME": str(tmp_path / "gone")}}),
             encoding="utf-8",
         )
-        with patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = _check_global_aipass_home()
         fails = [r for r in results if "does not exist" in r.detail]
         assert len(fails) == 1
@@ -1260,7 +1311,7 @@ class TestCheckGlobalAipassHome:
             json.dumps({"env": {"AIPASS_HOME": str(tmp_path)}}),
             encoding="utf-8",
         )
-        with patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = _check_global_aipass_home()
         fails = [r for r in results if "throwaway" in r.detail]
         assert len(fails) == 1
@@ -1276,7 +1327,7 @@ class TestCheckGlobalAipassHome:
             encoding="utf-8",
         )
         with (
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
+            _home_at(tmp_path),
             patch(
                 "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
                 return_value=False,
@@ -1287,7 +1338,7 @@ class TestCheckGlobalAipassHome:
 
     def test_no_settings_file_is_noop(self, tmp_path):
         """Missing ~/.claude/settings.json produces no results."""
-        with patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path):
+        with _home_at(tmp_path):
             results = _check_global_aipass_home()
         assert results == []
 

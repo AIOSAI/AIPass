@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-14
 # Modified: 2026-09-27
 # =============================================
@@ -346,10 +346,20 @@ class TestPackageAwarePlacement:
         assert issues == []
 
     def test_no_pyproject_unchanged(self, tmp_path: Path) -> None:
-        """Without pyproject, src/<agent>/ still passes (original behavior)."""
-        _make_agent(tmp_path, "myagent")
-        agents = scan_agents(tmp_path)
-        issues = check_placement(agents, tmp_path)
+        """Without pyproject, src/<agent>/ still passes (original behavior).
+
+        Premise added 2026-09-27: a pyproject ABOVE the project root, declaring
+        another package, is not the project's and must not be read.
+        """
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.hatch.build.targets.wheel]\npackages = ["src/other"]\n',
+            encoding="utf-8",
+        )
+        project = tmp_path / "proj"
+        project.mkdir()
+        _make_agent(project, "myagent")
+        agents = scan_agents(project)
+        issues = check_placement(agents, project)
         assert issues == []
 
     def test_pyproject_without_packages_unchanged(self, tmp_path: Path) -> None:
@@ -605,8 +615,13 @@ class TestCheckRootArtifacts:
         assert hits[0].name == ".venv"
         assert hits[0].severity == "info"
 
-    def test_venv_flagged_when_aipass_home_not_provided(self, tmp_path: Path) -> None:
-        """Without aipass_home, .venv still flags as info (no special-casing possible)."""
+    def test_venv_flagged_when_aipass_home_not_provided(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without aipass_home, .venv still flags as info (no special-casing possible).
+
+        Premise added 2026-09-27: the environment names this root as AIPASS_HOME,
+        and the scan still does not sniff it — only the argument counts.
+        """
+        monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
         (tmp_path / ".venv").mkdir()
         hits = check_root_artifacts(tmp_path)
         assert len(hits) == 1

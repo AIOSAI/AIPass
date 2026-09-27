@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins every aipass module against an unreadable working directory
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-31
 # Modified: 2026-09-27
 # =============================================
@@ -282,11 +282,8 @@ def _banned_sites() -> tuple[list[str], int]:
         parts = py.relative_to(BRANCH_ROOT).parts
         if any(part in _BAN_SKIP for part in parts):
             continue
-        try:
-            source = py.read_text(encoding="utf-8")
-            lines = _inspect_stack_calls(source)
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+        # A live file that will not parse raises here: skipping it could hide a call.
+        lines = _inspect_stack_calls(py.read_text(encoding="utf-8"))
         scanned += 1
         offenders.extend(f"{py.relative_to(BRANCH_ROOT).as_posix()}:{line}" for line in lines)
     return offenders, scanned

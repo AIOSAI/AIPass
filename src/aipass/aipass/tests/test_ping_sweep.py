@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_ping_sweep.py
 # Description: Tests for aipass ping_sweep handler Phase 3
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
 # Modified: 2026-09-27
 # =============================================
@@ -110,9 +110,9 @@ class TestWaitForAck:
         """Returns 'timeout' when inbox file does not exist."""
         missing = tmp_path / "nonexistent.json"
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=missing):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                # Short real timeout — watchdog thread shares time.time, so mocking it is fragile
-                result = _wait_for_ack("seedgo", timeout=0)
+            # Short real timeout — watchdog thread shares time.time, so mocking it is fragile.
+            # timeout=0: the poll loop is never entered, so nothing sleeps.
+            result = _wait_for_ack("seedgo", timeout=0)
         assert result == "timeout"
 
     def test_returns_ack_when_matching_message(self, tmp_path) -> None:
@@ -157,8 +157,8 @@ class TestWaitForAck:
             encoding="utf-8",
         )
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=0)
+            # timeout=0: the poll loop is never entered, so nothing sleeps.
+            result = _wait_for_ack("seedgo", timeout=0)
         assert result == "timeout"
 
     def test_ignores_non_new_message(self, tmp_path) -> None:
@@ -180,8 +180,8 @@ class TestWaitForAck:
             encoding="utf-8",
         )
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=0)
+            # timeout=0: the poll loop is never entered, so nothing sleeps.
+            result = _wait_for_ack("seedgo", timeout=0)
         assert result == "timeout"
 
     def test_handles_corrupt_inbox(self, tmp_path) -> None:
@@ -189,8 +189,8 @@ class TestWaitForAck:
         inbox = tmp_path / "inbox.json"
         inbox.write_text("NOT JSON", encoding="utf-8")
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
-            with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
-                result = _wait_for_ack("seedgo", timeout=0)
+            # timeout=0: the poll loop is never entered, so nothing sleeps.
+            result = _wait_for_ack("seedgo", timeout=0)
         assert result == "timeout"
 
 

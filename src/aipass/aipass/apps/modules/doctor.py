@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -712,14 +712,15 @@ def _check_services(verbose: bool = False) -> List[CheckResult]:
             timeout=90,
             cwd=cwd,
         )
-        output = proc.stdout + proc.stderr
+        lines = [ln.replace("[", r"\[") for ln in (proc.stdout + proc.stderr).splitlines()]  # markup-escaped
         if proc.returncode == 0:
-            # Count collected lines
-            collected = [ln for ln in output.splitlines() if "<" in ln or "::" in ln]
+            collected = [ln for ln in lines if "<" in ln or "::" in ln]
             detail = f"{len(collected)} tests collected" if collected else "ok"
             results.append(CheckResult("pytest collect", GLYPH_PASS, detail, ""))
-        else:
-            results.append(CheckResult("pytest collect", GLYPH_WARN, "collection issues", "Run pytest to diagnose"))
+        else:  # --verbose: pytest's ERROR lines (else its last line) under the row
+            errs = [ln for ln in lines if ln.startswith("ERROR")] or lines[-1:]
+            detail = "collection issues" + "".join(f"\n      {ln}" for ln in errs[:_MAX_NAMED_EXTRAS] if verbose)
+            results.append(CheckResult("pytest collect", GLYPH_WARN, detail, "Run pytest to diagnose"))
     except FileNotFoundError as exc:
         logger.warning("[doctor] pytest not found: %s", exc)
         results.append(CheckResult("pytest collect", GLYPH_WARN, "pytest not found", "pip install pytest"))

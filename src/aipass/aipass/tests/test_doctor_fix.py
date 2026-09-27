@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_doctor_fix.py
 # Description: Tests for doctor --fix remediation report (DPLAN-0177 Phase 2)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-05-15
 # Modified: 2026-09-27
 # =============================================
@@ -387,7 +387,10 @@ class TestDoctorFixHandleCommand:
         assert handle_command("help", []) is False
 
     def test_no_args_shows_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: no-args usage line not printed -> red."""
+        """No args shows the usage message, not the introspection banner.
+
+        Mutant: no-args usage line not printed -> red.
+        """
         result = handle_command("doctor_fix", [])
         assert result is True
         out, _err = capsys.readouterr()

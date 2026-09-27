@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.4.0
+# Version: 1.4.2
 # Created: 2026-05-12
 # Modified: 2026-09-27
 # =============================================
@@ -19,11 +19,13 @@ from __future__ import annotations
 import importlib.metadata
 import re
 import types
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import aipass.aipass.apps.aipass as aipass_mod
+import aipass.aipass.apps.modules as modules_pkg
 from aipass.aipass.apps.aipass import (
     _pyproject_version,
     _resolve_version,
@@ -52,9 +54,16 @@ class TestDiscoverModules:
         it was equally true of the empty list a broken MODULES_DIR returns.
         Measured on this tree the same day: 11 modules, and the COMMANDs are
         read off the modules themselves so a new one joins the pin by existing.
+        The loaded set is pinned to the public files on disk, so a module that
+        silently fails to load is named rather than counted.
+        Mutant: `if hasattr(module, "handle_command"):` -> `if hasattr(module, "handle_cmd"):` -> red.
         """
-        result = discover_modules()
+        modules_dir = Path(modules_pkg.__file__).parent
+        with patch.object(aipass_mod, "MODULES_DIR", modules_dir):
+            result = discover_modules()
         assert isinstance(result, list)
+        on_disk = sorted(p.stem for p in modules_dir.glob("*.py") if not p.name.startswith("_"))
+        assert sorted(m.__name__.rsplit(".", 1)[1] for m in result) == on_disk
         commands = sorted(str(getattr(m, "COMMAND", "")) for m in result)
         assert len(result) >= 11, f"discover_modules found {len(result)}: {commands}"
         assert "doctor" in commands
@@ -109,15 +118,15 @@ class TestDiscoverModules:
         assert len(result) == 1
 
     def test_handles_import_error_gracefully(self, tmp_path) -> None:
-        """ImportError during module load is caught and module skipped."""
+        """ImportError during module load is caught and module skipped.
+
+        A real failure: no aipass.aipass.apps.modules.broken exists to import.
+        Mutant: `except Exception as e:` -> `except KeyError as e:` -> red.
+        """
         mod_file = tmp_path / "broken.py"
         mod_file.write_text("raise ImportError('bad')\n", encoding="utf-8")
         with patch("aipass.aipass.apps.aipass.MODULES_DIR", tmp_path):
-            with patch(
-                "aipass.aipass.apps.aipass.importlib.import_module",
-                side_effect=ImportError("bad"),
-            ):
-                result = discover_modules()
+            result = discover_modules()
         assert result == []
 
 
@@ -251,7 +260,10 @@ class TestMain:
     """Tests for the main() entry point."""
 
     def test_version_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: version line not printed -> red."""
+        """--version prints the real package version and returns 0.
+
+        Mutant: version line not printed -> red.
+        """
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
                 result = main()
@@ -271,7 +283,10 @@ class TestMain:
         assert out.startswith("aipass ")
 
     def test_version_flag_fallback(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: version line not printed -> red."""
+        """--version prints 'unknown' when no repo pyproject AND no metadata.
+
+        Mutant: version line not printed -> red.
+        """
         _not_found = importlib.metadata.PackageNotFoundError
         with (
             patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
@@ -367,7 +382,10 @@ class TestMain:
         mod.handle_command.assert_called_once_with("new", ["--help"])
 
     def test_trailing_help_unknown_command_reports_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: help-guard 'Unknown command' line not printed -> red."""
+        """A trailing --help on an unroutable command still errors, not silently 0.
+
+        Mutant: help-guard 'Unknown command' line not printed -> red.
+        """
         mod = MagicMock()
         mod.handle_command.return_value = False
         mod.__name__ = "aipass.aipass.apps.modules.trust"
@@ -426,7 +444,10 @@ class TestMain:
         mod.handle_command.assert_called_once_with("doctor", [])
 
     def test_at_prefix_shows_drone_guidance(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: '@name is a drone routing target' line not printed -> red."""
+        """@drone prints guidance pointing to drone, not 'Unknown command'.
+
+        Mutant: '@name is a drone routing target' line not printed -> red.
+        """
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "@drone"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
                 result = main()
@@ -446,7 +467,10 @@ class TestMain:
         assert "drone @memory ..." in out
 
     def test_plain_bad_command_still_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: final 'Unknown command' line not printed -> red."""
+        """Non-@ bad command still prints 'Unknown command', not drone guidance.
+
+        Mutant: final 'Unknown command' line not printed -> red.
+        """
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "frobnicate"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
                 result = main()
@@ -510,7 +534,10 @@ class TestMain:
         assert "answering as: aipass help what is drone" in out
 
     def test_multiword_with_flag_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: final 'Unknown command' line not printed -> red."""
+        """A mistyped command carrying flags must NOT become a help search.
+
+        Mutant: final 'Unknown command' line not printed -> red.
+        """
         mod = MagicMock()
         mod.handle_command.side_effect = lambda c, a: c == "help"
         mod.__name__ = "aipass.aipass.apps.modules.help_chat"
@@ -522,7 +549,10 @@ class TestMain:
         assert out == "Unknown command: doctr\n"
 
     def test_single_unknown_word_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: final 'Unknown command' line not printed -> red."""
+        """One unknown token keeps the loud error — no silent help fallback.
+
+        Mutant: final 'Unknown command' line not printed -> red.
+        """
         mod = MagicMock()
         mod.handle_command.side_effect = lambda c, a: c == "help"
         mod.__name__ = "aipass.aipass.apps.modules.help_chat"
@@ -534,7 +564,10 @@ class TestMain:
         assert out == "Unknown command: xyzzy\n"
 
     def test_handler_crash_surfaces_error(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: crash reported on the console, not error() -> red."""
+        """Handler crash prints the real error, not 'Unknown command'.
+
+        Mutant: crash reported on the console, not error() -> red.
+        """
         mod = MagicMock()
         mod.handle_command.side_effect = RuntimeError("db connection failed")
         mod.__name__ = "aipass.aipass.apps.modules.doctor"
@@ -549,21 +582,21 @@ class TestMain:
         assert "'doctor' crashed: db connection failed" in err
         assert "Unknown command" not in out
 
-    def test_import_failure_surfaces_on_command(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: load failure reported on the console, not error() -> red."""
+    def test_import_failure_surfaces_on_command(self, tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: load failure reported on the console, not error() -> red.
+
+        The failure is a real one: a modules dir under tmp_path holding a file
+        whose import fails, found by main()'s own discover_modules.
+        Mutant: `_import_failures[file_path.stem] = e` -> `pass` -> red.
+        """
+        (tmp_path / "broken.py").write_text("def handle_command(c, a):\n    return False\n", encoding="utf-8")
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "broken"]):
-            with patch(
-                "aipass.aipass.apps.aipass.discover_modules",
-                return_value=[],
-            ):
-                aipass_mod._import_failures.clear()
-                aipass_mod._import_failures["broken"] = ImportError("no module")
+            with patch.object(aipass_mod, "MODULES_DIR", tmp_path):
                 result = main()
         out, err = capsys.readouterr()
         assert result == 1
-        assert "'broken' failed to load: no module" in err
+        assert "'broken' failed to load: No module named 'aipass.aipass.apps.modules.broken'" in err
         assert "Unknown command" not in out
-        aipass_mod._import_failures.clear()
 
 
 # =============================================================================

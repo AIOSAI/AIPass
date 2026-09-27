@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
 # Description: Tests for shared/project_home.py — CLAUDE.md ancestor fence helpers
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-07-31
 # Modified: 2026-09-27
 # =============================================
@@ -39,8 +39,12 @@ from aipass.aipass.shared.project_home import (
 
 
 def test_claude_md_excludes_returns_host_and_dot_claude_paths(tmp_path):
-    """Returns the two absolute paths a nested project must fence out."""
-    home = str(tmp_path / "AIPass")
+    """Returns the two absolute paths a nested project must fence out.
+
+    The product answers in POSIX form on every platform (settings files carry
+    forward slashes), so home is built with as_posix() to match on Windows.
+    """
+    home = (tmp_path / "AIPass").as_posix()
     excludes = _claude_md_excludes(home)
     assert excludes == [
         f"{home}/CLAUDE.md",
@@ -62,8 +66,8 @@ def test_claude_local_settings_default_omits_excludes(tmp_path):
 
 
 def test_claude_local_settings_nested_adds_excludes(tmp_path):
-    """nested=True adds claudeMdExcludes alongside env.AIPASS_HOME."""
-    home = str(tmp_path / "AIPass")
+    """nested=True adds claudeMdExcludes alongside env.AIPASS_HOME (POSIX-form home, as the product answers)."""
+    home = (tmp_path / "AIPass").as_posix()
     data = json.loads(_claude_local_settings(home, nested=True))
     assert data["env"] == {"AIPASS_HOME": home}
     assert data["claudeMdExcludes"] == [
@@ -78,8 +82,8 @@ def test_claude_local_settings_nested_adds_excludes(tmp_path):
 
 
 def test_merge_local_settings_adds_excludes_to_env_only_existing(tmp_path):
-    """Existing file has only env.AIPASS_HOME (pre-fence era) — merge adds the fence."""
-    home = str(tmp_path / "AIPass")
+    """Existing file has only env.AIPASS_HOME (pre-fence era) — merge adds the fence (POSIX-form home)."""
+    home = (tmp_path / "AIPass").as_posix()
     existing = {"env": {"AIPASS_HOME": home}}
     generated = json.loads(_claude_local_settings(home, nested=True))
 
@@ -105,8 +109,8 @@ def test_merge_local_settings_is_idempotent(tmp_path):
 
 
 def test_merge_local_settings_preserves_custom_excludes_entries(tmp_path):
-    """A user's hand-added claudeMdExcludes entry survives the merge alongside the official ones."""
-    home = str(tmp_path / "AIPass")
+    """A user's hand-added claudeMdExcludes entry survives the merge alongside the official ones (POSIX-form home)."""
+    home = (tmp_path / "AIPass").as_posix()
     existing = {
         "env": {"AIPASS_HOME": home},
         "claudeMdExcludes": ["/custom/extra/CLAUDE.md"],
@@ -123,8 +127,8 @@ def test_merge_local_settings_preserves_custom_excludes_entries(tmp_path):
 
 
 def test_merge_local_settings_does_not_duplicate_existing_official_entries(tmp_path):
-    """Re-running the merge when the official entries are already present adds nothing twice."""
-    home = str(tmp_path / "AIPass")
+    """Re-running the merge when the official entries are already present adds nothing twice (POSIX-form home)."""
+    home = (tmp_path / "AIPass").as_posix()
     existing = {
         "env": {"AIPASS_HOME": home},
         "claudeMdExcludes": [

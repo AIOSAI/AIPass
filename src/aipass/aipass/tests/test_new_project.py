@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.1.2
+# Version: 1.1.4
 # Created: 2026-07-17
 # Modified: 2026-09-27
 # =============================================
@@ -559,11 +559,16 @@ def test_is_projects_child_no_host_registry(tmp_path):
 
 
 def test_guard_init_blocks_nested_by_default(tmp_path):
+    """The refusal names the host it found and the marker file that proved it.
+
+    Mutant: `(has {f.name})` dropped from the BLOCKED message -> red.
+    """
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     target = tmp_path / "projects" / "nested"
     target.mkdir(parents=True)
-    with pytest.raises(RuntimeError, match="inside AIPass project"):
+    with pytest.raises(RuntimeError, match="inside AIPass project") as exc_info:
         _guard_init(target)
+    assert f"at '{tmp_path}' (has AIPASS_REGISTRY.json)" in str(exc_info.value)
 
 
 def test_guard_init_allows_nested_with_flag(tmp_path):
@@ -618,39 +623,39 @@ def test_module_handles_no_args(capsys: pytest.CaptureFixture[str]):
 # ---------------------------------------------------------------------------
 
 
+def _eof(prompt: str) -> str:
+    """Stand-in for input() at a closed stdin."""
+    raise EOFError
+
+
 def test_prompt_template_default():
-    with patch("builtins.input", return_value=""):
-        assert _prompt_template(["empty", "python"]) == "empty"
+    assert _prompt_template(["empty", "python"], ask=lambda prompt: "") == "empty"
 
 
 def test_prompt_template_by_number():
-    with patch("builtins.input", return_value="2"):
-        assert _prompt_template(["empty", "python"]) == "python"
+    """Mutant: `return templates[int(choice) - 1]` -> `return templates[0]` -> red."""
+    assert _prompt_template(["empty", "python"], ask=lambda prompt: "2") == "python"
 
 
 def test_prompt_template_by_name():
-    with patch("builtins.input", return_value="python"):
-        assert _prompt_template(["empty", "python"]) == "python"
+    assert _prompt_template(["empty", "python"], ask=lambda prompt: "python") == "python"
 
 
 def test_prompt_template_eof():
-    with patch("builtins.input", side_effect=EOFError):
-        assert _prompt_template(["empty", "python"]) == "empty"
+    assert _prompt_template(["empty", "python"], ask=_eof) == "empty"
 
 
 def test_prompt_agent_default_yes():
-    with patch("builtins.input", return_value=""):
-        assert _prompt_agent() is False
+    assert _prompt_agent(ask=lambda prompt: "") is False
 
 
 def test_prompt_agent_no():
-    with patch("builtins.input", return_value="n"):
-        assert _prompt_agent() is True
+    """Mutant: the `("n", "no")` branch's `return True` -> `return False` -> red."""
+    assert _prompt_agent(ask=lambda prompt: "n") is True
 
 
 def test_prompt_agent_eof():
-    with patch("builtins.input", side_effect=EOFError):
-        assert _prompt_agent() is False
+    assert _prompt_agent(ask=_eof) is False
 
 
 # ---------------------------------------------------------------------------
@@ -659,7 +664,10 @@ def test_prompt_agent_eof():
 
 
 def test_tty_auto_launches_agent(host_env, monkeypatch):
-    """On a TTY with an agent created, launch_inline is called."""
+    """On a TTY with an agent created, launch_inline is called.
+
+    Mutant: the launch_inline command `"claude",` -> `"codex",` -> red.
+    """
     monkeypatch.chdir(host_env)
     spawn_ok = {
         "success": True,
@@ -681,17 +689,21 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
         ),
-        patch("aipass.aipass.apps.modules.new_project.sys") as mock_sys,
+        patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
         patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
     ):
-        mock_sys.stdin.isatty.return_value = True
+        mock_stdin.isatty.return_value = True
         handle_command("new", ["launch", "--template", "empty"])
     mock_launch.assert_called_once()
+    assert mock_launch.call_args[0][0] == "claude"
     assert "launch" in mock_launch.call_args[0][2]
 
 
 def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureFixture[str]):
-    """Mutant: 'claude' next-step line not printed -> red."""
+    """On a non-TTY, launch_inline is NOT called — fallback to printed instructions.
+
+    Mutant: 'claude' next-step line not printed -> red.
+    """
     monkeypatch.chdir(host_env)
     spawn_ok = {
         "success": True,
@@ -713,10 +725,10 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureF
             "aipass.aipass.apps.handlers.new_project.spawn_agent",
             return_value=spawn_ok,
         ),
-        patch("aipass.aipass.apps.modules.new_project.sys") as mock_sys,
+        patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
         patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
     ):
-        mock_sys.stdin.isatty.return_value = False
+        mock_stdin.isatty.return_value = False
         handle_command("new", ["piped", "--template", "empty"])
     mock_launch.assert_not_called()
     out, _err = capsys.readouterr()
@@ -734,10 +746,10 @@ def test_no_agent_skips_auto_launch(host_env, monkeypatch):
             return_value=None,
         ),
         patch("aipass.aipass.shared.project_home._enroll_project"),
-        patch("aipass.aipass.apps.modules.new_project.sys") as mock_sys,
+        patch("aipass.aipass.apps.modules.new_project.sys.stdin") as mock_stdin,
         patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
     ):
-        mock_sys.stdin.isatty.return_value = True
+        mock_stdin.isatty.return_value = True
         handle_command("new", ["nolaunch", "--template", "empty", "--no-agent"])
     mock_launch.assert_not_called()
 

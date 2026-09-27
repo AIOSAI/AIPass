@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-05-12
 # Modified: 2026-09-27
 # =============================================
@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -97,9 +98,13 @@ class TestBuildManualCommand:
 class TestReturnPathBreadcrumb:
     """Tests for return_path_breadcrumb()."""
 
-    def test_returns_cd_and_continue(self) -> None:
-        """Breadcrumb is `cd <cwd> && claude --continue`."""
-        assert return_path_breadcrumb("/home/user/proj") == "cd /home/user/proj && claude --continue"
+    def test_returns_cd_and_continue(self, tmp_path) -> None:
+        """Breadcrumb is `cd <cwd> && claude --continue`.
+
+        Mutant: `f"cd {cwd} && claude --continue"` -> `f"cd . && claude --continue"` reddens this test.
+        """
+        proj = str(tmp_path / "proj")
+        assert return_path_breadcrumb(proj) == f"cd {proj} && claude --continue"
 
     def test_uses_continue_not_resume(self, tmp_path) -> None:
         """Uses --continue, never --resume <id> — session stores are per-directory,
@@ -282,43 +287,59 @@ class TestLaunchTerminal:
 # =============================================================================
 
 
+def _path_with(monkeypatch, tmp_path, *names: str) -> None:
+    """PATH holds only a tmp bin dir with these executables, so shutil.which answers from it."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in names:
+        exe = bin_dir / (name + (".exe" if os.name == "nt" else ""))
+        exe.write_text("", encoding="utf-8")
+        exe.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+
 class TestLaunchTmux:
     """Tests for launch_tmux()."""
 
-    def test_returns_false_when_tmux_not_found(self, tmp_path) -> None:
-        """Returns False when tmux is not on PATH."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value=None):
-            assert launch_tmux("claude", "test", str(tmp_path)) is False
+    def test_returns_false_when_tmux_not_found(self, tmp_path, monkeypatch) -> None:
+        """Returns False when tmux is not on PATH.
 
-    def test_success_returns_true(self, tmp_path, capsys: pytest.CaptureFixture[str]) -> None:
+        Mutant: `if not shutil.which("tmux"):` -> `if False:` reddens this test.
+        """
+        _path_with(monkeypatch, tmp_path)
+        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
+            assert launch_tmux("claude", "test", str(tmp_path)) is False
+        mock_run.assert_not_called()
+
+    def test_success_returns_true(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
         """Returns True when tmux commands succeed.
 
         Mutant: "tmux attach" instruction not printed -> red.
         """
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value="/usr/bin/tmux"):
-            with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0)
-                assert launch_tmux("claude", "test", str(tmp_path)) is True
+        _path_with(monkeypatch, tmp_path, "tmux")
+        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert launch_tmux("claude", "test", str(tmp_path)) is True
         out, _err = capsys.readouterr()
         assert "tmux attach -t" in out
 
-    def test_called_process_error_returns_false(self, tmp_path) -> None:
+    def test_called_process_error_returns_false(self, tmp_path, monkeypatch) -> None:
         """Returns False when tmux new-session fails."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value="/usr/bin/tmux"):
-            with patch(
-                "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
-                side_effect=[MagicMock(), subprocess.CalledProcessError(1, "tmux")],
-            ):
-                assert launch_tmux("claude", "test", str(tmp_path)) is False
+        _path_with(monkeypatch, tmp_path, "tmux")
+        with patch(
+            "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
+            side_effect=[MagicMock(), subprocess.CalledProcessError(1, "tmux")],
+        ):
+            assert launch_tmux("claude", "test", str(tmp_path)) is False
 
-    def test_timeout_returns_false(self, tmp_path) -> None:
+    def test_timeout_returns_false(self, tmp_path, monkeypatch) -> None:
         """Returns False when tmux command times out."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value="/usr/bin/tmux"):
-            with patch(
-                "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
-                side_effect=[MagicMock(), subprocess.TimeoutExpired("tmux", 10)],
-            ):
-                assert launch_tmux("claude", "test", str(tmp_path)) is False
+        _path_with(monkeypatch, tmp_path, "tmux")
+        with patch(
+            "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
+            side_effect=[MagicMock(), subprocess.TimeoutExpired("tmux", 10)],
+        ):
+            assert launch_tmux("claude", "test", str(tmp_path)) is False
 
 
 # =============================================================================
@@ -329,35 +350,40 @@ class TestLaunchTmux:
 class TestLaunchWt:
     """Tests for launch_wt()."""
 
-    def test_returns_false_when_wt_not_found(self, tmp_path) -> None:
-        """Returns False when wt.exe is not on PATH."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value=None):
+    def test_returns_false_when_wt_not_found(self, tmp_path, monkeypatch) -> None:
+        """Returns False when wt.exe is not on PATH.
+
+        Mutant: `if not shutil.which("wt"):` -> `if False:` reddens this test.
+        """
+        _path_with(monkeypatch, tmp_path)
+        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
+            assert launch_wt("claude", "test", str(tmp_path)) is False
+        mock_run.assert_not_called()
+
+    def test_success_returns_true(self, tmp_path, monkeypatch) -> None:
+        """Returns True when wt.exe runs successfully."""
+        _path_with(monkeypatch, tmp_path, "wt")
+        with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            assert launch_wt("claude", "test", str(tmp_path)) is True
+
+    def test_called_process_error_returns_false(self, tmp_path, monkeypatch) -> None:
+        """Returns False when wt.exe fails."""
+        _path_with(monkeypatch, tmp_path, "wt")
+        with patch(
+            "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "wt"),
+        ):
             assert launch_wt("claude", "test", str(tmp_path)) is False
 
-    def test_success_returns_true(self, tmp_path) -> None:
-        """Returns True when wt.exe runs successfully."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value="C:\\wt.exe"):
-            with patch("aipass.aipass.apps.handlers.handoff_platform.subprocess.run") as mock_run:
-                mock_run.return_value = MagicMock(returncode=0)
-                assert launch_wt("claude", "test", str(tmp_path)) is True
-
-    def test_called_process_error_returns_false(self, tmp_path) -> None:
-        """Returns False when wt.exe fails."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value="C:\\wt.exe"):
-            with patch(
-                "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
-                side_effect=subprocess.CalledProcessError(1, "wt"),
-            ):
-                assert launch_wt("claude", "test", str(tmp_path)) is False
-
-    def test_timeout_returns_false(self, tmp_path) -> None:
+    def test_timeout_returns_false(self, tmp_path, monkeypatch) -> None:
         """Returns False when wt.exe times out."""
-        with patch("aipass.aipass.apps.handlers.handoff_platform.shutil.which", return_value="C:\\wt.exe"):
-            with patch(
-                "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
-                side_effect=subprocess.TimeoutExpired("wt", 15),
-            ):
-                assert launch_wt("claude", "test", str(tmp_path)) is False
+        _path_with(monkeypatch, tmp_path, "wt")
+        with patch(
+            "aipass.aipass.apps.handlers.handoff_platform.subprocess.run",
+            side_effect=subprocess.TimeoutExpired("wt", 15),
+        ):
+            assert launch_wt("claude", "test", str(tmp_path)) is False
 
 
 # =============================================================================

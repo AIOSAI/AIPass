@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_help_flag.py
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-13
 # Modified: 2026-09-27
 # =============================================
@@ -162,7 +162,10 @@ class TestInitFlowStandaloneDoor:
     """The named finding: init_flow's standalone __main__ hands raw argv in."""
 
     def test_agent_help_does_not_spawn(self, _stub_every_doing_path, capsys: pytest.CaptureFixture[str]) -> None:
-        """Mutant: init help USAGE line not printed -> red."""
+        """`init_flow.py agent --help` must not reach `drone @spawn create`.
+
+        Mutant: init help USAGE line not printed -> red.
+        """
         try:
             handled = init_flow.handle_command("init", ["agent", "--help"])
         except SystemExit as exc:
@@ -175,7 +178,10 @@ class TestInitFlowStandaloneDoor:
     def test_agent_h_short_flag_does_not_spawn(
         self, _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Mutant: init help USAGE line not printed -> red."""
+        """Both dashed spellings — a half fix scores clean and stays exposed.
+
+        Mutant: init help USAGE line not printed -> red.
+        """
         try:
             handled = init_flow.handle_command("init", ["agent", "-h"])
         except SystemExit as exc:
@@ -207,7 +213,10 @@ class TestTrustEnrollmentCanary:
     def test_help_probe_does_not_enroll(
         self, tmp_path, _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Mutant: trust help enroll usage line altered -> red."""
+        """A help probe against a valid, enrollable directory must not enroll.
+
+        Mutant: trust help enroll usage line altered -> red.
+        """
         project = tmp_path / "enrollable"
         (project / ".aipass").mkdir(parents=True)
         (project / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
