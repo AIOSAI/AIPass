@@ -1,30 +1,31 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_log_health.py
 # Description: Tests for the log-health command module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/modules/log_health.py
+"""Tests for apps/modules/log_health.py."""
 
-The snapshot display is the reason this file exists. `snapshot` reports the
-rates a previous scan measured, and when it has none it used to render
-identically to a genuinely quiet system: "329 idle files (0 lines/min)".
-An operator cannot tell a calm fleet from a tracker that never ran, so the
-zero-state has to name its own cause.
+# The snapshot display is the reason this file exists. `snapshot` reports the
+# rates a previous scan measured, and when it has none it used to render
+# identically to a genuinely quiet system: "329 idle files (0 lines/min)".
+# An operator cannot tell a calm fleet from a tracker that never ran, so the
+# zero-state has to name its own cause.
+#
+# Every display test renders through a REAL Rich console — the shared conftest
+# installs a MagicMock console, which records calls but never renders, so it
+# cannot fail on anything that happens at render time.
+#
+# Covers:
+# - snapshot with no recent samples says so instead of reporting idle
+# - snapshot with fresh samples reports their age
+# - scan output is unchanged by the staleness reporting
+# - subcommand routing and the unknown-subcommand path
 
-Every display test renders through a REAL Rich console — the shared conftest
-installs a MagicMock console, which records calls but never renders, so it
-cannot fail on anything that happens at render time.
-
-Covers:
-- snapshot with no recent samples says so instead of reporting idle
-- snapshot with fresh samples reports their age
-- scan output is unchanged by the staleness reporting
-- subcommand routing and the unknown-subcommand path
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
 
 import importlib
 import io
@@ -51,7 +52,7 @@ def _row(name="prax_monitor.log", rate=0.0, age=None, branch="PRAX"):
     """Build one get_snapshot()/scan_rates() result row."""
     return {
         "file": name,
-        "path": f"/tmp/system_logs/{name}",
+        "path": f"system_logs/{name}",
         "size_kb": 12.5,
         "rate_lines_per_min": rate,
         "age_seconds": age,

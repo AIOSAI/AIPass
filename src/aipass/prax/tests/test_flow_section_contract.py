@@ -1,37 +1,41 @@
 # =================== AIPass ====================
 # Name: test_flow_section_contract.py
 # Description: sections.flow has two writers — both must build the same shape
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-16
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Contract cover for the 2026-08-16 sections.flow handoff (@devpulse dispatch).
+"""Tests for apps/handlers/dashboard/refresh.py."""
 
-``sections.flow`` is written by TWO services: @flow's ``push_flow_to_branch_dashboard``
-and prax's dashboard refresh. Both assign the section wholesale, so last writer
-wins. @flow's module went to 2.0.0 with a five-key contract
-(``managed_by``/``active_plans``/``open_recent``/``recently_closed``/``total_plans``);
-prax's refresh still built the old three-key block, so every refresh silently
-deleted ``open_recent`` and ``total_plans`` until flow's next push.
+# Contract cover for the 2026-08-16 sections.flow handoff (@devpulse dispatch).
+#
+# ``sections.flow`` is written by TWO services: @flow's ``push_flow_to_branch_dashboard``
+# and prax's dashboard refresh. Both assign the section wholesale, so last writer
+# wins. @flow's module went to 2.0.0 with a five-key contract
+# (``managed_by``/``active_plans``/``open_recent``/``recently_closed``/``total_plans``);
+# prax's refresh still built the old three-key block, so every refresh silently
+# deleted ``open_recent`` and ``total_plans`` until flow's next push.
+#
+# The invariant, same species as the quick_status one in test_dashboard_merge.py:
+# **no writer deletes a key it did not write** — applied here at section level.
+#
+# Two things this file pins that the dispatch did not ask for, both found while
+# building it:
+#
+# 1. The old ``_extract_flow_section`` read the central's TOP-LEVEL ``recently_closed``,
+#    which is the newest 5 closed plans FLEET-WIDE. Every branch's dashboard was
+#    published other branches' closed plans. The per-branch block was there the
+#    whole time at ``branches.<name>``.
+# 2. ``total_plans`` is NOT derivable from PLANS.central.json. The only per-branch
+#    closed number there (``branches.<name>.statistics.total_closed``) is capped at
+#    5 by construction, so prax preserves flow's value rather than inventing one.
+#
+# Modules are imported inside each test — conftest.py installs autouse sys.modules
+# mocks that must be in place first.
 
-The invariant, same species as the quick_status one in test_dashboard_merge.py:
-**no writer deletes a key it did not write** — applied here at section level.
-
-Two things this file pins that the dispatch did not ask for, both found while
-building it:
-
-1. The old ``_extract_flow_section`` read the central's TOP-LEVEL ``recently_closed``,
-   which is the newest 5 closed plans FLEET-WIDE. Every branch's dashboard was
-   published other branches' closed plans. The per-branch block was there the
-   whole time at ``branches.<name>``.
-2. ``total_plans`` is NOT derivable from PLANS.central.json. The only per-branch
-   closed number there (``branches.<name>.statistics.total_closed``) is capped at
-   5 by construction, so prax preserves flow's value rather than inventing one.
-
-Modules are imported inside each test — conftest.py installs autouse sys.modules
-mocks that must be in place first.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/dashboard/ parses and imports
 
 import importlib
 import sys

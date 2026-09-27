@@ -1,8 +1,10 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_json_durability.py - JSON Handler Durability Tests
-# Date: 2026-08-18
-# Version: 2.0.0
+# Description: Durability tests for the json service, as prax reaches it (the AIPASS_TEST_LOG_DIR seam)
+# Version: 2.1.0
+# Created: 2026-08-18
+# Modified: 2026-09-27
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -15,24 +17,28 @@
 #   - tmp_path + monkeypatch for file isolation — never the live prax_json/
 # =============================================
 
-"""Durability tests for the json service, as prax reaches it.
+"""Tests for apps/handlers/json/json_service.py and the apps/handlers/json/json_handler.py shim."""
 
-The pins this file was born with — the bounded os.replace retry, the write site
-routing through it, the exhausted retry leaving the original intact, the
-concurrent-writers race — are pinned once for the whole fleet in seedgo's
-tests/test_json_handler_contract.py (DPLAN-0323 phase 7, 2026-09-02), prax
-included. What remains here is the AIPASS_TEST_LOG_DIR seam, measured in a
-SUBPROCESS: in-process the seam is invisible, because whether the redirect was
-exported before or after the module was imported is exactly the property under
-test.
+# Durability tests for the json service, as prax reaches it.
+#
+# The pins this file was born with — the bounded os.replace retry, the write site
+# routing through it, the exhausted retry leaving the original intact, the
+# concurrent-writers race — are pinned once for the whole fleet in seedgo's
+# tests/test_json_handler_contract.py (DPLAN-0323 phase 7, 2026-09-02), prax
+# included. What remains here is the AIPASS_TEST_LOG_DIR seam, measured in a
+# SUBPROCESS: in-process the seam is invisible, because whether the redirect was
+# exported before or after the module was imported is exactly the property under
+# test.
+#
+# The PRAX_JSON_DIR override tests that used to live here are in tests/.archive/.
+# They pinned the two-fixed-point rule that told an explicit monkeypatch of the
+# module constant apart from a stale reload write-back — a rule that existed only
+# because the directory was captured at import. The service has no constant and
+# captures nothing, so there is no override to tell apart. The env var is the one
+# redirect.
 
-The PRAX_JSON_DIR override tests that used to live here are in tests/.archive/.
-They pinned the two-fixed-point rule that told an explicit monkeypatch of the
-module constant apart from a stale reload write-back — a rule that existed only
-because the directory was captured at import. The service has no constant and
-captures nothing, so there is no override to tell apart. The env var is the one
-redirect.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/json/ parses and imports
 
 import os
 import subprocess
@@ -47,6 +53,7 @@ def _probe(code: str, env_value: str) -> str:
         env={**os.environ, "AIPASS_TEST_LOG_DIR": env_value},
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
     assert result.returncode == 0, result.stderr

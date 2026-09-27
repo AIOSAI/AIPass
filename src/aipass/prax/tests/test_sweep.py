@@ -1,17 +1,20 @@
 # =================== AIPass ====================
 # Name: test_sweep.py
 # Description: Tests for stale log sweep in log_audit
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-07-11
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for sweep_stale_logs — the 30-day stale log cleanup policy.
+"""Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
 
-Verifies: age-based deletion, pattern matching (.log, .jsonl, .1 siblings),
-directory scanning across system_logs/ and branch logs/.
-"""
+# Tests for sweep_stale_logs — the 30-day stale log cleanup policy.
+#
+# Verifies: age-based deletion, pattern matching (.log, .jsonl, .1 siblings),
+# directory scanning across system_logs/ and branch logs/.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/logging/ parses and imports
 
 import os
 import sys
@@ -109,7 +112,7 @@ class TestSweepIntegration:
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         fresh = sys_logs / "recent.log"
-        fresh.write_text("fresh content\n")
+        fresh.write_text("fresh content\n", encoding="utf-8")
 
         with (
             patch.object(lw, "_get_system_logs_dir", return_value=sys_logs),

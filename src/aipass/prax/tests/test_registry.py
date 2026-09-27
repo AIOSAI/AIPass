@@ -1,17 +1,19 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Tests for registry load and save handlers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/registry/load.py and save.py.
+"""Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
 
-Covers: load_module_registry (valid file, missing file, corrupt file,
-missing modules key) and save_module_registry (writes valid JSON,
-creates directory, round-trip with load, error handling).
-"""
+# Covers: load_module_registry (valid file, missing file, corrupt file,
+# missing modules key) and save_module_registry (writes valid JSON,
+# creates directory, round-trip with load, error handling).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/registry/ parses and imports
 
 import json
 import sys

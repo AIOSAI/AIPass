@@ -1,24 +1,28 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-08-04
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for prax logging handler modules.
+"""Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
 
-Covers: direct.py (doRollover), introspection.py (get_calling_module_path),
-log_watchdog.py (get_oversized_files, truncate_log_file),
-monitoring.py (run_monitoring_loop), operations.py (create_config_file),
-override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
-setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
-terminal/filtering.py (load_filtered_modules, should_display_terminal),
-terminal/formatting.py (format_terminal_message, create_terminal_handler).
+# Tests for prax logging handler modules.
+#
+# Covers: direct.py (doRollover), introspection.py (get_calling_module_path),
+# log_watchdog.py (get_oversized_files, truncate_log_file),
+# monitoring.py (run_monitoring_loop), operations.py (create_config_file),
+# override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
+# setup.py (setup_system_logger, doRollover for _WindowsSafeRotatingHandler),
+# terminal/filtering.py (load_filtered_modules, should_display_terminal),
+# terminal/formatting.py (format_terminal_message, create_terminal_handler).
+#
+# All imports happen inside test functions because the autouse mock_prax_infrastructure
+# fixture must inject sys.modules mocks before any prax module is loaded.
 
-All imports happen inside test functions because the autouse mock_prax_infrastructure
-fixture must inject sys.modules mocks before any prax module is loaded.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/logging/ parses and imports
 
 import importlib  # used inside test functions for dynamic module loading
 import json

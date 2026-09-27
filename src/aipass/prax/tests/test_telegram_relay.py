@@ -1,26 +1,28 @@
 # =================== AIPass ====================
 # Name: test_telegram_relay.py
 # Description: Tests for the Telegram relay handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-06-24
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/monitoring/telegram_relay.py
+"""Tests for apps/handlers/monitoring/telegram_relay.py."""
 
-Covers:
-- Event formatting (log, command, hook types, PID labels)
-- init_relay: disabled path, missing config, incomplete config, successful start
-- Fail-silent-once: exactly one log line when config absent, zero sends
-- stop_relay: final flush and thread join, no-op when inactive
-- relay_event: buffering when active, no-op when inactive
-- Batching: 4000-char split across messages
-- Flood cap: truncation at 150 lines with suppression notice
-- _render_event calls relay_event in monitor.py
-- is_relay_enabled_by_env for env var detection
-- Offline backoff: doubles+caps, resets on success, log-once, never blocks
-- Control-file isolation: no test ever reads the operator's live pause state
-"""
+# Covers:
+# - Event formatting (log, command, hook types, PID labels)
+# - init_relay: disabled path, missing config, incomplete config, successful start
+# - Fail-silent-once: exactly one log line when config absent, zero sends
+# - stop_relay: final flush and thread join, no-op when inactive
+# - relay_event: buffering when active, no-op when inactive
+# - Batching: 4000-char split across messages
+# - Flood cap: truncation at 150 lines with suppression notice
+# - _render_event calls relay_event in monitor.py
+# - is_relay_enabled_by_env for env var detection
+# - Offline backoff: doubles+caps, resets on success, log-once, never blocks
+# - Control-file isolation: no test ever reads the operator's live pause state
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 import importlib
 import json
@@ -517,7 +519,7 @@ class TestReadControl:
         """Valid JSON control file is read and returned."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}))
+        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result["paused"] is True
@@ -527,11 +529,11 @@ class TestReadControl:
         """Same mtime returns cached result without re-reading the file."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps({"paused": False}))
+        ctrl.write_text(json.dumps({"paused": False}), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         first = relay._read_control()
         cached_mtime = ctrl.stat().st_mtime
-        ctrl.write_text("INVALID JSON")
+        ctrl.write_text("INVALID JSON", encoding="utf-8")
         os.utime(ctrl, (cached_mtime, cached_mtime))
         result = relay._read_control()
         assert result == first
@@ -540,10 +542,10 @@ class TestReadControl:
         """Changed mtime causes re-read of the control file."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps({"paused": False, "level": "all"}))
+        ctrl.write_text(json.dumps({"paused": False, "level": "all"}), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         relay._read_control()
-        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}))
+        ctrl.write_text(json.dumps({"paused": True, "level": "errors"}), encoding="utf-8")
         os.utime(ctrl, (ctrl.stat().st_mtime + 1, ctrl.stat().st_mtime + 1))
         result = relay._read_control()
         assert result["paused"] is True
@@ -553,7 +555,7 @@ class TestReadControl:
         """Malformed JSON returns empty dict and logs a warning."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text("{bad json!!!")
+        ctrl.write_text("{bad json!!!", encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result == {}
@@ -563,7 +565,7 @@ class TestReadControl:
         """JSON that isn't a dict returns empty and logs warning."""
         relay = _import_relay()
         ctrl = tmp_path / "control.json"
-        ctrl.write_text(json.dumps([1, 2, 3]))
+        ctrl.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         result = relay._read_control()
         assert result == {}
@@ -586,7 +588,7 @@ class TestFlushControl:
         setattr(relay, "_RELAY_ACTIVE", True)
         ctrl = tmp_path / "control.json"
         if control_data is not None:
-            ctrl.write_text(json.dumps(control_data))
+            ctrl.write_text(json.dumps(control_data), encoding="utf-8")
         setattr(relay, "CONTROL_FILE", ctrl)
         return relay
 
@@ -867,7 +869,7 @@ class TestControlFileIsolation:
         relay._flush_buffer()
         assert len(sent) == 2, "no control file must mean 'not paused', whatever HOME says"
 
-        relay.CONTROL_FILE.write_text(json.dumps({"paused": True}))
+        relay.CONTROL_FILE.write_text(json.dumps({"paused": True}), encoding="utf-8")
         relay._buffer.extend(["line 3"])
         relay._flush_buffer()
         assert len(sent) == 2

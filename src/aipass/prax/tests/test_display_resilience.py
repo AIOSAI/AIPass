@@ -1,32 +1,35 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_display_resilience.py
 # Description: The display consumer must survive an unrenderable event
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Regression cover for the 2026-08-11 Mission Control consumer death.
+"""Tests for apps/modules/monitor.py and apps/handlers/monitoring/unified_stream.py."""
 
-A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
-interpolated it raw into a Rich markup string. Rich read it as a closing tag,
-raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
-the only consumer of the display queue for the life of the process. The queue
-then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
-the Telegram relay (fed from the same code path) went silent.
+# Regression cover for the 2026-08-11 Mission Control consumer death.
+#
+# A tailed log line containing ``[/usr/bin]`` reached ``print_event``, which
+# interpolated it raw into a Rich markup string. Rich read it as a closing tag,
+# raised ``MarkupError``, and the exception escaped ``_display_worker`` — killing
+# the only consumer of the display queue for the life of the process. The queue
+# then sat permanently full, ``event_queue`` warned every 30s for ~20 hours, and
+# the Telegram relay (fed from the same code path) went silent.
+#
+# Two independent defects, covered separately here:
+#
+# 1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
+#    ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
+# 2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
+#    loop has to survive whatever the next producer sends.
+#
+# Rendering goes through a REAL Rich console — the shared conftest installs a
+# MagicMock console that records the call but never renders, so it cannot fail
+# on either defect.
 
-Two independent defects, covered separately here:
-
-1. Event text is UNTRUSTED markup. Log lines carry ``[/usr/bin]`` (raises) and
-   ``[event_queue]`` (silently eaten). Every dynamic value must be escaped.
-2. One unrenderable event must not kill the consumer. Even with (1) fixed, the
-   loop has to survive whatever the next producer sends.
-
-Rendering goes through a REAL Rich console — the shared conftest installs a
-MagicMock console that records the call but never renders, so it cannot fail
-on either defect.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 import importlib
 import io

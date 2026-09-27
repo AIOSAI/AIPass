@@ -1,17 +1,20 @@
 # =================== AIPass ====================
 # Name: test_status.py
 # Description: Unit tests for PRAX status module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for prax status module command routing, help text, and introspection.
+"""Tests for apps/modules/status.py and apps/handlers/status/sync.py."""
 
-All module imports happen inside test functions so that conftest's
-autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
-"""
+# Tests for prax status module command routing, help text, and introspection.
+#
+# All module imports happen inside test functions so that conftest's
+# autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/status/ parses and imports
 
 import json
 import sys

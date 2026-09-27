@@ -1,20 +1,22 @@
 # =================== AIPass ====================
 # Name: test_instance_lock.py
 # Description: Tests for the monitor single-instance lock
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-07-10
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/monitoring/instance_lock.py
+"""Tests for apps/handlers/monitoring/instance_lock.py."""
 
-Covers:
-- _is_pid_alive() cross-platform liveness check
-- try_acquire() creates lock, returns False for live duplicate, reclaims stale
-- _current_boot_id() + cross-boot reclaim (PID reuse after reboot)
-- release() removes lock file on clean shutdown
-- Concurrent viewer: relay lock scoped to TG sends, never blocks display
-"""
+# Covers:
+# - _is_pid_alive() cross-platform liveness check
+# - try_acquire() creates lock, returns False for live duplicate, reclaims stale
+# - _current_boot_id() + cross-boot reclaim (PID reuse after reboot)
+# - release() removes lock file on clean shutdown
+# - Concurrent viewer: relay lock scoped to TG sends, never blocks display
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 import json
 import os

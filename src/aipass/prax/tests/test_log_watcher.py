@@ -1,20 +1,22 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-03
 # Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/monitoring/log_watcher.py
+"""Tests for apps/handlers/monitoring/log_watcher.py."""
 
-Covers:
-- LogFileWatcher._detect_log_level()  -- level detection from markers
-- LogFileWatcher._extract_command_info() -- command pattern matching
-- LogFileWatcher._parse_log_message()  -- pipe-delimited parsing
-- start_log_watcher / stop_log_watcher / is_log_watcher_active
-- initialize_positions() -- seek-to-end on startup
-"""
+# Covers:
+# - LogFileWatcher._detect_log_level()  -- level detection from markers
+# - LogFileWatcher._extract_command_info() -- command pattern matching
+# - LogFileWatcher._parse_log_message()  -- pipe-delimited parsing
+# - start_log_watcher / stop_log_watcher / is_log_watcher_active
+# - initialize_positions() -- seek-to-end on startup
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 import sys
 from pathlib import Path
@@ -335,7 +337,7 @@ class TestParseLogMessage:
 class TestLogWatcherLifecycle:
     """Test start_log_watcher, stop_log_watcher, is_log_watcher_active."""
 
-    def test_start_creates_and_starts_observer(self):
+    def test_start_creates_and_starts_observer(self, tmp_path):
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_observer = MagicMock()
@@ -343,14 +345,14 @@ class TestLogWatcherLifecycle:
         setattr(mod, "_log_observer", None)
 
         with patch.object(mod, "WatchdogObserver", return_value=mock_observer):
-            with patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")):
+            with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
                 result = mod.start_log_watcher(mock_queue)
 
         assert result is mock_observer
         mock_observer.schedule.assert_called_once()
         mock_observer.start.assert_called_once()
 
-    def test_start_with_polling_mode(self):
+    def test_start_with_polling_mode(self, tmp_path):
         mod = _import_log_watcher()
         mock_queue = MagicMock()
         mock_observer = MagicMock()
@@ -364,7 +366,7 @@ class TestLogWatcherLifecycle:
                 "watchdog.observers.polling": MagicMock(PollingObserver=mock_polling_cls),
             },
         ):
-            with patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")):
+            with patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"):
                 result = mod.start_log_watcher(mock_queue, use_polling=True)
 
         assert result is mock_observer
@@ -617,17 +619,18 @@ class TestOnModified:
 
         mock_process.assert_called()
 
-    def test_handles_read_exception(self):
+    def test_handles_read_exception(self, tmp_path):
         """Should catch exceptions during log reading."""
         mod = _import_log_watcher()
         watcher, mock_queue = _make_watcher(mod)
 
+        system_logs_dir = tmp_path / "logs" / "system"
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/fake/logs/system/crash.log"
+        event.src_path = str(system_logs_dir / "crash.log")
 
         with (
-            patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs/system")),
+            patch.object(mod, "get_system_logs_dir", return_value=system_logs_dir),
             patch.object(watcher, "_read_new_content", side_effect=OSError("disk error")),
         ):
             # Should not raise
@@ -785,10 +788,11 @@ class TestExtractTargetFromCmd:
         result = mod.LogFileWatcher._extract_target_from_cmd("audit @prax")
         assert result == "PRAX"
 
-    def test_extracts_path_target(self):
+    def test_extracts_path_target(self, tmp_path):
         """Should extract target from /aipass/branch pattern."""
         mod = _import_log_watcher()
-        result = mod.LogFileWatcher._extract_target_from_cmd("/path/to/aipass/seedgo/run.py")
+        cmd_path = str(tmp_path / "aipass" / "seedgo" / "run.py")
+        result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
         assert result == "SEEDGO"
 
     def test_returns_none_when_no_target(self):
@@ -876,7 +880,7 @@ class TestEmitLogEvent:
 class TestStartLogWatcherAdditional:
     """Additional tests for start_log_watcher."""
 
-    def test_stops_existing_observer_before_starting(self):
+    def test_stops_existing_observer_before_starting(self, tmp_path):
         """Should stop existing observer if already running."""
         mod = _import_log_watcher()
         mock_queue = MagicMock()
@@ -888,7 +892,7 @@ class TestStartLogWatcherAdditional:
 
         with (
             patch.object(mod, "WatchdogObserver", return_value=mock_new_observer),
-            patch.object(mod, "get_system_logs_dir", return_value=Path("/fake/logs")),
+            patch.object(mod, "get_system_logs_dir", return_value=tmp_path / "logs"),
             patch.object(mod, "stop_log_watcher") as mock_stop,
         ):
             mod.start_log_watcher(mock_queue)

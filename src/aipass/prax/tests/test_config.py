@@ -1,15 +1,20 @@
 # =================== AIPass ====================
 # Name: test_config.py
 # Description: Tests for prax config handlers (load + ignore_patterns)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-29
-# Modified: 2026-08-04
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for prax config handlers — covers load.py functions
-(get_system_logs_dir, get_module_logs_dir, lines_to_bytes,
-get_debug_prints_enabled, load_log_config) and ignore_patterns.py
-(load_ignore_patterns_from_config)."""
+"""Tests for apps/handlers/config/load.py and apps/handlers/config/ignore_patterns.py."""
+
+# Tests for prax config handlers — covers load.py functions
+# (get_system_logs_dir, get_module_logs_dir, lines_to_bytes,
+# get_debug_prints_enabled, load_log_config) and ignore_patterns.py
+# (load_ignore_patterns_from_config).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that load.py's caller-name auto-detection and routing-warning helpers parse and import
 
 import json
 import sys

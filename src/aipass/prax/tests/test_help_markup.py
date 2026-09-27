@@ -1,26 +1,29 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_help_markup.py
 # Description: Canary tests that literal [placeholders] survive Rich rendering
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-10
-# Modified: 2026-08-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Rendered-output canaries for square-bracket placeholders.
+"""Tests for apps/modules/monitor.py, apps/prax.py and apps/modules/log_health.py's bracket rendering."""
 
-Rich treats ``[word]`` as a style tag, so an UNESCAPED literal placeholder is
-consumed silently: ``drone @prax monitor run [branches]`` renders as
-``drone @prax monitor run`` with no error and no visible gap. Every test here
-renders through a REAL Rich console (not the MagicMock the shared conftest
-installs) and asserts the bracketed text is still in the output — a mocked
-console records the call but never renders, so it cannot catch this class.
+# Rendered-output canaries for square-bracket placeholders.
+#
+# Rich treats ``[word]`` as a style tag, so an UNESCAPED literal placeholder is
+# consumed silently: ``drone @prax monitor run [branches]`` renders as
+# ``drone @prax monitor run`` with no error and no visible gap. Every test here
+# renders through a REAL Rich console (not the MagicMock the shared conftest
+# installs) and asserts the bracketed text is still in the output — a mocked
+# console records the call but never renders, so it cannot catch this class.
+#
+# Covers:
+# - monitor.print_help() — the ``[branches]`` argument placeholder
+# - prax.print_help() — the ``[options]`` usage placeholder
+# - log_health._display_rates() — the ``[branch]`` attribution tag on every row
 
-Covers:
-- monitor.print_help() — the ``[branches]`` argument placeholder
-- prax.print_help() — the ``[options]`` usage placeholder
-- log_health._display_rates() — the ``[branch]`` attribution tag on every row
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the render helper's finally-block restore on a raised exception parses
 
 import importlib
 import io

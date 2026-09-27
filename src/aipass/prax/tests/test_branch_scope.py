@@ -1,24 +1,25 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_branch_scope.py
 # Description: Tests for launch-time branch scoping of Mission Control
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-11
-# Modified: 2026-08-11
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/monitoring/branch_scope.py
+"""Tests for apps/handlers/monitoring/branch_scope.py."""
 
-`drone @prax monitor run seedgo,cli` has always been documented; until now the
-branch list was logged and then ignored, so a scoped run showed everything.
-These tests pin the parsing and the matching rules that make it real.
+# `drone @prax monitor run seedgo,cli` has always been documented; until now the
+# branch list was logged and then ignored, so a scoped run showed everything.
+# These tests pin the parsing and the matching rules that make it real.
+#
+# Covers:
+# - parse_scope(): comma/space lists, flags ignored, 'all' escape, dedup + order
+# - BranchScope.matches_label(): project prefixes, model tags, SUB/agent/TESTS decorators
+# - BranchScope.matches_event(): branch, caller and command target attribution
+# - BranchScope.describe() / unknown_names(): truthful banner text + typo detection
 
-Covers:
-- parse_scope(): comma/space lists, flags ignored, 'all' escape, dedup + order
-- BranchScope.matches_label(): project prefixes, model tags, SUB/agent/TESTS decorators
-- BranchScope.matches_event(): branch, caller and command target attribution
-- BranchScope.describe() / unknown_names(): truthful banner text + typo detection
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 from dataclasses import dataclass
 from typing import Optional

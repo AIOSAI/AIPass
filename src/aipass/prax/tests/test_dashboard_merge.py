@@ -1,30 +1,34 @@
 # =================== AIPass ====================
 # Name: test_dashboard_merge.py
 # Description: quick_status has many writers — none may delete another's key
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Regression cover for the 2026-08-12 quick_status clobber (@flow, DPLAN-0290 item 4).
+"""Tests for apps/handlers/dashboard/status.py, refresh.py, operations.py, template_pusher.py and template_differ.py."""
 
-DASHBOARD.local.json's quick_status block has several writers. Each one used to
-build a fresh dict and assign it over the whole block, so every writer silently
-deleted the keys it did not know about. The owner saw the symptom on his devpulse
-card: 0 todos while local.json held 9. @flow fixed their push and found the
-mirror here — prax refresh drops their ``commons_mentions`` on every run.
+# Regression cover for the 2026-08-12 quick_status clobber (@flow, DPLAN-0290 item 4).
+#
+# DASHBOARD.local.json's quick_status block has several writers. Each one used to
+# build a fresh dict and assign it over the whole block, so every writer silently
+# deleted the keys it did not know about. The owner saw the symptom on his devpulse
+# card: 0 todos while local.json held 9. @flow fixed their push and found the
+# mirror here — prax refresh drops their ``commons_mentions`` on every run.
+#
+# The invariant both sides now hold: **no writer deletes a key it did not write.**
+#
+# Second defect, same file: the calculator existed in THREE near-identical copies
+# (status.py, refresh.py, operations.py) and only one had grown a guard for a
+# list-shaped ``active_plans``. flow's section writes a list, so the two unguarded
+# copies raise TypeError on it. The copies are the reason one guard was missing,
+# so the drift is pinned shut here too.
+#
+# Modules are imported inside each test — conftest.py installs autouse sys.modules
+# mocks that must be in place first.
 
-The invariant both sides now hold: **no writer deletes a key it did not write.**
-
-Second defect, same file: the calculator existed in THREE near-identical copies
-(status.py, refresh.py, operations.py) and only one had grown a guard for a
-list-shaped ``active_plans``. flow's section writes a list, so the two unguarded
-copies raise TypeError on it. The copies are the reason one guard was missing,
-so the drift is pinned shut here too.
-
-Modules are imported inside each test — conftest.py installs autouse sys.modules
-mocks that must be in place first.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/dashboard/ parses and imports
 
 import importlib
 import json

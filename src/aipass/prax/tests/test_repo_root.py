@@ -1,8 +1,9 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_repo_root.py - Repo-Root Resolution Pins
-# Date: 2026-08-31
-# Version: 1.0.0
+# =================== AIPass ====================
+# Name: test_repo_root.py
+# Description: Repo-Root Resolution Pins
+# Version: 1.1.0
+# Created: 2026-08-31
+# Modified: 2026-09-27
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -15,24 +16,28 @@
 #     working directory in-process cannot get back
 # =============================================
 
-"""Pins for repo-root resolution that must never read the process CWD.
+"""Tests for apps/handlers/repo_root.py and the introspection/dashboard modules it guards."""
 
-@memory reported on 2026-08-31, with a full traceback: config/load.py's
-_find_repo_root ended `return Path.cwd()`, and because nearly every handler in
-AIPass does `logger = get_system_logger()` at module level, that walk runs during
-IMPORT. A process whose working directory has been deleted crashed importing
-almost anything; a registry-less checkout (every clean CI clone — the registry is
-gitignored) silently resolved system_logs/ against wherever the shell stood.
+# Pins for repo-root resolution that must never read the process CWD.
+#
+# @memory reported on 2026-08-31, with a full traceback: config/load.py's
+# _find_repo_root ended `return Path.cwd()`, and because nearly every handler in
+# AIPass does `logger = get_system_logger()` at module level, that walk runs during
+# IMPORT. A process whose working directory has been deleted crashed importing
+# almost anything; a registry-less checkout (every clean CI clone — the registry is
+# gitignored) silently resolved system_logs/ against wherever the shell stood.
+#
+# Prax carried EIGHT copies of that function. The cure is one shared module, and
+# the guard against the ninth copy is structural: an AST sweep, with a positive
+# control so it cannot be quietly silenced.
+#
+# The sweep found a second crash site @memory's traceback could not reach, because
+# their caller was a real absolute file: introspection.detect_branch_from_path
+# resolves the CALLER's path, and a pseudo-filename like <stdin> is relative, so
+# resolve() reads the cwd there too.
 
-Prax carried EIGHT copies of that function. The cure is one shared module, and
-the guard against the ninth copy is structural: an AST sweep, with a positive
-control so it cannot be quietly silenced.
-
-The sweep found a second crash site @memory's traceback could not reach, because
-their caller was a real absolute file: introspection.detect_branch_from_path
-resolves the CALLER's path, and a pseudo-filename like <stdin> is relative, so
-resolve() reads the cwd there too.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/repo_root/ parses and imports
 
 import ast
 import json
@@ -259,7 +264,9 @@ def _run_without_a_working_directory(body: str, world: str = _INJECT_DEAD_CWD, m
     # produces no usable stack filename so introspection bails early; a `<stdin>`
     # caller produces a RELATIVE pseudo-filename, which is exactly what
     # detect_branch_from_path then hands to resolve().
-    return subprocess.run([sys.executable, "-"], input=script, capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        [sys.executable, "-"], input=script, capture_output=True, text=True, encoding="utf-8", timeout=120
+    )
 
 
 # =============================================================================
@@ -335,7 +342,7 @@ class TestFindRepoRoot:
     def test_the_marker_wins_when_present(self, tmp_path):
         root = tmp_path / "checkout"
         (root / "src" / "aipass" / "prax").mkdir(parents=True)
-        (root / repo_root_mod.REGISTRY_MARKER).write_text("{}")
+        (root / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
         assert repo_root_mod.find_repo_root(root / "src" / "aipass" / "prax" / "a.py") == root
 
     def test_a_registry_less_checkout_resolves_to_the_checkout(self, tmp_path):
@@ -354,7 +361,7 @@ class TestFindRepoRoot:
         """
         foreign = tmp_path / "someone_elses_checkout"
         (foreign / "src" / "aipass" / "prax").mkdir(parents=True)
-        (foreign / repo_root_mod.REGISTRY_MARKER).write_text("{}")
+        (foreign / repo_root_mod.REGISTRY_MARKER).write_text("{}", encoding="utf-8")
         monkeypatch.chdir(foreign)
 
         # Walking this relative start reaches Path(".") — which IS the foreign
@@ -531,7 +538,7 @@ class TestCallerPathResolution:
 
         branch_dir = tmp_path / "src" / "aipass" / "someoneelse" / "apps"
         branch_dir.mkdir(parents=True)
-        (branch_dir / "mod.py").write_text("")
+        (branch_dir / "mod.py").write_text("", encoding="utf-8")
         monkeypatch.chdir(branch_dir)
 
         assert introspection._resolve_caller_path("mod.py") is None
@@ -540,10 +547,10 @@ class TestCallerPathResolution:
         from aipass.prax.apps.handlers.logging import introspection
 
         real = tmp_path / "mod.py"
-        real.write_text("")
+        real.write_text("", encoding="utf-8")
         assert introspection._resolve_caller_path(str(real)) == real.resolve()
 
-    def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch):
+    def test_an_unresolvable_absolute_path_is_an_answer_not_a_crash(self, monkeypatch, tmp_path):
         """Branch detection is a routing hint. Not knowing where the caller lives
         must never take down the caller's import."""
         from aipass.prax.apps.handlers.logging import introspection
@@ -552,7 +559,8 @@ class TestCallerPathResolution:
             raise OSError("no cwd")
 
         monkeypatch.setattr(Path, "resolve", boom)
-        assert introspection._resolve_caller_path("/absolute/but/unresolvable.py") is None
+        unresolvable = str(tmp_path / "unresolvable.py")
+        assert introspection._resolve_caller_path(unresolvable) is None
 
 
 class TestBothConstructionsAgree:
@@ -685,7 +693,7 @@ class TestNoPrivateCwdFallback:
         reports the same green as a clean tree."""
         planted = tmp_path / "apps" / "planted.py"
         planted.parent.mkdir(parents=True)
-        planted.write_text("from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n")
+        planted.write_text("from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n", encoding="utf-8")
         assert _modules_reading_the_cwd(tmp_path / "apps")
 
     def test_the_allowlist_matches_a_windows_spelled_key(self):
@@ -752,8 +760,10 @@ class TestEveryLaneUsesTheSharedResolver:
     def test_the_delegation_sweep_can_actually_see_a_violation(self, tmp_path):
         """Positive control: a sweep that looks nowhere reports the same green."""
         planted = tmp_path / "planted.py"
-        planted.write_text("from pathlib import Path\n\n\ndef _find_repo_root():\n    return Path.cwd()\n")
-        tree = ast.parse(planted.read_text())
+        planted.write_text(
+            "from pathlib import Path\n\n\ndef _find_repo_root():\n    return Path.cwd()\n", encoding="utf-8"
+        )
+        tree = ast.parse(planted.read_text(encoding="utf-8"))
         offenders = [
             node.lineno
             for node in ast.walk(tree)
@@ -892,8 +902,8 @@ class TestNothingCallsInspectStack:
     def test_the_matcher_convicts_a_planted_call_at_the_right_line(self, tmp_path):
         """Positive control, through the REAL matcher rather than a copy of it."""
         planted = tmp_path / "planted.py"
-        planted.write_text("import inspect\n\n\ndef f():\n    return inspect.stack()[1]\n")
-        assert _inspect_stack_calls(ast.parse(planted.read_text())) == [5]
+        planted.write_text("import inspect\n\n\ndef f():\n    return inspect.stack()[1]\n", encoding="utf-8")
+        assert _inspect_stack_calls(ast.parse(planted.read_text(encoding="utf-8"))) == [5]
 
     def test_the_matcher_does_not_convict_the_docstring_that_explains_the_ban(self):
         """The guard's docstring says `inspect.stack()` and must stay legal.
@@ -987,6 +997,7 @@ class TestCallerAttributionWithoutAWorkingDirectory:
                 ),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=120,
             )
             verdicts[name] = probe.stdout.strip()
@@ -1123,7 +1134,9 @@ class TestTheGuardsUndeterminableCallerBranch:
             )
             + textwrap.dedent(body)
         )
-        return subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        return subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
 
     def test_the_branch_is_reachable_and_the_guard_returns_from_it(self):
         """Both arming probes, then the claim — in that order, in one child.
@@ -1294,6 +1307,7 @@ class TestACallerNameIsNotAlwaysAModuleName:
                 ),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=120,
             )
             verdicts[name] = _answer(probe)

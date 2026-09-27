@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: prax.py
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -176,7 +176,8 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
         handlers: List of command handler functions
 
     Returns:
-        True if command was handled, False otherwise
+        True if a module owned the command, including one that failed (the
+        failure is reported through error()); False only if no module owns it
     """
     for handler in handlers:
         try:
@@ -187,9 +188,13 @@ def route_command(command: str, args: List[str], handlers: List[Callable]) -> bo
             # and exits 1. Swallowing it here is the exit-0 bug it exists to fix.
             raise
         except Exception as e:
+            # The command WAS handled: it failed. error() sets the failure flag,
+            # and main's resolve_exit turns that into exit 2. Returning False
+            # here told main no module owned the command, so a crash was also
+            # reported as "Unknown command" and exited 1.
             logger.error("Handler failed: %s", e)
             error(f"Handler failed: {e}")
-            return False
+            return True
 
     return False
 

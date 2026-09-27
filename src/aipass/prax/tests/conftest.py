@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.1.0
+# Version: 2.2.0
 # Created: 2025-11-08
-# Modified: 2026-08-09
+# Modified: 2026-09-27
 # =============================================
 
 """Shared pytest fixtures for prax tests.

@@ -1,29 +1,33 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: A help probe must never execute the thing it asks about
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Regression cover for help_flag_safety (@seedgo 2026-08-13, DPLAN-0291 rule E).
+"""Tests for apps/modules/log_audit.py, log_health.py, monitor.py and apps/handlers/cli/help_flags.py."""
 
-Every prax module gated help at ``args[0]`` only, so a flag anywhere later on
-the line was discarded and the subcommand ran instead. The standalone
-``__main__`` paths screened ``--help`` but not ``-h``, and ``-h`` survives a
-``--``-prefix filter because it carries a single dash. Two of the three had
-teeth:
+# Regression cover for help_flag_safety (@seedgo 2026-08-13, DPLAN-0291 rule E).
+#
+# Every prax module gated help at ``args[0]`` only, so a flag anywhere later on
+# the line was discarded and the subcommand ran instead. The standalone
+# ``__main__`` paths screened ``--help`` but not ``-h``, and ``-h`` survives a
+# ``--``-prefix filter because it carries a single dash. Two of the three had
+# teeth:
+#
+#     log_audit.py enforce -h   -> truncated every oversized log
+#     monitor.py   run -h       -> started a live Mission Control
+#
+# The rule these pin: a dashed flag counts ANYWHERE, a bare ``help`` counts only
+# at position 0 (branch names, log filenames and grep patterns are free text).
+#
+# Modules are imported inside each test — conftest.py installs autouse sys.modules
+# mocks that must be in place first.
 
-    log_audit.py enforce -h   -> truncated every oversized log
-    monitor.py   run -h       -> started a live Mission Control
-
-The rule these pin: a dashed flag counts ANYWHERE, a bare ``help`` counts only
-at position 0 (branch names, log filenames and grep patterns are free text).
-
-Modules are imported inside each test — conftest.py installs autouse sys.modules
-mocks that must be in place first.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/cli/ parses and imports
 
 import contextlib
 import importlib
@@ -207,6 +211,25 @@ class TestUnknownArgumentIsRefused:
         rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
         assert any("not_a_real_subarg_xyz" in call for call in rendered), rendered
         assert not any("Handler failed" in call for call in rendered), rendered
+
+
+class TestACrashedHandlerIsNotAnUnknownCommand:
+    def test_a_handler_that_raises_is_reported_as_a_failure_not_an_unknown_command(self, mock_prax_infrastructure):
+        """route_command returned False after error(), so a crash also read "Unknown command" (mutant: return False)."""
+        mod = _load(PRAX_PATH)
+
+        def crashing_handler(command, args):
+            raise RuntimeError("registry is unreachable")
+
+        with (
+            patch.object(mod, "discover_command_modules", return_value=[crashing_handler]),
+            patch.object(sys, "argv", ["prax", "status"]),
+        ):
+            mod.main()
+
+        rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
+        assert any("Handler failed: registry is unreachable" in call for call in rendered), rendered
+        assert not any("Unknown command" in call for call in rendered), rendered
 
 
 class TestOwnershipStillComesFirst:

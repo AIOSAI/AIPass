@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_pid_cache.py
 # Description: Tests for the PID cache handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/monitoring/pid_cache.py"""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 import json
 import sys

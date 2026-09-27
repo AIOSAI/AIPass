@@ -1,16 +1,19 @@
 # =================== AIPass ====================
 # Name: test_central.py
 # Description: Tests for central file reader handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/central/reader.py -- read_all_centrals().
+"""Tests for apps/handlers/central/reader.py."""
 
-Covers: valid central files, empty directory, missing directory,
-malformed JSON, mixed valid/invalid files, service name derivation.
-"""
+# read_all_centrals().
+# Covers: valid central files, empty directory, missing directory,
+# malformed JSON, mixed valid/invalid files, service name derivation.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/central/ parses and imports
 
 import json
 import sys

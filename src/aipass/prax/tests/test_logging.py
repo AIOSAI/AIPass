@@ -6,8 +6,13 @@
 # Modified: 2026-09-27
 # =============================================
 
-"""Tests for prax logging subsystem — covers introspection, config helpers,
-and template placeholder replacement."""
+"""Tests for apps/handlers/logging/introspection.py and setup.py."""
+
+# Tests for prax logging subsystem — covers introspection, config helpers,
+# and template placeholder replacement.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/logging/ parses and imports
 
 import copy
 import sys
@@ -25,47 +30,51 @@ from aipass.prax.apps.handlers.logging import setup as setup_handler
 class TestIsPraxInternal:
     """Tests for _is_prax_internal() — checks prax internal markers."""
 
-    def test_prax_logger_path(self, mock_prax_infrastructure):
+    def test_prax_logger_path(self, mock_prax_infrastructure, tmp_path):
         """Logger module path is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/prax/apps/modules/logger.py") is True
+        path = tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "logger.py"
+        assert _is_prax_internal(str(path)) is True
 
-    def test_prax_handlers_path(self, mock_prax_infrastructure):
+    def test_prax_handlers_path(self, mock_prax_infrastructure, tmp_path):
         """Handler directory path is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/prax/apps/handlers/logging/setup.py") is True
+        path = tmp_path / "src" / "aipass" / "prax" / "apps" / "handlers" / "logging" / "setup.py"
+        assert _is_prax_internal(str(path)) is True
 
-    def test_prax_logger_filename(self, mock_prax_infrastructure):
+    def test_prax_logger_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_logger.py filename is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/some/path/prax_logger.py") is True
+        assert _is_prax_internal(str(tmp_path / "some" / "path" / "prax_logger.py")) is True
 
-    def test_prax_handlers_filename(self, mock_prax_infrastructure):
+    def test_prax_handlers_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_handlers.py filename is detected as prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/some/path/prax_handlers.py") is True
+        assert _is_prax_internal(str(tmp_path / "some" / "path" / "prax_handlers.py")) is True
 
-    def test_external_cli_path(self, mock_prax_infrastructure):
+    def test_external_cli_path(self, mock_prax_infrastructure, tmp_path):
         """CLI module path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/cli/apps/cli.py") is False
+        path = tmp_path / "src" / "aipass" / "cli" / "apps" / "cli.py"
+        assert _is_prax_internal(str(path)) is False
 
-    def test_external_flow_path(self, mock_prax_infrastructure):
+    def test_external_flow_path(self, mock_prax_infrastructure, tmp_path):
         """Flow module path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/home/user/src/aipass/flow/apps/flow.py") is False
+        path = tmp_path / "src" / "aipass" / "flow" / "apps" / "flow.py"
+        assert _is_prax_internal(str(path)) is False
 
-    def test_random_script_path(self, mock_prax_infrastructure):
+    def test_random_script_path(self, mock_prax_infrastructure, tmp_path):
         """Random script path is not prax internal."""
         from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
 
-        assert _is_prax_internal("/tmp/random_script.py") is False
+        assert _is_prax_internal(str(tmp_path / "random_script.py")) is False
 
     def test_empty_string(self, mock_prax_infrastructure):
         """Empty string returns False."""
@@ -122,11 +131,11 @@ class TestDetectBranchFromPath:
         drone_path = str(_AIPASS_PKG_ROOT / "drone" / "apps" / "branch.py")
         assert detect_branch_from_path(drone_path) == "drone"
 
-    def test_random_path_returns_none(self, mock_prax_infrastructure):
+    def test_random_path_returns_none(self, mock_prax_infrastructure, tmp_path):
         """Random path outside the project returns None."""
         from aipass.prax.apps.handlers.logging.introspection import detect_branch_from_path
 
-        assert detect_branch_from_path("/tmp/random_script.py") is None
+        assert detect_branch_from_path(str(tmp_path / "random_script.py")) is None
 
     def test_empty_string_returns_none(self, mock_prax_infrastructure):
         """Empty string returns None."""

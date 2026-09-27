@@ -1,16 +1,20 @@
 # =================== AIPass ====================
 # Name: test_monitoring_filters.py
 # Description: Unit tests for monitoring_filters.py
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Unit tests for monitoring filter patterns and helper functions.
+"""Tests for apps/handlers/monitoring/monitoring_filters.py."""
 
-Tests pure functions: should_monitor, get_priority, get_content_filter,
-filter_log_content, and apply_content_filter.
-"""
+# Unit tests for monitoring filter patterns and helper functions.
+#
+# Tests pure functions: should_monitor, get_priority, get_content_filter,
+# filter_log_content, and apply_content_filter.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
 
 from pathlib import Path
 
@@ -23,113 +27,113 @@ from pathlib import Path
 class TestShouldMonitor:
     """Tests for should_monitor(path)."""
 
-    def test_python_file_monitored(self):
+    def test_python_file_monitored(self, tmp_path):
         """Python .py files should always be monitored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/module.py")) is True
+        assert should_monitor(tmp_path / "project" / "module.py") is True
 
-    def test_pycache_ignored(self):
+    def test_pycache_ignored(self, tmp_path):
         """__pycache__ directories should be ignored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/__pycache__/module.cpython-311.pyc")) is False
+        assert should_monitor(tmp_path / "project" / "__pycache__" / "module.cpython-311.pyc") is False
 
-    def test_venv_ignored(self):
+    def test_venv_ignored(self, tmp_path):
         """.venv directories should be ignored (non-ALWAYS files)."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
         # Use a .cfg file that is not in ALWAYS patterns
-        assert should_monitor(Path("/home/user/project/.venv/pyvenv.cfg")) is False
+        assert should_monitor(tmp_path / "project" / ".venv" / "pyvenv.cfg") is False
 
-    def test_git_ignored(self):
+    def test_git_ignored(self, tmp_path):
         """.git directory should be ignored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/.git/objects/ab/1234")) is False
+        assert should_monitor(tmp_path / "project" / ".git" / "objects" / "ab" / "1234") is False
 
-    def test_system_logs_ignored(self):
+    def test_system_logs_ignored(self, tmp_path):
         """system_logs directory should be ignored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/system_logs/prax.log")) is False
+        assert should_monitor(tmp_path / "project" / "system_logs" / "prax.log") is False
 
-    def test_dot_local_directory_ignored(self):
+    def test_dot_local_directory_ignored(self, tmp_path):
         """.local directory should be ignored (exact part match)."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/.local/share/data.txt")) is False
+        assert should_monitor(tmp_path / ".local" / "share" / "data.txt") is False
 
-    def test_ai_mail_local_not_ignored(self):
+    def test_ai_mail_local_not_ignored(self, tmp_path):
         """.ai_mail.local should NOT be caught by .local ignore rule."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
         # .ai_mail.local contains ".local" as a substring but is not the
         # ".local" directory — the part-only check should skip it.
         # The file itself is an .ai_mail.json which is in ALWAYS patterns.
-        result = should_monitor(Path("/home/user/project/.ai_mail.local/inbox.ai_mail.json"))
+        result = should_monitor(tmp_path / "project" / ".ai_mail.local" / "inbox.ai_mail.json")
         assert result is True
 
-    def test_always_overrides_ignore_py_in_cache(self):
+    def test_always_overrides_ignore_py_in_cache(self, tmp_path):
         """ALWAYS patterns override IGNORE — .py in .cache should be monitored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
         # .cache is in IGNORE, but *.py is in ALWAYS (checked first)
-        assert should_monitor(Path("/home/user/.cache/script.py")) is True
+        assert should_monitor(tmp_path / ".cache" / "script.py") is True
 
-    def test_claude_json_backup_early_exit(self):
+    def test_claude_json_backup_early_exit(self, tmp_path):
         """.claude.json.backup should be rejected via early exit."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/.claude.json.backup")) is False
+        assert should_monitor(tmp_path / "project" / ".claude.json.backup") is False
 
-    def test_claude_json_tmp_early_exit(self):
+    def test_claude_json_tmp_early_exit(self, tmp_path):
         """.claude.json.tmp should be rejected via early exit."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/.claude.json.tmp")) is False
+        assert should_monitor(tmp_path / "project" / ".claude.json.tmp") is False
 
-    def test_id_json_always_monitored(self):
+    def test_id_json_always_monitored(self, tmp_path):
         """*.id.json files should always be monitored (ALWAYS pattern)."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/FLOW.id.json")) is True
+        assert should_monitor(tmp_path / "project" / "FLOW.id.json") is True
 
-    def test_readme_always_monitored(self):
+    def test_readme_always_monitored(self, tmp_path):
         """README.md should always be monitored (ALWAYS pattern)."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/README.md")) is True
+        assert should_monitor(tmp_path / "project" / "README.md") is True
 
-    def test_log_files_ignored(self):
+    def test_log_files_ignored(self, tmp_path):
         """*.log files should be ignored (IGNORE pattern)."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/output.log")) is False
+        assert should_monitor(tmp_path / "project" / "output.log") is False
 
-    def test_templates_always_monitored(self):
+    def test_templates_always_monitored(self, tmp_path):
         """Paths containing templates/ should always be monitored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/templates/base.html")) is True
+        assert should_monitor(tmp_path / "project" / "templates" / "base.html") is True
 
-    def test_nested_templates_always_monitored(self):
+    def test_nested_templates_always_monitored(self, tmp_path):
         """Paths under */templates/** should always be monitored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/spawn/templates/builder/conftest.py")) is True
+        assert should_monitor(tmp_path / "spawn" / "templates" / "builder" / "conftest.py") is True
 
-    def test_regular_txt_file_monitored_by_default(self):
+    def test_regular_txt_file_monitored_by_default(self, tmp_path):
         """Files not matching any pattern should be monitored (inclusive default)."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/notes.txt")) is True
+        assert should_monitor(tmp_path / "project" / "notes.txt") is True
 
-    def test_zip_file_ignored(self):
+    def test_zip_file_ignored(self, tmp_path):
         """Archive files like *.zip should be ignored."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import should_monitor
 
-        assert should_monitor(Path("/home/user/project/archive.zip")) is False
+        assert should_monitor(tmp_path / "project" / "archive.zip") is False
 
 
 # =============================================
@@ -140,53 +144,53 @@ class TestShouldMonitor:
 class TestGetPriority:
     """Tests for get_priority(path, event_type)."""
 
-    def test_id_json_is_critical(self):
+    def test_id_json_is_critical(self, tmp_path):
         """*.id.json files should have critical priority."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/FLOW.id.json"), "modified")
+        result = get_priority(tmp_path / "FLOW.id.json", "modified")
         assert result == "critical"
 
-    def test_claude_md_is_critical(self):
+    def test_claude_md_is_critical(self, tmp_path):
         """CLAUDE.md should have critical priority."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/CLAUDE.md"), "modified")
+        result = get_priority(tmp_path / "CLAUDE.md", "modified")
         assert result == "critical"
 
-    def test_py_deletion_is_high(self):
+    def test_py_deletion_is_high(self, tmp_path):
         """Python file deletion should be high priority."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/important.py"), "deletion")
+        result = get_priority(tmp_path / "important.py", "deletion")
         assert result == "high"
 
-    def test_py_creation_is_high(self):
+    def test_py_creation_is_high(self, tmp_path):
         """Python file creation should be high priority."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/new_module.py"), "creation")
+        result = get_priority(tmp_path / "new_module.py", "creation")
         assert result == "high"
 
-    def test_local_json_is_medium(self):
+    def test_local_json_is_medium(self, tmp_path):
         """*.local.json files should have medium priority."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/session.local.json"), "modified")
+        result = get_priority(tmp_path / "session.local.json", "modified")
         assert result == "medium"
 
-    def test_random_txt_is_low(self):
+    def test_random_txt_is_low(self, tmp_path):
         """Unmatched files should default to low priority."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/random.txt"), "modified")
+        result = get_priority(tmp_path / "random.txt", "modified")
         assert result == "low"
 
-    def test_py_modification_is_medium(self):
+    def test_py_modification_is_medium(self, tmp_path):
         """Python file modification (not creation/deletion) should be medium."""
         from aipass.prax.apps.handlers.monitoring.monitoring_filters import get_priority
 
-        result = get_priority(Path("/home/user/utils.py"), "modification")
+        result = get_priority(tmp_path / "utils.py", "modification")
         assert result == "medium"
 
 

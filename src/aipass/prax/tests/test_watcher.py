@@ -1,15 +1,20 @@
 # =================== AIPass ====================
 # Name: test_watcher.py
 # Description: Tests for file system watcher handlers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for:
-- apps/handlers/watcher/monitor.py  (BranchFileHandler, start/stop_monitoring)
-- apps/handlers/discovery/watcher.py (PythonFileWatcher, start/stop_file_watcher)
-"""
+"""Tests for apps/handlers/watcher/monitor.py and apps/handlers/discovery/watcher.py."""
+
+# Tests for:
+# - apps/handlers/watcher/monitor.py  (BranchFileHandler, start/stop_monitoring)
+# - apps/handlers/discovery/watcher.py (PythonFileWatcher, start/stop_file_watcher)
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/watcher/ parses and imports
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/discovery/ parses and imports
 
 import subprocess
 import sys
@@ -68,41 +73,46 @@ class TestBranchFileHandler:
 
     # --- Callback firing tests ---
 
-    def test_on_created_fires_callback(self):
+    def test_on_created_fires_callback(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/module.py")
+        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
+        event = self._make_event(path)
         handler.on_created(event)
-        callback.assert_called_once_with("TEST", "CREATED", "/repo/src/aipass/flow/apps/module.py")
+        callback.assert_called_once_with("TEST", "CREATED", path)
 
-    def test_on_modified_fires_callback(self):
+    def test_on_modified_fires_callback(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/module.py")
+        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
+        event = self._make_event(path)
         handler.on_modified(event)
-        callback.assert_called_once_with("TEST", "MODIFIED", "/repo/src/aipass/flow/apps/module.py")
+        callback.assert_called_once_with("TEST", "MODIFIED", path)
 
-    def test_on_deleted_fires_callback(self):
+    def test_on_deleted_fires_callback(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/module.py")
+        path = str(tmp_path / "src" / "aipass" / "flow" / "apps" / "module.py")
+        event = self._make_event(path)
         handler.on_deleted(event)
-        callback.assert_called_once_with("TEST", "DELETED", "/repo/src/aipass/flow/apps/module.py")
+        callback.assert_called_once_with("TEST", "DELETED", path)
 
-    def test_on_moved_fires_callback_with_arrow(self):
+    def test_on_moved_fires_callback_with_arrow(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/old.py", dest_path="/repo/new.py")
+        old_path = str(tmp_path / "old.py")
+        new_path = str(tmp_path / "new.py")
+        event = self._make_event(old_path, dest_path=new_path)
         handler.on_moved(event)
-        callback.assert_called_once_with("TEST", "MOVED", "/repo/old.py \u2192 /repo/new.py")
+        callback.assert_called_once_with("TEST", "MOVED", f"{old_path} \u2192 {new_path}")
 
     # --- Ignore logic ---
 
-    def test_ignores_directory_events(self):
+    def test_ignores_directory_events(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/flow/apps/", is_directory=True)
+        event = self._make_event(str(tmp_path / "src" / "aipass" / "flow" / "apps"), is_directory=True)
         handler.on_created(event)
         callback.assert_not_called()
 
-    def test_ignores_log_files(self):
+    def test_ignores_log_files(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/logs/prax.log")
+        event = self._make_event(str(tmp_path / "logs" / "prax.log"))
         handler.on_modified(event)
         callback.assert_not_called()
 
@@ -148,9 +158,9 @@ class TestBranchFileHandler:
             handler.on_modified(event)
         callback.assert_not_called()
 
-    def test_does_not_ignore_normal_python_file(self):
+    def test_does_not_ignore_normal_python_file(self, tmp_path):
         handler, callback, _mod = self._make_handler()
-        event = self._make_event("/repo/src/aipass/prax/apps/modules/status.py")
+        event = self._make_event(str(tmp_path / "src" / "aipass" / "prax" / "apps" / "modules" / "status.py"))
         handler.on_modified(event)
         callback.assert_called_once()
 
@@ -264,9 +274,9 @@ class TestDiscoveryWatcher:
         mock_watchdog_events = MagicMock()
 
         mock_config = MagicMock()
-        mock_config.ECOSYSTEM_ROOT = Path("/fake/ecosystem")
-        mock_config.get_system_logs_dir.return_value = Path("/fake/logs/system")
-        mock_config.get_module_logs_dir.return_value = Path("/fake/logs/modules")
+        mock_config.ECOSYSTEM_ROOT = Path("fake/ecosystem")
+        mock_config.get_system_logs_dir.return_value = Path("fake/logs/system")
+        mock_config.get_module_logs_dir.return_value = Path("fake/logs/modules")
 
         mock_registry_load = MagicMock()
         mock_registry_load.load_module_registry.return_value = {}
@@ -457,7 +467,7 @@ class TestDispatcherSurvivesHandlerFailure:
             assert observer.is_alive(), "fixture broken: dispatcher was not alive to begin with"
 
             victim = tmp_path / "probe.py"
-            victim.write_text("x = 1\n")
+            victim.write_text("x = 1\n", encoding="utf-8")
             victim.unlink()  # gone before the handler can stat it
             _time.sleep(1.0)
 
@@ -485,13 +495,13 @@ class TestDispatcherSurvivesHandlerFailure:
         try:
             _time.sleep(0.3)
             victim = tmp_path / "probe.py"
-            victim.write_text("x = 1\n")
+            victim.write_text("x = 1\n", encoding="utf-8")
             victim.unlink()
             _time.sleep(0.5)
 
             # Generate traffic the dispatcher must chew through.
             for i in range(40):
-                (tmp_path / f"noise_{i}.txt").write_text("n")
+                (tmp_path / f"noise_{i}.txt").write_text("n", encoding="utf-8")
             _time.sleep(1.5)
 
             assert observer.event_queue.qsize() == 0, (
@@ -685,7 +695,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "save_module_registry", lambda modules: None)
 
         real_file = tmp_path / "counted.py"
-        real_file.write_text("z = 3\n")
+        real_file.write_text("z = 3\n", encoding="utf-8")
 
         calls = []
         original_stat = Path.stat
@@ -720,7 +730,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         new_file = tmp_path / "brand_new.py"
-        new_file.write_text("x = 1\n")
+        new_file.write_text("x = 1\n", encoding="utf-8")
 
         event = MagicMock()
         event.event_type = "created"
@@ -749,7 +759,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "_get_trigger", lambda: bus)
 
         new_file = tmp_path / "survivor.py"
-        new_file.write_text("x = 1\n")
+        new_file.write_text("x = 1\n", encoding="utf-8")
 
         event = MagicMock()
         event.event_type = "created"
@@ -770,7 +780,7 @@ class TestDispatcherSurvivesHandlerFailure:
         monkeypatch.setattr(mod, "_get_trigger", lambda: None)
 
         new_file = tmp_path / "lonely.py"
-        new_file.write_text("x = 1\n")
+        new_file.write_text("x = 1\n", encoding="utf-8")
 
         event = MagicMock()
         event.event_type = "created"
@@ -1016,6 +1026,7 @@ def _run_with_trigger_denied(body: str) -> subprocess.CompletedProcess:
         [sys.executable, "-"],
         input=script,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         cwd=str(Path(__file__).resolve().parents[3]),
     )

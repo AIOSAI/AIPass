@@ -1,17 +1,21 @@
 # =================== AIPass ====================
 # Name: test_operations.py
 # Description: Unit tests for dashboard operations handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Unit tests for aipass.prax.apps.handlers.dashboard.operations.
+"""Tests for apps/handlers/dashboard/operations.py."""
 
-Because conftest.py patches sys.modules with autouse mocks before imports,
-the module under test is imported INSIDE each test function via importlib
-to ensure the mocked dependencies are in place.
-"""
+# Unit tests for aipass.prax.apps.handlers.dashboard.operations.
+#
+# Because conftest.py patches sys.modules with autouse mocks before imports,
+# the module under test is imported INSIDE each test function via importlib
+# to ensure the mocked dependencies are in place.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/handlers/dashboard/ parses and imports
 
 import importlib
 import json
@@ -422,7 +426,7 @@ class TestCalculateQuickStatusStandalone:
                 {"id": "3", "status": "new"},
             ]
         }
-        (mail_dir / "inbox.json").write_text(json.dumps(inbox))
+        (mail_dir / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
         result = ops._calculate_quick_status_standalone({}, tmp_path)
         assert result["new_mail"] == 3
         assert result["action_required"] is True
@@ -449,7 +453,7 @@ class TestCalculateQuickStatusStandalone:
                 {"id": "3", "status": "opened"},
             ]
         }
-        (mail_dir / "inbox.json").write_text(json.dumps(inbox))
+        (mail_dir / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
         sections = {"flow": {"active_plans": 3}}
         result = ops._calculate_quick_status_standalone(sections, tmp_path)
         assert result["action_required"] is True
@@ -473,7 +477,7 @@ class TestCalculateQuickStatusStandalone:
                 {"id": "7", "status": "new"},
             ]
         }
-        (mail_dir / "inbox.json").write_text(json.dumps(inbox))
+        (mail_dir / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
         result = ops._calculate_quick_status_standalone({}, tmp_path)
         assert result["new_mail"] == 7
         assert result["action_required"] is True
@@ -2187,18 +2191,18 @@ class TestHandleTemplateStatus:
 class TestResolveBranchPathWrapper:
     """Tests for _resolve_branch_path -- dashboard module wrapper."""
 
-    def test_delegates_to_handler(self, monkeypatch):
+    def test_delegates_to_handler(self, monkeypatch, tmp_path):
         """Wrapper delegates to resolve_branch_path handler."""
         mod = _load_dashboard_module()
-        from pathlib import Path
+        fake_path = tmp_path / "flow"
 
         monkeypatch.setattr(
             mod,
             "resolve_branch_path",
-            lambda ref, caller=None: Path("/fake/flow"),
+            lambda ref, caller=None: fake_path,
         )
         result = mod._resolve_branch_path("@flow")
-        assert result == Path("/fake/flow")
+        assert result == fake_path
 
     def test_hands_the_handler_the_callers_directory(self, tmp_path, monkeypatch):
         """The project walk starts where the CALLER stands, so the wrapper must pass AIPASS_CALLER_CWD on.
