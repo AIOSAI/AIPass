@@ -3,24 +3,21 @@
 # Description: Tests for the compass module command router (FPLAN P2)
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-06-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the compass command router (FPLAN-0212 P2).
+"""Tests for apps/modules/compass.py, driven through handle_command against a temp --db store."""
 
-These exercise the thin command layer (``apps/modules/compass.py``) end to
-end against a real temp SQLite store via the ``--db`` flag — the same path the
-live ``drone @devpulse compass`` invocation takes. Everything goes through the
-module entry point (``handle_command``): the round-trip (add -> query -> see
-rating) is driven and asserted entirely via the command's own console output,
-so the storage handler is never reached into directly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(help_flag_safety) — that handle_command calls _wants_help before acting
+# seedgo: no-test-needed(constant) — the Rich colour tags in HELP_TEXT
 
 import re
 from pathlib import Path
 
 import pytest
 
+from aipass.cli.apps.modules import display as cli_display
 from aipass.devpulse.apps.modules import compass as compass_cmd
 
 
@@ -199,8 +196,6 @@ def test_a_missing_id_flips_the_exit_code(capsys, db, monkeypatch):
     rather than the wording — the wording is for humans, the code is for
     everything else.
     """
-    from aipass.cli.apps.modules import display as cli_display
-
     marks: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
 
@@ -213,8 +208,6 @@ def test_a_missing_id_flips_the_exit_code(capsys, db, monkeypatch):
 
 def test_a_real_id_still_reports_success(capsys, db, monkeypatch):
     """The fix must not turn every rate into a failure."""
-    from aipass.cli.apps.modules import display as cli_display
-
     did = _add(capsys, db, "ctx", "did the thing", "good")
     marks: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))

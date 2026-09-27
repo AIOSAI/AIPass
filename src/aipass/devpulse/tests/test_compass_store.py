@@ -3,15 +3,14 @@
 # Description: Tests for the compass SQLite/FTS5 storage core
 # Version: 1.0.0
 # Created: 2026-06-16
-# Modified: 2026-06-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for compass storage core — add/query round-trip, rating filter,
-stats, rate, archive, review, and FTS5 BM25 ranking.
+"""Tests for apps/handlers/compass/store.py through the compass package API, on a tmp_path db_path."""
 
-Every test uses a tmp_path DB via the ``db_path=`` kwarg — never the real
-branch-root compass.db.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the text of VALID_RATINGS, VALID_SOURCES and VALID_STATUSES
+# seedgo: no-test-needed(stdlib) — sqlite3.connect() and the rank arithmetic SQLite computes for a MATCH
 
 import sqlite3
 
@@ -30,20 +29,17 @@ def db(tmp_path):
 class TestFts5Available:
     """FTS5 must be present for compass to function at all."""
 
-    def test_fts5_compiled_in(self):
-        """The FTS5 probe used by _connect succeeds on this interpreter."""
-        conn = sqlite3.connect(":memory:")
-        try:
-            store._verify_fts5(conn)  # should not raise
-        finally:
-            conn.close()
+    def test_fts5_compiled_in(self, db):
+        """The FTS5 probe every connect runs passes on this interpreter (mutant: the probe always raises)."""
+        compass.add_decision("fts probe context", "fts probe decision", "good", db_path=db)
+        assert [h["context"] for h in compass.query_decisions("probe", db_path=db)] == ["fts probe context"]
 
 
 class TestAddQueryRoundTrip:
     """add → query round-trip: the decision is found and its rating returned."""
 
     def test_add_returns_id(self, db):
-        """add_decision returns a positive integer id."""
+        """add_decision returns the stored row's integer id (mutant: return new_id + 1)."""
         new_id = compass.add_decision(
             "Choosing a storage backend",
             "Use SQLite with FTS5",
@@ -52,6 +48,7 @@ class TestAddQueryRoundTrip:
         )
         assert isinstance(new_id, int)
         assert new_id > 0
+        assert compass.query_decisions("storage", db_path=db)[0]["id"] == new_id
 
     def test_query_finds_added_decision_with_rating(self, db):
         """A keyword query finds the added decision and returns its rating + fields."""
@@ -328,16 +325,17 @@ class TestSupersedes:
         compass.add_decision("ctx one", "dec one", "good", db_path=db)
         column_present_per_connect = []
         for _ in range(3):
-            conn = store._connect(db)
+            compass.stats(db_path=db)
+            conn = sqlite3.connect(str(db))
             try:
-                cols = {r["name"] for r in conn.execute("PRAGMA table_info(decisions)")}
+                cols = {r[1] for r in conn.execute("PRAGMA table_info(decisions)")}
             finally:
                 conn.close()
             column_present_per_connect.append("supersedes" in cols)
         assert column_present_per_connect == [True, True, True]
 
     def test_migration_adds_column_to_legacy_db(self, db):
-        """A pre-supersedes DB gets the column added in via _connect migration."""
+        """A pre-supersedes DB gets the column added by the migration every public call runs."""
         # Build a legacy `decisions` table WITHOUT supersedes, as older builds had.
         conn = sqlite3.connect(str(db))
         conn.execute(
@@ -354,10 +352,11 @@ class TestSupersedes:
         pre = {r[1] for r in conn.execute("PRAGMA table_info(decisions)")}
         conn.close()
         assert "supersedes" not in pre
-        # ...a store connect migrates it in (CREATE IF NOT EXISTS is a no-op here).
-        conn = store._connect(db)
+        # ...a public call's connect migrates it in (CREATE IF NOT EXISTS is a no-op here).
+        compass.stats(db_path=db)
+        conn = sqlite3.connect(str(db))
         try:
-            post = {r["name"] for r in conn.execute("PRAGMA table_info(decisions)")}
+            post = {r[1] for r in conn.execute("PRAGMA table_info(decisions)")}
         finally:
             conn.close()
         assert "supersedes" in post
@@ -465,10 +464,11 @@ class TestScoreRemoved:
         assert "score" not in hit
 
     def test_score_absent_from_review_dict(self, db):
-        """Review result dicts carry no score key."""
+        """Review result dicts carry no score key (mutant: review returns {})."""
         compass.add_decision("review score ctx", "dec", "good", db_path=db)
         result = compass.review(db_path=db)
         assert result is not None
+        assert result["context"] == "review score ctx"
         assert "score" not in result
 
 

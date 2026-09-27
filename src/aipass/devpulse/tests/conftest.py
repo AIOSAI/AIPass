@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for devpulse tests
 # Version: 1.2.0
 # Created: 2025-11-08
-# Modified: 2026-09-03
+# Modified: 2026-09-27
 # =============================================
 
 """Shared pytest fixtures for devpulse tests.
@@ -28,6 +28,7 @@ import shutil
 from pathlib import Path
 from typing import Generator
 
+from aipass.cli.apps.modules import display
 from aipass.devpulse.apps.handlers.json import json_handler
 
 
@@ -36,6 +37,21 @@ def pytest_configure(config: pytest.Config) -> None:
     # -c pyproject.toml) never reads this branch's ini, and its
     # --strict-markers would turn an unknown marker into an error.
     config.addinivalue_line("markers", "integration: live-dispatch integration tests (WATCHDOG_INTEGRATION=1)")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture

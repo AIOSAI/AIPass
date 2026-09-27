@@ -3,23 +3,15 @@
 # Description: Tests for the watchdog feed handler (FPLAN-0451 P2 — push replaces poll)
 # Version: 1.0.0
 # Created: 2026-08-21
-# Modified: 2026-08-21
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for drain_feed — reading completions off @ai_mail's notification feed.
+"""Tests for apps/handlers/watchdog/feed.py, reading completions off @ai_mail's notification feed."""
 
-The defect these pin is the one that made this handler a new file rather than a
-tweak to wire.py: THE FEED IS NOT APPEND-ONLY. ``notify._trim_feed`` rewrites it
-with ``os.replace`` once it passes 400 lines, so the inode changes and every
-byte offset and line index goes stale silently. wire.py's cursor is a byte
-offset. Reusing it here would either replay the whole file or skip events, with
-nothing anywhere saying so — and it would have shipped looking fine, because the
-feed only trims once it is full.
-
-``test_survives_a_trim`` is therefore the load-bearing test in this file.
-
-No test touches the real feed: every case passes ``feed_file_path`` explicitly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/feed.py parses and imports
+# seedgo: no-test-needed(documentation) — that drain_feed, feed_file and format_feed_event carry docstrings
+# seedgo: no-test-needed(constant) — WIRE_CURSOR_NAME's text and the _ROOT_MARKERS file names
 
 import json
 import os
@@ -27,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass import ai_mail
 from aipass.devpulse.apps.handlers.watchdog import feed
 
 
@@ -162,7 +155,7 @@ class TestKindFilter:
 
 
 class TestTrim:
-    """The reason this handler does not reuse wire.py's byte cursor."""
+    """notify._trim_feed os.replaces the feed past 400 lines, so wire.py's byte cursor would go stale."""
 
     def test_survives_a_trim(self, feed_file, cursor, tmp_path):
         _write(feed_file, [_event(minute=i) for i in range(6)])
@@ -260,8 +253,6 @@ class TestRepoRoot:
         aipass.ai_mail.feed_path, so that is the answer 'unchanged' means —
         and it is what the hermetic fixture patches, keeping this true off
         the live machine too."""
-        from aipass import ai_mail
-
         assert feed.feed_file() == ai_mail.feed_path()
 
     def test_drain_honours_repo_root(self, tmp_path, cursor):

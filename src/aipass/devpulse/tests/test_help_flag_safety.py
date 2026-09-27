@@ -3,20 +3,13 @@
 # Description: A help flag anywhere in args must explain, never execute (DPLAN-0291 rule E)
 # Version: 1.0.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Help-flag safety across all devpulse command modules.
+"""Tests for a trailing --help in apps/modules/feedback.py, admin_grant.py, watchdog.py and compass.py."""
 
-DPLAN-0291 round finding, 8-of-8 fleet hit rate: gating help at ``args[0]``
-only means a trailing ``--help`` lands in a value slot and the verb EXECUTES
-instead of explaining itself. seedgo's help_flag_safety standard flagged all
-four devpulse modules (feedback.py, admin_grant.py, watchdog.py, compass.py).
-
-Contract pinned here: a help flag ANYWHERE in args prints the module's help
-and the dispatch target is never reached. Canary verbs are read-only
-(status/query/inbox) — proving the trap never requires firing a live verb.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(help_flag_safety) — that each handle_command calls _wants_help before acting
 
 from unittest.mock import patch
 

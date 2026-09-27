@@ -3,19 +3,29 @@
 # Description: Tests for the watchdog module router
 # Version: 1.1.0
 # Created: 2026-04-14
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the watchdog module router (Phase 1, FPLAN-0186)."""
+"""Tests for apps/modules/watchdog.py, the watchdog module router (Phase 1, FPLAN-0186)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that modules/watchdog.py parses and imports
+# seedgo: no-test-needed(documentation) — that handle_command and print_introspection carry docstrings
+# seedgo: no-test-needed(constant) — the wording of _TIMER_HELP_TEXT and _SCHEDULE_HELP_TEXT
 
 import json
 import os
 import sys
 from unittest.mock import patch
 
+import aipass.devpulse.apps.handlers.owner.guard as owner_guard
+import aipass.spawn.apps.handlers.registry as spawn_registry
 import pytest
 
+from aipass.cli.apps.modules import display as cli_display
+from aipass.devpulse.apps.handlers.watchdog import dispatches as wd_dispatches
 from aipass.devpulse.apps.handlers.watchdog import registry as wd_registry
+from aipass.devpulse.apps.handlers.watchdog import wire as wd_wire
 from aipass.devpulse.apps.modules import watchdog as wd_mod
 
 
@@ -42,6 +52,16 @@ def _bypass_caller_guard(request):
         return
     with patch.object(wd_mod, "_guard_caller", return_value=True):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _pin_watch_registry(monkeypatch, tmp_path):
+    """Pin the watch registry's default store to tmp_path for every test.
+
+    The arm is recorded where it is exercised, but a route a mutant opens past
+    the recorder must still land here and never in the live .watchdog/.
+    """
+    monkeypatch.setattr(wd_registry, "_default_storage_path", lambda: tmp_path / "watchdog_active.json")
 
 
 def test_handle_command_rejects_unrelated_command():
@@ -84,10 +104,8 @@ def test_handle_command_unknown_subcommand(capsys):
 
 
 def _deny_owner(monkeypatch):
-    """Make the shared owner guard refuse, as it does for a non-owner seat."""
-    import aipass.devpulse.apps.handlers.owner.guard as owner_guard
-
-    monkeypatch.setattr(owner_guard, "guard_owner_caller", lambda _name: False)
+    """Make the shared owner guard refuse the watchdog tool, as it does for a non-owner seat."""
+    monkeypatch.setattr(owner_guard, "guard_owner_caller", lambda name: name != "watchdog")
 
 
 def test_help_survives_the_owner_gate(capsys, monkeypatch, real_owner_gate):
@@ -115,9 +133,14 @@ def test_introspection_survives_the_owner_gate(capsys, monkeypatch, real_owner_g
 
 
 def test_a_privileged_subcommand_is_still_refused(capsys, monkeypatch, real_owner_gate):
-    """Letting help through must not let anything else through with it."""
+    """Letting help through must not let anything else through with it.
+
+    Mutant: the gate asks the guard about another tool name — the wire arms.
+    """
     _deny_owner(monkeypatch)
+    armed = _record_arm_wire(monkeypatch)
     assert wd_mod.handle_command("watchdog", ["baseline"]) is True
+    assert armed == {}
     text = capsys.readouterr()
     assert "owner-only" in (text.out + text.err).lower()
 
@@ -132,25 +155,31 @@ def test_the_owner_refusal_flips_the_exit_code(monkeypatch, real_owner_gate):
     this one was silent.
 
     Asserts the FAILURE MARK, not the wording — wording is cosmetic and this
-    is the half that talks to scripts.
+    is the half that talks to scripts. Mutant: _guard_caller returns True after
+    its error() — the wire arms and ``armed`` is no longer empty.
     """
-    from aipass.cli.apps.modules import display as cli_display
-
     _deny_owner(monkeypatch)
+    armed = _record_arm_wire(monkeypatch)
     marks: list[int] = []
     monkeypatch.setattr(cli_display, "mark_command_failed", lambda: marks.append(1))
 
-    assert wd_mod._guard_caller() is False
-    assert marks, "the refusal must mark the command failed, or it exits 0"
+    wd_mod.handle_command("watchdog", ["baseline"])
+
+    assert armed == {}
+    assert marks == [1], "the refusal must mark the command failed, or it exits 0"
 
 
 def test_the_owner_refusal_names_the_owner(capsys, monkeypatch, real_owner_gate):
     """'Owner-only' tells a stranger they are in the wrong place, not where the
-    right place is. A refusal with no next step dead-ends."""
+    right place is. A refusal with no next step dead-ends. Mutant: the gate
+    passes after refusing — the wire arms and ``armed`` is no longer empty."""
     _deny_owner(monkeypatch)
+    armed = _record_arm_wire(monkeypatch)
     monkeypatch.setattr(wd_mod, "_owner_address", lambda: "@vera")
 
-    assert wd_mod._guard_caller() is False
+    wd_mod.handle_command("watchdog", ["baseline"])
+
+    assert armed == {}
     text = capsys.readouterr()
     assert "@vera" in (text.out + text.err)
 
@@ -161,18 +190,20 @@ def test_the_refusal_still_refuses_when_the_owner_cannot_be_named(capsys, monkey
     The owner lookup reads a registry, and a registry read can fail. If that
     failure escaped, an unreadable registry would turn a refusal into a
     traceback — and a traceback is not a refusal, it is a crash someone
-    retries.
+    retries. Mutant: the gate passes after refusing — the wire arms and
+    ``armed`` is no longer empty.
     """
-    import aipass.spawn.apps.handlers.registry as spawn_registry
-
     _deny_owner(monkeypatch)
+    armed = _record_arm_wire(monkeypatch)
 
     def explode(*_args, **_kwargs):
         raise RuntimeError("registry unreadable")
 
     monkeypatch.setattr(spawn_registry, "get_owner", explode)
 
-    assert wd_mod._guard_caller() is False
+    wd_mod.handle_command("watchdog", ["baseline"])
+
+    assert armed == {}
     text = capsys.readouterr()
     combined = (text.out + text.err).lower()
     assert "owner-only" in combined
@@ -217,36 +248,21 @@ def _fake_timer_module_with_format():
     return fake
 
 
-def _patch_registry_imports(fake_registry, fake_timer=None):
-    """Patch importlib.import_module to return the right fake per module path."""
+def _serve_registry(monkeypatch, fake_registry, fake_timer=None):
+    """Hand the router the fake registry and timer through its own loader seams."""
     timer = fake_timer or _fake_timer_module_with_format()
+    monkeypatch.setattr(wd_mod, "_load_registry_module", lambda: fake_registry)
+    monkeypatch.setattr(wd_mod, "_load_timer_module_for_format", lambda: timer)
 
-    def fake_import(name):
-        """Patched ``importlib.import_module`` — routes to fake registry/timer."""
-        if name.endswith(".registry"):
-            return fake_registry
-        if name.endswith(".timer"):
-            return timer
-        if name.endswith(".dispatches"):
-            # status prints the dispatch line off the REGISTER now (r4 deleted
-            # the events-file lag line with the daemon). A fake that reports an
-            # unavailable register keeps the line quiet without reaching the
-            # real one — and asserts nothing about a machine's live state.
-            fake_dispatches = type(sys)("fake_dispatches")
+    # status prints the dispatch line off the REGISTER now (r4 deleted the
+    # events-file lag line with the daemon). Reporting an unavailable register
+    # keeps the line quiet without reaching the real one — and asserts nothing
+    # about a machine's live state.
+    def _unavailable(*_a, **_kw):
+        raise wd_dispatches.RegisterUnavailable("no register in this test")
 
-            class RegisterUnavailable(RuntimeError):
-                pass
-
-            def _unavailable(*_a, **_kw):
-                raise RegisterUnavailable("no register in this test")
-
-            fake_dispatches.RegisterUnavailable = RegisterUnavailable
-            fake_dispatches.outstanding = _unavailable
-            fake_dispatches.overdue = _unavailable
-            return fake_dispatches
-        raise ImportError(f"unexpected import in test: {name}")
-
-    return patch("importlib.import_module", side_effect=fake_import)
+    monkeypatch.setattr(wd_dispatches, "outstanding", _unavailable)
+    monkeypatch.setattr(wd_dispatches, "overdue", _unavailable)
 
 
 def test_cancel_requires_handle(capsys):
@@ -258,7 +274,7 @@ def test_cancel_requires_handle(capsys):
     assert "usage: watchdog cancel <handle>" in combined.lower()
 
 
-def test_cancel_handle_routes_to_registry(capsys):
+def test_cancel_handle_routes_to_registry(capsys, monkeypatch):
     """`cancel <handle>` calls registry.kill_watch and prints the result."""
     fake = _fake_registry_module(
         kill_result={
@@ -268,8 +284,8 @@ def test_cancel_handle_routes_to_registry(capsys):
             "reason": "SIGTERM — pid 1234 exited in 0.1s",
         }
     )
-    with _patch_registry_imports(fake):
-        result = wd_mod.handle_command("watchdog", ["cancel", "agent-abc123"])
+    _serve_registry(monkeypatch, fake)
+    result = wd_mod.handle_command("watchdog", ["cancel", "agent-abc123"])
     assert result is True
     assert ("kill_watch", "agent-abc123") in fake.calls
     combined = capsys.readouterr().out
@@ -277,7 +293,7 @@ def test_cancel_handle_routes_to_registry(capsys):
     assert "KILLED" in combined
 
 
-def test_cancel_all_routes_to_registry(capsys):
+def test_cancel_all_routes_to_registry(capsys, monkeypatch):
     """`cancel --all` calls registry.kill_all and prints every result line."""
     fake = _fake_registry_module(
         kill_all_result=[
@@ -285,8 +301,8 @@ def test_cancel_all_routes_to_registry(capsys):
             {"handle": "schedule-222222", "killed": True, "was_alive": True, "reason": "ok"},
         ]
     )
-    with _patch_registry_imports(fake):
-        result = wd_mod.handle_command("watchdog", ["cancel", "--all"])
+    _serve_registry(monkeypatch, fake)
+    result = wd_mod.handle_command("watchdog", ["cancel", "--all"])
     assert result is True
     assert ("kill_all",) in fake.calls
     out = capsys.readouterr().out
@@ -294,27 +310,27 @@ def test_cancel_all_routes_to_registry(capsys):
     assert "schedule-222222" in out
 
 
-def test_cancel_all_empty(capsys):
+def test_cancel_all_empty(capsys, monkeypatch):
     """`cancel --all` with nothing active reports 'no active watches to cancel'."""
     fake = _fake_registry_module(kill_all_result=[])
-    with _patch_registry_imports(fake):
-        wd_mod.handle_command("watchdog", ["cancel", "--all"])
+    _serve_registry(monkeypatch, fake)
+    wd_mod.handle_command("watchdog", ["cancel", "--all"])
     out = capsys.readouterr().out.lower()
     assert "no active watches" in out
 
 
-def test_status_reports_no_active_watches(capsys):
+def test_status_reports_no_active_watches(capsys, monkeypatch):
     """status reports 'no active watches' when the registry is empty."""
     fake = _fake_registry_module(active=[])
-    with _patch_registry_imports(fake):
-        result = wd_mod.handle_command("watchdog", ["status"])
+    _serve_registry(monkeypatch, fake)
+    result = wd_mod.handle_command("watchdog", ["status"])
     assert result is True
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "no active watches" in combined.lower()
 
 
-def test_status_prints_active_watches(capsys):
+def test_status_prints_active_watches(capsys, monkeypatch):
     """status prints every active watch with handle + type + pid."""
     active = [
         {
@@ -335,8 +351,8 @@ def test_status_prints_active_watches(capsys):
         },
     ]
     fake = _fake_registry_module(active=active)
-    with _patch_registry_imports(fake):
-        result = wd_mod.handle_command("watchdog", ["status"])
+    _serve_registry(monkeypatch, fake)
+    result = wd_mod.handle_command("watchdog", ["status"])
     assert result is True
     out = capsys.readouterr().out
     assert "agent-abc123" in out
@@ -345,7 +361,7 @@ def test_status_prints_active_watches(capsys):
     assert "2 active watch(es):" in out
 
 
-def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys):
+def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys, monkeypatch):
     """r4 has no daemon, so the wire row must not print ``daemon_pid``.
 
     The field survived the daemon by two hours. It rendered as a permanent
@@ -364,14 +380,14 @@ def test_the_wire_row_does_not_report_a_daemon_that_cannot_exist(capsys):
         },
     ]
     fake = _fake_registry_module(active=active)
-    with _patch_registry_imports(fake):
-        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    _serve_registry(monkeypatch, fake)
+    assert wd_mod.handle_command("watchdog", ["status"]) is True
     out = capsys.readouterr().out
     assert "daemon" not in out.lower()
     assert "sess-abc" in out
 
 
-def test_the_wire_row_says_which_wrapper_is_carrying_it(capsys):
+def test_the_wire_row_says_which_wrapper_is_carrying_it(capsys, monkeypatch):
     """``via`` must show a real value on the HEALTHY path, not a permanent ?.
 
     This row replaced two fields that read ``?`` whenever the watchdog was
@@ -391,14 +407,14 @@ def test_the_wire_row_says_which_wrapper_is_carrying_it(capsys):
         },
     ]
     fake = _fake_registry_module(active=active)
-    with _patch_registry_imports(fake):
-        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    _serve_registry(monkeypatch, fake)
+    assert wd_mod.handle_command("watchdog", ["status"]) is True
     out = capsys.readouterr().out
     assert "via=background" in out
     assert "?" not in out.split("wire-003")[1].split("\n")[0]
 
 
-def test_a_foreground_wire_is_named_as_having_no_listener(capsys):
+def test_a_foreground_wire_is_named_as_having_no_listener(capsys, monkeypatch):
     """No session means nothing is reading stdout — the 2026-08-19 12:34 failure.
 
     It must read as NONE and not as a blank field, because a blank column looks
@@ -415,12 +431,12 @@ def test_a_foreground_wire_is_named_as_having_no_listener(capsys):
         },
     ]
     fake = _fake_registry_module(active=active)
-    with _patch_registry_imports(fake):
-        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    _serve_registry(monkeypatch, fake)
+    assert wd_mod.handle_command("watchdog", ["status"]) is True
     assert "NONE (fg)" in capsys.readouterr().out
 
 
-def test_an_unknown_watch_type_still_renders_its_row(capsys):
+def test_an_unknown_watch_type_still_renders_its_row(capsys, monkeypatch):
     """A watch nobody can see is a watch nobody retires.
 
     The tail table replaced an if/elif chain; a table lookup that misses must
@@ -437,18 +453,18 @@ def test_an_unknown_watch_type_still_renders_its_row(capsys):
         },
     ]
     fake = _fake_registry_module(active=active)
-    with _patch_registry_imports(fake):
-        assert wd_mod.handle_command("watchdog", ["status"]) is True
+    _serve_registry(monkeypatch, fake)
+    assert wd_mod.handle_command("watchdog", ["status"]) is True
     out = capsys.readouterr().out
     assert "mystery-01" in out
     assert "cassiopeia" in out
 
 
-def test_list_routes_to_status(capsys):
+def test_list_routes_to_status(capsys, monkeypatch):
     """`list` is an alias — same output as `status`."""
     fake = _fake_registry_module(active=[])
-    with _patch_registry_imports(fake):
-        result = wd_mod.handle_command("watchdog", ["list"])
+    _serve_registry(monkeypatch, fake)
+    result = wd_mod.handle_command("watchdog", ["list"])
     assert result is True
     out = capsys.readouterr().out.lower()
     assert "watchdog status" in out
@@ -464,7 +480,12 @@ def test_agent_subcommand_requires_id(capsys):
     assert "usage: watchdog agent <branch>" in combined.lower()
 
 
-def test_agent_subcommand_invokes_handler(capsys):
+def _serve_agent_handler(monkeypatch, fake_module):
+    """Hand the router ``fake_module`` through its _agent_handler seam, in place of the lazy import."""
+    monkeypatch.setattr(wd_mod, "_agent_handler", lambda: fake_module)
+
+
+def test_agent_subcommand_invokes_handler(capsys, monkeypatch):
     """`agent <id>` lazily imports and invokes watch_agent."""
     fake_result = {
         "woke": True,
@@ -477,8 +498,8 @@ def test_agent_subcommand_invokes_handler(capsys):
     fake_module = type(sys)("fake_agent_mod")
     fake_module.watch_agent = lambda agent_id, timeout_seconds=1800: fake_result
 
-    with patch("importlib.import_module", return_value=fake_module):
-        result = wd_mod.handle_command("watchdog", ["agent", "@drone"])
+    _serve_agent_handler(monkeypatch, fake_module)
+    result = wd_mod.handle_command("watchdog", ["agent", "@drone"])
 
     assert result is True
     captured = capsys.readouterr()
@@ -487,7 +508,7 @@ def test_agent_subcommand_invokes_handler(capsys):
     assert "@drone" in combined
 
 
-def test_agent_subcommand_parses_timeout_flag():
+def test_agent_subcommand_parses_timeout_flag(monkeypatch):
     """--timeout flag is parsed and passed to the handler."""
     captured_args = {}
 
@@ -507,8 +528,8 @@ def test_agent_subcommand_parses_timeout_flag():
     fake_module = type(sys)("fake_agent_mod")
     fake_module.watch_agent = fake_watch_agent
 
-    with patch("importlib.import_module", return_value=fake_module):
-        wd_mod.handle_command("watchdog", ["agent", "@flow", "--timeout", "60"])
+    _serve_agent_handler(monkeypatch, fake_module)
+    wd_mod.handle_command("watchdog", ["agent", "@flow", "--timeout", "60"])
 
     assert captured_args == {"agent_id": "@flow", "timeout": 60}
 
@@ -522,7 +543,7 @@ def test_agent_subcommand_invalid_timeout(capsys):
     assert "invalid --timeout value: notanumber" in combined.lower()
 
 
-def test_agent_subcommand_default_timeout_is_600():
+def test_agent_subcommand_default_timeout_is_600(monkeypatch):
     """Without an explicit --timeout, the module passes 600s (FPLAN-0189)."""
     captured_args = {}
 
@@ -541,13 +562,13 @@ def test_agent_subcommand_default_timeout_is_600():
     fake_module = type(sys)("fake_agent_mod")
     fake_module.watch_agent = fake_watch_agent
 
-    with patch("importlib.import_module", return_value=fake_module):
-        wd_mod.handle_command("watchdog", ["agent", "@flow"])
+    _serve_agent_handler(monkeypatch, fake_module)
+    wd_mod.handle_command("watchdog", ["agent", "@flow"])
 
     assert captured_args["timeout"] == 600
 
 
-def test_agent_subcommand_emits_next_action_breadcrumb(capsys):
+def test_agent_subcommand_emits_next_action_breadcrumb(capsys, monkeypatch):
     """On exit, the CLI prints a 'Next: drone @ai_mail dispatch' breadcrumb (FPLAN-0189)."""
     fake_result = {
         "woke": True,
@@ -560,8 +581,8 @@ def test_agent_subcommand_emits_next_action_breadcrumb(capsys):
     fake_module = type(sys)("fake_agent_mod")
     fake_module.watch_agent = lambda agent_id, timeout_seconds=600: fake_result
 
-    with patch("importlib.import_module", return_value=fake_module):
-        wd_mod.handle_command("watchdog", ["agent", "@drone"])
+    _serve_agent_handler(monkeypatch, fake_module)
+    wd_mod.handle_command("watchdog", ["agent", "@drone"])
 
     captured = capsys.readouterr()
     combined = captured.out + captured.err
@@ -638,47 +659,46 @@ def test_agent_subcommand_names_the_live_sign_in_wire_of_this_session(capsys, mo
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _fake_baseline_module(result=None, recorder=None):
-    """Minimal fake handler module for router-level tests.
+def _record_arm_wire(monkeypatch, result=None):
+    """Replace wire.arm_wire, the door the router lazily imports, with a recorder.
 
-    Serves BOTH doors the router lazily imports: ``arm_wire`` (the default,
-    wire.py) and ``watch_baseline`` (the ``--daemon`` detection role).
+    Returns the recorder: empty until the router arms the wire, then ``{"once": <flag>}``.
     """
-    fake = type(sys)("fake_baseline_mod")
+    recorder = {}
 
     def arm_wire(once=False):
         """Fake wire door — records its arguments, returns a preset result."""
-        if recorder is not None:
-            recorder["once"] = once
+        recorder["once"] = once
         return result or {"state": "stopped", "replayed": 0, "delivered": 0, "ticks": 1, "session": "s"}
 
-    def watch_baseline(once=False, daemon=False):
-        """Fake daemon door — records the daemon flag."""
-        if recorder is not None:
-            recorder["daemon"] = daemon
-        return result or {"state": "stopped", "handle": "baseline-abc123", "completions": 0, "ticks": 1, "elapsed": 0}
-
-    fake.arm_wire = arm_wire
-    fake.watch_baseline = watch_baseline
-    return fake
+    monkeypatch.setattr(wd_wire, "arm_wire", arm_wire)
+    return recorder
 
 
-def test_baseline_is_a_known_subcommand():
-    """`baseline` routes instead of falling through to the unknown-subcommand error."""
-    assert "baseline" in wd_mod._VALID_SUBCOMMANDS
+def test_baseline_is_a_known_subcommand(capsys, monkeypatch):
+    """`baseline` routes instead of falling through to the unknown-subcommand error.
+
+    Mutant: "baseline" dropped from _VALID_SUBCOMMANDS — the router errors and never arms.
+    """
+    _record_arm_wire(monkeypatch)
+
+    wd_mod.handle_command("watchdog", ["baseline"])
+
+    text = capsys.readouterr()
+    combined = (text.out + text.err).lower()
+    assert "watchdog baseline: arming the wire" in combined
+    assert "unknown watchdog subcommand" not in combined
     assert "baseline" in wd_mod.HELP_TEXT
 
 
-def test_baseline_subcommand_invokes_handler(capsys):
+def test_baseline_subcommand_invokes_handler(capsys, monkeypatch):
     """Bare `baseline` lazily imports and invokes the wire arm door."""
-    recorder = {}
-    fake_module = _fake_baseline_module(
+    recorder = _record_arm_wire(
+        monkeypatch,
         result={"state": "stopped", "handle": "baseline-abc123", "completions": 2, "ticks": 9, "elapsed": 18},
-        recorder=recorder,
     )
 
-    with patch("importlib.import_module", return_value=fake_module):
-        result = wd_mod.handle_command("watchdog", ["baseline"])
+    result = wd_mod.handle_command("watchdog", ["baseline"])
 
     assert result is True
     assert recorder == {"once": False}
@@ -687,59 +707,61 @@ def test_baseline_subcommand_invokes_handler(capsys):
     assert "baseline" in combined.lower()
 
 
-def test_baseline_once_flag_is_parsed():
+def test_baseline_once_flag_is_parsed(monkeypatch):
     """--once reaches the handler."""
-    recorder = {}
-    fake_module = _fake_baseline_module(recorder=recorder)
+    recorder = _record_arm_wire(monkeypatch)
 
-    with patch("importlib.import_module", return_value=fake_module):
-        wd_mod.handle_command("watchdog", ["baseline", "--once"])
+    wd_mod.handle_command("watchdog", ["baseline", "--once"])
 
     assert recorder == {"once": True}
 
 
-def test_baseline_rejects_unknown_flag(capsys):
-    """An unknown flag is a clean error — and never starts a watch."""
-    fake_module = _fake_baseline_module(recorder={})
+def test_baseline_rejects_unknown_flag(capsys, monkeypatch):
+    """An unknown flag is a clean error — and never starts a watch.
 
-    with patch("importlib.import_module", return_value=fake_module) as imported:
-        result = wd_mod.handle_command("watchdog", ["baseline", "--forever"])
+    Mutant: the unknown-flag branch falls through instead of returning — the wire arms.
+    """
+    recorder = _record_arm_wire(monkeypatch)
+
+    result = wd_mod.handle_command("watchdog", ["baseline", "--forever"])
 
     assert result is True
-    imported.assert_not_called()
+    assert recorder == {}
     captured = capsys.readouterr()
     combined = captured.out + captured.err
     assert "unknown baseline flag: --forever" in combined.lower()
 
 
-def test_baseline_daemon_flag_is_refused_by_name(capsys):
+def test_baseline_daemon_flag_is_refused_by_name(capsys, monkeypatch):
     """r4 deleted the detection daemon. --daemon must say THAT, not "unknown flag".
 
     An operator or a stale script passing it deserves to be told the lane
     changed rather than that they made a typo — and the refusal happens before
-    any import, so nothing is armed on the way to the error.
+    arm_wire is reached, so nothing is armed on the way to the error.
+    Mutant: the --daemon branch falls through instead of returning — the wire arms.
     """
-    fake_module = _fake_baseline_module(recorder={})
+    recorder = _record_arm_wire(monkeypatch)
 
-    with patch("importlib.import_module", return_value=fake_module) as imported:
-        result = wd_mod.handle_command("watchdog", ["baseline", "--daemon"])
+    result = wd_mod.handle_command("watchdog", ["baseline", "--daemon"])
 
     assert result is True
-    imported.assert_not_called()
+    assert recorder == {}
     combined = capsys.readouterr()
     text = combined.out + combined.err
     assert "removed in watchdog r4" in text
     assert "no detection daemon" in text
 
 
-def test_baseline_daemon_is_still_refused_alongside_once(capsys):
-    """The flag is dead in every combination, not just alone."""
-    fake_module = _fake_baseline_module(recorder={})
+def test_baseline_daemon_is_still_refused_alongside_once(capsys, monkeypatch):
+    """The flag is dead in every combination, not just alone.
 
-    with patch("importlib.import_module", return_value=fake_module) as imported:
-        result = wd_mod.handle_command("watchdog", ["baseline", "--once", "--daemon"])
+    Mutant: the --daemon branch falls through instead of returning — the wire arms.
+    """
+    recorder = _record_arm_wire(monkeypatch)
+
+    result = wd_mod.handle_command("watchdog", ["baseline", "--once", "--daemon"])
 
     assert result is True
-    imported.assert_not_called()
+    assert recorder == {}
     combined = capsys.readouterr()
     assert "removed in watchdog r4" in combined.out + combined.err

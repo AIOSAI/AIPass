@@ -3,44 +3,23 @@
 # Description: Tests for watchdog seat attribution (FPLAN-0452 P2 — only MY dispatches reach me)
 # Version: 2.0.0
 # Created: 2026-08-22
-# Modified: 2026-08-22
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for dispatches.py — whose completion was that, and what is still out.
+"""Tests for apps/handlers/watchdog/dispatches.py: whose completion was that, and what is still out."""
 
-The defect this module exists to kill: the wire woke @devpulse for EVERY
-citizen's completion, fleet-wide, because the notification feed named the branch
-that FINISHED and never the branch that SENT the work.
-
-Three things are pinned here, and all three are refusals or fail-closed rules —
-the happy path is a single field comparison and cannot really go wrong on its
-own:
-
-``test_a_record_without_a_sender_is_not_mine`` — unattributable must fail
-CLOSED. Failing open restores the fleet-wide wake exactly.
-
-``test_seat_email_reads_the_owner_entrys_email_not_the_dict`` — get_owner
-returns a registry ENTRY DICT. Stringifying it yields a plausible-looking
-address that matches nothing, which is a filter that silently excludes
-everything: a wire that looks armed and delivers nothing.
-
-``test_outstanding_refuses_rather_than_returning_the_live_register`` — "none
-outstanding" and "I cannot tell" must never render the same. The refusal is
-@ai_mail's strict read (an existing register that cannot be opened raises
-OSError; a missing one is genuinely "nobody dispatched here"), and this
-asserts we inherit it rather than swallowing it into an empty list.
-
-Nothing here folds the register: that reconstruction has one owner (@ai_mail's
-``outstanding_dispatches``) and a second implementation of an append-only rule
-is a duplicated LOGIC path — it fails silently and plausibly rather than loudly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/dispatches.py parses and imports
+# seedgo: no-test-needed(documentation) — that seat_email, is_mine, outstanding and overdue carry docstrings
 
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import aipass.spawn.apps.handlers.registry as spawn_registry
 import pytest
 
+from aipass.devpulse.apps.handlers.owner import guard
 from aipass.devpulse.apps.handlers.watchdog import dispatches
 
 
@@ -98,8 +77,6 @@ def test_seat_email_reads_the_owner_entrys_email_not_the_dict(monkeypatch):
     Stringifying it would produce a plausible-looking address that matches
     nothing — a filter that silently excludes every dispatch.
     """
-    import aipass.spawn.apps.handlers.registry as spawn_registry
-
     monkeypatch.setattr(
         spawn_registry,
         "get_owner",
@@ -110,16 +87,12 @@ def test_seat_email_reads_the_owner_entrys_email_not_the_dict(monkeypatch):
 
 def test_seat_email_is_portable_across_projects(monkeypatch):
     """@devpulse owns AIPass, @vera owns Vera Studio — never a directory name."""
-    import aipass.spawn.apps.handlers.registry as spawn_registry
-
     monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: {"email": "wren", "owner": True})
     assert dispatches.seat_email() == "@wren"
 
 
 def test_seat_email_refuses_when_no_owner_is_sealed(monkeypatch):
     """Without an identity there is no 'mine', and guessing one is the 2026-08-21 bug."""
-    import aipass.spawn.apps.handlers.registry as spawn_registry
-
     monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: None)
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
@@ -134,8 +107,6 @@ def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
     distinction survives in ``owner_address``'s log, which is where a
     diagnostic belongs — the message a caller reads should say what to DO.
     """
-    import aipass.spawn.apps.handlers.registry as spawn_registry
-
     monkeypatch.setattr(spawn_registry, "get_owner", lambda start_path=None: {"owner": True, "name": "vera"})
     with pytest.raises(dispatches.RegisterUnavailable) as exc:
         dispatches.seat_email()
@@ -145,8 +116,6 @@ def test_seat_email_refuses_an_owner_entry_with_no_email(monkeypatch):
 def test_the_owner_lookup_has_exactly_one_implementation():
     """seat_email must not re-derive the owner — two answers to one question is
     the 2026-08-21 bug in miniature. It delegates to the guard handler."""
-    from aipass.devpulse.apps.handlers.owner import guard
-
     assert dispatches._owner_address is guard.owner_address
 
 

@@ -3,20 +3,15 @@
 # Description: Tests for the watchdog agent handler
 # Version: 1.3.1
 # Created: 2026-04-14
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for watch_agent (Phase 1, FPLAN-0186).
+"""Tests for apps/handlers/watchdog/agent.py: watch_agent, TranscriptScanner and StallTracker."""
 
-Mock-heavy unit tests verify the return-shape branches:
-  - completed (clean exit)
-  - crashed (bounce file present)
-  - timeout
-  - agent not found
-
-Integration tests are marked with @pytest.mark.integration and require
-a live ai_mail dispatch flow. They're skipped by default in CI.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/agent.py parses and imports
+# seedgo: no-test-needed(documentation) — that watch_agent, TranscriptScanner and StallTracker carry docstrings
+# seedgo: no-test-needed(constant) — STALL_THRESHOLD, LONG_TOOL_THRESHOLD and REFRESH_INTERVAL values
 
 import json
 import os
@@ -76,27 +71,36 @@ def _write_lock(branch_path: Path, pid: int) -> Path:
     return lock_file
 
 
-def _agent_only_sleep(side_effect):
-    """Wrap a sleep side-effect so ONLY calls from the agent module fire it.
+def _pin_home(monkeypatch, home: Path, caller_cwd: str = "") -> None:
+    """Point the resolver's external roots (caller cwd, ~/Projects) at test-owned places.
 
-    Patching agent_handler.time.sleep mutates the GLOBAL time module — any
-    daemon thread sleeping during the patch window (prax logger spawns three on
-    first log) would run the side effect concurrently with the main thread,
-    e.g. re-truncating the bounce file mid-read in _classify_exit. Foreign
-    callers get a real 1ms sleep instead. Same guard as _fake_clock_sleep.
+    Through the environment Path.home() reads (HOME on POSIX, USERPROFILE on Windows).
     """
-    agent_file = Path(agent_handler.__file__).resolve()
-    real_sleep = time.sleep
+    monkeypatch.setenv("AIPASS_CALLER_CWD", caller_cwd)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
-    def fake_sleep(_seconds):
-        caller = Path(sys._getframe(1).f_code.co_filename).resolve()
-        if caller != agent_file:
-            real_sleep(0.001)
-            return
+
+def _mark_resolved(branch_dir: Path) -> None:
+    """Leave a bounce (exit_code 7) in ``branch_dir`` only, so watch_agent's
+    ('crashed', 7) answer names the directory the resolver chose."""
+    (branch_dir / ".ai_mail.local").mkdir(parents=True, exist_ok=True)
+    (branch_dir / ".ai_mail.local" / "last_bounce.json").write_text(json.dumps({"exit_code": 7}), encoding="utf-8")
+
+
+def _exit_during_first_poll(monkeypatch, side_effect):
+    """Run ``side_effect`` (the agent exiting) inside the watch loop's first poll tick.
+
+    The loop calls TranscriptScanner.tick once per poll, before it sleeps, so the
+    next iteration sees the exit. A class seam, not time.sleep: patching the
+    stdlib sleep is process-wide and raced the prax logger's daemon threads.
+    """
+
+    def tick_and_exit(self, now):
         side_effect()
-        real_sleep(0.01)
+        return False
 
-    return fake_sleep
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", tick_and_exit)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,9 +110,11 @@ def _agent_only_sleep(side_effect):
 
 def test_watch_agent_branch_not_found(monkeypatch, tmp_path):
     """Missing branch returns immediately with timeout state and 'agent not found'."""
-    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: None)
+    asked: list = []
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: asked.append(a) or None)
     result = agent_handler.watch_agent("@nonexistent", timeout_seconds=5)
 
+    assert asked == [()]
     assert result["woke"] is False
     assert result["agent_state"] == "timeout"
     assert "not found" in result["reason"].lower()
@@ -132,12 +138,11 @@ def test_resolve_branch_path_finds_projects_citizen(monkeypatch, tmp_path):
     project_registry = {"branches": [{"name": "BAUD", "email": "@baud", "path": "src/baud/baud"}]}
     (tmp_path / "projects" / "baud" / "BAUD_REGISTRY.json").write_text(json.dumps(project_registry), encoding="utf-8")
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setenv("AIPASS_CALLER_CWD", "")
-    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+    _pin_home(monkeypatch, tmp_path / "nohome")
+    _mark_resolved(branch_dir)
 
-    resolved = agent_handler._resolve_branch_path("@baud")
-    assert resolved is not None
-    assert resolved.resolve() == branch_dir.resolve()
+    result = agent_handler.watch_agent("@baud", timeout_seconds=5)
+    assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
 
 
 def test_resolve_branch_path_local_wins_over_projects(monkeypatch, tmp_path):
@@ -154,12 +159,11 @@ def test_resolve_branch_path_local_wins_over_projects(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setenv("AIPASS_CALLER_CWD", "")
-    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+    _pin_home(monkeypatch, tmp_path / "nohome")
+    _mark_resolved(local_dir)
 
-    resolved = agent_handler._resolve_branch_path("@twin")
-    assert resolved is not None
-    assert resolved.resolve() == local_dir.resolve()
+    result = agent_handler.watch_agent("@twin", timeout_seconds=5)
+    assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
 
 
 def test_watch_agent_no_active_lock(monkeypatch, tmp_path):
@@ -180,11 +184,7 @@ def test_watch_agent_completed_via_lock_removal(monkeypatch, tmp_path):
     lock_file = _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
 
-    monkeypatch.setattr(
-        agent_handler.time,
-        "sleep",
-        _agent_only_sleep(lambda: lock_file.unlink(missing_ok=True)),
-    )
+    _exit_during_first_poll(monkeypatch, lambda: lock_file.unlink(missing_ok=True))
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
@@ -204,11 +204,7 @@ def test_watch_agent_completed_replied_via_sent_folder(monkeypatch, tmp_path):
     sent_msg = {"to": "@devpulse", "from": "@fakebranch", "subject": "Done", "timestamp": "2026-04-14 00:01:00"}
     (sent_dir / "reply.json").write_text(json.dumps(sent_msg), encoding="utf-8")
 
-    monkeypatch.setattr(
-        agent_handler.time,
-        "sleep",
-        _agent_only_sleep(lambda: lock_file.unlink(missing_ok=True)),
-    )
+    _exit_during_first_poll(monkeypatch, lambda: lock_file.unlink(missing_ok=True))
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
@@ -229,7 +225,7 @@ def test_watch_agent_crashed_via_bounce_file(monkeypatch, tmp_path):
         bounce_file.write_text(json.dumps({"exit_code": 1, "reason": "test"}), encoding="utf-8")
         lock_file.unlink(missing_ok=True)
 
-    monkeypatch.setattr(agent_handler.time, "sleep", _agent_only_sleep(crash_exit))
+    _exit_during_first_poll(monkeypatch, crash_exit)
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
@@ -243,7 +239,7 @@ def test_watch_agent_timeout(monkeypatch, tmp_path):
     branch_path = _build_fake_branch(tmp_path)
     _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
+    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: pid == os.getpid())
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=1, poll_interval=0.05)
 
@@ -258,7 +254,7 @@ def test_watch_agent_pid_dead_treated_as_crash(monkeypatch, tmp_path):
     branch_path = _build_fake_branch(tmp_path)
     _write_lock(branch_path, pid=999999)
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: pid != 999999)
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=5, poll_interval=0.01)
 
@@ -296,14 +292,24 @@ def _write_jsonl(projects_dir: Path, *lines: dict, name: str = "session.jsonl") 
 
 
 def _lines(*entries: dict) -> list[str]:
-    """JSON-encode entries as transcript lines for _inflight_from_lines."""
+    """JSON-encode entries as raw transcript lines."""
     return [json.dumps(e) for e in entries]
 
 
-def test_inflight_from_lines_true_for_assistant_tool_use():
+def _scanner_verdict(projects_dir: Path, lines: list[str]) -> bool:
+    """The in-flight verdict a TranscriptScanner gives for one transcript holding ``lines``."""
+    projects_dir.mkdir(parents=True)
+    (projects_dir / "session.jsonl").write_text("".join(ln + "\n" for ln in lines), encoding="utf-8")
+    scanner = agent_handler.TranscriptScanner(projects_dir, now=0.0)
+    scanner.tick(1.0)
+    return scanner.last_entry_inflight()
+
+
+def test_inflight_from_lines_true_for_assistant_tool_use(tmp_path):
     """Last line = assistant message with a tool_use block → in-flight tool call."""
     assert (
-        agent_handler._inflight_from_lines(
+        _scanner_verdict(
+            tmp_path / "proj",
             _lines(
                 {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "go"}]}},
                 {
@@ -313,22 +319,24 @@ def test_inflight_from_lines_true_for_assistant_tool_use():
                         "content": [{"type": "tool_use", "id": "a", "name": "Bash", "input": {}}],
                     },
                 },
-            )
+            ),
         )
         is True
     )
 
 
-def test_inflight_from_lines_false_for_text_results_malformed_empty():
+def test_inflight_from_lines_false_for_text_results_malformed_empty(tmp_path):
     """Assistant text-only, a returned tool_result, malformed, and empty all → False."""
     assert (
-        agent_handler._inflight_from_lines(
-            _lines({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "d"}]}})
+        _scanner_verdict(
+            tmp_path / "text",
+            _lines({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "d"}]}}),
         )
         is False
     )
     assert (
-        agent_handler._inflight_from_lines(
+        _scanner_verdict(
+            tmp_path / "result",
             _lines(
                 {
                     "type": "user",
@@ -337,12 +345,12 @@ def test_inflight_from_lines_false_for_text_results_malformed_empty():
                         "content": [{"type": "tool_result", "tool_use_id": "a", "content": "ok"}],
                     },
                 }
-            )
+            ),
         )
         is False
     )
-    assert agent_handler._inflight_from_lines(["{not valid json"]) is False
-    assert agent_handler._inflight_from_lines([]) is False
+    assert _scanner_verdict(tmp_path / "malformed", ["{not valid json"]) is False
+    assert _scanner_verdict(tmp_path / "empty", []) is False
 
 
 def test_scanner_newest_file_decides_inflight(tmp_path):
@@ -383,9 +391,9 @@ def _stub_scanner(
     tracker.scanner.refresh = lambda now: None
 
 
-def test_stalltracker_reports_stall_after_threshold(capsys):
+def test_stalltracker_reports_stall_after_threshold(capsys, tmp_path):
     """No activity past STALL_THRESHOLD → a [watchdog.stall] line on stdout."""
-    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", tmp_path / "nope", now=0.0, pid=123)
     _stub_scanner(t, tick=False, inflight=False)
 
     t.observe(now=60.0)  # below threshold
@@ -397,9 +405,9 @@ def test_stalltracker_reports_stall_after_threshold(capsys):
     assert t.stall_reported is True
 
 
-def test_stalltracker_inflight_tool_prevents_stall(capsys):
+def test_stalltracker_inflight_tool_prevents_stall(capsys, tmp_path):
     """An in-flight tool call resets the idle timer every tick → never a stall."""
-    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", tmp_path / "nope", now=0.0, pid=123)
     _stub_scanner(t, tick=False, inflight=True)
 
     for now in (120.0, 240.0, 360.0, 480.0):
@@ -410,9 +418,9 @@ def test_stalltracker_inflight_tool_prevents_stall(capsys):
     assert t.stall_reported is False
 
 
-def test_stalltracker_long_tool_advisory(capsys):
+def test_stalltracker_long_tool_advisory(capsys, tmp_path):
     """One tool call held in-flight past LONG_TOOL_THRESHOLD → advisory, not a stall."""
-    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", tmp_path / "nope", now=0.0, pid=123)
     _stub_scanner(t, tick=False, inflight=True)
 
     t.observe(now=0.0)  # first in-flight tick → anchors in_flight_since
@@ -423,10 +431,10 @@ def test_stalltracker_long_tool_advisory(capsys):
     assert t.long_tool_reported is True
 
 
-def test_stalltracker_resume_clears_stall(capsys):
+def test_stalltracker_resume_clears_stall(capsys, tmp_path):
     """After a stall, real activity emits [watchdog.resumed] and clears the flag."""
     signals = {"size": False}
-    t = agent_handler.StallTracker("@x", Path("/nope"), now=0.0, pid=123)
+    t = agent_handler.StallTracker("@x", tmp_path / "nope", now=0.0, pid=123)
     _stub_scanner(t, tick=lambda: signals["size"], inflight=False)
 
     t.observe(now=agent_handler.StallTracker.STALL_THRESHOLD)  # stall
@@ -475,9 +483,11 @@ def test_watch_agent_surfaces_stall_to_stdout(monkeypatch, tmp_path, capsys):
     branch_path = _build_fake_branch(tmp_path)
     lock_file = _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
-    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", lambda self, now: False)
-    monkeypatch.setattr(agent_handler.TranscriptScanner, "last_entry_inflight", lambda self: False)
+    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: pid == os.getpid())
+    ticked: list = []
+    asked: list = []
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", lambda self, now: ticked.append(now) or False)
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "last_entry_inflight", lambda self: asked.append(1) or False)
     # Lock must outlive STALL_THRESHOLD (300s) or the watch completes stall-free.
     _fake_clock_sleep(agent_handler, monkeypatch, lock_file, unlink_at=400.0)
 
@@ -485,6 +495,9 @@ def test_watch_agent_surfaces_stall_to_stdout(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     assert "[watchdog.stall]" in out
     assert result["woke"] is True
+    # one poll per fake minute, and the threshold poll re-asks after its forced re-walk
+    assert ticked == [0.0, 60.0, 120.0, 180.0, 240.0, 300.0, 300.0, 360.0]
+    assert len(asked) == len(ticked)
 
 
 def test_watch_agent_inflight_tool_no_false_stall(monkeypatch, tmp_path, capsys):
@@ -492,15 +505,19 @@ def test_watch_agent_inflight_tool_no_false_stall(monkeypatch, tmp_path, capsys)
     branch_path = _build_fake_branch(tmp_path)
     lock_file = _write_lock(branch_path, pid=os.getpid())
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: True)
-    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", lambda self, now: False)
-    monkeypatch.setattr(agent_handler.TranscriptScanner, "last_entry_inflight", lambda self: True)
+    monkeypatch.setattr(agent_handler, "_pid_alive", lambda pid: pid == os.getpid())
+    ticked: list = []
+    asked: list = []
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "tick", lambda self, now: ticked.append(now) or False)
+    monkeypatch.setattr(agent_handler.TranscriptScanner, "last_entry_inflight", lambda self: asked.append(1) or True)
     _fake_clock_sleep(agent_handler, monkeypatch, lock_file)
 
     result = agent_handler.watch_agent("@fakebranch", timeout_seconds=100000, poll_interval=0.01)
     out = capsys.readouterr().out
     assert "[watchdog.stall]" not in out
     assert result["woke"] is True
+    assert ticked == [0.0, 60.0, 120.0, 180.0]
+    assert len(asked) == len(ticked)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -525,6 +542,7 @@ def test_watch_agent_live_dispatch_completes():
         ["drone", "@ai_mail", "dispatch", "@drone", "Watchdog ping test", "Reply with OK then exit."],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
     assert dispatch.returncode == 0, f"dispatch failed: {dispatch.stderr}"
@@ -579,7 +597,7 @@ def test_scanner_no_basename_collision(tmp_path):
     assert s.tick(2.0) is True
 
 
-def test_inflight_seen_past_bookkeeping_lines():
+def test_inflight_seen_past_bookkeeping_lines(tmp_path):
     """Bookkeeping lines (type: last-prompt) after the assistant tool_use must not
     mask the in-flight signal — the live false-STALLED had exactly this shape."""
     tool_use = {
@@ -587,14 +605,14 @@ def test_inflight_seen_past_bookkeeping_lines():
         "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "Task", "input": {}}]},
     }
     bookkeeping = {"type": "last-prompt", "prompt": "..."}
-    assert agent_handler._inflight_from_lines(_lines(tool_use, bookkeeping)) is True
+    assert _scanner_verdict(tmp_path / "inflight", _lines(tool_use, bookkeeping)) is True
 
     # But a returned tool_result behind the same bookkeeping → NOT in-flight.
     tool_result = {
         "type": "user",
         "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "ok"}]},
     }
-    assert agent_handler._inflight_from_lines(_lines(tool_use, tool_result, bookkeeping)) is False
+    assert _scanner_verdict(tmp_path / "returned", _lines(tool_use, tool_result, bookkeeping)) is False
 
 
 def test_scanner_newest_file_may_be_subagent(tmp_path):
@@ -788,6 +806,7 @@ def test_watch_agent_live_dispatch_timeout_path():
         ["drone", "@ai_mail", "dispatch", "@drone", "Long watchdog test", "Wait at least 30 seconds then reply."],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
@@ -835,12 +854,11 @@ def test_lowercase_counter_never_answers_a_projects_resolve(monkeypatch, tmp_pat
     assert "aaa_registry.json" in widened, "emulation is blind — this test proves nothing"
 
     monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
-    monkeypatch.setenv("AIPASS_CALLER_CWD", "")
-    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+    _pin_home(monkeypatch, tmp_path / "nohome")
+    _mark_resolved(right_dir)
 
-    resolved = agent_handler._resolve_branch_path("@baud")
-    assert resolved is not None
-    assert resolved.resolve() == right_dir.resolve()
+    result = agent_handler.watch_agent("@baud", timeout_seconds=5)
+    assert (result["agent_state"], result["exit_code"]) == ("crashed", 7)
 
 
 def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_path):
@@ -857,11 +875,13 @@ def test_lowercase_counter_never_answers_an_external_resolve(monkeypatch, tmp_pa
     widened = [p.name for p in ext.glob("*_REGISTRY.json")]
     assert "ext_registry.json" in widened, "emulation is blind — this test proves nothing"
 
-    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: None)
-    monkeypatch.setenv("AIPASS_CALLER_CWD", str(ext))
-    monkeypatch.setattr(agent_handler.Path, "home", lambda: tmp_path / "nohome")
+    asked: list = []
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: asked.append(a) or None)
+    _pin_home(monkeypatch, tmp_path / "nohome", caller_cwd=str(ext))
 
-    assert agent_handler._resolve_branch_path("@ext") is None
+    result = agent_handler.watch_agent("@ext", timeout_seconds=5)
+    assert result["reason"] == "agent not found"
+    assert asked == [()]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -919,14 +939,20 @@ def test_the_zombie_rule_is_not_duplicated_in_this_module():
     "A call-through pin cannot see a call that correctly never happens. The no-second-copy half above "
     "still runs on this host.",
 )
-def test_pid_alive_asks_the_registry_for_the_zombie_rule(monkeypatch):
+def test_pid_alive_asks_the_registry_for_the_zombie_rule(monkeypatch, tmp_path):
     """The other half: the single implementation is actually REACHED.
 
     Not having a private copy proves nothing on its own — a liveness check that
-    simply forgot to ask is the same silent lie by another route.
+    simply forgot to ask is the same silent lie by another route. Reached through
+    watch_agent: the registry's zombie verdict ends the watch as a crash.
+    Mutant: _pid_alive stops asking registry.is_zombie — the watch times out, calls stays empty.
     """
+    branch_path = _build_fake_branch(tmp_path)
+    _write_lock(branch_path, pid=os.getpid())
+    monkeypatch.setattr(agent_handler, "_find_repo_root", lambda *a, **kw: tmp_path)
     calls: list = []
-    monkeypatch.setattr(watch_registry, "is_zombie", lambda pid: calls.append(pid) or False)
+    monkeypatch.setattr(watch_registry, "is_zombie", lambda pid: calls.append(pid) or True)
 
-    agent_handler._pid_alive(os.getpid())
+    result = agent_handler.watch_agent("@fakebranch", timeout_seconds=60, poll_interval=0.01)
     assert calls == [os.getpid()]
+    assert result["agent_state"] == "crashed"
