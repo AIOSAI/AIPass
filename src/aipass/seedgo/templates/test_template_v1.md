@@ -1,10 +1,10 @@
 # Test template v1
 
-**Version 1.2.0** (1.1.0 → 1.2.0 on 2026-09-25: rule 1, rule 3, red-first for its own reason, from the backup study, added to items 11 to 13; 1.0.0 → 1.1.0 on 2026-09-24: conftest C0, the log redirect above the imports, stated as item 8's one exception) · gold source: `src/aipass/seedgo/templates/` · model file: `readme_update_model.py.txt` · plan of record: DPLAN-0354.
+**Version 1.3.0** (1.2.0 → 1.3.0 on 2026-09-27: item 5's banner word is `AIPass`, the owner's ruling; 1.1.0 → 1.2.0 on 2026-09-25: rule 1, rule 3, red-first for its own reason, from the backup study, added to items 11 to 13; 1.0.0 → 1.1.0 on 2026-09-24: conftest C0, the log redirect above the imports, stated as item 8's one exception) · gold source: `src/aipass/seedgo/templates/` · model file: `readme_update_model.py.txt` · plan of record: DPLAN-0354.
 
 Housed and distributed by @seedgo (owner 22:50: *"Seedgo will house the test template. It will distribute it fleetwide right, kinda like how memory houses and manages your trinity memory files."*). The machine-readable version lives in `templates.json` beside this page; a branch's receipt is `tests/.template_version.json`, written by `drone @seedgo tests template bump --confirm`.
 
-Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is either the owner's ruling (marked OWNER, with the time) or what the readme_update trial proved. **Items 1 to 23 are reproduced unchanged**, except the two sentences 1.2.0 added to each of items 11 to 13; the `conftest.py` section is seedgo's, added when the page was housed.
+Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is either the owner's ruling (marked OWNER, with the time) or what the readme_update trial proved. **Items 1 to 23 are reproduced unchanged**, except the two sentences 1.2.0 added to each of items 11 to 13 and 1.3.0's banner sentence in item 5; the `conftest.py` section is seedgo's, added when the page was housed.
 
 ## Grain
 
@@ -15,7 +15,7 @@ Authored by @devpulse, 2026-09-20 22:35, amended 23:15. Every line below is eith
 
 ## File shape, top to bottom
 
-5. **The META header block first**, the same block product files carry. For a test file the banner word is `META`. OWNER 22:06 "header on top".
+5. **The META header block first**, the same block product files carry. The banner word is `AIPass`, for test files as for product files (OWNER 2026-09-27); `file_top` applies `meta_check`'s banner rule, which still accepts the legacy `META` line. OWNER 22:06 "header on top".
 6. **Then the module docstring: one line naming the subject as a path.** `"""Tests for apps/modules/readme_update.py and the handlers it drives."""`
 7. **Then the declared pass**: what is NOT tested here and which seedgo standard, or `constant` / `stdlib` / `generated`, covers it. One marker per line, the gold standard's form. In the trial this slot is where six tests got dropped: writing it does the deciding.
 8. **Product imports at the top of the file**, never inside a test. This is not tidiness. It removes the option of faking the unit under test. The trial showed it is the single biggest quality change: the old files stubbed `sys.modules` and re-imported per test, and two product mutants passed all 27 of them. Cost: one import per process, measured 0.12 s for the whole readme_update stack, paid once.

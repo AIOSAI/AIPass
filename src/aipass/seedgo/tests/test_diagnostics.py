@@ -1,5 +1,3 @@
-"""Tests for the diagnostics handler directory (diagnostics_check)."""
-
 # =================== META ====================
 # Name: test_diagnostics.py
 # Description: Unit tests for handlers/diagnostics/
@@ -8,8 +6,14 @@
 # Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/handlers/diagnostics/diagnostics_check.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess's launch of the child process; the runner is stubbed or absent here
+# seedgo: no-test-needed(standard) — each runner's own verdicts; apps/handlers/diagnostics/diagnostics_check.py is the seam
+
+from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
 from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-    _get_enabled_runners_from_config,
     check_branch,
     check_file,
     format_summary,
@@ -114,23 +118,28 @@ def test_format_summary_clean_run():
 # ---------------------------------------------------------------------------
 
 
-def test_get_enabled_runners_simple():
-    """_get_enabled_runners_from_config handles boolean format."""
-    config = {"runners": {"python": True, "typescript": False}}
-    result = _get_enabled_runners_from_config(config)
-    assert "python" in result
-    assert "typescript" not in result
+def _dispatched(tmp_path, monkeypatch, *configs):
+    """The runners check_branch dispatches for these pack configs; no runner really runs."""
+    (tmp_path / "apps").mkdir(exist_ok=True)
+    monkeypatch.setattr(diagnostics_check, "_discover_pack_configs", lambda: [{"config": c} for c in configs])
+    seen = []
+    monkeypatch.setattr(diagnostics_check, "_run_runner", lambda name, *_a, **_k: seen.append(name))
+    check_branch(str(tmp_path))
+    return seen
 
 
-def test_get_enabled_runners_detailed():
-    """_get_enabled_runners_from_config handles detailed format."""
-    config = {"runners": {"python": {"enabled": True}, "rust": {"enabled": False}}}
-    result = _get_enabled_runners_from_config(config)
-    assert "python" in result
-    assert "rust" not in result
+def test_get_enabled_runners_simple(tmp_path, monkeypatch):
+    """Mutant: a boolean runner entry ignored in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+    config = {"runners": {"typescript": False, "go": True}}
+    assert _dispatched(tmp_path, monkeypatch, config) == ["go"]
 
 
-def test_get_enabled_runners_empty():
-    """_get_enabled_runners_from_config returns empty for no runners."""
-    assert _get_enabled_runners_from_config({}) == []
-    assert _get_enabled_runners_from_config({"runners": {}}) == []
+def test_get_enabled_runners_detailed(tmp_path, monkeypatch):
+    """Mutant: a detailed {"enabled": ...} runner entry ignored in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+    config = {"runners": {"go": {"enabled": True}, "rust": {"enabled": False}}}
+    assert _dispatched(tmp_path, monkeypatch, config) == ["go"]
+
+
+def test_get_enabled_runners_empty(tmp_path, monkeypatch):
+    """No runner enabled anywhere: check_branch falls back to python alone."""
+    assert _dispatched(tmp_path, monkeypatch, {}, {"runners": {}}) == ["python"]

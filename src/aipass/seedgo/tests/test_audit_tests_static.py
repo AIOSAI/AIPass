@@ -1,29 +1,33 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_static.py
 # Description: tests for the static nominator tier, harness selfcheck and cache stamp
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-29
 # Modified: 2026-09-27
 # =============================================
 
-"""
-Phase 6-7 of the audit-tests lane: the nine nominators, selfcheck, cache, render.
+"""Tests for apps/handlers/tests_pytest_standards/ nominators and apps/handlers/audit_tests/selfcheck.py, cache, render."""
 
-THE TWO-SIDED BAR (design section 10.2, from TAXONOMY section 6):
+# Phase 6-7 of the audit-tests lane: the nine nominators, selfcheck, cache, render.
+#
+# THE TWO-SIDED BAR (design section 10.2, from TAXONOMY section 6):
+#
+#     A checker that flags nothing in table A is not measuring.
+#     A checker that flags anything in table B is not shippable.
+#
+# So every rule here is tested in BOTH directions, and the known-good direction
+# is the one that gets the sharper test — a false nomination teaches a branch to
+# delete a pin that was holding something up, and Law M11 exists because that has
+# already nearly happened once in this campaign's own corpus.
+#
+# The fixtures reproduce TAXONOMY's exemplar SHAPES rather than importing another
+# branch's source. A test that read @daemon's tests would fail the day @daemon
+# fixed them, which would make this suite's green mean "the corpus has not moved"
+# instead of "the rule still works".
 
-    A checker that flags nothing in table A is not measuring.
-    A checker that flags anything in table B is not shippable.
-
-So every rule here is tested in BOTH directions, and the known-good direction
-is the one that gets the sharper test — a false nomination teaches a branch to
-delete a pin that was holding something up, and Law M11 exists because that has
-already nearly happened once in this campaign's own corpus.
-
-The fixtures reproduce TAXONOMY's exemplar SHAPES rather than importing another
-branch's source. A test that read @daemon's tests would fail the day @daemon
-fixed them, which would make this suite's green mean "the corpus has not moved"
-instead of "the rule still works".
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every nominator module under tests_pytest_standards/ parses and imports
+# seedgo: no-test-needed(stdlib) — ast.parse of the fixture sources; the nominators read its tree as given
 
 import ast
 import json
@@ -636,18 +640,23 @@ class TestRuffPt:
         with pytest.raises(RuntimeError, match="not readable JSON"):
             ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
 
-    def test_a_diagnostic_becomes_a_nomination_carrying_its_code(self, tmp_path):
+    def test_a_diagnostic_becomes_a_nomination_carrying_its_code(self, tmp_path, monkeypatch):
         diagnostic = {
             "filename": str(tmp_path / "tests/test_sample.py"),
             "location": {"row": 7},
             "code": "PT009",
             "message": "m",
         }
-        row = ruff_pt_check._row(diagnostic, tmp_path)
+        monkeypatch.setattr(ruff_pt_check, "_ruff_binary", lambda: "/bin/true")
+        monkeypatch.setattr(ruff_pt_check, "_run_ruff", lambda *a: ([diagnostic], ""))
+        [row] = ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
         assert row["species"] == "PT-FAMILY" and row["line"] == 7 and row["evidence"]["code"] == "PT009"
 
-    def test_a_ruff_diagnostic_never_carries_a_delete_family_verdict(self, tmp_path):
-        row = ruff_pt_check._row({"filename": "x.py", "location": {"row": 1}, "code": "PT001"}, tmp_path)
+    def test_a_ruff_diagnostic_never_carries_a_delete_family_verdict(self, tmp_path, monkeypatch):
+        diagnostic = {"filename": "x.py", "location": {"row": 1}, "code": "PT001"}
+        monkeypatch.setattr(ruff_pt_check, "_ruff_binary", lambda: "/bin/true")
+        monkeypatch.setattr(ruff_pt_check, "_run_ruff", lambda *a: ([diagnostic], ""))
+        [row] = ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
         assert row["verdict"] in (corpus.VERDICT_SUSPECT, corpus.VERDICT_IMPROVE)
 
 
@@ -671,6 +680,14 @@ def _executable(path: Path) -> Path:
     return path
 
 
+def _binary_nominate_used(tmp_path: Path, monkeypatch) -> str:
+    """The ruff binary the public `nominate` hands to ruff, read off a recording `_run_ruff`."""
+    used: list = []
+    monkeypatch.setattr(ruff_pt_check, "_run_ruff", lambda binary, *_rest: (used.append(binary), ([], ""))[1])
+    ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
+    return used[0]
+
+
 class TestRuffBinaryLookup:
     """PATH is not where ruff lives; a venv is, and the venv was invisible.
 
@@ -688,7 +705,7 @@ class TestRuffBinaryLookup:
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         sibling = _executable(binaries / "ruff")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: str(tmp_path / "elsewhere" / "ruff"))
-        assert ruff_pt_check._ruff_binary() == str(sibling)
+        assert _binary_nominate_used(tmp_path, monkeypatch) == str(sibling)
 
     def test_the_windows_spelling_of_the_sibling_is_found_too(self, tmp_path, monkeypatch):
         # A POSIX-only name list would report "not installed" on every Windows
@@ -696,7 +713,7 @@ class TestRuffBinaryLookup:
         binaries = _fake_interpreter(tmp_path, monkeypatch)
         sibling = _executable(binaries / "ruff.exe")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: "")
-        assert ruff_pt_check._ruff_binary() == str(sibling)
+        assert _binary_nominate_used(tmp_path, monkeypatch) == str(sibling)
 
     def test_path_is_still_searched_when_the_interpreter_has_no_sibling(self, tmp_path, monkeypatch):
         # The fix adds a place to look; it must not remove one. A system-wide
@@ -704,7 +721,7 @@ class TestRuffBinaryLookup:
         _fake_interpreter(tmp_path, monkeypatch)
         on_path = str(tmp_path / "usr" / "bin" / "ruff")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: on_path)
-        assert ruff_pt_check._ruff_binary() == on_path
+        assert _binary_nominate_used(tmp_path, monkeypatch) == on_path
 
     def test_a_sibling_that_is_a_directory_is_not_taken_for_a_binary(self, tmp_path, monkeypatch):
         # Handing a directory to subprocess turns a missing linter into a
@@ -714,7 +731,7 @@ class TestRuffBinaryLookup:
         (binaries / "ruff").mkdir()
         on_path = str(tmp_path / "usr" / "bin" / "ruff")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: on_path)
-        assert ruff_pt_check._ruff_binary() == on_path
+        assert _binary_nominate_used(tmp_path, monkeypatch) == on_path
 
     @pytest.mark.skipif(os.name == "nt", reason="Windows ignores the executable bit")
     def test_a_sibling_without_the_executable_bit_is_not_returned(self, tmp_path, monkeypatch):
@@ -723,32 +740,44 @@ class TestRuffBinaryLookup:
         (binaries / "ruff").chmod(0o644)
         on_path = str(tmp_path / "usr" / "bin" / "ruff")
         monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: on_path)
-        assert ruff_pt_check._ruff_binary() == on_path
+        assert _binary_nominate_used(tmp_path, monkeypatch) == on_path
 
     def test_only_both_places_missing_is_an_absence(self, tmp_path, monkeypatch):
+        """Mutant: _ruff_binary skips the PATH lookup in apps/handlers/tests_pytest_standards/ruff_pt_check.py — killed."""
         _fake_interpreter(tmp_path, monkeypatch)
-        monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: None)
-        assert ruff_pt_check._ruff_binary() == ""
+        asked: list = []
+        monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda name: asked.append(name))
+        with pytest.raises(RuntimeError):
+            ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
+        assert asked == ["ruff"]
 
     def test_the_refusal_names_both_places_it_looked(self, tmp_path, monkeypatch):
+        """Mutant: _ruff_binary skips the PATH lookup in apps/handlers/tests_pytest_standards/ruff_pt_check.py — killed."""
         # "ruff is not installed" was true of PATH and false of the machine,
         # and no reader of the artifact could tell which claim they held. The
         # reason has to carry the candidate locations or the next reader
         # repeats the same investigation.
         binaries = _fake_interpreter(tmp_path, monkeypatch)
-        monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda _name: None)
+        asked: list = []
+        monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda name: asked.append(name))
         with pytest.raises(RuntimeError) as raised:
             ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
         reason = str(raised.value)
         assert str(binaries / "ruff") in reason
         assert "PATH" in reason
+        assert asked == ["ruff"]
 
     def test_the_absence_reason_still_says_not_installed(self, tmp_path, monkeypatch):
+        """Mutant: _ruff_binary skips the PATH lookup in apps/handlers/tests_pytest_standards/ruff_pt_check.py — killed."""
         # The orchestrator's not_applicable text is read by people, and the
         # phrase they search for is the old one; naming the places must not
         # cost the sentence that says what happened.
         _fake_interpreter(tmp_path, monkeypatch)
-        assert "not installed" in ruff_pt_check._absent_reason()
+        asked: list = []
+        monkeypatch.setattr(ruff_pt_check.shutil, "which", lambda name: asked.append(name))
+        with pytest.raises(RuntimeError, match="not installed"):
+            ruff_pt_check.nominate(_corpus(tmp_path, "def test_a():\n    assert True\n"))
+        assert asked == ["ruff"]
 
 
 # =============================================================================
@@ -937,12 +966,16 @@ class TestContentRendering:
 # =============================================================================
 
 
+# The handlers/ directory the audit module discovers its packs in, found from the handler itself.
+_HANDLERS_DIR = Path(discovery.__file__).resolve().parent.parent
+
+
 class TestPackKindRefusal:
     """The nominators ship as *_check.py; the audit must not offer to score them."""
 
     def test_the_execution_pack_is_not_offered_as_a_scoring_pack(self):
 
-        assert "tests_pytest" not in standards_audit._discover_packs()
+        assert "tests_pytest" not in discovery.discover_packs(_HANDLERS_DIR)
 
     def test_the_execution_pack_is_still_visible_as_a_non_scoring_pack(self):
         # Hidden and absent must not look the same: an operator who can see the
@@ -952,7 +985,7 @@ class TestPackKindRefusal:
 
     def test_the_standards_pack_is_still_discovered(self):
 
-        assert "aipass" in standards_audit._discover_packs()
+        assert "aipass" in discovery.discover_packs(_HANDLERS_DIR)
 
     def test_a_pack_with_no_manifest_is_treated_as_standards(self, tmp_path):
         # Changing the default would silently unregister the pack this branch
@@ -968,7 +1001,7 @@ class TestPackKindRefusal:
         # calls it: a pack that is hidden and a pack that is absent look the
         # same to an operator, which is the whole reason the list exists.
 
-        standards_audit._print_non_scoring_packs()
+        standards_audit.print_introspection()
         printed = capsys.readouterr().out
         assert "tests_pytest" in printed and "execution" in printed
 

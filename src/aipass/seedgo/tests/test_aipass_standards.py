@@ -1,12 +1,17 @@
-"""Tests for the aipass_standards handler directory."""
-
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/naming_check.py and its json, host and calendar siblings."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — the other checkers in aipass_standards/; each has its own test file
+# seedgo: no-test-needed(constant) — the guidance prose in each *_content.py; only its doctrine lines are read
+# seedgo: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
 import pytest
 from unittest.mock import MagicMock
@@ -47,7 +52,7 @@ def _pin_bypass_log(monkeypatch):
 
 
 def test_naming_check_module_returns_dict(tmp_path):
-    """naming_check.check_module returns a dict with expected keys."""
+    """A clean snake_case file scores 100 and passes. Mutant: score counts failed checks in naming_check.py — killed."""
     py_file = tmp_path / "sample.py"
     py_file.write_text(
         '"""Sample module."""\n\ndef my_function():\n    pass\n',
@@ -59,17 +64,19 @@ def test_naming_check_module_returns_dict(tmp_path):
     assert "passed" in result
     assert "checks" in result
     assert "score" in result
-    assert isinstance(result["passed"], bool)
-    assert isinstance(result["checks"], list)
-    assert isinstance(result["score"], (int, float))
+    assert result["passed"] is True
+    assert [check["passed"] for check in result["checks"]] == [True, True]
+    assert result["score"] == 100
 
 
 def test_naming_check_module_missing_file(tmp_path):
-    """naming_check.check_module handles missing file gracefully."""
+    """A missing file fails at 0, saying so. Mutant: missing file reported passed in naming_check.py — killed."""
 
     result = naming_check.check_module(str(tmp_path / "nonexistent" / "path" / "file.py"))
     assert isinstance(result, dict)
-    assert "passed" in result
+    assert result["passed"] is False
+    assert result["score"] == 0
+    assert result["checks"][0]["message"].startswith("File not found:")
 
 
 def test_naming_check_module_with_bypass(tmp_path):
@@ -89,7 +96,7 @@ def test_naming_check_module_with_bypass(tmp_path):
 
 
 def test_json_structure_check_returns_expected_keys(tmp_path):
-    """json_structure_check.check_module returns dict with standard keys."""
+    """A file outside modules/ and handlers/ is declined at 100. Mutant: case (d) fails in json_structure_check.py — killed."""
     py_file = tmp_path / "sample.py"
     py_file.write_text(
         '"""Sample."""\nimport json\n',
@@ -98,17 +105,18 @@ def test_json_structure_check_returns_expected_keys(tmp_path):
 
     result = json_structure_check.check_module(str(py_file))
     assert isinstance(result, dict)
-    assert "passed" in result
-    assert "score" in result
-    assert "checks" in result
+    assert result["passed"] is True
+    assert result["score"] == 100
+    assert [check["message"] for check in result["checks"]] == ["Not in modules/ or handlers/ (not applicable)"]
 
 
 def test_json_structure_check_missing_file(tmp_path):
-    """json_structure_check.check_module handles missing file."""
+    """A missing file fails at 0. Mutant: missing file reported passed in json_structure_check.py — killed."""
 
     result = json_structure_check.check_module(str(tmp_path / "nonexistent" / "module.py"))
     assert isinstance(result, dict)
-    assert "passed" in result
+    assert result["passed"] is False
+    assert result["score"] == 0
 
 
 def test_json_structure_check_has_standard_field(tmp_path):
@@ -132,7 +140,7 @@ def test_json_structure_custom_config_subdir_passes(tmp_path):
     (cc / "settings.json").write_text("{}", encoding="utf-8")
     (json_dir / "config.json").write_text("{}", encoding="utf-8")
 
-    violations = json_structure_check._check_json_dir_structure(str(branch))
+    violations = json_structure_check.check_branch_post(str(branch))[0]
     assert violations == []
 
 
@@ -146,7 +154,7 @@ def test_json_structure_random_subdir_fails(tmp_path):
     (json_dir / "custom_config").mkdir()
     (json_dir / "extra_stuff").mkdir()
 
-    violations = json_structure_check._check_json_dir_structure(str(branch))
+    violations = json_structure_check.check_branch_post(str(branch))[0]
     assert len(violations) == 1
     assert "extra_stuff" in violations[0]["message"]
 
@@ -160,7 +168,7 @@ def test_json_structure_hidden_subdir_ignored(tmp_path):
     json_dir.mkdir()
     (json_dir / ".archive").mkdir()
 
-    violations = json_structure_check._check_json_dir_structure(str(branch))
+    violations = json_structure_check.check_branch_post(str(branch))[0]
     assert violations == []
 
 
@@ -170,7 +178,7 @@ def test_json_structure_no_json_dir_passes(tmp_path):
     branch = tmp_path / "mybranch"
     branch.mkdir()
 
-    violations = json_structure_check._check_json_dir_structure(str(branch))
+    violations = json_structure_check.check_branch_post(str(branch))[0]
     assert violations == []
 
 
@@ -205,7 +213,7 @@ def test_json_structure_bypassed_subdir_passes(tmp_path):
     (json_dir / "compass").mkdir()
 
     bypass_rules = [{"standard": "json_structure", "file": "mybranch_json/compass", "reason": "test"}]
-    violations = json_structure_check._check_json_dir_structure(str(branch), bypass_rules=bypass_rules)
+    violations = json_structure_check.check_branch_post(str(branch), bypass_rules=bypass_rules)[0]
     assert violations == []
 
 
@@ -220,7 +228,7 @@ def test_json_structure_unbypassed_subdir_still_fails(tmp_path):
     (json_dir / "random_dir").mkdir()
 
     bypass_rules = [{"standard": "json_structure", "file": "mybranch_json/compass", "reason": "test"}]
-    violations = json_structure_check._check_json_dir_structure(str(branch), bypass_rules=bypass_rules)
+    violations = json_structure_check.check_branch_post(str(branch), bypass_rules=bypass_rules)[0]
     assert len(violations) == 1
     assert "random_dir" in violations[0]["message"]
 
@@ -454,13 +462,20 @@ def _branch_with_json_files(tmp_path, filenames):
     return branch
 
 
+def _triplet_check(branch, bypass_rules=None):
+    """The disk-triplet check exactly as the public check_branch reports it."""
+    result = json_handler_check.check_branch(str(branch), bypass_rules=bypass_rules)
+    [check] = [check for check in result["checks"] if check["name"] == "Disk triplet completeness"]
+    return check
+
+
 def test_disk_triplets_no_json_dir(tmp_path):
     """No {branch}_json/ directory passes (no JSON activity)."""
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is True
 
 
@@ -469,7 +484,7 @@ def test_disk_triplets_complete(tmp_path):
 
     branch = _branch_with_json_files(tmp_path, ["audit_config.json", "audit_data.json", "audit_log.json"])
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is True
     assert "All 1 modules" in result["message"]
 
@@ -479,7 +494,7 @@ def test_disk_triplets_config_without_log_is_caught(tmp_path):
 
     branch = _branch_with_json_files(tmp_path, ["trigger_config.json"])
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is False
     assert "trigger (missing data, log)" in result["message"]
 
@@ -489,7 +504,7 @@ def test_disk_triplets_data_without_siblings_is_caught(tmp_path):
 
     branch = _branch_with_json_files(tmp_path, ["solo_data.json"])
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is False
     assert "solo (missing config, log)" in result["message"]
 
@@ -499,7 +514,7 @@ def test_disk_triplets_log_without_config_still_caught(tmp_path):
 
     branch = _branch_with_json_files(tmp_path, ["audit_log.json", "audit_data.json"])
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is False
     assert "audit (missing config)" in result["message"]
 
@@ -509,7 +524,7 @@ def test_disk_triplets_ignores_non_triplet_files(tmp_path):
 
     branch = _branch_with_json_files(tmp_path, ["audit_cache.json", "config.json", "registry.json"])
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is True
     assert "no triplet files" in result["message"]
 
@@ -526,7 +541,7 @@ def test_disk_triplets_bypass_respected(tmp_path):
         }
     ]
 
-    result = json_handler_check._check_disk_triplets(branch, bypass_rules=rules)
+    result = _triplet_check(branch, bypass_rules=rules)
     assert result["passed"] is True
 
 
@@ -536,7 +551,7 @@ def test_disk_triplets_bypass_wrong_standard_ignored(tmp_path):
     branch = _branch_with_json_files(tmp_path, ["trigger_config.json", "trigger_data.json"])
     rules = [{"file": "mybranch_json/trigger_log.json", "standard": "json_structure", "reason": "unrelated"}]
 
-    result = json_handler_check._check_disk_triplets(branch, bypass_rules=rules)
+    result = _triplet_check(branch, bypass_rules=rules)
     assert result["passed"] is False
 
 
@@ -548,7 +563,7 @@ def test_disk_triplets_multiple_gaps_counted(tmp_path):
         ["a_config.json", "a_data.json", "a_log.json", "b_config.json", "c_log.json"],
     )
 
-    result = json_handler_check._check_disk_triplets(branch)
+    result = _triplet_check(branch)
     assert result["passed"] is False
     assert result["message"].startswith("2/3 modules missing triplet files")
 
@@ -643,15 +658,33 @@ def _canonical_shim_bytes_on_disk():
     return content
 
 
-def test_the_canonical_shim_passes_capability_by_hash():
+def _named_check(branch, name):
+    """The check called *name* as the public check_branch reports it, or None when absent."""
+    result = json_handler_check.check_branch(str(branch))
+    found = [check for check in result["checks"] if check["name"] == name]
+    assert len(found) <= 1
+    return found[0] if found else None
+
+
+def _capability(root, content, branch_name):
+    """(passed, message) of check_branch's handler-capability check for a handler holding *content*."""
+    branch = root / branch_name
+    handler = branch / "apps" / "handlers" / "json" / "json_handler.py"
+    handler.parent.mkdir(parents=True)
+    handler.write_text(content, encoding="utf-8")
+    check = _named_check(branch, "Handler capability")
+    return check["passed"], check["message"]
+
+
+def test_the_canonical_shim_passes_capability_by_hash(tmp_path):
     """The spec's own bytes are accepted, and accepted on the identity path."""
 
-    passed, message = json_handler_check._capability_verdict(_canonical_shim_bytes_or_skip(), "anybranch")
+    passed, message = _capability(tmp_path, _canonical_shim_bytes_or_skip(), "anybranch")
     assert passed is True
     assert "sha256" in message
 
 
-def test_one_changed_character_is_no_longer_the_canonical_shim():
+def test_one_changed_character_is_no_longer_the_canonical_shim(tmp_path):
     """Identity, not resemblance: a shim that drifts stops being the shim.
 
     Red-first proof that the hash path is doing the work — one extra space,
@@ -662,13 +695,12 @@ def test_one_changed_character_is_no_longer_the_canonical_shim():
     a byte of drift is a red, not a quieter green.
     """
     mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
-    assert json_handler_check._is_canonical_shim(mutated) is False
-    passed, message = json_handler_check._capability_verdict(mutated, "anybranch")
+    passed, message = _capability(tmp_path, mutated, "anybranch")
     assert passed is False
     assert "sha256" in message
 
 
-def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused():
+def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused(tmp_path):
     """A branch that adopts the import and keeps its own directory is not migrated.
 
     The failure this forbids is a file that reads as migrated — it has the
@@ -680,12 +712,12 @@ def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused():
     """
 
     half = "from aipass.prax import json_handler\n_JSON_DIR = _ROOT / 'canary_json'\n"
-    passed, message = json_handler_check._capability_verdict(half, "canary")
+    passed, message = _capability(tmp_path, half, "canary")
     assert passed is False
     assert "canary" in message
 
 
-def test_the_refusal_message_names_the_branch_and_the_line_to_write():
+def test_the_refusal_message_names_the_branch_and_the_line_to_write(tmp_path):
     """A red a branch cannot act on is a red that stays.
 
     The hash says nothing on its own — "sha256 mismatch" tells a reader
@@ -693,7 +725,7 @@ def test_the_refusal_message_names_the_branch_and_the_line_to_write():
     that there is ONE implementation, and the import line the replacement
     starts with, because that is the entire remedy.
     """
-    passed, message = json_handler_check._capability_verdict("def load_json(name):\n    return {}\n", "canary")
+    passed, message = _capability(tmp_path, "def load_json(name):\n    return {}\n", "canary")
     assert passed is False
     assert "canary" in message
     assert json_handler_check.SERVICE_IMPORT_MARKER in message
@@ -704,7 +736,7 @@ def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
-    assert json_handler_check._check_template_handler(branch) is None
+    assert _named_check(branch, "Template handler capability") is None
 
 
 def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
@@ -721,7 +753,7 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     handler = template / "json_handler.py"
 
     handler.write_text("def log_operation(op):\n    return True\n", encoding="utf-8")
-    result = json_handler_check._check_template_handler(branch)
+    result = _named_check(branch, "Template handler capability")
     assert result is not None
     assert result["passed"] is False
     assert "Not the canonical json shim" in result["message"]
@@ -730,7 +762,7 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     # only accept path is the hash, so a two-line stand-in that merely imports
     # the service is refused here exactly as it would be in a branch.
     handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
-    result = json_handler_check._check_template_handler(branch)
+    result = _named_check(branch, "Template handler capability")
     assert result is not None
     assert result["passed"] is True
 
@@ -860,6 +892,13 @@ def _seam_branch(tmp_path, seam_body: str | None = None):
     return seam
 
 
+def _wiring_checks(path):
+    """The code-wiring checks the public check_module runs on *path* (never a declined arm)."""
+    checks = json_structure_check.check_module(str(path))["checks"]
+    assert not any(check.get("declined") for check in checks), checks
+    return checks
+
+
 def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
     """@backup moved 67 audit calls off the shim per the spec, as ordered.
 
@@ -869,12 +908,12 @@ def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
     """
 
     seam = _seam_branch(tmp_path)
-    module = seam.parents[3] / "modules" / "snapshot.py"
+    module = seam.parents[2] / "modules" / "snapshot.py"
     module.parent.mkdir(parents=True)
     source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
     module.write_text(source, encoding="utf-8")
 
-    checks = json_structure_check._check_code_wiring(module, source)
+    checks = _wiring_checks(module)
     assert all(c["passed"] for c in checks)
     assert any("trail seam" in c["message"] for c in checks)
 
@@ -883,7 +922,7 @@ def test_the_seam_itself_does_not_have_to_log_through_itself(tmp_path):
     """The substrate is not a consumer of the substrate."""
 
     seam = _seam_branch(tmp_path)
-    checks = json_structure_check._check_code_wiring(seam, seam.read_text(encoding="utf-8"))
+    checks = _wiring_checks(seam)
     assert all(c["passed"] for c in checks)
 
 
@@ -897,12 +936,12 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
 
     fake = _seam_branch(tmp_path, "def log_operation(operation, data):\n    print(operation)\n")
 
-    module = fake.parents[3] / "modules" / "snapshot.py"
+    module = fake.parents[2] / "modules" / "snapshot.py"
     module.parent.mkdir(parents=True)
     source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
     module.write_text(source, encoding="utf-8")
 
-    checks = json_structure_check._check_code_wiring(module, source)
+    checks = _wiring_checks(module)
     assert not all(c["passed"] for c in checks)
 
 

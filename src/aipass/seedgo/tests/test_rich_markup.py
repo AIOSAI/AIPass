@@ -1,12 +1,16 @@
-"""Tests for the rich_markup standard — asserted against RENDERED output."""
-
 # =================== META ====================
 # Name: test_rich_markup.py
 # Description: Unit tests for rich_markup_check and rich_markup_content
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-11
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/rich_markup_check.py, asserted on rendered output."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that rich_markup_check.py and rich_markup_content.py parse and import
+# seedgo: no-test-needed(stdlib) — ast.parse() of the checked source; the premise tests only read Rich back
 
 import io
 from pathlib import Path

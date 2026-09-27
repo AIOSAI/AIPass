@@ -1,5 +1,3 @@
-"""Tests for checklist module."""
-
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
@@ -7,6 +5,12 @@
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/modules/checklist.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — each checker's own verdict; every <row>_check.py has its own test file
+# seedgo: no-test-needed(stdlib) — argparse's own parsing of the flag list
 
 from unittest.mock import MagicMock, patch
 
@@ -123,14 +127,16 @@ def test_run_checklist_non_python_file(tmp_path):
     assert "not a python" in results[0]["detail"].lower()
 
 
-def test_run_checklist_python_file_no_checkers(tmp_path):
-    """run_checklist on a Python file with no applicable checkers returns skip."""
+def test_run_checklist_python_file_no_checkers(tmp_path, monkeypatch):
+    """Mutant: the empty-pack guard (if not checkers) removed in apps/modules/checklist.py — killed."""
+    # tmp_path sits under the system temp root, which the lane skips as throwaway
+    # before it ever loads a pack; neutered so the empty pack is what is measured.
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     py_file = tmp_path / "sample.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
     results = checklist.run_checklist(str(py_file))
-    # With mocked empty checkers, should get either skip or error
-    assert len(results) >= 1
-    assert isinstance(results[0], dict)
+    # The autouse fixture's pack discovers nothing: one failing error row, never a silent pass.
+    assert results == [{"standard": "(error)", "passed": False, "detail": "No checkers discovered"}]
 
 
 def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):
@@ -159,12 +165,19 @@ def test_run_checklist_scratchpad_path_skipped(tmp_path):
     assert results[0]["detail"] == "Throwaway path (temp/scratchpad) — skipped"
 
 
-def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch):
-    """prototype=True skips all standards."""
+def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch, capsys):
+    """Mutant: handle_command drops --prototype (prototype = False) in apps/modules/checklist.py — killed."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
     f = tmp_path / "poc.py"
     f.write_text("x = 1\n", encoding="utf-8")
+    assert checklist.handle_command("checklist", ["--prototype", str(f)]) is True
+    shown = capsys.readouterr().out
+    # A skip row prints no detail. Without the flag this file reaches the
+    # (stubbed, empty) pack and prints an (error) row instead of the skip.
+    assert "(skip)" in shown
+    assert "(error)" not in shown
+    # The row the flag hands back, read from the public function it drives.
     results = checklist.run_checklist(str(f), prototype=True)
     assert len(results) == 1
     assert results[0]["passed"] is True
@@ -221,24 +234,21 @@ def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_runs(monkeypatch):
-    """print_introspection produces console output."""
-    mock_console = MagicMock()
-    monkeypatch.setattr(checklist, "console", mock_console)
-    mock_console.reset_mock()
-    result = checklist.print_introspection()
-    assert result is None
-    assert mock_console.print.called, "print_introspection should produce console output"
+def test_print_introspection_runs(capsys):
+    """Mutant: pack discovery matches no *_standards dir in apps/modules/checklist.py — killed."""
+    assert checklist.handle_command("checklist", []) is True
+    shown = capsys.readouterr().out
+    assert "Discovered Packs:" in shown
+    assert "aipass" in shown
+    assert "No packs found" not in shown
 
 
-def test_print_help_runs(monkeypatch):
-    """print_help produces console output."""
-    mock_console = MagicMock()
-    monkeypatch.setattr(checklist, "console", mock_console)
-    mock_console.reset_mock()
-    result = checklist.print_help()
-    assert result is None
-    assert mock_console.print.called, "print_help should produce console output"
+def test_print_help_runs(capsys):
+    """Mutant: print_help drops its --pack usage line in apps/modules/checklist.py — killed."""
+    assert checklist.handle_command("checklist", ["--help"]) is True
+    shown = capsys.readouterr().out
+    assert "USAGE:" in shown
+    assert "drone @seedgo checklist --pack" in shown
 
 
 # ---------------------------------------------------------------------------
@@ -246,42 +256,61 @@ def test_print_help_runs(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_is_entry_point_detection(tmp_path):
-    """_is_entry_point correctly identifies apps/{name}.py files."""
-    assert checklist._is_entry_point((tmp_path / "some" / "branch" / "apps" / "flow.py").as_posix()) is True
-    assert (
-        checklist._is_entry_point((tmp_path / "some" / "branch" / "apps" / "modules" / "helper.py").as_posix()) is False
+def test_is_entry_point_detection(tmp_path, monkeypatch):
+    """Mutant: _is_entry_point answers True for any .py under apps/ in apps/modules/checklist.py — killed."""
+    from types import SimpleNamespace
+
+    # Through run_checklist: an entry_point-scoped row runs on apps/{name}.py only.
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    entry = SimpleNamespace(AUDIT_SCOPE="entry_point", check_module=lambda path, bypass_rules=None: {"passed": True})
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {"entry": entry})
+    apps = tmp_path / "some" / "branch" / "apps"
+    (apps / "modules").mkdir(parents=True)
+    for target in (apps / "flow.py", apps / "modules" / "helper.py", apps / "readme.txt"):
+        target.write_text("x = 1\n", encoding="utf-8")
+
+    def standards(target):
+        return [r["standard"] for r in checklist.run_checklist(str(target))]
+
+    assert standards(apps / "flow.py") == ["entry"]
+    assert standards(apps / "modules" / "helper.py") == ["(skip)"]
+    assert standards(apps / "readme.txt") == ["(skip)"]
+
+
+def _failure_detail(tmp_path, monkeypatch, checks):
+    """The detail run_checklist prints for one failing row carrying these checks."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
+    failing = SimpleNamespace(
+        AUDIT_SCOPE="all_files", check_module=lambda path, bypass_rules=None: {"passed": False, "checks": checks}
     )
-    assert checklist._is_entry_point((tmp_path / "some" / "branch" / "apps" / "readme.txt").as_posix()) is False
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {"row": failing})
+    target = tmp_path / "thing.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+    [row] = checklist.run_checklist(str(target))
+    assert row["standard"] == "row" and row["passed"] is False
+    return row["detail"]
 
 
-def test_format_failure_no_checks():
+def test_format_failure_no_checks(tmp_path, monkeypatch):
     """_format_failure returns fallback when no failed checks present."""
-    result = checklist._format_failure({"checks": []})
+    result = _failure_detail(tmp_path, monkeypatch, [])
     assert "no details" in result.lower()
 
 
-def test_format_failure_single_failure():
+def test_format_failure_single_failure(tmp_path, monkeypatch):
     """_format_failure returns the message from the first failed check."""
-    result = checklist._format_failure(
-        {
-            "checks": [
-                {"passed": False, "message": "Missing docstring"},
-            ]
-        }
-    )
+    result = _failure_detail(tmp_path, monkeypatch, [{"passed": False, "message": "Missing docstring"}])
     assert "Missing docstring" in result
 
 
-def test_format_failure_multiple_failures():
+def test_format_failure_multiple_failures(tmp_path, monkeypatch):
     """_format_failure indicates additional failures."""
-    result = checklist._format_failure(
-        {
-            "checks": [
-                {"passed": False, "message": "Missing docstring"},
-                {"passed": False, "message": "No type hints"},
-            ]
-        }
+    result = _failure_detail(
+        tmp_path,
+        monkeypatch,
+        [{"passed": False, "message": "Missing docstring"}, {"passed": False, "message": "No type hints"}],
     )
     assert "+1 more" in result
 
@@ -378,7 +407,6 @@ def test_help_after_the_file_path_does_not_run_the_checklist(monkeypatch):
     """`drone @seedgo checklist <file> --help` ran a full per-file audit instead of describing one."""
     run = MagicMock()
     monkeypatch.setattr(checklist, "run_checklist", run)
-    monkeypatch.setattr(checklist, "_print_results", MagicMock())
     shown = MagicMock()
     monkeypatch.setattr(checklist, "print_help", shown)
 
@@ -391,7 +419,6 @@ def test_help_after_a_pack_flag_does_not_run_the_checklist(monkeypatch):
     """The flag can trail any operand — `checklist --pack aipass <file> -h` is still a question."""
     run = MagicMock()
     monkeypatch.setattr(checklist, "run_checklist", run)
-    monkeypatch.setattr(checklist, "_print_results", MagicMock())
     shown = MagicMock()
     monkeypatch.setattr(checklist, "print_help", shown)
 
@@ -406,17 +433,13 @@ def test_checklist_still_runs_without_a_help_flag(monkeypatch, tmp_path):
     target.write_text("x = 1\n", encoding="utf-8")
     run = MagicMock(return_value=[])
     monkeypatch.setattr(checklist, "run_checklist", run)
-    monkeypatch.setattr(checklist, "_print_results", MagicMock())
-    monkeypatch.setattr(checklist, "print_help", MagicMock())
 
     assert checklist.handle_command("checklist", [str(target)]) is True
     assert run.call_count == 1
 
 
-def test_checklist_does_not_answer_for_another_command(monkeypatch):
+def test_checklist_does_not_answer_for_another_command():
     """Ownership first: a help flag never makes a module claim a command it does not own."""
-    monkeypatch.setattr(checklist, "print_help", MagicMock())
-
     assert checklist.handle_command("audit", ["--help"]) is False
 
 

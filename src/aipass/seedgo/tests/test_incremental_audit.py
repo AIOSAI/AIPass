@@ -1,12 +1,3 @@
-"""Equivalence tests for the incremental audit cache (DPLAN-0275).
-
-Proves audit_branch_incremental() output is byte-equivalent to audit_branch()
-across the full re-run matrix: cold cache, unchanged branch (cache hit),
-mutated/added/deleted files, checker-pack edits, and bypass/ignore rule
-edits. This is the hard acceptance bar from Compass #136/#147 — incremental
-must never mean approximate.
-"""
-
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
@@ -14,6 +5,20 @@ must never mean approximate.
 # Created: 2026-07-31
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/audit/branch_audit.py audit_branch_incremental and apps/handlers/audit/incremental_cache.py."""
+
+# Equivalence tests for the incremental audit cache (DPLAN-0275).
+#
+# Proves audit_branch_incremental() output is byte-equivalent to audit_branch()
+# across the full re-run matrix: cold cache, unchanged branch (cache hit),
+# mutated/added/deleted files, checker-pack edits, and bypass/ignore rule
+# edits. This is the hard acceptance bar from Compass #136/#147 — incremental
+# must never mean approximate.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — each row's own verdict; apps/handlers/aipass_standards/trinity_check.py has its own tests
+# seedgo: no-test-needed(stdlib) — hashlib's digest and json's round-trip of the cache file
 
 import json
 import types
@@ -1286,8 +1291,9 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         ],
     )
     def test_the_two_real_checkers_declare_their_inputs(self, module_name, attribute, expected):
-        """The shipped declarations, not a fixture: this is what closes ruling 6.
+        """Mutant: trinity_check's BRANCH_INPUTS renamed away in apps/handlers/aipass_standards/trinity_check.py — killed.
 
+        The shipped declarations, not a fixture: this is what closes ruling 6.
         Read from SOURCE rather than imported: this module's autouse fixture
         stubs the bypass package, so importing a real checker here fails for
         reasons that have nothing to do with the declaration.
@@ -1304,7 +1310,7 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
             if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == attribute for t in node.targets)
         ]
 
-        assert declared, f"{module_name} declares no {attribute}"
+        assert len(declared) == 1, f"{module_name} declares {attribute} {len(declared)} times"
         assert expected in declared[0]
 
     def test_editing_a_trinity_file_makes_the_branch_dirty(self, tmp_path, monkeypatch):

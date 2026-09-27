@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_file_top_check.py
 # Description: file_top_check — test template v1 items 5, 6 and 7, the top of a test file
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/file_top_check.py."""
@@ -54,6 +54,7 @@ def _write(tmp_path, body, name="test_thing.py"):
 
 class TestTheWholeTopInOrderPasses:
     def test_header_docstring_declared_pass_is_clean(self):
+        """HEADER carries meta_check's legacy META banner, still accepted. Mutant BN2: KILLED here."""
         assert file_top_check.scan(HEADER + DOCSTRING + DECLARED_PASS + BODY) == []
 
     def test_the_declared_pass_may_hold_no_markers(self):
@@ -79,11 +80,24 @@ class TestItemFiveTheHeaderComesFirst:
 
         assert findings[0] == "item 5 META header: the file opens with a docstring — the header block comes first"
 
-    def test_the_banner_word_must_be_the_one_the_template_names(self):
-        """345 fleet files spell it AIPass and 72 spell it AIPASS; the template says META."""
+    def test_the_aipass_banner_passes(self):
+        """Owner 2026-09-27: AIPass is the banner word for product and test files alike.
+
+        Mutant BN1 (the AIPass line dropped from the accepted banners): KILLED here.
+        """
         source = HEADER.replace("META", "AIPass", 1) + DOCSTRING + DECLARED_PASS + BODY
 
-        assert file_top_check.scan(source) == ["item 5 META header: the banner word is AIPass, not META"]
+        assert file_top_check.scan(source) == []
+
+    def test_a_banner_meta_check_would_not_accept_is_named(self):
+        """72 fleet files carry the squashed AIPASS spelling; meta_check's exact line refuses it."""
+        squashed = "# ===================AIPASS====================\n"
+        source = squashed + HEADER.split("\n", 1)[1] + DOCSTRING + DECLARED_PASS + BODY
+
+        assert file_top_check.scan(source) == [
+            "item 5 META header: the banner line is `# ===================AIPASS====================`, "
+            "not `# =================== AIPass ====================`"
+        ]
 
     def test_a_missing_field_is_named(self):
         source = HEADER.replace("# Modified: 2026-09-22\n", "") + DOCSTRING + DECLARED_PASS + BODY

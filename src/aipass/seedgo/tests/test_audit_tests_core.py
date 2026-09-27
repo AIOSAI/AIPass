@@ -1,28 +1,33 @@
-"""Tests for the audit-tests lane core: spine, refusal vocabulary, laws.
-
-These pin the three things the design argues are load-bearing, and each was
-written to fail against an implementation that got it wrong:
-
-  1. The group list COMPOSES (spine + namespaced adapter groups) rather than
-     equalling a constant. Revision 1's constant is the one shape the design
-     review called a true rebuild trigger.
-  2. A refusal is never a score, and the fleet form ranks an UNPROVEN harness
-     as worse than an honest gate failure.
-  3. Every law bites. A law that cannot fail is decoration, and a suite that
-     cannot fail is the exact species this whole lane exists to catch (L0).
-
-Law S9 and the rev-4 group contracts are pinned even though the groups they
-bind report `not_applicable: "not built"` — that is the point of writing a
-contract before the capability, and an untested contract is a promise.
-"""
-
 # =================== META ====================
 # Name: test_audit_tests_core.py
 # Description: Core pins for the audit-tests lane (spine, refusal, laws)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-29
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/audit_tests/spine.py, refusal.py, laws.py and runner.py."""
+
+# Tests for the audit-tests lane core: spine, refusal vocabulary, laws.
+#
+# These pin the three things the design argues are load-bearing, and each was
+# written to fail against an implementation that got it wrong:
+#
+#   1. The group list COMPOSES (spine + namespaced adapter groups) rather than
+#      equalling a constant. Revision 1's constant is the one shape the design
+#      review called a true rebuild trigger.
+#   2. A refusal is never a score, and the fleet form ranks an UNPROVEN harness
+#      as worse than an honest gate failure.
+#   3. Every law bites. A law that cannot fail is decoration, and a suite that
+#      cannot fail is the exact species this whole lane exists to catch (L0).
+#
+# Law S9 and the rev-4 group contracts are pinned even though the groups they
+# bind report `not_applicable: "not built"` — that is the point of writing a
+# contract before the capability, and an untested contract is a promise.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under audit_tests/ parses and imports
+# seedgo: no-test-needed(constant) — CORE_SPINE's group names; the fixture is built from it, not a copy
 
 import os
 import sys
@@ -435,8 +440,17 @@ class TestBudget:
         assert any("still carries a score" in p for p in laws.validate(document))
 
     def test_an_unbuilt_execution_group_needs_no_budget(self):
-        """not_applicable groups never ran, so a budget would be theatre."""
-        assert laws.validate(_lawful_document()) == []
+        """Unbuilt exec groups carry no budget and pass; Mutant: spine budget stamp / laws skip dropped — killed."""
+        document = _lawful_document()
+        unbuilt = {
+            name: group
+            for name, group in document["groups"].items()
+            if group["tier"] == "exec" and group["status"] == "not_applicable"
+        }
+
+        assert sorted(unbuilt) == ["oracle_execution", "order_dependence"]
+        assert [group.get("budget_seconds") for group in unbuilt.values()] == [None, None]
+        assert laws.check_budget(unbuilt) == []
 
 
 class TestS5:

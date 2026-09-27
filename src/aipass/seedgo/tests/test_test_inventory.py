@@ -1,37 +1,41 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-01
 # Modified: 2026-09-27
 # =============================================
 
-"""
-Pins for the ranked test inventory. Every test here names a DEFECT.
+"""Tests for apps/modules/inventory.py and the handlers under apps/handlers/test_inventory/."""
 
-The owner's standing rule governs this file: never add a test without a defect it
-pins. The tool is a report about test bloat, so a pile of instruments defending
-it would be the joke telling itself. What is pinned is what a future change
-could plausibly break, and several of these reproduce a defect that was real
-during the build:
+# Pins for the ranked test inventory. Every test here names a DEFECT.
+#
+# The owner's standing rule governs this file: never add a test without a defect it
+# pins. The tool is a report about test bloat, so a pile of instruments defending
+# it would be the joke telling itself. What is pinned is what a future change
+# could plausibly break, and several of these reproduce a defect that was real
+# during the build:
+#
+#   * the closed mock-assert set (a prefix rule read a project helper named
+#     `assert_row_shape` as a mock assertion and filed a checking test as a
+#     change detector)
+#   * `importorskip` as CONDITIONAL rather than skipped (a measured miss: this
+#     fleet's bluesky driver importorskips a package that IS installed, and
+#     calling it skipped under-counted 12 running tests)
+#   * the conftest ignore scope (a basename match would silence every `parked/`
+#     in the fleet from one branch's file)
+#   * the blame range starting at the first DECORATOR (a `@parametrize` table
+#     attributed to whichever function sits above it)
+#   * a process-salted body fingerprint (two runs over an unchanged tree
+#     publishing different values, making every diff of the artifact noise)
+#
+# NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE. No test claims a fleet count, a
+# Python version, or a platform. That species cost this campaign twelve hours and
+# thirteen CI rounds, and it is exactly what the tool under test exists to find.
 
-  * the closed mock-assert set (a prefix rule read a project helper named
-    `assert_row_shape` as a mock assertion and filed a checking test as a
-    change detector)
-  * `importorskip` as CONDITIONAL rather than skipped (a measured miss: this
-    fleet's bluesky driver importorskips a package that IS installed, and
-    calling it skipped under-counted 12 running tests)
-  * the conftest ignore scope (a basename match would silence every `parked/`
-    in the fleet from one branch's file)
-  * the blame range starting at the first DECORATOR (a `@parametrize` table
-    attributed to whichever function sits above it)
-  * a process-salted body fingerprint (two runs over an unchanged tree
-    publishing different values, making every diff of the artifact noise)
-
-NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE. No test claims a fleet count, a
-Python version, or a platform. That species cost this campaign twelve hours and
-thirteen CI rounds, and it is exactly what the tool under test exists to find.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — ast.parse's parsing; shape only walks the tree it returns
+# seedgo: no-test-needed(constant) — COMMANDS and DEFAULT_TOP, the verb's names and its default queue length
 
 import ast
 import json
@@ -39,11 +43,12 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, ranking, report, shape
-from aipass.seedgo.apps.handlers.test_inventory import roots
+from aipass.seedgo.apps.handlers.test_inventory import roots, twins
 from aipass.seedgo.apps.modules import inventory
 
 
@@ -597,6 +602,32 @@ class TestPublication:
         assert paths["readable"].read_text(encoding="utf-8").startswith("# Test inventory")
 
 
+def _run_twins_verb(tmp_path: Path, monkeypatch, argument: str) -> list:
+    """Run `test-inventory <argument> --twins` and return the containers it handed twins.build.
+
+    Artifacts and operation logs go to tmp_path. twins.build is recorded at the
+    edge and then run for real over a one-branch scratch tree, so the verb's
+    routing is observed without walking the whole fleet.
+    """
+    out = tmp_path / "out"
+    scratch = tmp_path / "scratch"
+    _write(scratch, "alpha/tests/test_a.py", "def test_a():\n    assert 1 + 1 == 2")
+    monkeypatch.setattr(report, "ARTIFACT_DIR", out)
+    monkeypatch.setattr(twins, "ARTIFACT_DIR", out)
+    for module in (inventory, report, twins):
+        monkeypatch.setattr(module, "json_handler", MagicMock())
+    real_build = twins.build
+    seen = []
+
+    def recording_build(container):
+        seen.append(container)
+        return real_build(scratch)
+
+    monkeypatch.setattr(twins, "build", recording_build)
+    assert inventory.handle_command("test-inventory", [argument, "--twins"]) is True
+    return seen
+
+
 class TestTheTwinsSwitch:
     """`--twins` on the test-inventory verb.
 
@@ -605,18 +636,33 @@ class TestTheTwinsSwitch:
     derivation caught a live defect where the fleet target published a zero.
     """
 
-    def test_the_twins_flag_is_declared_and_parsed(self) -> None:
-        """`inventory._parse` answers True for --twins and leaves the target alone.
+    def test_the_twins_flag_is_declared_and_parsed(self, tmp_path: Path, monkeypatch, capsys) -> None:
+        """`--twins` through the verb runs the twin report over the named target, not the inventory.
 
         A flag absent from FLAGS is rejected by the unrecognised-option arm
         before it ever reaches the parser, so both halves are pinned together.
+        Both artifact directories and every operation log are redirected first,
+        so a mutant that drops the switch publishes an inventory into tmp_path.
+        Mutant: _parse leaves want_twins False in apps/modules/inventory.py — killed.
         """
-        argument, _top, want_twins, unrecognized = inventory._parse(["aipass", "--twins"])
+        tree = tmp_path / "tree"
+        _write(tree, "alpha/tests/test_a.py", "def test_a():\n    assert 1 + 1 == 2")
+        out = tmp_path / "out"
+        monkeypatch.setattr(report, "ARTIFACT_DIR", out)
+        monkeypatch.setattr(twins, "ARTIFACT_DIR", out)
+        for module in (inventory, report, twins):
+            monkeypatch.setattr(module, "json_handler", MagicMock())
 
-        assert "--twins" in inventory.FLAGS
-        assert (argument, want_twins, unrecognized) == ("aipass", True, "")
+        assert inventory.handle_command("test-inventory", [str(tree), "--twins"]) is True
 
-    def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self) -> None:
+        printed = capsys.readouterr().out
+        assert "does not know the option" not in printed
+        assert "cross-branch twins" in printed
+        published = json.loads((out / twins.REPORT_NAME).read_text(encoding="utf-8"))
+        assert published["root"] == str(tree)
+        assert not (out / report.ROWS_NAME).exists()
+
+    def test_the_fleet_target_walks_the_branch_container_not_the_repo_root(self, tmp_path: Path, monkeypatch) -> None:
         """`inventory._branch_container` descends from the repo root to the branches.
 
         THE LIVE DEFECT THIS PINS: `roots.resolve("aipass")` answers the repo
@@ -624,12 +670,12 @@ class TestTheTwinsSwitch:
         first wired run reported "0 twins over 0 branches" as a success.
         """
         fleet = roots.resolve(roots.FLEET_ARGUMENT)
-        container = inventory._branch_container(fleet)
+        [container] = _run_twins_verb(tmp_path, monkeypatch, roots.FLEET_ARGUMENT)
 
         assert container != fleet.path
         assert (container / "seedgo" / "tests").is_dir()
 
-    def test_the_container_is_the_same_on_a_host_with_no_registry(self) -> None:
+    def test_the_container_is_the_same_on_a_host_with_no_registry(self, tmp_path: Path, monkeypatch) -> None:
         """The fleet container never depends on AIPASS_REGISTRY.json existing.
 
         THIS TEST IS WHY PR 751 WAS RED ON EVERY BOARD. The first cure took the
@@ -641,24 +687,23 @@ class TestTheTwinsSwitch:
         world is asserted rather than assumed: an empty branch map is exactly
         what a registry-less host produces.
         """
-        from unittest.mock import patch
-
         fleet = roots.resolve(roots.FLEET_ARGUMENT)
-        with_registry = inventory._branch_container(fleet)
+        [with_registry] = _run_twins_verb(tmp_path / "with", monkeypatch, roots.FLEET_ARGUMENT)
 
-        with patch.object(inventory, "_branch_paths", return_value={}):
-            without_registry = inventory._branch_container(fleet)
+        monkeypatch.setattr(inventory, "_branch_paths", lambda: {})
+        [without_registry] = _run_twins_verb(tmp_path / "without", monkeypatch, roots.FLEET_ARGUMENT)
 
         assert without_registry == with_registry
         assert without_registry != fleet.path
         assert (without_registry / "seedgo" / "tests").is_dir()
 
-    def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path) -> None:
+    def test_a_directory_target_is_walked_exactly_as_given(self, tmp_path: Path, monkeypatch) -> None:
         """Only the fleet target is redirected; a named directory is not.
 
         The counter-arm. Silently descending under an explicit path would make
         the verb walk somewhere the caller did not name.
         """
-        target = roots.Root(name="local", path=tmp_path, resolved_from="a test")
+        target = tmp_path / "named"
+        target.mkdir()
 
-        assert inventory._branch_container(target) == tmp_path
+        assert _run_twins_verb(tmp_path, monkeypatch, str(target)) == [target]

@@ -1,13 +1,18 @@
-"""Tests for seedgo checker handlers -- batch 10 (hardcoded_path, startup_budget, the two ratchets,
-router_assert, oversize_test_file)."""
-
 # =================== META ====================
 # Name: test_checkers_batch10.py
 # Description: Unit tests for hardcoded_path_check, startup_budget_check, the two ratchets, router_assert, oversize_test_file
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-06-18
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/hardcoded_path_check.py and batch-10 checkers."""
+
+# Batch 10: hardcoded_path, startup_budget, the two ratchets, router_assert, oversize_test_file.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every checker module in this batch parses and imports
+# seedgo: no-test-needed(stdlib) — re's matching itself; the patterns are pinned by what they catch here
 
 import json
 
@@ -33,79 +38,79 @@ from aipass.seedgo.apps.handlers.audit import branch_audit
 
 
 # ===========================================================================
-# 1. _scan_file — core scanning logic
+# 1. _scan_file — core scanning logic, through check_module
 # ===========================================================================
 
 
+def _scanned(tmp_path, content: str) -> str:
+    """What the public check_module says about a file holding *content*."""
+    sample = tmp_path / "sample.py"
+    sample.write_text(content, encoding="utf-8")
+    return hardcoded_path_check.check_module(str(sample))["checks"][0]["message"]
+
+
 class TestScanFile:
-    """Tests for the _scan_file helper."""
+    """Tests for the _scan_file helper, reached through the public check_module."""
 
-    def test_posix_home_detected(self):
+    def test_posix_home_detected(self, tmp_path):
         content = 'ROOT = "/home/patrick/Projects/AIPass"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][1] == "POSIX home path"
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L1: POSIX home path (")
 
-    def test_macos_home_detected(self):
+    def test_macos_home_detected(self, tmp_path):
         content = 'ROOT = "/Users/patrick/Projects/AIPass"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][1] == "macOS home path"
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L1: macOS home path (")
 
-    def test_windows_home_detected(self):
+    def test_windows_home_detected(self, tmp_path):
         content = 'ROOT = "C:\\\\Users\\\\patrick\\\\Projects"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][1] == "Windows home path"
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L1: Windows home path (")
 
-    def test_dash_encoded_posix_detected(self):
+    def test_dash_encoded_posix_detected(self, tmp_path):
         content = 'dirs = ["-home-patrick-Projects-AIPass"]\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][1] == "dash-encoded POSIX home"
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L1: dash-encoded POSIX home (")
 
-    def test_dash_encoded_macos_detected(self):
+    def test_dash_encoded_macos_detected(self, tmp_path):
         content = 'dirs = ["-Users-patrick-Projects-AIPass"]\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][1] == "dash-encoded macOS home"
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L1: dash-encoded macOS home (")
 
-    def test_comment_skipped(self):
+    def test_comment_skipped(self, tmp_path):
         content = '# ROOT = "/home/patrick/Projects/AIPass"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 0
+        said = _scanned(tmp_path, content)
+        assert said == "No hardcoded absolute home paths found"
 
-    def test_indented_comment_skipped(self):
+    def test_indented_comment_skipped(self, tmp_path):
         content = '    # path = "/home/patrick/test"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 0
+        said = _scanned(tmp_path, content)
+        assert said == "No hardcoded absolute home paths found"
 
-    def test_docstring_skipped(self):
+    def test_docstring_skipped(self, tmp_path):
         content = '"""\nExample: /home/patrick/Projects\n"""\nx = 1\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 0
+        said = _scanned(tmp_path, content)
+        assert said == "No hardcoded absolute home paths found"
 
-    def test_clean_file(self):
+    def test_clean_file(self, tmp_path):
         content = "from pathlib import Path\nROOT = Path(__file__).parent\n"
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 0
+        said = _scanned(tmp_path, content)
+        assert said == "No hardcoded absolute home paths found"
 
-    def test_generic_user_not_flagged(self):
+    def test_generic_user_not_flagged(self, tmp_path):
         content = 'path = "/home/user/Projects/AIPass"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][1] == "POSIX home path"
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L1: POSIX home path (")
 
-    def test_multiple_violations_same_file(self):
+    def test_multiple_violations_same_file(self, tmp_path):
         content = 'A = "/home/alice/foo"\nB = "/Users/bob/bar"\nC = "-home-charlie-baz"\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 3
+        said = _scanned(tmp_path, content)
+        assert said.startswith("3 hardcoded path(s): ")
 
-    def test_line_numbers_correct(self):
+    def test_line_numbers_correct(self, tmp_path):
         content = 'clean = 1\nbad = "/home/patrick/x"\nalso_clean = 2\n'
-        result = hardcoded_path_check._scan_file(content)
-        assert len(result) == 1
-        assert result[0][0] == 2
+        said = _scanned(tmp_path, content)
+        assert said.startswith("1 hardcoded path(s): L2: ")
 
 
 # ===========================================================================
@@ -196,15 +201,15 @@ class TestInDocstring:
         assert hardcoded_path_check._in_docstring(lines, 0) is False
         assert hardcoded_path_check._in_docstring(lines, 1) is False
 
-    def test_multiline_docstring(self):
+    def test_multiline_docstring(self, tmp_path):
         lines = ['"""', "/home/patrick/inside", '"""', "/home/patrick/outside"]
-        assert hardcoded_path_check._in_docstring(lines, 1) is True
-        assert hardcoded_path_check._in_docstring(lines, 3) is False
+        said = _scanned(tmp_path, "\n".join(lines) + "\n")
+        assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
 
-    def test_single_quote_docstring(self):
+    def test_single_quote_docstring(self, tmp_path):
         lines = ["'''", "/home/patrick/inside", "'''", "/home/patrick/outside"]
-        assert hardcoded_path_check._in_docstring(lines, 1) is True
-        assert hardcoded_path_check._in_docstring(lines, 3) is False
+        said = _scanned(tmp_path, "\n".join(lines) + "\n")
+        assert said.startswith("1 hardcoded path(s): L4: POSIX home path (")
 
 
 # ===========================================================================

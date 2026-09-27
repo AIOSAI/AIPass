@@ -1,13 +1,20 @@
-"""Tests for standard applicability (production / tests / everywhere) across both lanes."""
-
 # =================== META ====================
 # Name: test_applicability.py
 # Description: Unit tests for aipass_standards/applicability.py and its two consumers
-# Version: 1.16.0
+# Version: 1.16.1
 # Created: 2026-08-09
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/handlers/aipass_standards/applicability.py and its two consumers."""
+
+# Standard applicability (production / tests / everywhere) across both lanes.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — each checker's APPLIES_TO value; the checker's own test file owns it
+# seedgo: no-test-needed(stdlib) — functools.lru_cache's caching of the path predicates
+
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +33,12 @@ def _clear_path_caches():
     applicability.is_test_path.cache_clear()
     applicability.is_retired_path.cache_clear()
     yield
+
+
+def _throwaway_outside(root):
+    """is_throwaway_path's stand-in: every lane skips the system temp dir, so keep this test's own tree only."""
+    kept = Path(root).resolve()
+    return lambda path: not Path(path).resolve().is_relative_to(kept)
 
 
 def _checker(applies_to=None, **attrs):
@@ -54,10 +67,11 @@ def test_is_test_path_matches_test_trees_on_both_separators(path):
     assert applicability.is_test_path(path) is True
 
 
-def test_is_test_path_does_not_match_a_production_module_named_test_something():
+def test_is_test_path_does_not_match_a_production_module_named_test_something(tmp_path):
     """test_map.py is a real seedgo module — a filename heuristic would exempt it silently."""
-    assert applicability.is_test_path("/repo/seedgo/apps/modules/test_map.py") is False
-    assert applicability.is_test_path("/repo/seedgo/apps/handlers/test_map/function_scanner.py") is False
+    apps = tmp_path / "seedgo" / "apps"
+    assert applicability.is_test_path(str(apps / "modules" / "test_map.py")) is False
+    assert applicability.is_test_path(str(apps / "handlers" / "test_map" / "function_scanner.py")) is False
 
 
 @pytest.mark.parametrize(
@@ -73,8 +87,9 @@ def test_is_retired_path_matches_archived_trees_on_both_separators(path):
     assert applicability.is_retired_path(path) is True
 
 
-def test_is_retired_path_leaves_live_source_alone():
-    assert applicability.is_retired_path("/repo/trigger/apps/handlers/events/bulletin_created.py") is False
+def test_is_retired_path_leaves_live_source_alone(tmp_path):
+    live = tmp_path / "trigger" / "apps" / "handlers" / "events" / "bulletin_created.py"
+    assert applicability.is_retired_path(str(live)) is False
 
 
 def test_retired_dirs_stay_in_step_with_the_lists_they_mirror():
@@ -119,15 +134,16 @@ def test_an_unrecognised_declaration_is_reported_not_swallowed(monkeypatch):
         ("tests", False, True),
     ],
 )
-def test_applies_to_file_matrix(declared, production, tests):
+def test_applies_to_file_matrix(declared, production, tests, tmp_path):
     checker = _checker(declared)
-    assert applicability.applies_to_file(checker, "/repo/b/apps/modules/thing.py") is production
-    assert applicability.applies_to_file(checker, "/repo/b/tests/test_thing.py") is tests
+    assert applicability.applies_to_file(checker, str(tmp_path / "b" / "apps" / "modules" / "thing.py")) is production
+    assert applicability.applies_to_file(checker, str(tmp_path / "b" / "tests" / "test_thing.py")) is tests
 
 
-def test_no_checker_applies_to_retired_code():
+def test_no_checker_applies_to_retired_code(tmp_path):
+    retired = str(tmp_path / "b" / "apps" / ".archive" / "old.py")
     for declared in (None, "everywhere", "production", "tests"):
-        assert applicability.applies_to_file(_checker(declared), "/repo/b/apps/.archive/old.py") is False
+        assert applicability.applies_to_file(_checker(declared), retired) is False
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +298,7 @@ def test_checklist_lane_honours_the_declaration(tmp_path, monkeypatch):
     lane is measured end to end -- `architecture` is production-only,
     `import_site` is tests-only, `naming` is everywhere.
     """
-    monkeypatch.setattr(checklist, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(checklist, "is_throwaway_path", _throwaway_outside(tmp_path))
 
     source = tmp_path / "apps" / "modules" / "thing.py"
     source.parent.mkdir(parents=True)
@@ -306,7 +322,7 @@ def test_checklist_lane_skips_retired_files(tmp_path, monkeypatch):
     throwaway before anything else — neutered here so the retired rule is what
     is actually under test.
     """
-    monkeypatch.setattr(checklist, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(checklist, "is_throwaway_path", _throwaway_outside(tmp_path))
 
     archived = tmp_path / "apps" / "handlers" / ".archive" / "bulletin_created.py"
     archived.parent.mkdir(parents=True)
@@ -324,7 +340,7 @@ def test_audit_lane_does_not_collect_retired_files(tmp_path, monkeypatch):
     the corpus would name itself in the report. Asserting on the audit's output
     rather than on the collector proves no checker ever saw it.
     """
-    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", _throwaway_outside(tmp_path))
 
     live = tmp_path / "apps" / "modules" / "live.py"
     live.parent.mkdir(parents=True)
@@ -368,7 +384,7 @@ def _corpus(branch_path):
 
 def test_the_corpus_takes_test_files_and_conftest(tmp_path, monkeypatch):
     """The whole point of the ruling: a tests-only standard needs files to score."""
-    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", _throwaway_outside(tmp_path))
     root = _branch(
         tmp_path,
         **{
@@ -383,7 +399,7 @@ def test_the_corpus_takes_test_files_and_conftest(tmp_path, monkeypatch):
 
 def test_a_helper_beside_the_tests_is_not_in_the_corpus(tmp_path, monkeypatch):
     """A standard written for a test's author has nothing to say to a helper module."""
-    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", _throwaway_outside(tmp_path))
     root = _branch(
         tmp_path,
         **{"apps/modules/live.py": NAMES_ITSELF, "tests/helpers.py": NAMES_ITSELF, "tests/test_x.py": NAMES_ITSELF},
@@ -409,7 +425,7 @@ def test_set_aside_test_code_never_enters_the_corpus(tmp_path, monkeypatch, rel)
     `tests/parked/conftest.py` collection barriers carry nothing, and they
     would have entered the corpus as live test files.
     """
-    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", _throwaway_outside(tmp_path))
     root = _branch(tmp_path, **{"apps/modules/live.py": NAMES_ITSELF, rel: NAMES_ITSELF})
 
     assert _corpus(root) == {"live.py"}
@@ -423,7 +439,7 @@ def test_a_tests_only_standard_scores_a_row_when_the_branch_has_tests(tmp_path, 
     whole checker, so the all_files scan below it never ran and the standard
     stayed off the board even with tests/ in the corpus.
     """
-    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", _throwaway_outside(tmp_path))
     root = _branch(
         tmp_path,
         **{
@@ -446,7 +462,7 @@ def test_a_branch_with_no_tests_stands_the_standard_down_rather_than_dropping_it
     claim a measurement that never happened; reporting nothing would trip the
     tripwire on the first branch that ships without a tests/ directory.
     """
-    monkeypatch.setattr(branch_audit, "is_throwaway_path", lambda _p: False)
+    monkeypatch.setattr(branch_audit, "is_throwaway_path", _throwaway_outside(tmp_path))
     root = _branch(tmp_path, **{"apps/modules/live.py": "X = 1\n"})
 
     output = branch_audit.audit_branch({"name": "tmpb", "path": str(root), "entry_file": ""}, [])

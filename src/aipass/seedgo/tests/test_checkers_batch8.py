@@ -1,12 +1,17 @@
-"""Tests for seedgo checker handlers — batch 8 (7 checkers)."""
-
 # =================== META ====================
 # Name: test_checkers_batch8.py
 # Description: Unit tests for handlers, log_handler, log_level, log_structure, meta, naming, permission_flags
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-04-25
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/handlers_check.py and six sibling checkers (batch 8)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the seven checker modules under test parse and import
+# seedgo: no-test-needed(shared) — is_bypassed's own matching rules; tests/test_bypass.py
+# seedgo: no-test-needed(stdlib) — ast.parse's parsing; the checkers only walk the tree it returns
 
 from typing import List
 
@@ -150,20 +155,20 @@ def test_handler_independence_cross_branch_json_handler_is_not_exempt():
     assert result["passed"] is False
 
 
-def test_handler_independence_absolute_path_resolves_branch():
+def test_handler_independence_absolute_path_resolves_branch(tmp_path):
     """The PostToolUse hook passes absolute paths - branch detection must survive it."""
     content = "from aipass.trigger.apps.handlers.error_registry import n\n"
-    handler_path = "/home/user/Projects/AIPass/src/aipass/trigger/apps/handlers/escalation.py"
+    handler_path = str(tmp_path / "Projects/AIPass/src/aipass/trigger/apps/handlers/escalation.py")
 
     result = check_handler_independence(content, _lines(content), handler_path)
     assert result["passed"] is True
 
 
-def test_handler_independence_unknown_layout_says_so():
+def test_handler_independence_unknown_layout_says_so(tmp_path):
     """A path with no branch is reported as not-evaluated, not silently passed."""
     content = "from aipass.memory.apps.handlers.error import error_handler\n"
 
-    result = check_handler_independence(content, _lines(content), "/random/path/handler.py")
+    result = check_handler_independence(content, _lines(content), str(tmp_path / "random/path/handler.py"))
     assert result["passed"] is True
     assert "could not be determined" in result["message"]
 
@@ -286,7 +291,7 @@ def test_branch_before_says_none_rather_than_guessing():
     assert _branch_before(".apps.handlers.x", ".apps.handlers") is None
 
 
-def test_no_orchestration_allows_another_branchs_modules_gateway():
+def test_no_orchestration_allows_another_branchs_modules_gateway(tmp_path):
     """Consuming ANOTHER branch's modules/ is the sanctioned door, not orchestration.
 
     The two handler rules used to contradict each other: check_handler_independence
@@ -298,16 +303,20 @@ def test_no_orchestration_allows_another_branchs_modules_gateway():
     """
     content = '"""Handler."""\nfrom aipass.spawn.apps.modules import get_template_dir\n'
 
-    result = check_no_orchestration(content, _lines(content), "/repo/src/aipass/seedgo/apps/handlers/x/y.py")
+    result = check_no_orchestration(
+        content, _lines(content), str(tmp_path / "repo/src/aipass/seedgo/apps/handlers/x/y.py")
+    )
     assert result is not None
     assert result["passed"] is True, result["message"]
 
 
-def test_no_orchestration_still_flags_own_branch_modules():
+def test_no_orchestration_still_flags_own_branch_modules(tmp_path):
     """The real layering violation survives: a handler reaching up its OWN branch."""
     content = '"""Handler."""\nfrom aipass.seedgo.apps.modules import audit_module\n'
 
-    result = check_no_orchestration(content, _lines(content), "/repo/src/aipass/seedgo/apps/handlers/x/y.py")
+    result = check_no_orchestration(
+        content, _lines(content), str(tmp_path / "repo/src/aipass/seedgo/apps/handlers/x/y.py")
+    )
     assert result is not None
     assert result["passed"] is False
     assert "orchestration" in result["message"]
@@ -381,7 +390,7 @@ def test_no_orchestration_flags_real_import_alongside_guard_text():
 # ===========================================================================
 
 
-def test_no_raw_file_handler_clean():
+def test_no_raw_file_handler_clean(tmp_path):
     """File without logging.FileHandler passes."""
     lines: List[str] = [
         '"""Clean module."""',
@@ -390,11 +399,11 @@ def test_no_raw_file_handler_clean():
         "",
     ]
 
-    result = check_no_raw_file_handler(lines, "/fake/path.py")
+    result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_no_raw_file_handler_violation():
+def test_no_raw_file_handler_violation(tmp_path):
     """File with logging.FileHandler fails."""
     lines: List[str] = [
         '"""Bad module."""',
@@ -403,7 +412,7 @@ def test_no_raw_file_handler_violation():
         "",
     ]
 
-    result = check_no_raw_file_handler(lines, "/fake/path.py")
+    result = check_no_raw_file_handler(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "FileHandler" in result["message"]
 
@@ -413,7 +422,7 @@ def test_no_raw_file_handler_violation():
 # ===========================================================================
 
 
-def test_no_raw_stream_handler_no_file_logging():
+def test_no_raw_stream_handler_no_file_logging(tmp_path):
     """No file-based logging means stream handler check not applicable."""
     lines: List[str] = [
         "import logging",
@@ -422,12 +431,12 @@ def test_no_raw_stream_handler_no_file_logging():
     ]
     content = "\n".join(lines)
 
-    result = check_no_raw_stream_handler(lines, "/fake/path.py", content)
+    result = check_no_raw_stream_handler(lines, str(tmp_path / "fake/path.py"), content)
     assert result["passed"] is True
     assert "not applicable" in result["message"]
 
 
-def test_no_raw_stream_handler_violation():
+def test_no_raw_stream_handler_violation(tmp_path):
     """StreamHandler with file logging is a violation."""
     lines: List[str] = [
         "import logging",
@@ -437,12 +446,12 @@ def test_no_raw_stream_handler_violation():
     ]
     content = "\n".join(lines)
 
-    result = check_no_raw_stream_handler(lines, "/fake/path.py", content)
+    result = check_no_raw_stream_handler(lines, str(tmp_path / "fake/path.py"), content)
     assert result["passed"] is False
     assert "StreamHandler" in result["message"]
 
 
-def test_no_raw_stream_handler_clean():
+def test_no_raw_stream_handler_clean(tmp_path):
     """File logging present but no StreamHandler passes."""
     lines: List[str] = [
         "import logging",
@@ -451,7 +460,7 @@ def test_no_raw_stream_handler_clean():
     ]
     content = "\n".join(lines)
 
-    result = check_no_raw_stream_handler(lines, "/fake/path.py", content)
+    result = check_no_raw_stream_handler(lines, str(tmp_path / "fake/path.py"), content)
     assert result["passed"] is True
 
 
@@ -460,7 +469,7 @@ def test_no_raw_stream_handler_clean():
 # ===========================================================================
 
 
-def test_error_not_user_input_clean():
+def test_error_not_user_input_clean(tmp_path):
     """ERROR used for system failures passes."""
     lines: List[str] = [
         '"""Module."""',
@@ -468,11 +477,11 @@ def test_error_not_user_input_clean():
         "",
     ]
 
-    result = check_error_not_user_input(lines, "/fake/path.py")
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_error_not_user_input_violation():
+def test_error_not_user_input_violation(tmp_path):
     """ERROR used for user-input pattern fails."""
     lines: List[str] = [
         '"""Module."""',
@@ -480,12 +489,12 @@ def test_error_not_user_input_violation():
         "",
     ]
 
-    result = check_error_not_user_input(lines, "/fake/path.py")
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "user input" in result["message"]
 
 
-def test_error_not_user_input_in_docstring():
+def test_error_not_user_input_in_docstring(tmp_path):
     """ERROR pattern inside a docstring is ignored."""
     lines: List[str] = [
         '"""',
@@ -495,7 +504,7 @@ def test_error_not_user_input_in_docstring():
         "",
     ]
 
-    result = check_error_not_user_input(lines, "/fake/path.py")
+    result = check_error_not_user_input(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
@@ -504,28 +513,28 @@ def test_error_not_user_input_in_docstring():
 # ===========================================================================
 
 
-def test_command_routing_level_no_routing():
+def test_command_routing_level_no_routing(tmp_path):
     """File without command routing returns None."""
     content = "def do_work():\n    pass\n"
 
-    result = check_command_routing_level(content, _lines(content), "/fake/path.py")
+    result = check_command_routing_level(content, _lines(content), str(tmp_path / "fake/path.py"))
     assert result is None
 
 
-def test_command_routing_level_clean():
+def test_command_routing_level_clean(tmp_path):
     """Command routing with proper WARNING level passes."""
     content = 'def route_command(cmd):\n    logger.warning("Unknown command: %s", cmd)\n'
 
-    result = check_command_routing_level(content, _lines(content), "/fake/path.py")
+    result = check_command_routing_level(content, _lines(content), str(tmp_path / "fake/path.py"))
     assert result is not None
     assert result["passed"] is True
 
 
-def test_command_routing_level_violation():
+def test_command_routing_level_violation(tmp_path):
     """Command routing with ERROR for user-input pattern fails."""
     content = 'def route_command(cmd):\n    logger.error("Unknown command: %s", cmd)\n'
 
-    result = check_command_routing_level(content, _lines(content), "/fake/path.py")
+    result = check_command_routing_level(content, _lines(content), str(tmp_path / "fake/path.py"))
     assert result is not None
     assert result["passed"] is False
     assert result["message"] == "Command routing failures logged as ERROR on lines [2] - should be WARNING"
@@ -1119,7 +1128,7 @@ def test_class_naming_private_snake_still_fails():
 # ===========================================================================
 
 
-def test_no_dangerous_flags_clean():
+def test_no_dangerous_flags_clean(tmp_path):
     """File with only approved permission flags passes."""
     lines: List[str] = [
         '"""Clean module."""',
@@ -1127,11 +1136,11 @@ def test_no_dangerous_flags_clean():
         "",
     ]
 
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_no_dangerous_flags_violation():
+def test_no_dangerous_flags_violation(tmp_path):
     """File with prohibited permission bypass flag fails."""
     lines: List[str] = [
         '"""Module."""',
@@ -1139,12 +1148,12 @@ def test_no_dangerous_flags_violation():
         "",
     ]
 
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
     assert "Dangerous" in result["message"]
 
 
-def test_no_dangerous_flags_in_docstring():
+def test_no_dangerous_flags_in_docstring(tmp_path):
     """Prohibited flag inside docstring is ignored."""
     lines: List[str] = [
         '"""',
@@ -1154,11 +1163,11 @@ def test_no_dangerous_flags_in_docstring():
         "",
     ]
 
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is True
 
 
-def test_no_dangerous_flags_skip_permissions():
+def test_no_dangerous_flags_skip_permissions(tmp_path):
     """File with --skip-permissions fails."""
     lines: List[str] = [
         '"""Module."""',
@@ -1166,18 +1175,18 @@ def test_no_dangerous_flags_skip_permissions():
         "",
     ]
 
-    result = check_no_dangerous_flags(lines, "/fake/path.py")
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"))
     assert result["passed"] is False
 
 
-def test_no_dangerous_flags_bypass_rule():
+def test_no_dangerous_flags_bypass_rule(tmp_path):
     """Prohibited flag bypassed by rule passes."""
     lines: List[str] = [
         '"""Module."""',
         'cmd = "--dangerously-skip-permissions"',
         "",
     ]
-    bypass_rules = [{"standard": "permission_flags", "file": "/fake/path.py"}]
+    bypass_rules = [{"standard": "permission_flags", "file": str(tmp_path / "fake/path.py")}]
 
-    result = check_no_dangerous_flags(lines, "/fake/path.py", bypass_rules=bypass_rules)
+    result = check_no_dangerous_flags(lines, str(tmp_path / "fake/path.py"), bypass_rules=bypass_rules)
     assert result["passed"] is True

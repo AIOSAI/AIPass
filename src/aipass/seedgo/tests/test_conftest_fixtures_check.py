@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_conftest_fixtures_check.py
 # Description: conftest_fixtures_check — test template v1 item 20, the branch conftest
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/conftest_fixtures_check.py."""
@@ -162,7 +162,8 @@ class TestC2TheCommandStateReset:
         assert _missing(IMPORT + PIN) == ["C2"]
 
     def test_the_template_spelling_satisfies_it(self):
-        assert _missing(IMPORT + PIN + RESET) == []
+        """Mutant: C2 credited only beside a product import, in conftest_fixtures_check.py — killed."""
+        assert _missing(RESET) == ["C1"]
 
     def test_a_reset_before_the_yield_does_not_count(self):
         """It clears the PREVIOUS test's flag and hands this test's flag straight on."""
@@ -186,8 +187,10 @@ class TestC2TheCommandStateReset:
         assert _missing(source) == ["C2"]
 
     def test_the_reset_needs_no_session_scope(self):
-        """C2 runs per test by design — that is the point of it."""
-        assert _missing(IMPORT + PIN + RESET) == []
+        """C2 runs per test by design. Mutant: C2 refuses a scoped reset, conftest_fixtures_check.py — killed."""
+        per_test = RESET.replace("autouse=True", "autouse=True, scope='function'")
+
+        assert _missing(IMPORT + PIN + per_test) == []
 
 
 class TestTheMessageAnAuthorReads:

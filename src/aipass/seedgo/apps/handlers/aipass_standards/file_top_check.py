@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_check.py
 # Description: Test File Top Standards Checker Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -12,7 +12,7 @@ Test File Top Standards Checker Handler
 Test template v1, items 5, 6 and 7 -- the top of a test file, in order:
 
     5. the META header block first, the same block product files carry,
-       banner word META
+       banner and all -- meta_check's banner rule, not a second copy of it
     6. then the module docstring: ONE line, naming the subject as a path
     7. then the declared pass: what is NOT tested here and what covers it
 
@@ -33,14 +33,16 @@ already read a file's head and NONE of them reaches a test file:
 
 So no line here is charged twice, and items 5 to 7 had no checker at all.
 
-THE BANNER WORD IS THE ONE CONTRADICTION, AND IT IS REPORTED, NOT RESOLVED.
-Item 5 says "for a test file the banner word is META". ``meta_check`` calls
-``META`` the LEGACY spelling and ``AIPass`` the canonical one. Measured over
-579 fleet test files: 345 open with the AIPass banner, 72 with a squashed
-``# ===================AIPASS====================``, and 22 with META. This
-checker follows the template, because the template is what it was asked to
-enforce and the model file spells it META -- but a rule that convicts 545 files
-on a banner word is the owner's call to confirm, not mine to quietly make.
+THE BANNER IS meta_check's, IMPORTED, NOT COPIED. The template once said "for
+a test file the banner word is META" while ``meta_check`` called META the
+LEGACY spelling and AIPass the canonical one; 345 of 579 fleet test files
+opened with AIPass. The owner ruled (2026-09-27): AIPass is the banner word for
+product and test files alike. So a test file's banner passes exactly when
+``meta_check`` would pass it on a product file: its ``META_HEADER`` (AIPass) or
+its ``META_HEADER_LEGACY`` (META), the whole line, stripped. One rule in one
+place -- if meta_check retires the legacy line, this follows. The 72 squashed
+``# ===================AIPASS====================`` banners meta_check refuses,
+so this refuses them too, and the message prints the line meta_check wants.
 
 THE FIELDS ARE meta_check's FIVE, not a new list: Name, Description, Version,
 Created, Modified. Item 5 says "the same block product files carry", and that
@@ -75,6 +77,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.meta_check import META_HEADER, META_HEADER_LEGACY
 from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
 from aipass.seedgo.apps.handlers.json import json_handler
 
@@ -84,9 +87,8 @@ AUDIT_SCOPE = "all_files"
 STANDARD = "FILE_TOP"
 STANDARD_KEY = "file_top"
 
-#: The banner the template names for a test file. Split so this checker's own
-#: header is not read as an occurrence when the fleet is scanned for spellings.
-_BANNER_WORD = "META"
+#: meta_check's banner lines, canonical first. Imported so there is one rule.
+_ACCEPTED_BANNERS: Tuple[str, ...] = (META_HEADER, META_HEADER_LEGACY)
 _BANNER = re.compile(r"^#\s*=+\s*([A-Za-z]+)\s*=+\s*$")
 _FOOTER = re.compile(r"^#\s*=+\s*$")
 
@@ -105,10 +107,10 @@ _SUBJECT_PATH = re.compile(r"[A-Za-z_][\w.\-]*/[\w./\-]*\.py")
 FIX = "see templates/test_template_v1.md items 5 to 7, and tests/test_readme_update.py"
 
 
-def _header_span(lines: List[str]) -> Tuple[int, int, str]:
-    """(first line, last line, banner word) of the leading comment block, 1-indexed.
+def _header_span(lines: List[str]) -> Tuple[int, int]:
+    """(first line, last line) of the leading comment block, 1-indexed.
 
-    (0, 0, "") when the file does not open with one. Only a block at the very
+    (0, 0) when the file does not open with one. Only a block at the very
     top counts: "top to bottom" is the rule, so a header pushed below a
     docstring is not a header that is first.
     """
@@ -118,14 +120,13 @@ def _header_span(lines: List[str]) -> Tuple[int, int, str]:
             start = index
             break
     else:
-        return (0, 0, "")
-    match = _BANNER.match(lines[start].strip())
-    if not match:
-        return (0, 0, "")
+        return (0, 0)
+    if not _BANNER.match(lines[start].strip()):
+        return (0, 0)
     for index in range(start + 1, min(len(lines), start + 20)):
         if _FOOTER.match(lines[index].strip()) and not _BANNER.match(lines[index].strip()):
-            return (start + 1, index + 1, match.group(1))
-    return (start + 1, start + 1, match.group(1))
+            return (start + 1, index + 1)
+    return (start + 1, start + 1)
 
 
 def _missing_fields(lines: List[str], first: int, last: int) -> List[str]:
@@ -168,13 +169,14 @@ def _opener(lines: List[str], doc_line: int) -> str:
 
 def _header_findings(lines: List[str], doc_line: int) -> List[str]:
     """Item 5's message, or nothing when the header is right."""
-    first, last, banner = _header_span(lines)
+    first, last = _header_span(lines)
     if not first:
         opener = _opener(lines, doc_line)
         return [f"item 5 META header: the file opens with {opener} — the header block comes first"]
     findings = []
-    if banner != _BANNER_WORD:
-        findings.append(f"item 5 META header: the banner word is {banner}, not {_BANNER_WORD}")
+    banner_line = lines[first - 1].strip()
+    if banner_line not in _ACCEPTED_BANNERS:
+        findings.append(f"item 5 META header: the banner line is `{banner_line}`, not `{META_HEADER}`")
     missing = _missing_fields(lines, first, last)
     if missing:
         findings.append(f"item 5 META header: missing {', '.join(missing)}")

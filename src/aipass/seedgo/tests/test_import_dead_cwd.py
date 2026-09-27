@@ -1,73 +1,77 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins seedgo imports against a working directory the OS cannot read
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-31
 # Modified: 2026-09-27
 # =============================================
 
-"""Every seedgo module must import without a readable working directory.
+"""Tests that every module under apps/, apps/handlers/__init__.py first, imports with a dead cwd."""
 
-TWO DEFECTS, TWO WORLDS — and one instrument would have proved only half.
+# Every seedgo module must import without a readable working directory.
+#
+# TWO DEFECTS, TWO WORLDS — and one instrument would have proved only half.
+#
+# WORLD A, the ntpath condition. ``ntpath.realpath`` calls ``os.getcwd()``
+# UNCONDITIONALLY, before it checks whether the path is even relative, and
+# ``Path.resolve()`` routes through it. So on Windows every module-level
+# ``Path(__file__).resolve()`` is an import-time working-directory read. Twelve
+# seedgo modules had one. Injected as the CONDITION rather than the platform:
+# ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then ``getcwd``
+# is denied.
+#
+# WORLD B, the inspect.stack() shape. ``handlers/__init__.py`` called
+# ``inspect.stack()`` before anything else. That builds a FrameInfo per frame ->
+# ``getsourcefile`` -> (only for the frozen importlib frames an import puts on the
+# stack) ``getmodule``, whose module-scan loop calls ``os.path.realpath`` OUTSIDE
+# any try. World A CANNOT catch this one: on POSIX the walk raises earlier inside
+# ``getabsfile``, where ``inspect`` catches ``FileNotFoundError`` and returns
+# None — so a getcwd denial leaves the defective guard green while Windows dies,
+# because ``ntpath.abspath`` succeeds there and control reaches the unprotected
+# realpath. World B injects that asymmetry directly: ``abspath`` keeps working,
+# ``os.path.realpath`` raises.
+#
+# Both were REPRODUCED RED ON LINUX against the pre-fix source before the cure was
+# written; neither needed a Windows box. Measured on the Windows CI gate
+# 2026-08-31 (@memory's finding for A, @spawn's for B, relayed by @devpulse).
+#
+# THE INTERPRETER VERSION IS PART OF THE PLATFORM. Round 6, from CI: both worlds
+# went red on the Python 3.10 leg and neither was a defect in seedgo. 3.10's pathlib
+# delegates ``Path.resolve()`` to ``os.path.realpath`` through a ``_NormalAccessor``
+# that CAPTURED its own reference when pathlib was first imported (CPython 3.10
+# pathlib.py:358, called at :1077). Rebinding ``os.path.realpath`` afterwards
+# rebinds a name nothing reads again, so world A was inert there — not because the
+# delegation is missing, which was the first diagnosis and was wrong (@memory read
+# the source and refuted it). The arming probes refused rather than passing
+# quietly, which is the instrument discipline working; what they could not do was
+# still measure the claim. So:
+#
+#   * world A stays as the faithful ntpath emulation, keyed to a per-version
+#     cured in four lines: it patches the CAPTURED ACCESSOR too, so it arms on
+#     every interpreter and needs no version table at all;
+#   * ``ARM_WORLD_A_PRIME`` patches ``Path.resolve`` itself — the public call the
+#     defect makes, not the private delegate it routes through this year — so it
+#     arms on every version, and the module sweep rides it;
+#   * ``EMULATE_PY310_PATHLIB`` rebuilds the capture so the whole claim is
+#     falsifiable on THIS machine. A row no local platform can contradict enters
+#     silently (@ai_mail, round 5), and a CI red is a negative measurement: it
+#     proves not-armed, never why — which is precisely how the first, wrong
+#     mechanism survived a careful write-up.
+#
+# World B needed no change — ``inspect`` calls ``os.path.realpath`` directly on
+# every version. Its ARMING PROBE was the defect: it asked ``Path.resolve()``, a
+# question about pathlib, while the world denies realpath. Identical answers on
+# 3.11+ by delegation, divergent on 3.10. Deny and measure the call the DEFECT
+# makes (@memory's rule, applied to a probe rather than to a world).
+#
+# Each world carries a POSITIVE CONTROL — a module rebuilt in the defective shape
+# and imported live, which must die — and a NEGATIVE CONTROL FOR THE POSITIVE
+# CONTROL: the same module must import cleanly in the healthy world. @spawn's
+# lesson from the same round: a control that dies for any reason turns every pin
+# above it vacuously green, so the control needs a control.
 
-WORLD A, the ntpath condition. ``ntpath.realpath`` calls ``os.getcwd()``
-UNCONDITIONALLY, before it checks whether the path is even relative, and
-``Path.resolve()`` routes through it. So on Windows every module-level
-``Path(__file__).resolve()`` is an import-time working-directory read. Twelve
-seedgo modules had one. Injected as the CONDITION rather than the platform:
-``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then ``getcwd``
-is denied.
-
-WORLD B, the inspect.stack() shape. ``handlers/__init__.py`` called
-``inspect.stack()`` before anything else. That builds a FrameInfo per frame ->
-``getsourcefile`` -> (only for the frozen importlib frames an import puts on the
-stack) ``getmodule``, whose module-scan loop calls ``os.path.realpath`` OUTSIDE
-any try. World A CANNOT catch this one: on POSIX the walk raises earlier inside
-``getabsfile``, where ``inspect`` catches ``FileNotFoundError`` and returns
-None — so a getcwd denial leaves the defective guard green while Windows dies,
-because ``ntpath.abspath`` succeeds there and control reaches the unprotected
-realpath. World B injects that asymmetry directly: ``abspath`` keeps working,
-``os.path.realpath`` raises.
-
-Both were REPRODUCED RED ON LINUX against the pre-fix source before the cure was
-written; neither needed a Windows box. Measured on the Windows CI gate
-2026-08-31 (@memory's finding for A, @spawn's for B, relayed by @devpulse).
-
-THE INTERPRETER VERSION IS PART OF THE PLATFORM. Round 6, from CI: both worlds
-went red on the Python 3.10 leg and neither was a defect in seedgo. 3.10's pathlib
-delegates ``Path.resolve()`` to ``os.path.realpath`` through a ``_NormalAccessor``
-that CAPTURED its own reference when pathlib was first imported (CPython 3.10
-pathlib.py:358, called at :1077). Rebinding ``os.path.realpath`` afterwards
-rebinds a name nothing reads again, so world A was inert there — not because the
-delegation is missing, which was the first diagnosis and was wrong (@memory read
-the source and refuted it). The arming probes refused rather than passing
-quietly, which is the instrument discipline working; what they could not do was
-still measure the claim. So:
-
-  * world A stays as the faithful ntpath emulation, keyed to a per-version
-    cured in four lines: it patches the CAPTURED ACCESSOR too, so it arms on
-    every interpreter and needs no version table at all;
-  * ``ARM_WORLD_A_PRIME`` patches ``Path.resolve`` itself — the public call the
-    defect makes, not the private delegate it routes through this year — so it
-    arms on every version, and the module sweep rides it;
-  * ``EMULATE_PY310_PATHLIB`` rebuilds the capture so the whole claim is
-    falsifiable on THIS machine. A row no local platform can contradict enters
-    silently (@ai_mail, round 5), and a CI red is a negative measurement: it
-    proves not-armed, never why — which is precisely how the first, wrong
-    mechanism survived a careful write-up.
-
-World B needed no change — ``inspect`` calls ``os.path.realpath`` directly on
-every version. Its ARMING PROBE was the defect: it asked ``Path.resolve()``, a
-question about pathlib, while the world denies realpath. Identical answers on
-3.11+ by delegation, divergent on 3.10. Deny and measure the call the DEFECT
-makes (@memory's rule, applied to a probe rather than to a world).
-
-Each world carries a POSITIVE CONTROL — a module rebuilt in the defective shape
-and imported live, which must die — and a NEGATIVE CONTROL FOR THE POSITIVE
-CONTROL: the same module must import cleanly in the healthy world. @spawn's
-lesson from the same round: a control that dies for any reason turns every pin
-above it vacuously green, so the control needs a control.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — what os.getcwd() does on a live directory; only its denial is the subject
 
 import subprocess
 import sys
@@ -1299,7 +1303,7 @@ class TestTheInstrumentsCanFire:
         for a CI leg nobody runs locally.
         """
         modules = _seedgo_modules()
-        assert modules, "no seedgo modules enumerated - this pin would be vacuous"
+        assert modules != [], "no seedgo modules enumerated - this pin would be vacuous"
         body = (
             "import importlib\n"
             f"for name in {modules[:40]!r}:\n"

@@ -7,7 +7,7 @@
     "_usage": "The gold source of record for the fleet's test template. 'template_versions' is what every branch's tests/.template_version.json receipt is compared against by 'drone @seedgo tests template-status'. Bump a version here, then run 'drone @seedgo tests template bump' (dry run) and '--confirm' to write the receipts."
   },
   "template_versions": {
-    "test_template": "1.2.0"
+    "test_template": "1.3.0"
   },
   "files": {
     "test_template": {

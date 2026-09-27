@@ -1,6 +1,6 @@
 # Test File Top Standards
 **Status:** v1
-**Date:** 2026-09-22
+**Date:** 2026-09-22 (banner ruling 2026-09-27)
 
 ---
 
@@ -9,7 +9,7 @@
 Test template v1, **items 5, 6 and 7** — the top of a test file, in order:
 
 ```python
-# =================== META ====================
+# =================== AIPass ====================
 # Name: test_readme_update.py
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
 # Version: 2.2.0
@@ -54,7 +54,7 @@ see templates/test_template_v1.md items 5 to 7, and tests/test_readme_update.py
 | sub-rule | what it says |
 |---|---|
 | item 5 | `the file opens with code` / `with a docstring` / `with a shebang` — the header block comes first |
-| item 5 | `the banner word is AIPass, not META` |
+| item 5 | ``the banner line is `# ===================AIPASS====================`, not `# =================== AIPass ====================` `` |
 | item 5 | `missing Description, Created, Modified` |
 | item 6 | `missing` — one line naming the module this file tests |
 | item 6 | `3 lines, not 1` |
@@ -65,9 +65,9 @@ see templates/test_template_v1.md items 5 to 7, and tests/test_readme_update.py
 
 ---
 
-## The banner word is the one contradiction, and it is reported, not resolved
+## The banner is meta_check's rule, imported, not copied
 
-Item 5 says *"for a test file the banner word is `META`"*. `meta_check` calls `META` the **legacy** spelling and `AIPass` the canonical one. Measured over 579 fleet test files:
+The template once said *"for a test file the banner word is `META`"*, while `meta_check` called `META` the **legacy** spelling and `AIPass` the canonical one. Measured over 579 fleet test files on 2026-09-22:
 
 | first line | files |
 |---|---|
@@ -76,7 +76,7 @@ Item 5 says *"for a test file the banner word is `META`"*. `meta_check` calls `M
 | `# =================== META ====================` | 22 |
 | a shebang, a docstring, or code | 140 |
 
-This checker follows the template, because the template is what it was asked to enforce and the model file spells it `META`. A rule that convicts 545 files on a banner word is the owner's call to confirm, not the checker's to quietly make.
+**The owner's ruling, 2026-09-27: `AIPass` is the banner word for product and test files alike.** So a test file's banner passes exactly when `meta_check` would pass it on a product file: its `META_HEADER` (`AIPass`) or its `META_HEADER_LEGACY` (`META`), the whole line, stripped. The checker imports those two constants; there is one banner rule in the pack, and if `meta_check` ever retires the legacy line this rule follows it. The 22 `META` files pass as legacy, the same as a product file would; no banner is rewritten fleet-wide for this. The 72 squashed `AIPASS` lines are refused by `meta_check`'s exact line, so they are refused here, and the message prints the line wanted.
 
 The **fields** are `meta_check`'s five — Name, Description, Version, Created, Modified — because item 5 says "the same block product files carry", and that is the block they carry.
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: file_top_content.py
 # Description: Test File Top Standards Content Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-22
-# Modified: 2026-09-22
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -26,7 +26,7 @@ def get_file_top_standards() -> str:
         "[bold cyan]CORE PRINCIPLE (test template v1, items 5, 6 and 7):[/bold cyan]",
         "  A test file opens the same way every time, [green]top to bottom[/green]:",
         "",
-        "  [green]1.[/green] the META header block, first, banner word META",
+        "  [green]1.[/green] the META header block, first, banner word AIPass (meta_check's rule)",
         "  [green]2.[/green] then the module docstring: ONE line, naming the subject as a path",
         "  [green]3.[/green] then the declared pass: what is NOT tested here, and what covers it",
         "",
@@ -34,7 +34,7 @@ def get_file_top_standards() -> str:
         "  imports carries six. The ORDER is half the rule.",
         "",
         "[bold cyan]THE CANONICAL TOP (tests/test_readme_update.py):[/bold cyan]",
-        "  [dim]# =================== META ====================[/dim]",
+        "  [dim]# =================== AIPass ====================[/dim]",
         "  [dim]# Name: test_readme_update.py[/dim]",
         "  [dim]# Description: Template v1 model -- readme_update module[/dim]",
         "  [dim]# Version: 2.2.0[/dim]",
@@ -62,7 +62,7 @@ def get_file_top_standards() -> str:
         "",
         "[bold cyan]THE THREE MESSAGES:[/bold cyan]",
         "  [red]item 5 META header:[/red] the file opens with code / with a docstring /",
-        "  the banner word is AIPass, not META / missing Created, Modified",
+        "  the banner line is X, not meta_check's AIPass line / missing Created, Modified",
         "  [red]item 6 subject docstring:[/red] missing / 3 lines, not 1 / names no path",
         "  [red]item 7 declared pass:[/red] missing / line N is not a marker /",
         "  the block is above the docstring",

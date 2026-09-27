@@ -1,5 +1,3 @@
-"""Tests for diagnostics_audit module."""
-
 # =================== META ====================
 # Name: test_diagnostics_audit.py
 # Description: Unit tests for the diagnostics_audit module
@@ -7,6 +5,11 @@
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/modules/diagnostics_audit.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — pyright's own findings; the handler is tested in test_diagnostics.py
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -283,7 +286,6 @@ def test_help_after_an_argument_prints_help_not_an_error(monkeypatch):
 
 def test_unknown_argument_without_a_help_flag_still_errors(monkeypatch):
     """The gate must not swallow the module's fail-loud behaviour."""
-    monkeypatch.setattr(diagnostics_audit, "print_help", MagicMock())
     complained = MagicMock()
     monkeypatch.setattr(diagnostics_audit, "error", complained)
 
@@ -291,8 +293,6 @@ def test_unknown_argument_without_a_help_flag_still_errors(monkeypatch):
     assert complained.call_count == 1
 
 
-def test_diagnostics_does_not_answer_for_another_command(monkeypatch):
+def test_diagnostics_does_not_answer_for_another_command():
     """Ownership first: a help flag never makes a module claim a command it does not own."""
-    monkeypatch.setattr(diagnostics_audit, "print_help", MagicMock())
-
     assert diagnostics_audit.handle_command("checklist", ["--help"]) is False
