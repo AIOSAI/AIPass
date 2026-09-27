@@ -3,7 +3,7 @@
 # Description: Branch identity detection module
 # Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -87,7 +87,10 @@ def handle_command(command: str, args: List[str]) -> bool:
         True if command handled, False otherwise
     """
     if command == "whoami":
-        result = _handle_whoami(args)
+        if "--help" in args or "-h" in args:
+            print_introspection()
+            return True
+        result = _handle_whoami()
         if result:
             json_handler.log_operation("whoami_executed", {"command": "whoami", "success": True})
         return result
@@ -99,7 +102,7 @@ def handle_command(command: str, args: List[str]) -> bool:
 # =============================================================================
 
 
-def _handle_whoami(args: List[str]) -> bool:
+def _handle_whoami() -> bool:
     """Detect and display the caller's branch identity."""
     try:
         branch_info = get_caller_branch()

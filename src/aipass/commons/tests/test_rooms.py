@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_rooms.py - Room and Space Module Tests
+# Description: Tests for apps/handlers/rooms/room_ops.py and apps/modules/space.py
 # Date: 2026-03-24
 # Version: 1.0.0
+# Created: 2026-03-24
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,22 +17,17 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for room operations and spatial navigation helpers.
+"""Tests for apps/handlers/rooms/room_ops.py and apps/modules/space.py."""
 
-Covers:
-- MOOD_STYLES dict completeness
-- _mood_style() and _mood_icon() pure functions
-- create_room / list_rooms / join_room via room_ops (with DB fixture)
-- Room state operations (set/get room state)
-- Room query edge cases (nonexistent rooms, empty args)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/rooms/ parses and imports
 
 from unittest.mock import patch
 
 
 from aipass.commons.apps.modules.space import MOOD_STYLES, _mood_style, _mood_icon
 from aipass.commons.apps.handlers.rooms.room_ops import create_room, list_rooms, join_room
+from aipass.commons.apps.modules import room as room_module
 from aipass.commons.apps.handlers.rooms.room_state_ops import (
     set_room_state,
     get_room_state,
@@ -159,7 +157,7 @@ def test_list_rooms_returns_seeded_rooms(
     mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
     mock_close.side_effect = lambda conn: None  # type: ignore[union-attr]
 
-    result = list_rooms([])
+    result = list_rooms()
 
     assert result["success"] is True
     room_names = [r["name"] for r in result["rooms"]]
@@ -178,9 +176,7 @@ def test_join_room_no_args() -> None:
 @patch("aipass.commons.apps.modules.room.create_room")
 def test_room_create_help_prints_usage_without_creating(mock_create_room: object) -> None:
     """'room create --help' should print usage and never reach create_room."""
-    from aipass.commons.apps.modules import room
-
-    handled = room.handle_command("room", ["create", "--help"])
+    handled = room_module.handle_command("room", ["create", "--help"])
 
     assert handled is True
     mock_create_room.assert_not_called()  # type: ignore[union-attr]

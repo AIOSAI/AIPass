@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_activity.py - Activity, Catchup, and Digest Tests
+# Description: Tests for apps/handlers/activity/activity_ops.py, catchup_ops.py and digest_ops.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,17 +17,10 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for activity, catchup, and digest subsystems.
+"""Tests for apps/handlers/activity/activity_ops.py, catchup_ops.py and digest_ops.py."""
 
-Covers:
-- _relative_time() and _truncate() pure helpers (activity_ops)
-- _calculate_time_label() pure helper (catchup_ops)
-- run_activity orchestrator (activity_ops, mocked DB)
-- run_catchup orchestrator (catchup_ops, mocked DB)
-- Digest DB helpers: _get_activity_totals, _get_most_active_branches,
-  _get_new_branches, _get_top_posts (with initialized_db fixture)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/activity/, catchup/, digest/ parses and imports
 
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
@@ -138,10 +134,11 @@ def test_relative_time_future_timestamp() -> None:
 
 
 @patch("aipass.commons.apps.handlers.activity.activity_ops.logger")
-def test_relative_time_invalid_string(mock_logger: object) -> None:
+def test_relative_time_invalid_string(mock_logger: MagicMock) -> None:
     """Invalid timestamp strings should return 'unknown'."""
     assert _relative_time("not-a-timestamp") == "unknown"
     assert _relative_time("") == "unknown"
+    assert mock_logger.warning.call_count == 2
 
 
 # =============================================================================
@@ -192,9 +189,10 @@ def test_calculate_time_label_days() -> None:
 
 
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.logger")
-def test_calculate_time_label_invalid(mock_logger: object) -> None:
+def test_calculate_time_label_invalid(mock_logger: MagicMock) -> None:
     """Invalid timestamps should return fallback string."""
     assert _calculate_time_label("garbage") == "your last visit"
+    mock_logger.warning.assert_called_once()
 
 
 # =============================================================================
@@ -236,7 +234,6 @@ def test_run_activity_returns_formatted_activity(
 
 
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_onboarding_nudge", create=True)
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.update_last_active")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.query_catchup_data")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_last_active")
@@ -250,10 +247,18 @@ def test_run_catchup_first_visit(
     mock_last_active: object,
     mock_query: object,
     mock_update: object,
-    mock_nudge: object,
     mock_json: object,
 ) -> None:
-    """run_catchup for a first-time visitor should set is_first_visit True."""
+    """run_catchup for a first-time visitor should set is_first_visit True.
+
+    get_onboarding_nudge is no longer patched here: catchup_ops imports it
+    locally inside run_catchup (`from ...welcome_handler import
+    get_onboarding_nudge`), so a patch on the catchup_ops module attribute
+    never reaches the call — a dead patch (discarded_patch.md's known limit),
+    not a discarded one. Dropping it changes nothing: the real function
+    already ran against the mocked db connection either way, and any error
+    it raises is swallowed by run_catchup's own except-and-warn.
+    """
     mock_caller.return_value = {"name": "NEW_BRANCH"}  # type: ignore[union-attr]
     mock_get_db.return_value = MagicMock()  # type: ignore[union-attr]
     mock_close.side_effect = lambda c: None  # type: ignore[union-attr]
@@ -268,7 +273,7 @@ def test_run_catchup_first_visit(
     }
     mock_update.return_value = None  # type: ignore[union-attr]
 
-    result = run_catchup([])
+    result = run_catchup()
 
     assert result["success"] is True
     assert result["is_first_visit"] is True
@@ -279,7 +284,7 @@ def test_run_catchup_first_visit(
 def test_run_catchup_no_caller(mock_caller: object) -> None:
     """run_catchup without a detectable caller branch should fail."""
     mock_caller.return_value = None  # type: ignore[union-attr]
-    result = run_catchup([])
+    result = run_catchup()
     assert result["success"] is False
     assert "Could not detect" in result["error"]
 

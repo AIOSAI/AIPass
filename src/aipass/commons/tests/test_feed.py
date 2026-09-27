@@ -3,21 +3,18 @@
 # Description: Unit tests for feed handler and feed module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Unit tests for the feed subsystem.
+"""Tests for apps/handlers/feed/feed_ops.py and apps/modules/feed.py."""
 
-Tests cover:
-- feed_ops.format_time_ago() -- pure timestamp formatting
-- feed_ops.display_feed() -- argument parsing and query orchestration
-- feed module handle_command() -- command routing logic
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/feed/ parses and imports
 
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
+import pytest
 
 # Coverage imports -- handler layer
 from aipass.commons.apps.handlers.feed.feed_ops import format_time_ago, display_feed
@@ -119,6 +116,7 @@ def test_display_feed_default_args(
     assert result["offset"] == 0
     assert result["room"] is None
     assert result["posts"] == []
+    mock_close_db.assert_called_once_with(mock_conn)
 
 
 @patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
@@ -139,6 +137,7 @@ def test_display_feed_room_filter(
 
     assert result["success"] is True
     assert result["room"] == "general"
+    mock_close_db.assert_called_once_with(mock_conn)
 
 
 @patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
@@ -165,6 +164,7 @@ def test_display_feed_sort_modes(
     # Invalid sort should fall back to hot
     result = display_feed(["--sort", "invalid"])
     assert result["sort"] == "hot"
+    assert mock_close_db.call_count == 5
 
 
 @patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
@@ -189,6 +189,7 @@ def test_display_feed_limit_clamping(
 
     result = display_feed(["--limit", "50"])
     assert result["limit"] == 50
+    assert mock_close_db.call_count == 3
 
 
 @patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
@@ -207,6 +208,7 @@ def test_display_feed_page_to_offset(
 
     result = display_feed(["--page", "3", "--limit", "10"])
     assert result["offset"] == 20  # (3-1) * 10
+    mock_close_db.assert_called_once_with(mock_conn)
 
 
 @patch("aipass.commons.apps.handlers.feed.feed_ops.json_handler", autospec=True)
@@ -225,6 +227,7 @@ def test_display_feed_negative_offset_clamped(
 
     result = display_feed(["--offset", "-5"])
     assert result["offset"] == 0
+    mock_close_db.assert_called_once_with(mock_conn)
 
 
 # =============================================================================
@@ -234,11 +237,10 @@ def test_display_feed_negative_offset_clamped(
 
 @patch("aipass.commons.apps.modules.feed.json_handler", autospec=True)
 @patch("aipass.commons.apps.modules.feed.display_feed")
-@patch("aipass.commons.apps.modules.feed.console")
 def test_handle_command_routes_feed(
-    mock_console: MagicMock,
     mock_display_feed: MagicMock,
     mock_json: MagicMock,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """handle_command should route the 'feed' command and return True."""
     mock_display_feed.return_value = {
@@ -254,10 +256,10 @@ def test_handle_command_routes_feed(
     result = handle_command("feed", [])
     assert result is True
     mock_display_feed.assert_called_once_with([])
+    assert "No posts yet" in capsys.readouterr().out
 
 
-@patch("aipass.commons.apps.modules.feed.console")
-def test_handle_command_rejects_unknown(mock_console: MagicMock) -> None:
+def test_handle_command_rejects_unknown() -> None:
     """handle_command should return False for non-feed commands."""
     assert handle_command("post", []) is False
     assert handle_command("search", []) is False

@@ -51,12 +51,12 @@ commons/
 ├── templates/
 ├── commons_json/               # json trail written by the prax shim
 ├── artifacts/  dropbox/  docs.local/  logs/
-└── commons.db                  # SQLite, resolved by walking up to .trinity/
+└── commons.db                  # SQLite, resolved by walking up to .trinity/ or .aipass/
 ```
 
 # Gotchas
 
- - A trailing `--help` after a verb executes the verb — the flag arrives as an ordinary first argument. `room` and `activity` intercept it; nothing else does. `prompt --help` posts a real daily prompt. Use `drone @commons --help` with no verb.
+ - A trailing `--help` after a verb executes the verb — the flag arrives as an ordinary first argument. `room`, `activity`, `catchup`, `digest`, `explore`/`secrets` and `whoami` intercept it; the rest do not. `prompt --help` posts a real daily prompt. Use `drone @commons --help` with no verb.
  - `handle_command` answers handled, not succeeded. A module that printed a refusal still returns True; the exit code is decided by cli's `resolve_exit`. Clean 0, refusal 2, unclaimed 1.
  - Refusals come from cli's `error()`, which marks the command failed. Using `warning()` for a refusal prints but exits 0 — the wrong code.
  - Caller identity resolves `AIPASS_CALLER_CWD` first, then real PWD, then `AIPASS_CALLER_BRANCH`. Run drone from your own branch or the trail names the project, not you.

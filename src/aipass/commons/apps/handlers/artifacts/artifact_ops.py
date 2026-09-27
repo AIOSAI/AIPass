@@ -3,7 +3,7 @@
 # Description: Artifact Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -145,7 +145,7 @@ def craft_artifact(args: List[str]) -> dict:
     if metadata is None:
         return {"success": False, "error": "Invalid metadata: must be valid shallow JSON (no nested objects/arrays)"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:
@@ -223,7 +223,7 @@ def list_artifacts(args: List[str]) -> dict:
 
     owner_filter = None
     if not show_all:
-        from aipass.commons.apps.modules.commons_identity import get_caller_branch
+        from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
         caller = get_caller_branch()
         if not caller:
@@ -373,7 +373,7 @@ def collab_artifact(args: List[str]) -> dict:
     if rarity not in VALID_RARITIES:
         return {"success": False, "error": f"Invalid rarity '{rarity}'. Must be one of: {', '.join(VALID_RARITIES)}"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:
@@ -433,7 +433,7 @@ def sign_artifact(args: List[str]) -> dict:
         logger.warning("[artifact_ops] Non-numeric pending ID provided for sign")
         return {"success": False, "error": "Pending ID must be a number"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:

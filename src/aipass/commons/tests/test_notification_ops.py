@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_notification_ops.py - Notification Operations Tests
+# Description: Tests for apps/handlers/notifications/notification_ops.py
 # Date: 2026-04-03
 # Version: 1.0.0
+# Created: 2026-04-03
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -592,7 +595,7 @@ def test_show_preferences_empty(
 
     from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
 
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is True
     assert result["agent"] == "test-branch"
     assert result["preferences"] == []
@@ -627,7 +630,7 @@ def test_show_preferences_with_data(
     set_preference(conn, "test-branch", "room", "general", "watch")
     set_preference(conn, "test-branch", "post", "5", "mute")
 
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is True
     assert result["agent"] == "test-branch"
     assert len(result["preferences"]) == 2
@@ -642,7 +645,7 @@ def test_show_preferences_no_caller(mock_caller: MagicMock) -> None:
     """show_preferences should fail when caller is not detected."""
     from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
 
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is False
     assert "Could not detect" in result["error"]
 
@@ -660,7 +663,7 @@ def test_show_preferences_db_exception(
     """show_preferences should handle DB exceptions gracefully."""
     from aipass.commons.apps.handlers.notifications.notification_ops import show_preferences
 
-    result = show_preferences([])
+    result = show_preferences()
     assert result["success"] is False
     assert "connection refused" in result["error"]
 

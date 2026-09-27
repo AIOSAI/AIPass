@@ -3,15 +3,13 @@
 # Description: Unit tests for identity module and identity_ops handler
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Unit tests for the commons identity module and identity_ops handler.
+"""Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
 
-Tests extract_mentions (pure regex), find_branch_root (filesystem walk),
-resolve_display_name, and DB-backed mention validation.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that commons_identity.py and identity_ops.py parse and import
 
 import logging
 import sqlite3
@@ -405,6 +403,7 @@ def test_get_caller_branch_prefers_cwd_over_env(
 
     assert result is not None
     assert result["name"] == "flow"
+    mock_register.assert_called_once()
 
 
 @patch("aipass.commons.apps.handlers.identity.identity_ops.json_handler", autospec=True)
@@ -571,38 +570,56 @@ def test_find_caller_registries_sorted(tmp_path: Path, monkeypatch: pytest.Monke
     assert [p.name for p in found] == ["ALPHA_REGISTRY.json", "ZEBRA_REGISTRY.json"]
 
 
-def test_find_caller_registries_without_env(monkeypatch: pytest.MonkeyPatch):
-    """No AIPASS_CALLER_CWD means no walk — nothing to search from."""
+def test_find_caller_registries_without_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """No AIPASS_CALLER_CWD means no walk: a project registry at the process cwd is never searched."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = _make_external_project(project)
     monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
-    assert _ops._find_caller_registries() == []
+    monkeypatch.chdir(branch_dir)
 
-
-def test_branches_from_registry_dict_shape(tmp_path: Path):
-    """Dict-keyed branches are flattened to a list, like the list shape."""
-    import json as json_mod
-
-    path = tmp_path / "X_REGISTRY.json"
-    path.write_text(
-        json_mod.dumps({"branches": {"vera": {"name": "VERA", "path": "src/vera"}}}),
-        encoding="utf-8",
-    )
-
-    branches = _ops._branches_from_registry(path)
-
-    assert [b["name"] for b in branches] == ["VERA"]
-
-
-def test_branches_from_registry_malformed_json(tmp_path: Path):
-    """A corrupt registry is reported and skipped, never raised."""
-    path = tmp_path / "X_REGISTRY.json"
-    path.write_text("{not json", encoding="utf-8")
-
-    assert _ops._branches_from_registry(path) == []
+    assert _id_mod.get_branch_info_by_name("vera") is None
 
 
 def test_branches_from_registry_missing_file(tmp_path: Path):
     """A registry path that doesn't exist yields no branches."""
     assert _ops._branches_from_registry(tmp_path / "nope.json") == []
+
+
+def test_branches_from_registry_dict_shape(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """Dict-keyed branches are flattened to a list, like the list shape."""
+    import json as json_mod
+
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = project / "src" / "vera"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (project / "VERA-STUDIO_REGISTRY.json").write_text(
+        json_mod.dumps({"branches": {"vera": {"name": "VERA", "path": "src/vera"}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
+
+    assert result is not None
+    assert result["name"] == "VERA"
+
+
+def test_branches_from_registry_malformed_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, aipass_registry: Path):
+    """A corrupt registry is reported and skipped, never raised."""
+    project = tmp_path / "Vera-Studio"
+    project.mkdir()
+    branch_dir = project / "src" / "vera"
+    (branch_dir / ".trinity").mkdir(parents=True)
+    (branch_dir / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+    (project / "VERA-STUDIO_REGISTRY.json").write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
+
+    result = _id_mod.get_branch_info_from_registry(branch_dir)
+
+    assert result is None
 
 
 # ===========================================================================

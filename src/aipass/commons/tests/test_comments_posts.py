@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_comments_posts.py - Comment and Post Operations Tests
+# Description: Tests for apps/handlers/comments/comment_ops.py and apps/handlers/posts/post_ops.py
 # Date: 2026-04-03
 # Version: 1.0.0
+# Created: 2026-04-03
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,13 +17,10 @@
 #   - Mocks get_db, close_db, get_caller_branch at the source module level
 # =============================================
 
-"""
-Unit Tests for Comment and Post Operations
+"""Tests for apps/handlers/comments/comment_ops.py and apps/handlers/posts/post_ops.py."""
 
-Tests the handler functions in comment_ops.py and post_ops.py,
-mocking external dependencies (database connections, caller identity)
-and verifying return values and side effects.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/comments/, handlers/posts/ parses and imports
 
 import sqlite3
 from pathlib import Path

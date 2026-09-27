@@ -1,40 +1,27 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: test_central.py - Central Writer & Dashboard Writer Tests
-# Date: 2026-03-29
+# Name: test_central.py
+# Description: Tests for central_writer, dashboard_writer, and dashboard_pipeline handlers
 # Version: 1.0.0
-# Category: commons/tests
-#
-# CHANGELOG (Max 5 entries):
-#   - v1.0.0 (2026-03-29): Initial creation — central_writer, dashboard_writer,
-#     dashboard_pipeline tests
-#
-# CODE STANDARDS:
-#   - Pytest function style (no unittest classes)
-#   - Uses initialized_db fixture from conftest.py for DB isolation
-#   - Mocks prax logger, json_handler, file I/O, get_db/close_db
+# Created: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Unit tests for central_writer, dashboard_writer, and dashboard_pipeline.
+"""Tests for apps/handlers/central/, apps/handlers/dashboard/, and apps/handlers/notifications/dashboard_pipeline.py."""
 
-Covers:
-- get_registered_branches: registry file parsing
-- aggregate_branch_stats: DB-backed per-branch stat aggregation
-- query_top_threads: thread ranking by last comment activity
-- build_central_data: data structure assembly
-- write_central_file: atomic file write
-- update_central: full orchestrator
-- write_commons_activity: dashboard section write-through
-- update_commons_dashboard: DB query + dashboard push
-- update_dashboards_for_event: pipeline coordination
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that central_writer.py, dashboard_writer.py, and dashboard_pipeline.py parse and import
+# seedgo: no-test-needed(constant) — AI_CENTRAL_DIR and BRANCH_REGISTRY_PATH's literal path segments
 
 import json
 import sqlite3
-from unittest.mock import patch, mock_open, MagicMock
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
+
+from aipass.commons.apps.handlers.central import central_writer
+from aipass.commons.apps.handlers.dashboard import dashboard_writer
+from aipass.commons.apps.handlers.notifications import dashboard_pipeline
 
 
 # =============================================================================
@@ -42,24 +29,23 @@ import pytest
 # =============================================================================
 
 
-def test_get_registered_branches_returns_dict() -> None:
+def test_get_registered_branches_returns_dict(tmp_path: Path) -> None:
     """get_registered_branches should parse registry JSON into a name->path dict."""
-    from aipass.commons.apps.handlers.central import central_writer
-
-    registry_data = json.dumps(
-        {
-            "branches": [
-                {"name": "SEED", "path": "/projects/seed"},
-                {"name": "DRONE", "path": "/projects/drone"},
-                {"name": "", "path": "/empty-name"},
-            ]
-        }
+    registry_file = tmp_path / "AIPASS_REGISTRY.json"
+    registry_file.write_text(
+        json.dumps(
+            {
+                "branches": [
+                    {"name": "SEED", "path": "/projects/seed"},
+                    {"name": "DRONE", "path": "/projects/drone"},
+                    {"name": "", "path": "/empty-name"},
+                ]
+            }
+        ),
+        encoding="utf-8",
     )
 
-    with (
-        patch.object(central_writer, "BRANCH_REGISTRY_PATH", "/fake/AIPASS_REGISTRY.json"),
-        patch("builtins.open", mock_open(read_data=registry_data)),
-    ):
+    with patch.object(central_writer, "BRANCH_REGISTRY_PATH", str(registry_file)):
         result = central_writer.get_registered_branches()
 
     assert result == {"SEED": "/projects/seed", "DRONE": "/projects/drone"}
@@ -68,8 +54,6 @@ def test_get_registered_branches_returns_dict() -> None:
 
 def test_get_registered_branches_missing_file() -> None:
     """get_registered_branches should raise FileNotFoundError for missing registry."""
-    from aipass.commons.apps.handlers.central import central_writer
-
     with patch.object(central_writer, "BRANCH_REGISTRY_PATH", "/fake/missing.json"):
         with pytest.raises(FileNotFoundError):
             central_writer.get_registered_branches()
@@ -81,7 +65,6 @@ def test_get_registered_branches_missing_file() -> None:
 
 
 @patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.central.central_writer.logger")
 @patch("aipass.commons.apps.handlers.central.central_writer._read_last_checked", return_value="1970-01-01T00:00:00Z")
 @patch("aipass.commons.apps.handlers.central.central_writer.get_registered_branches")
 @patch("aipass.commons.apps.handlers.central.central_writer.close_db", side_effect=lambda conn: None)
@@ -91,7 +74,6 @@ def test_aggregate_branch_stats_with_data(
     mock_close: MagicMock,
     mock_branches: MagicMock,
     mock_last_checked: MagicMock,
-    mock_logger: MagicMock,
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
 ) -> None:
@@ -118,9 +100,7 @@ def test_aggregate_branch_stats_with_data(
     )
     initialized_db.commit()
 
-    from aipass.commons.apps.handlers.central.central_writer import aggregate_branch_stats
-
-    stats = aggregate_branch_stats()
+    stats = central_writer.aggregate_branch_stats()
 
     assert "ALPHA" in stats
     assert "BETA" in stats
@@ -169,9 +149,7 @@ def test_query_top_threads_returns_sorted(
     )
     initialized_db.commit()
 
-    from aipass.commons.apps.handlers.central.central_writer import query_top_threads
-
-    threads = query_top_threads()
+    threads = central_writer.query_top_threads()
 
     assert len(threads) == 2
     # Most recently active thread should be first
@@ -192,9 +170,7 @@ def test_query_top_threads_empty_db(
     """query_top_threads should return empty list when no posts have comments."""
     mock_get_db.return_value = initialized_db
 
-    from aipass.commons.apps.handlers.central.central_writer import query_top_threads
-
-    threads = query_top_threads()
+    threads = central_writer.query_top_threads()
     assert threads == []
 
 
@@ -205,12 +181,10 @@ def test_query_top_threads_empty_db(
 
 def test_build_central_data_structure() -> None:
     """build_central_data should produce the expected JSON structure."""
-    from aipass.commons.apps.handlers.central.central_writer import build_central_data
-
     stats = {"SEED": {"mentions": 2, "new_posts_since_last_visit": 5}}
     threads = [{"id": 1, "title": "Hot", "room": "general", "comment_count": 3, "last_activity": "2026-03-29"}]
 
-    result = build_central_data(stats, top_threads=threads)
+    result = central_writer.build_central_data(stats, top_threads=threads)
 
     assert result["service"] == "the_commons"
     assert "last_updated" in result
@@ -220,9 +194,7 @@ def test_build_central_data_structure() -> None:
 
 def test_build_central_data_defaults_top_threads() -> None:
     """build_central_data should default top_threads to empty list when None."""
-    from aipass.commons.apps.handlers.central.central_writer import build_central_data
-
-    result = build_central_data({})
+    result = central_writer.build_central_data({})
     assert result["top_threads"] == []
 
 
@@ -231,25 +203,23 @@ def test_build_central_data_defaults_top_threads() -> None:
 # =============================================================================
 
 
-@patch("aipass.commons.apps.handlers.central.central_writer.os.replace")
-@patch("aipass.commons.apps.handlers.central.central_writer.os.makedirs")
-@patch("builtins.open", new_callable=mock_open)
-def test_write_central_file_atomic_write(
-    mock_file: MagicMock,
-    mock_makedirs: MagicMock,
-    mock_replace: MagicMock,
-) -> None:
+def test_write_central_file_atomic_write(tmp_path: Path) -> None:
     """write_central_file should write to .tmp then atomically rename."""
-    from aipass.commons.apps.handlers.central.central_writer import write_central_file, CENTRAL_FILE
+    central_dir = tmp_path / "central"
+    central_file = central_dir / "COMMONS.central.json"
+    tmp_file = Path(str(central_file) + ".tmp")
 
-    data = {"service": "the_commons", "branch_stats": {}}
-    write_central_file(data)
+    with (
+        patch.object(central_writer, "AI_CENTRAL_DIR", str(central_dir)),
+        patch.object(central_writer, "CENTRAL_FILE", str(central_file)),
+    ):
+        data = {"service": "the_commons", "branch_stats": {}}
+        central_writer.write_central_file(data)
 
-    mock_makedirs.assert_called_once()
-    # Should write to tmp file
-    mock_file.assert_called_once_with(CENTRAL_FILE + ".tmp", "w", encoding="utf-8")
-    # Should atomically replace
-    mock_replace.assert_called_once_with(CENTRAL_FILE + ".tmp", CENTRAL_FILE)
+    # Should write real content and atomically replace — no leftover .tmp file
+    assert central_file.exists()
+    assert json.loads(central_file.read_text(encoding="utf-8")) == data
+    assert not tmp_file.exists()
 
 
 # =============================================================================
@@ -258,7 +228,6 @@ def test_write_central_file_atomic_write(
 
 
 @patch("aipass.commons.apps.handlers.central.central_writer.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.central.central_writer.logger")
 @patch("aipass.commons.apps.handlers.central.central_writer.write_central_file")
 @patch("aipass.commons.apps.handlers.central.central_writer.build_central_data")
 @patch("aipass.commons.apps.handlers.central.central_writer.query_top_threads")
@@ -268,17 +237,14 @@ def test_update_central_orchestrates_full_pipeline(
     mock_threads: MagicMock,
     mock_build: MagicMock,
     mock_write: MagicMock,
-    mock_logger: MagicMock,
     mock_json: MagicMock,
 ) -> None:
     """update_central should call stats, threads, build, and write in order."""
-    from aipass.commons.apps.handlers.central.central_writer import update_central
-
     mock_stats.return_value = {"X": {"mentions": 0}}
     mock_threads.return_value = []
     mock_build.return_value = {"service": "the_commons", "branch_stats": {"X": {"mentions": 0}}}
 
-    result = update_central()
+    result = central_writer.update_central()
 
     mock_stats.assert_called_once()
     mock_threads.assert_called_once()
@@ -293,13 +259,11 @@ def test_update_central_orchestrates_full_pipeline(
 
 
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.logger")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._get_write_section")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._find_branch_path")
 def test_write_commons_activity_success(
     mock_find: MagicMock,
     mock_ws: MagicMock,
-    mock_logger: MagicMock,
     mock_json: MagicMock,
 ) -> None:
     """write_commons_activity should call write_section with correct args on success."""
@@ -307,27 +271,21 @@ def test_write_commons_activity_success(
     mock_write_section = MagicMock(return_value=True)
     mock_ws.return_value = mock_write_section
 
-    from aipass.commons.apps.handlers.dashboard.dashboard_writer import write_commons_activity
-
     activity = {"managed_by": "the_commons", "mentions": 3}
-    result = write_commons_activity("SEED", activity)
+    result = dashboard_writer.write_commons_activity("SEED", activity)
 
     assert result is True
     mock_write_section.assert_called_once_with("/projects/seed", "commons_activity", activity)
 
 
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.logger")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._find_branch_path")
 def test_write_commons_activity_branch_not_found(
     mock_find: MagicMock,
-    mock_logger: MagicMock,
 ) -> None:
     """write_commons_activity should return False when branch path is not found."""
     mock_find.return_value = None
 
-    from aipass.commons.apps.handlers.dashboard.dashboard_writer import write_commons_activity
-
-    result = write_commons_activity("MISSING", {"mentions": 0})
+    result = dashboard_writer.write_commons_activity("MISSING", {"mentions": 0})
     assert result is False
 
 
@@ -337,7 +295,6 @@ def test_write_commons_activity_branch_not_found(
 
 
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.dashboard.dashboard_writer.logger")
 @patch("aipass.commons.apps.handlers.dashboard.dashboard_writer._get_write_section")
 @patch(
     "aipass.commons.apps.handlers.dashboard.dashboard_writer._read_last_checked", return_value="1970-01-01T00:00:00Z"
@@ -351,7 +308,6 @@ def test_update_commons_dashboard_queries_db(
     mock_find: MagicMock,
     mock_last_checked: MagicMock,
     mock_ws: MagicMock,
-    mock_logger: MagicMock,
     mock_json: MagicMock,
     initialized_db: sqlite3.Connection,
 ) -> None:
@@ -370,9 +326,7 @@ def test_update_commons_dashboard_queries_db(
     )
     initialized_db.commit()
 
-    from aipass.commons.apps.handlers.dashboard.dashboard_writer import update_commons_dashboard
-
-    result = update_commons_dashboard("SEED")
+    result = dashboard_writer.update_commons_dashboard("SEED")
 
     assert result is True
     # Verify write_section was called with section data containing real counts
@@ -389,7 +343,6 @@ def test_update_commons_dashboard_queries_db(
 
 
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.logger")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline._collect_branches_to_update")
@@ -397,16 +350,13 @@ def test_update_dashboards_for_event_calls_pipeline(
     mock_collect: MagicMock,
     mock_update_dash: MagicMock,
     mock_update_central: MagicMock,
-    mock_logger: MagicMock,
     mock_json: MagicMock,
 ) -> None:
     """update_dashboards_for_event should update each collected branch and central."""
     mock_collect.return_value = ["SEED", "DRONE"]
     mock_update_dash.return_value = True
 
-    from aipass.commons.apps.handlers.notifications.dashboard_pipeline import update_dashboards_for_event
-
-    count = update_dashboards_for_event("new_post", {"room_name": "general", "author": "FLOW"})
+    count = dashboard_pipeline.update_dashboards_for_event("new_post", {"room_name": "general", "author": "FLOW"})
 
     assert count == 2
     assert mock_update_dash.call_count == 2
@@ -414,7 +364,6 @@ def test_update_dashboards_for_event_calls_pipeline(
 
 
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.logger")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_central")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline.update_commons_dashboard")
 @patch("aipass.commons.apps.handlers.notifications.dashboard_pipeline._collect_branches_to_update")
@@ -422,16 +371,14 @@ def test_update_dashboards_for_event_handles_partial_failure(
     mock_collect: MagicMock,
     mock_update_dash: MagicMock,
     mock_update_central: MagicMock,
-    mock_logger: MagicMock,
     mock_json: MagicMock,
 ) -> None:
-    """Pipeline should continue updating remaining branches when one fails."""
+    """Pipeline should continue updating remaining branches when one fails, and still update central."""
     mock_collect.return_value = ["GOOD", "BAD", "ALSO_GOOD"]
     mock_update_dash.side_effect = [True, False, True]
 
-    from aipass.commons.apps.handlers.notifications.dashboard_pipeline import update_dashboards_for_event
-
-    count = update_dashboards_for_event("new_comment", {"room_name": "dev", "author": "X"})
+    count = dashboard_pipeline.update_dashboards_for_event("new_comment", {"room_name": "dev", "author": "X"})
 
     assert count == 2  # Only the two successful ones
     assert mock_update_dash.call_count == 3
+    mock_update_central.assert_called_once()

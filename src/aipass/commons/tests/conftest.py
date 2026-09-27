@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: The Commons test configuration
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-06-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -17,6 +17,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from pathlib import Path
 
 # Redirect prax logs to temp directory during tests
 # Must be set before any prax imports to catch logger initialization
@@ -35,10 +36,10 @@ try:
 except ImportError:
     logger.warning("[conftest] prax logger unavailable — using stdlib logging")
 
-from pathlib import Path
-
-from aipass.commons.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 from aipass.cli.apps.modules.display import reset_command_state
+from aipass.commons.apps.handlers.json import json_handler
+from aipass.commons.apps.modules.database import close_db, init_db
 
 # Never discover out of .archive/: it holds verbatim disposal copies of the
 # suites the one json service subsumed, and rglobbing into a dot-directory
@@ -71,6 +72,18 @@ def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     return sandbox
 
 
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Pin the product's consoles to one width for the whole session.
+
+    Rich sizes an unpinned console on every print (80 on POSIX, 79 on Windows
+    under capture, the terminal under -s), so a test reading wrapped output
+    would pass on one machine and fail on another.
+    """
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
 @pytest.fixture(autouse=True)
 def _clear_command_state():
     """Start every test with the CLI's failure flag clear.
@@ -89,28 +102,11 @@ def _clear_command_state():
 @pytest.fixture(scope="session")
 def _template_db_path(tmp_path_factory):
     """Build the initialized schema+seed DB once per session."""
-    from aipass.commons.apps.modules.database import close_db, init_db
-
     template = tmp_path_factory.mktemp("template") / "template_commons.db"
     conn = init_db(db_path=template)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     close_db(conn)
     return template
-
-
-@pytest.fixture
-def tmp_db_path(tmp_path):
-    """
-    Provide a temporary database path for test isolation.
-
-    Each test gets its own fresh database file that is
-    automatically cleaned up after the test completes.
-
-    Yields:
-        Path to temporary database file.
-    """
-    db_file = tmp_path / "test_commons.db"
-    yield db_file
 
 
 @pytest.fixture
@@ -134,30 +130,3 @@ def initialized_db(_template_db_path, tmp_path):
     conn.execute("PRAGMA synchronous = OFF")
     yield conn
     conn.close()
-
-
-@pytest.fixture
-def sample_data():
-    """
-    Provide sample_data for tests that need representative data structures.
-
-    Returns a dict with sample post, comment, and agent data
-    that mirrors the commons database schema.
-    """
-    return {
-        "post": {
-            "title": "Test Post",
-            "content": "This is a test post body.",
-            "room": "general",
-            "author": "TEST_AGENT",
-        },
-        "comment": {
-            "content": "This is a test comment.",
-            "post_id": 1,
-            "author": "TEST_AGENT",
-        },
-        "agent": {
-            "branch_name": "TEST_AGENT",
-            "display_name": "Test Agent",
-        },
-    }

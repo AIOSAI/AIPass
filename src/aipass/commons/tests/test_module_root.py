@@ -1,26 +1,14 @@
 # =================== AIPass ====================
 # Name: test_module_root.py
 # Description: Pins the guarded __file__ resolver
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""module_file() must return the RIGHT file when resolve() cannot be asked.
+"""Tests for apps/handlers/module_root.py: module_file() returns the RIGHT file when resolve() cannot be asked."""
 
-test_import_dead_cwd.py proves the imports survive. That is a weaker claim
-than it looks: a fallback returning Path(".") would also let every import
-succeed, and every caller would then walk up from the wrong place. These pins
-are about the VALUE, not the survival.
-
-The denial is scoped to ONE path rather than to Path.resolve as a whole. The
-first draft patched the method globally, which was green under the branch
-pytest.ini and RecursionError under the repo-root conftest: that conftest's
-write guard resolves a path inside log_operation, so a blanket denial sent
-_record_unresolved back through it forever. A global patch of a stdlib method
-is a claim about every caller in the process, and this test only has a claim
-about one file.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 from pathlib import Path
 
@@ -30,9 +18,21 @@ from aipass.commons.apps.handlers import module_root
 
 _DEAD_CWD = FileNotFoundError(2, "cwd deleted", "")
 
+# test_import_dead_cwd.py proves the imports survive. That is a weaker claim
+# than it looks: a fallback returning Path(".") would also let every import
+# succeed, and every caller would then walk up from the wrong place. These pins
+# are about the VALUE, not the survival.
+
 
 def _deny_resolve_for(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
     """Make resolve() raise for exactly one path; everything else is untouched."""
+    # Scoped to ONE path rather than to Path.resolve as a whole. The first
+    # draft patched the method globally, which was green under the branch
+    # pytest.ini and RecursionError under the repo-root conftest: that
+    # conftest's write guard resolves a path inside log_operation, so a blanket
+    # denial sent _record_unresolved back through it forever. A global patch of
+    # a stdlib method is a claim about every caller in the process, and this
+    # test only has a claim about one file.
     real_resolve = Path.resolve
 
     def _maybe_denied(self, *args, **kwargs):

@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_curation.py - Curation Subsystem Tests
+# Description: Tests for apps/handlers/curation/reaction_queries.py, pin_queries.py and trending_queries.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,14 +17,10 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for the curation subsystem.
+"""Tests for apps/handlers/curation/reaction_queries.py, pin_queries.py and trending_queries.py."""
 
-Covers:
-- reaction_queries: add, remove, get counts, get detailed, summary string
-- pin_queries: pin, unpin, get pinned, is_pinned checks
-- trending_queries: empty results and engagement-based ranking
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/curation/ parses and imports
 
 import sqlite3
 from unittest.mock import patch

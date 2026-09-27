@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_profiles.py - Profile Handler Unit Tests
+# Description: Tests for apps/handlers/profiles/profile_queries.py
 # Date: 2026-03-24
 # Version: 1.0.0
+# Created: 2026-03-24
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,16 +17,10 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for profile queries and profile operations.
+"""Tests for apps/handlers/profiles/profile_queries.py."""
 
-Covers:
-- format_time_ago() pure function with various timestamp inputs
-- get_profile / update_bio / update_status / update_role DB operations
-- get_activity_stats / get_all_agents_brief DB queries
-- increment_post_count / increment_comment_count mutations
-- Edge cases: missing agents, empty strings, malformed timestamps
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/profiles/ parses and imports
 
 import sqlite3
 from datetime import datetime, timezone, timedelta

@@ -3,7 +3,7 @@
 # Description: Room management operations
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -106,15 +106,11 @@ def create_room(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def list_rooms(args: List[str]) -> dict:
+def list_rooms() -> dict:
     """
     List all visible rooms in The Commons with member and post counts.
 
     Hidden rooms are excluded from the listing.
-
-    Args:
-        args: List of string arguments (currently unused, reserved for
-              future filtering options).
 
     Returns:
         Dict with success status and list of room dicts including

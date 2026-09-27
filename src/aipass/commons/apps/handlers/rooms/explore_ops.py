@@ -3,7 +3,7 @@
 # Description: Secret Room Exploration Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -13,8 +13,6 @@ Implementation logic for discovering hidden rooms.
 Shows hints, tracks which secret rooms a branch has discovered.
 Returns dicts for module display layer.
 """
-
-from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -27,7 +25,7 @@ from aipass.commons.apps.handlers.json import json_handler
 # =============================================================================
 
 
-def explore_rooms(args: List[str]) -> dict:
+def explore_rooms() -> dict:
     """
     Show discovery hints for hidden rooms.
 
@@ -93,7 +91,7 @@ def explore_rooms(args: List[str]) -> dict:
 # =============================================================================
 
 
-def list_secrets(args: List[str]) -> dict:
+def list_secrets() -> dict:
     """
     List secret rooms the caller has discovered (posted or commented in).
 

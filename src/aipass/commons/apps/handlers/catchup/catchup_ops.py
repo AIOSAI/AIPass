@@ -3,7 +3,7 @@
 # Description: Catchup Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -14,7 +14,6 @@ they missed since their last visit. Returns dicts for module display layer.
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import List
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
@@ -65,14 +64,11 @@ def _calculate_time_label(last_active: str) -> str:
 # =============================================================================
 
 
-def run_catchup(args: List[str]) -> dict:
+def run_catchup() -> dict:
     """
     Show what the branch missed since last visit.
 
     Usage: commons catchup
-
-    Args:
-        args: Command arguments (currently unused)
 
     Returns:
         Dict with success, is_first_visit, time_label, data, nudge keys

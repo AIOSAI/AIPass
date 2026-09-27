@@ -3,7 +3,7 @@
 # Description: Time Capsule Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -51,7 +51,7 @@ def seal_capsule(args: List[str]) -> dict:
 
     days = max(1, min(365, days))
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:
@@ -93,7 +93,7 @@ def seal_capsule(args: List[str]) -> dict:
 # =============================================================================
 
 
-def list_capsules(args: List[str]) -> dict:
+def list_capsules() -> dict:
     """
     List all time capsules with status info.
 
@@ -164,7 +164,7 @@ def open_capsule(args: List[str]) -> dict:
         logger.warning("[capsule_ops] Non-numeric capsule ID provided for open")
         return {"success": False, "error": "Capsule ID must be a number"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:

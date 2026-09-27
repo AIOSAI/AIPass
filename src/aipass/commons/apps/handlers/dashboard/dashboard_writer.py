@@ -3,7 +3,7 @@
 # Description: Dashboard Write-Through Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -79,16 +79,17 @@ def _find_branch_path(branch_name: str) -> Optional[str]:
 
     Returns:
         Path string to the branch directory, or None if not found
+
+    Raises:
+        OSError, json.JSONDecodeError: the registry exists but cannot be read.
+        Both callers catch it and log it as a failed write, so an unreadable
+        registry is no longer reported as "branch path not found".
     """
     if not os.path.exists(BRANCH_REGISTRY_PATH):
         return None
 
-    try:
-        with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
-            registry = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        logger.warning("[dashboard_writer] Failed to read branch registry")
-        return None
+    with open(BRANCH_REGISTRY_PATH, "r", encoding="utf-8") as f:
+        registry = json.load(f)
 
     for branch in registry.get("branches", []):
         if branch.get("name") == branch_name:

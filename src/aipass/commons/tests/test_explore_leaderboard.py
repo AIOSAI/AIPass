@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_explore_leaderboard.py - Explore & Leaderboard Tests
+# Description: Tests for apps/handlers/social/leaderboard_ops.py and apps/modules/explore.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,14 +17,10 @@
 #   - Mocks prax logger, json_handler, get_db, close_db, get_caller_branch as needed
 # =============================================
 
-"""
-Unit tests for the explore and leaderboard subsystems.
+"""Tests for apps/handlers/social/leaderboard_ops.py and apps/modules/explore.py."""
 
-Covers:
-- leaderboard_ops DB query functions (empty + populated tables)
-- show_leaderboard public API with mock DB
-- explore module command routing
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/social/ parses and imports
 
 import sqlite3
 from unittest.mock import patch, MagicMock

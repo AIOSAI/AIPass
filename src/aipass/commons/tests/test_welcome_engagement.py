@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_welcome_engagement.py - Welcome & Engagement Tests
+# Description: Tests for apps/modules/welcome.py, welcome_handler.py, apps/modules/engagement.py and engagement_ops.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,22 +17,15 @@
 #   - Mocks prax logger, json_handler, get_db, close_db as needed
 # =============================================
 
-"""
-Unit tests for the welcome and engagement subsystems.
+"""Tests for apps/modules/welcome.py, apps/handlers/welcome/welcome_handler.py and apps/modules/engagement.py."""
 
-Covers:
-- has_been_welcomed: new vs welcomed branch detection
-- create_welcome_post: post creation and double-welcome prevention
-- get_onboarding_nudge: nudge for inactive branches, None for active
-- welcome_new_branches: bulk scan and welcome
-- generate_prompt: daily prompt post creation
-- create_event: event creation with and without args
-- Module routing for welcome, prompt, event commands
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/welcome/, handlers/engagement/ parses and imports
 
 import sqlite3
 from unittest.mock import patch, MagicMock
 
+import pytest
 
 from aipass.commons.apps.handlers.welcome.welcome_handler import (
     has_been_welcomed,
@@ -41,6 +37,8 @@ from aipass.commons.apps.handlers.engagement.engagement_ops import (
     generate_prompt,
     create_event,
 )
+from aipass.commons.apps.modules import engagement as engagement_module
+from aipass.commons.apps.modules import welcome as welcome_module
 
 
 # =============================================================================
@@ -129,7 +127,8 @@ def test_create_welcome_post_double_welcome_prevented(
     _seed_test_agents(initialized_db)
 
     first = create_welcome_post(initialized_db, "TEST_BRANCH")
-    assert first is not None
+    row = initialized_db.execute("SELECT * FROM posts WHERE id = ?", (first,)).fetchone()
+    assert "TEST_BRANCH" in row["title"]
 
     second = create_welcome_post(initialized_db, "TEST_BRANCH")
     assert second is None
@@ -149,8 +148,7 @@ def test_get_onboarding_nudge_no_posts_gets_nudge(
     _seed_test_agents(initialized_db)
 
     nudge = get_onboarding_nudge(initialized_db, "TEST_BRANCH")
-    assert nudge is not None
-    assert "commons post" in nudge
+    assert nudge is not None and "commons post" in nudge
 
 
 @patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
@@ -275,28 +273,23 @@ def test_create_event_with_args_creates_event_post(
 
 @patch("aipass.commons.apps.modules.welcome.run_welcome")
 @patch("aipass.commons.apps.modules.welcome.json_handler", autospec=True)
-@patch("aipass.commons.apps.modules.welcome.console")
 def test_welcome_module_routes_welcome_command(
-    mock_console: MagicMock,
     mock_json: MagicMock,
     mock_run: MagicMock,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """welcome.handle_command should route 'welcome' and return True."""
-    from aipass.commons.apps.modules.welcome import handle_command
-
     mock_run.return_value = {"success": True, "action": "scan", "welcomed": []}
 
-    result = handle_command("welcome", [])
+    result = welcome_module.handle_command("welcome", [])
     assert result is True
     mock_run.assert_called_once_with([])
+    assert "All branches have been welcomed already." in capsys.readouterr().out
 
 
-@patch("aipass.commons.apps.modules.welcome.console")
-def test_welcome_module_rejects_unknown_command(mock_console: MagicMock) -> None:
+def test_welcome_module_rejects_unknown_command() -> None:
     """welcome.handle_command should return False for non-welcome commands."""
-    from aipass.commons.apps.modules.welcome import handle_command
-
-    result = handle_command("post", [])
+    result = welcome_module.handle_command("post", [])
     assert result is False
 
 
@@ -307,15 +300,12 @@ def test_welcome_module_rejects_unknown_command(mock_console: MagicMock) -> None
 
 @patch("aipass.commons.apps.modules.engagement.generate_prompt")
 @patch("aipass.commons.apps.modules.engagement.json_handler", autospec=True)
-@patch("aipass.commons.apps.modules.engagement.console")
 def test_engagement_module_routes_prompt_command(
-    mock_console: MagicMock,
     mock_json: MagicMock,
     mock_prompt: MagicMock,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """engagement.handle_command should route 'prompt' and return True."""
-    from aipass.commons.apps.modules.engagement import handle_command
-
     mock_prompt.return_value = {
         "success": True,
         "post_id": 1,
@@ -324,22 +314,20 @@ def test_engagement_module_routes_prompt_command(
         "author": "THE_COMMONS",
     }
 
-    result = handle_command("prompt", [])
+    result = engagement_module.handle_command("prompt", [])
     assert result is True
     mock_prompt.assert_called_once_with([])
+    assert "Daily prompt posted!" in capsys.readouterr().out
 
 
 @patch("aipass.commons.apps.modules.engagement.create_event")
 @patch("aipass.commons.apps.modules.engagement.json_handler", autospec=True)
-@patch("aipass.commons.apps.modules.engagement.console")
 def test_engagement_module_routes_event_command(
-    mock_console: MagicMock,
     mock_json: MagicMock,
     mock_event: MagicMock,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """engagement.handle_command should route 'event' and return True."""
-    from aipass.commons.apps.modules.engagement import handle_command
-
     mock_event.return_value = {
         "success": True,
         "post_id": 2,
@@ -348,6 +336,8 @@ def test_engagement_module_routes_event_command(
         "author": "THE_COMMONS",
     }
 
-    result = handle_command("event", ["Hackathon", "Build stuff"])
+    result = engagement_module.handle_command("event", ["Hackathon", "Build stuff"])
     assert result is True
     mock_event.assert_called_once_with(["Hackathon", "Build stuff"])
+    out = capsys.readouterr().out
+    assert "Event created!" in out and "Hackathon" in out

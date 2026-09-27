@@ -3,7 +3,7 @@
 # Description: Curation Orchestration Module
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -94,7 +94,7 @@ def handle_command(command: str, args: List[str]) -> bool:
         elif command == "pinned":
             result = _handle_pinned(args)
         else:
-            result = _handle_trending(args)
+            result = _handle_trending()
         if result:
             json_handler.log_operation(f"{command}_executed", {"command": command, "success": True})
         return result
@@ -257,9 +257,9 @@ def _handle_pinned(args: List[str]) -> bool:
     return True
 
 
-def _handle_trending(args: List[str]) -> bool:
+def _handle_trending() -> bool:
     """Show trending posts."""
-    result = show_trending(args)
+    result = show_trending()
 
     if not result["success"]:
         error(result["error"])

@@ -3,7 +3,7 @@
 # Description: Trading & Ephemeral Item Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -148,7 +148,7 @@ def gift_artifact(args: List[str]) -> dict:
     if not recipient:
         return {"success": False, "error": f"Branch '{args[1]}' not found in BRANCH_REGISTRY"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:
@@ -228,7 +228,7 @@ def trade_artifact(args: List[str]) -> dict:
     if not partner:
         return {"success": False, "error": f"Branch '{args[2]}' not found in BRANCH_REGISTRY"}
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:
@@ -336,7 +336,7 @@ def drop_item(args: List[str]) -> dict:
         else:
             i += 1
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:
@@ -412,7 +412,7 @@ def find_item(args: List[str]) -> dict:
 
     sweep_expired()
 
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
 
     caller = get_caller_branch()
     if not caller:

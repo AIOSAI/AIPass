@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_notifications.py - Notification Preferences Tests
+# Description: Tests for apps/handlers/notifications/preferences.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,19 +17,13 @@
 #   - Mocks prax logger and json_handler to avoid side-effect dependencies
 # =============================================
 
-"""
-Unit tests for the notification preferences subsystem.
+"""Tests for apps/handlers/notifications/preferences.py."""
 
-Covers:
-- set_preference: create, update, invalid level, invalid target_type
-- get_preference: existing and nonexistent lookups
-- get_all_preferences: populated and empty agent results
-- should_notify: mute, watch, track, and default (no preference) behavior
-- get_watchers: returns agents watching a specific target
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/notifications/ parses and imports
 
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 from aipass.commons.apps.handlers.notifications.preferences import (
@@ -58,9 +55,7 @@ def _insert_test_agent(conn: sqlite3.Connection, name: str = "TEST_BRANCH") -> N
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_and_retrieve(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -76,9 +71,7 @@ def test_set_preference_and_retrieve(
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_update_existing(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -96,7 +89,7 @@ def test_set_preference_update_existing(
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_invalid_level(
-    mock_logger: object,
+    mock_logger: MagicMock,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -106,12 +99,13 @@ def test_set_preference_invalid_level(
 
     result = set_preference(conn, "TEST_BRANCH", "room", "general", "silent")
     assert result is False
+    mock_logger.warning.assert_called_once_with("Invalid level: silent")
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
 @patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_set_preference_invalid_target_type(
-    mock_logger: object,
+    mock_logger: MagicMock,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -121,6 +115,7 @@ def test_set_preference_invalid_target_type(
 
     result = set_preference(conn, "TEST_BRANCH", "channel", "general", "watch")
     assert result is False
+    mock_logger.warning.assert_called_once_with("Invalid target_type: channel")
 
 
 # =============================================================================
@@ -143,9 +138,7 @@ def test_get_preference_nonexistent(initialized_db: object) -> None:
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_get_all_preferences_returns_all(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -181,9 +174,7 @@ def test_get_all_preferences_empty_for_new_agent(initialized_db: object) -> None
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_should_notify_mute_returns_false(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -199,9 +190,7 @@ def test_should_notify_mute_returns_false(
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_should_notify_watch_returns_true_for_any_event(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -218,9 +207,7 @@ def test_should_notify_watch_returns_true_for_any_event(
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_should_notify_track_only_mention_and_reply(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:
@@ -253,9 +240,7 @@ def test_should_notify_default_no_preference(initialized_db: object) -> None:
 
 
 @patch("aipass.commons.apps.handlers.notifications.preferences.json_handler", autospec=True)
-@patch("aipass.commons.apps.handlers.notifications.preferences.logger")
 def test_get_watchers_returns_watching_agents(
-    mock_logger: object,
     mock_json: object,
     initialized_db: object,
 ) -> None:

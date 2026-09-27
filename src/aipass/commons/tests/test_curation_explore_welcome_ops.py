@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_curation_explore_welcome_ops.py
+# Description: Tests for handlers/curation/curation_ops.py, rooms/explore_ops.py and welcome/welcome_ops.py
 # Date: 2026-04-03
 # Version: 1.0.0
+# Created: 2026-04-03
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,24 +17,10 @@
 #   - Mocks get_db, close_db, get_caller_branch, json_handler targeting SOURCE modules
 # =============================================
 
-"""
-Unit tests for the *ops* layer of curation, explore, and welcome handlers.
+"""Tests for apps/handlers/curation/curation_ops.py, rooms/explore_ops.py and welcome/welcome_ops.py."""
 
-These tests exercise the public functions that parse CLI args, acquire a DB
-connection, call into the query layer, and return result dicts.  The existing
-test_curation.py, test_explore_leaderboard.py, and test_welcome_engagement.py
-cover the lower-level query functions and module routing; this file focuses on
-the ops orchestration that sits above them.
-
-Covered modules:
-- commons.apps.handlers.curation.curation_ops
-    add_react, remove_react, show_reactions, pin_post_cmd, unpin_post_cmd,
-    show_pinned, show_trending
-- commons.apps.handlers.rooms.explore_ops
-    explore_rooms, list_secrets
-- commons.apps.handlers.welcome.welcome_ops
-    run_welcome (--dry-run and normal), _welcome_scan, _welcome_specific
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(duplicate) — query/routing covered by test_curation.py, test_explore_leaderboard.py
 
 import sqlite3
 from unittest.mock import patch, MagicMock
@@ -710,7 +699,7 @@ def test_show_trending_empty(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = show_trending([])
+    result = show_trending()
     assert result["success"] is True
     assert result["posts"] == []
 
@@ -745,7 +734,7 @@ def test_explore_rooms_no_hidden_rooms(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is True
     assert result["hidden_rooms"] == []
     assert result["rooms_visited"] == 0
@@ -777,7 +766,7 @@ def test_explore_rooms_with_hidden_rooms_no_reveal(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is True
     assert len(result["hidden_rooms"]) == 1
     assert result["hidden_rooms"][0]["name"] == "secret-lab"
@@ -817,7 +806,7 @@ def test_explore_rooms_reveals_after_3_rooms(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is True
     assert result["rooms_visited"] >= 3
     assert "revealed" in result
@@ -832,7 +821,7 @@ def test_explore_rooms_no_caller(mock_caller: MagicMock) -> None:
     """explore_rooms when caller cannot be detected returns error."""
     from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms
 
-    result = explore_rooms([])
+    result = explore_rooms()
     assert result["success"] is False
     assert "calling branch" in result["error"]
 
@@ -866,7 +855,7 @@ def test_list_secrets_none_discovered(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is True
     assert result["discovered"] == []
     assert result["total_hidden"] == 1
@@ -897,7 +886,7 @@ def test_list_secrets_with_discovered_room(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is True
     assert len(result["discovered"]) == 1
     assert result["discovered"][0]["name"] == "hidden-cove"
@@ -933,7 +922,7 @@ def test_list_secrets_discovered_via_comment(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda c: None
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is True
     assert len(result["discovered"]) == 1
     assert result["discovered"][0]["name"] == "hidden-den"
@@ -947,7 +936,7 @@ def test_list_secrets_no_caller(mock_caller: MagicMock) -> None:
     """list_secrets when caller cannot be detected returns error."""
     from aipass.commons.apps.handlers.rooms.explore_ops import list_secrets
 
-    result = list_secrets([])
+    result = list_secrets()
     assert result["success"] is False
     assert "calling branch" in result["error"]
 

@@ -3,7 +3,7 @@
 # Description: Notification Preference Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -142,7 +142,7 @@ def _set_notification_level(args: List[str], level: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def show_preferences(args: List[str]) -> dict:
+def show_preferences() -> dict:
     """
     Show all notification preferences for the caller.
 

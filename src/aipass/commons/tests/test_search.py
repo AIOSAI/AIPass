@@ -3,20 +3,13 @@
 # Description: Unit tests for search handler, search queries, and log export
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Unit tests for the search subsystem.
+"""Tests for apps/handlers/search/search_ops.py, search_queries.py, and log_export.py."""
 
-Tests cover:
-- search_ops._parse_search_args() -- pure argument parsing
-- search_ops.run_search() / run_log_export() -- orchestration with mocked DB
-- search_queries helper imports (coverage)
-- search_queries._quote_fts5_query() -- literal-phrase escaping for FTS5 MATCH
-- search_queries.search_posts() end-to-end against a real FTS5 index
-- log_export._format_comment_tree() -- pure tree formatting
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that search_ops.py, search_queries.py, and log_export.py parse and import
 
 import sqlite3
 
@@ -133,6 +126,10 @@ def test_run_search_no_args(
     result = run_search([])
     assert result["success"] is False
     assert result["error"].startswith("Usage")
+    # No query means no DB round-trip at all
+    mock_get_db.assert_not_called()
+    mock_search_all.assert_not_called()
+    mock_close_db.assert_not_called()
 
 
 @patch("aipass.commons.apps.handlers.search.search_ops.json_handler", autospec=True)
@@ -160,6 +157,7 @@ def test_run_search_returns_results(
     assert len(result["posts"]) == 1
     assert result["posts"][0]["title"] == "Found"
     assert result["comments"] == []
+    mock_close_db.assert_called_once_with(mock_conn)
 
 
 # =============================================================================

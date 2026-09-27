@@ -3,7 +3,7 @@
 # Description: Profile Operations Handler
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -118,14 +118,11 @@ def _handle_profile_set(args: List[str]) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def list_members(args: List[str]) -> dict:
+def list_members() -> dict:
     """
     List all agents with brief profile info.
 
     Usage: commons who
-
-    Args:
-        args: Command arguments (currently unused)
 
     Returns:
         Dict with success and agents list

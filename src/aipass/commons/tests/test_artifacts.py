@@ -1,8 +1,11 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: test_artifacts.py - Artifact, Trade, and Capsule Tests
+# Description: Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py
 # Date: 2026-03-28
 # Version: 1.0.0
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -14,17 +17,10 @@
 #   - Mocks prax logger, json_handler, get_db, close_db, get_caller_branch
 # =============================================
 
-"""
-Unit tests for artifact, trade, and capsule subsystems.
+"""Tests for apps/handlers/artifacts/artifact_ops.py, trade_ops.py and capsule_ops.py."""
 
-Covers:
-- _validate_metadata: valid/invalid JSON handling
-- craft_artifact / list_artifacts / inspect_artifact operations
-- _now_utc helper
-- sweep_expired / gift_artifact / drop_item operations
-- seal_capsule / list_capsules / open_capsule operations
-- Module routing for artifact, trade, capsule handle_command
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/artifacts/ parses and imports
 
 import sqlite3
 from datetime import datetime, timezone, timedelta
@@ -43,6 +39,9 @@ from aipass.commons.apps.handlers.artifacts.trade_ops import (
     gift_artifact,
     drop_item,
 )
+from aipass.commons.apps.modules import artifact as artifact_module
+from aipass.commons.apps.modules import capsule as capsule_module
+from aipass.commons.apps.modules import trade as trade_module
 from aipass.commons.apps.handlers.artifacts.capsule_ops import (
     seal_capsule,
     list_capsules,
@@ -114,7 +113,7 @@ def test_craft_artifact_no_args() -> None:
     assert "Usage" in result["error"]
 
 
-@patch("aipass.commons.apps.modules.commons_identity.get_caller_branch", return_value={"name": "TEST_BRANCH"})
+@patch("aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db")
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.close_db")
 @patch("aipass.commons.apps.handlers.artifacts.artifact_ops.json_handler", autospec=True)
@@ -278,7 +277,7 @@ def test_seal_capsule_no_args() -> None:
     assert "Usage" in result["error"]
 
 
-@patch("aipass.commons.apps.modules.commons_identity.get_caller_branch", return_value={"name": "TEST_BRANCH"})
+@patch("aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch", return_value={"name": "TEST_BRANCH"})
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db")
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.close_db")
 @patch("aipass.commons.apps.handlers.artifacts.capsule_ops.json_handler", autospec=True)
@@ -327,7 +326,7 @@ def test_list_capsules_empty_db(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    result = list_capsules([])
+    result = list_capsules()
 
     assert result["success"] is True
     assert result["capsules"] == []
@@ -367,9 +366,7 @@ def test_artifact_handle_command_routes_craft(
         "description": "d",
     }
 
-    from aipass.commons.apps.modules.artifact import handle_command
-
-    result = handle_command("craft", ["Test", "desc"])
+    result = artifact_module.handle_command("craft", ["Test", "desc"])
 
     assert result is True
     mock_craft.assert_called_once_with(["Test", "desc"])
@@ -393,9 +390,7 @@ def test_trade_handle_command_routes_gift(
         "recipient": "B",
     }
 
-    from aipass.commons.apps.modules.trade import handle_command
-
-    result = handle_command("gift", ["1", "@BRANCH"])
+    result = trade_module.handle_command("gift", ["1", "@BRANCH"])
 
     assert result is True
     gift_mock.assert_called_once_with(["1", "@BRANCH"])
@@ -418,9 +413,7 @@ def test_capsule_handle_command_routes_capsule(
         "opens_at": "2026-04-04T00:00:00Z",
     }
 
-    from aipass.commons.apps.modules.capsule import handle_command
-
-    result = handle_command("capsule", ["Title", "Content", "7"])
+    result = capsule_module.handle_command("capsule", ["Title", "Content", "7"])
 
     assert result is True
     seal_mock.assert_called_once_with(["Title", "Content", "7"])
