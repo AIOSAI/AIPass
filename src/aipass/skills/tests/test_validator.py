@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_validator.py
 # Description: Unit tests for skills validator
 # Version: 1.0.0

@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_dead_cwd_imports.py
 # Description: Dead-cwd import pins
 # Version: 1.0.0

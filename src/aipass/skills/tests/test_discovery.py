@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_discovery.py
 # Description: Unit tests for skills discovery
 # Version: 1.0.0

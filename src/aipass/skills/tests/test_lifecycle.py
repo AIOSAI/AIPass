@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_lifecycle.py
 # Description: Integration test for full skill lifecycle
 # Version: 1.0.0

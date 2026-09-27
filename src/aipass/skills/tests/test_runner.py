@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_runner.py
 # Description: Unit tests for skills runner
 # Version: 1.0.0

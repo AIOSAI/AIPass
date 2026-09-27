@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: conftest.py
 # Description: Skills test configuration
 # Version: 3.1.0

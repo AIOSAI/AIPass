@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_registry.py
 # Description: Unit tests for skills registry
 # Version: 1.0.0

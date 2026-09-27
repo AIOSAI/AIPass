@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_machine_vitals.py
 # Description: The machine_vitals() contract
 # Version: 1.1.0

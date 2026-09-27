@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_loader.py
 # Description: Unit tests for skills loader
 # Version: 1.0.0

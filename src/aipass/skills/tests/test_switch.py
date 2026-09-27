@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_switch.py
 # Description: Skill off-switch tests
 # Version: 1.1.0
