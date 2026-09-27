@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: wire.py
 # Description: Watchdog Wire Handler — deliver MY dispatch completions into THIS session
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-08-19
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -717,6 +717,16 @@ def arm_wire(
             f"watchdog wire: armed handle={handle} session={session_name or 'NONE (fg)'} "
             f"replayed={replayed} tick={wire_poll}s"
         )
+        if my_target is not None and str(my_target).startswith("pipe:"):
+            # A pipe hides the wrapper: `baseline --once | tail` under
+            # run_in_background still wakes on exit, but it records as
+            # foreground and the statusline counts only background or monitor,
+            # so a live wire painted as none (2026-09-27 02:41).
+            _stderr(
+                "watchdog wire: stdout is a pipe — this wire is recorded as foreground and the statusline "
+                "will not count it. Arm it bare, no pipe and no redirect: drone @devpulse watchdog baseline --once"
+            )
+            logger.warning("[watchdog.wire] armed behind a pipe handle=%s stdout=%s", handle, my_target)
         if not once:
             # The wrapper is invisible from inside — this line is the only
             # tripwire for the 12:34 mistake (continuous wire armed via

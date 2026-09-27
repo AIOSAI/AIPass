@@ -806,7 +806,7 @@ def test_a_foreground_wire_is_recorded_as_foreground(tmp_path, monkeypatch):
     assert seen["wrapper"] == wire.WRAPPER_FOREGROUND
 
 
-def test_the_run_in_background_shape_records_as_background(tmp_path, monkeypatch):
+def test_the_run_in_background_shape_records_as_background(tmp_path, capsys, monkeypatch):
     """--once is legal under run_in_background (it exits on delivery), so the
     wrapper must still be recorded truthfully there rather than assumed."""
     root = _repo(tmp_path)
@@ -822,6 +822,24 @@ def test_the_run_in_background_shape_records_as_background(tmp_path, monkeypatch
     wire.arm_wire(repo_root=root, storage_path=store, once=True, max_ticks=1, wire_poll=0)
 
     assert seen["wrapper"] == wire.WRAPPER_BACKGROUND
+    assert "stdout is a pipe" not in capsys.readouterr().err
+
+
+def test_a_piped_once_wire_says_the_statusline_will_not_count_it(tmp_path, capsys, monkeypatch):
+    """A pipe after --once records as foreground; the wire names the pipe (mutant: the pipe check answers False)."""
+    root = _repo(tmp_path)
+    store = _store(tmp_path)
+    _write_feed(root, [])
+    monkeypatch.setattr(wire, "_stdout_target", lambda pid=None: Path("pipe:[918273]"))
+    seen: dict = {}
+    _spy_register(monkeypatch, seen)
+
+    wire.arm_wire(repo_root=root, storage_path=store, once=True, max_ticks=1, wire_poll=0)
+
+    err = capsys.readouterr().err
+    assert seen["wrapper"] == wire.WRAPPER_FOREGROUND
+    assert "stdout is a pipe" in err
+    assert "drone @devpulse watchdog baseline --once" in err
 
 
 def test_wire_no_longer_records_a_daemon_pid(tmp_path, monkeypatch):
