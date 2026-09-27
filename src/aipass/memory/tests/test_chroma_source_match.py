@@ -1,27 +1,31 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_chroma_source_match.py
-# Date: 2026-09-15
-# Version: 1.1.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_chroma_source_match.py
+# Description: Tests for source_file matching in the ChromaDB subprocess handler
+# Version: 1.1.1
+# Created: 2026-08-23
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for source_file matching in the ChromaDB subprocess handler.
+"""Tests for apps/handlers/storage/chroma_subprocess.py."""
 
-Covers: _source_matches, _check_plan, _get_by_source, _delete_by_source,
-_search_vectors' --branch scope
+# Tests for source_file matching in the ChromaDB subprocess handler.
+#
+# Covers: _source_matches, _check_plan, _get_by_source, _delete_by_source,
+# _search_vectors' --branch scope
+#
+# The defect these pin: `plan_label in source_file` is an unanchored substring
+# test, so DPLAN-0012 matches a TDPLAN-0012 filename and the exact-match pin
+# promotes the wrong plan. A label only counts when the character before it is
+# not alphanumeric. The same species in the search filter: `startswith(branch)`
+# sent --branch aipass into aipass_site_local.
+#
+# All tests use a fake collection -- no live ChromaDB.
 
-The defect these pin: `plan_label in source_file` is an unanchored substring
-test, so DPLAN-0012 matches a TDPLAN-0012 filename and the exact-match pin
-promotes the wrong plan. A label only counts when the character before it is
-not alphanumeric. The same species in the search filter: `startswith(branch)`
-sent --branch aipass into aipass_site_local.
-
-All tests use a fake collection -- no live ChromaDB.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import pytest
 
+from aipass.memory.apps.handlers.search import query_executor
 from aipass.memory.apps.handlers.storage import chroma_subprocess
 
 
@@ -222,8 +226,6 @@ class TestPinComposition:
     """
 
     def _query_executor(self):
-        from aipass.memory.apps.handlers.search import query_executor
-
         return query_executor
 
     def test_extractor_keeps_the_longer_prefix_whole(self):

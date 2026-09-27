@@ -1,16 +1,29 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
-# Date: 2026-04-26
+# Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.0.0
+# Created: 2026-04-26
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
-"""Tests for orchestrator execute_rollover pipeline -- line coverage.
 
-Covers: from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
-"""
+"""Tests for apps/handlers/rollover/orchestrator.py."""
+
+# Tests for orchestrator execute_rollover pipeline -- line coverage.
+#
+# Covers: from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import sys
 from unittest.mock import MagicMock
+
+from aipass.memory.apps.handlers.rollover import orchestrator
+
+# The post-rollover chain imports these by name at call time, through
+# sys.modules; a dotted target patches whatever module sys.modules holds then.
+_CENTRAL_UPDATE = "aipass.memory.apps.handlers.central_writer.update_central"
+_POOL_PROCESS = "aipass.memory.apps.handlers.intake.pool_processor.process_memory_pool"
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +32,7 @@ from unittest.mock import MagicMock
 
 
 def _import_orchestrator(monkeypatch):
-    """Import orchestrator with mocked infrastructure dependencies."""
+    """Patch orchestrator's handler dependencies at the edge; return it and the mocks."""
     mock_detector = MagicMock()
     mock_detector._read_registry = MagicMock(return_value=[])
     mock_detector.check_all_branches = MagicMock(return_value={"success": True, "triggers": []})
@@ -27,30 +40,17 @@ def _import_orchestrator(monkeypatch):
     mock_extractor = MagicMock()
     mock_line_counter = MagicMock()
 
-    monitor_pkg = MagicMock()
-    monitor_pkg.detector = mock_detector
-
-    rollover_pkg = MagicMock()
-    rollover_pkg.extractor = mock_extractor
-
-    tracking_pkg = MagicMock()
-    tracking_pkg.line_counter = mock_line_counter
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor", monitor_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", mock_detector)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.extractor", mock_extractor)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking", tracking_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.tracking.line_counter", mock_line_counter)
-
-    sys.modules.pop("aipass.memory.apps.handlers.rollover.orchestrator", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
-    if parent is not None and hasattr(parent, "orchestrator"):
-        delattr(parent, "orchestrator")
-    from aipass.memory.apps.handlers.rollover import orchestrator
-
     monkeypatch.setattr(orchestrator, "detector", mock_detector)
     monkeypatch.setattr(orchestrator, "extractor", mock_extractor)
     monkeypatch.setattr(orchestrator, "line_counter", mock_line_counter)
+    # The conftest stands mocks in for these two in sys.modules; a module
+    # imported at the top of the file bound the real ones, so patch them here.
+    monkeypatch.setattr(orchestrator, "logger", MagicMock())
+    monkeypatch.setattr(orchestrator, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
+    # The post-rollover chain imports these at call time; unpatched, a test that
+    # reaches success_count > 0 wrote the live .ai_central/MEMORY.central.json.
+    monkeypatch.setattr(_CENTRAL_UPDATE, MagicMock(return_value={"success": True}))
+    monkeypatch.setattr(_POOL_PROCESS, MagicMock(return_value={"files_processed": 0}))
 
     return orchestrator, {
         "detector": mock_detector,
@@ -461,11 +461,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_core)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
         assert result["success"] is True
@@ -485,11 +484,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         orch.execute_rollover()
         mock_trigger_cls.fire.assert_called_once()
@@ -503,11 +501,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         orch.execute_rollover()
         mock_central.update_central.assert_called_once()
@@ -521,11 +518,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 2})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         orch.execute_rollover()
         mock_pool.process_memory_pool.assert_called_once()
@@ -540,11 +536,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
         # Pipeline still succeeds despite trigger error
@@ -559,11 +554,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value=None)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
         assert result["success"] is True
@@ -618,11 +612,10 @@ class TestExecuteRolloverMultiple:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
         assert result["success"] is True
@@ -671,11 +664,10 @@ class TestExecuteRolloverMultiple:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
         # Still succeeds -- line count is non-fatal
@@ -722,11 +714,10 @@ class TestExecuteRolloverMultiple:
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.central_writer", mock_central)
+        monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
         mock_pool = MagicMock()
         mock_pool.process_memory_pool = MagicMock(return_value={"files_processed": 0})
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake.pool_processor", mock_pool)
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.intake", MagicMock(pool_processor=mock_pool))
+        monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         result = orch.execute_rollover()
         assert result["success"] is True

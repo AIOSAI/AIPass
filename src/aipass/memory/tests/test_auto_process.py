@@ -1,88 +1,47 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_auto_process.py
-# Date: 2026-06-06
+# Description: Tests for the intake auto_process handler and the pool module
 # Version: 1.1.0
-# Modified: 2026-09-15
+# Created: 2026-06-06
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""Tests for the intake/auto_process handler and modules/pool module.
+"""Tests for apps/handlers/intake/auto_process.py and apps/modules/pool.py."""
 
-Covers:
-  - auto_process.auto_process (full orchestration entry point)
-  - auto_process.run_pool_processing (pool-only path)
-  - auto_process._load_pool_enabled (config loading)
-  - auto_process._run_rollover_check (rollover path)
-  - pool.handle_command (CLI routing)
+# Tests for the intake/auto_process handler and modules/pool module.
+#
+# Covers:
+#   - auto_process.auto_process (full orchestration entry point)
+#   - auto_process.run_pool_processing (pool-only path)
+#   - auto_process._load_pool_enabled (config loading)
+#   - auto_process._run_rollover_check (rollover path)
+#   - pool.handle_command (CLI routing)
+#
+# Tests: empty-pool no-op, new-drop processed+vectorized, re-run idempotent,
+# enabled=false respected, rollover-trigger path.
+#
+# All tests use mocks/tmp_path — no live filesystem or infrastructure access.
 
-Tests: empty-pool no-op, new-drop processed+vectorized, re-run idempotent,
-enabled=false respected, rollover-trigger path.
+# The declared pass — what is NOT tested here, and what covers it instead:
 
-All tests use mocks/tmp_path — no live filesystem or infrastructure access.
-"""
-
-import importlib.util
 import json
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 
-# ---------------------------------------------------------------------------
-# Import helpers
-# ---------------------------------------------------------------------------
-
-_CONFIG_LOADER_PATH = Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json" / "config_loader.py"
-
-
-def _load_real_config_loader():
-    """Load the real config_loader module from disk (bypassing mocked sys.modules)."""
-    spec = importlib.util.spec_from_file_location(
-        "aipass.memory.apps.handlers.json.config_loader",
-        _CONFIG_LOADER_PATH,
-    )
-    assert spec is not None, f"Could not find config_loader at {_CONFIG_LOADER_PATH}"
-    assert spec.loader is not None, "config_loader spec has no loader"
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["aipass.memory.apps.handlers.json.config_loader"] = mod
-    spec.loader.exec_module(mod)
-    # Also attach to the (mocked) parent package so `from ... import config_loader` works
-    parent = sys.modules.get("aipass.memory.apps.handlers.json")
-    if parent is not None:
-        setattr(parent, "config_loader", mod)
-    return mod
+from aipass.memory.apps.handlers.intake import auto_process
+from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.modules import pool
 
 
-def _import_auto_process(monkeypatch):
-    """Import auto_process with mocked dependencies.
-
-    Loads the real config_loader (bypassing the conftest MagicMock for the
-    json package) so that _CONFIG_PATH can be patched per-test.
-    """
-    # Load real config_loader into sys.modules before auto_process imports it
-    _load_real_config_loader()
-
-    sys.modules.pop("aipass.memory.apps.handlers.intake.auto_process", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.intake")
-    if parent is not None and hasattr(parent, "auto_process"):
-        delattr(parent, "auto_process")
-
-    from aipass.memory.apps.handlers.intake import auto_process
-
-    return auto_process
-
-
-def _import_pool_module(monkeypatch):
-    """Import pool module with mocked dependencies."""
-    sys.modules.pop("aipass.memory.apps.modules.pool", None)
-    parent = sys.modules.get("aipass.memory.apps.modules")
-    if parent is not None and hasattr(parent, "pool"):
-        delattr(parent, "pool")
-
-    from aipass.memory.apps.modules import pool
-
-    return pool
+@pytest.fixture(autouse=True)
+def _auto_process_logs_nowhere(monkeypatch):
+    """The conftest stands mocks in for the logger and json_handler in sys.modules;
+    auto_process is imported at the top of the file and bound the real ones."""
+    monkeypatch.setattr(auto_process, "logger", MagicMock())
+    monkeypatch.setattr(auto_process, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
 
 
 # ===========================================================================
@@ -94,7 +53,7 @@ class TestLoadPoolEnabled:
     """Test _load_pool_enabled config loading."""
 
     def test_returns_true_when_enabled(self, monkeypatch, tmp_path):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         cl = mod.config_loader
         config_file = tmp_path / "memory.config.json"
         config_file.write_text(
@@ -106,7 +65,7 @@ class TestLoadPoolEnabled:
         assert mod._load_pool_enabled() is True
 
     def test_returns_false_when_disabled(self, monkeypatch, tmp_path):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         cl = mod.config_loader
         config_file = tmp_path / "memory.config.json"
         config_file.write_text(
@@ -119,7 +78,7 @@ class TestLoadPoolEnabled:
 
     def test_returns_true_when_config_missing_self_heals(self, monkeypatch, tmp_path):
         """Missing config triggers self-heal which writes DEFAULT_CONFIG (enabled=True)."""
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         cl = mod.config_loader
         monkeypatch.setattr(cl, "_CONFIG_PATH", tmp_path / "missing.json")
 
@@ -127,7 +86,7 @@ class TestLoadPoolEnabled:
         assert mod._load_pool_enabled() is True
 
     def test_returns_false_when_key_missing(self, monkeypatch, tmp_path):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         cl = mod.config_loader
         config_file = tmp_path / "memory.config.json"
         config_file.write_text(json.dumps({"rollover": {}}), encoding="utf-8")
@@ -147,7 +106,7 @@ class TestRunPoolProcessing:
     """Test run_pool_processing function."""
 
     def test_skips_when_disabled(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: False)
 
         result = mod.run_pool_processing()
@@ -156,7 +115,7 @@ class TestRunPoolProcessing:
         assert "disabled" in result["reason"]
 
     def test_returns_zero_when_pool_empty(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
 
         mock_process = MagicMock(return_value={"success": True, "files_processed": 0, "total_chunks": 0})
@@ -170,7 +129,7 @@ class TestRunPoolProcessing:
         assert result["files_processed"] == 0
 
     def test_returns_count_when_files_processed(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
 
         mock_process = MagicMock(return_value={"success": True, "files_processed": 3, "total_chunks": 15})
@@ -185,7 +144,7 @@ class TestRunPoolProcessing:
         assert result["total_chunks"] == 15
 
     def test_handles_processing_error(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
 
         with patch(
@@ -207,7 +166,7 @@ class TestAutoProcess:
     """Test auto_process full orchestration."""
 
     def test_skips_everything_when_disabled(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: False)
 
         result = mod.auto_process()
@@ -217,7 +176,7 @@ class TestAutoProcess:
         assert result["rollover"]["skipped"] is True
 
     def test_empty_pool_no_rollover_triggers(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
         monkeypatch.setattr(
             mod,
@@ -237,7 +196,7 @@ class TestAutoProcess:
         assert result["rollover"]["skipped"] is True
 
     def test_pool_processed_no_rollover(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
         monkeypatch.setattr(
             mod,
@@ -256,7 +215,7 @@ class TestAutoProcess:
         assert result["pool"]["files_processed"] == 5
 
     def test_pool_and_rollover_both_fire(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
         monkeypatch.setattr(
             mod,
@@ -276,7 +235,7 @@ class TestAutoProcess:
         assert result["rollover"]["processed"] == 1
 
     def test_pool_failure_sets_success_false(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
         monkeypatch.setattr(
             mod,
@@ -294,7 +253,7 @@ class TestAutoProcess:
         assert result["success"] is False
 
     def test_rollover_failure_sets_success_false(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
         monkeypatch.setattr(
             mod,
@@ -313,7 +272,7 @@ class TestAutoProcess:
 
     def test_idempotent_second_run_no_new_work(self, monkeypatch):
         """Empty pool stays empty — both calls return 0 files."""
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
 
         call_count = {"pool": 0}
@@ -338,7 +297,7 @@ class TestAutoProcess:
 
     def test_first_call_processes_second_call_noop(self, monkeypatch):
         """With keep_recent=0, first call archives all files, second finds empty pool."""
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
         monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
 
         call_count = {"n": 0}
@@ -373,7 +332,7 @@ class TestRunRolloverCheck:
     """Test _run_rollover_check function."""
 
     def test_skips_when_no_triggers(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
 
         with patch(
             "aipass.memory.apps.handlers.monitor.detector.check_all_branches",
@@ -384,7 +343,7 @@ class TestRunRolloverCheck:
         assert result["skipped"] is True
 
     def test_executes_when_triggers_found(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
 
         mock_trigger = MagicMock()
         mock_execute = MagicMock(return_value={"success": True, "triggers_count": 1, "success_count": 1})
@@ -403,7 +362,7 @@ class TestRunRolloverCheck:
         assert result["processed"] == 1
 
     def test_handles_detector_error(self, monkeypatch):
-        mod = _import_auto_process(monkeypatch)
+        mod = auto_process
 
         with patch(
             "aipass.memory.apps.handlers.monitor.detector.check_all_branches",
@@ -419,15 +378,13 @@ class TestTodosNeverRideTheFleetWalk:
     """DPLAN-0345: todos roll for the OWN branch only - an over-count pad is not a fleet trigger."""
 
     def test_a_twelve_todo_pad_does_not_reach_execute_rollover(self, monkeypatch, tmp_path):
-        mod = _import_auto_process(monkeypatch)
-        loader = sys.modules["aipass.memory.apps.handlers.json.config_loader"]
+        mod = auto_process
+        loader = auto_process.config_loader
         config = json.loads(json.dumps(loader.DEFAULT_CONFIG))
         config["rollover"]["per_branch"] = {}
         config_path = tmp_path / "memory.config.json"
         config_path.write_text(json.dumps(config), encoding="utf-8")
         monkeypatch.setattr(loader, "_CONFIG_PATH", config_path)
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector, "config_loader", loader)
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
@@ -466,7 +423,7 @@ class TestPoolHandleCommand:
     """Test pool module command routing."""
 
     def test_handles_pool_command(self, monkeypatch):
-        mod = _import_pool_module(monkeypatch)
+        mod = pool
         mock = MagicMock()
         monkeypatch.setattr(mod, "print_introspection", mock)
 
@@ -474,7 +431,7 @@ class TestPoolHandleCommand:
         assert mock.call_count == 1
 
     def test_handles_pool_help(self, monkeypatch):
-        mod = _import_pool_module(monkeypatch)
+        mod = pool
         mock = MagicMock()
         monkeypatch.setattr(mod, "print_help", mock)
 
@@ -482,7 +439,7 @@ class TestPoolHandleCommand:
         assert mock.call_count == 1
 
     def test_handles_pool_process(self, monkeypatch):
-        mod = _import_pool_module(monkeypatch)
+        mod = pool
         mock = MagicMock()
         monkeypatch.setattr(mod, "_run_process_command", mock)
 
@@ -490,7 +447,7 @@ class TestPoolHandleCommand:
         assert mock.call_count == 1
 
     def test_handles_pool_status(self, monkeypatch):
-        mod = _import_pool_module(monkeypatch)
+        mod = pool
         mock = MagicMock()
         monkeypatch.setattr(mod, "_run_status_command", mock)
 
@@ -498,11 +455,11 @@ class TestPoolHandleCommand:
         assert mock.call_count == 1
 
     def test_rejects_unknown_subcommand(self, monkeypatch):
-        mod = _import_pool_module(monkeypatch)
+        mod = pool
 
         assert mod.handle_command("pool", ["bogus"]) is True
 
     def test_ignores_unrelated_command(self, monkeypatch):
-        mod = _import_pool_module(monkeypatch)
+        mod = pool
 
         assert mod.handle_command("search", []) is False

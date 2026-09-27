@@ -3,52 +3,55 @@
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
 # Version: 1.0.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Residency is DECLARED in a passport and ANCHORED in a registry. Both, or out.
+"""Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
 
-DPLAN-0318 defined the fleet with a named 4-tuple of resident registries. That
-constant did one job the passport field cannot do on its own: it kept
-``marketstand`` out. ``marketstand``'s registry still marks its branch
-``active`` while the project itself is parked, so anything that trusted a
-registry status field alone would sweep a held project into every rollover,
-lint and push in the system.
+# Residency is DECLARED in a passport and ANCHORED in a registry. Both, or out.
+#
+# DPLAN-0318 defined the fleet with a named 4-tuple of resident registries. That
+# constant did one job the passport field cannot do on its own: it kept
+# ``marketstand`` out. ``marketstand``'s registry still marks its branch
+# ``active`` while the project itself is parked, so anything that trusted a
+# registry status field alone would sweep a held project into every rollover,
+# lint and push in the system.
+#
+# Wave 3 replaces the constant as the CLASSIFIER, not as the exclusion. The
+# semantics these tests pin:
+#
+# DISCOVERY is registry-led and shallow. Candidates are exactly
+# ``projects/<project>/<NAME>_REGISTRY.json`` — one level under ``projects/``,
+# with any dot-prefixed path component refused. Never a passport walk.
+#
+#     That is not a stylistic preference. On this machine a passport walk under
+#     ``projects/`` returns EIGHT passports for FOUR residents: ``baud`` alone
+#     carries two more under ``.backup/versioned/`` and ``.backup/snapshots/``,
+#     each a byte-identical copy declaring ``residency: resident``. A backup copy
+#     of a passport is a real passport making a real declaration. Discovery that
+#     starts from passports counts baud three times; discovery that starts from
+#     registries reads a passport only at a path a registry declared.
+#
+# CLASSIFICATION reads ``citizenship.residency`` off the passport at that
+# registry-declared path. ``resident`` is included; anything else is refused and
+# named — missing passport, unreadable passport, absent field, ``core`` (a core
+# citizen cannot also be a resident), or a value nobody defined.
+#
+# THE TRUST MODEL, which decides who wins when they disagree. A passport is
+# agent-writable; a registry is not. So the passport can never ADD scope on its
+# own — a declared resident that no discovered registry lists is not reachable by
+# construction, because nothing walks passports. And for core citizens the sealed
+# registry is the anchor: a core citizen missing the field is LOGGED, never
+# dropped, because letting an agent edit its own passport to leave the
+# maintenance fleet is the same defect pointed the other way.
+#
+# EXCLUSION holds three deep, and each layer alone is enough to keep
+# ``marketstand`` out: it lives under a dot-directory, its passport declares no
+# residency, and its registry is not at glob depth one. The tests below assert
+# each layer independently, so removing one cannot quietly open the door on the
+# strength of another still standing.
 
-Wave 3 replaces the constant as the CLASSIFIER, not as the exclusion. The
-semantics these tests pin:
-
-DISCOVERY is registry-led and shallow. Candidates are exactly
-``projects/<project>/<NAME>_REGISTRY.json`` — one level under ``projects/``,
-with any dot-prefixed path component refused. Never a passport walk.
-
-    That is not a stylistic preference. On this machine a passport walk under
-    ``projects/`` returns EIGHT passports for FOUR residents: ``baud`` alone
-    carries two more under ``.backup/versioned/`` and ``.backup/snapshots/``,
-    each a byte-identical copy declaring ``residency: resident``. A backup copy
-    of a passport is a real passport making a real declaration. Discovery that
-    starts from passports counts baud three times; discovery that starts from
-    registries reads a passport only at a path a registry declared.
-
-CLASSIFICATION reads ``citizenship.residency`` off the passport at that
-registry-declared path. ``resident`` is included; anything else is refused and
-named — missing passport, unreadable passport, absent field, ``core`` (a core
-citizen cannot also be a resident), or a value nobody defined.
-
-THE TRUST MODEL, which decides who wins when they disagree. A passport is
-agent-writable; a registry is not. So the passport can never ADD scope on its
-own — a declared resident that no discovered registry lists is not reachable by
-construction, because nothing walks passports. And for core citizens the sealed
-registry is the anchor: a core citizen missing the field is LOGGED, never
-dropped, because letting an agent edit its own passport to leave the
-maintenance fleet is the same defect pointed the other way.
-
-EXCLUSION holds three deep, and each layer alone is enough to keep
-``marketstand`` out: it lives under a dot-directory, its passport declares no
-residency, and its registry is not at glob depth one. The tests below assert
-each layer independently, so removing one cannot quietly open the door on the
-strength of another still standing.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import logging
@@ -59,6 +62,7 @@ from pathlib import Path
 
 import pytest
 
+from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
 from aipass.memory.tests.dead_cwd import DEAD_CWD_WORLD
 
@@ -331,8 +335,6 @@ class TestEveryLaneReadsTheOneDefinition:
         is not the same as running it, and grep-shaped pins fail exactly where
         it matters: on a change that keeps the words and drops the behaviour.
         """
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(detector, "_REPO_ROOT", fleet)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
         names = {Path(branch["path"]).name for branch in detector._read_registry()}
@@ -356,8 +358,6 @@ class TestEveryLaneReadsTheOneDefinition:
         external tier through the DECLARED roots, never through a caller's
         cwd. Reads see the declared fleet; writes stop at the repo edge.
         """
-        from aipass.memory.apps.handlers.monitor import detector
-
         outside = tmp_path / "outside"
         _write(outside / "OUTSIDE_REGISTRY.json", _registry(_branch("ext", "src/ext/ext")))
         _write(outside / "src/ext/ext/.trinity/passport.json", _passport(None))
@@ -745,6 +745,8 @@ class TestRepoRootNeverReadsTheProcessDirectory:
             [sys.executable, "-c", cls._PROBE.format(world=DEAD_CWD_WORLD, src=src, body=body)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
         )
 
     def test_find_repo_root_survives_a_deleted_working_directory(self, tmp_path):

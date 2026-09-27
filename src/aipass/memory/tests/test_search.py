@@ -1,18 +1,21 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_search.py
-# Date: 2026-03-24
-# Version: 1.0.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_search.py
+# Description: Tests for the search orchestration module
+# Version: 1.0.1
+# Created: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the search orchestration module.
+"""Tests for apps/modules/search.py."""
 
-Covers: from aipass.memory.apps.modules.search import handle_command
+# Tests for the search orchestration module.
+#
+# Covers: from aipass.memory.apps.modules.search import handle_command
+#
+# Tests command routing, handler discovery, argument parsing, and help flags.
+# All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
-Tests command routing, handler discovery, argument parsing, and help flags.
-All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import sys
 from unittest.mock import MagicMock

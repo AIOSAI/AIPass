@@ -3,37 +3,40 @@
 # Description: Pins the declared-roots anchor and the external tier it opens
 # Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Repos outside this one join the fleet by DECLARATION, never by being nearby.
+"""Tests for apps/handlers/monitor/registry_scope.py — the declared-roots anchor and the external tier."""
 
-FPLAN-0460 phase 2. The owner's ruling, verbatim: "if .daemon is present anywhere
-on the machine and an agent exists there, daemon should be available - its really
-that simple." @devpulse gave the GO on the mechanism @drone and I reached
-independently: AIPass home declares which repo roots participate.
+# Repos outside this one join the fleet by DECLARATION, never by being nearby.
+#
+# FPLAN-0460 phase 2. The owner's ruling, verbatim: "if .daemon is present anywhere
+# on the machine and an agent exists there, daemon should be available - its really
+# that simple." @devpulse gave the GO on the mechanism @drone and I reached
+# independently: AIPass home declares which repo roots participate.
+#
+# WHAT THE GO CHANGED ABOUT MY OWN EARLIER RULING. I ruled that passport 2.0 needed
+# a third ``citizenship.residency`` value before external citizens could be seen.
+# That ruling made a schema migration and a six-owner declaration campaign into a
+# PRECONDITION for a working feature, and the GO retired it as one. So membership
+# here is PRESENCE, not declaration: a branch in a declared root is a citizen if
+# ``.trinity/passport.json`` exists. None of the six live external citizens has a
+# residency field, and gating on one would have shipped nothing.
+#
+# WHAT DID NOT CHANGE, and it is the law this module was built on: DECLARED roots
+# only, never a walk, at any depth. The reason is measured rather than asserted - a
+# passport walk of our own ``projects/`` returns eight passports for four
+# residents, because @baud carries copies under ``.backup/``. The same walk across
+# a machine would count every snapshot of every repo.
+#
+# The two candidate anchors that were REJECTED, both because they had already
+# failed in production: ``ai_mail``'s contacts.json accretes by last_seen, carries
+# dead April entries and does not contain @wren at all; and my own
+# ``known_registries.json`` persisted a deleted /tmp scratchpad probe while missing
+# Vera-Studio's real registry. An anchor that has to be right cannot be one that
+# accumulates by accident.
 
-WHAT THE GO CHANGED ABOUT MY OWN EARLIER RULING. I ruled that passport 2.0 needed
-a third ``citizenship.residency`` value before external citizens could be seen.
-That ruling made a schema migration and a six-owner declaration campaign into a
-PRECONDITION for a working feature, and the GO retired it as one. So membership
-here is PRESENCE, not declaration: a branch in a declared root is a citizen if
-``.trinity/passport.json`` exists. None of the six live external citizens has a
-residency field, and gating on one would have shipped nothing.
-
-WHAT DID NOT CHANGE, and it is the law this module was built on: DECLARED roots
-only, never a walk, at any depth. The reason is measured rather than asserted - a
-passport walk of our own ``projects/`` returns eight passports for four
-residents, because @baud carries copies under ``.backup/``. The same walk across
-a machine would count every snapshot of every repo.
-
-The two candidate anchors that were REJECTED, both because they had already
-failed in production: ``ai_mail``'s contacts.json accretes by last_seen, carries
-dead April entries and does not contain @wren at all; and my own
-``known_registries.json`` persisted a deleted /tmp scratchpad probe while missing
-Vera-Studio's real registry. An anchor that has to be right cannot be one that
-accumulates by accident.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 from pathlib import Path
@@ -41,6 +44,7 @@ from pathlib import Path
 import pytest
 
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
+from aipass.memory.apps.modules import fleet
 
 
 def _write(path: Path, document: dict) -> None:
@@ -421,8 +425,6 @@ class TestTheGatewayCarriesTheNewSurface:
     """@daemon consumes through modules/fleet.py and must not need a second import."""
 
     def test_the_new_names_are_on_the_public_gateway(self):
-        from aipass.memory.apps.modules import fleet
-
         for name in ("declared_roots", "external_branches", "RESIDENCY_EXTERNAL", "DECLARED_ROOTS"):
             assert getattr(fleet, name) is getattr(rs, name), f"{name} is not the handler's own object"
 
@@ -575,20 +577,20 @@ class TestACaseInsensitiveFilesystemCannotWidenTheWalk:
 class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
     """The predicate on its own, on every platform, with no filesystem at all."""
 
-    def test_it_keeps_the_exact_case_and_drops_every_other_spelling(self):
+    def test_it_keeps_the_exact_case_and_drops_every_other_spelling(self, tmp_path):
         candidates = [
-            Path("/x/AIPASS_REGISTRY.json"),
-            Path("/x/WREN_REGISTRY.json"),
-            Path("/x/wren_registry.json"),
-            Path("/x/Wren_Registry.Json"),
-            Path("/x/WREN_REGISTRY.JSON"),
+            tmp_path / "x" / "AIPASS_REGISTRY.json",
+            tmp_path / "x" / "WREN_REGISTRY.json",
+            tmp_path / "x" / "wren_registry.json",
+            tmp_path / "x" / "Wren_Registry.Json",
+            tmp_path / "x" / "WREN_REGISTRY.JSON",
         ]
 
         kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
 
         assert [path.name for path in kept] == ["AIPASS_REGISTRY.json", "WREN_REGISTRY.json"]
 
-    def test_the_suffix_has_to_end_the_name_not_merely_appear_in_it(self):
+    def test_the_suffix_has_to_end_the_name_not_merely_appear_in_it(self, tmp_path):
         """A backup beside the registry is not a registry.
 
         ``in`` instead of ``endswith`` reads ``AIPASS_REGISTRY.json.bak`` as the
@@ -606,12 +608,13 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
         a promise the next one will keep.
         """
         kept = rs._exactly_named(
-            [Path("/x/AIPASS_REGISTRY.json.bak"), Path("/x/AIPASS_REGISTRY.json")], rs.CORE_REGISTRY_SUFFIX
+            [tmp_path / "x" / "AIPASS_REGISTRY.json.bak", tmp_path / "x" / "AIPASS_REGISTRY.json"],
+            rs.CORE_REGISTRY_SUFFIX,
         )
 
         assert [path.name for path in kept] == ["AIPASS_REGISTRY.json"]
 
-    def test_it_narrows_and_never_reorders(self):
+    def test_it_narrows_and_never_reorders(self, tmp_path):
         """The walk sorts before filtering; the filter must not undo that.
 
         The sample is deliberately one a case-folding re-sort would reverse
@@ -619,11 +622,15 @@ class TestTheExactCaseFilterIsAboutNamesNotPlatforms:
         used ``A``/``C`` and a re-sorting mutant survived it — any order-blind
         sample makes an order claim that cannot fail.
         """
-        candidates = [Path("/x/B_REGISTRY.json"), Path("/x/skip_registry.json"), Path("/x/aa_REGISTRY.json")]
+        candidates = [
+            tmp_path / "x" / "B_REGISTRY.json",
+            tmp_path / "x" / "skip_registry.json",
+            tmp_path / "x" / "aa_REGISTRY.json",
+        ]
 
         kept = rs._exactly_named(candidates, rs.CORE_REGISTRY_SUFFIX)
 
-        assert kept == [Path("/x/B_REGISTRY.json"), Path("/x/aa_REGISTRY.json")]
+        assert kept == [tmp_path / "x" / "B_REGISTRY.json", tmp_path / "x" / "aa_REGISTRY.json"]
 
 
 class TestWhatTheHostCanActuallyHold:

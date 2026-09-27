@@ -1,7 +1,19 @@
-"""Tests for the surfacing governance module (pure state-in/state-out API)."""
+# =================== AIPass ====================
+# Name: test_governance.py
+# Description: Surfacing governance module — state API, rejection paths, command exit seam
+# Version: 1.0.0
+# Created: 2026-07-16
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/governance.py (pure state-in/state-out API)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import pytest
 
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
+from aipass.memory.apps.modules import governance as governance_module
 from aipass.memory.apps.modules.governance import (
     DEFAULT_CONFIG,
     new_state,
@@ -266,9 +278,6 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
     """
 
     def test_an_unknown_subcommand_exits_two(self, capsys):
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-        from aipass.memory.apps.modules import governance as governance_module
-
         reset_command_state()
         assert governance_module.handle_command("governance", ["nonsense"]) is True
         assert resolve_exit(True) == 2, "governance refused an unknown subcommand but would exit 0"
@@ -277,9 +286,6 @@ class TestTheUnknownSubcommandRefusalReachesTheExitCode:
 
     def test_the_bare_verb_still_exits_zero(self, capsys):
         """The other half: introspection is not a refusal and must stay 0."""
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-        from aipass.memory.apps.modules import governance as governance_module
-
         reset_command_state()
         assert governance_module.handle_command("governance", []) is True
         assert resolve_exit(True) == 0, "bare governance is introspection, not a failure"

@@ -1,33 +1,36 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-27
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Marker 7 — the memory lane, and the rulings that came with it.
+"""Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
 
-THE LAW OF THE MARKER: self-healing is TRIGGER-DRIVEN, never a daemon. Idle
-means zero processes.  Every pin here is written against that shape — a lane
-that heals because something HAPPENED, not because something is watching.
+# Marker 7 — the memory lane, and the rulings that came with it.
+#
+# THE LAW OF THE MARKER: self-healing is TRIGGER-DRIVEN, never a daemon. Idle
+# means zero processes.  Every pin here is written against that shape — a lane
+# that heals because something HAPPENED, not because something is watching.
+#
+# The five behaviours under test, and the wrong implementation each pin kills:
+#
+# - **One fleet, one definition** — rollover/lint/health reaching 19 branches
+#   while the push reaches 22, so three citizens' memories could overflow with
+#   no rollover ever running on them.
+# - **Rollover normalizes on touch, SCOPED** — a branch that rolls heals its own
+#   machine frame; healing the fleet from one branch's rollover is the 23:37
+#   write that opened this whole arc.
+# - **A verb whose name promises a write it no longer does** — `sync-lines`
+#   stopped writing when the health stamp was deleted, and kept the name.
+# - **The grandfather clause, narrowed not removed** — post-push the fleet is
+#   green, so "unchanged and over cap" hides new drift for the three archivable
+#   containers; for `todos` it is the only thing standing between a branch the
+#   push may not prune and a rollover lane that refuses to write to it.
+# - **A template bump heals through the push's gates** — never around them.
 
-The five behaviours under test, and the wrong implementation each pin kills:
-
-- **One fleet, one definition** — rollover/lint/health reaching 19 branches
-  while the push reaches 22, so three citizens' memories could overflow with
-  no rollover ever running on them.
-- **Rollover normalizes on touch, SCOPED** — a branch that rolls heals its own
-  machine frame; healing the fleet from one branch's rollover is the 23:37
-  write that opened this whole arc.
-- **A verb whose name promises a write it no longer does** — `sync-lines`
-  stopped writing when the health stamp was deleted, and kept the name.
-- **The grandfather clause, narrowed not removed** — post-push the fleet is
-  green, so "unchanged and over cap" hides new drift for the three archivable
-  containers; for `todos` it is the only thing standing between a branch the
-  push may not prune and a rollover lane that refuses to write to it.
-- **A template bump heals through the push's gates** — never around them.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import sys
@@ -44,6 +47,7 @@ from unittest.mock import MagicMock, patch
 # inside a test body raises "not a package". Collection-time imports resolve
 # against the real modules and are cached — the pattern the rest of the suite
 # already follows.
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import trinity_push
@@ -185,9 +189,6 @@ class TestOneFleetOneDefinition:
         There is no collision today; that is luck, not a guard. Six external
         names against twenty-two of ours, and nothing stops the twenty-third.
         """
-        from aipass.memory.apps.handlers.rollover import normalizer
-        from aipass.memory.apps.modules import rollover as rollover_module
-
         seen = []
         monkeypatch.setattr(
             normalizer,
@@ -196,7 +197,7 @@ class TestOneFleetOneDefinition:
         )
         # Every citizen in the fleet claims to have rolled, external ones included.
         every_name = [item["name"] for item in registry_scope.fleet_branches()]
-        rollover_module._normalize_rolled(every_name)
+        rollover._normalize_rolled(every_name)
 
         assert seen, "nothing was normalized, so the scope was never exercised"
         home = registry_scope.REPO_ROOT.resolve()
@@ -219,9 +220,6 @@ class TestOneFleetOneDefinition:
         Meanwhile the out-of-scope case IS named. One failure mode announced,
         the other invisible, in the same function.
         """
-        from aipass.memory.apps.handlers.rollover import normalizer
-        from aipass.memory.apps.modules import rollover as rollover_module
-
         monkeypatch.setattr(
             normalizer,
             "normalize_branch",
@@ -231,9 +229,9 @@ class TestOneFleetOneDefinition:
         # necessarily propagate to the root under every suite ordering, and a
         # pin that only holds when it runs first is not a pin.
         said = []
-        monkeypatch.setattr(rollover_module.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
+        monkeypatch.setattr(rollover.logger, "warning", lambda msg, *a, **k: said.append(str(msg)))
 
-        rollover_module._normalize_rolled(["memory"])
+        rollover._normalize_rolled(["memory"])
 
         joined = " ".join(said)
         assert "memory" in joined, joined
@@ -253,8 +251,6 @@ class TestOneFleetOneDefinition:
         @research) carry 49 over-cap entries between them. Rollover reaching
         them would be a lane writing into repos nobody declared it for.
         """
-        from aipass.memory.apps.handlers.monitor import detector
-
         rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
         assert rolled, "an empty scope proves nothing about what it excludes"
         home = registry_scope.REPO_ROOT.resolve()
@@ -702,7 +698,7 @@ class TestGrandfatherNarrowedToTodos:
 
         assert hits == []
 
-    def test_a_NEW_over_cap_todo_is_still_refused(self):
+    def test_a_new_over_cap_todo_is_still_refused(self):
         """The exemption covers what is already on disk, never a fresh violation."""
         before = {"todos": []}
         after = {"todos": [{"number": 1, "date": "d", "task": "y" * 99, "priority": "p", "status": "s"}]}
@@ -787,7 +783,7 @@ class TestTemplateBumpFiresThePush:
 
         assert template_bump.bump_pending()["pending"] is True
 
-    def test_a_bump_runs_the_push_as_a_DRY_RUN_by_default(self, tmp_path, monkeypatch):
+    def test_a_bump_runs_the_push_as_a_dry_run_by_default(self, tmp_path, monkeypatch):
         """Self-healing 22 branches' memory files unprompted is not healing."""
         calls = []
         monkeypatch.setattr(template_bump, "_ledger_path", lambda: tmp_path / "absent.json")
@@ -980,8 +976,6 @@ class TestTheDeadTemplateLaneIsRetired:
         `is True` says the verb was CLAIMED. It said nothing about the exit code,
         and under `warning()` that code was 0 — the shape the fleet sweep found.
         """
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         for verb in ("push-templates", "diff-templates"):
             reset_command_state()
             assert templates.handle_command(verb, ["--dry-run"]) is True

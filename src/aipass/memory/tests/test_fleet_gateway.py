@@ -3,34 +3,38 @@
 # Description: Pins the public cross-branch gateway for the fleet definition
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""The fleet definition has one owner and now one door.
+"""Tests for apps/modules/fleet.py."""
 
-@daemon reported (dispatch 2a70bbcd) that the cross-branch import I sanctioned
-fails two of @seedgo's checks at once. The rule is not arbitrary and it is not
-"do not consume @memory" — ``handlers_check.py:310`` says another branch's
-``modules`` package is its PUBLIC GATEWAY and sends cross-branch callers there
-explicitly. ``apps/handlers/`` is private implementation.
+# The fleet definition has one owner and now one door.
+#
+# @daemon reported (dispatch 2a70bbcd) that the cross-branch import I sanctioned
+# fails two of @seedgo's checks at once. The rule is not arbitrary and it is not
+# "do not consume @memory" — ``handlers_check.py:310`` says another branch's
+# ``modules`` package is its PUBLIC GATEWAY and sends cross-branch callers there
+# explicitly. ``apps/handlers/`` is private implementation.
+#
+# So the seam moves, and nothing else does. ``registry_scope`` stays the single
+# definition; this module is the door to it, owned here rather than shimmed in
+# each consumer's tree — a gateway living in @daemon would be a second public
+# surface for my module in a branch I do not control, and the next consumer would
+# import theirs or write a third.
+#
+# What is deliberately NOT re-exported is as much of the contract as what is:
+# ``resident_registry_paths`` and ``read_registry_branches`` are the mechanics of
+# HOW residents are found, and they stop being the whole story the moment the
+# external tier lands.
 
-So the seam moves, and nothing else does. ``registry_scope`` stays the single
-definition; this module is the door to it, owned here rather than shimmed in
-each consumer's tree — a gateway living in @daemon would be a second public
-surface for my module in a branch I do not control, and the next consumer would
-import theirs or write a third.
-
-What is deliberately NOT re-exported is as much of the contract as what is:
-``resident_registry_paths`` and ``read_registry_branches`` are the mechanics of
-HOW residents are found, and they stop being the whole story the moment the
-external tier lands.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
 from pathlib import Path
 
 import pytest
 
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
 from aipass.memory.apps.handlers.monitor import registry_scope
 from aipass.memory.apps.modules import fleet
 
@@ -109,8 +113,6 @@ class TestTheCommandSurfaceIsIntrospectionOnly:
         what looks like success to a caller. It goes through `error()` now and
         the exit code is pinned.
         """
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         reset_command_state()
         assert fleet.handle_command("fleet", ["nonsense"]) is True
         assert resolve_exit(True) == 2, "an unknown subcommand refused but would exit 0"

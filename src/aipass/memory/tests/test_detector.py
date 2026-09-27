@@ -3,23 +3,30 @@
 # Description: Tests for rollover trigger detection handler
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the rollover trigger detection module (apps/handlers/monitor/detector).
+"""Tests for apps/handlers/monitor/detector.py."""
 
-Uses tmp_path for all file operations. Creates real temp files with JSON content
-rather than mocking open(). The detector module is imported inside each test
-to ensure the autouse conftest fixture for json_handler is already applied.
-"""
+# Tests for the rollover trigger detection module (apps/handlers/monitor/detector).
+#
+# Uses tmp_path for all file operations. Creates real temp files with JSON content
+# rather than mocking open(). The detector module is imported inside each test
+# to ensure the autouse conftest fixture for json_handler is already applied.
+# (2026-09-27: detector is now imported once at the top; the fixture patches its
+# json_handler, config_loader and logger at the edge with monkeypatch.setattr.)
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import logging
-import sys
 
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
+
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.monitor import detector
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +41,7 @@ def _mock_detector_infrastructure(monkeypatch):
     """Mock prax logger and json_handler so detector.py can be imported."""
 
     # -- prax logger --------------------------------------------------------
-    mock_logger_mod = MagicMock()
-    mock_logger_mod.get_system_logger = MagicMock(return_value=MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", mock_logger_mod)
+    monkeypatch.setattr(detector, "logger", MagicMock())
 
     # -- memory json handler ------------------------------------------------
     mock_json_handler = MagicMock()
@@ -52,23 +54,10 @@ def _mock_detector_infrastructure(monkeypatch):
     }
     mock_config_loader.section.side_effect = lambda name: mock_config_loader.load.return_value.get(name, {})
 
-    json_pkg = MagicMock()
-    # Impersonating a package means answering __path__ — a bare MagicMock does not,
-    # and every lazy submodule import under it then dies. See test_import_isolation.py.
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-    json_pkg.config_loader = mock_config_loader
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.config_loader", mock_config_loader)
-
-    # Force fresh import every test — must also clean the parent package's
-    # cached attribute, otherwise Python reuses a stale detector module
-    # that holds an unconfigured config_loader reference.
-    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", raising=False)
-    parent = sys.modules.get("aipass.memory.apps.handlers.monitor")
-    if parent is not None and hasattr(parent, "detector"):
-        monkeypatch.delattr(parent, "detector", raising=False)
+    # Patched at the edge on the real module: detector is imported once at the
+    # top of this file, and monkeypatch restores each attribute after the test.
+    monkeypatch.setattr(detector, "json_handler", mock_json_handler)
+    monkeypatch.setattr(detector, "config_loader", mock_config_loader)
 
 
 # ===========================================================================
@@ -86,8 +75,6 @@ class TestGetMemoryFilePath:
         obs_file = trinity_dir / "observations.json"
         obs_file.write_text("{}", encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         branch = {"path": str(tmp_path)}
         result = detector._get_memory_file_path(branch, "observations")
 
@@ -100,8 +87,6 @@ class TestGetMemoryFilePath:
         trinity_dir.mkdir()
         # No observations.json created
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         branch = {"path": str(tmp_path)}
         result = detector._get_memory_file_path(branch, "observations")
 
@@ -109,7 +94,6 @@ class TestGetMemoryFilePath:
 
     def test_returns_none_when_branch_path_missing(self, tmp_path: Path):
         """Nonexistent branch path should return None."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         nonexistent = tmp_path / "does_not_exist"
         branch = {"path": str(nonexistent)}
@@ -119,7 +103,6 @@ class TestGetMemoryFilePath:
 
     def test_returns_none_when_path_key_empty(self, tmp_path: Path):
         """Empty path key in branch dict should return None."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         branch: dict[str, str] = {"path": ""}
         result = detector._get_memory_file_path(branch, "local")
@@ -132,8 +115,6 @@ class TestGetMemoryFilePath:
         trinity_dir.mkdir()
         local_file = trinity_dir / "local.json"
         local_file.write_text("{}", encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         branch = {"path": str(tmp_path)}
         result = detector._get_memory_file_path(branch, "local")
@@ -160,8 +141,6 @@ class TestCheckSingleFile:
         content = json.dumps(data, indent=2)
         mem_file.write_text(content, encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -183,8 +162,6 @@ class TestCheckSingleFile:
         content = json.dumps(data, indent=2)
         mem_file.write_text(content, encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -201,8 +178,6 @@ class TestCheckSingleFile:
         """check_single_file on a nonexistent path returns success=False."""
         missing = tmp_path / "ghost.json"
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         result = detector.check_single_file(missing)
 
         assert result["success"] is False
@@ -216,8 +191,6 @@ class TestCheckSingleFile:
             "sessions": [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}, {"id": "s4"}],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(
             detector.config_loader,
@@ -237,8 +210,6 @@ class TestCheckSingleFile:
             "sessions": [{"id": "s1"}, {"id": "s2"}],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(
             detector.config_loader,
@@ -269,8 +240,6 @@ class TestCheckSingleFile:
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -293,8 +262,6 @@ class TestCheckSingleFile:
             ],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(
             detector.config_loader,
@@ -331,8 +298,6 @@ class TestCheckSingleFile:
         """
         mem_file = self._dict_learnings(tmp_path, 4)
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         limits = {"per_branch": {}, "defaults": {"local": {"key_learnings": {"count": 3}}}}
         monkeypatch.setattr(detector.config_loader, "section", lambda name: limits)
 
@@ -344,8 +309,6 @@ class TestCheckSingleFile:
     def test_a_dict_at_its_count_is_not_undrainable(self, tmp_path: Path, monkeypatch):
         """Keep-N keeps N, in either shape: at the count there is nothing to drain."""
         mem_file = self._dict_learnings(tmp_path, 3)
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         limits = {"per_branch": {}, "defaults": {"local": {"key_learnings": {"count": 3}}}}
         monkeypatch.setattr(detector.config_loader, "section", lambda name: limits)
@@ -368,8 +331,6 @@ class TestCheckSingleFile:
         (trinity / "observations.json").write_text(json.dumps({"observations": []}), encoding="utf-8")
         registry = {"branches": [{"name": "WRITER", "path": str(tmp_path / "writer"), "status": "active"}]}
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
@@ -394,8 +355,6 @@ class TestCheckSingleFile:
         mem_file = tmp_path / "BROKEN.local.json"
         mem_file.write_text("NOT VALID JSON {{{", encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -416,8 +375,6 @@ class TestCheckSingleFile:
             "sessions": [{"id": f"s{i}"} for i in range(15)],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         # per_branch has NO entry for "newbranch", but defaults has local limits
         monkeypatch.setattr(
@@ -443,8 +400,6 @@ class TestCheckSingleFile:
             "sessions": [{"id": f"s{i}"} for i in range(100)],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         # Neither per_branch nor defaults have anything for "orphan"/"local"
         monkeypatch.setattr(
@@ -478,8 +433,6 @@ class TestSessionAutoCompactBudget:
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -507,8 +460,6 @@ class TestSessionAutoCompactBudget:
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(
             detector.config_loader,
             "section",
@@ -532,8 +483,6 @@ class TestSessionAutoCompactBudget:
             "sessions": [{"id": f"s{i}", "status": "completed"} for i in range(12)],
         }
         mem_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(
             detector.config_loader,
@@ -567,8 +516,6 @@ class TestReadRegistry:
         }
         registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         # Point _REPO_ROOT at our tmp_path
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
@@ -582,7 +529,6 @@ class TestReadRegistry:
 
     def test_missing_registry_returns_empty(self, tmp_path: Path, monkeypatch):
         """Missing registry file should return empty list."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         # Point _REPO_ROOT at a directory with no registry file
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
@@ -596,8 +542,6 @@ class TestReadRegistry:
         """Malformed registry JSON should return empty list."""
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text("NOT JSON {{{", encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
@@ -616,8 +560,6 @@ class TestReadRegistry:
         }
         registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
 
-        from aipass.memory.apps.handlers.monitor import detector
-
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
@@ -632,8 +574,6 @@ class TestReadRegistry:
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_data = {"branches": []}
         registry_file.write_text(json.dumps(registry_data), encoding="utf-8")
-
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
@@ -653,7 +593,6 @@ class TestRecreateTrinityFile:
 
     def test_recreates_missing_local_file(self, tmp_path: Path, monkeypatch):
         """Missing local.json should be recreated from template with _usage and no limits."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         templates_dir = tmp_path / "templates"
         templates_dir.mkdir()
@@ -689,7 +628,6 @@ class TestRecreateTrinityFile:
 
     def test_recreates_missing_observations_file(self, tmp_path: Path, monkeypatch):
         """Missing observations.json should be recreated from template."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         templates_dir = tmp_path / "templates"
         templates_dir.mkdir()
@@ -726,8 +664,6 @@ class TestRecreateTrinityFile:
         is refused outside it — and refused before the ``.trinity/`` directory
         is made, because making it is already a write.
         """
-        from aipass.memory.apps.handlers import write_fence
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         branch_dir = tmp_path / "other_root" / "src" / "x"
@@ -738,7 +674,6 @@ class TestRecreateTrinityFile:
 
     def test_check_all_branches_recreates_missing(self, tmp_path: Path, monkeypatch):
         """check_all_branches should auto-recreate missing .trinity files."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         branch_dir = tmp_path / "mybranch"
         trinity_dir = branch_dir / ".trinity"
@@ -821,7 +756,6 @@ class TestTodosAreCountOnly:
     """check_todos counts ONE pad; _should_rollover and check_all_branches never see todos."""
 
     def test_check_todos_reports_a_pad_over_its_count(self, tmp_path: Path, monkeypatch):
-        from aipass.memory.apps.handlers.monitor import detector
 
         counter = MagicMock(return_value=10)
         monkeypatch.setattr(detector.config_loader, "get_todos_count", counter)
@@ -831,7 +765,6 @@ class TestTodosAreCountOnly:
         counter.assert_called_once_with("mybranch")
 
     def test_a_pad_at_its_count_is_not_over(self, tmp_path: Path, monkeypatch):
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector.config_loader, "get_todos_count", MagicMock(return_value=10))
         result = detector.check_todos(_todo_pad(tmp_path, 10), "Named")
@@ -839,7 +772,6 @@ class TestTodosAreCountOnly:
         assert (result["branch"], result["over"], result["excess"]) == ("Named", False, 0)
 
     def test_no_usable_count_is_never_over(self, tmp_path: Path, monkeypatch):
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector.config_loader, "get_todos_count", MagicMock(return_value=None))
         result = detector.check_todos(_todo_pad(tmp_path, 40))
@@ -848,7 +780,6 @@ class TestTodosAreCountOnly:
         assert (result["count"], result["over"]) == (None, False)
 
     def test_todos_that_are_not_a_list_are_refused(self, tmp_path: Path):
-        from aipass.memory.apps.handlers.monitor import detector
 
         local = _todo_pad(tmp_path, 0)
         local.write_text(json.dumps({"todos": {"1": "not a pad"}}), encoding="utf-8")
@@ -856,7 +787,6 @@ class TestTodosAreCountOnly:
         assert detector.check_todos(local)["success"] is False
 
     def test_should_rollover_never_triggers_on_todos(self, tmp_path: Path, monkeypatch):
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector.config_loader, "section", lambda name: _ROLLOVER_WITH_TODOS)
         should, _lines, _schema, reason = detector._should_rollover(_todo_pad(tmp_path, 12))
@@ -866,7 +796,6 @@ class TestTodosAreCountOnly:
 
     def test_check_all_branches_leaves_an_over_count_pad_alone(self, tmp_path: Path, monkeypatch):
         """The detached fleet walk rolls whatever this reports - a pad over its count must not be in it."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         local = _todo_pad(tmp_path, 12)
         observations = {"document_metadata": {"schema_version": "3.0.0"}, "observations": []}
@@ -912,14 +841,12 @@ class TestKnownRegistries:
 
     def test_the_persistence_api_is_gone(self):
         """No file to read, no function to write it — the door, not just the habit."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         for name in ("persist_registry", "load_known_registries", "_KNOWN_REGISTRIES_PATH"):
             assert not hasattr(detector, name), f"detector.{name} is back — a caller's cwd would outlive the call"
 
     def test_a_caller_registry_is_forgotten_the_moment_the_caller_leaves(self, tmp_path: Path, monkeypatch):
         """Behavioural: a second walk from a neutral directory sees nothing the first one found."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         home = tmp_path / "aipass_home"
         home.mkdir()
@@ -939,8 +866,6 @@ class TestKnownRegistries:
     @staticmethod
     def _home_with_memory(tmp_path: Path, monkeypatch) -> Path:
         """A fake AIPass root holding one core branch, with detector AND fence standing on it."""
-        from aipass.memory.apps.handlers import write_fence
-        from aipass.memory.apps.handlers.monitor import detector
 
         home = tmp_path / "aipass"
         home.mkdir()
@@ -957,7 +882,6 @@ class TestKnownRegistries:
         Logged once, at INFO — standing in another repo is expected, not a
         fault, and a WARNING on every call from there would be noise nobody reads.
         """
-        from aipass.memory.apps.handlers.monitor import detector
 
         self._home_with_memory(tmp_path, monkeypatch)
         foreign = tmp_path / "vera_like"
@@ -977,7 +901,6 @@ class TestKnownRegistries:
 
     def test_a_caller_registry_inside_the_root_is_still_read(self, tmp_path: Path, monkeypatch):
         """Positive control: the fence narrows the walk to this root, it does not delete it."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         home = self._home_with_memory(tmp_path, monkeypatch)
         guest = home / "projects" / "guest"
@@ -993,7 +916,6 @@ class TestKnownRegistries:
 
     def test_an_inside_registry_naming_a_branch_outside_the_root_does_not_offer_it(self, tmp_path: Path, monkeypatch):
         """A registry is data; an absolute path in it can point anywhere."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         home = self._home_with_memory(tmp_path, monkeypatch)
         guest = home / "projects" / "guest"
@@ -1039,7 +961,6 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
     @pytest.fixture
     def caller_tree(self, tmp_path, monkeypatch):
         """A caller standing in someone else's repo, with the bait beside the real file."""
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
         (tmp_path / "aipass_home").mkdir()
@@ -1058,7 +979,6 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
         assert matched == ["FOREIGN_REGISTRY.json", "flow_json_registry.json"]
 
     def test_a_lowercase_counter_file_is_never_read_as_a_registry(self, caller_tree, case_insensitive_filesystem):
-        from aipass.memory.apps.handlers.monitor import detector
 
         found = [path.name for path in detector._find_caller_registries()]
 
@@ -1073,7 +993,6 @@ class TestTheCallerCwdWalkReadsNamesNotSpellings:
         stops there and the genuine registry one level up is never found — a
         silent narrowing, not a noisy wrong answer.
         """
-        from aipass.memory.apps.handlers.monitor import detector
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path / "aipass_home")
         (tmp_path / "aipass_home").mkdir()

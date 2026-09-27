@@ -1,23 +1,25 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_lint.py
-# Date: 2026-06-13
+# =================== AIPass ====================
+# Name: test_lint.py
+# Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
 # Version: 1.0.0
-# Category: memory/tests
+# Created: 2026-06-13
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for Phase 2 of FPLAN-0270: check_entry validator + lint handler.
+"""Tests for apps/handlers/json/entry_limits.py check_entry, apps/handlers/json/lint_handler.py and apps/modules/lint.py."""
 
-Covers:
-  - check_entry boundary checks (at-cap, cap+1, larger over)
-  - Character-not-byte counting (em-dash, tree glyphs)
-  - Unknown entry_type handling
-  - Dict container measurement (plain string + dict-with-field)
-  - List container measurement + missing-field refusal
-  - Lint handler finds violations with correct counts
-  - Lint handler is read-only (files unchanged after scan)
-"""
+# Tests for Phase 2 of FPLAN-0270: check_entry validator + lint handler.
+#
+# Covers:
+#   - check_entry boundary checks (at-cap, cap+1, larger over)
+#   - Character-not-byte counting (em-dash, tree glyphs)
+#   - Unknown entry_type handling
+#   - Dict container measurement (plain string + dict-with-field)
+#   - List container measurement + missing-field refusal
+#   - Lint handler finds violations with correct counts
+#   - Lint handler is read-only (files unchanged after scan)
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
 import json
@@ -28,6 +30,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+
+from aipass.cli.apps.modules import reset_command_state, resolve_exit
 
 
 # ---------------------------------------------------------------------------
@@ -572,8 +576,6 @@ class TestTheEmptyRegistryRefusalReachesTheExitCode:
         return importlib.import_module("aipass.memory.apps.modules.lint")
 
     def test_an_empty_registry_exits_two(self, capsys):
-        from aipass.cli.apps.modules import reset_command_state, resolve_exit
-
         lint = self._lint_module()
         reset_command_state()
         # The name the module actually binds: read_scope is imported from

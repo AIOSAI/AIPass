@@ -1,19 +1,22 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_rollover.py
-# Date: 2026-03-24
+# Description: Tests for the rollover module's command routing and SUBCOMMANDS
 # Version: 1.1.2
-# Modified: 2026-09-15
+# Created: 2026-03-24
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""Tests for the rollover orchestration module.
+"""Tests for apps/modules/rollover.py."""
 
-Covers: from aipass.memory.apps.modules.rollover import handle_command
+# Tests for the rollover orchestration module.
+#
+# Covers: from aipass.memory.apps.modules.rollover import handle_command
+#
+# Tests command routing, handler discovery, and the SUBCOMMANDS dict.
+# All tests use mocks or tmp_path — no live filesystem or infrastructure access.
 
-Tests command routing, handler discovery, and the SUBCOMMANDS dict.
-All tests use mocks or tmp_path — no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
 import sys

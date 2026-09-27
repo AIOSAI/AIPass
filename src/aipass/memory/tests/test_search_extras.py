@@ -1,66 +1,28 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_search_extras.py
-# Date: 2026-04-25
+# Description: Tests for search query_executor subprocess encoding and vector search
 # Version: 1.0.0
+# Created: 2026-04-25
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""Tests for search handler internals (query_executor and vector_search).
+"""Tests for apps/handlers/search/query_executor.py."""
 
-Covers:
-    from aipass.memory.apps.handlers.search.query_executor import encode_query_subprocess
-    from aipass.memory.apps.handlers.search.query_executor import search_vectors_subprocess
+# Covers:
+#     from aipass.memory.apps.handlers.search.query_executor import encode_query_subprocess
+#     from aipass.memory.apps.handlers.search.query_executor import search_vectors_subprocess
+#
+# Tests subprocess-based encoding/search.
+# All tests use mocks -- no live subprocess, ML model, or ChromaDB access.
 
-Tests subprocess-based encoding/search.
-All tests use mocks -- no live subprocess, ML model, or ChromaDB access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import subprocess
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
-# ---------------------------------------------------------------------------
-# Helpers: prepare the mock graph needed to import search handlers
-# ---------------------------------------------------------------------------
-
-
-def _prepare_query_executor_mocks(monkeypatch):
-    """Insert mocks for query_executor module-level imports.
-
-    Returns a dict of key mock objects so tests can assert against them.
-    """
-    # Mock the chroma_subprocess and embed_subprocess script paths
-    mock_chroma_script = MagicMock()
-    mock_embed_script = MagicMock()
-
-    return {
-        "chroma_script": mock_chroma_script,
-        "embed_script": mock_embed_script,
-    }
-
-
-def _import_query_executor(monkeypatch):
-    """Prepare mocks and import (or reimport) query_executor.
-
-    Returns (module, mocks_dict).
-    """
-    mocks = _prepare_query_executor_mocks(monkeypatch)
-
-    # Remove cached module so it gets re-imported with our mocks
-    sys.modules.pop("aipass.memory.apps.handlers.search.query_executor", None)
-
-    # Clear parent package attribute so Python re-executes module code
-    parent = sys.modules.get("aipass.memory.apps.handlers.search")
-    if parent is not None and hasattr(parent, "query_executor"):
-        delattr(parent, "query_executor")
-
-    from aipass.memory.apps.handlers.search import query_executor
-
-    return query_executor, mocks
+from aipass.memory.apps.handlers.search import query_executor
 
 
 # ===========================================================================
@@ -73,7 +35,7 @@ class TestEncodeQuerySubprocess:
 
     def test_encode_returns_embedding_on_success(self, monkeypatch):
         """Successful subprocess returns embedding and dimension."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         fake_output = json.dumps({"success": True, "embeddings": [[0.1, 0.2, 0.3]], "dimension": 3})
         mock_result = MagicMock()
@@ -90,7 +52,7 @@ class TestEncodeQuerySubprocess:
 
     def test_encode_returns_error_on_nonzero_exit(self, monkeypatch):
         """Non-zero return code produces error dict."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         mock_result = MagicMock()
         mock_result.returncode = 1
@@ -104,7 +66,7 @@ class TestEncodeQuerySubprocess:
 
     def test_encode_handles_timeout(self, monkeypatch):
         """TimeoutExpired produces a timeout error."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="python", timeout=120)):
             result = mod.encode_query_subprocess("slow query")
@@ -114,7 +76,7 @@ class TestEncodeQuerySubprocess:
 
     def test_encode_handles_invalid_json(self, monkeypatch):
         """Invalid JSON from subprocess produces error dict."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -128,7 +90,7 @@ class TestEncodeQuerySubprocess:
 
     def test_encode_handles_empty_embeddings(self, monkeypatch):
         """Response with empty embeddings list produces error."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         fake_output = json.dumps({"success": True, "embeddings": [], "dimension": 384})
         mock_result = MagicMock()
@@ -143,7 +105,7 @@ class TestEncodeQuerySubprocess:
 
     def test_encode_handles_generic_exception(self, monkeypatch):
         """Unexpected exception produces error dict."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         with patch.object(subprocess, "run", side_effect=OSError("Cannot execute")):
             result = mod.encode_query_subprocess("test query")
@@ -162,7 +124,7 @@ class TestSearchVectorsSubprocess:
 
     def test_search_returns_results_on_success(self, monkeypatch):
         """Successful subprocess returns parsed results."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         fake_output = json.dumps(
             {"success": True, "results": [{"document": "hello", "distance": 0.1}], "total_results": 1}
@@ -184,7 +146,7 @@ class TestSearchVectorsSubprocess:
 
     def test_search_returns_error_on_nonzero_exit(self, monkeypatch):
         """Non-zero exit code produces error dict."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         mock_result = MagicMock()
         mock_result.returncode = 1
@@ -198,7 +160,7 @@ class TestSearchVectorsSubprocess:
 
     def test_search_handles_timeout(self, monkeypatch):
         """TimeoutExpired produces a timeout error."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired(cmd="python", timeout=60)):
             result = mod.search_vectors_subprocess(query_embedding=[0.1])
@@ -208,7 +170,7 @@ class TestSearchVectorsSubprocess:
 
     def test_search_handles_invalid_json(self, monkeypatch):
         """Invalid JSON from subprocess produces error dict."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -220,16 +182,16 @@ class TestSearchVectorsSubprocess:
         assert result["success"] is False
         assert "json" in result["error"].lower()
 
-    def test_search_passes_db_path_as_string(self, monkeypatch):
+    def test_search_passes_db_path_as_string(self, monkeypatch, tmp_path):
         """db_path is converted to string in the input data."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         fake_output = json.dumps({"success": True, "results": []})
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = fake_output
 
-        db_path = Path("/tmp/test_chroma")
+        db_path = tmp_path / "test_chroma"
         with patch.object(subprocess, "run", return_value=mock_result) as mock_run:
             mod.search_vectors_subprocess(
                 query_embedding=[0.1],
@@ -243,7 +205,7 @@ class TestSearchVectorsSubprocess:
 
     def test_search_handles_generic_exception(self, monkeypatch):
         """Unexpected exception produces error dict."""
-        mod, mocks = _import_query_executor(monkeypatch)
+        mod = query_executor
 
         with patch.object(subprocess, "run", side_effect=OSError("Cannot execute")):
             result = mod.search_vectors_subprocess(query_embedding=[0.1])

@@ -1,28 +1,31 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_auto_process_background.py
-# Date: 2026-08-13
+# Description: Tests for auto_process background spawn, single-flight lock and run_once
 # Version: 1.1.0
+# Created: 2026-08-14
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""
-Tests for moving auto_process off the prompt lane (DPLAN-0295 item 1).
+"""Tests for apps/handlers/intake/auto_process.py."""
 
-auto_process ran SYNCHRONOUSLY on the first UserPromptSubmit of every session —
-measured 78.5s to 120.5s with a backlog, and the cause of the 30s-timeout losses
-The owner hit live. Its stdout is always empty, so by the owner's test (compass #272)
-it never belonged on the prompt lane at all.
+# Tests for moving auto_process off the prompt lane (DPLAN-0295 item 1).
+#
+# auto_process ran SYNCHRONOUSLY on the first UserPromptSubmit of every session —
+# measured 78.5s to 120.5s with a backlog, and the cause of the 30s-timeout losses
+# The owner hit live. Its stdout is always empty, so by the owner's test (compass #272)
+# it never belonged on the prompt lane at all.
+#
+# Covers:
+#   - spawn_background() returns immediately and does NOT do the work inline
+#   - a spawn failure is reported, never raised into the hook and never silent
+#   - single-flight: a fresh lock skips the spawn with a stated reason
+#   - a stale lock is reclaimed rather than deadlocking the lane forever
+#   - run_once() (the child) acquires, works, and always releases — even on error
+#   - the child is detached, so it outlives the session that kicked it
+#   - run_once() announces memory_pool_auto_processed on BOTH outcomes (1.1.0)
 
-Covers:
-  - spawn_background() returns immediately and does NOT do the work inline
-  - a spawn failure is reported, never raised into the hook and never silent
-  - single-flight: a fresh lock skips the spawn with a stated reason
-  - a stale lock is reclaimed rather than deadlocking the lane forever
-  - run_once() (the child) acquires, works, and always releases — even on error
-  - the child is detached, so it outlives the session that kicked it
-  - run_once() announces memory_pool_auto_processed on BOTH outcomes (1.1.0)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import os

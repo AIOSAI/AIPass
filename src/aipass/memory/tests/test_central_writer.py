@@ -1,20 +1,23 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_central_writer.py
-# Date: 2026-04-03
-# Version: 1.0.0
-# Category: memory/tests
+# =================== AIPass ====================
+# Name: test_central_writer.py
+# Description: Tests for the central writer handler
+# Version: 1.0.1
+# Created: 2026-04-05
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the central writer handler.
+"""Tests for apps/handlers/central_writer.py."""
 
-Covers:
-  - central_writer.py (count_chroma_vectors, count_archive_files,
-    get_last_rollover_timestamp, collect_stats, read_central_file,
-    write_central_file, update_central, get_current_stats)
+# Tests for the central writer handler.
+#
+# Covers:
+#   - central_writer.py (count_chroma_vectors, count_archive_files,
+#     get_last_rollover_timestamp, collect_stats, read_central_file,
+#     write_central_file, update_central, get_current_stats)
+#
+# All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
-All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import sqlite3
@@ -23,6 +26,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.memory.apps.handlers import repo_root as rr
 
 
 # ---------------------------------------------------------------------------
@@ -480,8 +485,6 @@ class TestTheBareWorldTheOldPinCouldNotSurvive:
     @staticmethod
     def _bare(monkeypatch):
         """Deny the marker on the live tree only — prax's hide-the-marker trick."""
-        from aipass.memory.apps.handlers import repo_root as rr
-
         real = rr.exists_exactly
         live = rr.SOURCE_ROOT
 

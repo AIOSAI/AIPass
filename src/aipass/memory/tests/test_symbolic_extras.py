@@ -3,36 +3,37 @@
 # Description: Tests for symbolic handler public functions
 # Version: 1.0.0
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for 23 untested public functions in symbolic handler files.
+"""Tests for apps/handlers/symbolic/hook.py, storage.py, deduplicator.py, chroma_client.py and retriever.py."""
 
-Covers imports required by the seedgo test scanner:
-    from aipass.memory.apps.handlers.symbolic.hook import save_config
-    from aipass.memory.apps.handlers.symbolic.hook import extract_conversation_context
-    from aipass.memory.apps.handlers.symbolic.hook import find_relevant_fragments
-    from aipass.memory.apps.handlers.symbolic.hook import format_fragment_recall
-    from aipass.memory.apps.handlers.symbolic.hook import format_multiple_recalls
-    from aipass.memory.apps.handlers.symbolic.hook import should_surface_fragment
-    from aipass.memory.apps.handlers.symbolic.hook import record_surface
-    from aipass.memory.apps.handlers.symbolic.hook import record_message
-    from aipass.memory.apps.handlers.symbolic.hook import reset_session
-    from aipass.memory.apps.handlers.symbolic.hook import get_session_state
-    from aipass.memory.apps.handlers.symbolic.hook import process_hook
-    from aipass.memory.apps.handlers.symbolic.storage import flatten_dimensions
-    from aipass.memory.apps.handlers.symbolic.storage import store_fragment
-    from aipass.memory.apps.handlers.symbolic.storage import store_fragments_batch
-    from aipass.memory.apps.handlers.symbolic.storage import store_llm_fragment
-    from aipass.memory.apps.handlers.symbolic.storage import store_llm_fragments_batch
-    from aipass.memory.apps.handlers.symbolic.storage import delete_fragment
-    from aipass.memory.apps.handlers.symbolic.deduplicator import deduplicate_fragment
-    from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
-    from aipass.memory.apps.handlers.symbolic.retriever import search_by_vector
-    from aipass.memory.apps.handlers.symbolic.retriever import search_by_dimensions
-    from aipass.memory.apps.handlers.symbolic.retriever import search_by_triggers
-    from aipass.memory.apps.handlers.symbolic.retriever import retrieve_fragments
-"""
+# Tests for 23 untested public functions in symbolic handler files.
+#
+# Covers imports required by the seedgo test scanner:
+#     from aipass.memory.apps.handlers.symbolic.hook import save_config
+#     from aipass.memory.apps.handlers.symbolic.hook import extract_conversation_context
+#     from aipass.memory.apps.handlers.symbolic.hook import find_relevant_fragments
+#     from aipass.memory.apps.handlers.symbolic.hook import format_fragment_recall
+#     from aipass.memory.apps.handlers.symbolic.hook import format_multiple_recalls
+#     from aipass.memory.apps.handlers.symbolic.hook import should_surface_fragment
+#     from aipass.memory.apps.handlers.symbolic.hook import record_surface
+#     from aipass.memory.apps.handlers.symbolic.hook import record_message
+#     from aipass.memory.apps.handlers.symbolic.hook import reset_session
+#     from aipass.memory.apps.handlers.symbolic.hook import get_session_state
+#     from aipass.memory.apps.handlers.symbolic.hook import process_hook
+#     from aipass.memory.apps.handlers.symbolic.storage import flatten_dimensions
+#     from aipass.memory.apps.handlers.symbolic.storage import store_fragment
+#     from aipass.memory.apps.handlers.symbolic.storage import store_fragments_batch
+#     from aipass.memory.apps.handlers.symbolic.storage import store_llm_fragment
+#     from aipass.memory.apps.handlers.symbolic.storage import store_llm_fragments_batch
+#     from aipass.memory.apps.handlers.symbolic.storage import delete_fragment
+#     from aipass.memory.apps.handlers.symbolic.deduplicator import deduplicate_fragment
+#     from aipass.memory.apps.handlers.symbolic.chroma_client import get_chroma_client
+#     from aipass.memory.apps.handlers.symbolic.retriever import search_by_vector
+#     from aipass.memory.apps.handlers.symbolic.retriever import search_by_dimensions
+#     from aipass.memory.apps.handlers.symbolic.retriever import search_by_triggers
+#     from aipass.memory.apps.handlers.symbolic.retriever import retrieve_fragments
 
 # ---------------------------------------------------------------------------
 # PARKED 2026-08-14 — the owner's ruling. The symbolic fragments tier is disabled
@@ -42,6 +43,9 @@ Covers imports required by the seedgo test scanner:
 # Active curated-truth piece: Compass — drone @devpulse compass.
 # Revive: tests/parked/symbolic_20260814/README.md
 # ---------------------------------------------------------------------------
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+
 import pytest as _parked
 
 _parked.skip(

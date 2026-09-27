@@ -1,31 +1,33 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_contracts.py
-# Date: 2026-03-28
+# Description: Contract tests for the memory entry point and its data handling
 # Version: 1.1.0
-# Modified: 2026-09-15
+# Created: 2026-03-28
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""
-Contract tests for memory branch.
+"""Tests for apps/memory.py."""
 
-Covers exception contracts, return type contracts, and data structure
-contracts. These tests verify behavioral guarantees of the memory
-module's data handling: what it raises, what it returns, and what data
-shapes it produces.
+# Contract tests for memory branch.
+#
+# Covers exception contracts, return type contracts, and data structure
+# contracts. These tests verify behavioral guarantees of the memory
+# module's data handling: what it raises, what it returns, and what data
+# shapes it produces.
+#
+# Exception contracts (3 items):
+#   - _create_default / ValueError for unknown types
+#   - save_json / invalid structure rejection
+#   - invalid_mode / invalid_type rejection
+#
+# Return type contracts:
+#   - paths_return_path: pathlib.Path return verification
+#
+# Data structure contracts:
+#   - config_keys: module_name verification
 
-Exception contracts (3 items):
-  - _create_default / ValueError for unknown types
-  - save_json / invalid structure rejection
-  - invalid_mode / invalid_type rejection
-
-Return type contracts:
-  - paths_return_path: pathlib.Path return verification
-
-Data structure contracts:
-  - config_keys: module_name verification
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import sys
@@ -34,6 +36,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.memory.apps import memory as memory_entry
 
 # ---------------------------------------------------------------------------
 # Exception Contracts
@@ -198,11 +201,8 @@ class TestUnknownArgumentExitsNonZero:
 
     def _run_main(self, argv: list[str]) -> int:
         """Call the entry point's main() with argv, returning its exit code."""
-        import importlib
-
-        entry = importlib.import_module("aipass.memory.apps.memory")
         with patch.object(sys, "argv", ["memory", *argv]):
-            return entry.main()
+            return memory_entry.main()
 
     def test_an_unknown_verb_exits_non_zero(self) -> None:
         assert self._run_main(["definitely_not_a_verb_xyz"]) == 1

@@ -1,35 +1,42 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_handlers.py
-# Date: 2026-03-31
+# =================== AIPass ====================
+# Name: test_handlers.py
+# Description: Handler-layer tests — rollover extractor, line counter, normalize and the todos operational schema
 # Version: 1.1.0
-# Category: memory/tests
+# Created: 2026-04-01
+# Modified: 2026-09-27
 # =============================================
 
-"""Targeted handler-layer tests for critical untested handlers.
+"""Tests for apps/handlers/rollover/extractor.py, tracking/line_counter.py and schema/normalize.py."""
 
-Covers:
-  - rollover/extractor.py  (_extract_items_v2, helpers)
-  - tracking/line_counter.py (_count_physical_lines, update_line_count)
-  - schema/normalize.py (normalize_memory_file)
-  - todos[] operational schema (rollover ignores, caps enforced)
+# Targeted handler-layer tests for critical untested handlers.
+#
+# Covers:
+#   - rollover/extractor.py  (_extract_items_v2, helpers)
+#   - tracking/line_counter.py (_count_physical_lines, update_line_count)
+#   - schema/normalize.py (normalize_memory_file)
+#   - todos[] operational schema (rollover ignores, caps enforced)
+#
+# All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
-All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.rollover import extractor
+from aipass.memory.apps.handlers.schema import normalize
+from aipass.memory.apps.handlers.tracking import line_counter
+
 
 # ---------------------------------------------------------------------------
-# Import helpers -- each handler has module-level imports that need mocking
+# Helpers -- the real handlers, their infrastructure seams patched with monkeypatch
 # ---------------------------------------------------------------------------
 
 
 def _import_extractor(monkeypatch):
-    """Import extractor with mocked infrastructure dependencies."""
+    """The real extractor, its infrastructure seams patched at the edge."""
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     mock_memory_files = MagicMock()
@@ -39,24 +46,10 @@ def _import_extractor(monkeypatch):
     mock_config_loader = MagicMock()
     mock_config_loader.section.return_value = {"defaults": {}, "per_branch": {}}
 
-    json_pkg = MagicMock()
-    # Impersonating a package means answering __path__ — a bare MagicMock does not,
-    # and every lazy submodule import under it then dies. See test_import_isolation.py.
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-    json_pkg.config_loader = mock_config_loader
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.config_loader", mock_config_loader)
-
-    sys.modules.pop("aipass.memory.apps.handlers.rollover.extractor", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
-    if parent is not None and hasattr(parent, "extractor"):
-        delattr(parent, "extractor")
-
-    from aipass.memory.apps.handlers.rollover import extractor
+    monkeypatch.setattr(extractor, "json_handler", mock_json_handler)
+    monkeypatch.setattr(extractor, "config_loader", mock_config_loader)
+    monkeypatch.setattr(extractor, "read_memory_file_data", mock_memory_files.read_memory_file_data)
+    monkeypatch.setattr(extractor, "write_memory_file_simple", mock_memory_files.write_memory_file_simple)
 
     return extractor, {
         "json_handler": mock_json_handler,
@@ -66,28 +59,13 @@ def _import_extractor(monkeypatch):
 
 
 def _import_line_counter(monkeypatch):
-    """Import line_counter with mocked infrastructure dependencies."""
+    """The real line_counter, its json_handler seam patched at the edge."""
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     mock_memory_files = MagicMock()
     mock_memory_files.update_metadata = MagicMock(return_value={"success": True})
 
-    json_pkg = MagicMock()
-    # Impersonating a package means answering __path__ — a bare MagicMock does not,
-    # and every lazy submodule import under it then dies. See test_import_isolation.py.
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
-
-    sys.modules.pop("aipass.memory.apps.handlers.tracking.line_counter", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.tracking")
-    if parent is not None and hasattr(parent, "line_counter"):
-        delattr(parent, "line_counter")
-
-    from aipass.memory.apps.handlers.tracking import line_counter
+    monkeypatch.setattr(line_counter, "json_handler", mock_json_handler)
 
     return line_counter, {
         "json_handler": mock_json_handler,
@@ -96,25 +74,11 @@ def _import_line_counter(monkeypatch):
 
 
 def _import_normalize(monkeypatch):
-    """Import normalize with mocked infrastructure dependencies."""
+    """The real normalize, its json_handler seam patched at the edge."""
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
-    json_pkg = MagicMock()
-    # Impersonating a package means answering __path__ — a bare MagicMock does not,
-    # and every lazy submodule import under it then dies. See test_import_isolation.py.
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-
-    sys.modules.pop("aipass.memory.apps.handlers.schema.normalize", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.schema")
-    if parent is not None and hasattr(parent, "normalize"):
-        delattr(parent, "normalize")
-
-    from aipass.memory.apps.handlers.schema import normalize
+    monkeypatch.setattr(normalize, "json_handler", mock_json_handler)
 
     return normalize, {
         "json_handler": mock_json_handler,
@@ -143,9 +107,9 @@ class TestDerivebranchAndType:
         assert branch == "MEMORY"
         assert mtype == "observations"
 
-    def test_legacy_dotted_path(self, monkeypatch):
+    def test_legacy_dotted_path(self, monkeypatch, tmp_path):
         ext, _ = _import_extractor(monkeypatch)
-        p = Path("/some/path/DEVPULSE.local.json")
+        p = tmp_path / "some" / "path" / "DEVPULSE.local.json"
         branch, mtype = ext._derive_branch_and_type(p)
         assert branch == "DEVPULSE"
         assert mtype == "local"
@@ -346,8 +310,6 @@ class TestCreateRolloverBackup:
     @staticmethod
     def _foreign_memory_file(tmp_path, monkeypatch) -> Path:
         """A branch file in a project beside a fake AIPass root the fence stands on."""
-        from aipass.memory.apps.handlers import write_fence
-
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         mem_file = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"
         mem_file.parent.mkdir(parents=True)
@@ -467,8 +429,6 @@ class TestNormalizeMemoryFile:
 
     def test_a_file_outside_the_aipass_root_is_read_never_rewritten(self, monkeypatch, tmp_path):
         """Memory may READ another project: the dry run still reports. It may never WRITE one."""
-        from aipass.memory.apps.handlers import write_fence
-
         norm, _ = _import_normalize(monkeypatch)
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         f = tmp_path / "other_root" / "src" / "x" / ".trinity" / "local.json"

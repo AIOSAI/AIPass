@@ -1,15 +1,18 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_plans_processor.py
-# Date: 2026-04-26
+# =================== AIPass ====================
+# Name: test_plans_processor.py
+# Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.0.0
-# Category: memory/tests
+# Created: 2026-04-26
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for plans_processor handler -- line coverage for all functions.
+"""Tests for apps/handlers/intake/plans_processor.py."""
 
-Covers: from aipass.memory.apps.handlers.intake.plans_processor import process_plans
-"""
+# Tests for plans_processor handler -- line coverage for all functions.
+#
+# Covers: from aipass.memory.apps.handlers.intake.plans_processor import process_plans
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import hashlib
 import json
@@ -17,34 +20,17 @@ import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
+from aipass.memory.apps.handlers.intake import plans_processor
+
 
 # ---------------------------------------------------------------------------
-# Import helper
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 def _sha(path):
     """The content hash the manifest records — spelled here so fixtures cannot drift from it."""
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
-
-
-def _import_plans_processor(monkeypatch):
-    """Import plans_processor with mocked dependencies."""
-    mock_memory_files = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.memory.apps.handlers.json.memory_files",
-        mock_memory_files,
-    )
-
-    sys.modules.pop("aipass.memory.apps.handlers.intake.plans_processor", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.intake")
-    if parent is not None and hasattr(parent, "plans_processor"):
-        delattr(parent, "plans_processor")
-
-    from aipass.memory.apps.handlers.intake import plans_processor
-
-    return plans_processor
 
 
 # ===========================================================================
@@ -56,7 +42,7 @@ class TestChunkPlanText:
     """Test _chunk_plan_text function."""
 
     def test_chunks_by_markdown_headers(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = (
             "## Introduction\n"
             "This is the introduction section with enough text to pass the 30-char threshold easily.\n"
@@ -72,7 +58,7 @@ class TestChunkPlanText:
         assert result[0]["text"].startswith("## Introduction\n"), result[0]["text"][:40]
 
     def test_flushes_last_section(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = (
             "## Header One\n"
             "Content for header one, long enough to pass thirty characters.\n"
@@ -87,7 +73,7 @@ class TestChunkPlanText:
         assert "Trailing content" in result[0]["text"]
 
     def test_skips_short_sections(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = (
             "## Short\n"
             "Tiny.\n"
@@ -103,7 +89,7 @@ class TestChunkPlanText:
         assert result[0]["section"] == "Long Section"
 
     def test_fallback_to_size_chunking(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         # Headers present but every section body is tiny (< 30 chars), so the
         # header-based pass produces zero chunks and the size-based fallback
         # triggers on the full text which exceeds MAX_CHUNK_CHARS.
@@ -123,7 +109,7 @@ class TestChunkPlanText:
         assert result[0]["section"].startswith("plan.md_part")
 
     def test_small_text_no_headers(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = "This is a plain text plan without any markdown headers at all."
 
         result = mod._chunk_plan_text(text, "plan.md")
@@ -133,7 +119,7 @@ class TestChunkPlanText:
         assert result[0]["text"] == text
 
     def test_tiny_text_skipped(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = "Short."
 
         result = mod._chunk_plan_text(text, "plan.md")
@@ -141,7 +127,7 @@ class TestChunkPlanText:
         assert result == []
 
     def test_splits_oversized_chunks(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         # Create a markdown section that is > MAX_CHUNK_CHARS * 2
         big_body = "X" * (mod.MAX_CHUNK_CHARS * 3)
         text = f"## Big Section\n{big_body}\n"
@@ -157,7 +143,7 @@ class TestChunkPlanText:
         ]
 
     def test_empty_text(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         result = mod._chunk_plan_text("", "plan.md")
 
@@ -192,18 +178,18 @@ class TestUnfilledPlaceholderSectionsAreNotVectorized:
     """
 
     def test_an_unfilled_section_is_dropped(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = "### Goal\n[What do you want to achieve? Specific end state.]\n"
         assert mod._chunk_plan_text(text, "p.md") == []
 
     def test_a_trailing_horizontal_rule_does_not_save_it(self, monkeypatch):
         """The live shape: the two biggest blocks both end in a `---` separator."""
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = "## Notes\n\n[Working notes, issues encountered, decisions made]\n\n---\n"
         assert mod._chunk_plan_text(text, "p.md") == []
 
     def test_one_line_of_real_prose_keeps_the_whole_section(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = (
             "### Goal\n"
             "[What do you want to achieve? Specific end state.]\n"
@@ -214,7 +200,7 @@ class TestUnfilledPlaceholderSectionsAreNotVectorized:
         assert "rollover valve" in chunks[0]["text"]
 
     def test_a_filled_section_is_untouched(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         text = "## Summary\n\nThe declared-roots anchor shipped and the fleet reads 28 citizens.\n"
         chunks = mod._chunk_plan_text(text, "p.md")
         assert len(chunks) == 1
@@ -226,13 +212,13 @@ class TestUnfilledPlaceholderSectionsAreNotVectorized:
         gate. Routing it through the placeholder rule instead would make the
         rule's own log and meaning wrong about why it went.
         """
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         assert mod._is_placeholder_only("## Notes\n\n---\n") is False
         assert mod._is_placeholder_only("## Notes\n\n") is False
 
     def test_markdown_link_syntax_is_not_a_placeholder(self, monkeypatch):
         """`[text](url)` opens with a bracket and is real content."""
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         assert mod._is_placeholder_only("## Refs\n[the seedgo audit](./audit.md)\n") is False
 
 
@@ -240,7 +226,7 @@ class TestManifest:
     """Test _load_manifest and _save_manifest."""
 
     def test_load_manifest_file_exists(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         manifest_path = tmp_path / "config" / ".plans_processed.json"
         manifest_path.parent.mkdir(parents=True)
         manifest_data = {"plan1.md": "2026-01-01T00:00:00", "plan2.md": "2026-01-02T00:00:00"}
@@ -252,7 +238,7 @@ class TestManifest:
         assert result == manifest_data
 
     def test_load_manifest_file_missing(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         manifest_path = tmp_path / "config" / ".plans_processed.json"
         monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
 
@@ -261,7 +247,7 @@ class TestManifest:
         assert result == {}
 
     def test_load_manifest_bad_json(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         manifest_path = tmp_path / "config" / ".plans_processed.json"
         manifest_path.parent.mkdir(parents=True)
         manifest_path.write_text("not valid json {{{{", encoding="utf-8")
@@ -272,7 +258,7 @@ class TestManifest:
         assert result == {}
 
     def test_save_manifest_creates_parent_dirs(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         manifest_path = tmp_path / "deep" / "nested" / "config" / ".plans_processed.json"
         monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
         data = {"file.md": "2026-04-26T12:00:00"}
@@ -293,7 +279,7 @@ class TestEmbedTexts:
     """Test _embed_texts subprocess wrapper."""
 
     def test_embed_texts_success(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         expected = {"success": True, "embeddings": [[0.1, 0.2], [0.3, 0.4]]}
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -307,7 +293,7 @@ class TestEmbedTexts:
         mock_run.assert_called_once()
 
     def test_embed_texts_nonzero_return(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "model not found"
@@ -319,7 +305,7 @@ class TestEmbedTexts:
         assert "model not found" in result["error"]
 
     def test_embed_texts_exception(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         with patch.object(subprocess, "run", side_effect=OSError("no such binary")):
             result = mod._embed_texts(["hello"])
@@ -337,7 +323,7 @@ class TestStoreVectors:
     """Test _store_vectors subprocess wrapper."""
 
     def test_store_vectors_success(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         expected = {"success": True, "stored": 5}
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -355,7 +341,7 @@ class TestStoreVectors:
         assert result["stored"] == 5
 
     def test_store_vectors_nonzero_return(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "db locked"
@@ -371,7 +357,7 @@ class TestStoreVectors:
         assert "db locked" in result["error"]
 
     def test_store_vectors_exception(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         with patch.object(subprocess, "run", side_effect=TimeoutError("timed out")):
             result = mod._store_vectors(
@@ -405,7 +391,7 @@ class TestFindRepoRoot:
 
     def test_it_delegates_instead_of_walking_itself(self, monkeypatch, tmp_path):
         """A private walk here is how the first cure missed nine other files."""
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         seen: list[dict] = []
         monkeypatch.setattr(
             mod.repo_root,
@@ -420,7 +406,7 @@ class TestFindRepoRoot:
 
     def test_it_never_returns_the_process_directory(self, monkeypatch, tmp_path):
         """The reversal. Standing somewhere must not change where the code lives."""
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         monkeypatch.chdir(tmp_path)
 
         assert mod._find_repo_root() != tmp_path
@@ -429,16 +415,17 @@ class TestFindRepoRoot:
 class TestGetMemoryPython:
     """Test _get_memory_python function."""
 
-    def test_env_override(self, monkeypatch):
-        mod = _import_plans_processor(monkeypatch)
-        monkeypatch.setenv("AIPASS_MEMORY_PYTHON", "/custom/python")
+    def test_env_override(self, monkeypatch, tmp_path):
+        mod = plans_processor
+        custom_python = str(tmp_path / "custom" / "python")
+        monkeypatch.setenv("AIPASS_MEMORY_PYTHON", custom_python)
 
         result = mod._get_memory_python()
 
-        assert result == "/custom/python"
+        assert result == custom_python
 
     def test_venv_python_exists(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
         venv_python = tmp_path / ".venv" / "bin" / "python"
         venv_python.parent.mkdir(parents=True)
@@ -450,7 +437,7 @@ class TestGetMemoryPython:
         assert result == str(venv_python)
 
     def test_falls_back_to_sys_executable(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
         # Point to a non-existent venv
         monkeypatch.setattr(mod, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / "python")
@@ -506,7 +493,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         )
 
     def test_changed_content_reprocesses_even_though_the_name_is_known(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
         plan = plans / "APLAN-0013_branch_audit_api_2026-08-13.md"
@@ -544,7 +531,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         return for every plan processed from then on — invisibly, because
         nothing asserted what the row actually said.
         """
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
         plan = plans / "FPLAN-9001_new_plan_2026-08-30.md"
@@ -568,7 +555,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         The migration records what the row was always missing — the hash — and
         does not pay for embeddings it has no reason to believe are stale.
         """
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
         plan = plans / "FPLAN-0208_dashboard_count_test_plan_2026-05-10.md"
@@ -596,7 +583,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         the file was written AFTER the row was recorded, that belief is wrong —
         which is exactly what a restore does to a plan.
         """
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
         plan = plans / "APLAN-0017_branch_audit_commons_2026-08-13.md"
@@ -619,7 +606,7 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
         came back, discarding nothing but paying for everything. The row is not
         the problem; trusting the row's NAME was. Left in place on purpose.
         """
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans = tmp_path / "plans"
         plans.mkdir()
         manifest_path = tmp_path / ".plans_processed.json"
@@ -645,7 +632,7 @@ class TestProcessPlans:
 
     def test_process_plans_defaults_no_plans_dir(self, monkeypatch, tmp_path):
         """With default config (self-healed), plans dir absent → success + 0 files."""
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         self._mock_config(monkeypatch, mod, {"enabled": True, "path": ".backup/processed_plans"})
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
@@ -656,7 +643,7 @@ class TestProcessPlans:
         assert "not found" in result.get("reason", "")
 
     def test_process_plans_disabled(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         self._mock_config(monkeypatch, mod, {"enabled": False})
 
         result = mod.process_plans()
@@ -666,7 +653,7 @@ class TestProcessPlans:
         assert "disabled" in result["reason"]
 
     def test_process_plans_dir_not_found(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         self._mock_config(monkeypatch, mod, {"enabled": True, "path": "nonexistent/plans"})
         monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
 
@@ -677,7 +664,7 @@ class TestProcessPlans:
         assert "not found" in result.get("reason", "")
 
     def test_process_plans_no_files(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()
         self._mock_config(
@@ -693,7 +680,7 @@ class TestProcessPlans:
         assert result["files_processed"] == 0
 
     def test_process_plans_all_already_processed(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()
         plan_file = plans_dir / "done.md"
@@ -723,7 +710,7 @@ class TestProcessPlans:
         assert "already processed" in result.get("reason", "")
 
     def test_process_plans_success(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()
@@ -775,7 +762,7 @@ class TestProcessPlans:
         assert "new_plan.md" in updated_manifest
 
     def test_process_plans_embed_fails(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()
@@ -812,7 +799,7 @@ class TestProcessPlans:
         assert any("embed" in e for e in result["errors"])
 
     def test_process_plans_no_embeddings(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()
@@ -848,7 +835,7 @@ class TestProcessPlans:
         assert any("no embeddings" in e for e in result["errors"])
 
     def test_process_plans_store_fails(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()
@@ -890,7 +877,7 @@ class TestProcessPlans:
         assert any("store" in e for e in result["errors"])
 
     def test_process_plans_empty_chunks(self, monkeypatch, tmp_path):
-        mod = _import_plans_processor(monkeypatch)
+        mod = plans_processor
 
         plans_dir = tmp_path / "plans"
         plans_dir.mkdir()

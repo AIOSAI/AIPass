@@ -1,43 +1,50 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_watch_module.py
-# Date: 2026-08-13
+# =================== AIPass ====================
+# Name: test_watch_module.py
+# Description: watch module routing, help, session start/failure, runner handler, introspection
 # Version: 1.0.0
+# Created: 2026-08-13
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""
-Tests for the watch module (APLAN-0010 encapsulation item).
+"""Tests for apps/modules/watch.py and handlers/monitor/watch_runner.py."""
 
-`watch` used to be a built-in on the entry point, which imported two monitor
-handlers directly — the encapsulation violation on apps/memory.py. It is now a
-module like every other command.
+# Tests for the watch module (APLAN-0010 encapsulation item).
+#
+# `watch` used to be a built-in on the entry point, which imported two monitor
+# handlers directly — the encapsulation violation on apps/memory.py. It is now a
+# module like every other command.
+#
+# Covers:
+#   - Routing: only the 'watch' command is claimed, everything else declines
+#   - Help interception via the shared wants_help() predicate, in any slot
+#   - No args starts the watcher (the live contract — 'drone @memory watch')
+#   - Unknown argument errors and does NOT start the watcher
+#   - Watcher start failure is reported, not swallowed
+#   - Introspection names the monitor handlers it is wired to
 
-Covers:
-  - Routing: only the 'watch' command is claimed, everything else declines
-  - Help interception via the shared wants_help() predicate, in any slot
-  - No args starts the watcher (the live contract — 'drone @memory watch')
-  - Unknown argument errors and does NOT start the watcher
-  - Watcher start failure is reported, not swallowed
-  - Introspection names the monitor handlers it is wired to
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
-import importlib
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.memory.apps.handlers.monitor import watch_runner as _watch_runner
+from aipass.memory.apps.modules import watch as _watch
+
 
 # ---------------------------------------------------------------------------
-# Helpers: import the module with the monitor handlers mocked out
+# Helpers: the real module, its monitor handlers patched at the edge
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def watch_module(monkeypatch):
-    """Import modules/watch.py with its two monitor handlers replaced by mocks.
+    """modules/watch.py with the runner's two monitor handlers replaced by mocks.
+
+    The watcher and the detector are the edge: a real start_memory_watcher
+    would observe live .trinity files, so the runner's bound names are patched.
 
     Returns:
         Tuple of (module, mocks) where mocks holds the patched handler functions.
@@ -52,17 +59,14 @@ def watch_module(monkeypatch):
         "files_checked": 34,
     }
 
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.memory_watcher", watcher_mod)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.monitor.detector", detector_mod)
-    sys.modules.pop("aipass.memory.apps.handlers.monitor.watch_runner", None)
-    sys.modules.pop("aipass.memory.apps.modules.watch", None)
-
-    module = importlib.import_module("aipass.memory.apps.modules.watch")
-    runner = importlib.import_module("aipass.memory.apps.handlers.monitor.watch_runner")
-    yield module, {"watcher": watcher_mod, "detector": detector_mod, "runner": runner}
-
-    sys.modules.pop("aipass.memory.apps.modules.watch", None)
-    sys.modules.pop("aipass.memory.apps.handlers.monitor.watch_runner", None)
+    module, runner = _watch, _watch_runner
+    monkeypatch.setattr(runner, "start_memory_watcher", watcher_mod.start_memory_watcher)
+    monkeypatch.setattr(runner, "stop_memory_watcher", watcher_mod.stop_memory_watcher)
+    monkeypatch.setattr(runner, "get_rollover_stats", detector_mod.get_rollover_stats)
+    # The json service is the edge too: no operational log lines from a test.
+    monkeypatch.setattr(module, "json_handler", MagicMock())
+    monkeypatch.setattr(runner, "json_handler", MagicMock())
+    return module, {"watcher": watcher_mod, "detector": detector_mod, "runner": runner}
 
 
 # ---------------------------------------------------------------------------

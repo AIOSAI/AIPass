@@ -1,22 +1,25 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_chroma_vectorize.py
-# Date: 2026-08-23
+# =================== AIPass ====================
+# Name: test_chroma_vectorize.py
+# Description: Text-in vectorize_and_store — the store owns the embedding model choice
 # Version: 1.0.0
-# Category: memory/tests
+# Created: 2026-08-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the text-in vectorize_and_store operation.
+"""Tests for apps/handlers/storage/chroma_subprocess.py _vectorize_and_store."""
 
-Covers: _vectorize_and_store
+# Tests for the text-in vectorize_and_store operation.
+#
+# Covers: _vectorize_and_store
+#
+# The gap this closes: callers had to pre-encode their own texts, which meant each
+# caller picked an embedding model. Two callers picking differently put vectors
+# from two models in one collection, which is silently unsearchable. The model
+# choice belongs to the branch that owns the store.
+#
+# All tests stub the embedder subprocess -- no live model load or ChromaDB.
 
-The gap this closes: callers had to pre-encode their own texts, which meant each
-caller picked an embedding model. Two callers picking differently put vectors
-from two models in one collection, which is silently unsearchable. The model
-choice belongs to the branch that owns the store.
-
-All tests stub the embedder subprocess -- no live model load or ChromaDB.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 

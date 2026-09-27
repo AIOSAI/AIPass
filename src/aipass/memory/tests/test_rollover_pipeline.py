@@ -1,29 +1,32 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_rollover_pipeline.py
-# Date: 2026-04-25
+# =================== AIPass ====================
+# Name: test_rollover_pipeline.py
+# Description: Rollover pipeline — orchestrator, extractor, rollover module, normalize, line counter
 # Version: 1.3.0
-# Modified: 2026-09-18
+# Created: 2026-04-25
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""Tests for untested public functions in the rollover pipeline.
+"""Tests for apps/modules/rollover.py and the rollover pipeline handlers it drives."""
 
-Covers:
-  from aipass.memory.apps.handlers.rollover.orchestrator import store_vectors_subprocess
-  from aipass.memory.apps.handlers.rollover.orchestrator import encode_batch_subprocess
-  from aipass.memory.apps.handlers.rollover.orchestrator import get_branch_local_chroma_path
-  from aipass.memory.apps.handlers.rollover.orchestrator import extract_text_from_memories
-  from aipass.memory.apps.handlers.rollover.extractor import extract_with_metadata
-  from aipass.memory.apps.modules.rollover import run_rollover
-  from aipass.memory.apps.modules.rollover import show_status
-  from aipass.memory.apps.modules.rollover import check_triggers
-  from aipass.memory.apps.handlers.schema.normalize import normalize_all_memory_files
-  from aipass.memory.apps.handlers.tracking.line_counter import update_all_memory_files
-  from aipass.memory.apps.handlers.learnings.manager import process_all_branches
+# Tests for untested public functions in the rollover pipeline.
+#
+# Covers:
+#   from aipass.memory.apps.handlers.rollover.orchestrator import store_vectors_subprocess
+#   from aipass.memory.apps.handlers.rollover.orchestrator import encode_batch_subprocess
+#   from aipass.memory.apps.handlers.rollover.orchestrator import get_branch_local_chroma_path
+#   from aipass.memory.apps.handlers.rollover.orchestrator import extract_text_from_memories
+#   from aipass.memory.apps.handlers.rollover.extractor import extract_with_metadata
+#   from aipass.memory.apps.modules.rollover import run_rollover
+#   from aipass.memory.apps.modules.rollover import show_status
+#   from aipass.memory.apps.modules.rollover import check_triggers
+#   from aipass.memory.apps.handlers.schema.normalize import normalize_all_memory_files
+#   from aipass.memory.apps.handlers.tracking.line_counter import update_all_memory_files
+#   from aipass.memory.apps.handlers.learnings.manager import process_all_branches
+#
+# All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
-All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import logging
@@ -36,6 +39,9 @@ from pathlib import Path
 import pytest
 from types import ModuleType
 from unittest.mock import MagicMock, patch
+
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.rollover import extractor as rollover_extractor
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +385,6 @@ class TestStoreVectorsSubprocess:
         thing that writes, so a refusal it would have to report back is already
         too late. The global store (db_path None) is memory's own and unfenced.
         """
-        from aipass.memory.apps.handlers import write_fence
 
         orch, _ = _import_orchestrator(monkeypatch)
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
@@ -604,7 +609,6 @@ class TestGetBranchLocalChromaPath:
 
     def test_a_branch_outside_the_aipass_root_gets_no_chroma_directory(self, monkeypatch, tmp_path):
         """No path handed out, no directory made — the auto-create was the first write."""
-        from aipass.memory.apps.handlers import write_fence
 
         orch, mocks = _import_orchestrator(monkeypatch)
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
@@ -617,7 +621,6 @@ class TestGetBranchLocalChromaPath:
 
     def test_an_existing_foreign_chroma_directory_is_not_handed_out_either(self, monkeypatch, tmp_path):
         """Existing is not permission: the store call would write straight into it."""
-        from aipass.memory.apps.handlers import write_fence
 
         orch, mocks = _import_orchestrator(monkeypatch)
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
@@ -1761,9 +1764,9 @@ class TestCheckTriggers:
 class TestNormalizeAllMemoryFiles:
     """Test normalize_all_memory_files iterates registry branches."""
 
-    def test_returns_error_when_registry_not_found(self, monkeypatch):
+    def test_returns_error_when_registry_not_found(self, monkeypatch, tmp_path):
         norm, _ = _import_normalize(monkeypatch)
-        with patch.object(norm, "_find_repo_root", return_value=Path("/nonexistent")):
+        with patch.object(norm, "_find_repo_root", return_value=tmp_path / "nonexistent"):
             result = norm.normalize_all_memory_files()
         assert result["success"] is False
         assert "not found" in result["error"]
@@ -1951,13 +1954,10 @@ class TestValveLoggingIsBounded:
         pass vacuously, reading zero emitted lines as zero warnings. Replacing
         the logger measures the calls the code actually made.
         """
-        from unittest.mock import MagicMock, patch
-
-        from aipass.memory.apps.handlers.rollover import extractor
 
         fake = MagicMock()
-        with patch.object(extractor, "logger", fake):
-            kept = extractor._extract_tail_excess(entries, limit, head, "key_learnings", "victim")
+        with patch.object(rollover_extractor, "logger", fake):
+            kept = rollover_extractor._extract_tail_excess(entries, limit, head, "key_learnings", "victim")
 
         warnings = [c.args[0] for c in fake.warning.call_args_list]
         debugs = [c.args[0] for c in fake.debug.call_args_list]
@@ -2444,7 +2444,6 @@ class TestTodoRoll:
         write. The pad is untouched either way: nothing is pruned until the
         backlog reads back.
         """
-        from aipass.memory.apps.handlers import write_fence
 
         home = tmp_path / "aipass"
         monkeypatch.setattr(write_fence, "ROOT", home)

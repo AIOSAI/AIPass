@@ -3,42 +3,44 @@
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
 # Version: 1.6.0
 # Created: 2026-08-16
-# Modified: 2026-09-16
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for `drone @memory config` -- the verb surface over rollover limits.
+"""Tests for apps/modules/rollover_config.py — the config verbs and the todo verbs, through apps/modules/rollover.py."""
 
-DPLAN-0302. The CLI output and the refusal sentences ARE the API contract
-(@api exec's this CLI to serve BAUD's memory-settings screen), so these
-tests pin the exact sentences, not merely "an error happened".
+# Tests for `drone @memory config` -- the verb surface over rollover limits.
+#
+# DPLAN-0302. The CLI output and the refusal sentences ARE the API contract
+# (@api exec's this CLI to serve BAUD's memory-settings screen), so these
+# tests pin the exact sentences, not merely "an error happened".
+#
+# Covers:
+#   - Every refusal sentence, message AND suggestion, verbatim
+#   - `set @branch <type> <count>` lands in per_branch and reads back as an override
+#   - `set-default` writes defaults and leaves per_branch untouched
+#   - Round-trip: set -> `rollover push` returns the branch to defaults
+#   - Effective limits resolve per FILE KEY exactly like detector._should_rollover
+#     (a deep merge would report a limit the engine does not enforce)
+#   - auto_compact_cap survives a `sessions` set (never dropped, never settable)
+#   - A help flag in ANY slot prints help and leaves the file byte-identical
+#   - A malformed config is refused, not clobbered (bytes unchanged)
+#   - Bounds: 0, negative, 101, non-numeric
+#   - The keep-count CEILING (FPLAN-0593): refused at both write verbs, the refusal
+#     naming the ceiling, the worst case, the file budget and the co-tenant counts;
+#     a count at exactly the ceiling is accepted and lands
+#   - Rich actually renders the [DEFAULT] / [OVERRIDE] markers on screen
+#     (a lowercase [default] tag is eaten by Rich's markup parser while the
+#     source string still reads correctly -- the assertion must see the screen)
+#   - `--json`: EXACTLY one parseable document on stdout per verb, every
+#     refusal as ok:false carrying the same sentence the human path prints,
+#     the flag honoured in any slot, and --help still outranking it
+#
+# Isolation: the live memory_json/custom_config/memory.config.json is COPIED
+# into tmp_path and config_loader._CONFIG_PATH is repointed at the copy. These
+# tests write limits; a suite that edited the fleet config would be the exact
+# accident these verbs exist to prevent.
 
-Covers:
-  - Every refusal sentence, message AND suggestion, verbatim
-  - `set @branch <type> <count>` lands in per_branch and reads back as an override
-  - `set-default` writes defaults and leaves per_branch untouched
-  - Round-trip: set -> `rollover push` returns the branch to defaults
-  - Effective limits resolve per FILE KEY exactly like detector._should_rollover
-    (a deep merge would report a limit the engine does not enforce)
-  - auto_compact_cap survives a `sessions` set (never dropped, never settable)
-  - A help flag in ANY slot prints help and leaves the file byte-identical
-  - A malformed config is refused, not clobbered (bytes unchanged)
-  - Bounds: 0, negative, 101, non-numeric
-  - The keep-count CEILING (FPLAN-0593): refused at both write verbs, the refusal
-    naming the ceiling, the worst case, the file budget and the co-tenant counts;
-    a count at exactly the ceiling is accepted and lands
-  - Rich actually renders the [DEFAULT] / [OVERRIDE] markers on screen
-    (a lowercase [default] tag is eaten by Rich's markup parser while the
-    source string still reads correctly -- the assertion must see the screen)
-  - `--json`: EXACTLY one parseable document on stdout per verb, every
-    refusal as ok:false carrying the same sentence the human path prints,
-    the flag honoured in any slot, and --help still outranking it
-
-Isolation: the live memory_json/custom_config/memory.config.json is COPIED
-into tmp_path and config_loader._CONFIG_PATH is repointed at the copy. These
-tests write limits; a suite that edited the fleet config would be the exact
-accident these verbs exist to prevent.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import copy
 import importlib

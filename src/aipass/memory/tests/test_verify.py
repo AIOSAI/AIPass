@@ -3,45 +3,24 @@
 # Description: Tests for verify module (plan vectorization check)
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the verify module: _get_memory_python, _check_plan_subprocess,
-is_plan_vectorized, handle_command, _discover_handlers.
+"""Tests for apps/modules/verify.py."""
 
-Covers: from aipass.memory.apps.modules.verify import handle_command
-"""
+# Covers _get_memory_python, _check_plan_subprocess, is_plan_vectorized,
+# handle_command, _discover_handlers.
+#
+# Covers: from aipass.memory.apps.modules.verify import handle_command
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
 import subprocess
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
-
-# ---------------------------------------------------------------------------
-# Helper: mock CLI modules that verify.py imports at module level
-# ---------------------------------------------------------------------------
-
-
-def _mock_cli_modules(monkeypatch):
-    """Inject mocks for aipass.cli.apps.modules (console, error)."""
-    mock_console = MagicMock()
-    mock_error = MagicMock()
-    cli_modules = MagicMock()
-    cli_modules.console = mock_console
-    cli_modules.error = mock_error
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-    return mock_console, mock_error
-
-
-def _import_verify():
-    """Import verify module inside the test (after mocks are in place)."""
-    from aipass.memory.apps.modules import verify
-
-    return verify
+from aipass.memory.apps.modules import verify
 
 
 # ===========================================================================
@@ -52,19 +31,15 @@ def _import_verify():
 class TestGetMemoryPython:
     """Tests for _get_memory_python() resolution logic."""
 
-    def test_env_override_takes_precedence(self, monkeypatch):
+    def test_env_override_takes_precedence(self, monkeypatch, tmp_path):
         """AIPASS_MEMORY_PYTHON env var overrides all other paths."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
-
-        monkeypatch.setenv("AIPASS_MEMORY_PYTHON", "/custom/bin/python3")
+        custom_python = str(tmp_path / "custom" / "bin" / "python3")
+        monkeypatch.setenv("AIPASS_MEMORY_PYTHON", custom_python)
         result = verify._get_memory_python()
-        assert result == "/custom/bin/python3"
+        assert result == custom_python
 
     def test_venv_python_used_when_exists(self, monkeypatch, tmp_path):
         """When the memory .venv python exists, it should be returned."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         # Remove env override so it doesn't interfere
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
@@ -79,25 +54,21 @@ class TestGetMemoryPython:
         result = verify._get_memory_python()
         assert result == str(fake_python)
 
-    def test_fallback_to_sys_executable(self, monkeypatch):
+    def test_fallback_to_sys_executable(self, monkeypatch, tmp_path):
         """When no env var and no venv, fall back to sys.executable."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         monkeypatch.delenv("AIPASS_MEMORY_PYTHON", raising=False)
         # Point to a path that does not exist
-        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", Path("/nonexistent/.venv/bin/python"))
+        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = verify._get_memory_python()
         assert result == sys.executable
 
-    def test_env_override_empty_string_is_falsy(self, monkeypatch):
+    def test_env_override_empty_string_is_falsy(self, monkeypatch, tmp_path):
         """An empty AIPASS_MEMORY_PYTHON env var should be treated as unset."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         monkeypatch.setenv("AIPASS_MEMORY_PYTHON", "")
         # Empty string is falsy, so it should NOT be returned
-        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", Path("/nonexistent/.venv/bin/python"))
+        monkeypatch.setattr(verify, "_MEMORY_VENV_PYTHON", tmp_path / "nonexistent" / ".venv" / "bin" / "python")
         result = verify._get_memory_python()
         # Falls through to venv check (missing) then sys.executable
         assert result == sys.executable
@@ -113,8 +84,6 @@ class TestCheckPlanSubprocess:
 
     def test_success_returns_parsed_json(self, monkeypatch):
         """Successful subprocess returns parsed JSON dict."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         expected = {"success": True, "found": True, "count": 5, "source_files": ["a.md"]}
         fake_result = MagicMock()
@@ -132,8 +101,6 @@ class TestCheckPlanSubprocess:
 
     def test_nonzero_returncode_returns_error(self, monkeypatch):
         """Non-zero return code produces error dict with stderr message."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_result = MagicMock()
         fake_result.returncode = 1
@@ -148,8 +115,6 @@ class TestCheckPlanSubprocess:
 
     def test_nonzero_returncode_empty_stderr(self, monkeypatch):
         """Non-zero return with empty stderr gives generic failure message."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_result = MagicMock()
         fake_result.returncode = 1
@@ -164,8 +129,6 @@ class TestCheckPlanSubprocess:
 
     def test_timeout_returns_error(self, monkeypatch):
         """Subprocess timeout produces a clear error message."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         def raise_timeout(*args, **kwargs):
             raise subprocess.TimeoutExpired(cmd="python", timeout=60)
@@ -179,8 +142,6 @@ class TestCheckPlanSubprocess:
 
     def test_invalid_json_returns_error(self, monkeypatch):
         """Invalid JSON stdout produces a JSON decode error."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_result = MagicMock()
         fake_result.returncode = 0
@@ -195,8 +156,6 @@ class TestCheckPlanSubprocess:
 
     def test_generic_exception_returns_error(self, monkeypatch):
         """Any other exception is caught and returned as error."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         def raise_oserror(*args, **kwargs):
             raise OSError("No such file or directory")
@@ -210,8 +169,6 @@ class TestCheckPlanSubprocess:
 
     def test_subprocess_receives_correct_input(self, monkeypatch):
         """Verify the input JSON sent to subprocess contains correct fields."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         captured_kwargs = {}
 
@@ -241,8 +198,6 @@ class TestIsPlanVectorized:
 
     def test_delegates_to_check_plan_subprocess(self, monkeypatch):
         """is_plan_vectorized is a thin wrapper around _check_plan_subprocess."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         expected = {"success": True, "found": True, "count": 3, "source_files": []}
         monkeypatch.setattr(verify, "_check_plan_subprocess", lambda label: expected)
@@ -254,8 +209,6 @@ class TestIsPlanVectorized:
 
     def test_returns_failure_dict_on_error(self, monkeypatch):
         """When subprocess fails, the error dict propagates through."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         error_result = {"success": False, "error": "something broke"}
         monkeypatch.setattr(verify, "_check_plan_subprocess", lambda label: error_result)
@@ -275,8 +228,6 @@ class TestHandleCommand:
 
     def test_verify_no_args_calls_introspection(self, monkeypatch):
         """'verify' with no args triggers print_introspection."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"introspection": False}
 
@@ -291,8 +242,6 @@ class TestHandleCommand:
 
     def test_verify_help_flag(self, monkeypatch):
         """'verify --help' triggers print_help."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"help": False}
 
@@ -307,8 +256,6 @@ class TestHandleCommand:
 
     def test_verify_h_flag(self, monkeypatch):
         """'verify -h' triggers print_help."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"help": False}
         monkeypatch.setattr(verify, "print_help", lambda: called.update(help=True))
@@ -319,8 +266,6 @@ class TestHandleCommand:
 
     def test_verify_help_word(self, monkeypatch):
         """'verify help' triggers print_help."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"help": False}
         monkeypatch.setattr(verify, "print_help", lambda: called.update(help=True))
@@ -331,8 +276,6 @@ class TestHandleCommand:
 
     def test_verify_with_plan_label(self, monkeypatch):
         """'verify FPLAN-0126' calls _verify_plan with the label."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         captured_label = {}
 
@@ -347,16 +290,12 @@ class TestHandleCommand:
 
     def test_unknown_command_returns_false(self, monkeypatch):
         """Unknown command returns False (not handled)."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         result = verify.handle_command("bogus", ["arg1"])
         assert result is False
 
     def test_toplevel_help_flag(self, monkeypatch):
         """Top-level '--help' command triggers print_help."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"help": False}
         monkeypatch.setattr(verify, "print_help", lambda: called.update(help=True))
@@ -367,8 +306,6 @@ class TestHandleCommand:
 
     def test_toplevel_h_flag(self, monkeypatch):
         """Top-level '-h' command triggers print_help."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"help": False}
         monkeypatch.setattr(verify, "print_help", lambda: called.update(help=True))
@@ -379,8 +316,6 @@ class TestHandleCommand:
 
     def test_toplevel_help_word(self, monkeypatch):
         """Top-level 'help' command triggers print_help."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         called = {"help": False}
         monkeypatch.setattr(verify, "print_help", lambda: called.update(help=True))
@@ -418,8 +353,6 @@ class TestDiscoverHandlers:
 
     def test_discovers_handler_directories_with_py_files(self, monkeypatch, tmp_path):
         """Finds handler dirs containing .py files (excluding __init__.py)."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_file, handlers_dir = _setup_fake_module_tree(tmp_path)
 
@@ -447,8 +380,6 @@ class TestDiscoverHandlers:
 
     def test_skips_dunder_directories(self, monkeypatch, tmp_path):
         """Directories starting with __ (like __pycache__) are skipped."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_file, handlers_dir = _setup_fake_module_tree(tmp_path)
 
@@ -468,8 +399,6 @@ class TestDiscoverHandlers:
 
     def test_empty_handlers_dir_returns_empty(self, monkeypatch, tmp_path):
         """An empty handlers directory returns an empty dict."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_file, _handlers_dir = _setup_fake_module_tree(tmp_path)
         # handlers_dir exists but is empty (no subdirs)
@@ -480,8 +409,6 @@ class TestDiscoverHandlers:
 
     def test_missing_handlers_dir_returns_empty(self, monkeypatch, tmp_path):
         """A nonexistent handlers directory returns an empty dict."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         # Point __file__ at a tree with no handlers/ at all
         modules_dir = tmp_path / "no_handlers" / "apps" / "modules"
@@ -496,8 +423,6 @@ class TestDiscoverHandlers:
 
     def test_dir_with_only_init_is_excluded(self, monkeypatch, tmp_path):
         """A handler dir with only __init__.py (no real modules) is excluded."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_file, handlers_dir = _setup_fake_module_tree(tmp_path)
 
@@ -513,8 +438,6 @@ class TestDiscoverHandlers:
 
     def test_non_py_files_are_ignored(self, monkeypatch, tmp_path):
         """Non-.py files (README, .json, etc.) are not included."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_file, handlers_dir = _setup_fake_module_tree(tmp_path)
 
@@ -536,8 +459,6 @@ class TestDiscoverHandlers:
 
     def test_results_are_sorted(self, monkeypatch, tmp_path):
         """Handler dirs and files within them are returned in sorted order."""
-        _mock_cli_modules(monkeypatch)
-        verify = _import_verify()
 
         fake_file, handlers_dir = _setup_fake_module_tree(tmp_path)
 

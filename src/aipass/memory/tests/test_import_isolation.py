@@ -3,51 +3,54 @@
 # Description: Pins against sys.modules poisoning of the handlers.json package
 # Version: 1.0.0
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-27
 # =============================================
 
-"""The suite is allowed to mock the world. It is not allowed to leave it broken.
+"""Tests for tests/conftest.py's handlers/json stand-in and the suite's sys.modules evictions."""
 
-WHAT HAPPENED (PR 743, run on ab9a1721 — a commit whose only diff was version
-strings). Two receipt tests in ``test_trinity_standard.py`` failed on ubuntu
-3.13, on that run only, having passed 3.13 one run earlier and 3.10/3.11/3.12 on
-that same run::
+# The suite is allowed to mock the world. It is not allowed to leave it broken.
+#
+# WHAT HAPPENED (PR 743, run on ab9a1721 — a commit whose only diff was version
+# strings). Two receipt tests in ``test_trinity_standard.py`` failed on ubuntu
+# 3.13, on that run only, having passed 3.13 one run earlier and 3.10/3.11/3.12 on
+# that same run::
+#
+#     assert (0, ['memory/local.json: No module named
+#     aipass.memory.apps.handlers.json.memory_files -
+#     aipass.memory.apps.handlers.json is not a package']) == (1, [])
+#
+# Read precisely, that message says the import machinery found SOMETHING at the
+# name ``aipass.memory.apps.handlers.json`` that has no ``__path__`` — a module
+# object standing where a package belongs. Two independent facts had to line up:
+#
+# 1. ``conftest._mock_infrastructure`` (autouse, so it is active in every test in
+#    this suite) installed a bare ``MagicMock`` at that PACKAGE name. A MagicMock
+#    does not answer ``__path__``, so any lazy ``from ...handlers.json.<sub>
+#    import x`` executed inside a test could not resolve the submodule — unless
+#    the submodule was already cached in ``sys.modules``, which is what made this
+#    invisible for months.
+#
+# 2. NINE test files evicted the real package from ``sys.modules`` with a bare
+#    ``pop``/``del`` and never put it back. A bare pop is one-way: the eviction
+#    outlives the test and every later test in the same process inherits it. Once
+#    the cache was cold, the next lazy import landed on fact 1.
+#
+#    Nine, not the four a first grep showed — the grep was truncated. The count
+#    is stated here because it is the whole argument for pinning at the source
+#    rather than fixing the file that happened to be named in the CI log.
+#
+# ``tab_renderer._refresh_one_file`` reports an import failure the same way it
+# reports a bad file — as a per-file error — so the whole thing surfaced as a
+# wrong COUNT pointing at the receipt renderer, which is not where the defect was.
+#
+# The trigger was ORDER, not code, and xdist decides order by packing tests into
+# workers differently run to run. ``test_trinity_standard.py`` passed standalone
+# because a sibling test higher in the file happened to re-import ``memory_files``
+# on its way out and warmed the cache for the receipt tests below it.
+#
+# Both facts are fixed and both are pinned here.
 
-    assert (0, ['memory/local.json: No module named
-    aipass.memory.apps.handlers.json.memory_files -
-    aipass.memory.apps.handlers.json is not a package']) == (1, [])
-
-Read precisely, that message says the import machinery found SOMETHING at the
-name ``aipass.memory.apps.handlers.json`` that has no ``__path__`` — a module
-object standing where a package belongs. Two independent facts had to line up:
-
-1. ``conftest._mock_infrastructure`` (autouse, so it is active in every test in
-   this suite) installed a bare ``MagicMock`` at that PACKAGE name. A MagicMock
-   does not answer ``__path__``, so any lazy ``from ...handlers.json.<sub>
-   import x`` executed inside a test could not resolve the submodule — unless
-   the submodule was already cached in ``sys.modules``, which is what made this
-   invisible for months.
-
-2. NINE test files evicted the real package from ``sys.modules`` with a bare
-   ``pop``/``del`` and never put it back. A bare pop is one-way: the eviction
-   outlives the test and every later test in the same process inherits it. Once
-   the cache was cold, the next lazy import landed on fact 1.
-
-   Nine, not the four a first grep showed — the grep was truncated. The count
-   is stated here because it is the whole argument for pinning at the source
-   rather than fixing the file that happened to be named in the CI log.
-
-``tab_renderer._refresh_one_file`` reports an import failure the same way it
-reports a bad file — as a per-file error — so the whole thing surfaced as a
-wrong COUNT pointing at the receipt renderer, which is not where the defect was.
-
-The trigger was ORDER, not code, and xdist decides order by packing tests into
-workers differently run to run. ``test_trinity_standard.py`` passed standalone
-because a sibling test higher in the file happened to re-import ``memory_files``
-on its way out and warmed the cache for the receipt tests below it.
-
-Both facts are fixed and both are pinned here.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import re
 import sys
@@ -246,8 +249,6 @@ class TestNobodyEvictsThePackageOneWay:
     # being fixed. test_symbolic_extras.py stays — it is still on disk.
     KNOWN_BARE_PACKAGE_STAND_INS = {
         "conftest.py::aipass.prax.apps.modules",
-        "test_orchestrator_exec.py::aipass.memory.apps.handlers.monitor",
-        "test_orchestrator_exec.py::aipass.memory.apps.handlers.tracking",
         "test_rollover.py::aipass.memory.apps.handlers",
         "test_rollover.py::aipass.memory.apps.handlers.cli",
         "test_rollover.py::aipass.memory.apps.handlers.intake",
@@ -272,7 +273,7 @@ class TestNobodyEvictsThePackageOneWay:
                     found_all.add(f"{path.name}::{name}")
         return found_all
 
-    def test_no_NEW_package_stand_in_arrives_without_a_path(self):
+    def test_no_new_package_stand_in_arrives_without_a_path(self):
         """The rule above was written for one package. The defect had seventeen.
 
         `aipass.prax` was a bare MagicMock in conftest, six lines above the json

@@ -1,29 +1,31 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/test_unified_schema.py
-# Date: 2026-06-13
+# Description: Tests for the unified entry schema: normalize, extractor trim, entry_limits
 # Version: 1.0.1
-# Modified: 2026-09-15
+# Created: 2026-06-13
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""
-Tests for FPLAN-0272: unified entry schema changes.
+"""Tests for apps/handlers/schema/normalize.py, apps/handlers/rollover/extractor.py and apps/handlers/json/entry_limits.py."""
 
-Covers:
-  - normalize.py: number-sort self-heal guardrail (sort, skip, no-op)
-  - extractor.py: key_learnings list trimming (oldest from end, under-limit skip)
-  - entry_limits.py: list-kind key_learnings char-limit enforcement via changed_entries
-"""
+# Tests for FPLAN-0272: unified entry schema changes.
+#
+# Covers:
+#   - normalize.py: number-sort self-heal guardrail (sort, skip, no-op)
+#   - extractor.py: key_learnings list trimming (oldest from end, under-limit skip)
+#   - entry_limits.py: list-kind key_learnings char-limit enforcement via changed_entries
 
-import importlib
+# The declared pass — what is NOT tested here, and what covers it instead:
+
 import json
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-import pytest
+from aipass.memory.apps.handlers.json import entry_limits
+from aipass.memory.apps.handlers.rollover import extractor
+from aipass.memory.apps.handlers.schema import normalize
 
 
 # ---------------------------------------------------------------------------
@@ -32,25 +34,12 @@ import pytest
 
 
 def _import_normalize(monkeypatch):
-    """Import normalize with mocked infrastructure dependencies."""
+    """Patch normalize's infrastructure dependencies at the edge; return it and the mocks."""
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
 
-    json_pkg = MagicMock()
-    # Impersonating a package means answering __path__ — a bare MagicMock does not,
-    # and every lazy submodule import under it then dies. See test_import_isolation.py.
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-
-    sys.modules.pop("aipass.memory.apps.handlers.schema.normalize", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.schema")
-    if parent is not None and hasattr(parent, "normalize"):
-        delattr(parent, "normalize")
-
-    from aipass.memory.apps.handlers.schema import normalize
+    monkeypatch.setattr(normalize, "json_handler", mock_json_handler)
+    monkeypatch.setattr(normalize, "logger", MagicMock())
 
     return normalize, {
         "json_handler": mock_json_handler,
@@ -58,7 +47,7 @@ def _import_normalize(monkeypatch):
 
 
 def _import_extractor(monkeypatch):
-    """Import extractor with mocked infrastructure dependencies."""
+    """Patch extractor's infrastructure dependencies at the edge; return it and the mocks."""
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
     mock_memory_files = MagicMock()
@@ -68,24 +57,13 @@ def _import_extractor(monkeypatch):
     mock_config_loader = MagicMock()
     mock_config_loader.section.return_value = {"defaults": {}, "per_branch": {}}
 
-    json_pkg = MagicMock()
-    # Impersonating a package means answering __path__ — a bare MagicMock does not,
-    # and every lazy submodule import under it then dies. See test_import_isolation.py.
-    json_pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "apps" / "handlers" / "json")]
-    json_pkg.json_handler = mock_json_handler
-    json_pkg.config_loader = mock_config_loader
-
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.json_handler", mock_json_handler)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.memory_files", mock_memory_files)
-    monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.json.config_loader", mock_config_loader)
-
-    sys.modules.pop("aipass.memory.apps.handlers.rollover.extractor", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.rollover")
-    if parent is not None and hasattr(parent, "extractor"):
-        delattr(parent, "extractor")
-
-    from aipass.memory.apps.handlers.rollover import extractor
+    # extractor binds the two memory_files functions by name, so they are
+    # patched by name - the stand-in for live .trinity reads and writes.
+    monkeypatch.setattr(extractor, "json_handler", mock_json_handler)
+    monkeypatch.setattr(extractor, "config_loader", mock_config_loader)
+    monkeypatch.setattr(extractor, "read_memory_file_data", mock_memory_files.read_memory_file_data)
+    monkeypatch.setattr(extractor, "write_memory_file_simple", mock_memory_files.write_memory_file_simple)
+    monkeypatch.setattr(extractor, "logger", MagicMock())
 
     return extractor, {
         "json_handler": mock_json_handler,
@@ -94,27 +72,9 @@ def _import_extractor(monkeypatch):
     }
 
 
-@pytest.fixture(autouse=True)
-def _fresh_entry_limits_modules(monkeypatch):
-    """Drop cached entry_limits modules so each test gets fresh imports.
-
-    Evicted with ``monkeypatch.delitem``, not a bare ``sys.modules.pop``: a
-    bare pop is one-way and the eviction outlives the test, which is how two
-    receipt tests went red on a single xdist worker on a single run.
-    """
-    for name in (
-        "aipass.memory.apps.handlers.json",
-        "aipass.memory.apps.handlers.json.json_handler",
-        "aipass.memory.apps.handlers.json.config_loader",
-        "aipass.memory.apps.handlers.json.entry_limits",
-    ):
-        monkeypatch.delitem(sys.modules, name, raising=False)
-    yield
-
-
 def _get_entry_limits():
-    """Import and return the entry_limits module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    """Return the entry_limits module (imported at the top of the file)."""
+    return entry_limits
 
 
 # ---------------------------------------------------------------------------

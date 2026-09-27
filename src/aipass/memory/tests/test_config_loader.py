@@ -1,29 +1,31 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-06-13
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the config_loader handler (Phase 1 of FPLAN-0271).
+"""Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
 
-Doctrine (the owner, S193): the JSON file is the runtime authority; code
-carries DEFAULT_CONFIG so that file can be regenerated when lost.
+# Tests for the config_loader handler (Phase 1 of FPLAN-0271).
+#
+# Doctrine (the owner, S193): the JSON file is the runtime authority; code
+# carries DEFAULT_CONFIG so that file can be regenerated when lost.
+#
+# Covers:
+#   1. Missing file      -- REGENERATES the full file from defaults, logs, returns defaults.
+#   2. Unreadable file   -- left exactly as-is on disk; ERROR logged, defaults served in memory.
+#   4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
+#   5. Full config                    -- passthrough of file values.
+#   6. section()                      -- returns named section or empty dict for unknown.
+#   7. deep_merge()                   -- nested merge, non-mutation, override precedence.
+#   8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
+#   9. File budgets (FPLAN-0593)     -- worst-case entry/file arithmetic, the per-type
+#                                       per-file keep-count ceiling and its co-tenants,
+#                                       the clamp on load, and that no shipped default clamps.
 
-Covers:
-  1. Missing file      -- REGENERATES the full file from defaults, logs, returns defaults.
-  2. Unreadable file   -- left exactly as-is on disk; ERROR logged, defaults served in memory.
-  4. Partial config                 -- deep_merge fills missing defaults, preserves file values.
-  5. Full config                    -- passthrough of file values.
-  6. section()                      -- returns named section or empty dict for unknown.
-  7. deep_merge()                   -- nested merge, non-mutation, override precedence.
-  8. todos count (DPLAN-0345)      -- count only, display-only, carried into per_branch.
-  9. File budgets (FPLAN-0593)     -- worst-case entry/file arithmetic, the per-type
-                                      per-file keep-count ceiling and its co-tenants,
-                                      the clamp on load, and that no shipped default clamps.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import copy
 import importlib
@@ -32,6 +34,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from aipass.memory.apps.handlers.json import budget
 
 
 # ---------------------------------------------------------------------------
@@ -830,8 +834,8 @@ class TestTodosCountMaterializes:
 
 
 def _budget_module():
-    """Import and return the pure budget-arithmetic module."""
-    return importlib.import_module("aipass.memory.apps.handlers.json.budget")
+    """Return the pure budget-arithmetic module."""
+    return budget
 
 
 def _entry_limits(mod) -> dict:

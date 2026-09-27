@@ -1,22 +1,24 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_changed_entries.py
-# Date: 2026-06-13
+# =================== AIPass ====================
+# Name: test_changed_entries.py
+# Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
 # Version: 1.0.0
-# Category: memory/tests
+# Created: 2026-06-13
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for Phase 3 of FPLAN-0270: changed_entries diff helper and
-write_memory_file entry-limits wiring.
+"""Tests for apps/handlers/json/entry_limits.py changed_entries and its write_memory_file wiring in memory_files.py."""
 
-Covers:
-  - changed_entries: new over-limit, changed over-limit, unchanged legacy
-    fat entries (rollover-safe), shrinking, dict/list containers, empty before.
-  - write_memory_file wiring: warn mode writes through + logs, enforce mode
-    rejects new fat entries, enforce mode allows unchanged legacy fat entries,
-    non-trinity files unaffected, passport.json unaffected.
-"""
+# Tests for Phase 3 of FPLAN-0270: changed_entries diff helper and
+# write_memory_file entry-limits wiring.
+#
+# Covers:
+#   - changed_entries: new over-limit, changed over-limit, unchanged legacy
+#     fat entries (rollover-safe), shrinking, dict/list containers, empty before.
+#   - write_memory_file wiring: warn mode writes through + logs, enforce mode
+#     rejects new fat entries, enforce mode allows unchanged legacy fat entries,
+#     non-trinity files unaffected, passport.json unaffected.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
 import json
@@ -25,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from aipass.memory.apps.handlers import repo_root
 
 
 # ---------------------------------------------------------------------------
@@ -811,8 +815,6 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
     @staticmethod
     def _hooks_root():
         """@hooks' source tree, or None when this checkout does not carry it."""
-        from aipass.memory.apps.handlers import repo_root
-
         candidate = repo_root.SOURCE_ROOT / "src" / "aipass" / "hooks" / "apps"
         return candidate if candidate.is_dir() else None
 
@@ -835,7 +837,6 @@ class TestTheBypassClaimIsMeasuredNotAsserted:
     def test_the_bypass_rule_is_narrowed_to_that_one_function(self) -> None:
         """A file-wide exemption would hide the NEXT orphan in the same file."""
         import json as _json
-        from aipass.memory.apps.handlers import repo_root
 
         rules = _json.loads(
             (repo_root.SOURCE_ROOT / "src" / "aipass" / "memory" / ".seedgo" / "bypass.json").read_text(

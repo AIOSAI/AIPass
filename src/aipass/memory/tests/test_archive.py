@@ -1,38 +1,41 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_archive.py
-# Date: 2026-04-03
+# =================== AIPass ====================
+# Name: test_archive.py
+# Description: Archive indexer handler — file info, index load/save/build, new-file check, status
 # Version: 1.0.0
+# Created: 2026-04-05
+# Modified: 2026-09-27
 # Category: memory/tests
 # =============================================
 
-"""Tests for the archive indexer handler.
+"""Tests for apps/handlers/archive/indexer.py."""
 
-Covers:
-  - archive/indexer.py (extract_file_info, get_archive_files, load_index,
-    save_index, build_index, check_for_new_files, get_index_status)
+# Covers:
+#   - archive/indexer.py (extract_file_info, get_archive_files, load_index,
+#     save_index, build_index, check_for_new_files, get_index_status)
+#
+# All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
-All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import json
-import sys
 from pathlib import Path
+from unittest.mock import MagicMock
+
+from aipass.memory.apps.handlers.archive import indexer as _indexer
 
 
 # ---------------------------------------------------------------------------
-# Import helper
+# Sandbox helper
 # ---------------------------------------------------------------------------
 
 
-def _import_indexer(monkeypatch, tmp_path):
-    """Import indexer with mocked dependencies and paths pointed at tmp_path."""
-    sys.modules.pop("aipass.memory.apps.handlers.archive.indexer", None)
-    parent = sys.modules.get("aipass.memory.apps.handlers.archive")
-    if parent is not None and hasattr(parent, "indexer"):
-        delattr(parent, "indexer")
-
-    from aipass.memory.apps.handlers.archive import indexer
+def _sandboxed_indexer(monkeypatch, tmp_path):
+    """The real indexer, its logger and json service patched at the edge, paths pointed at tmp_path."""
+    indexer = _indexer
+    json_service = MagicMock()
+    json_service.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(indexer, "json_handler", json_service)
+    monkeypatch.setattr(indexer, "logger", MagicMock())
 
     # Redirect constants to tmp_path
     code_archive = tmp_path / "code_archive"
@@ -53,7 +56,7 @@ class TestExtractFileInfo:
 
     def test_valid_python_file(self, monkeypatch, tmp_path):
         """Extract info from a well-formed Python file."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -84,7 +87,7 @@ class TestExtractFileInfo:
 
     def test_syntax_error_file(self, monkeypatch, tmp_path):
         """A file with invalid syntax should return error dict, not raise."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -102,7 +105,7 @@ class TestExtractFileInfo:
 
     def test_unreadable_file(self, monkeypatch, tmp_path):
         """A file that cannot be read should return an error dict."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
 
         missing_file = tmp_path / "code_archive" / "nonexistent.py"
 
@@ -114,7 +117,7 @@ class TestExtractFileInfo:
 
     def test_file_no_docstring(self, monkeypatch, tmp_path):
         """A file with no module docstring should return None for docstring."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -129,7 +132,7 @@ class TestExtractFileInfo:
 
     def test_long_docstring_truncated(self, monkeypatch, tmp_path):
         """A docstring longer than 200 chars should be truncated with '...'."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -144,7 +147,7 @@ class TestExtractFileInfo:
 
     def test_relative_path_in_subdirectory(self, monkeypatch, tmp_path):
         """File in subdirectory should have relative path from CODE_ARCHIVE_PATH."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         sub_dir = archive_dir / "utils"
         sub_dir.mkdir(parents=True)
@@ -167,7 +170,7 @@ class TestGetArchiveFiles:
 
     def test_empty_directory(self, monkeypatch, tmp_path):
         """An empty archive directory should return []."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -177,7 +180,7 @@ class TestGetArchiveFiles:
 
     def test_returns_py_files_sorted(self, monkeypatch, tmp_path):
         """Should return .py files sorted by path."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -192,7 +195,7 @@ class TestGetArchiveFiles:
 
     def test_excludes_init_py(self, monkeypatch, tmp_path):
         """__init__.py files should be excluded."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -206,7 +209,7 @@ class TestGetArchiveFiles:
 
     def test_directory_does_not_exist(self, monkeypatch, tmp_path):
         """If CODE_ARCHIVE_PATH does not exist, return []."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         # Do NOT create the directory
 
         result = indexer.get_archive_files()
@@ -215,7 +218,7 @@ class TestGetArchiveFiles:
 
     def test_includes_files_in_subdirectories(self, monkeypatch, tmp_path):
         """rglob should find .py files in subdirectories."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         sub_dir = archive_dir / "subpkg"
         sub_dir.mkdir(parents=True)
@@ -240,7 +243,7 @@ class TestLoadIndex:
 
     def test_file_exists(self, monkeypatch, tmp_path):
         """Should load existing index.json contents."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -258,7 +261,7 @@ class TestLoadIndex:
 
     def test_file_does_not_exist(self, monkeypatch, tmp_path):
         """Should return empty structure with metadata/categories/files keys."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
 
         result = indexer.load_index()
 
@@ -271,7 +274,7 @@ class TestLoadIndex:
 
     def test_corrupted_file_returns_default(self, monkeypatch, tmp_path):
         """A corrupted index.json should return the default structure."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -293,7 +296,7 @@ class TestSaveIndex:
 
     def test_success(self, monkeypatch, tmp_path):
         """Should write index.json and update metadata fields."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -313,9 +316,9 @@ class TestSaveIndex:
 
     def test_failure_returns_error(self, monkeypatch, tmp_path):
         """If writing fails, return success=False with error."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         # Point INDEX_PATH to an impossible location
-        monkeypatch.setattr(indexer, "INDEX_PATH", Path("/nonexistent/dir/index.json"))
+        monkeypatch.setattr(indexer, "INDEX_PATH", tmp_path / "nonexistent" / "dir" / "index.json")
 
         index = {
             "metadata": {"last_updated": None, "total_files": 0},
@@ -339,7 +342,7 @@ class TestBuildIndex:
 
     def test_with_files(self, monkeypatch, tmp_path):
         """Should index all .py files and return stats."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         sub_dir = archive_dir / "utils"
         sub_dir.mkdir(parents=True)
@@ -359,7 +362,7 @@ class TestBuildIndex:
 
     def test_with_no_files(self, monkeypatch, tmp_path):
         """Should return success with 0 files when dir is empty or missing."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         # Do not create code_archive directory
 
         result = indexer.build_index()
@@ -369,7 +372,7 @@ class TestBuildIndex:
 
     def test_files_at_root_have_no_category(self, monkeypatch, tmp_path):
         """Files directly in code_archive should not create a category."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -392,7 +395,7 @@ class TestCheckForNewFiles:
 
     def test_new_files_added(self, monkeypatch, tmp_path):
         """New files on disk should be indexed."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -416,7 +419,7 @@ class TestCheckForNewFiles:
 
     def test_files_deleted(self, monkeypatch, tmp_path):
         """Deleted files should be removed from index."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -439,7 +442,7 @@ class TestCheckForNewFiles:
 
     def test_no_changes(self, monkeypatch, tmp_path):
         """When index matches disk, no sync action needed."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -463,7 +466,7 @@ class TestCheckForNewFiles:
 
     def test_simultaneous_add_and_delete(self, monkeypatch, tmp_path):
         """Should handle both new and deleted files in one sync."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -498,7 +501,7 @@ class TestGetIndexStatus:
 
     def test_status_with_indexed_files(self, monkeypatch, tmp_path):
         """Should report correct counts and categories."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         sub_dir = archive_dir / "utils"
         sub_dir.mkdir(parents=True)
@@ -526,7 +529,7 @@ class TestGetIndexStatus:
 
     def test_status_with_unindexed_files(self, monkeypatch, tmp_path):
         """Should report unindexed count when files exist but index is empty."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
         archive_dir = tmp_path / "code_archive"
         archive_dir.mkdir(parents=True)
 
@@ -541,7 +544,7 @@ class TestGetIndexStatus:
 
     def test_status_empty(self, monkeypatch, tmp_path):
         """Empty archive: all counts zero."""
-        indexer = _import_indexer(monkeypatch, tmp_path)
+        indexer = _sandboxed_indexer(monkeypatch, tmp_path)
 
         status = indexer.get_index_status()
 

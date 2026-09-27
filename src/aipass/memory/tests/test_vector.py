@@ -1,23 +1,24 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: tests/test_vector.py
-# Date: 2026-04-03
+# =================== AIPass ====================
+# Name: test_vector.py
+# Description: EmbeddingService and the embedder public API — PARKED with the symbolic tier, kept for revival
 # Version: 2.0.0
-# Category: memory/tests
+# Created: 2026-04-05
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for vector embedding handler.
+"""Tests for apps/handlers/vector/embedder.py."""
 
-Covers:
-  - vector/embedder.py  EmbeddingService class (init, encode_batch with
-    pre-sort by length and order restoration)
-  - vector/embedder.py  Public API functions (encode_batch, encode_memories,
-    get_model_info)
-  - vector/embedder.py  Singleton management (_get_service, global reset)
-
-All tests use mocks/tmp_path -- no live fastembed or ONNX access.
-"""
-
+# Tests for vector embedding handler.
+#
+# Covers:
+#   - vector/embedder.py  EmbeddingService class (init, encode_batch with
+#     pre-sort by length and order restoration)
+#   - vector/embedder.py  Public API functions (encode_batch, encode_memories,
+#     get_model_info)
+#   - vector/embedder.py  Singleton management (_get_service, global reset)
+#
+# All tests use mocks/tmp_path -- no live fastembed or ONNX access.
+#
 # ---------------------------------------------------------------------------
 # PARKED 2026-08-14 — @devpulse's ruling, following the owner's symbolic-tier park.
 # vector/embedder.py had exactly two importers, symbolic/storage.py and
@@ -28,6 +29,9 @@ All tests use mocks/tmp_path -- no live fastembed or ONNX access.
 # Active curated-truth piece: Compass — drone @devpulse compass.
 # Revive: tests/parked/symbolic_20260814/README.md
 # ---------------------------------------------------------------------------
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+
 import pytest as _parked
 
 _parked.skip(

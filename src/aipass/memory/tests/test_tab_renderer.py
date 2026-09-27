@@ -1,23 +1,25 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-06-25
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the tab_renderer handler.
+"""Tests for apps/handlers/tracking/tab_renderer.py."""
 
-Covers:
-  1. render_tab() — correct strings for each section type.
-  2. render_tab() — per-branch overrides from config.
-  3. render_tab() — fallback to defaults when branch not in per_branch.
-  4. _reorder_keys() — canonical key ordering.
-  5. refresh_all_tabs() — reads config and writes tabs (mocked I/O).
-  6. Key ordering verification after tab insertion.
-  7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
-"""
+# Tests for the tab_renderer handler.
+#
+# Covers:
+#   1. render_tab() — correct strings for each section type.
+#   2. render_tab() — per-branch overrides from config.
+#   3. render_tab() — fallback to defaults when branch not in per_branch.
+#   4. _reorder_keys() — canonical key ordering.
+#   5. refresh_all_tabs() — reads config and writes tabs (mocked I/O).
+#   6. Key ordering verification after tab insertion.
+#   7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
 
 import importlib
 import json
@@ -26,6 +28,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.json.config_loader import resolve_limits
 
 
 # ---------------------------------------------------------------------------
@@ -532,8 +537,6 @@ class TestRefreshAllTabs:
         receipt beside them. Vera Studio's files carried that promise for a
         project whose rollover memory was never supposed to run.
         """
-        from aipass.memory.apps.handlers import write_fence
-
         mod = _get_module()
         monkeypatch.setattr(write_fence, "ROOT", tmp_path / "aipass")
         branch_dir = tmp_path / "other_root" / "src" / "x"
@@ -806,8 +809,6 @@ class TestTabAgreesWithTheEngine:
 
     @staticmethod
     def _engine_count(rollover_cfg, branch, section):
-        from aipass.memory.apps.handlers.json.config_loader import resolve_limits
-
         return resolve_limits(rollover_cfg, branch)[section]["count"]
 
     def test_per_branch_entry_missing_its_file_block_falls_back_like_the_engine(self):
