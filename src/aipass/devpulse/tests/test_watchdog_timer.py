@@ -3,10 +3,15 @@
 # Description: Tests for the watchdog timer handler + router integration
 # Version: 1.0.0
 # Created: 2026-04-14
-# Modified: 2026-04-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for watchdog timer handler (Phase 2, FPLAN-0186)."""
+"""Tests for apps/handlers/watchdog/timer.py and the watchdog timer command that drives it."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/watchdog/timer.py parses and imports
+# seedgo: no-test-needed(documentation) — that wake_in and the timer_* functions carry docstrings
+# seedgo: no-test-needed(constant) — the wording of _TIMER_HELP_TEXT
 
 import json
 import sys
@@ -119,13 +124,20 @@ def store_path(tmp_path):
     return tmp_path / "watchdog_timers.json"
 
 
+def _backdate(store_path, name, seconds):
+    """Move an active timer's stored start back, the way os.utime moves an mtime."""
+    raw = json.loads(store_path.read_text(encoding="utf-8"))
+    raw["active"][name]["started_epoch"] -= seconds
+    store_path.write_text(json.dumps(raw), encoding="utf-8")
+
+
 def test_timer_start_then_stop(store_path):
     start = timer_handler.timer_start("phase-a", storage_path=store_path)
     assert start["state"] == "started"
     assert start["name"] == "phase-a"
     assert "started_at" in start
 
-    time.sleep(1.1)
+    _backdate(store_path, "phase-a", 1.1)
 
     stop = timer_handler.timer_stop("phase-a", storage_path=store_path)
     assert stop["state"] == "stopped"
@@ -166,7 +178,7 @@ def test_timer_start_empty_name(store_path):
 def test_timer_list_mixes_active_and_history(store_path):
     timer_handler.timer_start("alpha", storage_path=store_path)
     timer_handler.timer_start("beta", storage_path=store_path)
-    time.sleep(1.1)
+    _backdate(store_path, "beta", 1.1)
     timer_handler.timer_stop("beta", storage_path=store_path)
 
     snapshot = timer_handler.timer_list(storage_path=store_path)
@@ -194,7 +206,7 @@ def test_timer_list_empty_store(store_path):
 
 def test_timer_report_contains_sections(store_path):
     timer_handler.timer_start("reporting", storage_path=store_path)
-    time.sleep(1.1)
+    _backdate(store_path, "reporting", 1.1)
     timer_handler.timer_stop("reporting", storage_path=store_path)
     timer_handler.timer_start("still-active", storage_path=store_path)
 
@@ -218,7 +230,7 @@ def test_persistence_across_reloads(store_path):
     raw_after_start = json.loads(store_path.read_text(encoding="utf-8"))
     assert "persistent" in raw_after_start["active"]
 
-    time.sleep(1.1)
+    _backdate(store_path, "persistent", 1.1)
     stop_result = timer_handler.timer_stop("persistent", storage_path=store_path)
     assert stop_result["state"] == "stopped"
 
@@ -258,8 +270,8 @@ def _bypass_caller_guard():
         yield
 
 
-def _fake_timer_module(**overrides):
-    """Build a fake handler module with the public surface the router calls."""
+def _fake_timer_module(monkeypatch, **overrides):
+    """Put recorders on the real handler's public surface the router calls."""
     fake = type(sys)("fake_timer_mod")
     fake.calls = []
 
@@ -307,47 +319,45 @@ def _fake_timer_module(**overrides):
         fake.calls.append(("timer_report",))
         return overrides.get("timer_report", "report body")
 
-    fake.wake_in = wake_in
-    fake.timer_start = timer_start
-    fake.timer_stop = timer_stop
-    fake.timer_list = timer_list
-    fake.timer_report = timer_report
+    for name, recorder in (
+        ("wake_in", wake_in),
+        ("timer_start", timer_start),
+        ("timer_stop", timer_stop),
+        ("timer_list", timer_list),
+        ("timer_report", timer_report),
+    ):
+        monkeypatch.setattr(timer_handler, name, recorder)
     return fake
 
 
-def test_router_timer_wake_in(_bypass_caller_guard):
-    fake = _fake_timer_module()
-    with patch("importlib.import_module", return_value=fake):
-        result = wd_mod.handle_command("watchdog", ["timer", "1s"])
+def test_router_timer_wake_in(_bypass_caller_guard, monkeypatch):
+    fake = _fake_timer_module(monkeypatch)
+    result = wd_mod.handle_command("watchdog", ["timer", "1s"])
     assert result is True
     assert ("wake_in", "1s") in fake.calls
 
 
-def test_router_timer_start(_bypass_caller_guard):
-    fake = _fake_timer_module()
-    with patch("importlib.import_module", return_value=fake):
-        wd_mod.handle_command("watchdog", ["timer", "start", "build-phase-3"])
+def test_router_timer_start(_bypass_caller_guard, monkeypatch):
+    fake = _fake_timer_module(monkeypatch)
+    wd_mod.handle_command("watchdog", ["timer", "start", "build-phase-3"])
     assert ("timer_start", "build-phase-3") in fake.calls
 
 
-def test_router_timer_stop(_bypass_caller_guard):
-    fake = _fake_timer_module()
-    with patch("importlib.import_module", return_value=fake):
-        wd_mod.handle_command("watchdog", ["timer", "stop", "build-phase-3"])
+def test_router_timer_stop(_bypass_caller_guard, monkeypatch):
+    fake = _fake_timer_module(monkeypatch)
+    wd_mod.handle_command("watchdog", ["timer", "stop", "build-phase-3"])
     assert ("timer_stop", "build-phase-3") in fake.calls
 
 
-def test_router_timer_list(_bypass_caller_guard):
-    fake = _fake_timer_module()
-    with patch("importlib.import_module", return_value=fake):
-        wd_mod.handle_command("watchdog", ["timer", "list"])
+def test_router_timer_list(_bypass_caller_guard, monkeypatch):
+    fake = _fake_timer_module(monkeypatch)
+    wd_mod.handle_command("watchdog", ["timer", "list"])
     assert ("timer_list",) in fake.calls
 
 
-def test_router_timer_report(_bypass_caller_guard, capsys):
-    fake = _fake_timer_module()
-    with patch("importlib.import_module", return_value=fake):
-        wd_mod.handle_command("watchdog", ["timer", "report"])
+def test_router_timer_report(_bypass_caller_guard, capsys, monkeypatch):
+    fake = _fake_timer_module(monkeypatch)
+    wd_mod.handle_command("watchdog", ["timer", "report"])
     assert ("timer_report",) in fake.calls
     captured = capsys.readouterr()
     assert "report body" in (captured.out + captured.err)
@@ -361,21 +371,14 @@ def test_router_timer_help(_bypass_caller_guard, capsys):
     assert "timer" in combined.lower()
 
 
-def test_router_timer_invalid_duration(_bypass_caller_guard, capsys):
+def test_router_timer_invalid_duration(_bypass_caller_guard, capsys, monkeypatch):
     """Invalid duration from wake_in surfaces as a clean error via the router."""
-    fake = type(sys)("fake_timer_mod")
 
     def wake_in(duration):
         raise ValueError(f"bad duration: {duration}")
 
-    fake.wake_in = wake_in
-    fake.timer_start = lambda *a, **kw: {}
-    fake.timer_stop = lambda *a, **kw: {}
-    fake.timer_list = lambda *a, **kw: {}
-    fake.timer_report = lambda *a, **kw: ""
-
-    with patch("importlib.import_module", return_value=fake):
-        result = wd_mod.handle_command("watchdog", ["timer", "notaduration"])
+    monkeypatch.setattr(timer_handler, "wake_in", wake_in)
+    result = wd_mod.handle_command("watchdog", ["timer", "notaduration"])
 
     assert result is True
     captured = capsys.readouterr()
