@@ -1,13 +1,18 @@
 # =================== AIPass ====================
 # Name: test_edit_gate_trinity.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for edit_gate .trinity character-limit check (Write/Edit/MultiEdit)."""
+"""Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that edit_gate's functions carry docstrings
+# seedgo: no-test-needed(ruff) — that edit_gate.py parses and its imports resolve
+# seedgo: no-test-needed(stdlib) — json.loads' parsing of the proposed content; the gate's reading of it is pinned
 
 import importlib
 import json
@@ -600,7 +605,9 @@ class TestTripwireWatchesEveryTrinityInTheProject:
         passport = seats["hooks"] / ".trinity" / "passport.json"
 
         clean = self._context(
-            self._around(seats["hooks"], lambda: passport.write_text(json.dumps({"identity": {"role": "r"}})))
+            self._around(
+                seats["hooks"], lambda: passport.write_text(json.dumps({"identity": {"role": "r"}}), encoding="utf-8")
+            )
         )
 
         assert f"MEMORY CHANGED DURING THIS BASH CALL: {passport} changed" in clean
@@ -611,7 +618,7 @@ class TestTripwireWatchesEveryTrinityInTheProject:
         passport = seats["hooks"] / ".trinity" / "passport.json"
         fat = json.dumps({"identity": {"purpose": "p" * 7000}})
 
-        context = self._context(self._around(seats["hooks"], lambda: passport.write_text(fat)))
+        context = self._context(self._around(seats["hooks"], lambda: passport.write_text(fat, encoding="utf-8")))
 
         assert "the whole file is" in context and "/6000 chars" in context
         assert "'identity.purpose' is 7000/600 chars (+6400 over)" in context
@@ -627,7 +634,9 @@ class TestTripwireWatchesEveryTrinityInTheProject:
         seats = self._project(tmp_path, monkeypatch)
         target = seats["memory"] / ".trinity" / "local.json"
 
-        context = self._context(self._around(seats["hooks"], lambda: target.write_text(json.dumps({"sessions": []}))))
+        context = self._context(
+            self._around(seats["hooks"], lambda: target.write_text(json.dumps({"sessions": []}), encoding="utf-8"))
+        )
 
         assert context.startswith("ANOTHER BRANCH'S MEMORY CHANGED")
         assert "MEMORY WRITTEN FROM A SHELL" not in context
@@ -639,7 +648,7 @@ class TestTripwireWatchesEveryTrinityInTheProject:
         mine = seats["hooks"] / ".trinity" / "local.json"
         over = json.dumps({"sessions": [{"summary": "s" * 300 + "tail"}]})
 
-        context = self._context(self._around(seats["hooks"], lambda: mine.write_text(over)))
+        context = self._context(self._around(seats["hooks"], lambda: mine.write_text(over, encoding="utf-8")))
 
         assert context.startswith("MEMORY WRITTEN FROM A SHELL")
         assert "Re-land each entry" in context
@@ -652,7 +661,10 @@ class TestTripwireWatchesEveryTrinityInTheProject:
 
         with caplog.at_level("INFO"):
             context = self._context(
-                self._around(seats["hooks"], lambda: mine.write_text(json.dumps({"sessions": [{"summary": "new"}]})))
+                self._around(
+                    seats["hooks"],
+                    lambda: mine.write_text(json.dumps({"sessions": [{"summary": "new"}]}), encoding="utf-8"),
+                )
             )
 
         assert context.startswith("MEMORY CHANGED DURING THIS BASH CALL")

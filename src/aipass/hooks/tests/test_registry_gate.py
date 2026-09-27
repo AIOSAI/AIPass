@@ -1,13 +1,18 @@
 # =================== AIPass ====================
 # Name: test_registry_gate.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for registry_gate security handler
 # Branch: hooks
 # Created: 2026-07-10
-# Modified: 2026-07-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/security/registry_gate.py."""
+"""Tests for apps/handlers/security/registry_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that the gate's functions carry docstrings
+# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
+# seedgo: no-test-needed(stdlib) — re's matching and pathlib's Path.name; the gate's own patterns are pinned here
 
 import json
 from unittest.mock import patch
@@ -30,8 +35,8 @@ class TestIsRegistryFile:
     def test_vera_registry(self):
         assert _is_registry_file("VERA_REGISTRY.json") is True
 
-    def test_full_path(self):
-        assert _is_registry_file("/tmp/projects/AIPass/AIPASS_REGISTRY.json") is True
+    def test_full_path(self, tmp_path):
+        assert _is_registry_file(str(tmp_path / "projects" / "AIPass" / "AIPASS_REGISTRY.json")) is True
 
     def test_not_registry(self):
         assert _is_registry_file("config.json") is False
@@ -42,8 +47,8 @@ class TestIsRegistryFile:
     def test_wrong_extension(self):
         assert _is_registry_file("AIPASS_REGISTRY.yaml") is False
 
-    def test_registry_in_path(self):
-        assert _is_registry_file("/path/to/FOO_REGISTRY.json") is True
+    def test_registry_in_path(self, tmp_path):
+        assert _is_registry_file(str(tmp_path / "path" / "to" / "FOO_REGISTRY.json")) is True
 
 
 class TestIsDroneSpawn:
@@ -273,28 +278,28 @@ class TestHandleEditTools:
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
 
-    def test_block_edit(self):
-        self._assert_blocked(self._edit("Edit", "/path/AIPASS_REGISTRY.json"))
+    def test_block_edit(self, tmp_path):
+        self._assert_blocked(self._edit("Edit", str(tmp_path / "path" / "AIPASS_REGISTRY.json")))
 
-    def test_block_write(self):
-        self._assert_blocked(self._edit("Write", "/path/AIPASS_REGISTRY.json"))
+    def test_block_write(self, tmp_path):
+        self._assert_blocked(self._edit("Write", str(tmp_path / "path" / "AIPASS_REGISTRY.json")))
 
-    def test_block_multi_edit(self):
-        self._assert_blocked(self._edit("MultiEdit", "/path/AIPASS_REGISTRY.json"))
+    def test_block_multi_edit(self, tmp_path):
+        self._assert_blocked(self._edit("MultiEdit", str(tmp_path / "path" / "AIPASS_REGISTRY.json")))
 
-    def test_block_notebook_edit(self):
+    def test_block_notebook_edit(self, tmp_path):
         self._assert_blocked(
             handle(
                 {
                     "tool_name": "NotebookEdit",
-                    "tool_input": {"notebook_path": "/path/AIPASS_REGISTRY.json"},
+                    "tool_input": {"notebook_path": str(tmp_path / "path" / "AIPASS_REGISTRY.json")},
                     "cwd": self.CWD,
                 }
             )
         )
 
-    def test_allow_normal_file(self):
-        self._assert_allowed(self._edit("Edit", "/path/config.json"))
+    def test_allow_normal_file(self, tmp_path):
+        self._assert_allowed(self._edit("Edit", str(tmp_path / "path" / "config.json")))
 
     def test_allow_empty_path(self):
         self._assert_allowed(self._edit("Edit", ""))
@@ -303,8 +308,8 @@ class TestHandleEditTools:
         result = handle({"tool_name": "Read", "tool_input": {"file_path": "/path/AIPASS_REGISTRY.json"}})
         self._assert_allowed(result)
 
-    def test_sound_key_on_block(self):
-        result = self._edit("Edit", "/path/AIPASS_REGISTRY.json")
+    def test_sound_key_on_block(self, tmp_path):
+        result = self._edit("Edit", str(tmp_path / "path" / "AIPASS_REGISTRY.json"))
         assert result.get("sound") == "registry gate"
 
 

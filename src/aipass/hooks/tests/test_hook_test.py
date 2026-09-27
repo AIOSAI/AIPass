@@ -1,4 +1,19 @@
-"""Tests for the portable hook test runner (modules/hook_test.py)."""
+# =================== AIPass ====================
+# Name: test_hook_test.py
+# Version: 1.0.1
+# Description: Tests for the portable hook test runner
+# Branch: hooks
+# Layer: tests
+# Created: 2026-07-10
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/hook_test.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — MOCK_EVENTS' sample payloads and HELP_COMMANDS' display strings
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir() choosing where the synthetic file lands
+# seedgo: no-test-needed(ruff) — that modules/hook_test.py parses and imports the engine it drives
 
 import json
 import os
@@ -203,14 +218,15 @@ class TestProbeIsolation:
         branch = tmp_path / "hooks"
         (branch / ".trinity").mkdir(parents=True)
         monkeypatch.chdir(branch)
-        monkeypatch.setenv("AIPASS_HOME", "/sentinel/home")
+        sentinel_home = str(tmp_path / "sentinel" / "home")
+        monkeypatch.setenv("AIPASS_HOME", sentinel_home)
         monkeypatch.delenv(hook_test.PROBE_ENV_VAR, raising=False)
 
         with patch(f"{_MOD}.find_project_config", return_value=self._prep_config()):
             hook_test.run_test()
 
         assert Path.cwd() == branch
-        assert os.environ["AIPASS_HOME"] == "/sentinel/home"
+        assert os.environ["AIPASS_HOME"] == sentinel_home
         assert hook_test.PROBE_ENV_VAR not in os.environ
 
     def test_workspace_is_removed(self, tmp_path, monkeypatch):

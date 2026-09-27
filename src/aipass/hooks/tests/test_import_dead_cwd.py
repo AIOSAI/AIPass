@@ -1,49 +1,54 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins hooks imports against a dead working directory (two worlds)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""Every hooks module must import without a readable working directory.
+"""Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
 
-THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-routed by @devpulse): ``ntpath.realpath`` calls ``os.getcwd()``
-UNCONDITIONALLY - not only for relative paths, the way ``posixpath`` does -
-and ``Path.resolve()`` routes through it. So on Windows every
-``Path(__file__).resolve()`` reached at import time is an import-time
-working-directory dependency: a process whose cwd is gone cannot import the
-module at all.
+# Every hooks module must import without a readable working directory.
+#
+# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
+# routed by @devpulse): ``ntpath.realpath`` calls ``os.getcwd()``
+# UNCONDITIONALLY - not only for relative paths, the way ``posixpath`` does -
+# and ``Path.resolve()`` routes through it. So on Windows every
+# ``Path(__file__).resolve()`` reached at import time is an import-time
+# working-directory dependency: a process whose cwd is gone cannot import the
+# module at all.
+#
+# WHY THIS BRANCH NEEDED TWO WORLDS. @seedgo measured the asymmetry and it is
+# real here: one instrument proves half the defect and looks complete.
+#
+#   World A - ntpath emulation. ``os.path.realpath`` is wrapped to read
+#   ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts an
+#   unguarded ``Path(__file__).resolve()``. It does NOT convict
+#   ``inspect.stack()`` on Linux: there the raise happens inside
+#   ``getabsfile()``, where inspect catches it.
+#
+#   World B - ``os.path.realpath`` denied directly, ``abspath`` left working.
+#   This convicts ``inspect.stack()`` at ``inspect.py:1009``.
+#
+# THE ARMING INGREDIENT FOR WORLD B, measured here rather than assumed:
+# ``inspect.stack()`` only reaches ``os.path.realpath`` for a frame whose
+# filename does not exist on disk. ``getsourcefile()`` returns early for a real
+# file (``os.path.exists``) and returns early for anything already in
+# ``linecache.cache``; only the remaining case falls through to ``getmodule()``,
+# whose module-cache rebuild loop contains the bare
+# ``modulesbyfile[os.path.realpath(f)]`` at line 1009.
+#
+# That is why a first cut of this file reported the world VACUOUS while the very
+# same world killed the import: the probe ran from ``<stdin>``, which the
+# heredoc had put in ``linecache.cache``, so it took the early return. A
+# ``<string>`` frame from ``compile()`` is not cached and does fall through -
+# and so do the ``<frozen importlib._bootstrap>`` frames present on any real
+# import, which is what the live defect actually rides. The probe below uses
+# ``<string>`` deliberately; ``<stdin>`` would silently measure nothing.
 
-WHY THIS BRANCH NEEDED TWO WORLDS. @seedgo measured the asymmetry and it is
-real here: one instrument proves half the defect and looks complete.
-
-  World A - ntpath emulation. ``os.path.realpath`` is wrapped to read
-  ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts an
-  unguarded ``Path(__file__).resolve()``. It does NOT convict
-  ``inspect.stack()`` on Linux: there the raise happens inside
-  ``getabsfile()``, where inspect catches it.
-
-  World B - ``os.path.realpath`` denied directly, ``abspath`` left working.
-  This convicts ``inspect.stack()`` at ``inspect.py:1009``.
-
-THE ARMING INGREDIENT FOR WORLD B, measured here rather than assumed:
-``inspect.stack()`` only reaches ``os.path.realpath`` for a frame whose
-filename does not exist on disk. ``getsourcefile()`` returns early for a real
-file (``os.path.exists``) and returns early for anything already in
-``linecache.cache``; only the remaining case falls through to ``getmodule()``,
-whose module-cache rebuild loop contains the bare
-``modulesbyfile[os.path.realpath(f)]`` at line 1009.
-
-That is why a first cut of this file reported the world VACUOUS while the very
-same world killed the import: the probe ran from ``<stdin>``, which the
-heredoc had put in ``linecache.cache``, so it took the early return. A
-``<string>`` frame from ``compile()`` is not cached and does fall through -
-and so do the ``<frozen importlib._bootstrap>`` frames present on any real
-import, which is what the live defect actually rides. The probe below uses
-``<string>`` deliberately; ``<stdin>`` would silently measure nothing.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every hooks module parses; this file pins only import under a dead cwd
+# seedgo: no-test-needed(stdlib) — os.getcwd() raising once the working directory is gone; the worlds emulate it
 
 import ast
 import subprocess
@@ -175,6 +180,8 @@ def _run_world(world: str, imports: str) -> subprocess.CompletedProcess:
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
         cwd=str(BRANCH_ROOT.parents[2]),
     )

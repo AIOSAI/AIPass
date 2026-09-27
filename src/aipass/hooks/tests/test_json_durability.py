@@ -1,29 +1,35 @@
 # =================== AIPass ====================
 # Name: test_json_durability.py
-# Version: 2.0.0
+# Version: 2.0.1
 # Description: Torn-write durability tests for hooks' arbitrary-path json module
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-16
-# Modified: 2026-09-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Torn-write durability for the json files module.
+"""Tests for apps/handlers/json/files.py's torn-write durability."""
 
-Axis 1 of the fleet defect: a write that truncates the target in place leaves a
-window where every concurrent reader sees an empty file. Measured on the
-handler this module was carved out of, before the fix: 587 of 1023 reads
-unusable (57.4%), three runs 56.7-57.5%.
+# Torn-write durability for the json files module.
+#
+# Axis 1 of the fleet defect: a write that truncates the target in place leaves a
+# window where every concurrent reader sees an empty file. Measured on the
+# handler this module was carved out of, before the fix: 587 of 1023 reads
+# unusable (57.4%), three runs 56.7-57.5%.
+#
+# DPLAN-0325 moved the nine standard names to the fleet's one json service, whose
+# behaviour seedgo's cross-branch contract pins once for everyone. What stayed
+# here is what stayed in hooks: ``read_json_file`` / ``write_json_file`` and the
+# atomic write beneath them, in ``apps/handlers/json/files.py``. They write
+# the TRUST REGISTRY and a project's alerts file — a torn registry read is every
+# hook in the project going dark — so the mechanism keeps its own pins. The tests
+# that pinned the service half moved verbatim to
+# ``tests/.archive/deleted_2026-09-03_json_durability.py``.
 
-DPLAN-0325 moved the nine standard names to the fleet's one json service, whose
-behaviour seedgo's cross-branch contract pins once for everyone. What stayed
-here is what stayed in hooks: ``read_json_file`` / ``write_json_file`` and the
-atomic write beneath them, in ``apps/handlers/json/files.py``. They write
-the TRUST REGISTRY and a project's alerts file — a torn registry read is every
-hook in the project going dark — so the mechanism keeps its own pins. The tests
-that pinned the service half moved verbatim to
-``tests/.archive/deleted_2026-09-03_json_durability.py``.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_handler) — the nine standard json names, pinned by seedgo's cross-branch contract
+# seedgo: no-test-needed(stdlib) — os.replace's atomicity and json.dumps' encoding
+# seedgo: no-test-needed(documentation) — that read_json_file / write_json_file carry docstrings
 
 import json
 import re

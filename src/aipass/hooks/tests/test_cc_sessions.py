@@ -1,4 +1,17 @@
-"""Tests for CC-native session file reader."""
+# =================== AIPass ====================
+# Name: test_cc_sessions.py
+# Version: 1.0.1
+# Description: Tests for the CC-native session file reader
+# Branch: hooks
+# Created: 2026-07-01
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — HELP_COMMANDS' help rows
+# seedgo: no-test-needed(stdlib) — os.getpid and os.kill, patched at the edge wherever a live pid is needed
 
 import json
 import os
@@ -51,7 +64,7 @@ class TestHasSessionFile:
     """Reads through CC_SESSIONS_DIR, so an unresolvable home answers instead of raising."""
 
     def test_true_when_the_file_is_there(self, tmp_path):
-        (tmp_path / "4242.json").write_text("{}")
+        (tmp_path / "4242.json").write_text("{}", encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions._has_session_file(4242) is True
 
@@ -154,22 +167,22 @@ class TestSessionPidMatches:
 
 class TestReadAllSessions:
     def test_reads_pid_files(self, tmp_path):
-        session = {"pid": 1234, "sessionId": "abc", "cwd": "/tmp/branch", "kind": "interactive"}
-        (tmp_path / "1234.json").write_text(json.dumps(session))
+        session = {"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path / "branch"), "kind": "interactive"}
+        (tmp_path / "1234.json").write_text(json.dumps(session), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             result = cc_sessions.read_all_sessions()
         assert len(result) == 1
         assert result[0]["pid"] == 1234
 
     def test_skips_non_pid_files(self, tmp_path):
-        (tmp_path / "config.json").write_text("{}")
-        (tmp_path / "abc.json").write_text("{}")
+        (tmp_path / "config.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "abc.json").write_text("{}", encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             result = cc_sessions.read_all_sessions()
         assert result == []
 
     def test_skips_corrupt_json(self, tmp_path):
-        (tmp_path / "999.json").write_text("not json{{{")
+        (tmp_path / "999.json").write_text("not json{{{", encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             result = cc_sessions.read_all_sessions()
         assert result == []
@@ -186,8 +199,8 @@ class TestReadAllSessions:
 
     def test_multiple_sessions(self, tmp_path):
         for pid in (100, 200, 300):
-            s = {"pid": pid, "sessionId": f"s-{pid}", "cwd": "/tmp", "kind": "interactive"}
-            (tmp_path / f"{pid}.json").write_text(json.dumps(s))
+            s = {"pid": pid, "sessionId": f"s-{pid}", "cwd": str(tmp_path), "kind": "interactive"}
+            (tmp_path / f"{pid}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             result = cc_sessions.read_all_sessions()
         assert len(result) == 3
@@ -195,75 +208,75 @@ class TestReadAllSessions:
 
 class TestFindLiveForCwd:
     def test_filters_by_cwd(self, tmp_path):
-        s1 = {"pid": os.getpid(), "sessionId": "a", "cwd": "/tmp/hooks", "kind": "interactive"}
-        s2 = {"pid": os.getpid(), "sessionId": "b", "cwd": "/tmp/devpulse", "kind": "interactive"}
-        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s1))
-        (tmp_path / "99999.json").write_text(json.dumps(s2))
+        s1 = {"pid": os.getpid(), "sessionId": "a", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        s2 = {"pid": os.getpid(), "sessionId": "b", "cwd": str(tmp_path / "devpulse"), "kind": "interactive"}
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s1), encoding="utf-8")
+        (tmp_path / "99999.json").write_text(json.dumps(s2), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_live_for_cwd("/tmp/hooks")
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
         assert len(result) == 1
         assert result[0]["sessionId"] == "a"
 
     def test_excludes_dead_pids(self, tmp_path):
-        s = {"pid": 999999999, "sessionId": "dead", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / "999999999.json").write_text(json.dumps(s))
+        s = {"pid": 999999999, "sessionId": "dead", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / "999999999.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_live_for_cwd("/tmp/hooks")
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
         assert result == []
 
     def test_resolves_paths(self, tmp_path):
         target = str(tmp_path / "hooks")
         s = {"pid": os.getpid(), "sessionId": "a", "cwd": target, "kind": "interactive"}
-        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s))
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             result = cc_sessions.find_live_for_cwd(target + "/")
         assert len(result) == 1
 
     def test_empty_cwd_skipped(self, tmp_path):
         s = {"pid": os.getpid(), "sessionId": "a", "cwd": "", "kind": "interactive"}
-        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s))
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_live_for_cwd("/tmp/hooks")
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
         assert result == []
 
     def test_excludes_reused_pid_with_mismatched_procstart(self, tmp_path):
         s = {
             "pid": os.getpid(),
             "sessionId": "reused",
-            "cwd": "/tmp/hooks",
+            "cwd": str(tmp_path / "hooks"),
             "kind": "interactive",
             "procStart": "1",
         }
-        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s))
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_proc_start_ticks", return_value="999999999"),
         ):
-            result = cc_sessions.find_live_for_cwd("/tmp/hooks")
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
         assert result == []
 
     def test_includes_session_with_matching_procstart(self, tmp_path):
         s = {
             "pid": os.getpid(),
             "sessionId": "genuine",
-            "cwd": "/tmp/hooks",
+            "cwd": str(tmp_path / "hooks"),
             "kind": "interactive",
             "procStart": "42",
         }
-        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s))
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_proc_start_ticks", return_value="42"),
         ):
-            result = cc_sessions.find_live_for_cwd("/tmp/hooks")
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
         assert len(result) == 1
         assert result[0]["sessionId"] == "genuine"
 
     def test_includes_session_without_procstart_field(self, tmp_path):
-        s = {"pid": os.getpid(), "sessionId": "no-procstart", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s))
+        s = {"pid": os.getpid(), "sessionId": "no-procstart", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_live_for_cwd("/tmp/hooks")
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
         assert len(result) == 1
         assert result[0]["sessionId"] == "no-procstart"
 
@@ -271,51 +284,57 @@ class TestFindLiveForCwd:
 class TestFindOccupant:
     def test_no_occupant_when_free(self, tmp_path):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_occupant("/tmp/hooks")
+            result = cc_sessions.find_occupant(str(tmp_path / "hooks"))
         assert result is None
 
     def test_excludes_own_pid(self, tmp_path):
         my_pid = os.getpid()
-        s = {"pid": my_pid, "sessionId": "mine", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s))
+        s = {"pid": my_pid, "sessionId": "mine", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_occupant("/tmp/hooks", exclude_pid=my_pid)
+            result = cc_sessions.find_occupant(str(tmp_path / "hooks"), exclude_pid=my_pid)
         assert result is None
 
     def test_finds_other_occupant(self, tmp_path):
         my_pid = os.getpid()
-        s = {"pid": my_pid, "sessionId": "other", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s))
+        s = {"pid": my_pid, "sessionId": "other", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_occupant("/tmp/hooks", exclude_pid=99999)
+            result = cc_sessions.find_occupant(str(tmp_path / "hooks"), exclude_pid=99999)
         assert result is not None
         assert result["sessionId"] == "other"
 
     def test_no_exclude_returns_any_live(self, tmp_path):
         my_pid = os.getpid()
-        s = {"pid": my_pid, "sessionId": "any", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s))
+        s = {"pid": my_pid, "sessionId": "any", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s), encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            result = cc_sessions.find_occupant("/tmp/hooks")
+            result = cc_sessions.find_occupant(str(tmp_path / "hooks"))
         assert result is not None
 
     def test_reused_pid_never_reported_as_occupant(self, tmp_path):
         my_pid = os.getpid()
-        s = {"pid": my_pid, "sessionId": "stale-claim", "cwd": "/tmp/hooks", "kind": "interactive", "procStart": "1"}
-        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s))
+        s = {
+            "pid": my_pid,
+            "sessionId": "stale-claim",
+            "cwd": str(tmp_path / "hooks"),
+            "kind": "interactive",
+            "procStart": "1",
+        }
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s), encoding="utf-8")
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_proc_start_ticks", return_value="999999999"),
         ):
-            result = cc_sessions.find_occupant("/tmp/hooks", exclude_pid=99999)
+            result = cc_sessions.find_occupant(str(tmp_path / "hooks"), exclude_pid=99999)
         assert result is None
 
 
 class TestReclaim:
     def test_reclaim_stops_live_sessions(self, tmp_path):
         my_pid = os.getpid()
-        s = {"pid": my_pid, "sessionId": "a", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s))
+        s = {"pid": my_pid, "sessionId": "a", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s), encoding="utf-8")
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_stop_session", return_value="stopped") as mock_stop,
@@ -326,8 +345,8 @@ class TestReclaim:
 
     def test_reclaim_filters_by_branch(self, tmp_path):
         my_pid = os.getpid()
-        s1 = {"pid": my_pid, "sessionId": "a", "cwd": "/tmp/hooks", "kind": "interactive"}
-        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s1))
+        s1 = {"pid": my_pid, "sessionId": "a", "cwd": str(tmp_path / "hooks"), "kind": "interactive"}
+        (tmp_path / f"{my_pid}.json").write_text(json.dumps(s1), encoding="utf-8")
         with (
             patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
             patch.object(cc_sessions, "_stop_session", return_value="stopped") as mock_stop,
@@ -428,60 +447,60 @@ class TestOccupantSelectionIsKindAware:
         assert occupant is not None
         return occupant["pid"]
 
-    def test_a_seat_behind_a_job_is_not_shadowed(self):
+    def test_a_seat_behind_a_job_is_not_shadowed(self, tmp_path):
         job = self._s(1, "bg", 1_000_000_000_000)
         seat = self._s(2, "interactive", 1_000_000_500_000)
         with self._live(job, seat):
-            assert self._occupant_pid("/tmp/branch") == 2
+            assert self._occupant_pid(str(tmp_path / "branch")) == 2
 
-    def test_order_on_disk_does_not_decide(self):
+    def test_order_on_disk_does_not_decide(self, tmp_path):
         """Session files are read in directory order — the answer must not be."""
         job = self._s(1, "bg", 1_000_000_000_000)
         seat = self._s(2, "interactive", 1_000_000_500_000)
         for ordering in ((job, seat), (seat, job)):
             with self._live(*ordering):
-                assert self._occupant_pid("/tmp/branch") == 2
+                assert self._occupant_pid(str(tmp_path / "branch")) == 2
 
-    def test_a_job_is_still_returned_when_it_is_the_only_occupant(self):
+    def test_a_job_is_still_returned_when_it_is_the_only_occupant(self, tmp_path):
         """Ranking, not filtering — a bg-only branch stays answerable."""
         with self._live(self._s(1, "bg", 1_000_000_000_000)):
-            assert self._occupant_pid("/tmp/branch") == 1
+            assert self._occupant_pid(str(tmp_path / "branch")) == 1
 
-    def test_background_spelling_ranks_as_a_job_too(self):
+    def test_background_spelling_ranks_as_a_job_too(self, tmp_path):
         job = self._s(1, "background", 1_000_000_000_000)
         seat = self._s(2, "interactive", 1_000_000_500_000)
         with self._live(job, seat):
-            assert self._occupant_pid("/tmp/branch") == 2
+            assert self._occupant_pid(str(tmp_path / "branch")) == 2
 
-    def test_the_oldest_seat_is_the_incumbent(self):
+    def test_the_oldest_seat_is_the_incumbent(self, tmp_path):
         """Callers rank themselves against 'the occupant' — that must be the
         incumbent, or the newest arrival could pass as one."""
         older = self._s(1, "interactive", 1_000_000_000_000)
         newer = self._s(2, "interactive", 1_000_000_900_000)
         with self._live(newer, older):
-            assert self._occupant_pid("/tmp/branch") == 1
+            assert self._occupant_pid(str(tmp_path / "branch")) == 1
 
-    def test_three_sessions_job_first_still_names_the_oldest_seat(self):
+    def test_three_sessions_job_first_still_names_the_oldest_seat(self, tmp_path):
         job = self._s(1, "bg", 999_000_000_000)
         newer_seat = self._s(2, "interactive", 1_000_000_900_000)
         older_seat = self._s(3, "interactive", 1_000_000_000_000)
         with self._live(job, newer_seat, older_seat):
-            assert self._occupant_pid("/tmp/branch") == 3
+            assert self._occupant_pid(str(tmp_path / "branch")) == 3
 
-    def test_unknown_start_never_displaces_a_seat_whose_age_is_known(self):
+    def test_unknown_start_never_displaces_a_seat_whose_age_is_known(self, tmp_path):
         undated = {"pid": 1, "kind": "interactive", "cwd": "/tmp/branch"}
         dated = self._s(2, "interactive", 1_000_000_900_000)
         with self._live(undated, dated):
-            assert self._occupant_pid("/tmp/branch") == 2
+            assert self._occupant_pid(str(tmp_path / "branch")) == 2
 
-    def test_our_own_pid_is_still_excluded(self):
+    def test_our_own_pid_is_still_excluded(self, tmp_path):
         seat = self._s(2, "interactive", 1_000_000_500_000)
         with self._live(self._s(1, "bg", 1_000_000_000_000), seat):
-            assert self._occupant_pid("/tmp/branch", exclude_pid=2) == 1
+            assert self._occupant_pid(str(tmp_path / "branch"), exclude_pid=2) == 1
 
-    def test_free_branch_is_none(self):
+    def test_free_branch_is_none(self, tmp_path):
         with self._live():
-            assert cc_sessions.find_occupant("/tmp/branch") is None
+            assert cc_sessions.find_occupant(str(tmp_path / "branch")) is None
 
 
 class TestSessionStart:

@@ -1,13 +1,18 @@
 # =================== AIPass ====================
 # Name: test_rm_gate.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Description: Tests for rm_gate security handler
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/security/rm_gate.py."""
+"""Tests for apps/handlers/security/rm_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that the gate's functions carry docstrings
+# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
+# seedgo: no-test-needed(stdlib) — shlex's tokenising itself; the gate's reading of the tokens is pinned here
 
 import json
 import logging

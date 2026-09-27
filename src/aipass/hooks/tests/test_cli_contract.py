@@ -1,9 +1,24 @@
-"""CLI contract tests — verify flags/subcommands our code invokes actually exist.
+# =================== AIPass ====================
+# Name: test_cli_contract.py
+# Version: 1.0.1
+# Description: CLI contract tests for the claude flags session_boot invokes
+# Branch: hooks
+# Created: 2026-07-13
+# Modified: 2026-09-27
+# =============================================
 
-Probes `claude --help` and `claude agents --help` at test time. Skips cleanly
-when the binary is absent. Catches phantom subcommands (like the former
-`claude agents stop`) before they ship as mocked-green.
-"""
+"""Tests for apps/handlers/lifecycle/session_boot.py's claude CLI contract."""
+
+# CLI contract tests — verify flags/subcommands our code invokes actually exist.
+#
+# Probes `claude --help` and `claude agents --help` at test time. Skips cleanly
+# when the binary is absent. Catches phantom subcommands (like the former
+# `claude agents stop`) before they ship as mocked-green.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that session_boot.py parses and imports
+# seedgo: no-test-needed(stdlib) — subprocess.run and shutil.which themselves
+# seedgo: no-test-needed(generated) — the full claude help text, upstream's output; only session_boot's flags pinned
 
 import shutil
 import subprocess
@@ -20,6 +35,8 @@ def _help_text(args: list[str]) -> str:
         [_CLAUDE, *args, "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=10,
     )
     return result.stdout + result.stderr
@@ -145,6 +162,8 @@ class TestAgentsStopDoesNotExist:
             [_CLAUDE, "agents", "stop", "test-id"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         assert result.returncode == 1

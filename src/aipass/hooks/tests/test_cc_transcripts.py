@@ -1,20 +1,24 @@
 # =================== AIPass ====================
 # Name: test_cc_transcripts.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for the CC transcript reader
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/modules/cc_transcripts.py.
+"""Tests for apps/modules/cc_transcripts.py."""
 
-The picker used to enumerate processes and call them chats. On 2026-08-18 that
-cost a conversation: Ctrl+C removes the dead chat's session file, so the chat
-the owner wanted was the one thing a PID list could not show, while three bg
-leftovers were offered as if they were his.
-"""
+# The picker used to enumerate processes and call them chats. On 2026-08-18 that
+# cost a conversation: Ctrl+C removes the dead chat's session file, so the chat
+# the owner wanted was the one thing a PID list could not show, while three bg
+# leftovers were offered as if they were his.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that modules/cc_transcripts.py parses and imports
+# seedgo: no-test-needed(documentation) — print_introspection(), the module's help screen
+# seedgo: no-test-needed(constant) — PROJECTS_ROOT's default location; every test repoints it at a temporary directory
 
 import json
 import os
@@ -81,9 +85,9 @@ class TestManglingRule:
     def test_matches_the_cli(self, raw: str, expected: str):
         assert cc_transcripts._mangle(raw) == expected
 
-    def test_underscore_becomes_dash(self):
+    def test_underscore_becomes_dash(self, tmp_path):
         """ai_mail is the branch that proves it — a naive '/'->'-' misses it."""
-        assert "_" not in cc_transcripts._mangle("/x/ai_mail")
+        assert "_" not in cc_transcripts._mangle(str(tmp_path / "x" / "ai_mail"))
 
     @pytest.mark.parametrize(
         "raw,expected",

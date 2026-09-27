@@ -1,4 +1,21 @@
-"""Tests for the presence gate handler."""
+# =================== AIPass ====================
+# Name: test_presence_gate.py
+# Version: 1.0.1
+# Description: Tests for the presence gate handler
+# Branch: hooks
+# Layer: tests
+# Created: 2026-06-29
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/security/presence_gate.py."""
+
+# The session records' "cwd" below is mock data the stubbed cc_sessions hands back;
+# the gate never touches it on disk, so it is a plain literal, not a /tmp path.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/security/presence_gate.py parses and imports
+# seedgo: no-test-needed(constant) — _SUB_AGENT_TYPES and _NON_BLOCKING_SESSION_TYPES' member strings
 
 import json
 import os
@@ -33,7 +50,7 @@ def _make_mocks(our_pid: int | None = 1000, occupant=None, all_sessions=None):
 _OCCUPANT = {
     "pid": 5000,
     "sessionId": "existing-session",
-    "cwd": "/tmp/branch",
+    "cwd": "/srv/example/branch",
     "kind": "interactive",
     "name": "hooks-ab",
 }
@@ -223,7 +240,7 @@ class TestRemedyIsSatisfiable:
     BG_OCCUPANT = {
         "pid": 434858,
         "sessionId": "bdbc613b",
-        "cwd": "/tmp/branch",
+        "cwd": "/srv/example/branch",
         "kind": "bg",
         "name": "codeql debugging",
     }
@@ -275,7 +292,7 @@ class TestHandleStop:
 
 
 def _seat(pid: int, started_ms: int, kind: str = "interactive", sid: str = "sid") -> dict:
-    return {"pid": pid, "sessionId": sid, "cwd": "/tmp/branch", "kind": kind, "startedAt": started_ms}
+    return {"pid": pid, "sessionId": sid, "cwd": "/srv/example/branch", "kind": kind, "startedAt": started_ms}
 
 
 class TestSecondSeatIsRefusedInWords:
@@ -378,7 +395,7 @@ class TestTwoSeatsCannotDeadlockEachOther:
     def test_unreadable_clock_never_promotes_us_to_incumbent(self, tmp_path):
         """Fail toward refusing the arriver, never toward letting both through."""
         occupant = _seat(5000, 1_000_000_000_000)
-        ours = {"pid": 1000, "sessionId": "x", "cwd": "/tmp/branch", "kind": "interactive"}
+        ours = {"pid": 1000, "sessionId": "x", "cwd": "/srv/example/branch", "kind": "interactive"}
         _, router = _make_mocks(our_pid=1000, occupant=occupant, all_sessions=[ours, occupant])
         with (
             _blocking(),

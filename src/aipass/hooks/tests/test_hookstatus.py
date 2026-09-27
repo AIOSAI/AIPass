@@ -1,17 +1,23 @@
 # =================== AIPass ====================
 # Name: test_hookstatus.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-05-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for modules/hookstatus.py — read-only hook config viewer."""
+"""Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — HELP_COMMANDS and the help screen's fixed lines
+# seedgo: no-test-needed(constant) — EVENT_TYPES, the fixed order the status table walks
 
 from unittest.mock import patch
 
 import pytest
+
+from aipass.hooks.apps.modules.hookstatus import _render_status, handle_command, print_introspection
 
 SAMPLE_CONFIG = {
     "hooks_enabled": True,
@@ -41,13 +47,11 @@ class TestHandleCommand:
 
     def test_returns_false_for_unknown_command(self):
         """Non-status commands return False for routing."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         assert handle_command("unknown", []) is False
 
     def test_routes_status_command(self):
         """Status command is handled and returns True."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         with patch(
             "aipass.hooks.apps.modules.hookstatus.find_project_config",
@@ -57,19 +61,16 @@ class TestHandleCommand:
 
     def test_help_flag(self):
         """--help flag is handled."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         assert handle_command("status", ["--help"]) is True
 
     def test_help_short_flag(self):
         """-h flag is handled."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         assert handle_command("status", ["-h"]) is True
 
     def test_help_word(self):
         """help subcommand is handled."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         assert handle_command("status", ["help"]) is True
 
@@ -79,7 +80,6 @@ class TestConfigPresent:
 
     def test_shows_enabled_and_disabled_hooks(self):
         """Verify mixed enabled/disabled hooks render without error."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
 
         with patch(
             "aipass.hooks.apps.modules.hookstatus.find_project_config",
@@ -91,7 +91,6 @@ class TestConfigPresent:
 
     def test_counts_enabled_total(self):
         """Verify footer shows correct enabled/total counts."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
         from io import StringIO
         from rich.console import Console
 
@@ -106,7 +105,6 @@ class TestConfigPresent:
 
     def test_shows_matcher(self):
         """Verify matcher values appear in output."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
         from io import StringIO
         from rich.console import Console
 
@@ -121,7 +119,6 @@ class TestConfigPresent:
 
     def test_shows_event_group_headers(self):
         """Verify event type section headers appear."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
         from io import StringIO
         from rich.console import Console
 
@@ -142,7 +139,6 @@ class TestConfigAbsent:
 
     def test_no_config_shows_message(self):
         """Verify a genuinely missing config still says exactly that."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
         from io import StringIO
         from rich.console import Console
 
@@ -170,7 +166,6 @@ class TestConfigAbsent:
 
     def test_untrusted_config_reports_the_real_refusal(self):
         """Present-but-unenrolled must not be rendered as file-not-found."""
-        from aipass.hooks.apps.modules.hookstatus import handle_command
         from io import StringIO
         from rich.console import Console
 
@@ -206,7 +201,6 @@ class TestMasterSwitchOff:
 
     def test_master_off_shows_warning(self):
         """Verify master switch OFF renders loud warning."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
         from io import StringIO
         from rich.console import Console
 
@@ -222,7 +216,6 @@ class TestMasterSwitchOff:
 
     def test_master_off_still_counts_hooks(self):
         """Verify hook counts still shown even with master OFF."""
-        from aipass.hooks.apps.modules.hookstatus import _render_status
         from io import StringIO
         from rich.console import Console
 
@@ -245,7 +238,6 @@ class TestPrintIntrospection:
         "Runs without raising" was the whole test and it asserted nothing, so
         an introspection that printed nothing at all was green.
         """
-        from aipass.hooks.apps.modules.hookstatus import print_introspection
 
         print_introspection()
 

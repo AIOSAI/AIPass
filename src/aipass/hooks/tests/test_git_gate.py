@@ -1,16 +1,24 @@
 # =================== AIPass ====================
 # Name: test_git_gate.py
-# Version: 2.2.0
+# Version: 2.2.1
 # Description: Tests for git_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/security/git_gate.py."""
+"""Tests for apps/handlers/security/git_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that git_gate.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation standard covers it
+# seedgo: no-test-needed(constant) — GIT_REDIRECT's and GH_REDIRECT's full wording; block tests pin key phrases
+# seedgo: no-test-needed(stdlib) — re.compile's matching engine, the stdlib's own
 
 import json
 from pathlib import Path
+
+from aipass.hooks.apps.handlers.security.git_gate import handle
 
 # Derived, never spelled: the fixtures below are only meaningful as paths INSIDE
 # this checkout, and a hardcoded home path makes the suite a property of one
@@ -24,8 +32,6 @@ PROJECT_HOOK = str(_REPO / ".claude" / "hooks" / "some_hook.py")
 
 
 def _bash(cmd: str) -> dict:
-    from aipass.hooks.apps.handlers.security.git_gate import handle
-
     return handle({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": CWD})
 
 
@@ -376,8 +382,6 @@ class TestGitGateEditProtection:
     """Protected file edit handling."""
 
     def test_block_edit_settings(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -388,8 +392,6 @@ class TestGitGateEditProtection:
         _assert_blocked(result)
 
     def test_allow_edit_settings_from_devpulse(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -400,8 +402,6 @@ class TestGitGateEditProtection:
         _assert_allowed(result)
 
     def test_block_edit_hooks_dir(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -418,8 +418,6 @@ class TestGitGateEditProtection:
         backslash. These are spelled out so every host exercises the Windows form,
         and in mixed case, which Windows and default macOS filesystems open as the same file.
         """
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         for path in (
             r"D:\work\.claude\settings.json",
             r"D:\work\.claude\settings.local.json",
@@ -432,8 +430,6 @@ class TestGitGateEditProtection:
             assert result["exit_code"] == 2, f"allowed: {path}"
 
     def test_a_windows_path_that_only_resembles_one_stays_allowed(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         for path in (r"D:\work\.claude\settings.json.bak", r"D:\a\repo\.claude\agents\helper.md"):
             _assert_allowed(handle({"tool_name": "Write", "tool_input": {"file_path": path}, "cwd": CWD}))
 
@@ -445,8 +441,6 @@ class TestGitGateMisc:
         _assert_allowed(_bash("ls -la"))
 
     def test_empty_hook_data(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle({})
         assert result["exit_code"] == 0
 
@@ -481,8 +475,6 @@ class TestGitGateMisc:
         assert "drone @git issue" in parsed["reason"]
 
     def test_edit_block_shows_disable_path(self):
-        from aipass.hooks.apps.handlers.security.git_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",

@@ -1,13 +1,18 @@
 # =================== AIPass ====================
 # Name: test_edit_gate.py
-# Version: 1.3.0
+# Version: 1.3.1
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/security/edit_gate.py."""
+"""Tests for apps/handlers/security/edit_gate.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that edit_gate.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — handle()'s docstring, the documentation checker covers it
+# seedgo: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
 
 import json
 from pathlib import Path
@@ -15,11 +20,12 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits, handle
+from aipass.hooks.apps.modules import diagnostics_state as ds
+
 
 class TestEditGateHandler:
     def test_allow_normal_edit(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -31,8 +37,6 @@ class TestEditGateHandler:
         assert result["stdout"] == ""
 
     def test_block_inbox_write(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -46,8 +50,6 @@ class TestEditGateHandler:
         assert "inbox.json" in parsed["reason"]
 
     def test_block_cross_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -61,8 +63,6 @@ class TestEditGateHandler:
         assert "Cross-branch" in parsed["reason"]
 
     def test_allow_trusted_cross_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -73,8 +73,6 @@ class TestEditGateHandler:
         assert result["exit_code"] == 0
 
     def test_block_daemon_cross_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -88,8 +86,6 @@ class TestEditGateHandler:
         assert "daemon" in parsed["reason"]
 
     def test_allow_daemon_own_branch(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -101,8 +97,6 @@ class TestEditGateHandler:
         assert result["exit_code"] == 0
 
     def test_skip_non_edit_tool(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Bash",
@@ -113,14 +107,10 @@ class TestEditGateHandler:
         assert result["stdout"] == ""
 
     def test_empty_file_path(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle({"tool_name": "Edit", "tool_input": {"file_path": ""}})
         assert result["exit_code"] == 0
 
     def test_empty_hook_data(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle({})
         assert result["exit_code"] == 0
 
@@ -159,8 +149,6 @@ class TestEditGateHandler:
         """Scratch and temp files belong to no project: the ownership rule has nothing to say."""
         scratch = tmp_path / "scratch" / "notes.md"
         assert _write(registered_projects["hooks"], scratch)["exit_code"] == 0
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         command = f"echo x > {scratch.as_posix()}"
         bash = handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": registered_projects["hooks"]})
         assert bash["exit_code"] == 0
@@ -171,8 +159,6 @@ class TestEditGateHandler:
 
 
 def _write(cwd: str, target: Path, tool: str = "Edit") -> dict:
-    from aipass.hooks.apps.handlers.security.edit_gate import handle
-
     return handle({"tool_name": tool, "tool_input": {"file_path": str(target)}, "cwd": cwd})
 
 
@@ -220,8 +206,6 @@ class TestEditGateProjectBoundary:
 
     @pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit", "NotebookEdit"])
     def test_block_upward_write_into_host_project(self, nested_projects: dict, tool: str):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": tool,
@@ -235,8 +219,6 @@ class TestEditGateProjectBoundary:
         assert "Cross-project" in parsed["reason"]
 
     def test_block_upward_write_from_project_root_seat(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -247,8 +229,6 @@ class TestEditGateProjectBoundary:
         assert result["exit_code"] == 2
 
     def test_block_sideways_write_between_sibling_projects(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Write",
@@ -262,8 +242,6 @@ class TestEditGateProjectBoundary:
 
     def test_reason_names_both_projects_and_the_target(self, nested_projects: dict):
         """Attribution must match the mail fence: caller project, target project."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -277,8 +255,6 @@ class TestEditGateProjectBoundary:
         assert "exceptions.py" in reason
 
     def test_allow_write_inside_own_project(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -298,8 +274,6 @@ class TestEditGateProjectBoundary:
         project's files". The seat here is named devpulse and holds no grant:
         the name opens nothing.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=False):
             result = handle(
                 {
@@ -312,8 +286,6 @@ class TestEditGateProjectBoundary:
         assert "Cross-project" in json.loads(result["stdout"])["reason"]
 
     def test_verified_admin_still_writes_down_into_nested_project(self, nested_projects: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch("aipass.ai_mail.apps.handlers.users.verified_caller.is_verified_admin_caller", return_value=True):
             result = handle(
                 {
@@ -352,8 +324,6 @@ class TestEditGateProjectBoundary:
         Those names are trusted inside the host tree only — a nested project
         with a src/<pkg>/devpulse directory resolves the same branch name.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         impostor = nested_projects["baud"] / "src" / "baud" / "devpulse"
         impostor.mkdir(parents=True)
         result = handle(
@@ -367,8 +337,6 @@ class TestEditGateProjectBoundary:
 
     def test_allow_when_no_project_root_is_resolvable(self, tmp_path: Path):
         """No registry on either side: fail open, exactly as before this fence."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         loose_a = tmp_path / "loose_a"
         loose_b = tmp_path / "loose_b"
         loose_a.mkdir()
@@ -385,8 +353,6 @@ class TestEditGateProjectBoundary:
     def test_daemon_session_from_project_seat_is_blocked(self, nested_projects: dict):
         """Dispatched project agents are fenced too — the daemon confinement
         below also keys on the src/<package>/<branch> shape and skips them."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -399,8 +365,6 @@ class TestEditGateProjectBoundary:
 
     def test_inbox_write_still_blocked_from_a_project_seat(self, nested_projects: dict):
         """The project fence must not shadow the inbox rule's own message."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         inbox = nested_projects["host"] / "src" / "aipass" / "drone" / ".ai_mail.local" / "inbox.json"
         result = handle(
             {
@@ -420,9 +384,6 @@ def branch_tree(tmp_path: Path):
     Shaped src/<pkg>/<branch>/... so _get_branch resolves, with no *_REGISTRY.json
     anywhere so the project fence stays out of the way.
     """
-    import importlib
-
-    ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
     branch = tmp_path / "src" / "aipass" / "seedgo"
     (branch / "tests").mkdir(parents=True)
     (branch / "apps" / "modules").mkdir(parents=True)
@@ -460,8 +421,6 @@ class TestEditGateDiagnosticsState:
     """
 
     def _edit_other_file(self, tree: dict) -> dict:
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         return handle(
             {
                 "tool_name": "Edit",
@@ -536,8 +495,6 @@ class TestEditGateDiagnosticsState:
         assert result["exit_code"] == 0
 
     def test_editing_the_errored_file_itself_is_still_allowed(self, branch_tree: dict):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         branch_tree["write_state"]([LOCAL_ERROR])
         result = handle(
             {
@@ -553,29 +510,19 @@ class TestDiagnosticsStateModule:
     """apps/modules/diagnostics_state.py — one definition of what the state file means."""
 
     def test_classifies_unknown_import_symbol_as_cross_file(self):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.is_cross_file_error(UNKNOWN_SYMBOL) is True
 
     def test_classifies_unresolved_import_as_cross_file(self):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.is_cross_file_error(MISSING_IMPORT) is True
 
     def test_does_not_classify_a_local_type_error_as_cross_file(self):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.is_cross_file_error(LOCAL_ERROR) is False
 
     def test_all_cross_file_is_false_for_an_empty_list(self):
         """No errors is not 'all resolvable elsewhere' — callers must not read it as allow."""
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.all_cross_file([]) is False
 
     def test_revalidate_returns_none_when_pyright_is_unavailable(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
         with patch.object(ds.subprocess, "run", side_effect=FileNotFoundError()):
@@ -583,8 +530,6 @@ class TestDiagnosticsStateModule:
 
     def test_revalidate_returns_none_on_timeout(self, tmp_path: Path):
         import subprocess as sp
-
-        from aipass.hooks.apps.modules import diagnostics_state as ds
 
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
@@ -601,8 +546,6 @@ class TestDiagnosticsStateModule:
         correctly answered None, and the test called that a failure. A longer budget
         would have masked a slow runner instead of fixing a dishonest assertion.
         """
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x: int = 1\n", encoding="utf-8")
         found = ds.revalidate(str(target))
@@ -613,8 +556,6 @@ class TestDiagnosticsStateModule:
     def test_revalidate_reports_a_real_type_error(self, tmp_path: Path):
         """Same three-state honesty. This one hid the flaw better: `assert found and ...`
         reads None as falsy, so a timeout failed here too, just without saying why."""
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "broken.py"
         target.write_text('x: int = "not an int"\n', encoding="utf-8")
         found = ds.revalidate(str(target))
@@ -623,19 +564,13 @@ class TestDiagnosticsStateModule:
         assert found and any("int" in e["message"] for e in found)
 
     def test_revalidate_returns_none_for_a_file_that_does_not_exist(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         assert ds.revalidate(str(tmp_path / "gone.py")) is None
 
     def test_load_returns_empty_dict_when_there_is_no_state(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
             assert ds.load() == {}
 
     def test_load_returns_empty_dict_on_corrupt_state(self, tmp_path: Path):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         corrupt = tmp_path / "corrupt.json"
         corrupt.write_text("{not json", encoding="utf-8")
         with patch.object(ds, "STATE_FILE", corrupt):
@@ -649,8 +584,6 @@ class TestDiagnosticsStateModule:
         reads this state to decide whether an edit is fenced, so "absent" and
         "empty" are the two answers that matter.
         """
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         absent = tmp_path / "absent.json"
         with patch.object(ds, "STATE_FILE", absent):
             ds.clear()
@@ -663,8 +596,6 @@ class TestEditGateExternalProject:
     """Verify edit gate works for non-AIPass projects (e.g. src/vera_studio/)."""
 
     def test_block_cross_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -678,8 +609,6 @@ class TestEditGateExternalProject:
         assert "Cross-branch" in parsed["reason"]
 
     def test_allow_own_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",
@@ -690,8 +619,6 @@ class TestEditGateExternalProject:
         assert result["exit_code"] == 0
 
     def test_block_daemon_cross_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -705,8 +632,6 @@ class TestEditGateExternalProject:
         assert "daemon" in parsed["reason"]
 
     def test_allow_daemon_own_branch_external(self):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         with patch.dict("os.environ", {"AIPASS_SESSION_TYPE": "daemon"}):
             result = handle(
                 {
@@ -755,8 +680,6 @@ class TestCapGateStatesItsReach:
         import json as _json
         from unittest.mock import MagicMock
 
-        from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits
-
         el = MagicMock()
         el.changed_entries.return_value = [
             {"entry_type": "sessions", "key": "s1", "length": 2529, "cap": 300, "over_by": 2229}
@@ -801,8 +724,6 @@ class TestRevalidateParsesPyrightOutput:
     """
 
     def _revalidate(self, tmp_path: Path, diagnostics: list[dict]):
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
         with patch.object(ds.subprocess, "run", return_value=_pyright_result(diagnostics)):
@@ -842,8 +763,6 @@ class TestRevalidateParsesPyrightOutput:
         """Garbage on stdout must never read as clean."""
         from unittest.mock import MagicMock
 
-        from aipass.hooks.apps.modules import diagnostics_state as ds
-
         target = tmp_path / "thing.py"
         target.write_text("x = 1\n", encoding="utf-8")
         broken = MagicMock()
@@ -862,8 +781,6 @@ class TestEveryRefusalIsLogged:
     """
 
     def test_inbox_refusal_is_logged(self, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Edit",

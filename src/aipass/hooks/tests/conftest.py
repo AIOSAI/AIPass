@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.2.0
+# Version: 2.3.0
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -36,9 +36,25 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 
+from aipass.cli.apps.modules import display
 from aipass.hooks.apps.handlers.json import json_handler
 
 collect_ignore_glob = [".archive/*"]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)

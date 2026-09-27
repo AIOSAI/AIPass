@@ -1,29 +1,33 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for hooks's entry point routing, help and introspection
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-09-03
-# Modified: 2026-09-07
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for hooks's CLI entry point.
+"""Tests for apps/hooks.py, the branch's CLI entry point."""
 
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
+# Covers the four things the entry point promises: no-args shows introspection,
+# --help shows help without executing anything, a subcommand's --help never runs
+# that subcommand, and an unknown command fails loudly with a non-zero code.
+#
+# The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
+# shell reads as success, so the refusal path is pinned by test rather than assumed.
+#
+# Arrived with the citizen template on 2026-09-03 (the DPLAN-0325 lane adds any
+# missing template file) and is adapted here to the entry point hooks actually
+# has. Three template assumptions do not hold for this branch and are asserted in
+# this branch's spelling instead of the template's: help sections are uppercase
+# (``USAGE:``), ``--version`` prints the lowercase branch name, and the refusal
+# message is written with the rest of the CLI's output rather than to stderr. The
+# template's ``__version__`` and ``_module_import_path`` pins are dropped
+# outright — hooks.py has neither name, so there was nothing to measure.
 
-The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-shell reads as success, so the refusal path is pinned by test rather than assumed.
-
-Arrived with the citizen template on 2026-09-03 (the DPLAN-0325 lane adds any
-missing template file) and is adapted here to the entry point hooks actually
-has. Three template assumptions do not hold for this branch and are asserted in
-this branch's spelling instead of the template's: help sections are uppercase
-(``USAGE:``), ``--version`` prints the lowercase branch name, and the refusal
-message is written with the rest of the CLI's output rather than to stderr. The
-template's ``__version__`` and ``_module_import_path`` pins are dropped
-outright — hooks.py has neither name, so there was nothing to measure.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that hooks.py parses and imports, ruff and collection cover it
+# seedgo: no-test-needed(documentation) — the help text's prose beyond its section headers, the documentation checker
+# seedgo: no-test-needed(stdlib) — importlib.import_module's submodule resolution, the stdlib's own
 
 import importlib
 import os
@@ -274,7 +278,7 @@ class TestDiscoverySkipsRetiredModules:
 
     def test_a_disabled_module_is_never_imported(self, monkeypatch, tmp_path):
         self._modules_dir(monkeypatch, tmp_path)
-        (tmp_path / "presence(disabled).py").write_text("raise AssertionError('imported')\n")
+        (tmp_path / "presence(disabled).py").write_text("raise AssertionError('imported')\n", encoding="utf-8")
 
         imported = []
         monkeypatch.setattr(
@@ -288,8 +292,8 @@ class TestDiscoverySkipsRetiredModules:
 
     def test_a_live_module_beside_it_still_loads(self, monkeypatch, tmp_path):
         self._modules_dir(monkeypatch, tmp_path)
-        (tmp_path / "presence(disabled).py").write_text("")
-        (tmp_path / "sessions.py").write_text("")
+        (tmp_path / "presence(disabled).py").write_text("", encoding="utf-8")
+        (tmp_path / "sessions.py").write_text("", encoding="utf-8")
 
         stub = _StubModule()
         seen = []
@@ -309,7 +313,7 @@ class TestDiscoverySkipsRetiredModules:
         # The convention writes the mark as a suffix, but a stem like
         # "presence(disabled)_v2" is the same retirement and must not sneak back.
         self._modules_dir(monkeypatch, tmp_path)
-        (tmp_path / "presence(disabled)_v2.py").write_text("")
+        (tmp_path / "presence(disabled)_v2.py").write_text("", encoding="utf-8")
 
         monkeypatch.setattr(
             branch_entry.importlib,

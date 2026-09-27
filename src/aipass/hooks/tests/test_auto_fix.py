@@ -1,18 +1,22 @@
 # =================== AIPass ====================
 # Name: test_auto_fix.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Tests for auto_fix lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/lifecycle/auto_fix.py.
+"""Tests for apps/handlers/lifecycle/auto_fix.py."""
 
-NOTE: sound is action-gated via the result "sound" key — it is set to
-"auto fix diagnostics" only on the error-surfacing path; clean and skip
-paths stay silent (no "sound" key).
-"""
+# NOTE: sound is action-gated via the result "sound" key — it is set to
+# "auto fix diagnostics" only on the error-surfacing path; clean and skip
+# paths stay silent (no "sound" key).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — ruff's own lint and format verdicts; the tests stub its subprocess at the edge
+# seedgo: no-test-needed(documentation) — that auto_fix's functions carry docstrings
+# seedgo: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
 
 import json
 import sys

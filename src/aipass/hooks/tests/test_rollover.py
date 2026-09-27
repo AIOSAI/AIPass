@@ -1,17 +1,25 @@
 # =================== AIPass ====================
 # Name: test_rollover.py
-# Version: 2.2.0
+# Version: 2.2.1
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for handlers/lifecycle/rollover.py."""
+"""Tests for apps/handlers/lifecycle/rollover.py."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and its logger import resolves
+# seedgo: no-test-needed(stdlib) — subprocess.run's timeout mechanics; the tests stub it at the edge
+# seedgo: no-test-needed(documentation) — that the handler's functions carry docstrings
+
+import logging
 from unittest.mock import patch, MagicMock
 import subprocess
 
+from aipass.hooks.apps.handlers.lifecycle import rollover
+from aipass.hooks.apps.handlers.lifecycle.rollover import _find_repo_root, _run_check, _run_rollover, handle
 from aipass.memory.apps.handlers.rollover import todo_report
 
 
@@ -37,8 +45,6 @@ def _mock_run(stdout="", returncode=0):
 
 class TestRolloverHandler:
     def test_no_repo_root_returns_empty(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import handle
-
         with patch(f"{MOD}._find_repo_root", return_value=None):
             result = handle({})
 
@@ -47,8 +53,6 @@ class TestRolloverHandler:
         assert "sound" not in result
 
     def test_no_overdue_returns_empty(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import handle
-
         with patch(f"{MOD}._find_repo_root", return_value=MagicMock()):
             with patch(f"{MOD}._run_check", return_value=(False, CHECK_CLEAN_OUTPUT)):
                 result = handle({})
@@ -58,8 +62,6 @@ class TestRolloverHandler:
         assert "sound" not in result
 
     def test_overdue_triggers_rollover(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import handle
-
         with patch(f"{MOD}._find_repo_root", return_value=MagicMock()):
             with patch(f"{MOD}._run_check", return_value=(True, CHECK_OVERDUE_OUTPUT)):
                 with patch(f"{MOD}._run_rollover", return_value=(True, "ok")):
@@ -69,8 +71,6 @@ class TestRolloverHandler:
         assert result["sound"] == "pre compact rollover"
 
     def test_overdue_rollover_failure_still_returns_sound(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import handle
-
         with patch(f"{MOD}._find_repo_root", return_value=MagicMock()):
             with patch(f"{MOD}._run_check", return_value=(True, CHECK_OVERDUE_OUTPUT)):
                 with patch(f"{MOD}._run_rollover", return_value=(False, "error")):
@@ -80,8 +80,6 @@ class TestRolloverHandler:
         assert result["sound"] == "pre compact rollover"
 
     def test_run_check_parses_overdue(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _run_check
-
         mock_result = _mock_run(stdout=CHECK_OVERDUE_OUTPUT)
         with patch("subprocess.run", return_value=mock_result):
             has_overdue, summary = _run_check(MagicMock(), None)
@@ -90,8 +88,6 @@ class TestRolloverHandler:
         assert "ready for rollover" in summary.lower()
 
     def test_run_check_parses_clean(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _run_check
-
         mock_result = _mock_run(stdout=CHECK_CLEAN_OUTPUT)
         with patch("subprocess.run", return_value=mock_result):
             has_overdue, _ = _run_check(MagicMock(), None)
@@ -99,16 +95,12 @@ class TestRolloverHandler:
         assert not has_overdue
 
     def test_run_check_timeout_returns_false(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _run_check
-
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 30)):
             has_overdue, _ = _run_check(MagicMock(), None)
 
         assert not has_overdue
 
     def test_run_rollover_success(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _run_rollover
-
         mock_result = _mock_run(stdout="done", returncode=0)
         with patch("subprocess.run", return_value=mock_result):
             success, _ = _run_rollover(MagicMock(), None)
@@ -116,8 +108,6 @@ class TestRolloverHandler:
         assert success
 
     def test_run_rollover_failure(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _run_rollover
-
         mock_result = _mock_run(stdout="error", returncode=1)
         with patch("subprocess.run", return_value=mock_result):
             success, _ = _run_rollover(MagicMock(), None)
@@ -125,8 +115,6 @@ class TestRolloverHandler:
         assert not success
 
     def test_run_rollover_timeout(self):
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _run_rollover
-
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 110)):
             success, msg = _run_rollover(MagicMock(), None)
 
@@ -145,8 +133,6 @@ class TestTheCompactingBranchIsNamed:
 
     @staticmethod
     def _spy(monkeypatch, check_stdout=CHECK_OVERDUE_OUTPUT):
-        from aipass.hooks.apps.handlers.lifecycle import rollover
-
         calls = []
 
         def fake_run(argv, **kwargs):
@@ -212,9 +198,6 @@ class TestFindRepoRootFailLoud:
 
     def test_bad_root_logs_error(self, tmp_path, caplog):
         """No AIPASS_REGISTRY.json anywhere -> logger.error with AIPASS_HOME + cwd."""
-        import logging
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _find_repo_root
-
         with caplog.at_level(logging.ERROR):
             with patch.dict("os.environ", {"AIPASS_HOME": ""}):
                 with patch(f"{MOD}.Path") as mock_path_cls:
@@ -227,9 +210,6 @@ class TestFindRepoRootFailLoud:
 
     def test_bad_aipass_home_falls_through_to_cwd(self, tmp_path, caplog):
         """AIPASS_HOME set but no registry there -> falls through, still logs error if cwd also fails."""
-        import logging
-        from aipass.hooks.apps.handlers.lifecycle.rollover import _find_repo_root
-
         bad_home = str(tmp_path / "nonexistent")
 
         with caplog.at_level(logging.ERROR):
@@ -253,8 +233,6 @@ class TestProbeSuppression:
     """
 
     def _patched(self, monkeypatch):
-        from aipass.hooks.apps.handlers.lifecycle import rollover
-
         ran = []
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
         monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: "hooks")
@@ -278,8 +256,6 @@ class TestProbeSuppression:
 
     def test_the_read_only_check_still_runs_under_a_probe(self, monkeypatch):
         """Suppression is at the mutation, not at the entry — the handler must still work."""
-        from aipass.hooks.apps.handlers.lifecycle import rollover
-
         checked = []
         monkeypatch.setattr(rollover, "_find_repo_root", lambda: MagicMock())
         monkeypatch.setattr(rollover, "_compacting_branch", lambda hook_data: "hooks")

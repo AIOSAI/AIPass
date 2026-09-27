@@ -1,4 +1,19 @@
-"""Tests for the Codex bridge (handlers/bridges/codex.py)."""
+# =================== AIPass ====================
+# Name: test_codex_bridge.py
+# Version: 1.0.1
+# Description: Tests for the Codex bridge's stdin normalization and output envelope
+# Branch: hooks
+# Layer: tests
+# Created: 2026-07-10
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/bridges/codex.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/bridges/codex.py parses and imports its engine and loader
+# seedgo: no-test-needed(documentation) — the Codex protocol notes in the bridge's module docstring
+# seedgo: no-test-needed(stdlib) — json.loads and json.dumps round-tripping a payload
 
 import json
 
@@ -6,17 +21,19 @@ from aipass.hooks.apps.handlers.bridges.codex import _normalize_stdin, _wrap_out
 
 
 class TestNormalizeStdin:
-    def test_remaps_input_to_tool_input(self):
-        stdin = json.dumps({"tool_name": "Edit", "input": {"file_path": "/tmp/x.py"}})
+    def test_remaps_input_to_tool_input(self, tmp_path):
+        file_path = str(tmp_path / "x.py")
+        stdin = json.dumps({"tool_name": "Edit", "input": {"file_path": file_path}})
         result = json.loads(_normalize_stdin(stdin))
         assert "tool_input" in result
-        assert result["tool_input"] == {"file_path": "/tmp/x.py"}
+        assert result["tool_input"] == {"file_path": file_path}
         assert "input" not in result
 
-    def test_preserves_existing_tool_input(self):
-        stdin = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "/tmp/x.py"}})
+    def test_preserves_existing_tool_input(self, tmp_path):
+        file_path = str(tmp_path / "x.py")
+        stdin = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": file_path}})
         result = json.loads(_normalize_stdin(stdin))
-        assert result["tool_input"] == {"file_path": "/tmp/x.py"}
+        assert result["tool_input"] == {"file_path": file_path}
 
     def test_no_clobber_when_both_present(self):
         stdin = json.dumps({"tool_input": {"a": 1}, "input": {"b": 2}})

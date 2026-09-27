@@ -1,20 +1,24 @@
 # =================== AIPass ====================
 # Name: test_srt_resolve.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Regression tests for _srt_resolve.mjs candidate-list resolution
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-08-07
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/modules/_srt_resolve.mjs (DPLAN-0279).
+"""Tests for apps/modules/_srt_resolve.mjs, the resolver apps/modules/sandbox.py calls (DPLAN-0279)."""
 
-Exercises the real Node script via subprocess -- the candidate-list logic is
-ESM and not importable from pytest directly. Node's own execPath prefix on
-the machine running these tests is left alone (can't be faked without a
-privileged symlink); each test isolates a different resolution mechanism
-instead: the npm_config_prefix env var, a stubbed `npm` on PATH, or neither.
-"""
+# Exercises the real Node script via subprocess -- the candidate-list logic is
+# ESM and not importable from pytest directly. Node's own execPath prefix on
+# the machine running these tests is left alone (can't be faked without a
+# privileged symlink); each test isolates a different resolution mechanism
+# instead: the npm_config_prefix env var, a stubbed `npm` on PATH, or neither.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — the script's header comment, the documentation standard covers it
+# seedgo: no-test-needed(generated) — the full-mode wrapped command; sandbox-runtime builds it for sandbox.py
+# seedgo: no-test-needed(stdlib) — subprocess.run's process launch, the stdlib's own
 
 import os
 import shutil
@@ -70,6 +74,7 @@ def _run_resolve(tmp_path: Path, env: dict) -> subprocess.CompletedProcess:
         [_node(), str(_MJS), "--resolve"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=_NODE_TIMEOUT_S,
         check=False,
         cwd=str(tmp_path),
@@ -160,6 +165,7 @@ class TestSrtResolveCandidates:
             [_node(), str(_MJS)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_NODE_TIMEOUT_S,
             check=False,
             cwd=str(tmp_path),
