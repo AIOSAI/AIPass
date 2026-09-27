@@ -1,19 +1,22 @@
 # =================== AIPass ====================
 # Name: test_posix_literal_nominator.py
 # Description: pins for the POSIX-LITERAL nominator
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-r"""Pins for the rooted-path-literal nominator.
+"""Tests for apps/handlers/tests_pytest_standards/posix_literal_check.py."""
 
-THE FACT THIS RULE DEPENDS ON is pinned first, because @drone's round-7 note is
-right: every rule has a premise underneath it and almost none of them say so out
-loud. Here the premise is that ntpath treats a rooted literal as DRIVE-RELATIVE
-while posixpath treats it as absolute. If that ever stops being true this file
-goes red rather than quietly nominating a defect nobody can hit.
-"""
+# THE FACT THIS RULE DEPENDS ON is pinned first, because @drone's round-7 note is
+# right: every rule has a premise underneath it and almost none of them say so out
+# loud. Here the premise is that ntpath treats a rooted literal as DRIVE-RELATIVE
+# while posixpath treats it as absolute. If that ever stops being true this file
+# goes red rather than quietly nominating a defect nobody can hit.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — SPECIFICATION's rule, flags, exempts and evidence prose
+# seedgo: no-test-needed(constant) — DIALECT_MODULES' membership, macpath included
 
 import ast
 import ntpath
@@ -22,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.seedgo.apps.handlers.tests_pytest_standards import corpus
+from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter, corpus
 from aipass.seedgo.apps.handlers.tests_pytest_standards import posix_literal_check as target
 
 
@@ -72,7 +75,7 @@ class TestWhatItNominates:
         )
         assert len(rows) == 1, rows
 
-    def test_a_windows_rooted_literal_is_nominated_TOO(self, tmp_path):
+    def test_a_windows_rooted_literal_is_nominated_too(self, tmp_path):
         r"""The rule is not "POSIX spelling bad". A hardcoded C:\ is the same
         claim pointing the other way, and a rule that only caught one direction
         would be a platform preference wearing a portability name."""
@@ -93,7 +96,7 @@ class TestWhatItNominates:
 class TestWhatItAcquits:
     """The acquittals are most of this rule - measured before it shipped."""
 
-    def test_another_objects_resolve_verb_is_NOT_nominated(self, tmp_path):
+    def test_another_objects_resolve_verb_is_not_nominated(self, tmp_path):
         """The measurement that decided the shape. Six of the ten sites a
         name-keyed rule found fleet-wide were this: a branch-name resolver
         sharing a verb with pathlib and holding a rooted literal in a dict value
@@ -106,7 +109,7 @@ class TestWhatItAcquits:
         )
         assert rows == []
 
-    def test_any_objects_resolve_handed_a_rooted_literal_DIRECTLY_acquits(self, tmp_path):
+    def test_any_objects_resolve_handed_a_rooted_literal_directly_acquits(self, tmp_path):
         """The receiver test carrying its own weight, and it needed a second pin.
 
         The first acquittal above holds the literal inside a dict, so a mutant
@@ -121,7 +124,7 @@ class TestWhatItAcquits:
         )
         assert rows == []
 
-    def test_a_realpath_on_a_NON_PATH_module_acquits(self, tmp_path):
+    def test_a_realpath_on_a_non_path_module_acquits(self, tmp_path):
         """Guards the os.path clause, which no pin reached until a mutant
         deleting it survived the whole file. Run round 7, M11."""
         rows = _nominate(
@@ -130,7 +133,7 @@ class TestWhatItAcquits:
         )
         assert rows == []
 
-    def test_a_relative_literal_is_NOT_nominated(self, tmp_path):
+    def test_a_relative_literal_is_not_nominated(self, tmp_path):
         """A relative fragment makes no platform claim to disagree about."""
         rows = _nominate(
             tmp_path,
@@ -138,14 +141,14 @@ class TestWhatItAcquits:
         )
         assert rows == []
 
-    def test_a_path_from_a_fixture_is_NOT_nominated(self, tmp_path):
+    def test_a_path_from_a_fixture_is_not_nominated(self, tmp_path):
         rows = _nominate(
             tmp_path,
             "def test_x(tmp_path):\n    assert tmp_path.resolve()\n",
         )
         assert rows == []
 
-    def test_a_resolve_on_a_variable_is_NOT_nominated(self, tmp_path):
+    def test_a_resolve_on_a_variable_is_not_nominated(self, tmp_path):
         """The stated limit, pinned so it is a decision rather than a surprise:
         this rule reads the RECEIVER, so a literal that travelled through a name
         is invisible to it. It errs SHORT."""
@@ -155,7 +158,7 @@ class TestWhatItAcquits:
         )
         assert rows == []
 
-    def test_an_empty_literal_is_NOT_nominated(self, tmp_path):
+    def test_an_empty_literal_is_not_nominated(self, tmp_path):
         rows = _nominate(
             tmp_path,
             'from pathlib import Path\n\n\ndef test_x():\n    assert Path("").resolve()\n',
@@ -171,8 +174,6 @@ class TestTheNominatorShape:
         assert target.SPECIFICATION["species"] == ["POSIX-LITERAL"]
 
     def test_it_is_registered_with_the_adapter(self):
-        from aipass.seedgo.apps.handlers.tests_pytest_standards import adapter
-
         assert target.GROUP in adapter.STATIC_GROUPS
 
     def test_it_does_not_define_a_module_or_branch_check(self):
@@ -207,9 +208,14 @@ class TestTheNominatorShape:
             ("./tmp", False),
         ],
     )
-    def test_the_rooted_test_covers_both_dialects(self, text, expected):
-        """A literal table, so this one cannot vanish."""
-        assert target._is_rooted_literal(ast.Constant(value=text)) is expected
+    def test_the_rooted_test_covers_both_dialects(self, tmp_path, text, expected):
+        """A literal table, so this one cannot vanish. Mutant: a backslash root not rooted in apps/handlers/tests_pytest_standards/posix_literal_check.py — killed."""
+        rows = _nominate(
+            tmp_path, f"from pathlib import Path\n\n\ndef test_x():\n    assert Path({text!r}).resolve()\n"
+        )
+        assert (len(rows) == 1) is expected, rows
 
-    def test_a_non_string_constant_is_not_rooted(self):
-        assert target._is_rooted_literal(ast.Constant(value=47)) is False
+    def test_a_non_string_constant_is_not_rooted(self, tmp_path):
+        """Mutant: the str guard dropped in apps/handlers/tests_pytest_standards/posix_literal_check.py — killed."""
+        rows = _nominate(tmp_path, "from pathlib import Path\n\n\ndef test_x():\n    assert Path(47).resolve()\n")
+        assert rows == []

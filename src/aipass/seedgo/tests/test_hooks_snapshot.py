@@ -8,9 +8,9 @@ Baselines in tests/fixtures/*_hooks_snapshot.json.
 # =================== META ====================
 # Name: test_hooks_snapshot.py
 # Description: Snapshot tests for hook configurations across provider, project, and branch levels
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-05-07
-# Modified: 2026-05-07
+# Modified: 2026-09-27
 # =============================================
 """
 

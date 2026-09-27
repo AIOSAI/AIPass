@@ -3,13 +3,22 @@
 # =================== META ====================
 # Name: test_aipass_standards.py
 # Description: Unit tests for handlers/aipass_standards/
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
 import pytest
 from unittest.mock import MagicMock
+
+import aipass
+from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
+from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
+from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check
+from aipass.seedgo.apps.handlers.aipass_standards import json_structure_check
+from aipass.seedgo.apps.handlers.aipass_standards import json_structure_content
+from aipass.seedgo.apps.handlers.aipass_standards import naming_check
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 
 
 # ---------------------------------------------------------------------------
@@ -18,34 +27,18 @@ from unittest.mock import MagicMock
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards checkers."""
-    import sys
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # Force re-imports of specific checker modules we test
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.naming_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.json_structure_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.meta_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module -- xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +53,8 @@ def test_naming_check_module_returns_dict(tmp_path):
         '"""Sample module."""\n\ndef my_function():\n    pass\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_module
 
-    result = check_module(str(py_file))
+    result = naming_check.check_module(str(py_file))
     assert isinstance(result, dict)
     assert "passed" in result
     assert "checks" in result
@@ -72,11 +64,10 @@ def test_naming_check_module_returns_dict(tmp_path):
     assert isinstance(result["score"], (int, float))
 
 
-def test_naming_check_module_missing_file():
+def test_naming_check_module_missing_file(tmp_path):
     """naming_check.check_module handles missing file gracefully."""
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_module
 
-    result = check_module("/nonexistent/path/file.py")
+    result = naming_check.check_module(str(tmp_path / "nonexistent" / "path" / "file.py"))
     assert isinstance(result, dict)
     assert "passed" in result
 
@@ -85,10 +76,9 @@ def test_naming_check_module_with_bypass(tmp_path):
     """naming_check.check_module respects bypass rules."""
     py_file = tmp_path / "sample.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_module
 
     bypass = [{"file": "sample.py", "standard": "naming", "reason": "test"}]
-    result = check_module(str(py_file), bypass_rules=bypass)
+    result = naming_check.check_module(str(py_file), bypass_rules=bypass)
     assert isinstance(result, dict)
     assert result["passed"] is True
 
@@ -105,20 +95,18 @@ def test_json_structure_check_returns_expected_keys(tmp_path):
         '"""Sample."""\nimport json\n',
         encoding="utf-8",
     )
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
 
-    result = check_module(str(py_file))
+    result = json_structure_check.check_module(str(py_file))
     assert isinstance(result, dict)
     assert "passed" in result
     assert "score" in result
     assert "checks" in result
 
 
-def test_json_structure_check_missing_file():
+def test_json_structure_check_missing_file(tmp_path):
     """json_structure_check.check_module handles missing file."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
 
-    result = check_module("/nonexistent/module.py")
+    result = json_structure_check.check_module(str(tmp_path / "nonexistent" / "module.py"))
     assert isinstance(result, dict)
     assert "passed" in result
 
@@ -127,15 +115,13 @@ def test_json_structure_check_has_standard_field(tmp_path):
     """json_structure_check.check_module includes 'standard' in output."""
     py_file = tmp_path / "test_mod.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
 
-    result = check_module(str(py_file))
+    result = json_structure_check.check_module(str(py_file))
     assert "standard" in result
 
 
 def test_json_structure_custom_config_subdir_passes(tmp_path):
     """Branch with {branch}_json/custom_config/ passes directory check."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_json_dir_structure
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
@@ -146,13 +132,12 @@ def test_json_structure_custom_config_subdir_passes(tmp_path):
     (cc / "settings.json").write_text("{}", encoding="utf-8")
     (json_dir / "config.json").write_text("{}", encoding="utf-8")
 
-    violations = _check_json_dir_structure(str(branch))
+    violations = json_structure_check._check_json_dir_structure(str(branch))
     assert violations == []
 
 
 def test_json_structure_random_subdir_fails(tmp_path):
     """Branch with an unsanctioned subdir under {branch}_json/ is flagged."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_json_dir_structure
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
@@ -161,14 +146,13 @@ def test_json_structure_random_subdir_fails(tmp_path):
     (json_dir / "custom_config").mkdir()
     (json_dir / "extra_stuff").mkdir()
 
-    violations = _check_json_dir_structure(str(branch))
+    violations = json_structure_check._check_json_dir_structure(str(branch))
     assert len(violations) == 1
     assert "extra_stuff" in violations[0]["message"]
 
 
 def test_json_structure_hidden_subdir_ignored(tmp_path):
     """Hidden subdirs (e.g. .archive) under {branch}_json/ are not flagged."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_json_dir_structure
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
@@ -176,24 +160,22 @@ def test_json_structure_hidden_subdir_ignored(tmp_path):
     json_dir.mkdir()
     (json_dir / ".archive").mkdir()
 
-    violations = _check_json_dir_structure(str(branch))
+    violations = json_structure_check._check_json_dir_structure(str(branch))
     assert violations == []
 
 
 def test_json_structure_no_json_dir_passes(tmp_path):
     """Branch with no {branch}_json/ directory produces no violations."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_json_dir_structure
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
 
-    violations = _check_json_dir_structure(str(branch))
+    violations = json_structure_check._check_json_dir_structure(str(branch))
     assert violations == []
 
 
 def test_json_structure_check_branch_post(tmp_path):
     """check_branch_post returns violations and scores."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_post
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
@@ -201,21 +183,20 @@ def test_json_structure_check_branch_post(tmp_path):
     json_dir.mkdir()
     (json_dir / "bad_split").mkdir()
 
-    violations, scores = check_branch_post(str(branch))
+    violations, scores = json_structure_check.check_branch_post(str(branch))
     assert len(violations) == 1
     assert scores == [0]
 
     # Clean branch
     (json_dir / "bad_split").rmdir()
     (json_dir / "custom_config").mkdir()
-    violations2, scores2 = check_branch_post(str(branch))
+    violations2, scores2 = json_structure_check.check_branch_post(str(branch))
     assert violations2 == []
     assert scores2 == [100]
 
 
 def test_json_structure_bypassed_subdir_passes(tmp_path):
     """A subdir bypassed via bypass_rules is not flagged."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_json_dir_structure
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
@@ -224,13 +205,12 @@ def test_json_structure_bypassed_subdir_passes(tmp_path):
     (json_dir / "compass").mkdir()
 
     bypass_rules = [{"standard": "json_structure", "file": "mybranch_json/compass", "reason": "test"}]
-    violations = _check_json_dir_structure(str(branch), bypass_rules=bypass_rules)
+    violations = json_structure_check._check_json_dir_structure(str(branch), bypass_rules=bypass_rules)
     assert violations == []
 
 
 def test_json_structure_unbypassed_subdir_still_fails(tmp_path):
     """An unsanctioned subdir without a bypass entry is still flagged."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_json_dir_structure
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
@@ -240,7 +220,7 @@ def test_json_structure_unbypassed_subdir_still_fails(tmp_path):
     (json_dir / "random_dir").mkdir()
 
     bypass_rules = [{"standard": "json_structure", "file": "mybranch_json/compass", "reason": "test"}]
-    violations = _check_json_dir_structure(str(branch), bypass_rules=bypass_rules)
+    violations = json_structure_check._check_json_dir_structure(str(branch), bypass_rules=bypass_rules)
     assert len(violations) == 1
     assert "random_dir" in violations[0]["message"]
 
@@ -252,25 +232,22 @@ def test_json_structure_unbypassed_subdir_still_fails(tmp_path):
 
 def test_naming_is_bypassed_true():
     """is_bypassed returns True when rule matches."""
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import is_bypassed
 
     rules = [{"file": "foo.py", "standard": "naming", "reason": "legacy"}]
-    assert is_bypassed("some/path/foo.py", "naming", bypass_rules=rules) is True
+    assert naming_check.is_bypassed("some/path/foo.py", "naming", bypass_rules=rules) is True
 
 
 def test_naming_is_bypassed_false_no_rules():
     """is_bypassed returns False with no rules."""
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import is_bypassed
 
-    assert is_bypassed("foo.py", "naming", bypass_rules=None) is False
+    assert naming_check.is_bypassed("foo.py", "naming", bypass_rules=None) is False
 
 
 def test_naming_is_bypassed_wrong_standard():
     """is_bypassed returns False when standard does not match."""
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import is_bypassed
 
     rules = [{"file": "foo.py", "standard": "imports", "reason": "legacy"}]
-    assert is_bypassed("foo.py", "naming", bypass_rules=rules) is False
+    assert naming_check.is_bypassed("foo.py", "naming", bypass_rules=rules) is False
 
 
 # ---------------------------------------------------------------------------
@@ -285,11 +262,7 @@ def _custom_config_doctrine_text():
     let a generic word like "untouched" pass from some unrelated paragraph
     after the doctrine block itself was deleted.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_content import (
-        get_json_structure_standards,
-    )
-
-    full = get_json_structure_standards()
+    full = json_structure_content.get_json_structure_standards()
     start = full.index("custom_config/ HOUSE PATTERN:")
     end = full.index("KEY WARNINGS:", start)
     return full[start:end].lower()
@@ -397,43 +370,35 @@ def _branch_with_custom_config(tmp_path, filenames):
 
 def test_custom_config_info_no_json_dir(tmp_path):
     """A branch with no {branch}_json/ produces no info line."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_info
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
 
-    assert check_branch_info(str(branch)) == []
+    assert json_structure_check.check_branch_info(str(branch)) == []
 
 
 def test_custom_config_info_no_custom_config_dir(tmp_path):
     """A branch_json/ without custom_config/ produces no info line."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_info
 
     branch = tmp_path / "mybranch"
     (branch / "mybranch_json").mkdir(parents=True)
 
-    assert check_branch_info(str(branch)) == []
+    assert json_structure_check.check_branch_info(str(branch)) == []
 
 
 def test_custom_config_info_readme_only(tmp_path):
     """custom_config/ holding only README.md is scaffolding, not an override."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_info
 
     branch = _branch_with_custom_config(tmp_path, ["README.md"])
 
-    assert check_branch_info(str(branch)) == []
+    assert json_structure_check.check_branch_info(str(branch)) == []
 
 
 def test_custom_config_info_lists_operator_files(tmp_path):
     """Operator files are named, counted, and carry the guide pointer."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import (
-        CUSTOM_CONFIG_GUIDE,
-        check_branch_info,
-    )
-
     branch = _branch_with_custom_config(tmp_path, ["README.md", "cadence_config.json", "alpha_config.json"])
 
-    lines = check_branch_info(str(branch))
+    lines = json_structure_check.check_branch_info(str(branch))
     assert len(lines) == 1
     line = lines[0]
     assert "mybranch_json/custom_config/" in line
@@ -444,35 +409,32 @@ def test_custom_config_info_lists_operator_files(tmp_path):
     assert "content not audited" in line
     # Track the constant, not a copy of it — test_standards_query proves the
     # constant names a command that actually resolves.
-    assert CUSTOM_CONFIG_GUIDE in line
+    assert json_structure_check.CUSTOM_CONFIG_GUIDE in line
 
 
 def test_custom_config_info_singular_wording(tmp_path):
     """One override reads 'file', not 'files'."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_info
 
     branch = _branch_with_custom_config(tmp_path, ["memory.config.json"])
 
-    assert "1 operator file (" in check_branch_info(str(branch))[0]
+    assert "1 operator file (" in json_structure_check.check_branch_info(str(branch))[0]
 
 
 def test_custom_config_info_ignores_subdirs(tmp_path):
     """Directories inside custom_config/ are not listed as operator files."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_info
 
     branch = _branch_with_custom_config(tmp_path, [])
     (branch / "mybranch_json" / "custom_config" / "nested").mkdir()
 
-    assert check_branch_info(str(branch)) == []
+    assert json_structure_check.check_branch_info(str(branch)) == []
 
 
 def test_custom_config_never_affects_score(tmp_path):
     """Operator files in custom_config/ leave check_branch_post at a clean 100."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_branch_post
 
     branch = _branch_with_custom_config(tmp_path, ["cadence_config.json"])
 
-    violations, scores = check_branch_post(str(branch))
+    violations, scores = json_structure_check.check_branch_post(str(branch))
     assert violations == []
     assert scores == [100]
 
@@ -494,73 +456,66 @@ def _branch_with_json_files(tmp_path, filenames):
 
 def test_disk_triplets_no_json_dir(tmp_path):
     """No {branch}_json/ directory passes (no JSON activity)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is True
 
 
 def test_disk_triplets_complete(tmp_path):
     """A full config/data/log trio passes."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["audit_config.json", "audit_data.json", "audit_log.json"])
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is True
     assert "All 1 modules" in result["message"]
 
 
 def test_disk_triplets_config_without_log_is_caught(tmp_path):
     """A hand-written config with no log sibling is no longer invisible."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["trigger_config.json"])
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is False
     assert "trigger (missing data, log)" in result["message"]
 
 
 def test_disk_triplets_data_without_siblings_is_caught(tmp_path):
     """A lone data file implies its config and log must exist."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["solo_data.json"])
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is False
     assert "solo (missing config, log)" in result["message"]
 
 
 def test_disk_triplets_log_without_config_still_caught(tmp_path):
     """The original log-first direction keeps working."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["audit_log.json", "audit_data.json"])
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is False
     assert "audit (missing config)" in result["message"]
 
 
 def test_disk_triplets_ignores_non_triplet_files(tmp_path):
     """Files outside the {stem}_{kind}.json shape are not modules."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["audit_cache.json", "config.json", "registry.json"])
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is True
     assert "no triplet files" in result["message"]
 
 
 def test_disk_triplets_bypass_respected(tmp_path):
     """A bypassed missing member does not fail the branch."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["trigger_config.json", "trigger_data.json"])
     rules = [
@@ -571,31 +526,29 @@ def test_disk_triplets_bypass_respected(tmp_path):
         }
     ]
 
-    result = _check_disk_triplets(branch, bypass_rules=rules)
+    result = json_handler_check._check_disk_triplets(branch, bypass_rules=rules)
     assert result["passed"] is True
 
 
 def test_disk_triplets_bypass_wrong_standard_ignored(tmp_path):
     """A bypass for another standard does not suppress a triplet gap."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(tmp_path, ["trigger_config.json", "trigger_data.json"])
     rules = [{"file": "mybranch_json/trigger_log.json", "standard": "json_structure", "reason": "unrelated"}]
 
-    result = _check_disk_triplets(branch, bypass_rules=rules)
+    result = json_handler_check._check_disk_triplets(branch, bypass_rules=rules)
     assert result["passed"] is False
 
 
 def test_disk_triplets_multiple_gaps_counted(tmp_path):
     """The message counts incomplete modules against total modules found."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_disk_triplets
 
     branch = _branch_with_json_files(
         tmp_path,
         ["a_config.json", "a_data.json", "a_log.json", "b_config.json", "c_log.json"],
     )
 
-    result = _check_disk_triplets(branch)
+    result = json_handler_check._check_disk_triplets(branch)
     assert result["passed"] is False
     assert result["message"].startswith("2/3 modules missing triplet files")
 
@@ -626,8 +579,6 @@ def _canonical_shim_bytes_or_skip():
     import re
     from pathlib import Path
 
-    import aipass
-
     # From the installed package, so the read is identical whichever rootdir
     # pytest picks — the same discovery the contract suite uses.
     spec = Path(aipass.__file__).resolve().parent / "devpulse" / "docs.local" / "DPLAN-0325_spec.md"
@@ -649,10 +600,8 @@ def test_the_pinned_hash_is_the_hash_of_the_spec_block():
     """
     import hashlib
 
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
-
     measured = hashlib.sha256(_canonical_shim_bytes_or_skip().encode("utf-8")).hexdigest()
-    assert measured == CANONICAL_SHIM_SHA256, (
+    assert measured == json_handler_check.CANONICAL_SHIM_SHA256, (
         "the pinned canonical-shim hash no longer matches DPLAN-0325 section 3 — "
         "amend the constant in the same change as the spec"
     )
@@ -674,10 +623,6 @@ def _canonical_shim_bytes_on_disk():
     import hashlib
     from pathlib import Path as _Path
 
-    import aipass
-
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
-
     template = (
         _Path(aipass.__file__).resolve().parent
         / "spawn"
@@ -691,7 +636,7 @@ def _canonical_shim_bytes_on_disk():
     if not template.is_file():
         pytest.skip(f"citizen template not present ({template})")
     content = template.read_text(encoding="utf-8")
-    assert hashlib.sha256(content.encode("utf-8")).hexdigest() == CANONICAL_SHIM_SHA256, (
+    assert hashlib.sha256(content.encode("utf-8")).hexdigest() == json_handler_check.CANONICAL_SHIM_SHA256, (
         "the citizen template is no longer the canonical shim — every branch spawned from it "
         "would be born failing the json_handler standard"
     )
@@ -700,9 +645,8 @@ def _canonical_shim_bytes_on_disk():
 
 def test_the_canonical_shim_passes_capability_by_hash():
     """The spec's own bytes are accepted, and accepted on the identity path."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
 
-    passed, message = _capability_verdict(_canonical_shim_bytes_or_skip(), "anybranch")
+    passed, message = json_handler_check._capability_verdict(_canonical_shim_bytes_or_skip(), "anybranch")
     assert passed is True
     assert "sha256" in message
 
@@ -717,14 +661,9 @@ def test_one_changed_character_is_no_longer_the_canonical_shim():
     mutation is now REFUSED outright, which is the whole point of narrowing:
     a byte of drift is a red, not a quieter green.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
-        _capability_verdict,
-        _is_canonical_shim,
-    )
-
     mutated = _canonical_shim_bytes_or_skip().replace("_h = json_handler.for_module", "_h  = json_handler.for_module")
-    assert _is_canonical_shim(mutated) is False
-    passed, message = _capability_verdict(mutated, "anybranch")
+    assert json_handler_check._is_canonical_shim(mutated) is False
+    passed, message = json_handler_check._capability_verdict(mutated, "anybranch")
     assert passed is False
     assert "sha256" in message
 
@@ -739,10 +678,9 @@ def test_a_half_migrated_shim_that_kept_a_branch_token_is_refused():
     section 4); the hash refuses this text for the simpler reason that it is
     not the shim's bytes, and cannot be argued with about which tokens count.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _capability_verdict
 
     half = "from aipass.prax import json_handler\n_JSON_DIR = _ROOT / 'canary_json'\n"
-    passed, message = _capability_verdict(half, "canary")
+    passed, message = json_handler_check._capability_verdict(half, "canary")
     assert passed is False
     assert "canary" in message
 
@@ -755,24 +693,18 @@ def test_the_refusal_message_names_the_branch_and_the_line_to_write():
     that there is ONE implementation, and the import line the replacement
     starts with, because that is the entire remedy.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import (
-        SERVICE_IMPORT_MARKER,
-        _capability_verdict,
-    )
-
-    passed, message = _capability_verdict("def load_json(name):\n    return {}\n", "canary")
+    passed, message = json_handler_check._capability_verdict("def load_json(name):\n    return {}\n", "canary")
     assert passed is False
     assert "canary" in message
-    assert SERVICE_IMPORT_MARKER in message
+    assert json_handler_check.SERVICE_IMPORT_MARKER in message
 
 
 def test_a_branch_without_a_citizen_template_grows_no_template_check(tmp_path):
     """Seventeen branches ship no template, so the check does not appear for them."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_template_handler
 
     branch = tmp_path / "mybranch"
     branch.mkdir()
-    assert _check_template_handler(branch) is None
+    assert json_handler_check._check_template_handler(branch) is None
 
 
 def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
@@ -782,7 +714,6 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     would have minted eighteen non-compliant branches before any audit noticed,
     because the audit only ever walked branches.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import _check_template_handler
 
     branch = tmp_path / "spawnish"
     template = branch / "templates" / "citizen" / "apps" / "handlers" / "json"
@@ -790,7 +721,7 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     handler = template / "json_handler.py"
 
     handler.write_text("def log_operation(op):\n    return True\n", encoding="utf-8")
-    result = _check_template_handler(branch)
+    result = json_handler_check._check_template_handler(branch)
     assert result is not None
     assert result["passed"] is False
     assert "Not the canonical json shim" in result["message"]
@@ -799,7 +730,7 @@ def test_the_citizen_template_is_judged_by_the_same_rule(tmp_path):
     # only accept path is the hash, so a two-line stand-in that merely imports
     # the service is refused here exactly as it would be in a branch.
     handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
-    result = _check_template_handler(branch)
+    result = json_handler_check._check_template_handler(branch)
     assert result is not None
     assert result["passed"] is True
 
@@ -815,19 +746,17 @@ def test_a_bound_alias_is_not_a_lowercase_constant():
     The shape DPLAN-0325 makes fleet-wide — nine per branch — and the reason
     canary, memory and spawn carried naming bypasses before this rule existed.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
 
     source = "save_json = _h.save_json\nInvalidDocument = json_handler.InvalidDocument\nMAX = 5\n"
-    result = check_constant_naming(source)
+    result = naming_check.check_constant_naming(source)
     assert result is not None
     assert result["passed"] is True
 
 
 def test_an_alias_with_a_trailing_comment_is_still_an_alias():
     """A `# noqa` after the value must not turn the alias back into a constant."""
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
 
-    result = check_constant_naming("read_json = _h.read_json  # noqa: F401\nMAX = 5\n")
+    result = naming_check.check_constant_naming("read_json = _h.read_json  # noqa: F401\nMAX = 5\n")
     assert result is not None
     assert result["passed"] is True
 
@@ -839,9 +768,8 @@ def test_the_alias_rule_does_not_excuse_an_expression_that_merely_contains_a_dot
     assignment containing an attribute access would stop being checked, which
     is a far larger exemption than the one that was asked for.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_check import check_constant_naming
 
-    result = check_constant_naming("total = counters.seen + 1\nfirst = items.data[0]\n")
+    result = naming_check.check_constant_naming("total = counters.seen + 1\nfirst = items.data[0]\n")
     assert result is not None
     assert result["passed"] is False
     assert "total" in result["message"]
@@ -861,7 +789,6 @@ def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
     on purpose, so a dead cwd on Windows cannot poison it. A standard that
     demands the spelling convicts the endpoint of the migration.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
 
     handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
     handler.parent.mkdir(parents=True)
@@ -870,7 +797,7 @@ def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
     # hash test (finding (a)), so only the shim itself earns it now.
     handler.write_text(_canonical_shim_bytes_on_disk(), encoding="utf-8")
 
-    checks = check_module(str(handler), bypass_rules=None)["checks"]
+    checks = json_structure_check.check_module(str(handler), bypass_rules=None)["checks"]
     resolution = next(c for c in checks if c["name"] == "Relative path resolution")
     assert resolution["passed"] is True
     assert "Delegates path resolution" in resolution["message"]
@@ -878,19 +805,18 @@ def test_a_shim_that_binds_the_service_resolves_nothing_and_says_so(tmp_path):
 
 def test_a_handler_that_neither_binds_nor_resolves_still_fails(tmp_path):
     """The accept is the service import, not an amnesty on the whole check."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import check_module
 
     handler = tmp_path / "apps" / "handlers" / "json" / "json_handler.py"
     handler.parent.mkdir(parents=True)
     handler.write_text("JSON_DIR = 'documents'\n\n\ndef read_json(name):\n    return {}\n", encoding="utf-8")
 
-    checks = check_module(str(handler), bypass_rules=None)["checks"]
+    checks = json_structure_check.check_module(str(handler), bypass_rules=None)["checks"]
     resolution = next(c for c in checks if c["name"] == "Relative path resolution")
     assert resolution["passed"] is False
     assert "Missing relative path resolution" in resolution["message"]
 
 
-def test_the_two_standards_share_the_shim_TEST_not_a_copy_of_a_string():
+def test_the_two_standards_share_the_shim_test_not_a_copy_of_a_string():
     """Both standards must agree on what a shim IS, by running the same function.
 
     json_structure_check excuses a shim from "resolves its own path" — the
@@ -905,8 +831,6 @@ def test_the_two_standards_share_the_shim_TEST_not_a_copy_of_a_string():
     file. The identity assertion below is what makes that impossible to redo
     by accident.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards import json_handler_check, json_structure_check
-
     assert json_structure_check._is_canonical_shim is json_handler_check._is_canonical_shim
 
 
@@ -943,7 +867,6 @@ def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
     and convicted 41 of backup's 43 files for obeying it. Recognised, never
     bypassed: backup will not carry a bypass for following the spec.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
 
     seam = _seam_branch(tmp_path)
     module = seam.parents[3] / "modules" / "snapshot.py"
@@ -951,17 +874,16 @@ def test_a_module_logging_through_the_branch_seam_is_wired(tmp_path):
     source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
     module.write_text(source, encoding="utf-8")
 
-    checks = _check_code_wiring(module, source)
+    checks = json_structure_check._check_code_wiring(module, source)
     assert all(c["passed"] for c in checks)
     assert any("trail seam" in c["message"] for c in checks)
 
 
 def test_the_seam_itself_does_not_have_to_log_through_itself(tmp_path):
     """The substrate is not a consumer of the substrate."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
 
     seam = _seam_branch(tmp_path)
-    checks = _check_code_wiring(seam, seam.read_text(encoding="utf-8"))
+    checks = json_structure_check._check_code_wiring(seam, seam.read_text(encoding="utf-8"))
     assert all(c["passed"] for c in checks)
 
 
@@ -972,7 +894,6 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
     on aipass.prax) any module could name a local object `trail` and claim the
     exemption, which is a far wider waiver than the one backup needs.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import _check_code_wiring
 
     fake = _seam_branch(tmp_path, "def log_operation(operation, data):\n    print(operation)\n")
 
@@ -981,7 +902,7 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
     source = "from ..handlers.audit import trail\n\n\ndef run():\n    trail.log_operation('snapshot', {})\n"
     module.write_text(source, encoding="utf-8")
 
-    checks = _check_code_wiring(module, source)
+    checks = json_structure_check._check_code_wiring(module, source)
     assert not all(c["passed"] for c in checks)
 
 
@@ -1011,8 +932,6 @@ def test_calling_log_operation_on_something_that_is_not_a_seam_earns_nothing(tmp
 
 def _scan_source(tmp_path, source, name="sample.py"):
     """Write *source* to a file and return (violations, acquitted_binary_sites)."""
-    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
-
     target = tmp_path / name
     target.write_text(source, encoding="utf-8")
     return host_portability_check.scan_file(str(target))
@@ -1029,16 +948,12 @@ def test_host_portability_declares_the_branch_level_contract():
     branch_level, not all_files: the per-file lane's corpus is apps/ only, and
     this standard's whole reason for existing is that tests/ broke macOS CI.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
-
     assert host_portability_check.AUDIT_SCOPE == "branch_level"
     assert callable(host_portability_check.check_branch)
 
 
 def test_a_clean_branch_scores_100_and_reports_the_file_count(tmp_path):
     """check_branch returns the pack's dict shape: passed/checks/score/standard."""
-    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
-
     apps = tmp_path / "apps"
     apps.mkdir()
     (apps / "clean.py").write_text("import os\n\n\ndef where():\n    return os.getcwd()\n", encoding="utf-8")
@@ -1056,8 +971,6 @@ def test_a_branch_with_one_dirty_file_scores_by_clean_file_share(tmp_path):
 
     Two files, one of them running tmux bare: 50, not 0 and not 99.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
-
     apps = tmp_path / "apps"
     apps.mkdir()
     (apps / "clean.py").write_text("def ok():\n    return 1\n", encoding="utf-8")
@@ -1763,8 +1676,6 @@ def test_lib_is_in_the_corpus(tmp_path):
     lib/system_status/handler.py read /proc on every macOS run while this
     standard read skills 100, because the walk stopped at apps/ and tests/.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards import host_portability_check
-
     handlers = tmp_path / "lib" / "telegram" / "apps" / "handlers"
     handlers.mkdir(parents=True)
     (handlers / "tmux_manager.py").write_text(
@@ -1859,8 +1770,6 @@ def _calendar_package(tmp_path, unit_source, where=("tests",)):
 
 def _calendar_scan(tmp_path, unit_source):
     """scan_file over a laid-down package: (violations, context)."""
-    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
-
     branch, test_file = _calendar_package(tmp_path, unit_source)
     return calendar_bound_check.scan_file(str(test_file), str(branch.parent))
 
@@ -1872,8 +1781,6 @@ def _line_of(source, needle):
 
 def test_calendar_bound_declares_the_branch_level_contract():
     """AUDIT_SCOPE and the entry point the audit pipeline dispatches on."""
-    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
-
     assert calendar_bound_check.AUDIT_SCOPE == "branch_level"
     assert calendar_bound_check.STANDARD_NAME == "CALENDAR_BOUND"
     assert callable(calendar_bound_check.check_branch)
@@ -2019,8 +1926,6 @@ def test_the_slot_is_seeded(monkeypatch):
 
 def test_calendar_bound_scores_by_clean_test_file_share(tmp_path):
     """check_branch: two test files, one convicted - 50, and the row names the file."""
-    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
-
     branch, _test_file = _calendar_package(tmp_path, _SLOTS_UNIT)
     (branch / "tests" / "test_clean.py").write_text("def test_arithmetic():\n    assert 1 + 1 == 2\n", encoding="utf-8")
 
@@ -2034,8 +1939,6 @@ def test_calendar_bound_scores_by_clean_test_file_share(tmp_path):
 
 def test_a_skills_own_tests_under_lib_are_in_the_corpus(tmp_path):
     """skills keeps tests beside each skill in lib/<skill>/tests/, outside the branch tests/ root."""
-    from aipass.seedgo.apps.handlers.aipass_standards import calendar_bound_check
-
     branch, _test_file = _calendar_package(tmp_path, _SLOTS_UNIT, where=("lib", "reminder", "tests"))
 
     result = calendar_bound_check.check_branch(str(branch))

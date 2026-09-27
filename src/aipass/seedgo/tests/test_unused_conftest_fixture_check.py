@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_unused_conftest_fixture_check.py
 # Description: unused_conftest_fixture_check — crack class G, a shared fixture nothing requests
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unused_conftest_fixture_check.py."""

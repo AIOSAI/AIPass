@@ -1,125 +1,96 @@
-"""Tests for plugin_integrity (aipass_proof) and diagnostics_check (diagnostics) coverage."""
-
 # =================== META ====================
 # Name: test_coverage_proof_diagnostics.py
 # Description: Line-coverage tests for plugin_integrity.py and diagnostics_check.py
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_proof/plugin_integrity.py and apps/handlers/diagnostics/diagnostics_check.py."""
+
+# Coverage tests for the two handlers, reached through their public doors:
+# plugin_integrity.scan() and diagnostics_check.check_branch(), check_file(),
+# check_directory(), should_ignore_file() and format_summary(). Each synthetic
+# source below is written into a scanned target module, so every helper is
+# judged by the finding scan() reports for it, not by a direct call.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — importlib.import_module's loading of a runner module from a path on __path__
 
 import ast
 import json
 import subprocess
+import sys
+import textwrap
 
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from aipass.seedgo.apps.handlers import diagnostics as diagnostics_package
+from aipass.seedgo.apps.handlers.aipass_proof import plugin_integrity
+from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import scan
 from aipass.seedgo.apps.handlers.bypass import ignore_handler as real_ignore_handler
+from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
+from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
+    check_branch,
+    check_directory,
+    check_file,
+    format_summary,
+    should_ignore_file,
+)
 
 
 # ---------------------------------------------------------------------------
-# Fixtures
+# Helpers -- a scanned seedgo tree under tmp_path
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for proof and diagnostics handlers."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.json.json_handler",
-        json_mod,
-    )
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_ignore.get_audit_ignore_patterns = MagicMock(return_value=[])
-    # The ignore list removes nothing here, as the empty pattern list above says.
-    bypass_ignore.audit_ignore_match = MagicMock(return_value=None)
-    bypass_ignore.ignored_tracked_source = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-
-    # -- rich.console (diagnostics_check imports Console directly) ----------
-    mock_console_cls = MagicMock()
-    rich_console_mod = MagicMock()
-    rich_console_mod.Console = mock_console_cls
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.console", rich_console_mod)
-
-    # Force re-imports so modules pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity",
-        "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+def _pack(tmp_path: Path, names: tuple[str, ...] = ("zz_special",)) -> Path:
+    """A standards pack under tmp_path's apps/handlers/, one *_check.py per name."""
+    pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (pack_dir / f"{name}_check.py").write_text("pass", encoding="utf-8")
+    return pack_dir
 
 
-# ---------------------------------------------------------------------------
-# Helper to build typed parent dicts for AST tests
-# ---------------------------------------------------------------------------
+def _module(result: dict, label: str = "standards_audit.py") -> dict:
+    """scan()'s result for one target module, by label."""
+    return next(m for m in result["modules"] if m["label"] == label)
 
 
-def _parents(*pairs: tuple[ast.AST, ast.AST]) -> dict[int, ast.AST]:
-    """Build a child-id -> parent mapping accepted by plugin_integrity helpers."""
-    return {id(child): parent for child, parent in pairs}
+def _findings(tmp_path: Path, source: str, names: tuple[str, ...] = ("zz_special",)) -> list[dict]:
+    """scan()'s findings for a standards_audit.py holding *source*, in a pack of *names*."""
+    pack_dir = _pack(tmp_path, names)
+    modules_dir = tmp_path / "apps" / "modules"
+    modules_dir.mkdir(parents=True, exist_ok=True)
+    (modules_dir / "standards_audit.py").write_text(textwrap.dedent(source), encoding="utf-8")
+    return _module(plugin_integrity.scan(pack_dir))["findings"]
+
+
+def _kinds(findings: list[dict]) -> list[str]:
+    """The kind of every finding, in order."""
+    return [f["kind"] for f in findings]
 
 
 # ===========================================================================
-# PLUGIN INTEGRITY -- _resolve_target_modules
+# PLUGIN INTEGRITY -- the target modules, through scan()
 # ===========================================================================
 
 
 class TestResolveTargetModules:
-    """Tests for _resolve_target_modules."""
+    """The five target modules scan() reports on."""
 
     def test_returns_five_modules(self, tmp_path):
-        """Target module list always has five entries."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _resolve_target_modules,
-        )
-
-        pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
-        pack_dir.mkdir(parents=True)
-        result = _resolve_target_modules(pack_dir)
-        assert len(result) == 5
+        """Target module list always has five entries. Mutant: seedgo.py dropped from the targets in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = plugin_integrity.scan(_pack(tmp_path, ()))
+        assert len(result["modules"]) == 5
 
     def test_labels_correct(self, tmp_path):
-        """Target module labels match expected file names."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _resolve_target_modules,
-        )
-
-        pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
-        pack_dir.mkdir(parents=True)
-        result = _resolve_target_modules(pack_dir)
-        labels = [m["label"] for m in result]
+        """Target module labels match expected file names. Mutant: seedgo.py dropped from the targets in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = plugin_integrity.scan(_pack(tmp_path, ()))
+        labels = [m["label"] for m in result["modules"]]
         assert "standards_audit.py" in labels
         assert "branch_audit.py" in labels
         assert "audit_display.py" in labels
@@ -127,725 +98,305 @@ class TestResolveTargetModules:
         assert "seedgo.py" in labels
 
     def test_cosmetic_flag(self, tmp_path):
-        """audit_display.py is marked cosmetic; others are not."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _resolve_target_modules,
-        )
-
-        pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
-        pack_dir.mkdir(parents=True)
-        result = _resolve_target_modules(pack_dir)
-        cosmetic_map = {m["label"]: m["cosmetic"] for m in result}
+        """audit_display.py is marked cosmetic; others are not. Mutant: standards_audit.py marked cosmetic in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = plugin_integrity.scan(_pack(tmp_path, ()))
+        cosmetic_map = {m["label"]: m["cosmetic_module"] for m in result["modules"]}
         assert cosmetic_map["audit_display.py"] is True
         assert cosmetic_map["standards_audit.py"] is False
 
 
 # ===========================================================================
-# PLUGIN INTEGRITY -- _discover_standard_names
+# PLUGIN INTEGRITY -- standard name discovery, through scan()
 # ===========================================================================
 
 
 class TestDiscoverStandardNames:
-    """Tests for _discover_standard_names."""
+    """The standard names scan() discovers from a pack."""
 
     def test_nonexistent_directory(self, tmp_path):
-        """Returns empty list for nonexistent directory."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _discover_standard_names,
-        )
-
-        result = _discover_standard_names(tmp_path / "missing")
-        assert result == []
+        """Returns empty list for nonexistent directory. Mutant: a missing pack answers a name in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = plugin_integrity.scan(tmp_path / "missing")
+        assert result["standard_names"] == []
 
     def test_no_check_files(self, tmp_path):
-        """Returns empty list when directory has no *_check.py files."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _discover_standard_names,
-        )
-
-        (tmp_path / "readme.py").write_text("pass", encoding="utf-8")
-        result = _discover_standard_names(tmp_path)
-        assert result == []
+        """Returns empty list when directory has no *_check.py files. Mutant: every *.py read as a check in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        pack_dir = _pack(tmp_path, ())
+        (pack_dir / "readme.py").write_text("pass", encoding="utf-8")
+        result = plugin_integrity.scan(pack_dir)
+        assert result["standard_names"] == []
 
     def test_discovers_names(self, tmp_path):
-        """Discovers standard names from *_check.py filenames."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _discover_standard_names,
-        )
-
-        (tmp_path / "meta_check.py").write_text("pass", encoding="utf-8")
-        (tmp_path / "naming_check.py").write_text("pass", encoding="utf-8")
-        (tmp_path / "cli_check.py").write_text("pass", encoding="utf-8")
-        result = _discover_standard_names(tmp_path)
-        assert sorted(result) == ["cli", "meta", "naming"]
+        """Discovers standard names from *_check.py filenames. Mutant: the _check suffix kept in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = plugin_integrity.scan(_pack(tmp_path, ("meta", "naming", "cli")))
+        assert sorted(result["standard_names"]) == ["cli", "meta", "naming"]
 
 
 # ===========================================================================
-# PLUGIN INTEGRITY -- AST helpers
+# PLUGIN INTEGRITY -- AST helpers, through a finding's context and filters
 # ===========================================================================
 
 
 class TestEnclosingContext:
-    """Tests for _enclosing_context."""
+    """The context a finding names."""
 
-    def test_module_level(self):
-        """Returns '<module level>' when no parent function/class."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _enclosing_context,
-        )
+    def test_module_level(self, tmp_path):
+        """A module-level literal reads '<module level>'. Mutant: the module-level answer emptied in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        findings = _findings(tmp_path, 'x = "zz_special"\n')
+        assert [f["context"] for f in findings] == ["<module level>"]
 
-        node = ast.Constant(value="x")
-        result = _enclosing_context(node, {})
-        assert result == "<module level>"
+    def test_inside_function(self, tmp_path):
+        """A literal inside a def names the function. Mutant: the def context spelled without 'def' in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        findings = _findings(tmp_path, 'def my_func():\n    x = "zz_special"\n')
+        assert "def my_func()" in findings[0]["context"]
 
-    def test_inside_function(self):
-        """Returns function context when inside a def."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _enclosing_context,
-        )
-
-        func_node = ast.FunctionDef(
-            name="my_func",
-            args=ast.arguments(
-                posonlyargs=[],
-                args=[],
-                kwonlyargs=[],
-                kw_defaults=[],
-                defaults=[],
-            ),
-            body=[],
-            decorator_list=[],
-        )
-        child_node = ast.Constant(value="test")
-        parents = _parents((child_node, func_node))
-        result = _enclosing_context(child_node, parents)
-        assert "def my_func()" in result
-
-    def test_inside_class_and_method(self):
-        """Returns nested context for class > method."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _enclosing_context,
-        )
-
-        class_node = ast.ClassDef(
-            name="MyClass",
-            bases=[],
-            keywords=[],
-            body=[],
-            decorator_list=[],
-        )
-        method_node = ast.FunctionDef(
-            name="do_stuff",
-            args=ast.arguments(
-                posonlyargs=[],
-                args=[],
-                kwonlyargs=[],
-                kw_defaults=[],
-                defaults=[],
-            ),
-            body=[],
-            decorator_list=[],
-        )
-        child_node = ast.Constant(value="x")
-        parents = _parents(
-            (child_node, method_node),
-            (method_node, class_node),
-        )
-        result = _enclosing_context(child_node, parents)
+    def test_inside_class_and_method(self, tmp_path):
+        """A literal in a method names class > method. Mutant: the class dropped from the context in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        source = 'class MyClass:\n    def do_stuff(self):\n        x = "zz_special"\n'
+        result = _findings(tmp_path, source)[0]["context"]
         assert "class MyClass" in result
         assert "def do_stuff()" in result
 
-    def test_inside_async_function(self):
-        """Returns context for async function."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _enclosing_context,
-        )
-
-        async_func = ast.AsyncFunctionDef(
-            name="async_work",
-            args=ast.arguments(
-                posonlyargs=[],
-                args=[],
-                kwonlyargs=[],
-                kw_defaults=[],
-                defaults=[],
-            ),
-            body=[],
-            decorator_list=[],
-        )
-        child = ast.Constant(value="x")
-        parents = _parents((child, async_func))
-        result = _enclosing_context(child, parents)
-        assert "def async_work()" in result
+    def test_inside_async_function(self, tmp_path):
+        """A literal in an async def names it. Mutant: AsyncFunctionDef not read as a def in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        findings = _findings(tmp_path, 'async def async_work():\n    x = "zz_special"\n')
+        assert "def async_work()" in findings[0]["context"]
 
 
 class TestIsDocstring:
-    """Tests for _is_docstring."""
+    """A docstring naming a standard is not a finding."""
 
-    def test_actual_docstring(self):
-        """Detects module-level docstring."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_docstring,
-        )
+    def test_actual_docstring(self, tmp_path):
+        """Detects module-level docstring. Mutant: no docstring recognised in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, '"""zz_special"""\nx = 1\n') == []
 
-        source = '"""This is a docstring."""\nx = 1\n'
-        tree = ast.parse(source)
-        first_expr = tree.body[0]
-        assert isinstance(first_expr, ast.Expr)
-        node = first_expr.value
-        assert isinstance(node, ast.Constant)
-        assert _is_docstring(node, tree) is True
+    def test_non_docstring(self, tmp_path):
+        """Regular string literal is not a docstring. Mutant: every literal read as a docstring in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _kinds(_findings(tmp_path, 'x = "zz_special"\n')) == ["ast_string_literal"]
 
-    def test_non_docstring(self):
-        """Regular string literal is not a docstring."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_docstring,
-        )
-
-        source = 'x = "not a docstring"\n'
-        tree = ast.parse(source)
-        constants = [n for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "not a docstring"]
-        assert len(constants) == 1, f"expected exactly one string constant in the AST, got {constants}"
-        assert _is_docstring(constants[0], tree) is False
-
-    def test_function_docstring(self):
-        """Detects function-level docstring."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_docstring,
-        )
-
-        source = 'def foo():\n    """My doc."""\n    pass\n'
-        tree = ast.parse(source)
-        func = tree.body[0]
-        assert isinstance(func, ast.FunctionDef)
-        first_stmt = func.body[0]
-        assert isinstance(first_stmt, ast.Expr)
-        node = first_stmt.value
-        assert isinstance(node, ast.Constant)
-        assert _is_docstring(node, tree) is True
+    def test_function_docstring(self, tmp_path):
+        """Detects function-level docstring. Mutant: no docstring recognised in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'def foo():\n    """zz_special"""\n    pass\n') == []
 
 
 class TestIsDisplayString:
-    """Tests for _is_display_string."""
+    """A standard name in display text is not a finding."""
 
-    def test_inside_fstring(self):
-        """String inside f-string is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        fstring = ast.JoinedStr(values=[child])
-        assert _is_display_string(child, _parents((child, fstring))) is True
+    def test_inside_fstring(self, tmp_path):
+        """String inside f-string is display text. Mutant: the f-string acquittal dropped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'x = f"zz_special{y}"\n') == []
 
     def test_no_parent(self):
         """Node with no parent returns False."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
+        # HELD (no public seam): scan() hands _is_display_string only nodes from a
+        # parsed module, and every such constant has a parent.
         child = ast.Constant(value="hello")
-        assert _is_display_string(child, {}) is False
+        assert plugin_integrity._is_display_string(child, {}) is False
 
-    def test_print_call(self):
-        """String passed to console.print() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_print_call(self, tmp_path):
+        """String passed to console.print() is display text. Mutant: 'print' dropped from the display calls in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'console.print("zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Attribute(
-            value=ast.Name(id="console", ctx=ast.Load()),
-            attr="print",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_logger_info_call(self, tmp_path):
+        """String passed to logger.info() is display text. Mutant: 'info' dropped from the display calls in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'logger.info("zz_special")\n') == []
 
-    def test_logger_info_call(self):
-        """String passed to logger.info() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_logger_error_call(self, tmp_path):
+        """String passed to logger.error() is display text. Mutant: 'error' dropped from the display methods in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'logger.error("zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Attribute(
-            value=ast.Name(id="logger", ctx=ast.Load()),
-            attr="info",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_logger_warning_call(self, tmp_path):
+        """String passed to logger.warning() is display text. Mutant: 'warning' dropped from the display methods in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'logger.warning("zz_special")\n') == []
 
-    def test_logger_error_call(self):
-        """String passed to logger.error() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_logger_debug_call(self, tmp_path):
+        """String passed to logger.debug() is display text. Mutant: 'debug' dropped from the display calls in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'logger.debug("zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Attribute(
-            value=ast.Name(id="logger", ctx=ast.Load()),
-            attr="error",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_header_name_call(self, tmp_path):
+        """String passed to header() function call is display text. Mutant: 'header' dropped from the display functions in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'header("zz_special")\n') == []
 
-    def test_logger_warning_call(self):
-        """String passed to logger.warning() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_error_name_call(self, tmp_path):
+        """String passed to error() function call is display text. Mutant: 'error' dropped from the display functions in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'error("zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Attribute(
-            value=ast.Name(id="logger", ctx=ast.Load()),
-            attr="warning",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_warning_name_call(self, tmp_path):
+        """String passed to warning() function call is display text. Mutant: 'warning' dropped from the display functions in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'warning("zz_special")\n') == []
 
-    def test_logger_debug_call(self):
-        """String passed to logger.debug() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_keyword_arg_in_print_call(self, tmp_path):
+        """Keyword arg value inside console.print() is display text. Mutant: 'print' dropped from the keyword display calls in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'console.print(style="zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Attribute(
-            value=ast.Name(id="logger", ctx=ast.Load()),
-            attr="debug",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_keyword_arg_in_log_operation(self, tmp_path):
+        """Keyword arg value inside .log_operation() is display text. Mutant: 'log_operation' dropped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'json_handler.log_operation(data="zz_special")\n') == []
 
-    def test_header_name_call(self):
-        """String passed to header() function call is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_keyword_arg_in_header_call(self, tmp_path):
+        """Keyword arg value inside header() call is display text. Mutant: 'header' dropped from the keyword display functions in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'header(title="zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Name(id="header", ctx=ast.Load())
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_keyword_arg_in_error_call(self, tmp_path):
+        """Keyword arg value inside error() call is display text. Mutant: 'error' dropped from the keyword display functions in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'error(msg="zz_special")\n') == []
 
-    def test_error_name_call(self):
-        """String passed to error() function call is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
+    def test_keyword_arg_in_warning_call(self, tmp_path):
+        """Keyword arg value inside warning() call is display text. Mutant: 'warning' dropped from the keyword display functions in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'warning(msg="zz_special")\n') == []
 
-        child = ast.Constant(value="hello")
-        func = ast.Name(id="error", ctx=ast.Load())
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
+    def test_non_display_context(self, tmp_path):
+        """String in normal assignment context is not display text. Mutant: every literal read as display text in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _kinds(_findings(tmp_path, 'label = "zz_special"\n')) == ["ast_string_literal"]
 
-    def test_warning_name_call(self):
-        """String passed to warning() function call is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        func = ast.Name(id="warning", ctx=ast.Load())
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_display_string(child, _parents((child, call))) is True
-
-    def test_keyword_arg_in_print_call(self):
-        """Keyword arg value inside console.print() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        kw = ast.keyword(arg="style", value=child)
-        func = ast.Attribute(
-            value=ast.Name(id="console", ctx=ast.Load()),
-            attr="print",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[], keywords=[kw])
-        parents = _parents((child, kw), (kw, call))
-        assert _is_display_string(child, parents) is True
-
-    def test_keyword_arg_in_log_operation(self):
-        """Keyword arg value inside .log_operation() is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        kw = ast.keyword(arg="data", value=child)
-        func = ast.Attribute(
-            value=ast.Name(id="json_handler", ctx=ast.Load()),
-            attr="log_operation",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[], keywords=[kw])
-        parents = _parents((child, kw), (kw, call))
-        assert _is_display_string(child, parents) is True
-
-    def test_keyword_arg_in_header_call(self):
-        """Keyword arg value inside header() call is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        kw = ast.keyword(arg="title", value=child)
-        func = ast.Name(id="header", ctx=ast.Load())
-        call = ast.Call(func=func, args=[], keywords=[kw])
-        parents = _parents((child, kw), (kw, call))
-        assert _is_display_string(child, parents) is True
-
-    def test_keyword_arg_in_error_call(self):
-        """Keyword arg value inside error() call is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        kw = ast.keyword(arg="msg", value=child)
-        func = ast.Name(id="error", ctx=ast.Load())
-        call = ast.Call(func=func, args=[], keywords=[kw])
-        parents = _parents((child, kw), (kw, call))
-        assert _is_display_string(child, parents) is True
-
-    def test_keyword_arg_in_warning_call(self):
-        """Keyword arg value inside warning() call is display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        kw = ast.keyword(arg="msg", value=child)
-        func = ast.Name(id="warning", ctx=ast.Load())
-        call = ast.Call(func=func, args=[], keywords=[kw])
-        parents = _parents((child, kw), (kw, call))
-        assert _is_display_string(child, parents) is True
-
-    def test_non_display_context(self):
-        """String in normal assignment context is not display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        assign = ast.Assign(
-            targets=[ast.Name(id="x", ctx=ast.Store())],
-            value=child,
-        )
-        assert _is_display_string(child, _parents((child, assign))) is False
-
-    def test_keyword_arg_in_non_display_call(self):
-        """Keyword arg value in a non-display call is not display text."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_display_string,
-        )
-
-        child = ast.Constant(value="hello")
-        kw = ast.keyword(arg="name", value=child)
-        func = ast.Name(id="do_work", ctx=ast.Load())
-        call = ast.Call(func=func, args=[], keywords=[kw])
-        parents = _parents((child, kw), (kw, call))
-        assert _is_display_string(child, parents) is False
+    def test_keyword_arg_in_non_display_call(self, tmp_path):
+        """Keyword arg value in a non-display call is not display text. Mutant: every literal read as display text in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _kinds(_findings(tmp_path, 'do_work(name="zz_special")\n')) == ["ast_string_literal"]
 
 
 class TestIsDictKeyAccess:
-    """Tests for _is_dict_key_access."""
+    """A standard name used as a dict key is not a finding."""
 
-    def test_get_call(self):
-        """result.get('key') is dict key access."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_dict_key_access,
-        )
+    def test_get_call(self, tmp_path):
+        """result.get('key') is dict key access. Mutant: .get not read as key access in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'value = result.get("zz_special")\n') == []
 
-        child = ast.Constant(value="key")
-        func = ast.Attribute(
-            value=ast.Name(id="result", ctx=ast.Load()),
-            attr="get",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_dict_key_access(child, _parents((child, call))) is True
-
-    def test_subscript(self):
-        """result['key'] is dict key access."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_dict_key_access,
-        )
-
-        child = ast.Constant(value="key")
-        subscript = ast.Subscript(
-            value=ast.Name(id="result", ctx=ast.Load()),
-            slice=child,
-            ctx=ast.Load(),
-        )
-        assert _is_dict_key_access(child, _parents((child, subscript))) is True
+    def test_subscript(self, tmp_path):
+        """result['key'] is dict key access. Mutant: a subscript not read as key access in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _findings(tmp_path, 'value = result["zz_special"]\n') == []
 
     def test_no_parent(self):
         """Node with no parent returns False."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_dict_key_access,
-        )
-
+        # HELD (no public seam): scan() hands _is_dict_key_access only nodes from a
+        # parsed module, and every such constant has a parent.
         child = ast.Constant(value="key")
-        assert _is_dict_key_access(child, {}) is False
+        assert plugin_integrity._is_dict_key_access(child, {}) is False
 
-    def test_non_get_attribute_call(self):
-        """result.append('key') is not dict key access."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_dict_key_access,
-        )
+    def test_non_get_attribute_call(self, tmp_path):
+        """result.append('key') is not dict key access. Mutant: every method call read as key access in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _kinds(_findings(tmp_path, 'result.append("zz_special")\n')) == ["ast_string_literal"]
 
-        child = ast.Constant(value="key")
-        func = ast.Attribute(
-            value=ast.Name(id="result", ctx=ast.Load()),
-            attr="append",
-            ctx=ast.Load(),
-        )
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_dict_key_access(child, _parents((child, call))) is False
-
-    def test_plain_function_call(self):
-        """do_work('key') is not dict key access."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _is_dict_key_access,
-        )
-
-        child = ast.Constant(value="key")
-        func = ast.Name(id="do_work", ctx=ast.Load())
-        call = ast.Call(func=func, args=[child], keywords=[])
-        assert _is_dict_key_access(child, _parents((child, call))) is False
+    def test_plain_function_call(self, tmp_path):
+        """do_work('key') is not dict key access. Mutant: every call read as key access in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        assert _kinds(_findings(tmp_path, 'do_work("zz_special")\n')) == ["ast_string_literal"]
 
 
 # ===========================================================================
-# PLUGIN INTEGRITY -- _scan_file_ast
+# PLUGIN INTEGRITY -- the AST scanner, through scan()
 # ===========================================================================
 
 
 class TestScanFileAst:
-    """Tests for _scan_file_ast."""
+    """What the AST half of scan() reports."""
 
     def test_clean_file(self, tmp_path):
         """File with no standard name references returns empty."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "clean.py"
-        f.write_text('x = "hello"\n', encoding="utf-8")
-        result = _scan_file_ast(f, ["meta", "naming"])
+        result = _findings(tmp_path, 'x = "hello"\n', ("meta", "naming"))
         assert result == []
 
     def test_syntax_error_file(self, tmp_path):
-        """File with syntax error returns empty and does not crash."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "broken.py"
-        f.write_text("def foo(\n", encoding="utf-8")
-        result = _scan_file_ast(f, ["meta"])
+        """File with syntax error returns empty and does not crash. Mutant: the SyntaxError re-raised in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, "def foo(\n", ("meta",))
         assert result == []
 
     def test_finds_hardcoded_standard_name(self, tmp_path):
-        """Detects non-ambiguous standard name as string literal."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "hardcoded.py"
-        f.write_text('x = "custom_standard"\n', encoding="utf-8")
-        result = _scan_file_ast(f, ["custom_standard"])
+        """Detects non-ambiguous standard name as string literal. Mutant: the name-set check inverted in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, 'x = "custom_standard"\n', ("custom_standard",))
         assert len(result) == 1
         assert result[0]["name"] == "custom_standard"
         assert result[0]["kind"] == "ast_string_literal"
 
     def test_skips_ambiguous_names(self, tmp_path):
-        """Ambiguous standard names are not flagged by AST scanner."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "ambiguous.py"
-        f.write_text('x = "meta"\n', encoding="utf-8")
-        result = _scan_file_ast(f, ["meta"])
+        """Ambiguous standard names are not flagged by AST scanner. Mutant: the ambiguous-name skip dropped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, 'x = "meta"\n', ("meta",))
         assert result == []
 
     def test_skips_docstrings(self, tmp_path):
         """Standard name in docstring is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
+        # HELD (pins nothing): the docstring is not equal to a standard name, so no
+        # mutant of the docstring skip reddens this, through scan() or directly.
         f = tmp_path / "docstr.py"
         f.write_text('"""custom_standard is great."""\nx = 1\n', encoding="utf-8")
-        result = _scan_file_ast(f, ["custom_standard"])
+        result = plugin_integrity._scan_file_ast(f, ["custom_standard"])
         assert result == []
 
     def test_skips_display_strings(self, tmp_path):
-        """Standard name in display call is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "display.py"
-        f.write_text(
-            'import logger\nlogger.info("custom_standard")\n',
-            encoding="utf-8",
-        )
-        result = _scan_file_ast(f, ["custom_standard"])
+        """Standard name in display call is not flagged. Mutant: the display-string skip dropped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, 'import logger\nlogger.info("custom_standard")\n', ("custom_standard",))
         assert result == []
 
     def test_skips_dict_key_access(self, tmp_path):
-        """Standard name as dict key access is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "dictkey.py"
-        f.write_text('result = data.get("custom_standard")\n', encoding="utf-8")
-        result = _scan_file_ast(f, ["custom_standard"])
+        """Standard name as dict key access is not flagged. Mutant: the dict-key skip dropped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, 'result = data.get("custom_standard")\n', ("custom_standard",))
         assert result == []
 
     def test_non_matching_name_not_flagged(self, tmp_path):
-        """String literal not matching any standard name is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_ast,
-        )
-
-        f = tmp_path / "other.py"
-        f.write_text('x = "something_else"\n', encoding="utf-8")
-        result = _scan_file_ast(f, ["custom_standard"])
+        """String literal not matching any standard name is not flagged. Mutant: the name-set check inverted in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, 'x = "something_else"\n', ("custom_standard",))
         assert result == []
 
 
 # ===========================================================================
-# PLUGIN INTEGRITY -- _scan_file_regex
+# PLUGIN INTEGRITY -- the regex scanner, through scan()
 # ===========================================================================
 
 
 class TestScanFileRegex:
-    """Tests for _scan_file_regex."""
+    """What the regex half of scan() reports."""
 
     def test_clean_file(self, tmp_path):
         """File with no suspicious patterns returns empty."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "clean.py"
-        f.write_text('x = "hello"\n', encoding="utf-8")
-        result = _scan_file_regex(f, ["meta"])
+        result = _findings(tmp_path, 'x = "hello"\n', ("meta",))
         assert result == []
 
     def test_hardcoded_function_call(self, tmp_path):
-        """Detects check_<standard>( pattern."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "func_call.py"
-        f.write_text("result = check_custom_std(path)\n", encoding="utf-8")
-        result = _scan_file_regex(f, ["custom_std"])
+        """Detects check_<standard>( pattern. Mutant: the check_<standard>( pattern broken in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, "result = check_custom_std(path)\n", ("custom_std",))
         assert len(result) >= 1
-        kinds = [r["kind"] for r in result]
+        kinds = _kinds(result)
         assert "hardcoded_function_call" in kinds
 
     def test_hardcoded_violation_key(self, tmp_path):
-        """Detects <standard>_violations pattern."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "viol_key.py"
-        f.write_text("x = custom_std_violations\n", encoding="utf-8")
-        result = _scan_file_regex(f, ["custom_std"])
+        """Detects <standard>_violations pattern. Mutant: the _violations pattern broken in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, "x = custom_std_violations\n", ("custom_std",))
         assert len(result) >= 1
-        kinds = [r["kind"] for r in result]
+        kinds = _kinds(result)
         assert "hardcoded_violation_key" in kinds
 
     def test_hardcoded_branch_condition(self, tmp_path):
-        """Detects == 'standard' pattern."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "branch_cond.py"
-        f.write_text("if name == 'custom_std':\n    pass\n", encoding="utf-8")
-        result = _scan_file_regex(f, ["custom_std"])
+        """Detects == 'standard' pattern. Mutant: the == '<standard>' pattern broken in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, "if name == 'custom_std':\n    pass\n", ("custom_std",))
         assert len(result) >= 1
-        kinds = [r["kind"] for r in result]
+        kinds = _kinds(result)
         assert "hardcoded_branch" in kinds
 
     def test_skips_comment_lines(self, tmp_path):
         """Pure comment lines are skipped."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
+        # HELD (pins nothing): the inline-comment strip blanks this line too, so no
+        # mutant of the comment skip reddens this, through scan() or directly.
         f = tmp_path / "comments.py"
         f.write_text("# check_custom_std(path)\n", encoding="utf-8")
-        result = _scan_file_regex(f, ["custom_std"])
+        result = plugin_integrity._scan_file_regex(f, ["custom_std"])
         assert result == []
 
     def test_skips_docstring_content(self, tmp_path):
-        """Content inside triple-quoted docstrings is skipped."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "docstr.py"
-        f.write_text(
-            '"""\ncheck_custom_std(path)\n"""\npass\n',
-            encoding="utf-8",
-        )
-        result = _scan_file_regex(f, ["custom_std"])
+        """Content inside triple-quoted docstrings is skipped. Mutant: docstring lines not skipped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, '"""\ncheck_custom_std(path)\n"""\npass\n', ("custom_std",))
         assert result == []
 
     def test_inline_comment_stripped(self, tmp_path):
-        """Code before inline comment is still checked."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "inline.py"
-        f.write_text(
-            "result = check_custom_std(path)  # run check\n",
-            encoding="utf-8",
-        )
-        result = _scan_file_regex(f, ["custom_std"])
+        """Code before inline comment is still checked. Mutant: the check_<standard>( pattern broken in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, "result = check_custom_std(path)  # run check\n", ("custom_std",))
         assert len(result) >= 1
 
     def test_double_quote_branch(self, tmp_path):
-        """Detects == 'standard' with double quotes."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "dquote.py"
-        f.write_text('if name == "custom_std":\n    pass\n', encoding="utf-8")
-        result = _scan_file_regex(f, ["custom_std"])
-        kinds = [r["kind"] for r in result]
+        """Detects == 'standard' with double quotes. Mutant: the == '<standard>' pattern broken in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, 'if name == "custom_std":\n    pass\n', ("custom_std",))
+        kinds = _kinds(result)
         assert "hardcoded_branch" in kinds
 
     def test_single_quote_docstring(self, tmp_path):
-        """Single-quote triple docstrings are tracked."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            _scan_file_regex,
-        )
-
-        f = tmp_path / "squote_doc.py"
-        f.write_text(
-            "'''\ncheck_custom_std(path)\n'''\npass\n",
-            encoding="utf-8",
-        )
-        result = _scan_file_regex(f, ["custom_std"])
+        """Single-quote triple docstrings are tracked. Mutant: docstring lines not skipped in apps/handlers/aipass_proof/plugin_integrity.py — killed."""
+        result = _findings(tmp_path, "'''\ncheck_custom_std(path)\n'''\npass\n", ("custom_std",))
         assert result == []
 
 
@@ -859,9 +410,6 @@ class TestPluginIntegrityScan:
 
     def test_all_modules_missing(self, tmp_path):
         """All target modules missing results in 'missing' status."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -872,9 +420,6 @@ class TestPluginIntegrityScan:
 
     def test_clean_module(self, tmp_path):
         """Module with no issues is marked clean."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -889,9 +434,6 @@ class TestPluginIntegrityScan:
 
     def test_cosmetic_module_flagged_as_cosmetic(self, tmp_path):
         """Module in COSMETIC_MODULES with findings is marked cosmetic."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -909,9 +451,6 @@ class TestPluginIntegrityScan:
 
     def test_flagged_module(self, tmp_path):
         """Non-cosmetic module with findings is flagged and scan fails."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -931,9 +470,6 @@ class TestPluginIntegrityScan:
 
     def test_deduplication_of_findings(self, tmp_path):
         """Findings from AST and regex are deduplicated."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -960,9 +496,6 @@ class TestPluginIntegrityScan:
 
     def test_summary_with_all_clean(self, tmp_path):
         """Summary string says 'clean' when all modules pass."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -984,9 +517,6 @@ class TestPluginIntegrityScan:
 
     def test_issue_kind_labels(self, tmp_path):
         """Issue strings use human-readable kind labels."""
-        from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity import (
-            scan,
-        )
 
         pack_dir = tmp_path / "apps" / "handlers" / "aipass_standards"
         pack_dir.mkdir(parents=True)
@@ -1018,9 +548,6 @@ class TestShouldIgnoreFile:
 
     def test_matching_pattern(self, tmp_path):
         """A root-anchored entry removes its path at the branch root and nowhere deeper."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            should_ignore_file,
-        )
 
         mod = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
         with patch(f"{mod}.audit_ignore_match", real_ignore_handler.audit_ignore_match):
@@ -1029,9 +556,6 @@ class TestShouldIgnoreFile:
 
     def test_no_matching_pattern(self, tmp_path):
         """An unanchored entry (.archive/) removes its directory at any depth."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            should_ignore_file,
-        )
 
         mod = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
         with patch(f"{mod}.audit_ignore_match", real_ignore_handler.audit_ignore_match):
@@ -1040,9 +564,6 @@ class TestShouldIgnoreFile:
 
     def test_empty_patterns(self, tmp_path, monkeypatch):
         """Empty pattern list means nothing is ignored."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            should_ignore_file,
-        )
 
         monkeypatch.setattr(real_ignore_handler, "AUDIT_IGNORE_PATTERNS", [])
         mod = "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check"
@@ -1060,9 +581,6 @@ class TestCheckFile:
 
     def test_nonexistent_file(self, tmp_path):
         """Nonexistent file returns error dict."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         result = check_file(str(tmp_path / "missing.py"))
         assert result["errors"] == 0
@@ -1071,9 +589,6 @@ class TestCheckFile:
 
     def test_non_python_file(self, tmp_path):
         """Non-.py file is skipped."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         f = tmp_path / "data.txt"
         f.write_text("hello", encoding="utf-8")
@@ -1083,9 +598,6 @@ class TestCheckFile:
 
     def test_successful_pyright_check(self, tmp_path):
         """Pyright with clean output returns zero errors."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         f = tmp_path / "good.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1101,9 +613,6 @@ class TestCheckFile:
 
     def test_pyright_with_errors(self, tmp_path):
         """Pyright output with errors is parsed correctly."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         f = tmp_path / "bad.py"
         f.write_text("x: int = 'no'\n", encoding="utf-8")
@@ -1137,9 +646,6 @@ class TestCheckFile:
 
     def test_pyright_json_decode_error(self, tmp_path):
         """Non-JSON pyright output returns error dict."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         f = tmp_path / "file.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1155,9 +661,6 @@ class TestCheckFile:
 
     def test_pyright_timeout(self, tmp_path):
         """Pyright timeout returns timeout error."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         f = tmp_path / "slow.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1171,9 +674,6 @@ class TestCheckFile:
 
     def test_pyright_generic_exception(self, tmp_path):
         """Generic exception during pyright returns error dict."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_file,
-        )
 
         f = tmp_path / "crash.py"
         f.write_text("x = 1\n", encoding="utf-8")
@@ -1196,9 +696,6 @@ class TestCheckDirectory:
 
     def test_nonexistent_directory(self, tmp_path):
         """Nonexistent directory returns error."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         result = check_directory(str(tmp_path / "nonexistent"))
         assert result["total_files"] == 0
@@ -1206,9 +703,6 @@ class TestCheckDirectory:
 
     def test_empty_directory(self, tmp_path):
         """Empty directory with no diagnostics returns zero totals."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         pyright_out = json.dumps({"generalDiagnostics": [], "summary": {"filesAnalyzed": 0}})
         with patch("aipass.seedgo.apps.handlers.diagnostics.diagnostics_check.subprocess.run") as mock_run:
@@ -1220,9 +714,6 @@ class TestCheckDirectory:
 
     def test_directory_with_errors(self, tmp_path):
         """Directory with pyright errors parses and groups correctly."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         diags = [
             {
@@ -1261,9 +752,6 @@ class TestCheckDirectory:
 
     def test_directory_ignores_files(self, tmp_path):
         """Pyright's findings in the driver layer are dropped; tracked handlers/integrations/ keeps its."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         apps = tmp_path / "apps"
         apps.mkdir()
@@ -1299,9 +787,6 @@ class TestCheckDirectory:
 
     def test_directory_json_decode_error(self, tmp_path):
         """Non-JSON pyright output for directory returns error."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         with patch("aipass.seedgo.apps.handlers.diagnostics.diagnostics_check.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
@@ -1315,9 +800,6 @@ class TestCheckDirectory:
 
     def test_directory_timeout(self, tmp_path):
         """Timeout for directory check returns error."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         with patch("aipass.seedgo.apps.handlers.diagnostics.diagnostics_check.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(cmd="pyright", timeout=300)
@@ -1328,9 +810,6 @@ class TestCheckDirectory:
 
     def test_directory_generic_exception(self, tmp_path):
         """Generic exception during directory check returns error."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_directory,
-        )
 
         with patch("aipass.seedgo.apps.handlers.diagnostics.diagnostics_check.subprocess.run") as mock_run:
             mock_run.side_effect = RuntimeError("unexpected")
@@ -1340,44 +819,102 @@ class TestCheckDirectory:
         assert "unexpected" in result["error"]
 
 
+# ---------------------------------------------------------------------------
+# Helpers -- check_branch over a handlers/ tree under tmp_path
+# ---------------------------------------------------------------------------
+
+_RUNNER_PREFIX = diagnostics_package.__name__ + "."
+
+
+@pytest.fixture
+def handlers_dir(tmp_path, monkeypatch):
+    """tmp_path as check_branch's handlers/ and diagnostics/ dirs, and as a branch with an apps/."""
+    # A runner written here imports for real, under the diagnostics package's own
+    # name, exactly as _run_runner imports it; it leaves sys.modules afterwards.
+    monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
+    monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
+    monkeypatch.setattr(diagnostics_package, "__path__", [*diagnostics_package.__path__, str(tmp_path)])
+    (tmp_path / "apps").mkdir()
+    yield tmp_path
+    for name in [
+        n
+        for n, m in list(sys.modules.items())
+        if n.startswith(_RUNNER_PREFIX) and str(getattr(m, "__file__", "")).startswith(str(tmp_path))
+    ]:
+        del sys.modules[name]
+
+
+class _Fallback:
+    """Stands in for check_directory, the pyright subprocess check_branch falls back to."""
+
+    RESULT = {"total_errors": 0, "total_warnings": 0, "total_files": 42, "results": []}
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def __call__(self, directory: str) -> dict:
+        self.calls.append(directory)
+        return self.RESULT
+
+
+def _config(handlers: Path, config: dict, pack: str = "x_standards") -> None:
+    """A *_standards pack under *handlers* whose diagnostics.json is *config*."""
+    pack_dir = handlers / pack
+    pack_dir.mkdir(exist_ok=True)
+    (pack_dir / "diagnostics.json").write_text(json.dumps(config), encoding="utf-8")
+
+
+def _requested(branch: Path, monkeypatch) -> list[str]:
+    """The runner names check_branch asks for on *branch*, each answered clean."""
+    asked: list[str] = []
+
+    def runner(name: str, branch_path: str, bypass_rules: list | None = None) -> dict:
+        asked.append(name)
+        return {"total_errors": 0, "total_warnings": 0, "total_files": 1, "checks": [], "results": []}
+
+    monkeypatch.setattr(diagnostics_check, "_run_runner", runner)
+    check_branch(str(branch))
+    return asked
+
+
+def _through_runner(handlers: Path, monkeypatch, runner: str) -> tuple[dict, _Fallback]:
+    """check_branch with only *runner* enabled: its result, and the pyright fallback it may call."""
+    _config(handlers, {"runners": {runner: True}})
+    fallback = _Fallback()
+    monkeypatch.setattr(diagnostics_check, "check_directory", fallback)
+    return check_branch(str(handlers)), fallback
+
+
 # ===========================================================================
-# DIAGNOSTICS CHECK -- _discover_pack_configs
+# DIAGNOSTICS CHECK -- pack config discovery, through check_branch
 # ===========================================================================
 
 
 class TestDiscoverPackConfigs:
-    """Tests for _discover_pack_configs."""
+    """Which diagnostics.json files check_branch reads its runners from."""
 
-    def test_no_handlers_dir(self, monkeypatch):
-        """Returns empty when HANDLERS_DIR does not exist."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
+    def test_no_handlers_dir(self, tmp_path, monkeypatch):
+        """No HANDLERS_DIR means no config: only the python fallback runs. Mutant: the missing-dir guard dropped in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path / "nonexistent")
+        (tmp_path / "apps").mkdir()
+        assert _requested(tmp_path, monkeypatch) == ["python"]
 
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", Path("/nonexistent/dir"))
-        result = diagnostics_check._discover_pack_configs()
-        assert result == []
+    def test_no_standards_dirs(self, handlers_dir, monkeypatch):
+        """A config outside a *_standards dir is not read. Mutant: the _standards name check dropped in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        _config(handlers_dir, {"runners": {"rust": True}}, pack="other_dir")
+        assert _requested(handlers_dir, monkeypatch) == ["python"]
 
-    def test_no_standards_dirs(self, tmp_path, monkeypatch):
-        """Returns empty when no *_standards directories exist."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
-        (tmp_path / "other_dir").mkdir()
-        result = diagnostics_check._discover_pack_configs()
-        assert result == []
-
-    def test_standards_dir_without_config(self, tmp_path, monkeypatch):
-        """Returns empty when *_standards dir has no diagnostics.json."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
-        (tmp_path / "aipass_standards").mkdir()
-        result = diagnostics_check._discover_pack_configs()
-        assert result == []
+    def test_standards_dir_without_config(self, handlers_dir, monkeypatch):
+        """A *_standards dir with no diagnostics.json adds no runner. Mutant: any *.json read as the config in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        pack_dir = handlers_dir / "aipass_standards"
+        pack_dir.mkdir()
+        (pack_dir / "other.json").write_text(json.dumps({"runners": {"rust": True}}), encoding="utf-8")
+        assert _requested(handlers_dir, monkeypatch) == ["python"]
 
     def test_valid_config(self, tmp_path, monkeypatch):
         """Returns config when valid diagnostics.json exists."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
+        # HELD (no public seam): check_branch reads only each config's runners, never
+        # the pack_name and pack_path this pins.
         monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
         std_dir = tmp_path / "aipass_standards"
         std_dir.mkdir()
@@ -1389,22 +926,17 @@ class TestDiscoverPackConfigs:
         assert result[0]["pack_name"] == "aipass_standards"
         assert result[0]["config"] == config
 
-    def test_malformed_config_skipped(self, tmp_path, monkeypatch):
-        """Malformed JSON is skipped gracefully."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
-        std_dir = tmp_path / "test_standards"
+    def test_malformed_config_skipped(self, handlers_dir, monkeypatch):
+        """Malformed JSON is skipped gracefully. Mutant: JSONDecodeError not caught in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        std_dir = handlers_dir / "test_standards"
         std_dir.mkdir()
         (std_dir / "diagnostics.json").write_text("not json", encoding="utf-8")
-
-        result = diagnostics_check._discover_pack_configs()
-        assert result == []
+        assert _requested(handlers_dir, monkeypatch) == ["python"]
 
     def test_non_directory_skipped(self, tmp_path, monkeypatch):
         """Files (not directories) in HANDLERS_DIR are skipped."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
+        # HELD (pins nothing): a file's diagnostics.json never exists, so no mutant
+        # of the is_dir() skip reddens this, through check_branch or directly.
         monkeypatch.setattr(diagnostics_check, "HANDLERS_DIR", tmp_path)
         (tmp_path / "some_standards").write_text("file", encoding="utf-8")
         result = diagnostics_check._discover_pack_configs()
@@ -1412,62 +944,38 @@ class TestDiscoverPackConfigs:
 
 
 # ===========================================================================
-# DIAGNOSTICS CHECK -- _get_enabled_runners_from_config
+# DIAGNOSTICS CHECK -- enabled runners, through check_branch
 # ===========================================================================
 
 
 class TestGetEnabledRunners:
-    """Tests for _get_enabled_runners_from_config."""
+    """Which runners a diagnostics.json enables."""
 
-    def test_simple_bool_format(self):
-        """Simple bool format: {'python': true}."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            _get_enabled_runners_from_config,
-        )
+    # python is check_branch's fallback, so an enabled runner is named rust here:
+    # a python-only answer could not tell the config from the fallback.
 
-        config = {"runners": {"python": True, "typescript": False}}
-        result = _get_enabled_runners_from_config(config)
-        assert result == ["python"]
+    def test_simple_bool_format(self, handlers_dir, monkeypatch):
+        """Simple bool format: {'rust': true}. Mutant: a false bool read as enabled in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        _config(handlers_dir, {"runners": {"rust": True, "typescript": False}})
+        assert _requested(handlers_dir, monkeypatch) == ["rust"]
 
-    def test_detailed_dict_format(self):
-        """Detailed format: {'python': {'enabled': true, ...}}."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            _get_enabled_runners_from_config,
-        )
+    def test_detailed_dict_format(self, handlers_dir, monkeypatch):
+        """Detailed format: {'rust': {'enabled': true, ...}}. Mutant: every dict read as enabled in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        _config(handlers_dir, {"runners": {"rust": {"enabled": True, "timeout": 60}, "go": {"enabled": False}}})
+        assert _requested(handlers_dir, monkeypatch) == ["rust"]
 
-        config = {
-            "runners": {
-                "python": {"enabled": True, "timeout": 60},
-                "rust": {"enabled": False},
-            }
-        }
-        result = _get_enabled_runners_from_config(config)
-        assert result == ["python"]
+    def test_empty_runners(self, handlers_dir, monkeypatch):
+        """Empty runners section enables nothing: only the fallback runs. Mutant: an empty section answers a runner in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        _config(handlers_dir, {"runners": {}})
+        assert _requested(handlers_dir, monkeypatch) == ["python"]
 
-    def test_empty_runners(self):
-        """Empty runners section returns empty list."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            _get_enabled_runners_from_config,
-        )
+    def test_no_runners_key(self, handlers_dir, monkeypatch):
+        """Missing 'runners' key enables nothing: only the fallback runs. Mutant: 'runners' read without a default in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        _config(handlers_dir, {})
+        assert _requested(handlers_dir, monkeypatch) == ["python"]
 
-        result = _get_enabled_runners_from_config({"runners": {}})
-        assert result == []
-
-    def test_no_runners_key(self):
-        """Missing 'runners' key returns empty list."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            _get_enabled_runners_from_config,
-        )
-
-        result = _get_enabled_runners_from_config({})
-        assert result == []
-
-    def test_mixed_formats(self):
-        """Mix of bool and dict format works."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            _get_enabled_runners_from_config,
-        )
-
+    def test_mixed_formats(self, handlers_dir, monkeypatch):
+        """Mix of bool and dict format works. Mutant: the dict format never read in apps/handlers/diagnostics/diagnostics_check.py — killed."""
         config = {
             "runners": {
                 "python": True,
@@ -1476,7 +984,8 @@ class TestGetEnabledRunners:
                 "java": {"enabled": False},
             }
         }
-        result = _get_enabled_runners_from_config(config)
+        _config(handlers_dir, config)
+        result = _requested(handlers_dir, monkeypatch)
         assert "python" in result
         assert "rust" in result
         assert "go" not in result
@@ -1484,149 +993,81 @@ class TestGetEnabledRunners:
 
 
 # ===========================================================================
-# DIAGNOSTICS CHECK -- _run_runner
+# DIAGNOSTICS CHECK -- runner dispatch, through check_branch
 # ===========================================================================
 
 
 class TestRunRunner:
-    """Tests for _run_runner."""
+    """A runner that does not answer sends check_branch to its pyright fallback."""
 
-    def test_runner_not_found(self, tmp_path, monkeypatch):
-        """Returns None when runner file does not exist."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
+    def test_runner_not_found(self, handlers_dir, monkeypatch):
+        """A missing runner file falls back. Mutant: a missing runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "nonexistent")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        result = diagnostics_check._run_runner("nonexistent", "/branch")
-        assert result is None
+    def test_runner_empty_file(self, handlers_dir, monkeypatch):
+        """An empty (0 bytes) runner file falls back. Mutant: an empty runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "empty_diagnostics.py").write_text("", encoding="utf-8")
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "empty")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
-    def test_runner_empty_file(self, tmp_path, monkeypatch):
-        """Returns None when runner file is empty (0 bytes)."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
+    def test_runner_whitespace_only(self, handlers_dir, monkeypatch):
+        """A whitespace-only runner file falls back. Mutant: a blank runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "blank_diagnostics.py").write_text("   \n\n  \n", encoding="utf-8")
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "blank")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "empty_diagnostics.py").write_text("", encoding="utf-8")
-        result = diagnostics_check._run_runner("empty", "/branch")
-        assert result is None
+    def test_runner_import_failure(self, handlers_dir, monkeypatch):
+        """A runner module that fails to import falls back. Mutant: an import failure answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "broken_diagnostics.py").write_text("import nonexistent_module_xyz\n", encoding="utf-8")
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "broken")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
-    def test_runner_whitespace_only(self, tmp_path, monkeypatch):
-        """Returns None when runner file is whitespace only."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
+    def test_runner_no_check_branch(self, handlers_dir, monkeypatch):
+        """A runner module with no check_branch falls back. Mutant: a runner without check_branch answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "nofunc_diagnostics.py").write_text("x = 1\n", encoding="utf-8")
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "nofunc")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "blank_diagnostics.py").write_text("   \n\n  \n", encoding="utf-8")
-        result = diagnostics_check._run_runner("blank", "/branch")
-        assert result is None
-
-    def test_runner_import_failure(self, tmp_path, monkeypatch):
-        """Returns None when runner module fails to import."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "broken_diagnostics.py").write_text("import nonexistent_module_xyz\n", encoding="utf-8")
-
-        with patch.object(
-            diagnostics_check.importlib,
-            "import_module",
-            side_effect=ImportError("no module"),
-        ):
-            result = diagnostics_check._run_runner("broken", "/branch")
-
-        assert result is None
-
-    def test_runner_no_check_branch(self, tmp_path, monkeypatch):
-        """Returns None when runner module has no check_branch function."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "nofunc_diagnostics.py").write_text("x = 1\n", encoding="utf-8")
-
-        mock_module = MagicMock(spec=[])
-        with patch.object(
-            diagnostics_check.importlib,
-            "import_module",
-            return_value=mock_module,
-        ):
-            result = diagnostics_check._run_runner("nofunc", "/branch")
-
-        assert result is None
-
-    def test_runner_check_branch_raises(self, tmp_path, monkeypatch):
-        """Returns None when check_branch raises an exception."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "crashing_diagnostics.py").write_text(
+    def test_runner_check_branch_raises(self, handlers_dir, monkeypatch):
+        """A runner whose check_branch raises falls back. Mutant: a raising runner answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "crashing_diagnostics.py").write_text(
             "def check_branch(b, bypass_rules=None):\n    raise RuntimeError('boom')\n",
             encoding="utf-8",
         )
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "crashing")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
-        mock_module = MagicMock()
-        mock_module.check_branch = MagicMock(side_effect=RuntimeError("boom"))
-        with patch.object(
-            diagnostics_check.importlib,
-            "import_module",
-            return_value=mock_module,
-        ):
-            result = diagnostics_check._run_runner("crashing", "/branch")
-
-        assert result is None
-
-    def test_runner_success(self, tmp_path, monkeypatch):
-        """Returns result when runner executes successfully."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "good_diagnostics.py").write_text(
-            "def check_branch(b, bypass_rules=None):\n    return {}\n",
+    def test_runner_success(self, handlers_dir, monkeypatch):
+        """A runner that answers is merged and pyright never runs. Mutant: the runner's answer dropped in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "good_diagnostics.py").write_text(
+            "def check_branch(b, bypass_rules=None):\n"
+            "    return {'total_errors': 3, 'total_warnings': 0, 'total_files': 7, 'checks': [], 'results': []}\n",
             encoding="utf-8",
         )
+        result, fallback = _through_runner(handlers_dir, monkeypatch, "good")
+        assert (result["total_errors"], result["total_files"]) == (3, 7)
+        assert fallback.calls == []
 
-        expected = {"total_errors": 0, "checks": []}
-        mock_module = MagicMock()
-        mock_module.check_branch = MagicMock(return_value=expected)
-        with patch.object(
-            diagnostics_check.importlib,
-            "import_module",
-            return_value=mock_module,
-        ):
-            result = diagnostics_check._run_runner("good", "/branch")
-
-        assert result == expected
-
-    def test_runner_typo_variant(self, tmp_path, monkeypatch):
-        """Falls back to *_diognostics.py typo variant."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        (tmp_path / "legacy_diognostics.py").write_text(
-            "def check_branch(b, bypass_rules=None):\n    return {}\n",
+    def test_runner_typo_variant(self, handlers_dir, monkeypatch):
+        """Falls back to *_diognostics.py typo variant. Mutant: the typo variant not tried in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        (handlers_dir / "legacy_diognostics.py").write_text(
+            "def check_branch(b, bypass_rules=None):\n"
+            "    return {'total_errors': 0, 'total_warnings': 0, 'total_files': 5, 'checks': [], 'results': []}\n",
             encoding="utf-8",
         )
+        result, fallback = _through_runner(handlers_dir, monkeypatch, "legacy")
+        assert result["total_files"] == 5
+        assert fallback.calls == []
 
-        expected = {"total_errors": 0}
-        mock_module = MagicMock()
-        mock_module.check_branch = MagicMock(return_value=expected)
-        with patch.object(
-            diagnostics_check.importlib,
-            "import_module",
-            return_value=mock_module,
-        ):
-            result = diagnostics_check._run_runner("legacy", "/branch")
-
-        assert result == expected
-
-    def test_runner_ioerror_on_read(self, tmp_path, monkeypatch):
-        """Returns None when runner file cannot be read."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
-
-        monkeypatch.setattr(diagnostics_check, "DIAGNOSTICS_DIR", tmp_path)
-        runner_file = tmp_path / "ioerr_diagnostics.py"
-        runner_file.write_text("content\n", encoding="utf-8")
-
-        with patch.object(Path, "read_text", side_effect=IOError("read error")):
-            result = diagnostics_check._run_runner("ioerr", "/branch")
-
-        assert result is None
+    def test_runner_ioerror_on_read(self, handlers_dir, monkeypatch):
+        """A runner file that cannot be read falls back. Mutant: a read error answered in apps/handlers/diagnostics/diagnostics_check.py — killed."""
+        # A directory under the runner's file name is a real read failure on every
+        # OS: POSIX raises IsADirectoryError, Windows PermissionError (or stats it
+        # at size 0, which falls back one check earlier).
+        (handlers_dir / "ioerr_diagnostics.py").mkdir()
+        _, fallback = _through_runner(handlers_dir, monkeypatch, "ioerr")
+        assert fallback.calls == [str(handlers_dir / "apps")]
 
 
 # ===========================================================================
@@ -1639,9 +1080,6 @@ class TestCheckBranch:
 
     def test_no_apps_directory(self, tmp_path):
         """Returns passed=True when no apps/ directory exists."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            check_branch,
-        )
 
         result = check_branch(str(tmp_path))
         assert result["passed"] is True
@@ -1650,7 +1088,6 @@ class TestCheckBranch:
 
     def test_with_runner_configs(self, tmp_path, monkeypatch):
         """Uses runner configs when packs are discovered."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
 
         apps_dir = tmp_path / "apps"
         apps_dir.mkdir()
@@ -1695,7 +1132,6 @@ class TestCheckBranch:
 
     def test_fallback_to_python_runner(self, tmp_path, monkeypatch):
         """Falls back to 'python' runner when no configs found."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
 
         apps_dir = tmp_path / "apps"
         apps_dir.mkdir()
@@ -1720,18 +1156,18 @@ class TestCheckBranch:
         assert result["score"] == 100
 
     def test_no_runner_executed_fallback_to_pyright(self, tmp_path, monkeypatch):
-        """Falls back to direct pyright check when no runner executes."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
+        """Falls back to direct pyright check when no runner executes. Mutant: the fallback runner renamed in apps/handlers/diagnostics/diagnostics_check.py — killed."""
 
         apps_dir = tmp_path / "apps"
         apps_dir.mkdir()
 
         monkeypatch.setattr(diagnostics_check, "_discover_pack_configs", lambda: [])
-        monkeypatch.setattr(
-            diagnostics_check,
-            "_run_runner",
-            lambda name, bp, bypass_rules=None: None,
-        )
+        asked: list[str] = []
+
+        def runner(name: str, branch_path: str, bypass_rules: list | None = None) -> None:
+            asked.append(name)
+
+        monkeypatch.setattr(diagnostics_check, "_run_runner", runner)
 
         dir_result = {
             "total_errors": 1,
@@ -1752,10 +1188,10 @@ class TestCheckBranch:
         assert result["passed"] is False
         assert result["total_errors"] == 1
         assert any("Type errors" in c["name"] for c in result["checks"])
+        assert asked == ["python"]
 
     def test_no_errors_default_check(self, tmp_path, monkeypatch):
         """Default passing check is added when nothing failed."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
 
         apps_dir = tmp_path / "apps"
         apps_dir.mkdir()
@@ -1783,7 +1219,6 @@ class TestCheckBranch:
 
     def test_score_clamped_at_zero(self, tmp_path, monkeypatch):
         """Score does not go below 0 even with many errors."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
 
         apps_dir = tmp_path / "apps"
         apps_dir.mkdir()
@@ -1814,7 +1249,6 @@ class TestCheckBranch:
 
     def test_multiple_runners_deduplicated(self, tmp_path, monkeypatch):
         """Duplicate runner names across packs are deduplicated."""
-        from aipass.seedgo.apps.handlers.diagnostics import diagnostics_check
 
         apps_dir = tmp_path / "apps"
         apps_dir.mkdir()
@@ -1871,18 +1305,12 @@ class TestFormatSummary:
 
     def test_with_error(self):
         """Returns error message when 'error' key is present."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            format_summary,
-        )
 
         result = format_summary({"error": "Something broke"})
         assert result == "Error: Something broke"
 
     def test_normal_summary(self):
         """Returns formatted summary for normal results."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            format_summary,
-        )
 
         results = {
             "total_files": 10,
@@ -1898,9 +1326,6 @@ class TestFormatSummary:
 
     def test_empty_error_string(self):
         """Empty error string returns normal summary."""
-        from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-            format_summary,
-        )
 
         results = {
             "error": "",

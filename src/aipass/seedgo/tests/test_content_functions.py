@@ -1,112 +1,79 @@
-"""Tests for all 37 content functions (standards + proof).
-
-One test per content function. Each asserts the function's own subject matter
-AND, through ``_assert_content_str``, that the answer is a non-empty multi-line
-string.
-
-Was 74 tests in 37 pairs until 2026-09-07 (FPLAN-0491). Every pair was a
-``_returns_str`` row and a ``_has_expected_content`` row calling the SAME
-function and asserting over the SAME value; the substring assertion already
-fails on None (TypeError) and on an empty string, so the only claim unique to
-the first row was "contains a newline". The pairs are merged, not dropped:
-``_assert_content_str`` now runs inside the surviving row, on the same result.
-Mutation-checked at the merge: a content function returning a single line
-reds its test.
-
-29 of the 37 rows carried an ``or``-joined substring assertion until 2026-09-07
-(FPLAN-0509, assertion_shape OR-ESCAPE): ``assert "X" in result or "y" in
-result.lower()`` passes on either clause, so it pinned neither. Each was
-replaced by the substrings the function ACTUALLY returns, measured by calling
-it and reading the string, one assert per claim. Two of the discarded clauses
-were already dead and the ``or`` had been hiding it: ``"meta" in result.lower()``
-is FALSE for get_introspection_standards, and ``"snake_case" in result.lower()``
-is FALSE for get_naming_standards. All 66 replacement substrings were
-mutation-checked one at a time against their own content module.
-"""
-
 # =================== META ====================
 # Name: test_content_functions.py
 # Description: Unit tests for all 37 content handler functions
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-import pytest
-from unittest.mock import MagicMock
+"""Tests for apps/handlers/aipass_standards/architecture_content.py and 36 sibling content functions."""
 
+# One test per content function (standards + proof). Each asserts the function's
+# own subject matter AND, through ``_assert_content_str``, that the answer is a
+# non-empty multi-line string.
+#
+# Was 74 tests in 37 pairs until 2026-09-07 (FPLAN-0491). Every pair was a
+# ``_returns_str`` row and a ``_has_expected_content`` row calling the SAME
+# function and asserting over the SAME value; the substring assertion already
+# fails on None (TypeError) and on an empty string, so the only claim unique to
+# the first row was "contains a newline". The pairs are merged, not dropped:
+# ``_assert_content_str`` now runs inside the surviving row, on the same result.
+# Mutation-checked at the merge: a content function returning a single line
+# reds its test.
+#
+# 29 of the 37 rows carried an ``or``-joined substring assertion until 2026-09-07
+# (FPLAN-0509, assertion_shape OR-ESCAPE): ``assert "X" in result or "y" in
+# result.lower()`` passes on either clause, so it pinned neither. Each was
+# replaced by the substrings the function ACTUALLY returns, measured by calling
+# it and reading the string, one assert per claim. Two of the discarded clauses
+# were already dead and the ``or`` had been hiding it: ``"meta" in result.lower()``
+# is FALSE for get_introspection_standards, and ``"snake_case" in result.lower()``
+# is FALSE for get_naming_standards. All 66 replacement substrings were
+# mutation-checked one at a time against their own content module.
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that all 37 content modules under aipass_standards/ and aipass_proof/ parse and import
+# seedgo: no-test-needed(meta) — that each content module carries its own META header
 
-
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for content handlers."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # Force re-imports so content modules pick up fresh mocks
-    standards_prefix = "aipass.seedgo.apps.handlers.aipass_standards"
-    proof_prefix = "aipass.seedgo.apps.handlers.aipass_proof"
-    content_modules = [
-        f"{standards_prefix}.architecture_content",
-        f"{standards_prefix}.cli_content",
-        f"{standards_prefix}.cli_flags_content",
-        f"{standards_prefix}.commented_logger_content",
-        f"{standards_prefix}.dead_code_content",
-        f"{standards_prefix}.debug_print_content",
-        f"{standards_prefix}.deep_nesting_content",
-        f"{standards_prefix}.documentation_content",
-        f"{standards_prefix}.encapsulation_content",
-        f"{standards_prefix}.error_handling_content",
-        f"{standards_prefix}.handlers_content",
-        f"{standards_prefix}.hardcoded_key_content",
-        f"{standards_prefix}.help_text_content",
-        f"{standards_prefix}.imports_content",
-        f"{standards_prefix}.introspection_content",
-        f"{standards_prefix}.json_structure_content",
-        f"{standards_prefix}.log_handler_content",
-        f"{standards_prefix}.log_level_content",
-        f"{standards_prefix}.log_structure_content",
-        f"{standards_prefix}.log_visibility_content",
-        f"{standards_prefix}.meta_content",
-        f"{standards_prefix}.modules_content",
-        f"{standards_prefix}.naming_content",
-        f"{standards_prefix}.permission_flags_content",
-        f"{standards_prefix}.readme_content",
-        f"{standards_prefix}.ruff_check_content",
-        f"{standards_prefix}.shebang_content",
-        f"{standards_prefix}.silent_catch_content",
-        f"{standards_prefix}.stderr_routing_content",
-        f"{standards_prefix}.todo_content",
-        f"{standards_prefix}.trigger_content",
-        f"{standards_prefix}.unused_function_content",
-        f"{proof_prefix}.content_naming_content",
-        f"{proof_prefix}.interface_content",
-        f"{proof_prefix}.plugin_integrity_content",
-        f"{proof_prefix}.readme_currency_content",
-        f"{proof_prefix}.triplet_content",
-    ]
-    for mod_name in content_modules:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+from aipass.seedgo.apps.handlers.aipass_proof.content_naming_content import get_content_naming_proof
+from aipass.seedgo.apps.handlers.aipass_proof.interface_content import get_interface_proof
+from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity_content import get_plugin_integrity_proof
+from aipass.seedgo.apps.handlers.aipass_proof.readme_currency_content import get_readme_currency_proof
+from aipass.seedgo.apps.handlers.aipass_proof.triplet_content import get_triplet_proof
+from aipass.seedgo.apps.handlers.aipass_standards.architecture_content import get_architecture_standards
+from aipass.seedgo.apps.handlers.aipass_standards.cli_content import get_cli_standards
+from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_content import get_cli_flags_standards
+from aipass.seedgo.apps.handlers.aipass_standards.commented_logger_content import get_commented_logger_standards
+from aipass.seedgo.apps.handlers.aipass_standards.dead_code_content import get_dead_code_standards
+from aipass.seedgo.apps.handlers.aipass_standards.debug_print_content import get_debug_print_standards
+from aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_content import get_deep_nesting_standards
+from aipass.seedgo.apps.handlers.aipass_standards.docs_page_check import CHECK_NAMES
+from aipass.seedgo.apps.handlers.aipass_standards.docs_page_content import get_docs_page_standards
+from aipass.seedgo.apps.handlers.aipass_standards.documentation_content import get_documentation_standards
+from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_content import get_encapsulation_standards
+from aipass.seedgo.apps.handlers.aipass_standards.error_handling_content import get_error_handling_standards
+from aipass.seedgo.apps.handlers.aipass_standards.handlers_content import get_handlers_standards
+from aipass.seedgo.apps.handlers.aipass_standards.hardcoded_key_content import get_hardcoded_key_standards
+from aipass.seedgo.apps.handlers.aipass_standards.help_text_content import get_help_text_standards
+from aipass.seedgo.apps.handlers.aipass_standards.imports_content import get_imports_standards
+from aipass.seedgo.apps.handlers.aipass_standards.introspection_content import get_introspection_standards
+from aipass.seedgo.apps.handlers.aipass_standards.json_structure_content import get_json_structure_standards
+from aipass.seedgo.apps.handlers.aipass_standards.log_handler_content import get_log_handler_standards
+from aipass.seedgo.apps.handlers.aipass_standards.log_level_content import get_log_level_standards
+from aipass.seedgo.apps.handlers.aipass_standards.log_structure_content import get_log_structure_standards
+from aipass.seedgo.apps.handlers.aipass_standards.log_visibility_content import get_log_visibility_standards
+from aipass.seedgo.apps.handlers.aipass_standards.meta_content import get_meta_standards
+from aipass.seedgo.apps.handlers.aipass_standards.modules_content import get_modules_standards
+from aipass.seedgo.apps.handlers.aipass_standards.naming_content import get_naming_standards
+from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_content import get_permission_flags_standards
+from aipass.seedgo.apps.handlers.aipass_standards.readme_content import get_readme_standards
+from aipass.seedgo.apps.handlers.aipass_standards.ruff_check_content import get_ruff_check_standards
+from aipass.seedgo.apps.handlers.aipass_standards.shebang_content import get_shebang_standards
+from aipass.seedgo.apps.handlers.aipass_standards.silent_catch_content import get_silent_catch_standards
+from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_content import get_stderr_routing_standards
+from aipass.seedgo.apps.handlers.aipass_standards.todo_content import get_todo_standards
+from aipass.seedgo.apps.handlers.aipass_standards.trigger_content import get_trigger_standards
+from aipass.seedgo.apps.handlers.aipass_standards.unused_function_content import get_unused_function_standards
 
 
 # ===========================================================================
@@ -133,9 +100,6 @@ def _assert_content_str(result: str, label: str) -> None:
 
 def test_get_content_naming_proof_has_expected_content():
     """get_content_naming_proof states the {name}_content.py -> get_{name}_standards() convention."""
-    from aipass.seedgo.apps.handlers.aipass_proof.content_naming_content import (
-        get_content_naming_proof,
-    )
 
     result = get_content_naming_proof()
     _assert_content_str(result, "content_naming_proof")
@@ -150,9 +114,6 @@ def test_get_content_naming_proof_has_expected_content():
 
 def test_get_interface_proof_has_expected_content():
     """get_interface_proof states the AUDIT_SCOPE rule and the check_branch signature."""
-    from aipass.seedgo.apps.handlers.aipass_proof.interface_content import (
-        get_interface_proof,
-    )
 
     result = get_interface_proof()
     _assert_content_str(result, "interface_proof")
@@ -168,9 +129,6 @@ def test_get_interface_proof_has_expected_content():
 
 def test_get_plugin_integrity_proof_has_expected_content():
     """get_plugin_integrity_proof demands dynamic discovery and names standards_audit.py."""
-    from aipass.seedgo.apps.handlers.aipass_proof.plugin_integrity_content import (
-        get_plugin_integrity_proof,
-    )
 
     result = get_plugin_integrity_proof()
     _assert_content_str(result, "plugin_integrity_proof")
@@ -186,9 +144,6 @@ def test_get_plugin_integrity_proof_has_expected_content():
 
 def test_get_readme_currency_proof_has_expected_content():
     """get_readme_currency_proof states that the README checker count must match reality."""
-    from aipass.seedgo.apps.handlers.aipass_proof.readme_currency_content import (
-        get_readme_currency_proof,
-    )
 
     result = get_readme_currency_proof()
     _assert_content_str(result, "readme_currency_proof")
@@ -203,9 +158,6 @@ def test_get_readme_currency_proof_has_expected_content():
 
 def test_get_triplet_proof_has_expected_content():
     """get_triplet_proof names all three files of the triplet."""
-    from aipass.seedgo.apps.handlers.aipass_proof.triplet_content import (
-        get_triplet_proof,
-    )
 
     result = get_triplet_proof()
     _assert_content_str(result, "triplet_proof")
@@ -227,9 +179,6 @@ def test_get_triplet_proof_has_expected_content():
 
 def test_get_architecture_standards_has_expected_content():
     """get_architecture_standards states the 3-layer pattern and the handler import ban."""
-    from aipass.seedgo.apps.handlers.aipass_standards.architecture_content import (
-        get_architecture_standards,
-    )
 
     result = get_architecture_standards()
     _assert_content_str(result, "architecture_standards")
@@ -244,8 +193,6 @@ def test_get_architecture_standards_has_expected_content():
 
 def test_get_docs_page_standards_has_expected_content():
     """get_docs_page_standards names the reader, the six scored checks and where the retired registers live."""
-    from aipass.seedgo.apps.handlers.aipass_standards.docs_page_check import CHECK_NAMES
-    from aipass.seedgo.apps.handlers.aipass_standards.docs_page_content import get_docs_page_standards
 
     result = get_docs_page_standards()
     _assert_content_str(result, "docs_page_standards")
@@ -260,9 +207,6 @@ def test_get_docs_page_standards_has_expected_content():
 
 def test_get_cli_standards_has_expected_content():
     """get_cli_standards names Rich console.print() as the only approved output path."""
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_content import (
-        get_cli_standards,
-    )
 
     result = get_cli_standards()
     _assert_content_str(result, "cli_standards")
@@ -277,9 +221,6 @@ def test_get_cli_standards_has_expected_content():
 
 def test_get_cli_flags_standards_has_expected_content():
     """get_cli_flags_standards lists the tier 1 required flags, --help and --version among them."""
-    from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_content import (
-        get_cli_flags_standards,
-    )
 
     result = get_cli_flags_standards()
     _assert_content_str(result, "cli_flags_standards")
@@ -296,9 +237,6 @@ def test_get_cli_flags_standards_has_expected_content():
 
 def test_get_commented_logger_standards_has_expected_content():
     """get_commented_logger_standards calls commented-out logger calls dead logging and lists the detected levels."""
-    from aipass.seedgo.apps.handlers.aipass_standards.commented_logger_content import (
-        get_commented_logger_standards,
-    )
 
     result = get_commented_logger_standards()
     _assert_content_str(result, "commented_logger_standards")
@@ -313,9 +251,6 @@ def test_get_commented_logger_standards_has_expected_content():
 
 def test_get_dead_code_standards_has_expected_content():
     """get_dead_code_standards calls unreferenced files dead weight and declares branch_level scope."""
-    from aipass.seedgo.apps.handlers.aipass_standards.dead_code_content import (
-        get_dead_code_standards,
-    )
 
     result = get_dead_code_standards()
     _assert_content_str(result, "dead_code_standards")
@@ -330,9 +265,6 @@ def test_get_dead_code_standards_has_expected_content():
 
 def test_get_debug_print_standards_has_expected_content():
     """get_debug_print_standards bans bare print() and points at the Prax logger instead."""
-    from aipass.seedgo.apps.handlers.aipass_standards.debug_print_content import (
-        get_debug_print_standards,
-    )
 
     result = get_debug_print_standards()
     _assert_content_str(result, "debug_print_standards")
@@ -347,9 +279,6 @@ def test_get_debug_print_standards_has_expected_content():
 
 def test_get_deep_nesting_standards_has_expected_content():
     """get_deep_nesting_standards states the depth > 4 threshold and the counted node types."""
-    from aipass.seedgo.apps.handlers.aipass_standards.deep_nesting_content import (
-        get_deep_nesting_standards,
-    )
 
     result = get_deep_nesting_standards()
     _assert_content_str(result, "deep_nesting_standards")
@@ -364,9 +293,6 @@ def test_get_deep_nesting_standards_has_expected_content():
 
 def test_get_documentation_standards_has_expected_content():
     """get_documentation_standards requires a module docstring and Google-style function docstrings."""
-    from aipass.seedgo.apps.handlers.aipass_standards.documentation_content import (
-        get_documentation_standards,
-    )
 
     result = get_documentation_standards()
     _assert_content_str(result, "documentation_standards")
@@ -381,9 +307,6 @@ def test_get_documentation_standards_has_expected_content():
 
 def test_get_encapsulation_standards_has_expected_content():
     """get_encapsulation_standards states rule 1, no cross-branch handler imports."""
-    from aipass.seedgo.apps.handlers.aipass_standards.encapsulation_content import (
-        get_encapsulation_standards,
-    )
 
     result = get_encapsulation_standards()
     _assert_content_str(result, "encapsulation_standards")
@@ -398,9 +321,6 @@ def test_get_encapsulation_standards_has_expected_content():
 
 def test_get_error_handling_standards_has_expected_content():
     """get_error_handling_standards demands truthful errors and names the except: pass failure."""
-    from aipass.seedgo.apps.handlers.aipass_standards.error_handling_content import (
-        get_error_handling_standards,
-    )
 
     result = get_error_handling_standards()
     _assert_content_str(result, "error_handling_standards")
@@ -415,9 +335,6 @@ def test_get_error_handling_standards_has_expected_content():
 
 def test_get_handlers_standards_has_expected_content():
     """get_handlers_standards mentions handler concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.handlers_content import (
-        get_handlers_standards,
-    )
 
     result = get_handlers_standards()
     _assert_content_str(result, "handlers_standards")
@@ -431,9 +348,6 @@ def test_get_handlers_standards_has_expected_content():
 
 def test_get_hardcoded_key_standards_has_expected_content():
     """get_hardcoded_key_standards bans literal API keys and lists the detected provider prefixes."""
-    from aipass.seedgo.apps.handlers.aipass_standards.hardcoded_key_content import (
-        get_hardcoded_key_standards,
-    )
 
     result = get_hardcoded_key_standards()
     _assert_content_str(result, "hardcoded_key_standards")
@@ -448,9 +362,6 @@ def test_get_hardcoded_key_standards_has_expected_content():
 
 def test_get_help_text_standards_has_expected_content():
     """get_help_text_standards mentions help text concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.help_text_content import (
-        get_help_text_standards,
-    )
 
     result = get_help_text_standards()
     _assert_content_str(result, "help_text_standards")
@@ -464,9 +375,6 @@ def test_get_help_text_standards_has_expected_content():
 
 def test_get_imports_standards_has_expected_content():
     """get_imports_standards mentions import concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.imports_content import (
-        get_imports_standards,
-    )
 
     result = get_imports_standards()
     _assert_content_str(result, "imports_standards")
@@ -480,9 +388,6 @@ def test_get_imports_standards_has_expected_content():
 
 def test_get_introspection_standards_has_expected_content():
     """get_introspection_standards states the two-level auto-discovery pattern and its function name."""
-    from aipass.seedgo.apps.handlers.aipass_standards.introspection_content import (
-        get_introspection_standards,
-    )
 
     result = get_introspection_standards()
     _assert_content_str(result, "introspection_standards")
@@ -497,9 +402,6 @@ def test_get_introspection_standards_has_expected_content():
 
 def test_get_json_structure_standards_has_expected_content():
     """get_json_structure_standards mentions JSON structure concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_content import (
-        get_json_structure_standards,
-    )
 
     result = get_json_structure_standards()
     _assert_content_str(result, "json_structure_standards")
@@ -513,9 +415,6 @@ def test_get_json_structure_standards_has_expected_content():
 
 def test_get_log_handler_standards_has_expected_content():
     """get_log_handler_standards requires RotatingFileHandler via prax."""
-    from aipass.seedgo.apps.handlers.aipass_standards.log_handler_content import (
-        get_log_handler_standards,
-    )
 
     result = get_log_handler_standards()
     _assert_content_str(result, "log_handler_standards")
@@ -530,9 +429,6 @@ def test_get_log_handler_standards_has_expected_content():
 
 def test_get_log_level_standards_has_expected_content():
     """get_log_level_standards reserves ERROR for real system failures."""
-    from aipass.seedgo.apps.handlers.aipass_standards.log_level_content import (
-        get_log_level_standards,
-    )
 
     result = get_log_level_standards()
     _assert_content_str(result, "log_level_standards")
@@ -547,9 +443,6 @@ def test_get_log_level_standards_has_expected_content():
 
 def test_get_log_structure_standards_has_expected_content():
     """get_log_structure_standards states the two-tier model with system_logs/ at repo root."""
-    from aipass.seedgo.apps.handlers.aipass_standards.log_structure_content import (
-        get_log_structure_standards,
-    )
 
     result = get_log_structure_standards()
     _assert_content_str(result, "log_structure_standards")
@@ -564,9 +457,6 @@ def test_get_log_structure_standards_has_expected_content():
 
 def test_get_log_visibility_standards_has_expected_content():
     """get_log_visibility_standards ties logging.getLogger() to a required prax system_logger import."""
-    from aipass.seedgo.apps.handlers.aipass_standards.log_visibility_content import (
-        get_log_visibility_standards,
-    )
 
     result = get_log_visibility_standards()
     _assert_content_str(result, "log_visibility_standards")
@@ -582,9 +472,6 @@ def test_get_log_visibility_standards_has_expected_content():
 
 def test_get_meta_standards_has_expected_content():
     """get_meta_standards requires a META block on line 1 of every Python file."""
-    from aipass.seedgo.apps.handlers.aipass_standards.meta_content import (
-        get_meta_standards,
-    )
 
     result = get_meta_standards()
     _assert_content_str(result, "meta_standards")
@@ -599,9 +486,6 @@ def test_get_meta_standards_has_expected_content():
 
 def test_get_modules_standards_has_expected_content():
     """get_modules_standards mentions module concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.modules_content import (
-        get_modules_standards,
-    )
 
     result = get_modules_standards()
     _assert_content_str(result, "modules_standards")
@@ -615,9 +499,6 @@ def test_get_modules_standards_has_expected_content():
 
 def test_get_naming_standards_has_expected_content():
     """get_naming_standards states path = context, name = action, and lists the standard verbs."""
-    from aipass.seedgo.apps.handlers.aipass_standards.naming_content import (
-        get_naming_standards,
-    )
 
     result = get_naming_standards()
     _assert_content_str(result, "naming_standards")
@@ -632,9 +513,6 @@ def test_get_naming_standards_has_expected_content():
 
 def test_get_permission_flags_standards_has_expected_content():
     """get_permission_flags_standards names the one approved permission bypass flag."""
-    from aipass.seedgo.apps.handlers.aipass_standards.permission_flags_content import (
-        get_permission_flags_standards,
-    )
 
     result = get_permission_flags_standards()
     _assert_content_str(result, "permission_flags_standards")
@@ -649,9 +527,6 @@ def test_get_permission_flags_standards_has_expected_content():
 
 def test_get_readme_standards_has_expected_content():
     """get_readme_standards mentions README concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_content import (
-        get_readme_standards,
-    )
 
     result = get_readme_standards()
     _assert_content_str(result, "readme_standards")
@@ -665,9 +540,6 @@ def test_get_readme_standards_has_expected_content():
 
 def test_get_ruff_check_standards_has_expected_content():
     """get_ruff_check_standards names ruff as the primary linter and shows the JSON output flag."""
-    from aipass.seedgo.apps.handlers.aipass_standards.ruff_check_content import (
-        get_ruff_check_standards,
-    )
 
     result = get_ruff_check_standards()
     _assert_content_str(result, "ruff_check_standards")
@@ -682,9 +554,6 @@ def test_get_ruff_check_standards_has_expected_content():
 
 def test_get_shebang_standards_has_expected_content():
     """get_shebang_standards bans shebangs in pip-installable packages."""
-    from aipass.seedgo.apps.handlers.aipass_standards.shebang_content import (
-        get_shebang_standards,
-    )
 
     result = get_shebang_standards()
     _assert_content_str(result, "shebang_standards")
@@ -699,9 +568,6 @@ def test_get_shebang_standards_has_expected_content():
 
 def test_get_silent_catch_standards_has_expected_content():
     """get_silent_catch_standards bans silently swallowed exceptions and names the ExceptHandler walk."""
-    from aipass.seedgo.apps.handlers.aipass_standards.silent_catch_content import (
-        get_silent_catch_standards,
-    )
 
     result = get_silent_catch_standards()
     _assert_content_str(result, "silent_catch_standards")
@@ -716,9 +582,6 @@ def test_get_silent_catch_standards_has_expected_content():
 
 def test_get_stderr_routing_standards_has_expected_content():
     """get_stderr_routing_standards mentions stderr routing concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.stderr_routing_content import (
-        get_stderr_routing_standards,
-    )
 
     result = get_stderr_routing_standards()
     _assert_content_str(result, "stderr_routing_standards")
@@ -732,9 +595,6 @@ def test_get_stderr_routing_standards_has_expected_content():
 
 def test_get_todo_standards_has_expected_content():
     """get_todo_standards names the TODO and FIXME tags it flags."""
-    from aipass.seedgo.apps.handlers.aipass_standards.todo_content import (
-        get_todo_standards,
-    )
 
     result = get_todo_standards()
     _assert_content_str(result, "todo_standards")
@@ -750,9 +610,6 @@ def test_get_todo_standards_has_expected_content():
 
 def test_get_trigger_standards_has_expected_content():
     """get_trigger_standards mentions trigger concepts."""
-    from aipass.seedgo.apps.handlers.aipass_standards.trigger_content import (
-        get_trigger_standards,
-    )
 
     result = get_trigger_standards()
     _assert_content_str(result, "trigger_standards")
@@ -766,9 +623,6 @@ def test_get_trigger_standards_has_expected_content():
 
 def test_get_unused_function_standards_has_expected_content():
     """get_unused_function_standards calls dead code a maintenance burden and names phase 1."""
-    from aipass.seedgo.apps.handlers.aipass_standards.unused_function_content import (
-        get_unused_function_standards,
-    )
 
     result = get_unused_function_standards()
     _assert_content_str(result, "unused_function_standards")

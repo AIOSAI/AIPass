@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_unconsumed_side_effect_check.py
 # Description: unconsumed_side_effect_check — crack class F, queued mock answers nothing counts
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-23
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/unconsumed_side_effect_check.py."""

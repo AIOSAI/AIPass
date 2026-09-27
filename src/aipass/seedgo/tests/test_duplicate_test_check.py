@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_duplicate_test_check.py
 # Description: duplicate_test_check — crack class B, a test another test already covers
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/duplicate_test_check.py."""

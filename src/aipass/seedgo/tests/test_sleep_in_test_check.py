@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_sleep_in_test_check.py
 # Description: sleep_in_test_check — crack class N, a test that waits instead of asserting
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/sleep_in_test_check.py."""

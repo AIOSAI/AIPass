@@ -1,3 +1,11 @@
+# =================== META ====================
+# Name: conftest.py
+# Description: Shared pytest fixtures for seedgo tests
+# Version: 2.0.2
+# Created: 2026-03-05
+# Modified: 2026-09-27
+# =============================================
+
 """Shared pytest fixtures for seedgo tests.
 
 The autouse fixture here is the load-bearing one: seedgo's json_handler binds
@@ -5,14 +13,6 @@ the fleet's one json service (DPLAN-0325), which writes into seedgo_json/
 unless AIPASS_TEST_LOG_DIR says otherwise. mock_infrastructure sets that
 variable per test, so every test lands in its own tmp_path without knowing it.
 """
-
-# =================== META ====================
-# Name: conftest.py
-# Description: Shared pytest fixtures for seedgo tests
-# Version: 2.0.0
-# Created: 2026-03-05
-# Modified: 2026-09-03
-# =============================================
 
 import os
 import sys
@@ -32,6 +32,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from aipass.cli.apps.modules import display
+from aipass.seedgo.apps import seedgo as seedgo_entry
 from aipass.seedgo.apps.handlers.json import json_handler
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
@@ -121,8 +122,6 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
 
         def error(self, *args, **kwargs):
             captured.append(("error", args))
-
-    from aipass.seedgo.apps import seedgo as seedgo_entry
 
     monkeypatch.setattr(seedgo_entry, "logger", _CapturingLogger())
     return captured

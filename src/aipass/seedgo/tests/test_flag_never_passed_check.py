@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_flag_never_passed_check.py
 # Description: flag_never_passed_check — crack class P, a parsed flag no test passes
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/flag_never_passed_check.py."""

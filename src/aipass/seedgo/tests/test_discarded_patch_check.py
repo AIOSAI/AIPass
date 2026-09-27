@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_discarded_patch_check.py
 # Description: discarded_patch_check — crack class R, a mock nothing ever observes
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/discarded_patch_check.py."""

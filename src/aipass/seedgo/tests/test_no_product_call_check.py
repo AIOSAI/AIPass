@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_no_product_call_check.py
 # Description: no_product_call_check — crack class A, a test that reaches no product code
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/no_product_call_check.py."""

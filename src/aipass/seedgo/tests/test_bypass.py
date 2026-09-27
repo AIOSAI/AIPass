@@ -1,52 +1,38 @@
-"""Tests for the bypass handler directory (bypass_handler, ignore_handler)."""
-
 # =================== META ====================
 # Name: test_bypass.py
 # Description: Unit tests for handlers/bypass/
-# Version: 1.1.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/handlers/bypass/bypass_handler.py, ignore_handler.py, utils.py and inert.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module in handlers/bypass/ parses and imports
+# seedgo: no-test-needed(constant) — BYPASS_TEMPLATE's metadata strings and ADVISORY_CAVEAT's wording
+
 import json
+
 import pytest
-from unittest.mock import MagicMock
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for bypass handlers."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # Force re-imports
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.bypass.bypass_handler",
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        "aipass.seedgo.apps.handlers.bypass.utils",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+from aipass.seedgo.apps.handlers.aipass_standards import trigger_check
+from aipass.seedgo.apps.handlers.bypass import inert
+from aipass.seedgo.apps.handlers.bypass.bypass_handler import (
+    ensure_seedgo_config,
+    is_bypassed as bypass_handler_is_bypassed,
+    load_bypass_rules,
+)
+from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
+    get_audit_ignore_patterns,
+    get_deprecated_patterns,
+    get_template_ignore_patterns,
+    is_seedgo_ignored,
+    load_ignore_entries,
+)
+from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as utils_is_bypassed, matching_rule
+from aipass.seedgo.apps.modules import CommandRefused
+from aipass.seedgo.apps.modules import bypass as bypass_module
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +52,6 @@ def test_load_bypass_rules_from_file(tmp_path):
     }
     bypass_file.write_text(json.dumps(bypass_data), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
-
     rules = load_bypass_rules(str(tmp_path))
     assert len(rules) == 1
     assert rules[0]["standard"] == "naming"
@@ -85,16 +69,12 @@ def test_load_bypass_rules_empty_when_no_rules(tmp_path):
     }
     bypass_file.write_text(json.dumps(bypass_data), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
-
     rules = load_bypass_rules(str(tmp_path))
     assert rules == []
 
 
 def test_load_bypass_rules_creates_config_if_missing(tmp_path):
     """load_bypass_rules creates .seedgo/bypass.json if it does not exist."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import load_bypass_rules
-
     rules = load_bypass_rules(str(tmp_path))
     assert isinstance(rules, list)
     # Config should now exist
@@ -106,14 +86,12 @@ def test_load_bypass_rules_creates_config_if_missing(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_is_bypassed_matching_rule():
+def test_is_bypassed_matching_rule(tmp_path):
     """is_bypassed returns True when file and standard match a rule."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import is_bypassed
-
     rules = [{"file": "apps/foo.py", "standard": "naming", "reason": "legacy"}]
-    result = is_bypassed(
-        file_path="/branch/apps/foo.py",
-        branch_path="/branch",
+    result = bypass_handler_is_bypassed(
+        file_path=str(tmp_path / "apps" / "foo.py"),
+        branch_path=str(tmp_path),
         standard="naming",
         line=None,
         bypass_rules=rules,
@@ -121,14 +99,12 @@ def test_is_bypassed_matching_rule():
     assert result is True
 
 
-def test_is_bypassed_no_match():
+def test_is_bypassed_no_match(tmp_path):
     """is_bypassed returns False when no rule matches."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import is_bypassed
-
     rules = [{"file": "apps/foo.py", "standard": "naming", "reason": "legacy"}]
-    result = is_bypassed(
-        file_path="/branch/apps/bar.py",
-        branch_path="/branch",
+    result = bypass_handler_is_bypassed(
+        file_path=str(tmp_path / "apps" / "bar.py"),
+        branch_path=str(tmp_path),
         standard="naming",
         line=None,
         bypass_rules=rules,
@@ -136,20 +112,18 @@ def test_is_bypassed_no_match():
     assert result is False
 
 
-def test_is_bypassed_line_specific():
+def test_is_bypassed_line_specific(tmp_path):
     """is_bypassed respects line-specific bypass rules."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import is_bypassed
-
     rules = [{"file": "apps/foo.py", "standard": "cli", "lines": [10, 20], "reason": "circular"}]
-    assert is_bypassed("/branch/apps/foo.py", "/branch", "cli", 10, rules) is True
-    assert is_bypassed("/branch/apps/foo.py", "/branch", "cli", 99, rules) is False
+    foo_path = str(tmp_path / "apps" / "foo.py")
+    branch_path = str(tmp_path)
+    assert bypass_handler_is_bypassed(foo_path, branch_path, "cli", 10, rules) is True
+    assert bypass_handler_is_bypassed(foo_path, branch_path, "cli", 99, rules) is False
 
 
-def test_is_bypassed_empty_rules():
+def test_is_bypassed_empty_rules(tmp_path):
     """is_bypassed returns False with empty rules list."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import is_bypassed
-
-    assert is_bypassed("/branch/apps/foo.py", "/branch", "naming", None, []) is False
+    assert bypass_handler_is_bypassed(str(tmp_path / "apps" / "foo.py"), str(tmp_path), "naming", None, []) is False
 
 
 # ---------------------------------------------------------------------------
@@ -159,8 +133,6 @@ def test_is_bypassed_empty_rules():
 
 def test_ensure_seedgo_config_creates_dir(tmp_path):
     """ensure_seedgo_config creates .seedgo directory and bypass.json."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import ensure_seedgo_config
-
     result = ensure_seedgo_config(str(tmp_path))
     assert result == tmp_path / ".seedgo" / "bypass.json"
     assert result.exists()
@@ -168,8 +140,6 @@ def test_ensure_seedgo_config_creates_dir(tmp_path):
 
 def test_ensure_seedgo_config_idempotent(tmp_path):
     """Calling ensure_seedgo_config twice does not corrupt the file."""
-    from aipass.seedgo.apps.handlers.bypass.bypass_handler import ensure_seedgo_config
-
     ensure_seedgo_config(str(tmp_path))
     ensure_seedgo_config(str(tmp_path))
     bypass_file = tmp_path / ".seedgo" / "bypass.json"
@@ -184,8 +154,6 @@ def test_ensure_seedgo_config_idempotent(tmp_path):
 
 def test_get_audit_ignore_patterns_returns_list():
     """get_audit_ignore_patterns returns a list of strings."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_audit_ignore_patterns
-
     patterns = get_audit_ignore_patterns()
     assert isinstance(patterns, list)
     assert all(isinstance(p, str) for p in patterns)
@@ -193,8 +161,6 @@ def test_get_audit_ignore_patterns_returns_list():
 
 def test_get_template_ignore_patterns_returns_copy():
     """get_template_ignore_patterns returns a copy (not the original list)."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_template_ignore_patterns
-
     a = get_template_ignore_patterns()
     b = get_template_ignore_patterns()
     assert a == b
@@ -204,16 +170,12 @@ def test_get_template_ignore_patterns_returns_copy():
 
 def test_template_ignore_excludes_test_scaffold():
     """test_scaffold.py is in TEMPLATE_IGNORE_PATTERNS so branches don't require it."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_template_ignore_patterns
-
     patterns = get_template_ignore_patterns()
     assert "test_scaffold.py" in patterns
 
 
 def test_get_deprecated_patterns_returns_dict():
     """get_deprecated_patterns returns a dict of string keys and string values."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import get_deprecated_patterns
-
     patterns = get_deprecated_patterns()
     assert isinstance(patterns, dict)
     assert patterns["--verbose"] == "removed from audit (v0.4.0)"
@@ -229,8 +191,6 @@ def test_get_deprecated_patterns_returns_dict():
 
 def test_global_default_ignores_tools_dir_with_no_dotfile(tmp_path):
     """Global default (tools/) applies branch-wide even with zero .seedgoignore files."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
-
     tools_file = tmp_path / "apps" / "tools" / "scratch.py"
     tools_file.parent.mkdir(parents=True)
     tools_file.write_text("pass", encoding="utf-8")
@@ -244,8 +204,6 @@ def test_global_default_ignores_tools_dir_with_no_dotfile(tmp_path):
 
 def test_seedgo_ignore_dotfile_scoped_to_its_own_directory(tmp_path):
     """A .seedgoignore dropped in a subdir only affects that subdir's subtree, not siblings."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
-
     scratch_dir = tmp_path / "apps" / "handlers" / "experiment"
     scratch_dir.mkdir(parents=True)
     (scratch_dir / ".seedgoignore").write_text("*.draft.py\n", encoding="utf-8")
@@ -261,8 +219,6 @@ def test_seedgo_ignore_dotfile_scoped_to_its_own_directory(tmp_path):
 
 def test_seedgo_ignore_supports_gitignore_style_patterns(tmp_path):
     """Comments, blank lines, and negation follow standard gitignore semantics."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
-
     (tmp_path / ".seedgoignore").write_text(
         "\n".join(["# comment", "", "scratch/", "!scratch/keep_me.py"]),
         encoding="utf-8",
@@ -278,8 +234,6 @@ def test_seedgo_ignore_supports_gitignore_style_patterns(tmp_path):
 
 def test_seedgo_ignore_nested_scopes_both_apply(tmp_path):
     """A nested .seedgoignore adds to (not replaces) any ancestor .seedgoignore scopes."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
-
     (tmp_path / ".seedgoignore").write_text("*.rootskip\n", encoding="utf-8")
     child_dir = tmp_path / "apps" / "child"
     child_dir.mkdir(parents=True)
@@ -295,8 +249,6 @@ def test_seedgo_ignore_nested_scopes_both_apply(tmp_path):
 
 def test_is_seedgo_ignored_path_outside_branch_root_returns_false(tmp_path):
     """A file outside branch_root cannot be resolved to a relative path — treated as not ignored."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored
-
     branch_root = tmp_path / "branch"
     branch_root.mkdir()
     outside_file = tmp_path / "elsewhere" / "file.py"
@@ -308,8 +260,6 @@ def test_is_seedgo_ignored_path_outside_branch_root_returns_false(tmp_path):
 
 def test_load_ignore_entries_default_only_when_no_dotfiles(tmp_path):
     """With no .seedgoignore files present, only the global default scope is returned."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import load_ignore_entries
-
     entries = load_ignore_entries(tmp_path)
     assert len(entries) == 1
     assert entries[0][0] == ""
@@ -317,8 +267,6 @@ def test_load_ignore_entries_default_only_when_no_dotfiles(tmp_path):
 
 def test_is_seedgo_ignored_accepts_precomputed_entries(tmp_path):
     """Passing pre-loaded entries skips the internal reload — same result as omitting it."""
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import is_seedgo_ignored, load_ignore_entries
-
     tools_file = tmp_path / "tools" / "scratch.py"
     tools_file.parent.mkdir(parents=True)
     tools_file.write_text("pass", encoding="utf-8")
@@ -332,10 +280,8 @@ def test_is_seedgo_ignored_accepts_precomputed_entries(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_utils_name_match_suppresses_regardless_of_line():
+def test_utils_name_match_suppresses_regardless_of_line(tmp_path):
     """Name-scoped bypass matches by function name, ignoring line number."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/ops.py",
@@ -345,8 +291,8 @@ def test_utils_name_match_suppresses_regardless_of_line():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/ops.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "ops.py"),
             "unused_function",
             line=999,
             bypass_rules=rules,
@@ -356,10 +302,8 @@ def test_utils_name_match_suppresses_regardless_of_line():
     )
 
 
-def test_utils_name_not_in_functions_list():
+def test_utils_name_not_in_functions_list(tmp_path):
     """Name-scoped bypass rejects function not in the functions list."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/ops.py",
@@ -369,8 +313,8 @@ def test_utils_name_not_in_functions_list():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/ops.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "ops.py"),
             "unused_function",
             line=232,
             bypass_rules=rules,
@@ -380,10 +324,8 @@ def test_utils_name_not_in_functions_list():
     )
 
 
-def test_utils_line_drift_no_longer_breaks_name_scoped():
+def test_utils_line_drift_no_longer_breaks_name_scoped(tmp_path):
     """Line drift doesn't affect name-scoped bypass — name is stable."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/ops.py",
@@ -393,8 +335,8 @@ def test_utils_line_drift_no_longer_breaks_name_scoped():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/ops.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "ops.py"),
             "unused_function",
             line=52,
             bypass_rules=rules,
@@ -403,8 +345,8 @@ def test_utils_line_drift_no_longer_breaks_name_scoped():
         is True
     )
     assert (
-        is_bypassed(
-            "/branch/apps/ops.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "ops.py"),
             "unused_function",
             line=9999,
             bypass_rules=rules,
@@ -414,10 +356,8 @@ def test_utils_line_drift_no_longer_breaks_name_scoped():
     )
 
 
-def test_utils_functions_present_name_none_falls_back_to_lines():
+def test_utils_functions_present_name_none_falls_back_to_lines(tmp_path):
     """When functions is set but name=None (other checker), fall back to line matching."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/ops.py",
@@ -428,8 +368,8 @@ def test_utils_functions_present_name_none_falls_back_to_lines():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/ops.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "ops.py"),
             "unused_function",
             line=10,
             bypass_rules=rules,
@@ -439,10 +379,8 @@ def test_utils_functions_present_name_none_falls_back_to_lines():
     )
 
 
-def test_utils_existing_lines_only_rules_still_work():
+def test_utils_existing_lines_only_rules_still_work(tmp_path):
     """Existing line-only rules (no functions field) still match by line."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/foo.py",
@@ -452,8 +390,8 @@ def test_utils_existing_lines_only_rules_still_work():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/foo.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "foo.py"),
             "cli",
             line=10,
             bypass_rules=rules,
@@ -461,8 +399,8 @@ def test_utils_existing_lines_only_rules_still_work():
         is True
     )
     assert (
-        is_bypassed(
-            "/branch/apps/foo.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "foo.py"),
             "cli",
             line=99,
             bypass_rules=rules,
@@ -471,10 +409,8 @@ def test_utils_existing_lines_only_rules_still_work():
     )
 
 
-def test_utils_file_only_bypass_still_matches():
+def test_utils_file_only_bypass_still_matches(tmp_path):
     """File-level bypass (no lines, no functions) still works."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/foo.py",
@@ -483,8 +419,8 @@ def test_utils_file_only_bypass_still_matches():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/foo.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "foo.py"),
             "unused_function",
             line=50,
             bypass_rules=rules,
@@ -494,10 +430,8 @@ def test_utils_file_only_bypass_still_matches():
     )
 
 
-def test_utils_multiple_functions_in_one_rule():
+def test_utils_multiple_functions_in_one_rule(tmp_path):
     """A single rule can list multiple function names."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/registry.py",
@@ -507,8 +441,8 @@ def test_utils_multiple_functions_in_one_rule():
         }
     ]
     assert (
-        is_bypassed(
-            "/branch/apps/registry.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "registry.py"),
             "unused_function",
             line=1,
             bypass_rules=rules,
@@ -517,8 +451,8 @@ def test_utils_multiple_functions_in_one_rule():
         is True
     )
     assert (
-        is_bypassed(
-            "/branch/apps/registry.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "registry.py"),
             "unused_function",
             line=1,
             bypass_rules=rules,
@@ -527,8 +461,8 @@ def test_utils_multiple_functions_in_one_rule():
         is True
     )
     assert (
-        is_bypassed(
-            "/branch/apps/registry.py",
+        utils_is_bypassed(
+            str(tmp_path / "apps" / "registry.py"),
             "unused_function",
             line=1,
             bypass_rules=rules,
@@ -543,41 +477,37 @@ def test_utils_multiple_functions_in_one_rule():
 # ---------------------------------------------------------------------------
 
 
-def test_utils_lines_rule_does_not_match_when_no_line_supplied():
+def test_utils_lines_rule_does_not_match_when_no_line_supplied(tmp_path):
     """A lines rule is inert for a caller that passes no line -- never file-wide.
 
     This is the whole defect: every checker's top-of-check_module gate calls
-    is_bypassed(path, standard) with no line, so a rule reading "lines": [37, 66]
+    utils_is_bypassed(path, standard) with no line, so a rule reading "lines": [37, 66]
     used to suppress the entire file for that standard.
     """
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [{"file": "apps/ops.py", "standard": "silent_catch", "lines": [37, 66], "reason": "test"}]
+    ops_path = str(tmp_path / "apps" / "ops.py")
 
-    assert is_bypassed("/branch/apps/ops.py", "silent_catch", bypass_rules=rules) is False
-    assert is_bypassed("/branch/apps/ops.py", "silent_catch", line=37, bypass_rules=rules) is True
-    assert is_bypassed("/branch/apps/ops.py", "silent_catch", line=99, bypass_rules=rules) is False
+    assert utils_is_bypassed(ops_path, "silent_catch", bypass_rules=rules) is False
+    assert utils_is_bypassed(ops_path, "silent_catch", line=37, bypass_rules=rules) is True
+    assert utils_is_bypassed(ops_path, "silent_catch", line=99, bypass_rules=rules) is False
 
 
-def test_utils_functions_rule_does_not_match_when_no_name_supplied():
+def test_utils_functions_rule_does_not_match_when_no_name_supplied(tmp_path):
     """Same contract for name-scoped rules: no name supplied means no match."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [{"file": "apps/ops.py", "standard": "unused_function", "functions": ["foo"], "reason": "test"}]
+    ops_path = str(tmp_path / "apps" / "ops.py")
 
-    assert is_bypassed("/branch/apps/ops.py", "unused_function", bypass_rules=rules) is False
-    assert is_bypassed("/branch/apps/ops.py", "unused_function", name="foo", bypass_rules=rules) is True
-    assert is_bypassed("/branch/apps/ops.py", "unused_function", name="bar", bypass_rules=rules) is False
+    assert utils_is_bypassed(ops_path, "unused_function", bypass_rules=rules) is False
+    assert utils_is_bypassed(ops_path, "unused_function", name="foo", bypass_rules=rules) is True
+    assert utils_is_bypassed(ops_path, "unused_function", name="bar", bypass_rules=rules) is False
 
 
-def test_utils_declared_scope_that_is_supplied_must_match():
+def test_utils_declared_scope_that_is_supplied_must_match(tmp_path):
     """With both keys declared, a supplied scope that disagrees blocks the match.
 
     A rule for update_command does not cover some other symbol that happens to
     sit on the same line.
     """
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [
         {
             "file": "apps/ops.py",
@@ -587,19 +517,19 @@ def test_utils_declared_scope_that_is_supplied_must_match():
             "reason": "test",
         }
     ]
+    ops_path = str(tmp_path / "apps" / "ops.py")
 
-    assert is_bypassed("/branch/apps/ops.py", "unused_function", line=10, name="other", bypass_rules=rules) is False
-    assert is_bypassed("/branch/apps/ops.py", "unused_function", line=10, name="update_command", bypass_rules=rules)
+    assert utils_is_bypassed(ops_path, "unused_function", line=10, name="other", bypass_rules=rules) is False
+    assert utils_is_bypassed(ops_path, "unused_function", line=10, name="update_command", bypass_rules=rules)
 
 
-def test_utils_unscoped_rule_is_still_file_wide():
+def test_utils_unscoped_rule_is_still_file_wide(tmp_path):
     """A rule with neither lines nor functions keeps matching everything in its file."""
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed
-
     rules = [{"file": "apps/ops.py", "standard": "silent_catch", "reason": "test"}]
+    ops_path = str(tmp_path / "apps" / "ops.py")
 
-    assert is_bypassed("/branch/apps/ops.py", "silent_catch", bypass_rules=rules) is True
-    assert is_bypassed("/branch/apps/ops.py", "silent_catch", line=12345, bypass_rules=rules) is True
+    assert utils_is_bypassed(ops_path, "silent_catch", bypass_rules=rules) is True
+    assert utils_is_bypassed(ops_path, "silent_catch", line=12345, bypass_rules=rules) is True
 
 
 # inert.py -- a rule whose scope the checker can never evaluate must ANNOUNCE itself (FPLAN-0382 ruling a)
@@ -607,8 +537,6 @@ def test_utils_unscoped_rule_is_still_file_wide():
 
 def test_inert_scope_support_is_derived_not_hardcoded():
     """The map comes from the checker sources, so it cannot drift from them."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     support = inert.scope_support()
 
     # cli threads line= into is_bypassed; handlers gates once at the top of check_module.
@@ -617,35 +545,25 @@ def test_inert_scope_support_is_derived_not_hardcoded():
 
 
 def test_inert_lines_rule_on_line_blind_standard_is_reported():
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert inert.inert_scopes({"file": "a.py", "standard": "handlers", "lines": [10]}) == ("lines",)
 
 
 def test_inert_lines_rule_on_line_passing_standard_is_not_reported():
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert inert.inert_scopes({"file": "a.py", "standard": "cli", "lines": [10]}) == ()
 
 
 def test_inert_unscoped_rule_is_never_reported():
     """File-wide rules are the recommended form -- they must not be nagged about."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert inert.inert_scopes({"file": "a.py", "standard": "handlers"}) == ()
 
 
 def test_inert_unknown_standard_is_left_alone():
     """A rule naming no known standard is a different defect; this channel reports scope only."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert inert.inert_scopes({"file": "a.py", "standard": "nope", "lines": [1]}) == ()
 
 
 def test_inert_branch_info_names_the_file_and_standard(tmp_path):
     import json
-
-    from aipass.seedgo.apps.handlers.bypass import inert
 
     (tmp_path / ".seedgo").mkdir()
     (tmp_path / ".seedgo" / "bypass.json").write_text(
@@ -661,8 +579,6 @@ def test_inert_branch_info_names_the_file_and_standard(tmp_path):
 
 
 def test_inert_branch_info_empty_without_a_bypass_file(tmp_path):
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert inert.check_branch_info(str(tmp_path)) == []
 
 
@@ -678,8 +594,6 @@ def _write_bypass(tmp_path, rules):
 
 
 def test_out_of_scope_rules_are_named_and_grouped_by_standard(tmp_path):
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     _write_bypass(
         tmp_path,
         [
@@ -700,8 +614,6 @@ def test_out_of_scope_rules_are_named_and_grouped_by_standard(tmp_path):
 
 def test_out_of_scope_listing_is_not_capped(tmp_path):
     """A silent cap would rebuild the same unactionable count one layer down."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     _write_bypass(
         tmp_path, [{"file": f"tests/test_{n}.py", "standard": "architecture", "reason": "r"} for n in range(12)]
     )
@@ -716,8 +628,6 @@ def test_out_of_scope_listing_is_not_capped(tmp_path):
 
 def test_in_scope_rules_are_never_listed_as_out_of_scope(tmp_path):
     """Negative direction: a live rule on production code must stay silent."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     _write_bypass(tmp_path, [{"file": "apps/x.py", "standard": "architecture", "reason": "r"}])
 
     assert inert.check_branch_info(str(tmp_path)) == []
@@ -732,8 +642,6 @@ def test_inert_scope_support_reads_positional_line_argument():
     The first version of this map inspected keywords only and reported ten live
     standards as line-blind, which nearly widened working rules to file-wide.
     """
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     support = inert.scope_support()
 
     for standard in ("debug_print", "help_text", "log_handler", "output_routing", "windows_compat"):
@@ -742,27 +650,38 @@ def test_inert_scope_support_reads_positional_line_argument():
 
 def test_inert_scope_support_ignores_a_literal_none_line():
     """readme_quality passes None positionally -- supplying nothing, spelled out."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert "lines" not in inert.scope_support().get("readme_quality", set())
 
 
-def test_inert_scope_support_skips_modules_that_shadow_the_matcher():
+def test_inert_scope_support_skips_modules_that_shadow_the_matcher(tmp_path, monkeypatch):
     """A module defining its own matcher is left out rather than read wrongly.
 
     bypass_handler.is_bypassed takes (file_path, branch_path, standard, line) --
     reading positional args against that signature while assuming the shared one
-    yields confident nonsense, so resolve the binding first.
+    yields confident nonsense, so resolve the binding first. The shadowing module
+    defines its own matcher BEFORE it imports the shared name, so only the
+    definition can disqualify it.
+    Mutant: the definition no longer disqualifies in apps/handlers/bypass/inert.py — killed.
     """
-    import ast
+    shared = "from aipass.seedgo.apps.handlers.bypass.utils import matching_rule\n"
+    (tmp_path / "shadowing_check.py").write_text(
+        "def is_bypassed(a, b, c):\n    return False\n\n\n"
+        + shared
+        + "\n\ndef check(p):\n    return is_bypassed(p, 'shadowed_std', 5)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "shared_check.py").write_text(
+        shared + "\n\ndef check(p, ln):\n    return matching_rule(p, 'shared_std', ln)\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(inert, "HANDLERS_ROOT", tmp_path)
+    inert.scope_support.cache_clear()
+    try:
+        support = inert.scope_support()
+    finally:
+        inert.scope_support.cache_clear()
 
-    from aipass.seedgo.apps.handlers.bypass import inert
-
-    local_copy = ast.parse("def is_bypassed(a, b, c):\n    return False\n")
-    assert inert._binds_shared_matcher(local_copy) is False
-
-    imported = ast.parse("from aipass.seedgo.apps.handlers.bypass.utils import matching_rule\n")
-    assert inert._binds_shared_matcher(imported) is True
+    assert "shadowed_std" not in support
+    assert support["shared_std"] == {"lines"}
 
 
 # The trigger standard's third matcher, folded back into the shared one (FPLAN-0384)
@@ -770,8 +689,6 @@ def test_inert_scope_support_skips_modules_that_shadow_the_matcher():
 
 def test_trigger_standard_is_now_in_the_scope_map_as_line_blind():
     """trigger_check carried its own matcher, so the map could not see the standard at all."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     support = inert.scope_support()
     assert "trigger" in support, "trigger now routes through the shared matcher"
     assert "lines" not in support["trigger"], "its one call site gates the whole file"
@@ -780,8 +697,6 @@ def test_trigger_standard_is_now_in_the_scope_map_as_line_blind():
 
 def _trigger_bypass_message(tmp_path, rules):
     """check_module's bypass gate, exercised on a real file."""
-    from aipass.seedgo.apps.handlers.aipass_standards import trigger_check
-
     target = tmp_path / "apps" / "foo.py"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text('"""Doc."""\n\nx = 1\n', encoding="utf-8")
@@ -816,8 +731,6 @@ def test_functions_scoped_unused_function_rules_are_never_reported_dead():
     faith deletes a working rule. This map reads the checker's call sites
     instead: unused_function passes name=, so the scope is evaluable.
     """
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     assert "functions" in inert.scope_support()["unused_function"]
 
     live = {
@@ -831,8 +744,6 @@ def test_functions_scoped_unused_function_rules_are_never_reported_dead():
 
 def test_a_functions_rule_on_a_name_blind_standard_is_still_reported():
     """The other direction: the map must not go quiet on every functions rule."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     name_blind = next(s for s, kinds in inert.scope_support().items() if "functions" not in kinds)
     assert inert.inert_scopes({"file": "a.py", "standard": name_blind, "functions": ["f"]}) == ("functions",)
 
@@ -851,8 +762,6 @@ def test_a_functions_rule_on_a_name_blind_standard_is_still_reported():
 
 def _advisory(tmp_path, rules):
     """The bypass advisory for a branch whose bypass.json holds *rules*."""
-    from aipass.seedgo.apps.handlers.bypass import inert
-
     _write_bypass(tmp_path, rules)
     return inert.check_branch_info(str(tmp_path))
 
@@ -930,14 +839,14 @@ def test_the_advisory_survives_the_renderer_that_shows_it(tmp_path):
     assert "apps/x.py" in rendered, rendered
 
 
-def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees():
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed, matching_rule
-
+def test_matching_rule_hands_back_the_rule_and_is_bypassed_agrees(tmp_path):
     rules = [{"file": "apps/foo.py", "standard": "cli", "reason": "entry point"}]
-    assert matching_rule("/b/apps/foo.py", "cli", None, rules) is rules[0]
-    assert is_bypassed("/b/apps/foo.py", "cli", None, rules) is True
-    assert matching_rule("/b/apps/bar.py", "cli", None, rules) is None
-    assert is_bypassed("/b/apps/bar.py", "cli", None, rules) is False
+    foo_path = str(tmp_path / "apps" / "foo.py")
+    bar_path = str(tmp_path / "apps" / "bar.py")
+    assert matching_rule(foo_path, "cli", None, rules) is rules[0]
+    assert utils_is_bypassed(foo_path, "cli", None, rules) is True
+    assert matching_rule(bar_path, "cli", None, rules) is None
+    assert utils_is_bypassed(bar_path, "cli", None, rules) is False
 
 
 # ---------------------------------------------------------------------------
@@ -956,8 +865,6 @@ PRUNE_RULES = [
 @pytest.fixture
 def prune_branch(tmp_path, monkeypatch):
     """A branch named 'planted': one live file, and a bypass.json of dead, live and blank rules."""
-    from aipass.seedgo.apps.modules import bypass as bypass_module
-
     branch = tmp_path / "planted"
     (branch / "apps").mkdir(parents=True)
     (branch / "apps" / "live.py").write_text("pass\n", encoding="utf-8")
@@ -1009,8 +916,6 @@ def test_a_file_json_cannot_reproduce_is_refused_not_rewritten(prune_branch, cap
 
 def test_an_unknown_branch_is_refused_with_exit_3(prune_branch):
     """A target with nothing to act on exits 3 and names the target."""
-    from aipass.seedgo.apps.modules import CommandRefused
-
     bypass_module, _ = prune_branch
     with pytest.raises(CommandRefused) as refused:
         bypass_module.handle_command("bypass", ["prune", "@nobody"])

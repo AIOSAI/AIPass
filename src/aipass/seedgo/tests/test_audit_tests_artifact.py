@@ -1,25 +1,27 @@
-"""Tests for the audit-tests target resolver, artifact writer and adapter seam.
-
-Three properties these pin, each of which the design argues is load-bearing:
-
-  1. Two external projects with the same directory name must not overwrite
-     each other's measurement. The hash suffix is the whole defence.
-  2. An unlawful artifact NEVER reaches disk. Validation runs before the
-     write, not after, because something could read a file the instant it
-     exists.
-  3. Registration is CONDITIONAL on payload isolation. @devpulse granted the
-     payload bypass conditional on a machine check, so a payload that imports
-     aipass must fail registration rather than warn — the grant cannot widen
-     silently and it has to outlive everyone who agreed to it.
-"""
-
 # =================== META ====================
 # Name: test_audit_tests_artifact.py
 # Description: Target, artifact and adapter-seam pins for the audit-tests lane
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-08-29
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/audit_tests/target.py, artifact.py and adapters.py."""
+
+# Three properties these pin, each of which the design argues is load-bearing:
+#
+#   1. Two external projects with the same directory name must not overwrite
+#      each other's measurement. The hash suffix is the whole defence.
+#   2. An unlawful artifact NEVER reaches disk. Validation runs before the
+#      write, not after, because something could read a file the instant it
+#      exists.
+#   3. Registration is CONDITIONAL on payload isolation. @devpulse granted the
+#      payload bypass conditional on a machine check, so a payload that imports
+#      aipass must fail registration rather than warn — the grant cannot widen
+#      silently and it has to outlive everyone who agreed to it.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module in handlers/audit_tests/ parses and imports
 
 import json
 import types
@@ -92,10 +94,10 @@ class TestTargetResolution:
         assert resolved.is_registry_branch
         assert resolved.path == tmp_path
 
-    def test_an_unknown_branch_raises_rather_than_guessing(self):
+    def test_an_unknown_branch_raises_rather_than_guessing(self, tmp_path):
         """A lane that silently measures the wrong tree publishes a wrong number."""
         with pytest.raises(ValueError, match="not a registered branch"):
-            target.resolve("@nope", {"backup": Path("/tmp")})
+            target.resolve("@nope", {"backup": tmp_path})
 
     def test_a_directory_resolves_without_a_registry(self, tmp_path):
         resolved = target.resolve(str(tmp_path))
@@ -445,7 +447,8 @@ class TestAdapterContract:
 
     @pytest.mark.parametrize("missing", adapters.REQUIRED_CONSTANTS)
     def test_every_required_constant_is_required(self, missing):
-        assert any(missing in p for p in adapters.contract_problems(_adapter_module(**{missing: None})))
+        """Reported as a missing constant. Mutant: the constant problem unclassified in apps/handlers/audit_tests/adapters.py — killed."""
+        assert f"missing constant {missing}" in adapters.contract_problems(_adapter_module(**{missing: None}))
 
     def test_an_unsupported_api_version_is_refused(self):
         """The core refuses an adapter it does not speak rather than calling half of it."""

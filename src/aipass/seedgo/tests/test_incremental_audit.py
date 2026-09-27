@@ -10,18 +10,21 @@ must never mean approximate.
 # =================== META ====================
 # Name: test_incremental_audit.py
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
-# Version: 1.3.2
+# Version: 1.4.1
 # Created: 2026-07-31
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 import json
-import sys
 import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs, trinity_check
+from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
+from aipass.seedgo.apps.handlers.bypass import ignore_handler
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -30,62 +33,26 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for branch_audit + incremental_cache."""
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
-        is_seedgo_ignored as real_is_seedgo_ignored,
-        load_ignore_entries as real_load_ignore_entries,
-    )
+    """Patch branch_audit's own seams directly, at the edge of the real modules.
 
-    mock_ignore_handler = MagicMock()
-    mock_ignore_handler.get_audit_ignore_patterns = MagicMock(return_value=[])
+    branch_audit and incremental_cache are imported for real, once, at module
+    top, rather than force-deleted and reimported against a sys.modules stub
+    per test. What was a whole-package replacement now patches only the two
+    names branch_audit reads that reach outside the branch under test:
+    ``dead_rules``/``inert`` (left unconfigured, same as every call fleet-wide
+    got from the old auto-mocked bypass package) and the real ignore_handler's
+    three list-shaping functions (emptied here, so the equivalence tests never
+    trip over this repo's own ignore rules -- ``is_seedgo_ignored`` and
+    ``load_ignore_entries`` stay real, exactly as the old fixture also kept
+    them real).
+    """
+    monkeypatch.setattr(branch_audit, "dead_rules", MagicMock())
+    monkeypatch.setattr(branch_audit, "inert", MagicMock())
+    monkeypatch.setattr(branch_audit, "scan_branch", lambda p: None)
+    monkeypatch.setattr(ignore_handler, "get_audit_ignore_patterns", MagicMock(return_value=[]))
     # The ignore list removes nothing here, as the empty pattern list above says.
-    mock_ignore_handler.audit_ignore_match = MagicMock(return_value=None)
-    mock_ignore_handler.ignored_tracked_source = MagicMock(return_value=[])
-    mock_ignore_handler.is_seedgo_ignored = real_is_seedgo_ignored
-    mock_ignore_handler.load_ignore_entries = real_load_ignore_entries
-    mock_scan_branch = MagicMock(return_value=None)
-
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    cli_mod = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    bypass_pkg = MagicMock()
-    bypass_pkg.ignore_handler = mock_ignore_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", mock_ignore_handler)
-
-    test_map_pkg = MagicMock()
-    test_map_pkg.scan_branch = mock_scan_branch
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.test_map", test_map_pkg)
-    scanner_mod = MagicMock()
-    scanner_mod.scan_branch = mock_scan_branch
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.test_map.function_scanner", scanner_mod)
-
-    # audit package (must be a real module with __path__ pointing at the real
-    # directory so submodule imports like audit.incremental_cache work)
-    audit_pkg = types.ModuleType("aipass.seedgo.apps.handlers.audit")
-    audit_pkg.__path__ = [str(Path(__file__).resolve().parents[1] / "apps" / "handlers" / "audit")]
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
-
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.audit.audit_display",
-        "aipass.seedgo.apps.handlers.audit.branch_audit",
-        "aipass.seedgo.apps.handlers.audit.incremental_cache",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    monkeypatch.setattr(ignore_handler, "audit_ignore_match", MagicMock(return_value=None))
+    monkeypatch.setattr(ignore_handler, "ignored_tracked_source", MagicMock(return_value=[]))
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +117,6 @@ def _audit_output(result: dict) -> dict:
 
 def _prepare(tmp_path, monkeypatch, files: dict) -> tuple:
     """Wire up an isolated branch_audit/incremental_cache pair for one test."""
-    from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
-    from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
-
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
     monkeypatch.setattr(incremental_cache, "CACHE_DIR", tmp_path / "seedgo_json" / "audit_cache")
     monkeypatch.setattr(incremental_cache, "LEGACY_CACHE_FILE", tmp_path / "seedgo_json" / "audit_cache.json")
@@ -1021,13 +985,9 @@ class TestThePerCheckerStampScopesAReRun:
 
 class TestFingerprintFile:
     def test_missing_file_returns_sentinel(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         assert incremental_cache.fingerprint_file(tmp_path / "nope.py") == [-1, -1]
 
     def test_existing_file_returns_mtime_and_size(self, tmp_path):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         f = tmp_path / "a.py"
         f.write_text("hello", encoding="utf-8")
         fp = incremental_cache.fingerprint_file(f)
@@ -1037,8 +997,6 @@ class TestFingerprintFile:
 
 class TestDiffFileset:
     def test_added_changed_deleted_unchanged(self):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         cached = {"a.py": [1, 10], "b.py": [1, 20], "c.py": [1, 30]}
         current = {"a.py": [1, 10], "b.py": [2, 20], "d.py": [1, 40]}
         added, changed, deleted, unchanged = incremental_cache.diff_fileset(cached, current)
@@ -1064,8 +1022,6 @@ class TestTheCacheKeyDiscriminatesThePack:
 
     def test_two_packs_do_not_share_one_slot(self, tmp_path):
         """The key differs by pack for the same branch, so neither evicts the other."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         aipass_pack = tmp_path / "aipass_standards"
         shadow_pack = tmp_path / "pytest_quality_standards"
 
@@ -1079,15 +1035,11 @@ class TestTheCacheKeyDiscriminatesThePack:
         The counter-arm: suffixing every key would orphan every cached entry in
         the fleet and buy one guaranteed cold scan for nothing.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         assert branch_audit.cache_key_for("prax", None, no_bypass=False) == "prax"
         assert branch_audit.cache_key_for("prax", tmp_path / "aipass_standards", no_bypass=False) == "prax"
 
     def test_bypass_mode_still_discriminates_alongside_the_pack(self, tmp_path):
         """The pack axis is added to the bypass axis, not swapped for it."""
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         shadow = tmp_path / "pytest_quality_standards"
         keys = {
             branch_audit.cache_key_for("prax", None, no_bypass=False),
@@ -1102,8 +1054,6 @@ class TestTheCacheKeyDiscriminatesThePack:
 @pytest.fixture
 def cache_dir(tmp_path, monkeypatch):
     """incremental_cache pointed at a tmp cache directory and legacy doc."""
-    from aipass.seedgo.apps.handlers.audit import incremental_cache
-
     monkeypatch.setattr(incremental_cache, "CACHE_DIR", tmp_path / "audit_cache")
     monkeypatch.setattr(incremental_cache, "LEGACY_CACHE_FILE", tmp_path / "audit_cache.json")
     return incremental_cache
@@ -1162,38 +1112,28 @@ class TestOneFilePerCacheKey:
 
 class TestTheFilenameIsSafeOnEveryHost:
     def test_a_plain_key_keeps_its_name_readable(self):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         assert incremental_cache.entry_filename("memory").startswith("memory.")
 
     def test_no_illegal_character_survives(self):
         """':' cannot appear in a Windows filename, and every key carries '::'."""
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         name = incremental_cache.entry_filename("memory::pack=pytest_quality")
 
         assert ":" not in name
         assert "memory__pack" in name
 
     def test_two_keys_that_flatten_alike_get_different_files(self):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         assert incremental_cache.entry_filename("memory::no-bypass") != incremental_cache.entry_filename(
             "memory=no-bypass"
         )
 
     def test_keys_differing_only_in_case_get_different_files(self):
         """Windows and macOS filesystems are case-insensitive; the fleet has BACKUP."""
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         upper = incremental_cache.entry_filename("BACKUP")
         lower = incremental_cache.entry_filename("backup")
 
         assert upper.lower() != lower.lower()
 
     def test_a_windows_device_name_is_prefixed_out_of_the_way(self):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         assert incremental_cache.entry_filename("con").startswith("_con.")
 
 
@@ -1270,8 +1210,6 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
 
     @staticmethod
     def _watch_rels(branch_path, checkers):
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         return {f["rel"] for f in branch_audit._collect_watch_files(branch_path, checkers)}
 
     def test_a_declared_input_is_watched(self, tmp_path, monkeypatch):
@@ -1371,8 +1309,6 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
 
     def test_editing_a_trinity_file_makes_the_branch_dirty(self, tmp_path, monkeypatch):
         """End to end: the cache serves a hit, then must NOT after a .trinity edit."""
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         trinity_dir = branch_path / ".trinity"
         trinity_dir.mkdir()
@@ -1410,16 +1346,12 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
 
     @staticmethod
     def _fps(branch_path, checkers):
-        from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
-
         return incremental_cache.collect_fingerprints(branch_audit._collect_watch_files(branch_path, checkers))
 
     def _names_checker(self):
         return {"json_handler": types.SimpleNamespace(BRANCH_INPUT_NAMES=("{branch}_json/*.json",))}
 
     def test_a_content_write_does_not_make_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         json_dir = branch_path / "mybranch_json"
         json_dir.mkdir()
@@ -1434,8 +1366,6 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
         assert not (added or changed or deleted)
 
     def test_adding_a_file_still_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         json_dir = branch_path / "mybranch_json"
         json_dir.mkdir()
@@ -1449,8 +1379,6 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
         assert "mybranch_json/thing_data.json" in added
 
     def test_deleting_a_file_still_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         json_dir = branch_path / "mybranch_json"
         json_dir.mkdir()
@@ -1466,8 +1394,6 @@ class TestPresenceOnlyInputsDoNotChurnTheCache:
 
     def test_content_inputs_still_react_to_content(self, tmp_path, monkeypatch):
         """The two channels must not collapse into one another."""
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         (branch_path / ".trinity").mkdir()
         target = branch_path / ".trinity" / "local.json"
@@ -1500,8 +1426,6 @@ class TestNotApplicableStandardsLeaveTheGatingAverage:
         measure and score, so the realistic question is whether the average
         reflects THEM once trinity stands down.
         """
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         branch, branch_path = _setup_branch(tmp_path, {})
         checker = types.SimpleNamespace(
             AUDIT_SCOPE="branch_level",
@@ -1599,16 +1523,12 @@ class TestTheCacheSeesStrayDirectories:
 
     @staticmethod
     def _fps(branch_path, checkers):
-        from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
-
         return incremental_cache.collect_fingerprints(branch_audit._collect_watch_files(branch_path, checkers))
 
     def _checkers(self):
         return {"trinity": types.SimpleNamespace(BRANCH_INPUTS=(".trinity/*",))}
 
     def test_a_new_stray_directory_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         (branch_path / ".trinity").mkdir()
 
@@ -1619,8 +1539,6 @@ class TestTheCacheSeesStrayDirectories:
         assert ".trinity/.recovery" in added
 
     def test_a_removed_stray_directory_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         (branch_path / ".trinity").mkdir()
         (branch_path / ".trinity" / ".recovery").mkdir()
@@ -1635,8 +1553,6 @@ class TestTheCacheSeesStrayDirectories:
         """Presence, not content: a child write already shows as its own file,
         and a directory mtime would double-report it.
         """
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         sub = branch_path / ".trinity" / "sub"
         sub.mkdir(parents=True)
@@ -1650,8 +1566,6 @@ class TestTheCacheSeesStrayDirectories:
 
     def test_files_are_still_watched_by_content(self, tmp_path, monkeypatch):
         """Over-refusal guard: adding directories must not blind the file lane."""
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         (branch_path / ".trinity").mkdir()
         target = branch_path / ".trinity" / "local.json"
@@ -1665,9 +1579,6 @@ class TestTheCacheSeesStrayDirectories:
 
     def test_the_cache_and_the_checker_see_the_same_strays(self, tmp_path, monkeypatch):
         """The invariant the defect broke, asserted directly."""
-        from aipass.seedgo.apps.handlers.aipass_standards import trinity_check
-        from aipass.seedgo.apps.handlers.audit import branch_audit
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         trinity_dir = branch_path / ".trinity"
         trinity_dir.mkdir()
@@ -1778,8 +1689,6 @@ class TestExternalInputsInvalidateTheCache:
 
     @staticmethod
     def _fps(branch_path, checkers):
-        from aipass.seedgo.apps.handlers.audit import branch_audit, incremental_cache
-
         return incremental_cache.collect_fingerprints(branch_audit._collect_watch_files(branch_path, checkers))
 
     @staticmethod
@@ -1800,8 +1709,6 @@ class TestExternalInputsInvalidateTheCache:
         assert config.resolve().as_posix() in self._fps(branch_path, self._checkers(config))
 
     def test_editing_an_external_input_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         config = self._external(tmp_path)
 
@@ -1812,8 +1719,6 @@ class TestExternalInputsInvalidateTheCache:
         assert config.resolve().as_posix() in changed
 
     def test_removing_an_external_input_makes_the_branch_dirty(self, tmp_path, monkeypatch):
-        from aipass.seedgo.apps.handlers.audit import incremental_cache
-
         _, _, _, branch_path, _, _ = _prepare(tmp_path, monkeypatch, {})
         config = self._external(tmp_path)
 

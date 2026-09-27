@@ -1,19 +1,23 @@
-"""Tests for the audit artifact writer (handlers/audit/artifact.py).
-
-The core regression is the reason the artifact exists: audit_display.py caps at
-10 files, 3 diagnostics per file and 5 violations per standard, and clips
-messages at 60 chars. A consumer that read that display as complete published a
-violation count that never existed. These tests build a result set BIGGER than
-every one of those caps and assert the artifact still carries all of it.
-"""
-
 # =================== META ====================
 # Name: test_audit_artifact.py
 # Description: Completeness + join-key tests for audit/artifact.py
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-11
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/audit/artifact.py."""
+
+# The core regression is the reason the artifact exists: audit_display.py caps at
+# 10 files, 3 diagnostics per file and 5 violations per standard, and clips
+# messages at 60 chars. A consumer that read that display as complete published a
+# violation count that never existed. These tests build a result set BIGGER than
+# every one of those caps and assert the artifact still carries all of it.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/audit/artifact.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public artifact functions carry docstrings
+# seedgo: no-test-needed(stdlib) — json.dump's ability to serialise the document
 
 import json
 from pathlib import Path
@@ -34,10 +38,8 @@ LONG_MESSAGE = (
 )
 
 
-@pytest.fixture(autouse=True)
-def _quiet_json_handler(monkeypatch):
-    """Keep the operation log out of seedgo_json/ during tests."""
-    monkeypatch.setattr(audit_artifact.json_handler, "log_operation", lambda *a, **k: True)
+# The operation log needs no stub: conftest's autouse mock_infrastructure
+# already points the json service into tmp_path, so the real call lands there.
 
 
 def _make_results(branch_root: Path, file_count: int = 14):

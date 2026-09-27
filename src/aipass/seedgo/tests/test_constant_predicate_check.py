@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_constant_predicate_check.py
 # Description: constant_predicate_check — crack class C, a lambda that cannot discriminate
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/constant_predicate_check.py."""

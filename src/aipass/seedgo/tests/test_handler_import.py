@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_handler_import.py
 # Description: Unit tests for handler_import_check checker handler
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-04-26
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/handler_import_check.py."""

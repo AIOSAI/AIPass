@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_self_set_assert_check.py
 # Description: self_set_assert_check — crack class E, a test asserting what it just wrote
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-23
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/self_set_assert_check.py."""

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_branch_audit_scoring.py
 # Description: audit_branch's all_files row — which files the average counts
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-09-25
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/audit/branch_audit.py, the all_files row's average."""

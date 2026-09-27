@@ -1,14 +1,20 @@
-"""Tests for readme_check.py — Check 7 (test count accuracy), Check 8 (markdown link
-validity) and the advisory docs-index / rot-bait lane (check_branch_info) — and for
-docs_page_check.py, the docs/*.md page shape one layer down (DPLAN-0351)."""
-
 # =================== META ====================
 # Name: test_readme_content_checks.py
 # Description: Unit tests for readme content accuracy checks and the docs page standard
-# Version: 1.2.1
+# Version: 1.3.1
 # Created: 2026-05-15
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/aipass_standards/readme_check.py and docs_page_check.py beside it."""
+
+# readme_check's Check 7 (test count accuracy), Check 8 (markdown link validity) and the
+# advisory docs-index / rot-bait lane (check_branch_info); docs_page_check's docs/*.md page
+# shape one layer down (DPLAN-0351).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — check_required_sections and check_command_list; tests/test_checkers_batch9.py
+# seedgo: no-test-needed(ruff) — that readme_check.py and docs_page_check.py parse and import
 
 import os
 import sys
@@ -17,6 +23,18 @@ import pytest
 from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock
+
+from aipass.seedgo.apps.handlers.aipass_standards import docs_page_check, readme_check
+from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
+    check_branch_info,
+    check_directory_tree,
+    check_markdown_links,
+    check_module,
+    check_module_list,
+    check_test_count_accuracy,
+)
+from aipass.seedgo.apps.handlers.aipass_standards.readme_content import get_readme_standards
+from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as budget
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +46,20 @@ def _lines(text: str) -> List[str]:
     return text.split("\n")
 
 
+def _count_check(tmp_path: Path, readme: str, files: dict) -> dict:
+    """check_test_count_accuracy over a README text and a tests/ tree of {name: source}."""
+    tests_dir = tmp_path / "tests"
+    for name, source in files.items():
+        (tests_dir / name).parent.mkdir(parents=True, exist_ok=True)
+        (tests_dir / name).write_text(source, encoding="utf-8")
+    tests_dir.mkdir(exist_ok=True)
+    return check_test_count_accuracy(_lines(readme), tmp_path, "fake.py")
+
+
+def _tests(count: int) -> str:
+    return "".join(f"def test_{i}(): pass\n" for i in range(count))
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -35,52 +67,16 @@ def _lines(text: str) -> List[str]:
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for readme_check."""
-    import sys
+    """Mock heavy infrastructure the checkers read, at the seam each reads it from.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as real_is_bypassed
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
-        is_seedgo_ignored as real_is_seedgo_ignored,
-        load_ignore_entries as real_load_ignore_entries,
-    )
-
-    bypass_pkg = MagicMock()
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = real_is_bypassed
-    bypass_pkg.utils = bypass_utils
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_ignore.is_seedgo_ignored = real_is_seedgo_ignored
-    bypass_ignore.load_ignore_entries = real_load_ignore_entries
-    bypass_pkg.ignore_handler = bypass_ignore
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.utils", bypass_utils)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.aipass_standards.readme_check",
-        raising=False,
-    )
+    ``is_bypassed``, ``is_seedgo_ignored`` and ``load_ignore_entries`` are left
+    real: each is a pure function of the arguments a call passes explicitly
+    (``bypass_rules``, ``branch_root``), with no live-repo dependency once
+    those are test-controlled.
+    """
+    for module in (readme_check, docs_page_check):
+        monkeypatch.setattr(module, "logger", MagicMock())
+        monkeypatch.setattr(module, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
 
 
 # ===========================================================================
@@ -88,25 +84,16 @@ def _mock_infrastructure(monkeypatch):
 # ===========================================================================
 
 
-def test_test_count_no_claims():
+def test_test_count_no_claims(tmp_path):
     """No test count claims in README passes (skipped)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-    from pathlib import Path
-
     lines = _lines("# Branch\n\nSome content without test counts.\n")
-    result = check_test_count_accuracy(lines, Path("/nonexistent"), "fake.py")
+    result = check_test_count_accuracy(lines, tmp_path, "fake.py")
     assert result["passed"] is True
     assert "skipped" in result["message"].lower()
 
 
 def test_test_count_no_tests_dir(tmp_path):
     """Test count claim with no tests/ directory passes (skipped)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-
     lines = _lines("├── tests/    # 50 tests\n")
     result = check_test_count_accuracy(lines, tmp_path, "fake.py")
     assert result["passed"] is True
@@ -115,10 +102,6 @@ def test_test_count_no_tests_dir(tmp_path):
 
 def test_test_count_accurate(tmp_path):
     """Claimed count within 10% of actual passes."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_one.py").write_text(
@@ -137,10 +120,6 @@ def test_test_count_accurate(tmp_path):
 
 def test_test_count_drift_over_10_pct(tmp_path):
     """Claimed count drifting >10% from actual fails."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_one.py").write_text(
@@ -159,10 +138,6 @@ def test_test_count_drift_over_10_pct(tmp_path):
 
 def test_test_count_claims_zero_actual_nonzero(tmp_path):
     """README claims tests but 0 actual functions found fails."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_empty.py").write_text("# no test functions\n", encoding="utf-8")
@@ -174,10 +149,6 @@ def test_test_count_claims_zero_actual_nonzero(tmp_path):
 
 def test_test_count_uses_max_claimed(tmp_path):
     """When multiple counts claimed, uses the highest for comparison."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     funcs = "\n".join(f"def test_{i}(): pass" for i in range(100))
@@ -188,25 +159,16 @@ def test_test_count_uses_max_claimed(tmp_path):
     assert result["passed"] is True
 
 
-def test_test_count_bypassed():
+def test_test_count_bypassed(tmp_path):
     """Bypassed standard passes immediately."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-    from pathlib import Path
-
     bypass_rules = [{"file": "fake.py", "standard": "readme", "reason": "test"}]
     lines = _lines("├── tests/    # 999 tests\n")
-    result = check_test_count_accuracy(lines, Path("/tmp"), "fake.py", bypass_rules)
+    result = check_test_count_accuracy(lines, tmp_path, "fake.py", bypass_rules)
     assert result["passed"] is True
 
 
 def test_test_count_rglob_nested(tmp_path):
     """Counts test functions in nested test subdirectories."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_test_count_accuracy,
-    )
-
     tests_dir = tmp_path / "tests"
     sub_dir = tests_dir / "subdir"
     sub_dir.mkdir(parents=True)
@@ -223,35 +185,28 @@ def test_test_count_rglob_nested(tmp_path):
 # ===========================================================================
 
 
-def test_extract_test_counts_various_patterns():
-    """Extracts counts from various README patterns."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _extract_test_counts,
-    )
-
-    content = "├── tests/    # 219 tests (watchdog + feedback)\n**Tests:** 219 tests passing\n"
-    counts = _extract_test_counts(content)
-    assert 219 in counts
-    assert len(counts) == 2
-
-
-def test_extract_test_counts_singular():
-    """Matches singular 'test' as well as plural."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _extract_test_counts,
-    )
-
-    counts = _extract_test_counts("1 test passing")
-    assert counts == [1]
+def test_extract_test_counts_various_patterns(tmp_path):
+    """Mutant: only the first claim kept in apps/handlers/aipass_standards/readme_check.py — killed."""
+    tree_line = "├── tests/    # 21 tests (watchdog + feedback)"
+    status_line = "**Tests:** 22 tests passing"
+    files = {"test_one.py": _tests(22)}
+    # Each pattern is read on its own, and both are read together (the second is the max).
+    assert "claim (21)" in _count_check(tmp_path, tree_line, files)["message"]
+    assert "claim (22)" in _count_check(tmp_path, status_line, files)["message"]
+    assert "claim (22)" in _count_check(tmp_path, tree_line + "\n" + status_line, files)["message"]
 
 
-def test_extract_test_counts_empty():
-    """Returns empty list when no patterns match."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _extract_test_counts,
-    )
+def test_extract_test_counts_singular(tmp_path):
+    """Mutant: the claim pattern made plural-only in apps/handlers/aipass_standards/readme_check.py — killed."""
+    result = _count_check(tmp_path, "1 test passing", {"test_one.py": _tests(1)})
+    assert result["message"] == "Test count claim (1) within 10% of actual (1)"
 
-    assert _extract_test_counts("No numbers here.") == []
+
+def test_extract_test_counts_empty(tmp_path):
+    """Mutant: a phantom 0 claimed on no match in apps/handlers/aipass_standards/readme_check.py — killed."""
+    result = _count_check(tmp_path, "No numbers here.", {"test_one.py": _tests(1)})
+    assert result["passed"] is True
+    assert result["message"] == "No test count claims found in README (skipped)"
 
 
 # ===========================================================================
@@ -260,43 +215,27 @@ def test_extract_test_counts_empty():
 
 
 def test_count_test_functions_basic(tmp_path):
-    """Counts def test_ functions across files."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _count_test_functions,
-    )
+    """Mutant: one count per file, not per def, in apps/handlers/aipass_standards/readme_check.py — killed."""
+    files = {"test_a.py": "def test_one(): pass\ndef test_two(): pass\n", "test_b.py": "def test_three(): pass\n"}
 
-    tests_dir = tmp_path / "tests"
-    tests_dir.mkdir()
-    (tests_dir / "test_a.py").write_text("def test_one(): pass\ndef test_two(): pass\n", encoding="utf-8")
-    (tests_dir / "test_b.py").write_text("def test_three(): pass\n", encoding="utf-8")
-
-    assert _count_test_functions(tests_dir) == 3
+    assert "of actual (3)" in _count_check(tmp_path, "3 tests", files)["message"]
 
 
 def test_count_test_functions_skips_non_test_files(tmp_path):
-    """Only counts from test_*.py files, not conftest or helpers."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _count_test_functions,
-    )
+    """Mutant: every *.py counted, not test_*.py, in apps/handlers/aipass_standards/readme_check.py — killed."""
+    files = {
+        "test_real.py": "def test_one(): pass\n",
+        "conftest.py": "def test_fixture(): pass\n",
+        "helpers.py": "def test_helper(): pass\n",
+    }
 
-    tests_dir = tmp_path / "tests"
-    tests_dir.mkdir()
-    (tests_dir / "test_real.py").write_text("def test_one(): pass\n", encoding="utf-8")
-    (tests_dir / "conftest.py").write_text("def test_fixture(): pass\n", encoding="utf-8")
-    (tests_dir / "helpers.py").write_text("def test_helper(): pass\n", encoding="utf-8")
-
-    assert _count_test_functions(tests_dir) == 1
+    assert "of actual (1)" in _count_check(tmp_path, "1 test", files)["message"]
 
 
 def test_count_test_functions_empty_dir(tmp_path):
-    """Empty tests dir returns 0."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _count_test_functions,
-    )
-
-    tests_dir = tmp_path / "tests"
-    tests_dir.mkdir()
-    assert _count_test_functions(tests_dir) == 0
+    """Mutant: the count starts at 1 in apps/handlers/aipass_standards/readme_check.py — killed."""
+    result = _count_check(tmp_path, "5 tests", {})
+    assert result["message"] == "README claims 5 tests but no test functions found"
 
 
 # ===========================================================================
@@ -304,38 +243,24 @@ def test_count_test_functions_empty_dir(tmp_path):
 # ===========================================================================
 
 
-def test_markdown_links_no_links():
+def test_markdown_links_no_links(tmp_path):
     """README with no relative links passes (skipped)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-    from pathlib import Path
-
     lines = _lines("# Branch\n\nNo links here.\n")
-    result = check_markdown_links(lines, Path("/tmp"), "fake.py")
+    result = check_markdown_links(lines, tmp_path, "fake.py")
     assert result["passed"] is True
     assert "skipped" in result["message"].lower()
 
 
-def test_markdown_links_external_only():
+def test_markdown_links_external_only(tmp_path):
     """README with only external links passes (skipped)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-    from pathlib import Path
-
     lines = _lines("[Google](https://google.com)\n[Mail](mailto:a@b.com)\n[Section](#heading)\n")
-    result = check_markdown_links(lines, Path("/tmp"), "fake.py")
+    result = check_markdown_links(lines, tmp_path, "fake.py")
     assert result["passed"] is True
     assert "skipped" in result["message"].lower()
 
 
 def test_markdown_links_all_valid(tmp_path):
     """All relative links pointing to existing paths pass."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-
     (tmp_path / "STATUS.local.md").write_text("# Status\n", encoding="utf-8")
     trinity_dir = tmp_path / ".trinity"
     trinity_dir.mkdir()
@@ -348,10 +273,6 @@ def test_markdown_links_all_valid(tmp_path):
 
 def test_markdown_links_dead_link(tmp_path):
     """Dead relative link fails."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-
     lines = _lines("[Setup](SETUP.md)\n")
     result = check_markdown_links(lines, tmp_path, "fake.py")
     assert result["passed"] is False
@@ -360,10 +281,6 @@ def test_markdown_links_dead_link(tmp_path):
 
 def test_markdown_links_mixed_valid_and_dead(tmp_path):
     """Mix of valid and dead links fails, reporting only dead ones."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-
     (tmp_path / "README.md").write_text("# exists\n", encoding="utf-8")
 
     lines = _lines("[Readme](README.md)\n[Gone](deleted_file.md)\n[Also Gone](utils/)\n")
@@ -375,10 +292,6 @@ def test_markdown_links_mixed_valid_and_dead(tmp_path):
 
 def test_markdown_links_parent_path(tmp_path):
     """Parent-relative links (../) are resolved correctly."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-
     parent_file = tmp_path.parent / "parent_readme.md"
     parent_file.write_text("# parent\n", encoding="utf-8")
 
@@ -387,16 +300,11 @@ def test_markdown_links_parent_path(tmp_path):
     assert result["passed"] is True
 
 
-def test_markdown_links_bypassed():
+def test_markdown_links_bypassed(tmp_path):
     """Bypassed standard passes immediately."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_markdown_links,
-    )
-    from pathlib import Path
-
     bypass_rules = [{"file": "fake.py", "standard": "readme", "reason": "test"}]
     lines = _lines("[Dead](nonexistent.md)\n")
-    result = check_markdown_links(lines, Path("/tmp"), "fake.py", bypass_rules)
+    result = check_markdown_links(lines, tmp_path, "fake.py", bypass_rules)
     assert result["passed"] is True
 
 
@@ -405,38 +313,26 @@ def test_markdown_links_bypassed():
 # ===========================================================================
 
 
-def test_extract_relative_links_mixed():
-    """Extracts only relative links, skipping external."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _extract_relative_links,
-    )
-
+def test_extract_relative_links_mixed(tmp_path):
+    """Mutant: anchor links no longer skipped in apps/handlers/aipass_standards/readme_check.py — killed."""
     content = "[Ext](https://example.com)\n[Local](docs/setup.md)\n[Anchor](#top)\n[File](README.md)\n"
-    links = _extract_relative_links(content)
-    assert len(links) == 2
-    assert ("Local", "docs/setup.md") in links
-    assert ("File", "README.md") in links
+    # Neither target exists, so the dead-link message lists exactly the relative links read.
+    result = check_markdown_links(_lines(content), tmp_path, "fake.py")
+    assert result["message"] == "Dead links: docs/setup.md (Local), README.md (File)"
 
 
-def test_extract_relative_links_empty():
-    """No links returns empty list."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _extract_relative_links,
-    )
-
-    assert _extract_relative_links("No links at all.") == []
+def test_extract_relative_links_empty(tmp_path):
+    """Mutant: an empty link invented on no match in apps/handlers/aipass_standards/readme_check.py — killed."""
+    result = check_markdown_links(_lines("No links at all."), tmp_path, "fake.py")
+    assert result["message"] == "No relative markdown links found (skipped)"
 
 
-def test_extract_relative_links_backtick_text():
-    """Links with backtick text are extracted correctly."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _extract_relative_links,
-    )
-
-    content = "[`tools/`](tools/)\n"
-    links = _extract_relative_links(content)
-    assert len(links) == 1
-    assert links[0] == ("`tools/`", "tools/")
+def test_extract_relative_links_backtick_text(tmp_path):
+    """Mutant: backticks refused in link text in apps/handlers/aipass_standards/readme_check.py — killed."""
+    # utils/, not the old tools/: tools is a runtime artifact, so a dead tools/ link is never named.
+    content = "[`utils/`](utils/)\n"
+    result = check_markdown_links(_lines(content), tmp_path, "fake.py")
+    assert result["message"] == "Dead links: utils/ (`utils/`)"
 
 
 # ===========================================================================
@@ -446,8 +342,6 @@ def test_extract_relative_links_backtick_text():
 
 def test_check_module_includes_new_checks(tmp_path):
     """check_module result includes test count and link checks."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_module
-
     branch_root = tmp_path
     apps_dir = branch_root / "apps"
     apps_dir.mkdir()
@@ -473,8 +367,6 @@ def test_check_module_includes_new_checks(tmp_path):
 
 def test_check_module_missing_readme_has_8_failures(tmp_path):
     """Missing README produces 8 failure checks (1 exists + 7 dependent)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_module
-
     apps_dir = tmp_path / "apps"
     apps_dir.mkdir()
     entry = apps_dir / "mybranch.py"
@@ -485,37 +377,33 @@ def test_check_module_missing_readme_has_8_failures(tmp_path):
     assert result["score"] == 0
 
 
-def test_is_runtime_artifact_known_dirs():
-    """_is_runtime_artifact recognizes known runtime dirs and suffixes."""
-    from pathlib import Path
-
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _is_runtime_artifact,
-    )
-
-    assert _is_runtime_artifact(Path("/any/path/logs")) is True
-    assert _is_runtime_artifact(Path("/any/path/artifacts")) is True
-    assert _is_runtime_artifact(Path("/any/path/.trinity")) is True
-    assert _is_runtime_artifact(Path("/any/path/cli_json")) is True
-    assert _is_runtime_artifact(Path("/any/path/seedgo_json")) is True
-    assert _is_runtime_artifact(Path("/any/path/STATUS.local.md")) is False
-    assert _is_runtime_artifact(Path("/any/path/DASHBOARD.local.json")) is True
-    assert _is_runtime_artifact(Path("/any/path/docs.local")) is True
-    assert _is_runtime_artifact(Path("/any/path/dropbox")) is True
-    assert _is_runtime_artifact(Path("/any/path/system_logs")) is True
-    assert _is_runtime_artifact(Path("/any/path/tools")) is True
-    assert _is_runtime_artifact(Path("/any/path/backups")) is True
-    assert _is_runtime_artifact(Path("/any/path/src")) is False
-    assert _is_runtime_artifact(Path("/any/path/apps")) is False
-    assert _is_runtime_artifact(Path("/any/path/tests")) is False
+def test_is_runtime_artifact_known_dirs(tmp_path):
+    """Mutant: _json not a runtime artifact in apps/handlers/aipass_standards/readme_check.py — killed."""
+    names = [
+        "logs",
+        "artifacts",
+        ".trinity",
+        "cli_json",
+        "seedgo_json",
+        "STATUS.local.md",
+        "DASHBOARD.local.json",
+        "docs.local",
+        "dropbox",
+        "system_logs",
+        "tools",
+        "backups",
+        "src",
+        "apps",
+        "tests",
+    ]
+    # None exists on disk: a runtime artifact is excused from the dead-link list, anything else is named.
+    content = "".join(f"[x]({name})\n" for name in names)
+    result = check_markdown_links(_lines(content), tmp_path, "fake.py")
+    assert result["message"] == "Dead links: STATUS.local.md (x), src (x), apps (x), tests (x)"
 
 
 def test_module_list_skips_disabled_file(tmp_path):
     """A (disabled) .py in apps/modules/ must not trigger a 'missing module' violation."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_module_list,
-    )
-
     modules_dir = tmp_path / "apps" / "modules"
     modules_dir.mkdir(parents=True)
     (modules_dir / "__init__.py").write_text("", encoding="utf-8")
@@ -529,29 +417,18 @@ def test_module_list_skips_disabled_file(tmp_path):
 
 
 def test_count_test_functions_skips_disabled_file(tmp_path):
-    """_count_test_functions must exclude test_*(disabled).py files."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        _count_test_functions,
-    )
+    """Mutant: the (disabled) skip removed in apps/handlers/aipass_standards/readme_check.py — killed."""
+    files = {
+        "test_active.py": "def test_one(): pass\ndef test_two(): pass\n",
+        "test_old(disabled).py": "def test_ghost(): pass\ndef test_phantom(): pass\ndef test_zombie(): pass\n",
+    }
 
-    tests_dir = tmp_path / "tests"
-    tests_dir.mkdir()
-    (tests_dir / "test_active.py").write_text("def test_one(): pass\ndef test_two(): pass\n", encoding="utf-8")
-    (tests_dir / "test_old(disabled).py").write_text(
-        "def test_ghost(): pass\ndef test_phantom(): pass\ndef test_zombie(): pass\n",
-        encoding="utf-8",
-    )
-
-    assert _count_test_functions(tests_dir) == 2
+    assert "of actual (2)" in _count_check(tmp_path, "2 tests", files)["message"]
 
 
 def test_directory_tree_passes_absent_runtime_dir(tmp_path):
     """Parity regression: README tree lists runtime dir (logs), dir absent on
     disk, no git available — tree check passes via _is_runtime_artifact."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_directory_tree,
-    )
-
     branch_root = tmp_path / "mybranch"
     branch_root.mkdir()
     apps_dir = branch_root / "apps"
@@ -582,10 +459,6 @@ _MODE_BITS_HOLD = sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)(
 
 @pytest.mark.skipif(not _MODE_BITS_HOLD, reason="a directory cannot be made unlistable on this platform")
 def test_directory_tree_names_the_unreadable_subtree_it_could_not_verify(tmp_path):
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_directory_tree,
-    )
-
     branch_root = tmp_path / "mybranch"
     locked = branch_root / "locked"
     (locked / "hidden").mkdir(parents=True)
@@ -630,8 +503,6 @@ _PLAIN_README = (
 
 def test_docs_index_reports_unlinked_doc(tmp_path):
     """A docs/*.md the README never names is reported, by name."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     branch_root = _advisory_branch(tmp_path, _PLAIN_README, docs={"audit.md": "# Audit\n"})
 
     lines = [line for line in check_branch_info(str(branch_root)) if "docs index" in line]
@@ -643,8 +514,6 @@ def test_docs_index_reports_unlinked_doc(tmp_path):
 
 def test_docs_index_linked_doc_not_reported(tmp_path):
     """A docs/*.md reached by a relative link is not reported as unlinked."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nDepth: [audit](docs/audit.md)\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
 
@@ -657,8 +526,6 @@ def test_docs_index_link_is_resolved_not_string_matched(tmp_path):
     ("docs/./audit.md") still indexes it: link targets are RESOLVED against the
     branch root, not string-matched against the text. Without resolution the
     lane would only ever see paths written the one canonical way."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nDepth: [audit](docs/./audit.md)\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
     assert "docs/audit.md" not in readme
@@ -669,8 +536,6 @@ def test_docs_index_link_is_resolved_not_string_matched(tmp_path):
 
 def test_docs_index_plain_path_mention_counts_as_linked(tmp_path):
     """The literal path docs/<name> indexes the file even without link syntax."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nDepth lives in `docs/audit.md`.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme, docs={"audit.md": "# Audit\n"})
 
@@ -680,8 +545,6 @@ def test_docs_index_plain_path_mention_counts_as_linked(tmp_path):
 
 def test_docs_index_dir_link_covers_docs_readme(tmp_path):
     """A link to docs/ indexes docs/README.md — that is how a directory index renders."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nDepth: [docs](docs/)\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme, docs={"README.md": "# Docs\n"})
 
@@ -691,8 +554,6 @@ def test_docs_index_dir_link_covers_docs_readme(tmp_path):
 
 def test_docs_index_absent_docs_dir_is_silence(tmp_path):
     """No docs/ directory reports NOTHING — silence, not a finding."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     branch_root = _advisory_branch(tmp_path, _PLAIN_README)
 
     assert check_branch_info(str(branch_root)) == []
@@ -700,8 +561,6 @@ def test_docs_index_absent_docs_dir_is_silence(tmp_path):
 
 def test_docs_index_empty_docs_dir_is_silence(tmp_path):
     """A docs/ directory with no *.md in it reports nothing either."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     branch_root = _advisory_branch(tmp_path, _PLAIN_README)
     (branch_root / "docs").mkdir()
 
@@ -710,8 +569,6 @@ def test_docs_index_empty_docs_dir_is_silence(tmp_path):
 
 def test_missing_readme_is_silence(tmp_path):
     """No README at all: the advisory lane says nothing (check 1 owns that)."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     branch_root = _advisory_branch(tmp_path, _PLAIN_README, docs={"audit.md": "# Audit\n"})
     (branch_root / "README.md").unlink()
 
@@ -723,11 +580,6 @@ def test_broken_readme_link_reported_by_scored_check_only(tmp_path):
     advisory lane. The target is branch-rooted on purpose: the advisory lane
     would pick it up if it stopped skipping link targets, and then one dead
     link would be told twice."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import (
-        check_branch_info,
-        check_markdown_links,
-    )
-
     readme = "# MyBranch\n\nThe gate: [gate](apps/handlers/gone.py)\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -740,8 +592,6 @@ def test_broken_readme_link_reported_by_scored_check_only(tmp_path):
 
 def test_named_path_absent_is_reported(tmp_path):
     """A branch-rooted path the README names but that is not there is reported."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nThe gate is `apps/handlers/gone.py`.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -752,8 +602,6 @@ def test_named_path_absent_is_reported(tmp_path):
 
 def test_named_path_present_is_silent(tmp_path):
     """A named path that exists produces no line."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nThe entry is `apps/mybranch.py`.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -763,8 +611,6 @@ def test_named_path_present_is_silent(tmp_path):
 def test_named_path_outside_branch_root_ignored(tmp_path):
     """A path rooted somewhere else (a neighbour branch, an illustration) is out
     of scope: this audit reads ONE branch and cannot tell stale from foreign."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nSee `lifecycle/auto_fix.py` and `/path/to/registry.json`.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -773,8 +619,6 @@ def test_named_path_outside_branch_root_ignored(tmp_path):
 
 def test_rot_bait_stale_count_reported(tmp_path):
     """A count claim in the README is rot bait, quoted back with its noun."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\nThis branch ships 46 standards today.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -785,8 +629,6 @@ def test_rot_bait_stale_count_reported(tmp_path):
 
 def test_rot_bait_dated_status_heading_reported(tmp_path):
     """A dated heading and a Status heading are both snapshots."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\n## Status (2026-09-07)\n\nGreen.\n\n## Latest Audit\n\n100.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -800,8 +642,6 @@ def test_rot_bait_last_updated_is_never_rot_bait(tmp_path):
     """Last Updated carries a date and is REQUIRED by check 3 — never flagged,
     not even when a branch writes it as a dated HEADING, which is the only
     shape where the exemption is load-bearing."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\n## Last Updated (2026-09-15)\n\nA face.\n\n**Last Updated:** 2026-09-15\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -810,8 +650,6 @@ def test_rot_bait_last_updated_is_never_rot_bait(tmp_path):
 
 def test_rot_bait_command_list_reported(tmp_path):
     """A Commands section that re-types --help is reported with its count."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = (
         "# MyBranch\n\n## Commands\n\n"
         "- `drone @mybranch audit`\n"
@@ -829,8 +667,6 @@ def test_rot_bait_command_list_reported(tmp_path):
 
 def test_rot_bait_short_command_pointer_is_silent(tmp_path):
     """A pointer (under the threshold) is the contract, not rot bait."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = (
         "# MyBranch\n\n## Commands\n\nEvery command: `drone @mybranch --help`\n\n"
         "## Depends On\n\ndrone\n\n*Last Updated: 2099-01-01*\n"
@@ -843,8 +679,6 @@ def test_rot_bait_short_command_pointer_is_silent(tmp_path):
 def test_command_count_survives_fenced_comments(tmp_path):
     """A bash comment inside a fence is not a markdown heading: counting must
     not stop at '# Audit' three invocations in."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = (
         "# MyBranch\n\n## Commands\n\n```bash\n"
         "drone @mybranch one\n"
@@ -862,8 +696,6 @@ def test_command_count_survives_fenced_comments(tmp_path):
 
 def test_advisory_samples_are_rich_safe(tmp_path):
     """Square brackets in quoted README text would be eaten as Rich markup."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     readme = "# MyBranch\n\n## Status [2026-09-07]\n\nGreen.\n\n*Last Updated: 2099-01-01*\n"
     branch_root = _advisory_branch(tmp_path, readme)
 
@@ -875,8 +707,6 @@ def test_advisory_samples_are_rich_safe(tmp_path):
 def test_branch_inputs_declares_docs_for_the_audit_cache(tmp_path):
     """docs/*.md is declared, or a new docs file is invisible until something
     else in the branch changes and the index line is served stale."""
-    from aipass.seedgo.apps.handlers.aipass_standards import readme_check
-
     assert "docs/*.md" in readme_check.BRANCH_INPUTS
 
 
@@ -884,8 +714,6 @@ def test_advisory_lane_does_not_move_the_readme_score(tmp_path):
     """LOAD-BEARING: a branch that trips every advisory line still scores
     exactly what it scored before the lane existed — 8 checks, no advisory
     finding anywhere in checks[]. CI gates every branch at 100."""
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info, check_module
-
     readme = (
         "# MyBranch\n\n## Architecture\n\n```\nmybranch/\n```\n\n"
         "## Commands\n\n"
@@ -926,8 +754,6 @@ _EIGHT = (
 
 
 def _sections_line(branch_root):
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_check import check_branch_info
-
     return [line for line in check_branch_info(str(branch_root)) if line.startswith("readme sections")]
 
 
@@ -961,8 +787,6 @@ def test_readme_sections_names_what_is_missing_renamed_out_of_order_and_extra(tm
 def test_readme_sections_the_standard_prints_the_order_the_check_reads():
     """readme.md's Canonical Section Order and the query text carry the checker's eight, in its order."""
     import re
-    from aipass.seedgo.apps.handlers.aipass_standards import readme_check
-    from aipass.seedgo.apps.handlers.aipass_standards.readme_content import get_readme_standards
 
     standard = (Path(readme_check.__file__).parent / "readme.md").read_text(encoding="utf-8")
     block = standard.split("## Canonical Section Order", 1)[1].split("\n## ", 1)[0]
@@ -1000,8 +824,6 @@ _OTHER_PAGE = "[<- Back](../README.md)\n\n# Other\n\nThe second page, in one sen
 
 
 def _docs():
-    from aipass.seedgo.apps.handlers.aipass_standards import docs_page_check
-
     return docs_page_check
 
 
@@ -1173,7 +995,6 @@ def test_docs_page_an_unreadable_cap_fails_the_size_check_and_says_why(monkeypat
 def test_docs_page_the_shipped_cap_is_the_context_pack_key():
     """The pack.json key exists and reads; the checker holds no copy of the number."""
     import ast
-    from aipass.seedgo.apps.handlers.context_standards import startup_budget_check as budget
 
     cap, reason = budget.docs_page_cap()
     tree = ast.parse(open(_docs().__file__, encoding="utf-8").read())

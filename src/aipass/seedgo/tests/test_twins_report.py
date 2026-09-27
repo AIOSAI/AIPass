@@ -1,30 +1,33 @@
 # =================== AIPass ====================
 # Name: test_twins_report.py
 # Description: behavioural pins for the cross-branch twin report
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Pins for the twin report. Every test here names the contract it holds.
+"""Tests for apps/handlers/test_inventory/twins.py — the cross-branch twin report."""
 
-THE ONE THAT MATTERS MOST is `test_the_same_name_with_a_different_body_is_not
-_a_twin`. The whole reason this report is keyed on (name, body fingerprint)
-rather than on a filename is a fleet measurement: of the test names living in
-six or more branches, only a handful still carry the same body everywhere - the
-rest were stamped once and then evolved apart. A name-keyed or filename-keyed
-merge would collapse those diverged bodies into one and take real coverage with
-it, silently. That test is the negative control which proves the gate is shape
-and not name, and if it ever passes for the wrong reason the report becomes
-exactly the tool it was built to prevent.
+# Every test here names the contract it holds.
+#
+# THE ONE THAT MATTERS MOST is `test_the_same_name_with_a_different_body_is_not
+# _a_twin`. The whole reason this report is keyed on (name, body fingerprint)
+# rather than on a filename is a fleet measurement: of the test names living in
+# six or more branches, only a handful still carry the same body everywhere - the
+# rest were stamped once and then evolved apart. A name-keyed or filename-keyed
+# merge would collapse those diverged bodies into one and take real coverage with
+# it, silently. That test is the negative control which proves the gate is shape
+# and not name, and if it ever passes for the wrong reason the report becomes
+# exactly the tool it was built to prevent.
+#
+# NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE OR THIS FLEET. Every tree is
+# built under tmp_path and every expected number is derived from what the test
+# itself wrote. A pin on a live fleet count would go red the next time any
+# citizen adds a test, which would make this file a tax on the fleet rather than
+# a guard on the tool.
 
-NOTHING HERE ASSERTS A FACT ABOUT THIS MACHINE OR THIS FLEET. Every tree is
-built under tmp_path and every expected number is derived from what the test
-itself wrote. A pin on a live fleet count would go red the next time any
-citizen adds a test, which would make this file a tax on the fleet rather than
-a guard on the tool.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/test_inventory/twins.py parses and imports
 
 import json
 import textwrap
@@ -479,7 +482,7 @@ class TestTheReportRefusesAConfidentZero:
         would make the tool unusable on anything but the whole fleet.
         """
         (tmp_path / "solo" / "tests").mkdir(parents=True)
-        (tmp_path / "solo" / "tests" / "test_x.py").write_text("def test_x():\n    assert True\n")
+        (tmp_path / "solo" / "tests" / "test_x.py").write_text("def test_x():\n    assert True\n", encoding="utf-8")
         (tmp_path / "docs").mkdir()
 
         assert [name for name, _ in twins.branch_dirs(tmp_path)] == ["solo"]

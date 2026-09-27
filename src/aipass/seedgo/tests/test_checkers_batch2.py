@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: test_checkers_batch2.py
 # Description: Tests for checker handlers batch 2
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for 8 seedgo checker handlers:
-  error_handling, handlers, hardcoded_key, help_text,
-  imports, introspection, log_handler, log_level.
+"""Tests for apps/handlers/aipass_standards/error_handling_check.py and seven batch-2 sibling checkers."""
 
-Each checker gets 3 tests: clean pass, violation caught, bypass respected.
-"""
+# Covers handlers, hardcoded_key, help_text, imports, introspection, log_handler
+# and log_level. Each checker gets 3 tests: clean pass, violation caught, bypass
+# respected.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the eight checker modules under test parse and import
 
 from pathlib import Path
 from unittest.mock import MagicMock

@@ -1,47 +1,52 @@
-"""One contract suite over every ``json_handler`` the fleet ships.
-
-WHY THIS FILE EXISTS. The campaign premise was "shared infrastructure tested N
-times". Measurement refused it: the branch handlers were stamped once and every
-copy then diverged. Eighteen files, eighteen distinct hashes, 28 to 592 lines,
-and no single function present in all eighteen with the same shape. So this is
-not a suite that asserts they are the same. It is a suite that asserts what is
-TRUE of each, names every place they disagree, and refuses to hide a
-disagreement behind an assertion weak enough to pass everywhere.
-
-HOW DIVERGENCE IS REPORTED. Three mechanisms, never silence:
-
-* ``pytest.skip`` with a message naming the branch and the missing function,
-  for a surface a branch simply does not have (``ai_mail`` has no
-  ``validate_json_structure``; ``backup`` addresses documents by path, so every
-  ``module_name``/``json_type`` contract is inapplicable there, not passing).
-* ``pytest.mark.xfail(strict=True)`` carrying the MEASURED reason, for a branch
-  that has the function and answers differently from the fleet majority. Strict
-  on purpose: when a branch is repaired the xfail turns into a failure that
-  says "update the divergence table", instead of a green line nobody rereads.
-* A plain assertion for everything the fleet genuinely agrees on.
-
-DISCOVERY IS DYNAMIC. The branch list is globbed from the installed ``aipass``
-package, never written down. A nineteenth branch is picked up with no edit here
-and is held to the majority contract; a deleted branch disappears from the run
-instead of breaking it. Only the divergence tables name branches, because a
-measurement record has to name its subjects.
-
-SAFETY. Every implementation is redirected at ``tmp_path`` before any call that
-could write, and the redirect is VERIFIED through the implementation's own
-``get_json_path`` before the first write. A branch whose directory cannot be
-redirected is skipped, loudly — this suite never writes into a live branch tree.
-Redirecting only the subject was NOT enough and the difference was measured,
-not guessed: see ``quarantined_document_directories`` for the syscall audit and
-the exact cross-branch chain it closes.
-"""
-
 # =================== META ====================
 # Name: test_json_handler_contract.py
 # Description: Fleet-wide contract suite over every branch json_handler
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for every branch's apps/handlers/json/json_handler.py, one contract over the fleet."""
+
+# One contract suite over every ``json_handler`` the fleet ships.
+#
+# WHY THIS FILE EXISTS. The campaign premise was "shared infrastructure tested N
+# times". Measurement refused it: the branch handlers were stamped once and every
+# copy then diverged. Eighteen files, eighteen distinct hashes, 28 to 592 lines,
+# and no single function present in all eighteen with the same shape. So this is
+# not a suite that asserts they are the same. It is a suite that asserts what is
+# TRUE of each, names every place they disagree, and refuses to hide a
+# disagreement behind an assertion weak enough to pass everywhere.
+#
+# HOW DIVERGENCE IS REPORTED. Three mechanisms, never silence:
+#
+# * ``pytest.skip`` with a message naming the branch and the missing function,
+#   for a surface a branch simply does not have (``ai_mail`` has no
+#   ``validate_json_structure``; ``backup`` addresses documents by path, so every
+#   ``module_name``/``json_type`` contract is inapplicable there, not passing).
+# * ``pytest.mark.xfail(strict=True)`` carrying the MEASURED reason, for a branch
+#   that has the function and answers differently from the fleet majority. Strict
+#   on purpose: when a branch is repaired the xfail turns into a failure that
+#   says "update the divergence table", instead of a green line nobody rereads.
+# * A plain assertion for everything the fleet genuinely agrees on.
+#
+# DISCOVERY IS DYNAMIC. The branch list is globbed from the installed ``aipass``
+# package, never written down. A nineteenth branch is picked up with no edit here
+# and is held to the majority contract; a deleted branch disappears from the run
+# instead of breaking it. Only the divergence tables name branches, because a
+# measurement record has to name its subjects.
+#
+# SAFETY. Every implementation is redirected at ``tmp_path`` before any call that
+# could write, and the redirect is VERIFIED through the implementation's own
+# ``get_json_path`` before the first write. A branch whose directory cannot be
+# redirected is skipped, loudly — this suite never writes into a live branch tree.
+# Redirecting only the subject was NOT enough and the difference was measured,
+# not guessed: see ``quarantined_document_directories`` for the syscall audit and
+# the exact cross-branch chain it closes.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that handlers/aipass_standards/json_handler_check.py parses and imports
+# seedgo: no-test-needed(stdlib) — os.replace's own atomicity; the tests only choose what it raises
 
 import contextlib
 import copy
@@ -53,7 +58,6 @@ import inspect
 import json
 import os
 import stat
-import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -63,6 +67,20 @@ from typing import Any, Callable, Mapping
 import pytest
 
 import aipass
+import aipass.prax
+from aipass.prax import logger
+from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
+
+# Module level, never inside a function: a guard here can precede no test's own
+# patching (import_site item 8's own exemption), and it is the ONE way to keep
+# this import_site-clean while still tolerating a checkout where @memory is
+# absent — moving it into _fleet_roster() would put a product import back
+# inside a function for no behavioural gain.
+try:
+    from aipass.memory.apps.handlers.monitor.registry_scope import fleet_branches
+except Exception as exc:  # pragma: no cover - exercised only where @memory is absent
+    logger.info("[json_handler_contract] @memory unreachable, the roster is the installed glob alone: %s", exc)
+    fleet_branches = None
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -103,13 +121,12 @@ def _fleet_roster() -> dict[str, Path]:
     alone — a narrower run that still runs, never an empty one.
     """
     roster = _installed_roster()
-    try:
-        from aipass.memory.apps.handlers.monitor.registry_scope import fleet_branches
-    except Exception:  # pragma: no cover - exercised only where @memory is absent
+    if fleet_branches is None:
         return roster
     try:
         rows = fleet_branches()
-    except Exception:  # pragma: no cover - a broken registry must not empty the run
+    except Exception as exc:  # pragma: no cover - a broken registry must not empty the run
+        logger.info("[json_handler_contract] fleet_branches() failed, the roster is the installed glob alone: %s", exc)
         return roster
     for row in rows:
         root = Path(str(row.get("path", "")))
@@ -153,14 +170,43 @@ def handler_path(branch: str) -> Path:
     return ROSTER[branch] / HANDLER_RELPATH
 
 
-def implementation(branch: str) -> Any:
-    """Import one branch's ``json_handler`` module.
+#: Every roster handler, imported ONCE, here at module level, before any test
+#: can stage a replacement for it (template item 8).
+#:
+#: A core citizen is imported by its dotted name, which is what every other
+#: caller in the fleet uses. A RESIDENT has no dotted name inside `aipass`, so
+#: it is loaded from the file instead — the same module object either way, and
+#: the alternative was leaving those citizens unmeasured, which is the gap the
+#: roster widening closed.
+#:
+#: ONE module object per branch, for the whole run. Loading the file afresh on
+#: each call returns a NEW module object every time, and a test that captures a
+#: function from one call and redirects another gets a redirect that covers
+#: neither. Measured the hard way on 2026-09-07: the uncached first draft of
+#: this loader wrote contract documents into @vera's live vera_json/ directory,
+#: because `expose(module, ...)` held the unredirected module while
+#: `prepared(...)` redirected a different one. This dict is that cache; it
+#: used to be sys.modules under a private key, which held the object just as
+#: well and left a module-table entry behind for every file collected after.
+#:
+#: A resident whose file cannot be loaded as a module is left out, and each of
+#: its tests skips naming the path (see :func:`implementation`).
+IMPLEMENTATIONS: dict[str, Any] = {}
+for _branch in BRANCHES:
+    if ROSTER[_branch].parent == PACKAGE_ROOT:
+        IMPLEMENTATIONS[_branch] = importlib.import_module(f"aipass.{_branch}.apps.handlers.json.json_handler")
+        continue
+    _key = f"_aipass_contract_json_handler_{_branch}"
+    _spec = importlib.util.spec_from_file_location(_key, handler_path(_branch))
+    if _spec is None or _spec.loader is None:
+        continue
+    _module = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_module)
+    IMPLEMENTATIONS[_branch] = _module
 
-    A core citizen is imported by its dotted name, which is what every other
-    caller in the fleet uses. A RESIDENT has no dotted name inside `aipass`,
-    so it is loaded from the file instead — the same module object either way,
-    and the alternative was leaving those citizens unmeasured, which is the
-    gap this widening closes.
+
+def implementation(branch: str) -> Any:
+    """One branch's ``json_handler`` module, as imported at module level.
 
     Args:
         branch: A name in :data:`ROSTER`.
@@ -168,27 +214,9 @@ def implementation(branch: str) -> Any:
     Returns:
         The imported module.
     """
-    if ROSTER[branch].parent == PACKAGE_ROOT:
-        return importlib.import_module(f"aipass.{branch}.apps.handlers.json.json_handler")
-
-    # CACHED IN sys.modules, EXACTLY AS import_module WOULD. Loading the file
-    # afresh on each call returns a NEW module object every time, and a test
-    # that captures a function from one call and redirects another gets a
-    # redirect that covers neither. Measured the hard way on 2026-09-07: the
-    # uncached first draft of this branch wrote contract documents into
-    # @vera's live vera_json/ directory, because `expose(module, ...)` held
-    # the unredirected module while `prepared(...)` redirected a different one.
-    key = f"_aipass_contract_json_handler_{branch}"
-    cached = sys.modules.get(key)
-    if cached is not None:
-        return cached
-    path = handler_path(branch)
-    spec = importlib.util.spec_from_file_location(key, path)
-    if spec is None or spec.loader is None:
-        pytest.skip(f"{branch}: {path} could not be loaded as a module")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[key] = module
-    spec.loader.exec_module(module)
+    module = IMPLEMENTATIONS.get(branch)
+    if module is None:
+        pytest.skip(f"{branch}: {handler_path(branch)} could not be loaded as a module")
     return module
 
 
@@ -596,6 +624,8 @@ def test_load_json_answers_a_default_for_a_document_that_does_not_exist(
 ):
     """load_json never makes a caller handle "the file is not there".
 
+    Mutant: seedgo's shim binds a load_json answering {} in apps/handlers/json/json_handler.py — killed.
+
     Pinned because the alternative shapes are both real: raising forces every
     call site to wrap a try/except it will eventually forget, and returning
     None forces an ``is None`` guard the fleet demonstrably does not write.
@@ -608,6 +638,11 @@ def test_load_json_answers_a_default_for_a_document_that_does_not_exist(
     else:
         answer = module.load_json(str(tmp_path / "never_written.json"))
     assert answer is not None, f"{branch}: load_json returned None for a missing document"
+    # The default is a data document, not merely something: every family measured
+    # 2026-09-27 answers a dict carrying both of the data document's dates.
+    assert {"created", "last_updated"} - set(answer) == set(), (
+        f"{branch}: load_json's default for a missing data document is {answer!r}"
+    )
 
 
 @pytest.mark.parametrize("branch", parametrized())
@@ -1060,7 +1095,7 @@ def json_service_or_skip() -> Any:
     Returns:
         The ``aipass.prax.json_handler`` service module.
     """
-    service = getattr(importlib.import_module("aipass.prax"), "json_handler", None)
+    service = getattr(aipass.prax, "json_handler", None)
     if service is None:
         pytest.skip(
             "aipass.prax exposes no json_handler attribute yet — the one service "
@@ -1184,8 +1219,6 @@ def test_every_shipped_shim_is_byte_identical_to_the_pinned_canonical(branch: st
     byte-identical file cannot carry a name the canonical does not carry, and
     cannot fail to carry one it does; those claims are the hash, restated.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_handler_check import CANONICAL_SHIM_SHA256
-
     content = handler_path(branch).read_text(encoding="utf-8")
     if SERVICE_IMPORT_MARKER not in content:
         pytest.skip(f"{branch} has not migrated to the one service yet — its handler does not import it")
@@ -1872,6 +1905,8 @@ def test_the_public_writer_routes_its_write_through_the_bounded_replace_helper(
 ):
     """A write that lands by a bare rename re-introduces the Windows hang.
 
+    Mutant: seedgo's shim saves to another document in apps/handlers/json/json_handler.py — killed.
+
     The helper being present is pinned above; this pins that the writer
     actually goes through it, which is a different claim and the one that
     decays silently. A refactor that inlines ``os.replace`` back into
@@ -1886,7 +1921,7 @@ def test_the_public_writer_routes_its_write_through_the_bounded_replace_helper(
     six branches the rename does not happen in the handler under test at all —
     is the assertion that actually distinguishes the two.
     """
-    module, save, _ = public_writer(branch, tmp_path, monkeypatch)
+    module, save, document = public_writer(branch, tmp_path, monkeypatch)
     owner = retry_owner(module)
     assert owner is not None, f"{branch}: no bounded replace helper is reachable from save_json"
 
@@ -1901,9 +1936,9 @@ def test_the_public_writer_routes_its_write_through_the_bounded_replace_helper(
     monkeypatch.setattr(owner, name, counting)
     save(copy.deepcopy(DATA_PAYLOAD))
 
-    assert len(calls) == 1, (
-        f"{branch}: one save_json made {len(calls)} calls to {owner.__name__}.{name} — "
-        f"expected exactly one staged write routed through the bounded retry"
+    assert [destination for _source, destination in calls] == [str(document)], (
+        f"{branch}: one save_json made {len(calls)} calls to {owner.__name__}.{name} ({calls}) — "
+        f"expected exactly one staged write of {document} routed through the bounded retry"
     )
 
 
@@ -2710,7 +2745,14 @@ def test_save_json_writes_a_document_that_parses_from_disk(
     assert parsed == LOG_PAYLOAD, f"{branch}: the document on disk is not what was saved"
 
 
+# windows_compat item 23: the skip below moved from a runtime `if` to a
+# decorator so the checker's static test-scan recognises the guard covering
+# os.chmod / stat.S_IMODE further down — an in-body `if os.name == "nt":
+# pytest.skip(...)` guards nothing lexically, only at runtime.
 @pytest.mark.parametrize("branch", parametrized())
+@pytest.mark.skipif(
+    os.name == "nt", reason="permission bits are not the file's own on Windows; the claim has no subject there"
+)
 def test_rewriting_a_document_keeps_the_permission_bits_it_already_had(
     branch: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2727,8 +2769,6 @@ def test_rewriting_a_document_keeps_the_permission_bits_it_already_had(
     correct, the write reports success, and the next process that is not this
     user cannot read it.
     """
-    if os.name == "nt":
-        pytest.skip("permission bits are not the file's own on Windows; the claim has no subject there")
     module = implementation(branch)
     require_document_addressing(module, branch)
     require_one_service(branch)

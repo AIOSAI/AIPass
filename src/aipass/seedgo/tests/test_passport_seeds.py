@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_passport_seeds.py
 # Description: Repo pins for tracked passport seeds - shape, leak-guard, naming
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
 """Pins for the tracked passport seeds (TDPLAN-0017).

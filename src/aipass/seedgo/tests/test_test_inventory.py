@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_test_inventory.py
 # Description: behavioural pins for the test-inventory verb
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-09-01
-# Modified: 2026-09-01
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -43,6 +43,8 @@ from pathlib import Path
 import pytest
 
 from aipass.seedgo.apps.handlers.test_inventory import collection, exclusions, history, ranking, report, shape
+from aipass.seedgo.apps.handlers.test_inventory import roots
+from aipass.seedgo.apps.modules import inventory
 
 
 def _function(source: str) -> ast.AST:
@@ -166,6 +168,7 @@ def _in_fresh_process(script: str) -> str:
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
         env={"PYTHONHASHSEED": "random", "PATH": "/usr/bin:/bin"},
     )
@@ -585,13 +588,13 @@ class TestPublication:
         inventory = report.build(tmp_path, found, statuses, blames, now=1_000_000.0)
         paths = report.publish(inventory, directory=tmp_path / "out")
 
-        rows = [json.loads(line) for line in paths["rows"].read_text().splitlines()]
-        summary = json.loads(paths["summary"].read_text())
+        rows = [json.loads(line) for line in paths["rows"].read_text(encoding="utf-8").splitlines()]
+        summary = json.loads(paths["summary"].read_text(encoding="utf-8"))
 
         assert [row["nodeid"] for row in rows] == ["tests/test_x.py::test_x"]
         assert summary["blind_spots"]
         assert summary["ranking"]["authorises_deletion"] is False
-        assert paths["readable"].read_text().startswith("# Test inventory")
+        assert paths["readable"].read_text(encoding="utf-8").startswith("# Test inventory")
 
 
 class TestTheTwinsSwitch:
@@ -608,8 +611,6 @@ class TestTheTwinsSwitch:
         A flag absent from FLAGS is rejected by the unrecognised-option arm
         before it ever reaches the parser, so both halves are pinned together.
         """
-        from aipass.seedgo.apps.modules import inventory
-
         argument, _top, want_twins, unrecognized = inventory._parse(["aipass", "--twins"])
 
         assert "--twins" in inventory.FLAGS
@@ -622,9 +623,6 @@ class TestTheTwinsSwitch:
         root, but `twins.branch_dirs` reads immediate children only - so the
         first wired run reported "0 twins over 0 branches" as a success.
         """
-        from aipass.seedgo.apps.handlers.test_inventory import roots
-        from aipass.seedgo.apps.modules import inventory
-
         fleet = roots.resolve(roots.FLEET_ARGUMENT)
         container = inventory._branch_container(fleet)
 
@@ -645,9 +643,6 @@ class TestTheTwinsSwitch:
         """
         from unittest.mock import patch
 
-        from aipass.seedgo.apps.handlers.test_inventory import roots
-        from aipass.seedgo.apps.modules import inventory
-
         fleet = roots.resolve(roots.FLEET_ARGUMENT)
         with_registry = inventory._branch_container(fleet)
 
@@ -664,9 +659,6 @@ class TestTheTwinsSwitch:
         The counter-arm. Silently descending under an explicit path would make
         the verb walk somewhere the caller did not name.
         """
-        from aipass.seedgo.apps.handlers.test_inventory import roots
-        from aipass.seedgo.apps.modules import inventory
-
         target = roots.Root(name="local", path=tmp_path, resolved_from="a test")
 
         assert inventory._branch_container(target) == tmp_path

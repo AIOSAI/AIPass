@@ -7,9 +7,9 @@ Was 6. The test_quality section retired 2026-09-07 with the v4 standard itself
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-03-29
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 from pathlib import Path
@@ -29,6 +29,7 @@ from aipass.seedgo.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
 )
 from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import (
+    _strip_non_code,
     check_branch as unused_function_check_branch,
 )
 
@@ -446,8 +447,6 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
 
 
 def test_unused_function_strip_non_code_degrades_on_syntax_error():
-    from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import _strip_non_code
-
     source = "def helper():\n    return 1\n  stray = 2\n"
 
     # Falls back to the raw corpus rather than raising -- the name must survive.

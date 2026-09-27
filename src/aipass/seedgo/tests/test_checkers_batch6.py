@@ -1,17 +1,29 @@
-"""Tests for seedgo checker sub-functions -- batch 6 (architecture, cli, cli_flags, documentation)."""
-
 # =================== META ====================
 # Name: test_checkers_batch6.py
 # Description: Unit tests for checker sub-functions in architecture, cli, cli_flags, documentation
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for the sub-functions of apps/handlers/aipass_standards/architecture_check.py and 3 siblings."""
+
+# Covers architecture, cli, cli_flags and documentation checker sub-functions,
+# called directly rather than through check_module.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the four checker modules under test parse and import
 
 from typing import List
 
 import pytest
 from unittest.mock import MagicMock
+
+from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
+from aipass.seedgo.apps.handlers.aipass_standards import cli_check
+from aipass.seedgo.apps.handlers.aipass_standards import cli_flags_check
+from aipass.seedgo.apps.handlers.aipass_standards import documentation_check
+from aipass.seedgo.apps.handlers.bypass import utils as _bypass_utils
 
 
 def _lines(text: str) -> List[str]:
@@ -25,61 +37,18 @@ def _lines(text: str) -> List[str]:
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards checkers."""
-    import sys
+def _pin_bypass_log(monkeypatch):
+    """Point is_bypassed's json_handler at a mock for every test here.
 
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.json.json_handler",
-        json_mod,
-    )
-
-    # -- bypass handler (used by architecture_check + cli_check) -------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-    from aipass.seedgo.apps.handlers.bypass.utils import is_bypassed as _real_is_bypassed
-
-    bypass_utils = MagicMock()
-    bypass_utils.is_bypassed = _real_is_bypassed
-    bypass_pkg.utils = bypass_utils
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.utils",
-        bypass_utils,
-    )
-
-    # Force re-imports so checkers pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.aipass_standards.architecture_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.cli_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check",
-        "aipass.seedgo.apps.handlers.aipass_standards.documentation_check",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    The bypass tests call the real is_bypassed, which appends to the
+    repo-tracked seedgo_json/utils_log.json via the json_handler global in
+    its OWN module -- xdist workers racing on that shared file corrupt it
+    (JSONDecodeError: Extra data). sys.modules patching never reaches a
+    function's globals, so the pin must land on the utils module object.
+    """
+    mock_handler = MagicMock()
+    mock_handler.log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(_bypass_utils, "json_handler", mock_handler)
 
 
 # ===========================================================================
@@ -93,43 +62,35 @@ def _mock_infrastructure(monkeypatch):
 class TestCheckLayerLocation:
     """Tests for check_layer_location."""
 
-    def test_entry_point_passes(self):
+    def test_entry_point_passes(self, tmp_path):
         """Entry point path is recognised as the entry-point layer."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_layer_location,
+        result = architecture_check.check_layer_location(
+            str(tmp_path / "branch" / "apps" / "branch.py"), True, False, False
         )
-
-        result = check_layer_location("/branch/apps/branch.py", True, False, False)
         assert result["passed"] is True
         assert "Entry point" in result["message"]
 
-    def test_module_layer_passes(self):
+    def test_module_layer_passes(self, tmp_path):
         """Module path is recognised as the module layer."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_layer_location,
+        result = architecture_check.check_layer_location(
+            str(tmp_path / "branch" / "apps" / "modules" / "foo.py"), False, True, False
         )
-
-        result = check_layer_location("/branch/apps/modules/foo.py", False, True, False)
         assert result["passed"] is True
         assert "Module layer" in result["message"]
 
-    def test_handler_layer_passes(self):
+    def test_handler_layer_passes(self, tmp_path):
         """Handler path is recognised as the handler layer."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_layer_location,
+        result = architecture_check.check_layer_location(
+            str(tmp_path / "branch" / "apps" / "handlers" / "json" / "j.py"), False, False, True
         )
-
-        result = check_layer_location("/branch/apps/handlers/json/j.py", False, False, True)
         assert result["passed"] is True
         assert "Handler layer" in result["message"]
 
-    def test_outside_3_layer_fails(self):
+    def test_outside_3_layer_fails(self, tmp_path):
         """Path outside the 3-layer structure fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_layer_location,
+        result = architecture_check.check_layer_location(
+            str(tmp_path / "branch" / "random" / "foo.py"), False, False, False
         )
-
-        result = check_layer_location("/branch/random/foo.py", False, False, False)
         assert result["passed"] is False
         assert "not in standard 3-layer" in result["message"]
 
@@ -142,56 +103,36 @@ class TestArchCheckFileSize:
 
     def test_small_file_passes(self):
         """Under 300 lines is perfect."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 100
-        result = check_file_size(lines, "small.py")
+        result = architecture_check.check_file_size(lines, "small.py")
         assert result["passed"] is True
         assert "perfect" in result["message"]
 
     def test_medium_file_passes(self):
         """300-500 lines is good."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 350
-        result = check_file_size(lines, "medium.py")
+        result = architecture_check.check_file_size(lines, "medium.py")
         assert result["passed"] is True
         assert "good" in result["message"]
 
     def test_heavy_file_passes(self):
         """500-700 lines is acceptable but heavy."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 600
-        result = check_file_size(lines, "heavy.py")
+        result = architecture_check.check_file_size(lines, "heavy.py")
         assert result["passed"] is True
         assert "getting heavy" in result["message"]
 
     def test_advisory_file_passes(self):
         """700-1500 lines is advisory — passes but warns."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 750
-        result = check_file_size(lines, "big.py")
+        result = architecture_check.check_file_size(lines, "big.py")
         assert result["passed"] is True
         assert "advisory" in result["message"]
 
     def test_oversized_file_fails(self):
         """1500+ lines hard-fails the size check."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_file_size,
-        )
-
         lines: list[str] = ["x"] * 1600
-        result = check_file_size(lines, "huge.py")
+        result = architecture_check.check_file_size(lines, "huge.py")
         assert result["passed"] is False
         assert "must split" in result["message"]
 
@@ -202,12 +143,8 @@ class TestArchCheckFileSize:
 class TestArchHandlerIndependence:
     """Tests for architecture_check.check_handler_independence."""
 
-    def test_clean_handler_passes(self):
+    def test_clean_handler_passes(self, tmp_path):
         """Handler without parent module imports passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
-
         lines: list[str] = [
             "from aipass.prax import logger",
             "from aipass.cli.apps.modules import display",
@@ -215,47 +152,41 @@ class TestArchHandlerIndependence:
             "def do_work():",
             "    return True",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = architecture_check.check_handler_independence(
+            lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py")
+        )
         assert result is not None
         assert result["passed"] is True
 
-    def test_parent_module_import_fails(self):
+    def test_parent_module_import_fails(self, tmp_path):
         """Handler importing from its parent branch module fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
-
         lines: list[str] = [
             "from seedgo.apps.modules.audit import run_audit",
             "",
             "def do_work():",
             "    return True",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = architecture_check.check_handler_independence(
+            lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py")
+        )
         assert result is not None
         assert result["passed"] is False
         assert "parent module" in result["message"]
 
-    def test_allowed_service_imports_pass(self):
+    def test_allowed_service_imports_pass(self, tmp_path):
         """Prax and CLI service imports are allowed in handlers."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
-
         lines: list[str] = [
             "from prax.apps.modules.logger import info",
             "from cli.apps.modules.display import header",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = architecture_check.check_handler_independence(
+            lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py")
+        )
         assert result is not None
         assert result["passed"] is True
 
-    def test_import_in_docstring_ignored(self):
+    def test_import_in_docstring_ignored(self, tmp_path):
         """Imports inside docstrings are not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_handler_independence,
-        )
-
         lines: list[str] = [
             '"""',
             "from seedgo.apps.modules.audit import run_audit",
@@ -263,7 +194,9 @@ class TestArchHandlerIndependence:
             "def do_work():",
             "    return True",
         ]
-        result = check_handler_independence(lines, "/seedgo/apps/handlers/json/j.py")
+        result = architecture_check.check_handler_independence(
+            lines, str(tmp_path / "seedgo" / "apps" / "handlers" / "json" / "j.py")
+        )
         assert result is not None
         assert result["passed"] is True
 
@@ -274,45 +207,35 @@ class TestArchHandlerIndependence:
 class TestCheckDomainOrganization:
     """Tests for check_domain_organization."""
 
-    def test_domain_based_passes(self):
+    def test_domain_based_passes(self, tmp_path):
         """Handler in a domain-named folder passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
+        result = architecture_check.check_domain_organization(
+            str(tmp_path / "branch" / "apps" / "handlers" / "json" / "json_handler.py")
         )
-
-        result = check_domain_organization("/branch/apps/handlers/json/json_handler.py")
         assert result is not None
         assert result["passed"] is True
         assert "json" in result["message"]
 
-    def test_technical_name_fails(self):
+    def test_technical_name_fails(self, tmp_path):
         """Handler in a technical-named folder (utils) fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
+        result = architecture_check.check_domain_organization(
+            str(tmp_path / "branch" / "apps" / "handlers" / "utils" / "helper.py")
         )
-
-        result = check_domain_organization("/branch/apps/handlers/utils/helper.py")
         assert result is not None
         assert result["passed"] is False
         assert "Technical organization" in result["message"]
 
-    def test_helpers_name_fails(self):
+    def test_helpers_name_fails(self, tmp_path):
         """Handler in a helpers/ folder fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
+        result = architecture_check.check_domain_organization(
+            str(tmp_path / "branch" / "apps" / "handlers" / "helpers" / "tool.py")
         )
-
-        result = check_domain_organization("/branch/apps/handlers/helpers/tool.py")
         assert result is not None
         assert result["passed"] is False
 
-    def test_no_handler_domain_detected(self):
+    def test_no_handler_domain_detected(self, tmp_path):
         """Path ending at handlers/ with no subdirectory fails detection."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_domain_organization,
-        )
-
-        result = check_domain_organization("/branch/apps/handlers")
+        result = architecture_check.check_domain_organization(str(tmp_path / "branch" / "apps" / "handlers"))
         assert result is not None
         assert result["passed"] is False
         assert "Could not detect" in result["message"]
@@ -324,37 +247,25 @@ class TestCheckDomainOrganization:
 class TestCheckTemplateBaseline:
     """Tests for check_template_baseline."""
 
-    def test_no_branch_path_detected(self):
+    def test_no_branch_path_detected(self, tmp_path):
         """Path without apps/ cannot resolve a branch."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_template_baseline,
-        )
-
-        result = check_template_baseline("/random/file.py")
+        result = architecture_check.check_template_baseline(str(tmp_path / "random" / "file.py"))
         assert len(result) >= 1
         assert result[0]["passed"] is False
         assert "Could not detect branch path" in result[0]["message"]
 
     def test_missing_passport_skips(self, tmp_path):
         """Branch without passport.json skips template baseline (gitignored)."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_template_baseline,
-        )
-
         apps_dir = tmp_path / "mybranch" / "apps"
         apps_dir.mkdir(parents=True)
         entry = apps_dir / "mybranch.py"
         entry.write_text('"""Entry."""\n', encoding="utf-8")
 
-        result = check_template_baseline(str(entry))
+        result = architecture_check.check_template_baseline(str(entry))
         assert result == []
 
     def test_passport_without_citizen_class(self, tmp_path):
         """Branch with passport.json but no citizen_class fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.architecture_check import (
-            check_template_baseline,
-        )
-
         apps_dir = tmp_path / "mybranch" / "apps"
         apps_dir.mkdir(parents=True)
         entry = apps_dir / "mybranch.py"
@@ -364,7 +275,7 @@ class TestCheckTemplateBaseline:
         passport = trinity / "passport.json"
         passport.write_text('{"identity": {}}', encoding="utf-8")
 
-        result = check_template_baseline(str(entry))
+        result = architecture_check.check_template_baseline(str(entry))
         assert len(result) >= 1
         assert result[0]["passed"] is False
         assert "citizen_class" in result[0]["message"]
@@ -375,8 +286,6 @@ class TestCheckTemplateBaseline:
         .trinity/ is permanently gitignored, so requiring its contents in a
         clone-facing structural score asks a branch to ship what it must not.
         """
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         templates = tmp_path / "templates"
         template = templates / "citizen"
         (template / ".trinity").mkdir(parents=True)
@@ -405,8 +314,6 @@ class TestCheckTemplateBaseline:
 
     def test_skipped_baseline_announced_on_info_channel(self, tmp_path):
         """A baseline that cannot run says so — it never vanishes silently."""
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         branch = tmp_path / "mybranch"
         (branch / "apps").mkdir(parents=True)
 
@@ -417,8 +324,6 @@ class TestCheckTemplateBaseline:
 
     def test_info_channel_silent_when_passport_present(self, tmp_path):
         """Nothing to announce when the baseline can actually run."""
-        from aipass.seedgo.apps.handlers.aipass_standards import architecture_check
-
         branch = tmp_path / "mybranch"
         (branch / "apps").mkdir(parents=True)
         trinity = branch / ".trinity"
@@ -441,66 +346,42 @@ class TestCheckHandlerSeparation:
 
     def test_clean_handler_passes(self):
         """Handler with no console output passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_handler_separation,
-        )
-
         content = "def compute():\n    return 42\n"
-        result = check_handler_separation(content)
+        result = cli_check.check_handler_separation(content)
         assert result["passed"] is True
         assert "No console output" in result["message"]
 
     def test_console_print_fails(self):
         """Handler with console.print() fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_handler_separation,
-        )
-
         content = "def show():\n    console.print('hello')\n"
-        result = check_handler_separation(content)
+        result = cli_check.check_handler_separation(content)
         assert result["passed"] is False
         assert "console.print()" in result["message"]
 
     def test_bare_print_fails(self):
         """Handler with bare print() fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_handler_separation,
-        )
-
         content = "def show():\n    print('hello')\n"
-        result = check_handler_separation(content)
+        result = cli_check.check_handler_separation(content)
         assert result["passed"] is False
         assert "print()" in result["message"]
 
     def test_cli_import_fails(self):
         """Handler importing CLI services fails separation check."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_handler_separation,
-        )
-
         content = "from aipass.cli.apps.modules.display import header\ndef show():\n    pass\n"
-        result = check_handler_separation(content)
+        result = cli_check.check_handler_separation(content)
         assert result["passed"] is False
         assert "CLI services" in result["message"]
 
     def test_print_in_main_block_ignored(self):
         """Print inside if __name__ block is allowed."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_handler_separation,
-        )
-
         content = "def compute():\n    return 42\nif __name__ == '__main__':\n    print('test output')\n"
-        result = check_handler_separation(content)
+        result = cli_check.check_handler_separation(content)
         assert result["passed"] is True
 
     def test_console_print_in_string_ignored(self):
         """Console.print inside a string literal is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_handler_separation,
-        )
-
         content = "msg = 'use console.print() for output'\n"
-        result = check_handler_separation(content)
+        result = cli_check.check_handler_separation(content)
         assert result["passed"] is True
 
 
@@ -510,61 +391,41 @@ class TestCheckHandlerSeparation:
 class TestCheckCliImports:
     """Tests for check_cli_imports."""
 
-    def test_has_cli_imports_passes(self):
+    def test_has_cli_imports_passes(self, tmp_path):
         """Module with CLI service imports passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_cli_imports,
-        )
-
         content = "from aipass.cli.apps.modules.display import header\n"
-        result = check_cli_imports(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_cli_imports(content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py"))
         assert result is not None
         assert result["passed"] is True
 
-    def test_cli_branch_exempt(self):
+    def test_cli_branch_exempt(self, tmp_path):
         """CLI branch itself is exempt from this check."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_cli_imports,
-        )
-
         content = "from .display import header\n"
-        result = check_cli_imports(content, "/cli/apps/modules/something.py")
+        result = cli_check.check_cli_imports(content, str(tmp_path / "cli" / "apps" / "modules" / "something.py"))
         assert result is not None
         assert result["passed"] is True
         assert "CLI branch exempt" in result["message"]
 
-    def test_output_without_cli_imports_fails(self):
+    def test_output_without_cli_imports_fails(self, tmp_path):
         """Module with output but no CLI imports fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_cli_imports,
-        )
-
         content = "print('hello world')\n"
-        result = check_cli_imports(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_cli_imports(content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py"))
         assert result is not None
         assert result["passed"] is False
         assert "missing CLI service imports" in result["message"]
 
-    def test_no_output_at_all_passes(self):
+    def test_no_output_at_all_passes(self, tmp_path):
         """Module with no output at all passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_cli_imports,
-        )
-
         content = "def compute():\n    return 42\n"
-        result = check_cli_imports(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_cli_imports(content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py"))
         assert result is not None
         assert result["passed"] is True
         assert "No CLI output needed" in result["message"]
 
-    def test_shortcut_import_passes(self):
+    def test_shortcut_import_passes(self, tmp_path):
         """Shortcut import via cli __init__ passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_cli_imports,
-        )
-
         content = "from aipass.cli import header\n"
-        result = check_cli_imports(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_cli_imports(content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py"))
         assert result is not None
         assert result["passed"] is True
 
@@ -575,113 +436,77 @@ class TestCheckCliImports:
 class TestCheckPrintUsage:
     """Tests for check_print_usage."""
 
-    def test_console_print_passes(self):
+    def test_console_print_passes(self, tmp_path):
         """File using console.print passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "console.print('hello')\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is not None
         assert result["passed"] is True
 
-    def test_bare_print_fails(self):
+    def test_bare_print_fails(self, tmp_path):
         """Bare print() statement fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "print('hello')\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is not None
         assert result["passed"] is False
         assert "print() statements" in result["message"]
 
-    def test_parser_print_help_fails(self):
+    def test_parser_print_help_fails(self, tmp_path):
         """parser.print_help() usage fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "parser.print_help()\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is not None
         assert result["passed"] is False
         assert "parser.print_help()" in result["message"]
 
-    def test_format_help_fails(self):
+    def test_format_help_fails(self, tmp_path):
         """console.print(parser.format_help()) fails — plain argparse text."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "console.print(parser.format_help())\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is not None
         assert result["passed"] is False
         assert ".format_help()" in result["message"]
 
-    def test_format_help_in_comment_ignored(self):
+    def test_format_help_in_comment_ignored(self, tmp_path):
         """.format_help() inside a comment is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "# parser.format_help() should not be used\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is None
 
-    def test_sys_stdout_write_fails(self):
+    def test_sys_stdout_write_fails(self, tmp_path):
         """sys.stdout.write() usage fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "import sys\nsys.stdout.write('hello')\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is not None
         assert result["passed"] is False
         assert "sys.stdout" in result["message"]
 
-    def test_print_in_main_block_ignored(self):
+    def test_print_in_main_block_ignored(self, tmp_path):
         """Print inside if __name__ block returns None (no violation)."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "if __name__ == '__main__':\n    print('test')\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is None
 
-    def test_no_output_returns_none(self):
+    def test_no_output_returns_none(self, tmp_path):
         """File with no output returns None."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "x = 42\n"
         lines = _lines(content)
-        result = check_print_usage(content, lines, "/module.py")
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"))
         assert result is None
 
-    def test_bypass_rule_skips_line(self):
+    def test_bypass_rule_skips_line(self, tmp_path):
         """Bypassed print line is not flagged."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_print_usage,
-        )
-
         content = "print('hello')\n"
         lines = _lines(content)
         bypass = [{"standard": "cli", "file": "module.py", "lines": [1]}]
-        result = check_print_usage(content, lines, "/module.py", bypass_rules=bypass)
+        result = cli_check.check_print_usage(content, lines, str(tmp_path / "module.py"), bypass_rules=bypass)
         assert result is None
 
 
@@ -693,46 +518,30 @@ class TestCheckHelpFlag:
 
     def test_argparse_with_help_passes(self):
         """Module with argparse and help/h flags passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_help_flag,
-        )
-
         content = "import argparse\nparser = argparse.ArgumentParser()\n--help\n-h\n"
-        result = check_help_flag(content)
+        result = cli_check.check_help_flag(content)
         assert result is not None
         assert result["passed"] is True
 
     def test_print_help_function_passes(self):
         """Module with def print_help passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_help_flag,
-        )
-
         content = "def print_help():\n    pass\n"
-        result = check_help_flag(content)
+        result = cli_check.check_help_flag(content)
         assert result is not None
         assert result["passed"] is True
 
     def test_executable_without_help_fails(self):
         """Executable module without --help fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_help_flag,
-        )
-
         content = "if __name__ == '__main__':\n    main()\n"
-        result = check_help_flag(content)
+        result = cli_check.check_help_flag(content)
         assert result is not None
         assert result["passed"] is False
         assert "--help flag not implemented" in result["message"]
 
     def test_non_executable_returns_none(self):
         """Non-executable module returns None (not applicable)."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_help_flag,
-        )
-
         content = "def compute():\n    return 42\n"
-        result = check_help_flag(content)
+        result = cli_check.check_help_flag(content)
         assert result is None
 
 
@@ -742,37 +551,31 @@ class TestCheckHelpFlag:
 class TestCheckDuplicateDisplayFunctions:
     """Tests for check_duplicate_display_functions."""
 
-    def test_no_duplicates_passes(self):
+    def test_no_duplicates_passes(self, tmp_path):
         """Module without CLI display function duplicates passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "def compute():\n    return 42\n"
-        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py")
+        )
         assert result is not None
         assert result["passed"] is True
 
-    def test_duplicate_header_fails(self):
+    def test_duplicate_header_fails(self, tmp_path):
         """Module defining its own header() fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "def header(title):\n    print(title)\n"
-        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py")
+        )
         assert result is not None
         assert result["passed"] is False
         assert "header" in result["message"]
 
-    def test_duplicate_error_and_warning_fails(self):
+    def test_duplicate_error_and_warning_fails(self, tmp_path):
         """Module defining error() and warning() fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "def error(msg):\n    pass\ndef warning(msg):\n    pass\n"
-        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py")
+        )
         assert result is not None
         assert result["passed"] is False
         assert "error" in result["message"]
@@ -781,94 +584,74 @@ class TestCheckDuplicateDisplayFunctions:
     # The check used to substring-match "def error(" over raw source, so any
     # class exposing a logger API tripped it.
 
-    def test_logger_class_methods_are_not_display_duplicates(self):
+    def test_logger_class_methods_are_not_display_duplicates(self, tmp_path):
         """class TrailLogger: def error(...) is a logger API, not a cli.display copy."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = (
             "class TrailLogger:\n"
             "    def error(self, message, **fields):\n        pass\n"
             "    def warning(self, message, **fields):\n        pass\n"
             "    def info(self, message, **fields):\n        pass\n"
         )
-        result = check_duplicate_display_functions(content, "/trigger/apps/config.py")
+        result = cli_check.check_duplicate_display_functions(content, str(tmp_path / "trigger" / "apps" / "config.py"))
         assert result is not None
         assert result["passed"] is True
 
-    def test_module_level_duplicate_still_caught_next_to_a_logger_class(self):
+    def test_module_level_duplicate_still_caught_next_to_a_logger_class(self, tmp_path):
         """Narrowing to module level must not blind the check to a real duplicate."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "class TrailLogger:\n    def info(self, m):\n        pass\n\ndef success(msg):\n    print(msg)\n"
-        result = check_duplicate_display_functions(content, "/trigger/apps/config.py")
+        result = cli_check.check_duplicate_display_functions(content, str(tmp_path / "trigger" / "apps" / "config.py"))
         assert result is not None
         assert result["passed"] is False
         assert "success" in result["message"]
 
-    def test_def_inside_string_literal_is_not_a_definition(self):
+    def test_def_inside_string_literal_is_not_a_definition(self, tmp_path):
         """Help text quoting "def error(" is not a definition."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = 'HELP = """\n  def error(msg)\n"""\n'
-        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py")
+        )
         assert result is not None
         assert result["passed"] is True
 
-    def test_nested_def_is_not_module_level(self):
+    def test_nested_def_is_not_module_level(self, tmp_path):
         """A closure named info() is local, not a module-level display helper."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "def outer():\n    def info(m):\n        pass\n    return info\n"
-        result = check_duplicate_display_functions(content, "/seedgo/apps/modules/audit.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "seedgo" / "apps" / "modules" / "audit.py")
+        )
         assert result is not None
         assert result["passed"] is True
 
-    def test_async_module_level_duplicate_is_caught(self):
+    def test_async_module_level_duplicate_is_caught(self, tmp_path):
         """async def error() at module level is still a duplicate."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
+        result = cli_check.check_duplicate_display_functions(
+            "async def error(m):\n    pass\n", str(tmp_path / "seedgo" / "apps" / "modules" / "a.py")
         )
-
-        result = check_duplicate_display_functions("async def error(m):\n    pass\n", "/seedgo/apps/modules/a.py")
         assert result is not None
         assert result["passed"] is False
 
-    def test_unparseable_file_does_not_crash(self):
+    def test_unparseable_file_does_not_crash(self, tmp_path):
         """A syntax error degrades to no-finding rather than raising."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
+        result = cli_check.check_duplicate_display_functions(
+            "def broken(:\n", str(tmp_path / "seedgo" / "apps" / "modules" / "a.py")
         )
-
-        result = check_duplicate_display_functions("def broken(:\n", "/seedgo/apps/modules/a.py")
         assert result is not None
         assert result["passed"] is True
 
-    def test_cli_branch_exempt(self):
+    def test_cli_branch_exempt(self, tmp_path):
         """CLI branch is exempt (it defines these functions)."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "def header(title):\n    print(title)\n"
-        result = check_duplicate_display_functions(content, "/cli/apps/modules/display.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "cli" / "apps" / "modules" / "display.py")
+        )
         assert result is None
 
-    def test_prax_logger_exempt(self):
+    def test_prax_logger_exempt(self, tmp_path):
         """Prax logger module is exempt (it is the logging system)."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_check import (
-            check_duplicate_display_functions,
-        )
-
         content = "def error(msg):\n    pass\n"
-        result = check_duplicate_display_functions(content, "/prax/apps/modules/logger/log.py")
+        result = cli_check.check_duplicate_display_functions(
+            content, str(tmp_path / "prax" / "apps" / "modules" / "logger" / "log.py")
+        )
         assert result is None
 
 
@@ -883,55 +666,39 @@ class TestCheckDuplicateDisplayFunctions:
 class TestCheckVersionFlag:
     """Tests for check_version_flag."""
 
-    def test_version_flag_found_passes(self):
+    def test_version_flag_found_passes(self, tmp_path):
         """Entry point with '--version' string passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import (
-            check_version_flag,
-        )
-
         lines: list[str] = [
             "def main():",
             "    if '--version' in args:",
             "        print(VERSION)",
         ]
-        result = check_version_flag(lines, "/branch/apps/branch.py", None)
+        result = cli_flags_check.check_version_flag(lines, str(tmp_path / "branch" / "apps" / "branch.py"), None)
         assert result["passed"] is True
         assert "version flag" in result["message"].lower()
 
-    def test_short_version_flag_passes(self):
+    def test_short_version_flag_passes(self, tmp_path):
         """Entry point with '-V' string passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import (
-            check_version_flag,
-        )
-
         lines: list[str] = [
             "def main():",
             "    if '-V' in args:",
             "        print(VERSION)",
         ]
-        result = check_version_flag(lines, "/branch/apps/branch.py", None)
+        result = cli_flags_check.check_version_flag(lines, str(tmp_path / "branch" / "apps" / "branch.py"), None)
         assert result["passed"] is True
 
-    def test_no_version_flag_fails(self):
+    def test_no_version_flag_fails(self, tmp_path):
         """Entry point without any version flag handling fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import (
-            check_version_flag,
-        )
-
         lines: list[str] = [
             "def main():",
             "    print('hello')",
         ]
-        result = check_version_flag(lines, "/branch/apps/branch.py", None)
+        result = cli_flags_check.check_version_flag(lines, str(tmp_path / "branch" / "apps" / "branch.py"), None)
         assert result["passed"] is False
         assert "missing --version" in result["message"].lower()
 
-    def test_version_in_docstring_ignored(self):
+    def test_version_in_docstring_ignored(self, tmp_path):
         """Version flag mentioned only in a docstring does not count."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import (
-            check_version_flag,
-        )
-
         lines: list[str] = [
             '"""',
             "Supports --version flag",
@@ -939,18 +706,14 @@ class TestCheckVersionFlag:
             "def main():",
             "    pass",
         ]
-        result = check_version_flag(lines, "/branch/apps/branch.py", None)
+        result = cli_flags_check.check_version_flag(lines, str(tmp_path / "branch" / "apps" / "branch.py"), None)
         assert result["passed"] is False
 
-    def test_bypassed_passes(self):
+    def test_bypassed_passes(self, tmp_path):
         """Bypassed entry point passes regardless."""
-        from aipass.seedgo.apps.handlers.aipass_standards.cli_flags_check import (
-            check_version_flag,
-        )
-
         lines: list[str] = ["def main():", "    pass"]
         bypass = [{"standard": "cli_flags", "file": "branch.py"}]
-        result = check_version_flag(lines, "/branch/apps/branch.py", bypass)
+        result = cli_flags_check.check_version_flag(lines, str(tmp_path / "branch" / "apps" / "branch.py"), bypass)
         assert result["passed"] is True
         assert "Bypassed" in result["message"]
 
@@ -968,10 +731,6 @@ class TestCheckModuleDocstring:
 
     def test_docstring_present_passes(self):
         """File with a module-level docstring passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_module_docstring,
-        )
-
         lines: list[str] = [
             "# META block",
             "",
@@ -979,15 +738,11 @@ class TestCheckModuleDocstring:
             "",
             "def foo():",
         ]
-        result = check_module_docstring(lines)
+        result = documentation_check.check_module_docstring(lines)
         assert result["passed"] is True
 
     def test_docstring_missing_fails(self):
         """File without a docstring in the first 30 lines fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_module_docstring,
-        )
-
         lines: list[str] = [
             "# Just a comment",
             "import os",
@@ -995,26 +750,18 @@ class TestCheckModuleDocstring:
             "def foo():",
             "    pass",
         ] + ["# more code"] * 30
-        result = check_module_docstring(lines)
+        result = documentation_check.check_module_docstring(lines)
         assert result["passed"] is False
         assert "Missing module-level docstring" in result["message"]
 
     def test_single_quote_docstring_passes(self):
         """Single-quote triple-quote docstring is accepted."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_module_docstring,
-        )
-
         lines: list[str] = ["'''Module docstring.'''", "", "def foo():"]
-        result = check_module_docstring(lines)
+        result = documentation_check.check_module_docstring(lines)
         assert result["passed"] is True
 
     def test_docstring_after_meta_block_passes(self):
         """Docstring after META header block is accepted."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_module_docstring,
-        )
-
         lines: list[str] = [
             "# ========= META =========",
             "# Name: foo.py",
@@ -1024,7 +771,7 @@ class TestCheckModuleDocstring:
             "Multi-line docstring.",
             '"""',
         ]
-        result = check_module_docstring(lines)
+        result = documentation_check.check_module_docstring(lines)
         assert result["passed"] is True
 
 
@@ -1036,60 +783,40 @@ class TestCheckFunctionDocstrings:
 
     def test_all_public_documented_passes(self):
         """All public functions with docstrings passes."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_function_docstrings,
-        )
-
         content = 'def foo():\n    """Does foo."""\n    pass\ndef bar():\n    """Does bar."""\n    pass\n'
         lines = _lines(content)
-        result = check_function_docstrings(content, lines)
+        result = documentation_check.check_function_docstrings(content, lines)
         assert result["passed"] is True
         assert "2 public functions" in result["message"]
 
     def test_missing_docstring_fails(self):
         """Public function without docstring fails."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_function_docstrings,
-        )
-
         content = "def foo():\n    pass\n"
         lines = _lines(content)
-        result = check_function_docstrings(content, lines)
+        result = documentation_check.check_function_docstrings(content, lines)
         assert result["passed"] is False
         assert "foo" in result["message"]
 
     def test_private_functions_skipped(self):
         """Private functions (starting with _) are not checked."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_function_docstrings,
-        )
-
         content = "def _private_helper():\n    pass\n"
         lines = _lines(content)
-        result = check_function_docstrings(content, lines)
+        result = documentation_check.check_function_docstrings(content, lines)
         assert result["passed"] is True
         assert "No public functions" in result["message"]
 
     def test_no_functions_passes(self):
         """File with no functions passes vacuously."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_function_docstrings,
-        )
-
         content = "x = 42\ny = 43\n"
         lines = _lines(content)
-        result = check_function_docstrings(content, lines)
+        result = documentation_check.check_function_docstrings(content, lines)
         assert result["passed"] is True
 
     def test_multiline_signature_docstring_found(self):
         """Docstring after a multi-line function signature is detected."""
-        from aipass.seedgo.apps.handlers.aipass_standards.documentation_check import (
-            check_function_docstrings,
-        )
-
         content = (
             'def compute(\n    arg1: str,\n    arg2: int,\n) -> bool:\n    """Compute something."""\n    return True\n'
         )
         lines = _lines(content)
-        result = check_function_docstrings(content, lines)
+        result = documentation_check.check_function_docstrings(content, lines)
         assert result["passed"] is True

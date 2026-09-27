@@ -1,18 +1,17 @@
 # =================== META ====================
 # Name: test_audit_cache_stamps.py
 # Description: The audit cache's invalidation stamps and what its branch line reports
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for incremental_cache's stamp functions — the cache's whole invalidation surface.
+"""Tests for apps/handlers/audit/incremental_cache.py's stamp functions."""
 
-Split out of test_incremental_audit.py on 2026-09-21: that file tests
-audit_branch_incremental's BEHAVIOUR (what re-runs), these test the stamps it
-decides with. Nothing here loads a branch or runs a checker, so nothing here
-needs that file's infrastructure mocks.
-"""
+# Split out of test_incremental_audit.py on 2026-09-21: that file tests
+# audit_branch_incremental's BEHAVIOUR (what re-runs), these test the stamps it
+# decides with. Nothing here loads a branch or runs a checker, so nothing here
+# needs that file's infrastructure mocks.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — that hashlib.sha1 and json.dumps are deterministic

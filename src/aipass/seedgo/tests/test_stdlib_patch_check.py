@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_stdlib_patch_check.py
 # Description: stdlib_patch_check — crack class Q, a patch that replaces work the product owns
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/stdlib_patch_check.py."""

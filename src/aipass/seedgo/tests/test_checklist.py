@@ -3,9 +3,9 @@
 # =================== META ====================
 # Name: test_checklist.py
 # Description: Unit tests for the checklist module
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 from unittest.mock import MagicMock, patch
@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
+from aipass.seedgo.apps.modules import checklist
 
 
 # ---------------------------------------------------------------------------
@@ -22,67 +23,19 @@ from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for checklist."""
-    import sys
+    """Default seams checklist reads, so a test that does not override them
+    stays deterministic and never touches the live repo's registry or the
+    real checker packs.
 
-    from aipass.seedgo.apps.handlers.bypass.ignore_handler import (
-        is_seedgo_ignored as real_is_seedgo_ignored,
-        load_ignore_entries as real_load_ignore_entries,
-    )
-
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
-    mock_error = MagicMock()
-    mock_json_handler = MagicMock()
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- branch_audit (discover_checkers) ------------------------------------
-    audit_pkg = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit", audit_pkg)
-    branch_audit_mod = MagicMock()
-    branch_audit_mod.discover_checkers = MagicMock(return_value={})
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.audit.branch_audit", branch_audit_mod)
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_pkg = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    bypass_mod = MagicMock()
-    bypass_mod.get_branch_from_path = MagicMock(return_value=None)
-    bypass_mod.load_bypass_rules = MagicMock(return_value=[])
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", bypass_mod)
-
-    ignore_mod = MagicMock()
-    ignore_mod.is_seedgo_ignored = real_is_seedgo_ignored
-    ignore_mod.load_ignore_entries = real_load_ignore_entries
-    bypass_pkg.ignore_handler = ignore_mod
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.ignore_handler", ignore_mod)
-
-    # Force re-import
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.checklist", raising=False)
+    discover_checkers -> {} is the "no checkers discovered" floor most of the
+    tests below assert on. get_branch_from_path -> None and load_bypass_rules
+    -> [] keep branch/bypass resolution off the live AIPASS_REGISTRY.json
+    (template item 17). Tests that need a real branch or real checkers
+    override the seam themselves, on the same module object.
+    """
+    monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {})
+    monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: None)
+    monkeypatch.setattr(checklist, "load_bypass_rules", lambda branch_path: [])
 
 
 # ---------------------------------------------------------------------------
@@ -92,15 +45,11 @@ def _mock_infrastructure(monkeypatch):
 
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.checklist import handle_command
-
-    assert handle_command("wrong_command", []) is False
+    assert checklist.handle_command("wrong_command", []) is False
 
 
 def test_handle_command_no_args_shows_introspection():
     """No args shows introspection, and does not fall through to help."""
-    from aipass.seedgo.apps.modules import checklist
-
     with (
         patch.object(checklist, "print_introspection") as shown,
         patch.object(checklist, "print_help") as helped,
@@ -112,8 +61,6 @@ def test_handle_command_no_args_shows_introspection():
 
 def test_handle_command_help_flag():
     """--help explains and runs nothing."""
-    from aipass.seedgo.apps.modules import checklist
-
     with (
         patch.object(checklist, "print_help") as helped,
         patch.object(checklist, "run_checklist") as ran,
@@ -131,8 +78,6 @@ def test_handle_command_h_flag():
     describe. Only the position of the flag distinguishes the two, and the
     return value is True either way.
     """
-    from aipass.seedgo.apps.modules import checklist
-
     with (
         patch.object(checklist, "print_help") as helped,
         patch.object(checklist, "run_checklist") as ran,
@@ -144,8 +89,6 @@ def test_handle_command_h_flag():
 
 def test_handle_command_help_word():
     """The bare word 'help' reaches the same door as the flags."""
-    from aipass.seedgo.apps.modules import checklist
-
     with (
         patch.object(checklist, "print_help") as helped,
         patch.object(checklist, "run_checklist") as ran,
@@ -162,10 +105,8 @@ def test_handle_command_help_word():
 
 def test_run_checklist_file_not_found(tmp_path):
     """run_checklist returns error result for missing file."""
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     missing = tmp_path / "nonexistent.py"
-    results = run_checklist(str(missing))
+    results = checklist.run_checklist(str(missing))
     assert len(results) == 1
     assert results[0]["passed"] is False
     assert results[0]["standard"] == "(error)"
@@ -174,11 +115,9 @@ def test_run_checklist_file_not_found(tmp_path):
 
 def test_run_checklist_non_python_file(tmp_path):
     """run_checklist skips non-Python files gracefully."""
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     txt_file = tmp_path / "readme.txt"
     txt_file.write_text("hello", encoding="utf-8")
-    results = run_checklist(str(txt_file))
+    results = checklist.run_checklist(str(txt_file))
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert "not a python" in results[0]["detail"].lower()
@@ -186,11 +125,9 @@ def test_run_checklist_non_python_file(tmp_path):
 
 def test_run_checklist_python_file_no_checkers(tmp_path):
     """run_checklist on a Python file with no applicable checkers returns skip."""
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     py_file = tmp_path / "sample.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
-    results = run_checklist(str(py_file))
+    results = checklist.run_checklist(str(py_file))
     # With mocked empty checkers, should get either skip or error
     assert len(results) >= 1
     assert isinstance(results[0], dict)
@@ -198,13 +135,11 @@ def test_run_checklist_python_file_no_checkers(tmp_path):
 
 def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):
     """Files under system temp dirs are skipped."""
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [tmp_path])
 
     tmp_file = tmp_path / "test_throwaway.py"
     tmp_file.write_text("x = 1\n", encoding="utf-8")
-    results = run_checklist(str(tmp_file))
+    results = checklist.run_checklist(str(tmp_file))
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert results[0]["standard"] == "(skip)"
@@ -213,13 +148,11 @@ def test_run_checklist_throwaway_temp_path_skipped(tmp_path, monkeypatch):
 
 def test_run_checklist_scratchpad_path_skipped(tmp_path):
     """Files under a scratchpad directory are skipped."""
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     scratch_dir = tmp_path / "scratchpad"
     scratch_dir.mkdir()
     f = scratch_dir / "poc.py"
     f.write_text("x = 1\n", encoding="utf-8")
-    results = run_checklist(str(f))
+    results = checklist.run_checklist(str(f))
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert results[0]["standard"] == "(skip)"
@@ -230,11 +163,9 @@ def test_run_checklist_prototype_flag_skips(tmp_path, monkeypatch):
     """prototype=True skips all standards."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     f = tmp_path / "poc.py"
     f.write_text("x = 1\n", encoding="utf-8")
-    results = run_checklist(str(f), prototype=True)
+    results = checklist.run_checklist(str(f), prototype=True)
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert "prototype" in results[0]["detail"].lower()
@@ -244,11 +175,9 @@ def test_run_checklist_prototype_marker_skips(tmp_path, monkeypatch):
     """In-file '# seedgo: prototype' marker skips all standards."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     f = tmp_path / "poc.py"
     f.write_text("# seedgo: prototype\nx = 1\n", encoding="utf-8")
-    results = run_checklist(str(f))
+    results = checklist.run_checklist(str(f))
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert "prototype" in results[0]["detail"].lower()
@@ -256,22 +185,15 @@ def test_run_checklist_prototype_marker_skips(tmp_path, monkeypatch):
 
 def test_run_checklist_seedgo_ignore_skips(tmp_path, monkeypatch):
     """A file under apps/tools/ is skipped via the global .seedgoignore default."""
-    import sys
-
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
-
-    branch_mod = MagicMock()
-    branch_mod.get_branch_from_path = MagicMock(return_value={"path": str(tmp_path)})
-    branch_mod.load_bypass_rules = MagicMock(return_value=[])
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass.bypass_handler", branch_mod)
-
-    from aipass.seedgo.apps.modules.checklist import run_checklist
+    monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: {"path": str(tmp_path)})
+    monkeypatch.setattr(checklist, "load_bypass_rules", lambda branch_path: [])
 
     tools_dir = tmp_path / "apps" / "tools"
     tools_dir.mkdir(parents=True)
     f = tools_dir / "scratch.py"
     f.write_text("x = 1\n", encoding="utf-8")
-    results = run_checklist(str(f))
+    results = checklist.run_checklist(str(f))
     assert len(results) == 1
     assert results[0]["passed"] is True
     assert "seedgoignore" in results[0]["detail"].lower()
@@ -281,11 +203,9 @@ def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
     """A normal file without markers/temp path is still fully audited."""
     monkeypatch.setattr(skip_dirs, "_get_temp_roots", lambda: [])
 
-    from aipass.seedgo.apps.modules.checklist import run_checklist
-
     f = tmp_path / "real_code.py"
     f.write_text("def main(): pass\n", encoding="utf-8")
-    results = run_checklist(str(f))
+    results = checklist.run_checklist(str(f))
     # Floor: the audit lane produced exactly one row (the mocked pack discovers
     # no checkers), so the loop below cannot pass over an empty list.
     assert len(results) == 1
@@ -301,28 +221,24 @@ def test_run_checklist_normal_file_still_audited(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_runs():
+def test_print_introspection_runs(monkeypatch):
     """print_introspection produces console output."""
-    import sys
-    from aipass.seedgo.apps.modules.checklist import print_introspection
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    result = print_introspection()
+    mock_console = MagicMock()
+    monkeypatch.setattr(checklist, "console", mock_console)
+    mock_console.reset_mock()
+    result = checklist.print_introspection()
     assert result is None
-    assert mock_cli.console.print.called, "print_introspection should produce console output"
+    assert mock_console.print.called, "print_introspection should produce console output"
 
 
-def test_print_help_runs():
+def test_print_help_runs(monkeypatch):
     """print_help produces console output."""
-    import sys
-    from aipass.seedgo.apps.modules.checklist import print_help
-
-    mock_cli = sys.modules["aipass.cli"]
-    mock_cli.console.reset_mock()
-    result = print_help()
+    mock_console = MagicMock()
+    monkeypatch.setattr(checklist, "console", mock_console)
+    mock_console.reset_mock()
+    result = checklist.print_help()
     assert result is None
-    assert mock_cli.console.print.called, "print_help should produce console output"
+    assert mock_console.print.called, "print_help should produce console output"
 
 
 # ---------------------------------------------------------------------------
@@ -330,28 +246,24 @@ def test_print_help_runs():
 # ---------------------------------------------------------------------------
 
 
-def test_is_entry_point_detection():
+def test_is_entry_point_detection(tmp_path):
     """_is_entry_point correctly identifies apps/{name}.py files."""
-    from aipass.seedgo.apps.modules.checklist import _is_entry_point
-
-    assert _is_entry_point("/some/branch/apps/flow.py") is True
-    assert _is_entry_point("/some/branch/apps/modules/helper.py") is False
-    assert _is_entry_point("/some/branch/apps/readme.txt") is False
+    assert checklist._is_entry_point((tmp_path / "some" / "branch" / "apps" / "flow.py").as_posix()) is True
+    assert (
+        checklist._is_entry_point((tmp_path / "some" / "branch" / "apps" / "modules" / "helper.py").as_posix()) is False
+    )
+    assert checklist._is_entry_point((tmp_path / "some" / "branch" / "apps" / "readme.txt").as_posix()) is False
 
 
 def test_format_failure_no_checks():
     """_format_failure returns fallback when no failed checks present."""
-    from aipass.seedgo.apps.modules.checklist import _format_failure
-
-    result = _format_failure({"checks": []})
+    result = checklist._format_failure({"checks": []})
     assert "no details" in result.lower()
 
 
 def test_format_failure_single_failure():
     """_format_failure returns the message from the first failed check."""
-    from aipass.seedgo.apps.modules.checklist import _format_failure
-
-    result = _format_failure(
+    result = checklist._format_failure(
         {
             "checks": [
                 {"passed": False, "message": "Missing docstring"},
@@ -363,9 +275,7 @@ def test_format_failure_single_failure():
 
 def test_format_failure_multiple_failures():
     """_format_failure indicates additional failures."""
-    from aipass.seedgo.apps.modules.checklist import _format_failure
-
-    result = _format_failure(
+    result = checklist._format_failure(
         {
             "checks": [
                 {"passed": False, "message": "Missing docstring"},
@@ -394,8 +304,6 @@ def _rendered_results(monkeypatch, results, file_path="/repo/branch/apps/thing.p
 
     from rich.console import Console
 
-    from aipass.seedgo.apps.modules import checklist
-
     buffer = io.StringIO()
     monkeypatch.setattr(checklist, "console", Console(file=buffer, force_terminal=False, width=300))
     checklist._print_results(results, file_path)
@@ -415,8 +323,6 @@ def test_each_finding_carries_a_greppable_marker(monkeypatch):
     must be a plain ASCII token that is present once per finding -- not a
     decorative em dash a reader has to guess at.
     """
-    from aipass.seedgo.apps.modules import checklist
-
     rendered = _rendered_results(monkeypatch, _MIXED_RESULTS)
 
     assert rendered.count("[FAIL]") == 2, f"one marker per finding, got: {rendered!r}"
@@ -456,8 +362,6 @@ def test_help_documents_the_marker(monkeypatch):
 
     from rich.console import Console
 
-    from aipass.seedgo.apps.modules import checklist
-
     buffer = io.StringIO()
     monkeypatch.setattr(checklist, "console", Console(file=buffer, force_terminal=False, width=300))
     checklist.print_help()
@@ -472,8 +376,6 @@ def test_help_documents_the_marker(monkeypatch):
 
 def test_help_after_the_file_path_does_not_run_the_checklist(monkeypatch):
     """`drone @seedgo checklist <file> --help` ran a full per-file audit instead of describing one."""
-    from aipass.seedgo.apps.modules import checklist
-
     run = MagicMock()
     monkeypatch.setattr(checklist, "run_checklist", run)
     monkeypatch.setattr(checklist, "_print_results", MagicMock())
@@ -487,8 +389,6 @@ def test_help_after_the_file_path_does_not_run_the_checklist(monkeypatch):
 
 def test_help_after_a_pack_flag_does_not_run_the_checklist(monkeypatch):
     """The flag can trail any operand — `checklist --pack aipass <file> -h` is still a question."""
-    from aipass.seedgo.apps.modules import checklist
-
     run = MagicMock()
     monkeypatch.setattr(checklist, "run_checklist", run)
     monkeypatch.setattr(checklist, "_print_results", MagicMock())
@@ -502,8 +402,6 @@ def test_help_after_a_pack_flag_does_not_run_the_checklist(monkeypatch):
 
 def test_checklist_still_runs_without_a_help_flag(monkeypatch, tmp_path):
     """The gate must not swallow the real command."""
-    from aipass.seedgo.apps.modules import checklist
-
     target = tmp_path / "thing.py"
     target.write_text("x = 1\n", encoding="utf-8")
     run = MagicMock(return_value=[])
@@ -517,8 +415,6 @@ def test_checklist_still_runs_without_a_help_flag(monkeypatch, tmp_path):
 
 def test_checklist_does_not_answer_for_another_command(monkeypatch):
     """Ownership first: a help flag never makes a module claim a command it does not own."""
-    from aipass.seedgo.apps.modules import checklist
-
     monkeypatch.setattr(checklist, "print_help", MagicMock())
 
     assert checklist.handle_command("audit", ["--help"]) is False
@@ -565,8 +461,6 @@ def _write(tmp_path, rel):
 
 def test_a_test_file_names_its_tests_only_branch_rows(tmp_path, monkeypatch):
     """The conftest case: unused_conftest_fixture applies and was not judged here."""
-    from aipass.seedgo.apps.modules import checklist
-
     monkeypatch.setattr(checklist, "discover_checkers", lambda pack: _fake_pack())
     conftest = _write(tmp_path, "branch/tests/conftest.py")
 
@@ -575,8 +469,6 @@ def test_a_test_file_names_its_tests_only_branch_rows(tmp_path, monkeypatch):
 
 def test_a_production_file_does_not_name_tests_only_rows(tmp_path, monkeypatch):
     """Applicability gates the list: a module never hears about a conftest standard."""
-    from aipass.seedgo.apps.modules import checklist
-
     monkeypatch.setattr(checklist, "discover_checkers", lambda pack: _fake_pack())
     module = _write(tmp_path, "branch/apps/modules/thing.py")
 
@@ -585,8 +477,6 @@ def test_a_production_file_does_not_name_tests_only_rows(tmp_path, monkeypatch):
 
 def test_rows_the_checklist_does_run_are_not_named(tmp_path, monkeypatch):
     """ruff is branch_level but has check_module(), so it is judged here; entry_point rows are never listed."""
-    from aipass.seedgo.apps.modules import checklist
-
     monkeypatch.setattr(checklist, "discover_checkers", lambda pack: _fake_pack())
     entry = _write(tmp_path, "branch/apps/branch.py")
 
@@ -600,8 +490,6 @@ def _rendered_command(monkeypatch, target, pack=None):
     import io
 
     from rich.console import Console
-
-    from aipass.seedgo.apps.modules import checklist
 
     # tmp_path sits under the system temp root, which the lane skips as throwaway;
     # exempt this target only, and leave the real gate in place for anything else.

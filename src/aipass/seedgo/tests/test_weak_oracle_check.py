@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_weak_oracle_check.py
 # Description: weak_oracle_check — crack class D, a test whose whole oracle cannot fail
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-09-22
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/aipass_standards/weak_oracle_check.py."""

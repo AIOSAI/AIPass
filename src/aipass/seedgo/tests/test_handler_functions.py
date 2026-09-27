@@ -3,15 +3,20 @@
 # =================== META ====================
 # Name: test_handler_functions.py
 # Description: Unit tests for handler-level functions across multiple handler packages
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 import json
-import pytest
 from typing import Dict
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+from aipass.seedgo.apps.handlers.audit import audit_display
+from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_directory
+from aipass.seedgo.apps.handlers.readme import readme_generator, readme_ops
 
 
 # ---------------------------------------------------------------------------
@@ -20,67 +25,11 @@ from unittest.mock import MagicMock, patch
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for handler functions."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- bypass handler -----------------------------------------------------
-    bypass_pkg = MagicMock()
-    bypass_ignore = MagicMock()
-    bypass_ignore.get_template_ignore_patterns = MagicMock(return_value=[])
-    bypass_ignore.get_audit_ignore_patterns = MagicMock(return_value=[])
-    # The ignore list removes nothing here, as the empty pattern list above says.
-    bypass_ignore.audit_ignore_match = MagicMock(return_value=None)
-    bypass_ignore.ignored_tracked_source = MagicMock(return_value=[])
-    bypass_pkg.ignore_handler = bypass_ignore
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.bypass", bypass_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.seedgo.apps.handlers.bypass.ignore_handler",
-        bypass_ignore,
-    )
-
-    # -- cli (console for audit_display) ------------------------------------
+def _mock_console(monkeypatch):
+    """Patch audit_display's console seam directly, at the edge."""
     mock_console = MagicMock()
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    # -- cli.apps.modules (warning function for hooks_ext) ------------------
-    cli_apps = MagicMock()
-    cli_apps_modules = MagicMock()
-    cli_apps_modules.warning = MagicMock()
-    cli_apps.modules = cli_apps_modules
-    cli_mod.apps = cli_apps
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_apps_modules)
-
-    # Force re-imports so handler modules pick up fresh mocks
-    for mod_name in [
-        "aipass.seedgo.apps.handlers.audit.audit_display",
-        "aipass.seedgo.apps.handlers.diagnostics.diagnostics_check",
-        "aipass.seedgo.apps.handlers.json.json_handler",
-        "aipass.seedgo.apps.handlers.readme.readme_ops",
-        "aipass.seedgo.apps.handlers.readme.readme_generator",
-    ]:
-        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+    monkeypatch.setattr(audit_display, "console", mock_console)
+    return mock_console
 
 
 # ===========================================================================
@@ -88,15 +37,13 @@ def _mock_infrastructure(monkeypatch):
 # ===========================================================================
 
 
-def test_print_branch_summary_basic():
+def test_print_branch_summary_basic(_mock_console):
     """print_branch_summary renders the branch line, the score grid and the overall.
 
     Was a bare call that asserted nothing (no_oracle). The lines below are the
     strings the function actually hands to console.print, measured 2026-09-07;
-    `console` here is the fixture's mock, which is what the module binds.
+    `_mock_console` here is the fixture's mock, which is what the module binds.
     """
-    from aipass.seedgo.apps.handlers.audit.audit_display import console, print_branch_summary
-
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
         "scores": {"meta": 100, "naming": 90},
@@ -104,9 +51,9 @@ def test_print_branch_summary_basic():
         "files_checked": 10,
         "results": {},
     }
-    print_branch_summary(audit_result)
+    audit_display.print_branch_summary(audit_result)
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    lines = [call.args[0] for call in _mock_console.print.call_args_list if call.args]
     branch_line = (
         "[bold cyan]seedgo[/bold cyan] [dim](10 files measured — apps/ plus tests/ test_*.py and conftest.py)[/dim]"
     )
@@ -115,14 +62,12 @@ def test_print_branch_summary_basic():
     assert "  [bold]Overall:          95% ✅[/bold]" in lines
 
 
-def test_print_branch_summary_with_violations():
+def test_print_branch_summary_with_violations(_mock_console):
     """print_branch_summary renders the violation block: count, file, score, issue.
 
     Was a bare call that asserted nothing (no_oracle) — it could not tell a
     rendered violation from a silently dropped one.
     """
-    from aipass.seedgo.apps.handlers.audit.audit_display import console, print_branch_summary
-
     audit_result: Dict = {
         "branch": {"name": "testbranch"},
         "scores": {"meta": 60, "naming": 80},
@@ -133,9 +78,9 @@ def test_print_branch_summary_with_violations():
         },
         "meta_violations": [{"path": "file.py", "score": 50, "issues": ["Missing META block"]}],
     }
-    print_branch_summary(audit_result)
+    audit_display.print_branch_summary(audit_result)
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    lines = [call.args[0] for call in _mock_console.print.call_args_list if call.args]
     branch_line = (
         "[bold cyan]testbranch[/bold cyan] [dim](5 files measured — apps/ plus tests/ test_*.py and conftest.py)[/dim]"
     )
@@ -145,7 +90,7 @@ def test_print_branch_summary_with_violations():
     assert "      [dim]• Missing META block[/dim]" in lines
 
 
-def test_print_branch_summary_with_system_averages():
+def test_print_branch_summary_with_system_averages(_mock_console):
     """The optional system-average arguments are accepted and never rendered.
 
     Was a bare call that asserted nothing (no_oracle). Measured 2026-09-07:
@@ -155,8 +100,6 @@ def test_print_branch_summary_with_system_averages():
     line of output, so that is what this pins. If the comparison is ever wired
     up, this test goes red and should be rewritten to pin the new line.
     """
-    from aipass.seedgo.apps.handlers.audit.audit_display import console, print_branch_summary
-
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
         "scores": {"meta": 100},
@@ -165,9 +108,9 @@ def test_print_branch_summary_with_system_averages():
         "results": {},
     }
     system_averages: Dict[str, int] = {"meta": 90}
-    print_branch_summary(audit_result, system_averages, 90)
+    audit_display.print_branch_summary(audit_result, system_averages, 90)
 
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]
+    lines = [call.args[0] for call in _mock_console.print.call_args_list if call.args]
     assert "  Meta            100% ✅" in lines
     assert "  [bold]Overall:         100% ✅[/bold]" in lines
     assert not [line for line in lines if "90" in line]
@@ -180,10 +123,6 @@ def test_print_branch_summary_with_system_averages():
 
 def test_check_directory_missing(tmp_path):
     """check_directory on nonexistent directory returns error."""
-    from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-        check_directory,
-    )
-
     result = check_directory(str(tmp_path / "nonexistent"))
     assert result["total_files"] == 0
     assert "error" in result
@@ -195,10 +134,6 @@ def test_check_directory_exists(tmp_path):
     # Create a Python file
     py_file = tmp_path / "example.py"
     py_file.write_text("x = 1\n", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-        check_directory,
-    )
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
@@ -220,10 +155,6 @@ def test_check_directory_with_errors(tmp_path):
     """check_directory reports errors from pyright output."""
     py_file = tmp_path / "bad.py"
     py_file.write_text("x: int = 'not_int'\n", encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import (
-        check_directory,
-    )
 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
@@ -287,8 +218,6 @@ def test_resolve_branch_found(tmp_path, monkeypatch):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme import readme_ops
-
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: registry_path)
 
     result = readme_ops.resolve_branch("@seedgo")
@@ -302,8 +231,6 @@ def test_resolve_branch_not_found(tmp_path, monkeypatch):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme import readme_ops
-
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: registry_path)
 
     result = readme_ops.resolve_branch("@nonexistent")
@@ -312,8 +239,6 @@ def test_resolve_branch_not_found(tmp_path, monkeypatch):
 
 def test_resolve_branch_no_registry(tmp_path, monkeypatch):
     """resolve_branch returns None when registry does not exist."""
-    from aipass.seedgo.apps.handlers.readme import readme_ops
-
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: tmp_path / "MISSING.json")
 
     result = readme_ops.resolve_branch("@seedgo")
@@ -329,8 +254,6 @@ def test_resolve_branch_alias(tmp_path, monkeypatch):
     }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
-
-    from aipass.seedgo.apps.handlers.readme import readme_ops
 
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: registry_path)
 
@@ -356,8 +279,6 @@ def test_get_all_branches(tmp_path, monkeypatch):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme import readme_ops
-
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: registry_path)
 
     branches = readme_ops.get_all_branches()
@@ -369,8 +290,6 @@ def test_get_all_branches_empty_registry(tmp_path, monkeypatch):
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
     registry_path.write_text(json.dumps({"branches": []}), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme import readme_ops
-
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: registry_path)
 
     branches = readme_ops.get_all_branches()
@@ -379,8 +298,6 @@ def test_get_all_branches_empty_registry(tmp_path, monkeypatch):
 
 def test_get_all_branches_no_registry(tmp_path, monkeypatch):
     """get_all_branches returns empty list when registry is missing."""
-    from aipass.seedgo.apps.handlers.readme import readme_ops
-
     monkeypatch.setattr(readme_ops, "_find_registry", lambda: tmp_path / "MISSING.json")
 
     branches = readme_ops.get_all_branches()
@@ -398,11 +315,7 @@ def test_generate_commands_section_no_entry_point(tmp_path):
     apps_dir = branch_dir / "apps"
     apps_dir.mkdir(parents=True)
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        generate_commands_section,
-    )
-
-    result = generate_commands_section(str(branch_dir))
+    result = readme_generator.generate_commands_section(str(branch_dir))
     assert result == ""
 
 
@@ -414,16 +327,12 @@ def test_generate_commands_section_with_help(tmp_path):
     entry = apps_dir / "mybranch.py"
     entry.write_text("pass", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        generate_commands_section,
-    )
-
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(
             stdout="Commands: audit, report, check\n",
             stderr="",
         )
-        result = generate_commands_section(str(branch_dir))
+        result = readme_generator.generate_commands_section(str(branch_dir))
 
     assert "audit" in result
     assert "report" in result
@@ -450,11 +359,7 @@ def test_generate_header_section_with_passport(tmp_path):
     }
     (trinity_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        generate_header_section,
-    )
-
-    result = generate_header_section(str(branch_dir))
+    result = readme_generator.generate_header_section(str(branch_dir))
     assert "MYBRANCH" in result
     assert "library" in result
     assert "Testing branch" in result
@@ -465,11 +370,7 @@ def test_generate_header_section_no_passport(tmp_path):
     branch_dir = tmp_path / "mybranch"
     branch_dir.mkdir()
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        generate_header_section,
-    )
-
-    result = generate_header_section(str(branch_dir))
+    result = readme_generator.generate_header_section(str(branch_dir))
     assert result == ""
 
 
@@ -486,11 +387,7 @@ def test_update_readme_auto_sections_dry_run(tmp_path):
     original = "# Branch\n<!-- AUTO:LAST_UPDATED -->\n*Last Updated: 2025-01-01*\n<!-- /AUTO:LAST_UPDATED -->\n"
     readme.write_text(original, encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        update_readme_auto_sections,
-    )
-
-    result = update_readme_auto_sections(str(branch_dir), dry_run=True)
+    result = readme_generator.update_readme_auto_sections(str(branch_dir), dry_run=True)
     assert result["dry_run"] is True
     # File should not be modified in dry run
     assert readme.read_text(encoding="utf-8") == original
@@ -501,11 +398,7 @@ def test_update_readme_auto_sections_no_readme(tmp_path):
     branch_dir = tmp_path / "mybranch"
     branch_dir.mkdir()
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        update_readme_auto_sections,
-    )
-
-    result = update_readme_auto_sections(str(branch_dir))
+    result = readme_generator.update_readme_auto_sections(str(branch_dir))
     assert "README.md not found" in result["errors"]
 
 
@@ -523,11 +416,7 @@ def test_update_readme_auto_sections_missing_markers(tmp_path):
     readme = branch_dir / "README.md"
     readme.write_text("# Branch\nNo markers here.\n", encoding="utf-8")
 
-    from aipass.seedgo.apps.handlers.readme.readme_generator import (
-        update_readme_auto_sections,
-    )
-
-    result = update_readme_auto_sections(str(branch_dir))
+    result = readme_generator.update_readme_auto_sections(str(branch_dir))
     assert result["missing_markers"] == ["tree", "last_updated"]
     assert result["updated"] == []
     assert result["errors"] == []

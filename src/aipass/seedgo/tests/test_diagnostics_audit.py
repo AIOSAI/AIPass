@@ -3,13 +3,15 @@
 # =================== META ====================
 # Name: test_diagnostics_audit.py
 # Description: Unit tests for the diagnostics_audit module
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+from aipass.seedgo.apps.modules import diagnostics_audit
 
 
 # ---------------------------------------------------------------------------
@@ -29,8 +31,6 @@ def _console_lines(function_name: str, *args):
     Returns:
         (return value of the render function, list of printed strings).
     """
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     recorder = MagicMock()
     with patch.object(diagnostics_audit, "console", recorder):
         result = getattr(diagnostics_audit, function_name)(*args)
@@ -45,60 +45,17 @@ def _console_lines(function_name: str, *args):
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for diagnostics_audit."""
-    import sys
+    """Replace diagnostics_audit's own seams with mocks, at the edge, not by rebuilding the module.
 
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
-    mock_header = MagicMock()
-    mock_error = MagicMock()
-    mock_warning = MagicMock()
-    mock_json_handler = MagicMock()
-    mock_normalize = MagicMock(side_effect=lambda x: x.lstrip("@").upper())
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    cli_mod.header = mock_header
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.error = mock_error
-    cli_modules.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # -- drone services -----------------------------------------------------
-    drone_mod = MagicMock()
-    drone_mod.normalize_branch_arg = mock_normalize
-    monkeypatch.setitem(sys.modules, "aipass.drone", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.drone.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.drone.apps.modules", drone_mod)
-
-    # -- diagnostics discovery handler --------------------------------------
-    diag_pkg = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.diagnostics", diag_pkg)
-    discovery_mod = MagicMock()
-    discovery_mod.discover_branches = MagicMock(return_value=[])
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.diagnostics.discovery", discovery_mod)
-
-    # Force re-import
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.diagnostics_audit", raising=False)
+    diagnostics_audit binds ``logger``, ``console``, ``error`` and ``warning`` at
+    import time (module-level names), so patching them directly on the real,
+    already-imported module reaches every call the same way the old sys.modules
+    stub did, without a stand-in for the unit under test.
+    """
+    monkeypatch.setattr(diagnostics_audit, "logger", MagicMock())
+    monkeypatch.setattr(diagnostics_audit, "console", MagicMock())
+    monkeypatch.setattr(diagnostics_audit, "error", MagicMock())
+    monkeypatch.setattr(diagnostics_audit, "warning", MagicMock())
 
 
 # ---------------------------------------------------------------------------
@@ -108,15 +65,11 @@ def _mock_infrastructure(monkeypatch):
 
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.diagnostics_audit import handle_command
-
-    assert handle_command("wrong_command", []) is False
+    assert diagnostics_audit.handle_command("wrong_command", []) is False
 
 
 def test_handle_command_accepts_diagnostics_name():
     """'diagnostics' reaches this module's introspection, not just a True."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     with patch.object(diagnostics_audit, "print_introspection") as shown:
         assert diagnostics_audit.handle_command("diagnostics", []) is True
     shown.assert_called_once_with()
@@ -124,8 +77,6 @@ def test_handle_command_accepts_diagnostics_name():
 
 def test_handle_command_accepts_diagnostics_audit_name():
     """'diagnostics_audit' is the same door, not a near miss returning True."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     with patch.object(diagnostics_audit, "print_introspection") as shown:
         assert diagnostics_audit.handle_command("diagnostics_audit", []) is True
     shown.assert_called_once_with()
@@ -133,8 +84,6 @@ def test_handle_command_accepts_diagnostics_audit_name():
 
 def test_handle_command_no_args_shows_introspection():
     """No args names the module on the console, rather than erroring quietly."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     assert diagnostics_audit.handle_command("diagnostics", []) is True
 
     printed = " ".join(str(c.args[0]) for c in diagnostics_audit.console.print.call_args_list if c.args)  # type: ignore[attr-defined]
@@ -143,8 +92,6 @@ def test_handle_command_no_args_shows_introspection():
 
 def test_handle_command_help_flag():
     """--help explains, and does not take the unknown-argument door."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     with (
         patch.object(diagnostics_audit, "print_help") as helped,
         patch.object(diagnostics_audit, "error") as reported,
@@ -161,8 +108,6 @@ def test_handle_command_h_flag():
     aipass --help` used to answer "Unknown argument" for a question it can
     answer. Both sides of that bug return True.
     """
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     with (
         patch.object(diagnostics_audit, "print_help") as helped,
         patch.object(diagnostics_audit, "error") as reported,
@@ -174,8 +119,6 @@ def test_handle_command_h_flag():
 
 def test_handle_command_help_word():
     """The bare word 'help' reaches the same door as the flags."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     with (
         patch.object(diagnostics_audit, "print_help") as helped,
         patch.object(diagnostics_audit, "error") as reported,
@@ -192,8 +135,6 @@ def test_handle_command_unknown_arg():
     displayed gracefully — and this module returns True on every path, so the
     test passed with all six console lines and both channels deleted.
     """
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     assert diagnostics_audit.handle_command("diagnostics", ["some_unknown_arg"]) is True
 
     diagnostics_audit.error.assert_called_once_with("Unknown argument: 'some_unknown_arg'")  # type: ignore[attr-defined]
@@ -330,8 +271,6 @@ def test_print_system_summary_with_data():
 
 def test_help_after_an_argument_prints_help_not_an_error(monkeypatch):
     """`drone @seedgo diagnostics aipass --help` answered "Unknown argument" instead of explaining."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     shown = MagicMock()
     monkeypatch.setattr(diagnostics_audit, "print_help", shown)
     complained = MagicMock()
@@ -344,8 +283,6 @@ def test_help_after_an_argument_prints_help_not_an_error(monkeypatch):
 
 def test_unknown_argument_without_a_help_flag_still_errors(monkeypatch):
     """The gate must not swallow the module's fail-loud behaviour."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     monkeypatch.setattr(diagnostics_audit, "print_help", MagicMock())
     complained = MagicMock()
     monkeypatch.setattr(diagnostics_audit, "error", complained)
@@ -356,8 +293,6 @@ def test_unknown_argument_without_a_help_flag_still_errors(monkeypatch):
 
 def test_diagnostics_does_not_answer_for_another_command(monkeypatch):
     """Ownership first: a help flag never makes a module claim a command it does not own."""
-    from aipass.seedgo.apps.modules import diagnostics_audit
-
     monkeypatch.setattr(diagnostics_audit, "print_help", MagicMock())
 
     assert diagnostics_audit.handle_command("checklist", ["--help"]) is False

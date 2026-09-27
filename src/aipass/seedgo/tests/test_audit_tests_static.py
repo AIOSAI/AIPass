@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_audit_tests_static.py
 # Description: tests for the static nominator tier, harness selfcheck and cache stamp
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-29
-# Modified: 2026-08-29
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -52,6 +52,7 @@ from aipass.seedgo.apps.handlers.tests_pytest_standards import (
     self_skip_check,
     unentered_assert_check,
 )
+from aipass.seedgo.apps.modules import standards_audit
 
 
 def _corpus(tmp_path: Path, source: str, filename: str = "test_sample.py", production: str = "") -> corpus.Corpus:
@@ -940,19 +941,16 @@ class TestPackKindRefusal:
     """The nominators ship as *_check.py; the audit must not offer to score them."""
 
     def test_the_execution_pack_is_not_offered_as_a_scoring_pack(self):
-        from aipass.seedgo.apps.modules import standards_audit
 
         assert "tests_pytest" not in standards_audit._discover_packs()
 
     def test_the_execution_pack_is_still_visible_as_a_non_scoring_pack(self):
         # Hidden and absent must not look the same: an operator who can see the
         # pack knows where to look for its numbers.
-        from aipass.seedgo.apps.modules import standards_audit
 
         assert standards_audit.non_scoring_packs().get("tests_pytest") == "execution"
 
     def test_the_standards_pack_is_still_discovered(self):
-        from aipass.seedgo.apps.modules import standards_audit
 
         assert "aipass" in standards_audit._discover_packs()
 
@@ -969,7 +967,6 @@ class TestPackKindRefusal:
         # The function returning the right answer proves nothing if no surface
         # calls it: a pack that is hidden and a pack that is absent look the
         # same to an operator, which is the whole reason the list exists.
-        from aipass.seedgo.apps.modules import standards_audit
 
         standards_audit._print_non_scoring_packs()
         printed = capsys.readouterr().out
@@ -1313,30 +1310,30 @@ def _document(**overrides) -> dict:
 class TestRender:
     """A number never prints alone, and a not_applicable always prints its reason."""
 
-    def test_the_score_never_prints_without_the_blind_counts(self, capsys):
-        render.render_target(_document(), "/tmp/a.json")
+    def test_the_score_never_prints_without_the_blind_counts(self, capsys, tmp_path):
+        render.render_target(_document(), str(tmp_path / "a.json"))
         output = capsys.readouterr().out
         assert "hygiene 100" in output and "cannot follow" in output
 
-    def test_a_not_applicable_group_prints_its_reason(self, capsys):
-        render.render_target(_document(), "/tmp/a.json")
+    def test_a_not_applicable_group_prints_its_reason(self, capsys, tmp_path):
+        render.render_target(_document(), str(tmp_path / "a.json"))
         assert "not_applicable - not built" in capsys.readouterr().out
 
-    def test_a_preview_says_how_many_rows_it_withheld(self, capsys):
-        render.render_target(_document(), "/tmp/a.json")
+    def test_a_preview_says_how_many_rows_it_withheld(self, capsys, tmp_path):
+        render.render_target(_document(), str(tmp_path / "a.json"))
         assert "and 2 more" in capsys.readouterr().out
 
-    def test_the_retirement_ruling_is_rendered(self, capsys):
-        render.render_target(_document(), "/tmp/a.json")
+    def test_the_retirement_ruling_is_rendered(self, capsys, tmp_path):
+        render.render_target(_document(), str(tmp_path / "a.json"))
         assert "pytest.static_nominators" in capsys.readouterr().out
 
-    def test_a_refusal_renders_its_law_and_not_a_score(self, capsys):
+    def test_a_refusal_renders_its_law_and_not_a_score(self, capsys, tmp_path):
         document = _document(status="refused", refusal={"reason": "gate blind", "law": "T10", "code": 2, "detail": []})
-        render.render_target(document, "/tmp/a.json")
+        render.render_target(document, str(tmp_path / "a.json"))
         output = _screen(capsys)
         assert "REFUSED" in output and "T10" in output and "hygiene 100" not in output
 
-    def test_a_failing_harness_check_is_printed(self, capsys):
+    def test_a_failing_harness_check_is_printed(self, capsys, tmp_path):
         document = _document(
             harness={
                 "checks": [{"check": 11, "name": "canary", "status": "fail", "detail": "not caught"}],
@@ -1344,7 +1341,7 @@ class TestRender:
                 "failed": 1,
             }
         )
-        render.render_target(document, "/tmp/a.json")
+        render.render_target(document, str(tmp_path / "a.json"))
         assert "harness check 11 FAILED" in _screen(capsys)
 
     def test_the_renderer_names_no_ecosystem(self):
