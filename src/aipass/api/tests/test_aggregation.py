@@ -3,17 +3,20 @@
 # Description: Tests for usage aggregation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for aggregation.py -- usage aggregation handler.
+"""Tests for apps/handlers/usage/aggregation.py, the usage aggregation handler."""
 
-Tests:
-- get_overall_stats() no file, empty data, no usage_by_caller, valid multi-caller, exception
-- get_caller_usage() no file, caller not found, valid caller, exception
-- get_session_summary() no file, no session data, valid session, exception
-"""
+# Tests:
+# - get_overall_stats() no file, empty data, no usage_by_caller, valid multi-caller, exception
+# - get_caller_usage() no file, caller not found, valid caller, exception
+# - get_session_summary() no file, no session data, valid session, exception
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that aggregation.py parses and imports
+# seedgo: no-test-needed(constant) — MODULE_NAME and DATA_FILE's text; the tests read the file by that name
+# seedgo: no-test-needed(json_handler) — API_JSON_DIR's real location; every test redirects it into the sandbox
 
 import json
 from pathlib import Path

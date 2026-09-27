@@ -3,37 +3,42 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-17
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Token Store's Accountability Fields
+"""Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
 
-Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
-this machine and the store could not say who minted it. Three fields:
+# Tests for the Token Store's Accountability Fields
+#
+# Devpulse's ruling, granted 2026-08-14 after an operate-scoped token appeared on
+# this machine and the store could not say who minted it. Three fields:
+#
+#   minted_by   - best-effort provenance. WHO ran issue-token.
+#   revoked_at  - when a token stopped working.
+#   last_used   - whether a live token is actually live, or merely un-revoked.
+#
+# THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
+#
+# `last_used` means a write on EVERY authenticated request, against a JSON file
+# that issue and revoke also write. Two things could go wrong, and the second one
+# is the dangerous one:
+#
+#   1. Two writers race and one update is lost. For telemetry, survivable.
+#   2. A telemetry write, holding a record list it read BEFORE a revoke landed,
+#      writes that stale list back — and un-revokes the token. A revoked device
+#      starts working again because somebody looked at a timestamp.
+#
+# So the load-bearing test in this file is not "last_used is written". It is
+# "a concurrent revoke survives a touch". Telemetry must never undo security.
+#
+# And one more: a truncated store reads as empty, which denies every request. With
+# per-request writes that window stops being theoretical, so the write is atomic —
+# a reader sees the old file or the new one, never half of either.
 
-  minted_by   - best-effort provenance. WHO ran issue-token.
-  revoked_at  - when a token stopped working.
-  last_used   - whether a live token is actually live, or merely un-revoked.
-
-THE HAZARD THESE TESTS EXIST FOR, and it is not the fields.
-
-`last_used` means a write on EVERY authenticated request, against a JSON file
-that issue and revoke also write. Two things could go wrong, and the second one
-is the dangerous one:
-
-  1. Two writers race and one update is lost. For telemetry, survivable.
-  2. A telemetry write, holding a record list it read BEFORE a revoke landed,
-     writes that stale list back — and un-revokes the token. A revoked device
-     starts working again because somebody looked at a timestamp.
-
-So the load-bearing test in this file is not "last_used is written". It is
-"a concurrent revoke survives a touch". Telemetry must never undo security.
-
-And one more: a truncated store reads as empty, which denies every request. With
-per-request writes that window stops being theoretical, so the write is atomic —
-a reader sees the old file or the new one, never half of either.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — scope_allows() and resolve_token(), tests/test_host_api.py
+# seedgo: no-test-needed(covered) — the failed-auth audit line, tests/test_host_auth_audit.py
+# seedgo: no-test-needed(stdlib) — secrets.token_urlsafe's randomness itself
 
 import importlib.util
 import json
@@ -47,6 +52,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 from aipass.api.apps.modules import host_api as host_api_module
 
@@ -453,8 +459,6 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
     def test_a_successful_verification_touches_the_token(self, store: Path) -> None:
         """Where 'last_used' actually comes from."""
-        from aipass.api.apps.handlers.host import server as host_server
-
         from fastapi.testclient import TestClient
 
         record, raw = host_tokens.issue_token("pixel-8", scope="read")
@@ -470,8 +474,6 @@ class TestTheServerTouchesOnEveryAuthenticatedRequest:
 
     def test_a_refused_request_touches_nothing(self, store: Path) -> None:
         """A rejected token was not used — it was presented and refused."""
-        from aipass.api.apps.handlers.host import server as host_server
-
         from fastapi.testclient import TestClient
 
         record, _ = host_tokens.issue_token("pixel-8", scope="read")

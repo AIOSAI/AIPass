@@ -3,71 +3,77 @@
 # Description: Tests for the Stage 0 host API — config, bind gate, tokens, auth
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/host/{config,tokens,server}.py and apps/modules/host_api.py.
+"""Tests for apps/modules/host_api.py and apps/handlers/host/{config,tokens,server}.py."""
 
-FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
-are a bind that silently widens and an auth check that honours a revoked token,
-so those carry the most tests.
+# FPLAN-0411 Phase 1. The two failures that would make everything downstream moot
+# are a bind that silently widens and an auth check that honours a revoked token,
+# so those carry the most tests.
+#
+# Tests — handlers/host/config.py (the bind gate, design call D1):
+# - validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
+# - validate_bind: IPv6 wildcard :: refused
+# - validate_bind: hostname refused as ambiguous
+# - validate_bind: empty address refused
+# - validate_bind: address this machine does not hold refused, no fallback
+# - validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
+# - validate_bind: non-loopback message names the review gate
+# - validate_bind: loopback accepted
+# - validate_bind: port out of range refused (0, 65536, non-int, bool)
+# - validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
+# - load_config: defaults when the store is absent
+# - load_config: stored values merge over defaults
+# - load_config: non-dict store falls back to defaults
+# - save_config: round-trips through the store
+#
+# Tests — handlers/host/tokens.py (design call D2):
+# - issue_token: returns a raw value that is NOT in the store
+# - issue_token: store holds a sha256 hash of the raw
+# - issue_token: record carries id, label, scope, created, revoked=False
+# - issue_token: last_used stays null in Phase 1 (reservation, not a write)
+# - issue_token: empty label refused
+# - issue_token: unknown scope refused
+# - issue_token: two tokens are distinct and both verify
+# - verify_token: accepts the issued raw value
+# - verify_token: rejects an unknown value
+# - verify_token: rejects empty and non-string input
+# - verify_token: revoked token rejected with NO restart (store re-read per call)
+# - verify_token: malformed store denies everything rather than admitting one
+# - revoke_token: unknown id returns False
+# - revoke_token: already-revoked id returns False
+# - scope_allows: operate implies read; read does not imply operate
+# - scope_allows: unknown scope allows nothing
+# - store: token file is 0600 (POSIX)
+#
+# Tests — handlers/host/server.py:
+# - create_app: raises with install instructions when the extra is missing
+# - GET /v1/ping: 204, no auth, no body
+# - GET /v1/whoami: 401 with no Authorization header
+# - GET /v1/whoami: 401 with an unknown bearer token
+# - GET /v1/whoami: 200 with a valid read token
+# - GET /v1/whoami: 401 after revocation, same running app
+# - require_scope('operate'): 403 for a read token, 200 for an operate token
+# - errors: every failure carries the {error:{code,message}} envelope
+#
+# Tests — modules/host_api.py:
+# - handle_command: no args prints introspection
+# - handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
+# - handle_command: -h in trailing position explains
+# - handle_command: foreign command passes through
+# - handle_command: unknown subcommand reports, does not raise
+# - issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
+# - issue-token: writes the raw value to a 0600 file
+# - issue-token: missing label refused
+# - serve: BindRefused is reported, server never starts
 
-Tests — handlers/host/config.py (the bind gate, design call D1):
-- validate_bind: wildcard 0.0.0.0 refused (it binds fine — that is the danger)
-- validate_bind: IPv6 wildcard :: refused
-- validate_bind: hostname refused as ambiguous
-- validate_bind: empty address refused
-- validate_bind: address this machine does not hold refused, no fallback
-- validate_bind: non-loopback refused while LOOPBACK_ONLY (Phase 5 gate)
-- validate_bind: non-loopback message names the review gate
-- validate_bind: loopback accepted
-- validate_bind: port out of range refused (0, 65536, non-int, bool)
-- validate_bind: tailnet-shaped address accepted once LOOPBACK_ONLY is lifted
-- load_config: defaults when the store is absent
-- load_config: stored values merge over defaults
-- load_config: non-dict store falls back to defaults
-- save_config: round-trips through the store
-
-Tests — handlers/host/tokens.py (design call D2):
-- issue_token: returns a raw value that is NOT in the store
-- issue_token: store holds a sha256 hash of the raw
-- issue_token: record carries id, label, scope, created, revoked=False
-- issue_token: last_used stays null in Phase 1 (reservation, not a write)
-- issue_token: empty label refused
-- issue_token: unknown scope refused
-- issue_token: two tokens are distinct and both verify
-- verify_token: accepts the issued raw value
-- verify_token: rejects an unknown value
-- verify_token: rejects empty and non-string input
-- verify_token: revoked token rejected with NO restart (store re-read per call)
-- verify_token: malformed store denies everything rather than admitting one
-- revoke_token: unknown id returns False
-- revoke_token: already-revoked id returns False
-- scope_allows: operate implies read; read does not imply operate
-- scope_allows: unknown scope allows nothing
-- store: token file is 0600 (POSIX)
-
-Tests — handlers/host/server.py:
-- create_app: raises with install instructions when the extra is missing
-- GET /v1/ping: 204, no auth, no body
-- GET /v1/whoami: 401 with no Authorization header
-- GET /v1/whoami: 401 with an unknown bearer token
-- GET /v1/whoami: 200 with a valid read token
-- GET /v1/whoami: 401 after revocation, same running app
-- require_scope('operate'): 403 for a read token, 200 for an operate token
-- errors: every failure carries the {error:{code,message}} envelope
-
-Tests — modules/host_api.py:
-- handle_command: no args prints introspection
-- handle_command: help flag ANYWHERE explains, never runs (S58/S59 lesson)
-- handle_command: -h in trailing position explains
-- handle_command: foreign command passes through
-- handle_command: unknown subcommand reports, does not raise
-- issue-token: refuses without --out (no raw secret to stdout, S49 precedent)
-- issue-token: writes the raw value to a 0600 file
-- issue-token: missing label refused
-- serve: BindRefused is reported, server never starts
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — hashlib.sha256 and secrets.token_urlsafe themselves, behind issue_token()
+# seedgo: no-test-needed(constant) — print_help() and print_introspection() display text beyond the names asserted
+# seedgo: no-test-needed(windows_compat) — the 0o600 token file mode on Windows; the POSIX tests carry a skipif
+# seedgo: no-test-needed(duplicate_test) — the face lane in depth, covered by tests/test_host_face.py
+# seedgo: no-test-needed(duplicate_test) — the lifetime and fleet lanes in depth, tests/test_host_lifetime.py
 
 import json
 import os

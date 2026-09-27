@@ -3,15 +3,19 @@
 # Description: Init/Provisioning Tests (from seedgo template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Init/Provisioning Tests for API branch.
+"""Tests for apps/handlers/json/json_handler.py, its ensure_json_exists provisioning."""
 
-Covers 4 tests:
-  - creates_files, auto_creates_dir, no_overwrite, returns_dict
-"""
+# Init/Provisioning Tests for API branch.
+#
+# Covers 4 tests:
+#   - creates_files, auto_creates_dir, no_overwrite, returns_dict
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the json_handler shim parses and imports
+# seedgo: no-test-needed(duplicate_test) — log_operation() and the prax service behind the shim, @prax's own suite
 
 import importlib
 import json
@@ -24,17 +28,17 @@ import pytest
 
 BRANCH_MODULE = "api"
 
-_handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
-_json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
+HANDLER_PKG = f"aipass.{BRANCH_MODULE}.apps.handlers"
+JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
+if HANDLER_PKG not in sys.modules:
+    _stub = types.ModuleType(HANDLER_PKG)
     _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
+    sys.modules[HANDLER_PKG] = _stub
 
-_mod = importlib.import_module(_json_mod_path)
-json_handler = _mod
+_mod = importlib.import_module(JSON_MOD_PATH)
+JSON_HANDLER = _mod
 
 
 #: Isolation goes through the fleet seam, not a module attribute.
@@ -75,7 +79,7 @@ def test_creates_expected_files(tmp_path: Path) -> None:
     json_dir = _json_dir_as_path(tmp_path)
 
     for json_type in ("config", "data", "log"):
-        result = json_handler.ensure_json_exists("prov_mod", json_type)
+        result = JSON_HANDLER.ensure_json_exists("prov_mod", json_type)
         assert result is True
 
         expected = json_dir / f"prov_mod_{json_type}.json"
@@ -105,7 +109,7 @@ def test_auto_creates_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     # a handler that cannot build the chain must go red. Catching OSError and
     # skipping meant the one failure worth knowing about reported itself as a
     # green skip (seedgo self_skip, 2026-09-07).
-    result = json_handler.ensure_json_exists("autodir", "config")
+    result = JSON_HANDLER.ensure_json_exists("autodir", "config")
 
     assert nested_dir.exists(), "the handler did not build the missing parent directories"
     assert result is True
@@ -117,14 +121,14 @@ def test_no_overwrite_on_second_call(tmp_path: Path) -> None:
     json_dir = _json_dir_as_path(tmp_path)
     json_dir.mkdir(parents=True, exist_ok=True)
 
-    json_handler.ensure_json_exists("idem_mod", "data")
+    JSON_HANDLER.ensure_json_exists("idem_mod", "data")
 
     target = json_dir / "idem_mod_data.json"
     original = json.loads(target.read_text(encoding="utf-8"))
     original["custom_field"] = "do_not_overwrite"
     target.write_text(json.dumps(original, indent=2), encoding="utf-8")
 
-    json_handler.ensure_json_exists("idem_mod", "data")
+    JSON_HANDLER.ensure_json_exists("idem_mod", "data")
 
     after = json.loads(target.read_text(encoding="utf-8"))
     assert after.get("custom_field") == "do_not_overwrite"
@@ -132,18 +136,18 @@ def test_no_overwrite_on_second_call(tmp_path: Path) -> None:
 
 def test_returns_dict_with_expected_keys(tmp_path: Path) -> None:
     """Provisioned files contain the correct structure keys."""
-    json_handler.ensure_json_exists("key_mod", "config")
-    config = json_handler.load_json("key_mod", "config")
+    JSON_HANDLER.ensure_json_exists("key_mod", "config")
+    config = JSON_HANDLER.load_json("key_mod", "config")
     assert isinstance(config, dict)
     assert "module_name" in config
     assert "version" in config
 
-    json_handler.ensure_json_exists("key_mod", "data")
-    data = json_handler.load_json("key_mod", "data")
+    JSON_HANDLER.ensure_json_exists("key_mod", "data")
+    data = JSON_HANDLER.load_json("key_mod", "data")
     assert isinstance(data, dict)
     assert "created" in data
     assert "last_updated" in data
 
-    json_handler.ensure_json_exists("key_mod", "log")
-    log = json_handler.load_json("key_mod", "log")
+    JSON_HANDLER.ensure_json_exists("key_mod", "log")
+    log = JSON_HANDLER.load_json("key_mod", "log")
     assert isinstance(log, list)

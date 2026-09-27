@@ -3,19 +3,32 @@
 # Description: Tests for integrations_manager command handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for integrations_manager.py -- handle_command, _run_list, _run_call,
-print_introspection, print_help.
+"""Tests for apps/modules/integrations_manager.py, the integrations command handler."""
 
-Existing test_integrations.py covers bridge, registry, fetch_contracts,
-call_contract. This file covers the remaining uncovered functions.
-"""
+# Tests for integrations_manager.py -- handle_command, _run_list, _run_call,
+# print_introspection, print_help.
+#
+# Existing test_integrations.py covers bridge, registry, fetch_contracts,
+# call_contract. This file covers the remaining uncovered functions.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that integrations_manager.py parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — fetch_contracts and call_contract, tests/test_integrations.py
+# seedgo: no-test-needed(covered_elsewhere) — the bridge registry itself, tests/test_bridge_module.py
 
 import pytest
 from unittest.mock import patch, MagicMock
+
+from aipass.api.apps.modules.integrations_manager import (
+    _run_call,
+    _run_list,
+    handle_command,
+    print_help,
+    print_introspection,
+)
 
 _IM = "aipass.api.apps.modules.integrations_manager"
 
@@ -38,8 +51,6 @@ class TestHandleCommand:
         _mock_console: MagicMock,
     ) -> None:
         """Non-integrations command returns False."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         result = handle_command("status", [])
         assert result is False
 
@@ -53,8 +64,6 @@ class TestHandleCommand:
         _mock_console: MagicMock,
     ) -> None:
         """--help flag triggers print_help and returns True."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         result = handle_command("integrations", ["--help"])
         assert result is True
 
@@ -70,8 +79,6 @@ class TestHandleCommand:
         _mock_jh: MagicMock,
     ) -> None:
         """No args triggers introspection and returns True."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         result = handle_command("integrations", [])
         assert result is True
 
@@ -85,8 +92,6 @@ class TestHandleCommand:
         _mock_console: MagicMock,
     ) -> None:
         """Unknown subcommand calls error() and raises SystemExit."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit):
             handle_command("integrations", ["bogus"])
         mock_error.assert_called_once()
@@ -107,8 +112,6 @@ class TestHandleCommand:
         _mock_console: MagicMock,
     ) -> None:
         """list subcommand loads drivers and calls sys.exit."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit) as exc_info:
             handle_command("integrations", ["list"])
         assert exc_info.value.code == 0
@@ -123,8 +126,6 @@ class TestHandleCommand:
         _mock_console: MagicMock,
     ) -> None:
         """call subcommand without contract name shows error and exits 1."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit) as exc_info:
             handle_command("integrations", ["call"])
         assert exc_info.value.code == 1
@@ -151,8 +152,6 @@ class TestRunList:
         mock_console: MagicMock,
     ) -> None:
         """Empty contracts list prints 'No integrations configured.'."""
-        from aipass.api.apps.modules.integrations_manager import _run_list
-
         result = _run_list()
         assert result == 0
 
@@ -171,8 +170,6 @@ class TestRunList:
         mock_console: MagicMock,
     ) -> None:
         """With contracts, prints each name and returns 0."""
-        from aipass.api.apps.modules.integrations_manager import _run_list
-
         result = _run_list()
         assert result == 0
         # Each contract name is printed
@@ -200,8 +197,6 @@ class TestRunCall:
         _mock_console: MagicMock,
     ) -> None:
         """Unresolved contract calls error() and returns 1."""
-        from aipass.api.apps.modules.integrations_manager import _run_call
-
         result = _run_call("missing", [])
         assert result == 1
         mock_error.assert_called_once()
@@ -221,8 +216,6 @@ class TestRunCall:
         mock_console: MagicMock,
     ) -> None:
         """Successful call returns 0 and prints result."""
-        from aipass.api.apps.modules.integrations_manager import _run_call
-
         mock_resolve.return_value = MagicMock()
 
         result = _run_call("mycontract", ["arg1"])
@@ -243,8 +236,6 @@ class TestRunCall:
         _mock_console: MagicMock,
     ) -> None:
         """Failed driver returns 1 and calls error()."""
-        from aipass.api.apps.modules.integrations_manager import _run_call
-
         mock_resolve.return_value = MagicMock()
 
         result = _run_call("failing", [])
@@ -270,8 +261,6 @@ class TestPrintFunctions:
         _mock_jh: MagicMock,
     ) -> None:
         """print_introspection runs without error and prints output."""
-        from aipass.api.apps.modules.integrations_manager import print_introspection
-
         print_introspection()
         assert mock_console.print.called
 
@@ -283,8 +272,6 @@ class TestPrintFunctions:
         mock_console: MagicMock,
     ) -> None:
         """print_help runs without error and prints output."""
-        from aipass.api.apps.modules.integrations_manager import print_help
-
         print_help()
         assert mock_console.print.called
 
@@ -308,8 +295,6 @@ class TestTrailingHelpDoesNotDispatch:
         mock_help: MagicMock,
     ) -> None:
         """`integrations call <contract> --help` prints help, dispatches nothing."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         assert handle_command("integrations", ["call", "publish_devto", "--help"]) is True
 
         mock_call.assert_not_called()
@@ -325,8 +310,6 @@ class TestTrailingHelpDoesNotDispatch:
         mock_help: MagicMock,
     ) -> None:
         """`integrations list --help` prints help instead of listing."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         assert handle_command("integrations", ["list", "--help"]) is True
 
         mock_list.assert_not_called()
@@ -342,8 +325,6 @@ class TestTrailingHelpDoesNotDispatch:
         mock_help: MagicMock,
     ) -> None:
         """A bare `help` is a contract argument, not a flag."""
-        from aipass.api.apps.modules.integrations_manager import handle_command
-
         with pytest.raises(SystemExit):
             handle_command("integrations", ["call", "publish_devto", "help"])
 

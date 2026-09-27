@@ -1,37 +1,41 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_attach.py
 # Description: Tests for the host API attach lane — a real PTY running a tmux client
 # Version: 1.0.0
 # Created: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Attach Lane
+"""Tests for apps/handlers/host/attach.py and the WS /v1/room/attach route in apps/handlers/host/server.py."""
 
-DPLAN-0300 Round 18b/18c. `WS /v1/room/attach` runs a PTY hosting a tmux CLIENT
-into a branch's persistent room — the desktop's window over a different wire.
+# Tests for the Attach Lane
+#
+# DPLAN-0300 Round 18b/18c. `WS /v1/room/attach` runs a PTY hosting a tmux CLIENT
+# into a branch's persistent room — the desktop's window over a different wire.
+#
+# THE THREE THINGS THIS LANE COULD GET WRONG, and none of them is "does it work":
+#
+#   1. **Killing a room it was only supposed to leave.** Detach is a SIGHUP to the
+#      client; the session survives. If this ever became a kill, closing a sheet on
+#      a phone would end an agent mid-task. Pinned by behaviour AND by reading the
+#      module source for kill-session, because the failure is one word long.
+#
+#   2. **Leaking the token into a log.** A WebSocket cannot carry an Authorization
+#      header, and the easy answer — a query parameter — writes the credential into
+#      every access log, proxy log and browser history entry. The bearer rides the
+#      subprotocol, and the ACCEPTED protocol is the sentinel rather than the token.
+#
+#   3. **Spawning a PTY for an unauthenticated caller.** The scope check happens
+#      BEFORE accept, so a refused socket never reaches a shell.
+#
+# REAL PTYs, DELIBERATELY. These tests spawn actual processes — `cat` and `echo`,
+# never tmux and never a room. A mocked PTY would prove the mock's behaviour, and
+# the interesting failures here (EOF on close, SIGHUP not killing a session,
+# TIOCSWINSZ argument order) live precisely in the parts a mock invents.
 
-THE THREE THINGS THIS LANE COULD GET WRONG, and none of them is "does it work":
-
-  1. **Killing a room it was only supposed to leave.** Detach is a SIGHUP to the
-     client; the session survives. If this ever became a kill, closing a sheet on
-     a phone would end an agent mid-task. Pinned by behaviour AND by reading the
-     module source for kill-session, because the failure is one word long.
-
-  2. **Leaking the token into a log.** A WebSocket cannot carry an Authorization
-     header, and the easy answer — a query parameter — writes the credential into
-     every access log, proxy log and browser history entry. The bearer rides the
-     subprotocol, and the ACCEPTED protocol is the sentinel rather than the token.
-
-  3. **Spawning a PTY for an unauthenticated caller.** The scope check happens
-     BEFORE accept, so a refused socket never reaches a shell.
-
-REAL PTYs, DELIBERATELY. These tests spawn actual processes — `cat` and `echo`,
-never tmux and never a room. A mocked PTY would prove the mock's behaviour, and
-the interesting failures here (EOF on close, SIGHUP not killing a session,
-TIOCSWINSZ argument order) live precisely in the parts a mock invents.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — issue_token() and the token store's own locking, tests/test_host_token_store.py
+# seedgo: no-test-needed(generated) — the tmux client that attach_command() builds; these tests spawn cat, never tmux
 
 import ast
 import errno
@@ -623,15 +627,13 @@ class TestTheRoomCanActuallyHearAResize:
         and until the fix it was true only by that accident — two independent
         defaults agreeing, which is not the same as a contract.
         """
-        import fcntl
         import struct
-        import termios
 
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
         try:
-            packed = fcntl.ioctl(session.descriptor, termios.TIOCGWINSZ, b"\0" * 8)
+            packed = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
             rows, cols, _, _ = struct.unpack("HHHH", packed)
         finally:
             session.hangup()
@@ -708,7 +710,7 @@ class TestTheRoomCanActuallyHearAResize:
         for parameter in signature.parameters.values():
             assert parameter.default is not inspect.Parameter.empty
 
-    def test_the_pre_3_11_fallback_does_setsid_then_TIOCSCTTY(self) -> None:
+    def test_the_pre_3_11_fallback_does_setsid_then_tiocsctty(self) -> None:
         """
         The branch that never runs on this interpreter, and would ship untested.
 
@@ -818,13 +820,11 @@ class TestResizeIsAnIoctlAndItsArgumentsAreOrdered:
 
     def test_a_resize_reaches_the_terminal(self, cat_session: Any) -> None:
         """Read the size back off the descriptor rather than trusting the call."""
-        import fcntl
         import struct
-        import termios
 
         cat_session.resize(100, 30)
 
-        packed = fcntl.ioctl(cat_session.descriptor, termios.TIOCGWINSZ, b"\0" * 8)
+        packed = host_attach.fcntl.ioctl(cat_session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
         rows, cols, _, _ = struct.unpack("HHHH", packed)
 
         assert (cols, rows) == (100, 30)
@@ -1551,7 +1551,7 @@ class TestABadResizeIsDroppedAndTheSessionLivesOn:
 
         assert session.writes == [b"echo still-listening", b"\r"]
 
-    def test_a_disconnect_on_a_SILENT_room_still_detaches_promptly(self, store: Any, seated: Any) -> None:
+    def test_a_disconnect_on_a_silent_room_still_detaches_promptly(self, store: Any, seated: Any) -> None:
         """
         The bug this file found, pinned so it cannot come back.
 
@@ -2079,15 +2079,16 @@ class TestTheOneSeatHostsAnyProjectsRoom:
     away from losing it quietly.
     """
 
-    def test_an_external_projects_room_reaches_the_spawn(self, store: Any) -> None:
+    def test_an_external_projects_room_reaches_the_spawn(self, store: Any, tmp_path: Path) -> None:
         """The census resolves it; the seat never gets a vote."""
         from fastapi.testclient import TestClient
 
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        vera_root = tmp_path / "projects" / "vera" / "src" / "vera"
 
         with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
             with patch.object(host_server.host_fleet, "resolve_branch") as census:
-                census.return_value = {"name": "vera", "path": "/projects/vera/src/vera"}
+                census.return_value = {"name": "vera", "path": str(vera_root)}
                 with patch.object(host_attach, "open_attach") as spawn:
                     spawn.side_effect = host_attach.AttachUnavailable("stop here, resolution is what is under test")
                     client = TestClient(host_server.create_app())
@@ -2099,7 +2100,7 @@ class TestTheOneSeatHostsAnyProjectsRoom:
                         socket.receive()
 
         census.assert_called_once_with("VERA-STUDIO", "vera")
-        assert spawn.call_args.kwargs["cwd"] == Path("/projects/vera/src/vera")
+        assert spawn.call_args.kwargs["cwd"] == vera_root
 
     def test_the_room_carries_the_projects_scope(self, store: Any) -> None:
         """
@@ -2459,11 +2460,13 @@ class TestTheDetachIsWrittenDownToo:
                     socket.close(code=1000)
                     line = wait_for_log(log, "socket detached from")
 
-        held = float(re.search(r"after (\d+\.\d+)s", line).group(1))
+        stamp = re.search(r"after (\d+\.\d+)s", line)
+        assert stamp is not None, line
+        held = float(stamp.group(1))
 
         assert held >= 0.5, line
 
-    def test_a_room_that_ends_first_says_so_instead_of_printing_None(self, store: Any, seated: Any) -> None:
+    def test_a_room_that_ends_first_says_so_instead_of_printing_none(self, store: Any, seated: Any) -> None:
         """
         The detach nobody's client caused.
 

@@ -1,11 +1,14 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 2.0.0
+# Description: Shared pytest fixtures for api tests
+# Version: 2.1.0
+# Created: 2026-03-05
+# Modified: 2026-09-27
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v2.1.0 (2026-09-27): Console width pin + command-state reset (C1, C2);
+#     host imports hoisted to module level; mock_json_handler removed (unused)
 #   - v2.0.0 (2026-03-27): Added mock_infrastructure, mock_logger,
 #     mock_json_handler fixtures for test quality compliance
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
@@ -35,6 +38,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.cli.apps.modules import display
 
 # ============ BRANCH CONFIG ============
 BRANCH_MODULE = "api"
@@ -44,16 +48,34 @@ BRANCH_MODULE = "api"
 # Dynamic import for json_handler isolation
 # ---------------------------------------------------------------------------
 
-_handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
-_json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
+_HANDLER_PKG = f"aipass.{BRANCH_MODULE}.apps.handlers"
+_JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
+if _HANDLER_PKG not in sys.modules:
+    _stub = types.ModuleType(_HANDLER_PKG)
     _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
+    sys.modules[_HANDLER_PKG] = _stub
 
-_json_mod = importlib.import_module(_json_mod_path)
+_json_mod = importlib.import_module(_JSON_MOD_PATH)
+
+# The [host] extra's handlers, imported once at module level. Each is None when
+# the extra is absent: the autouse fixtures below are suite-wide, so a missing
+# extra must never be the reason a run cannot collect.
+try:
+    from aipass.api.apps.handlers.host import fleet as _fleet
+except Exception:  # pragma: no cover - only when the extra is missing
+    _fleet = None
+
+try:
+    from aipass.api.apps.handlers.host import refusals as _refusals
+except Exception:  # pragma: no cover - only when the extra is missing
+    _refusals = None
+
+try:
+    from aipass.api.apps.handlers.host import attach as _attach
+except Exception:  # pragma: no cover - only when the extra is missing
+    _attach = None
 
 
 # Never discover out of .archive/: it holds verbatim disposal copies of the
@@ -159,21 +181,19 @@ def mock_logger() -> MagicMock:
     return mock
 
 
-@pytest.fixture()
-def mock_json_handler() -> MagicMock:
-    """Standalone mock json_handler for isolating from real file I/O."""
-    handler = MagicMock()
-    handler.load_json = MagicMock(return_value={})
-    handler.save_json = MagicMock(return_value=True)
-    handler.ensure_json_exists = MagicMock(return_value=True)
-    handler.ensure_module_jsons = MagicMock(return_value=True)
-    # gettempdir(), not a literal /tmp: this stand-in is only ever compared
-    # against, never opened, but a POSIX literal is still a POSIX literal and
-    # the fleet runs a Windows job.
-    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
-    handler.validate_json_structure = MagicMock(return_value=True)
-    handler.log_operation = MagicMock(return_value=True)
-    return handler
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -190,9 +210,7 @@ def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
     Silently skipped when the [host] extra is absent — this fixture is autouse
     for the whole suite, so it must never be the reason a run cannot collect.
     """
-    try:
-        from aipass.api.apps.handlers.host import fleet as _fleet
-    except Exception:  # pragma: no cover - only when the extra is missing
+    if _fleet is None:  # pragma: no cover - only when the extra is missing
         yield
         return
 
@@ -217,9 +235,7 @@ def _no_remembered_git_refusals_between_tests() -> Generator[None, None, None]:
     Silently skipped when the [host] extra is absent — this fixture is autouse
     for the whole suite, so it must never be the reason a run cannot collect.
     """
-    try:
-        from aipass.api.apps.handlers.host import refusals as _refusals
-    except Exception:  # pragma: no cover - only when the extra is missing
+    if _refusals is None:  # pragma: no cover - only when the extra is missing
         yield
         return
 
@@ -244,9 +260,7 @@ def _no_leaked_pump_reservations() -> Generator[None, None, None]:
     hangup always releases, and a failed spawn releases too, each proven by a
     mutation. This only stops one test's leftovers from being another's cap.
     """
-    try:
-        from aipass.api.apps.handlers.host import attach as _attach
-    except Exception:  # pragma: no cover - only when the extra is missing
+    if _attach is None:  # pragma: no cover - only when the extra is missing
         yield
         return
 

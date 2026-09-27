@@ -1,32 +1,35 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_memory_config.py
 # Description: Tests for the host API memory-config lane — @memory's rollover limits
 # Version: 2.0.0
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Host API Memory Config Lane
+"""Tests for apps/handlers/host/memory_config.py and its routes in apps/handlers/host/server.py."""
 
-The contract under test is @memory's, delivered 2026-08-16 through @devpulse
-and MACHINE-READABLE since the same evening: five verbs, three entry types,
-bounds 1-100, and `--json` on every one of them.
+# Tests for the Host API Memory Config Lane
+#
+# The contract under test is @memory's, delivered 2026-08-16 through @devpulse
+# and MACHINE-READABLE since the same evening: five verbs, three entry types,
+# bounds 1-100, and `--json` on every one of them.
+#
+# THE VERDICT IS `ok`, NOT THE EXIT CODE. Their branch-wide convention is that
+# refusals exit 0, so the code has never been the signal here — but until --json
+# landed the signal was a refusal glyph recovered from a rendered screen. Now it
+# is a boolean they emit. The class below keeps its name because the rule it
+# guards is unchanged; only the field it reads moved.
+#
+# NOTHING HERE ROUTES A REAL COMMAND. Every test drives a stubbed
+# drone.route_command against the documents at the top of this file — real
+# captured stdout where a read could be run safely, and transcriptions of
+# @memory's own _emit call sites where producing one for real would mean WRITING
+# to the owner's live limits. A suite that resets 17 branches to defaults to see
+# what the answer looks like is not a suite.
 
-THE VERDICT IS `ok`, NOT THE EXIT CODE. Their branch-wide convention is that
-refusals exit 0, so the code has never been the signal here — but until --json
-landed the signal was a refusal glyph recovered from a rendered screen. Now it
-is a boolean they emit. The class below keeps its name because the rule it
-guards is unchanged; only the field it reads moved.
-
-NOTHING HERE ROUTES A REAL COMMAND. Every test drives a stubbed
-drone.route_command against the documents at the top of this file — real
-captured stdout where a read could be run safely, and transcriptions of
-@memory's own _emit call sites where producing one for real would mean WRITING
-to the owner's live limits. A suite that resets 17 branches to defaults to see
-what the answer looks like is not a suite.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(through_the_command) — the real drone.route_command dispatch, stubbed here; @memory's suite
+# seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api.py
 
 from typing import Any
 from unittest.mock import MagicMock, patch

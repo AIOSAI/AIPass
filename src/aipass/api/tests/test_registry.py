@@ -3,17 +3,22 @@
 # Description: Tests for registry driver auto-discovery
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for registry.py — driver auto-discovery for integrations."""
+"""Tests for apps/modules/registry.py, driver auto-discovery for integrations."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — bridge's list_contracts() and call routing, tests/test_integrations.py
+# seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's own loading of a file as a module
 
 import sys
 from unittest.mock import patch
 
 import pytest
 
-from aipass.api.apps.modules.registry import load_drivers, _import_driver
+from aipass.api.apps.modules.bridge import clear, resolve
+from aipass.api.apps.modules.registry import _import_driver, handle_command, load_drivers, print_introspection
 
 
 class TestLoadDrivers:
@@ -35,7 +40,7 @@ class TestLoadDrivers:
         integrations = tmp_path / "integrations"
         project = integrations / "myproject"
         project.mkdir(parents=True)
-        (project / "other.py").write_text("x = 1")
+        (project / "other.py").write_text("x = 1", encoding="utf-8")
         assert load_drivers(integrations) == 0
 
     def test_loads_valid_driver(self, tmp_path):
@@ -47,10 +52,9 @@ class TestLoadDrivers:
         driver.write_text(
             "def register():\n"
             "    from aipass.api.apps.modules.bridge import register as r\n"
-            "    r('test_load', lambda *a: 'ok')\n"
+            "    r('test_load', lambda *a: 'ok')\n",
+            encoding="utf-8",
         )
-
-        from aipass.api.apps.modules.bridge import clear, resolve
 
         clear()
         loaded = load_drivers(integrations)
@@ -63,14 +67,14 @@ class TestLoadDrivers:
         integrations = tmp_path / "integrations"
         project = integrations / "broken"
         project.mkdir(parents=True)
-        (project / "driver.py").write_text("raise ImportError('boom')")
+        (project / "driver.py").write_text("raise ImportError('boom')", encoding="utf-8")
         assert load_drivers(integrations) == 0
 
     def test_skips_non_directories(self, tmp_path):
         """Regular files in integrations dir are skipped."""
         integrations = tmp_path / "integrations"
         integrations.mkdir()
-        (integrations / "notadir.py").write_text("x = 1")
+        (integrations / "notadir.py").write_text("x = 1", encoding="utf-8")
         assert load_drivers(integrations) == 0
 
     def test_multiple_drivers(self, tmp_path):
@@ -82,10 +86,9 @@ class TestLoadDrivers:
             (d / "driver.py").write_text(
                 f"def register():\n"
                 f"    from aipass.api.apps.modules.bridge import register as r\n"
-                f"    r('{name}_contract', lambda *a: '{name}')\n"
+                f"    r('{name}_contract', lambda *a: '{name}')\n",
+                encoding="utf-8",
             )
-
-        from aipass.api.apps.modules.bridge import clear
 
         clear()
         loaded = load_drivers(integrations)
@@ -109,7 +112,8 @@ class TestImportDriver:
         project.mkdir()
         driver = project / "driver.py"
         driver.write_text(
-            "LOADED = True\nREGISTERED = False\ndef register():\n    global REGISTERED\n    REGISTERED = True\n"
+            "LOADED = True\nREGISTERED = False\ndef register():\n    global REGISTERED\n    REGISTERED = True\n",
+            encoding="utf-8",
         )
 
         _import_driver(driver, "proj")
@@ -131,7 +135,7 @@ class TestImportDriver:
         project = tmp_path / "proj2"
         project.mkdir()
         driver = project / "driver.py"
-        driver.write_text("LOADED = True\n")
+        driver.write_text("LOADED = True\n", encoding="utf-8")
 
         _import_driver(driver, "proj2")
 
@@ -151,14 +155,10 @@ class TestRegistryHandleCommand:
 
     def test_returns_false_for_unknown(self):
         """Unknown command returns False."""
-        from aipass.api.apps.modules.registry import handle_command
-
         assert handle_command("anything", ["stuff"]) is False
 
     def test_help_stays_silent(self, capsys):
         """A --help probe for another module's command prints nothing here."""
-        from aipass.api.apps.modules.registry import handle_command
-
         assert handle_command("validate", ["--help"]) is False
         assert capsys.readouterr().out == ""
 
@@ -168,8 +168,6 @@ class TestRegistryHandleCommand:
         Registry is discovered before google_client, so anything printed here
         leaks into the output of the commands that module owns.
         """
-        from aipass.api.apps.modules.registry import handle_command
-
         assert handle_command("validate", []) is False
         assert capsys.readouterr().out == ""
 
@@ -188,8 +186,6 @@ class TestPrintIntrospection:
         for are WHERE it looks and WHETHER it has run — an introspection that
         stopped printing either still "rendered without raising".
         """
-        from aipass.api.apps.modules.registry import print_introspection
-
         print_introspection()
 
         printed = " ".join(str(call) for call in mock_console.print.call_args_list)

@@ -3,18 +3,22 @@
 # Description: Tests for caller auto-provisioning handler
 # Version: 1.0.0
 # Created: 2026-03-20
-# Modified: 2026-03-20
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for provision.py — caller auto-provisioning.
+"""Tests for apps/handlers/openrouter/provision.py, caller auto-provisioning."""
 
-Tests:
-- create_caller_config() creates 3 JSON files with correct defaults
-- ensure_caller_config() provisions on first call, returns existing on second
-- Idempotency: second call doesn't overwrite existing config
-- Config defaults match expected values
-"""
+# Tests for provision.py — caller auto-provisioning.
+#
+# Tests:
+# - create_caller_config() creates 3 JSON files with correct defaults
+# - ensure_caller_config() provisions on first call, returns existing on second
+# - Idempotency: second call doesn't overwrite existing config
+# - Config defaults match expected values
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — detect_caller_from_stack, mocked here; tests/test_caller_detection.py
+# seedgo: no-test-needed(stdlib) — json.dumps formatting beyond indent and ensure_ascii; the stdlib json module
 
 import json
 from pathlib import Path

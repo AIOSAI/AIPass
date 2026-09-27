@@ -3,19 +3,23 @@
 # Description: CLI Routing Tests (adapted for API module structure)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-27
 # =============================================
 
-"""
-CLI Routing Tests for API branch.
+"""Tests for apps/modules/api_key.py's command routing, help and introspection."""
 
-API has handle_command in module files (api_key.py, openrouter_client.py, etc.)
-rather than a standalone cli_handler. Tests adapted accordingly.
+# CLI Routing Tests for API branch.
+#
+# API has handle_command in module files (api_key.py, openrouter_client.py, etc.)
+# rather than a standalone cli_handler. Tests adapted accordingly.
+#
+# Covers 9 items:
+#   - help_flag, short_help, help_word, no_args, unknown_command,
+#     return_bool, print_help, print_introspection, output_capture
 
-Covers 9 items:
-  - help_flag, short_help, help_word, no_args, unknown_command,
-    return_bool, print_help, print_introspection, output_capture
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — get_key(), validate_key() and get_secret_cmd() bodies, tests/test_api_key.py
+# seedgo: no-test-needed(cli) — the console and header rendering itself, owned by @cli
 
 from unittest.mock import patch
 

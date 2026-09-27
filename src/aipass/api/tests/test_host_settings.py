@@ -3,14 +3,18 @@
 # Description: Host API settings handler — the desktop's gear rules, held in Python
 # Version: 1.0.0
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-27
 # =============================================
 
-"""
-The settings lane mirrors @baud's settings.rs, and these tests pin the rules
-that make the two faces write one truth: surgical three-state patches, the
-never-treat-unreadable-as-blank refusal, and the idempotent mute flag.
-"""
+"""Tests for apps/handlers/host/settings.py, the desktop's settings lane."""
+
+# The settings lane mirrors @baud's settings.rs, and these tests pin the rules
+# that make the two faces write one truth: surgical three-state patches, the
+# never-treat-unreadable-as-blank refusal, and the idempotent mute flag.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — @baud's settings.rs, the other face; @baud's own tests
+# seedgo: no-test-needed(covered_elsewhere) — where hooks_sound puts the mute flag; @hooks' tests of that module
 
 import json
 import os
@@ -46,6 +50,7 @@ def _where_the_door_would_write() -> Path:
         [sys.executable, "-c", WHERE_THE_FLAG_LIVES],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=host_settings.HOOKS_SOUND_TIMEOUT_SECONDS,
     )
 
@@ -129,11 +134,11 @@ class TestAgentSettings:
         keys come back byte-identical, which is the whole surgical promise."""
         path = agent_file(tmp_path)
         path.parent.mkdir(parents=True)
-        path.write_text(json.dumps({"permissions": {"allow": ["Bash"]}, "model": "opus"}))
+        path.write_text(json.dumps({"permissions": {"allow": ["Bash"]}, "model": "opus"}), encoding="utf-8")
 
         view = host_settings.write_agent_settings(tmp_path, {"model": "sonnet", "auto_compact_window": 350_000})
 
-        document = json.loads(path.read_text())
+        document = json.loads(path.read_text(encoding="utf-8"))
         assert document["model"] == "sonnet"
         assert document["autoCompactWindow"] == 350_000
         assert document["permissions"] == {"allow": ["Bash"]}
@@ -144,11 +149,11 @@ class TestAgentSettings:
         """The three-state contract in one write."""
         path = agent_file(tmp_path)
         path.parent.mkdir(parents=True)
-        path.write_text(json.dumps({"model": "opus", "autoCompactEnabled": True}))
+        path.write_text(json.dumps({"model": "opus", "autoCompactEnabled": True}), encoding="utf-8")
 
         view = host_settings.write_agent_settings(tmp_path, {"model": None})
 
-        document = json.loads(path.read_text())
+        document = json.loads(path.read_text(encoding="utf-8"))
         assert "model" not in document
         assert document["autoCompactEnabled"] is True
         assert view == {"model": None, "auto_compact_enabled": True, "auto_compact_window": None}
@@ -158,20 +163,22 @@ class TestAgentSettings:
         a corrupt file to {} would destroy whatever the operator had there."""
         path = agent_file(tmp_path)
         path.parent.mkdir(parents=True)
-        path.write_text("{not json")
+        path.write_text("{not json", encoding="utf-8")
 
         with pytest.raises(host_settings.SettingsRefused):
             host_settings.read_agent_settings(tmp_path)
         with pytest.raises(host_settings.SettingsRefused):
             host_settings.write_agent_settings(tmp_path, {"model": "opus"})
-        assert path.read_text() == "{not json"
+        assert path.read_text(encoding="utf-8") == "{not json"
 
     def test_wrong_typed_values_read_as_null(self, tmp_path) -> None:
         """A dial cannot show a value it does not understand — including the
         bool-is-an-int trap, which is why the window check excludes bools."""
         path = agent_file(tmp_path)
         path.parent.mkdir(parents=True)
-        path.write_text(json.dumps({"model": 7, "autoCompactEnabled": "yes", "autoCompactWindow": True}))
+        path.write_text(
+            json.dumps({"model": 7, "autoCompactEnabled": "yes", "autoCompactWindow": True}), encoding="utf-8"
+        )
 
         assert host_settings.read_agent_settings(tmp_path) == {
             "model": None,
@@ -196,7 +203,9 @@ class TestBaudSettings:
     def test_merge_keeps_null_removes_and_replaces_subtrees(self, tmp_path) -> None:
         path = tmp_path / ".aipass" / "baud.settings.json"
         path.parent.mkdir(parents=True)
-        path.write_text(json.dumps({"startup_agent": "devpulse", "poll_interval_ms": 5000, "extra": {"a": 1}}))
+        path.write_text(
+            json.dumps({"startup_agent": "devpulse", "poll_interval_ms": 5000, "extra": {"a": 1}}), encoding="utf-8"
+        )
 
         result = host_settings.write_baud_settings(
             tmp_path, {"startup_agent": None, "bell_sound": True, "extra": {"b": 2}}
@@ -207,7 +216,7 @@ class TestBaudSettings:
         assert result["bell_sound"] is True
         # Replaced whole, never merged into — a caller says what a subtree IS.
         assert result["extra"] == {"b": 2}
-        assert json.loads(path.read_text()) == result
+        assert json.loads(path.read_text(encoding="utf-8")) == result
 
 
 class TestHooksSound:
@@ -349,6 +358,7 @@ class TestHooksSound:
             list(host_settings.HOOKS_SOUND_DOOR),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=host_settings.HOOKS_SOUND_TIMEOUT_SECONDS,
         )
         if listening.returncode != 0:
@@ -538,7 +548,7 @@ class TestTheCorpusForcedTwoFixes:
     was the strict side and this lane was the lenient one.
     """
 
-    def test_a_parent_that_is_a_FILE_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
+    def test_a_parent_that_is_a_file_is_a_fault_not_a_fresh_branch(self, tmp_path) -> None:
         """
         Divergence 2. A missing directory on the way to the file means nobody
         has written settings yet. A FILE standing where a directory belongs

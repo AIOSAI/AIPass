@@ -3,18 +3,22 @@
 # Description: Tests for usage data cleanup handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for cleanup.py -- usage data retention and cleanup handler.
+"""Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
 
-Tests:
-- _read_json() file exists, file missing, invalid JSON
-- _write_json() success, parent dir creation, write failure
-- cleanup_old_data() no file, no old entries, entries cleaned, retention period
-- _identify_old_generations() valid timestamps, no timestamp, invalid timestamp, mixed
-"""
+# Tests for cleanup.py -- usage data retention and cleanup handler.
+#
+# Tests:
+# - _read_json() file exists, file missing, invalid JSON
+# - _write_json() success, parent dir creation, write failure
+# - cleanup_old_data() no file, no old entries, entries cleaned, retention period
+# - _identify_old_generations() valid timestamps, no timestamp, invalid timestamp, mixed
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DEFAULT_RETENTION_DAYS's value; the retention tests pass retention_days
+# seedgo: no-test-needed(json_handler) — the json_handler.log_operation() audit line cleanup writes
 
 import json
 from datetime import datetime, timedelta

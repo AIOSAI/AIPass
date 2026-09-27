@@ -1,51 +1,56 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_perf.py
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the host API's cost doctrine (DPLAN-0305 Audit 2).
+"""Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
 
-The owner, 2026-08-18: the phone lags. @devpulse audited and found three causes in
-this branch, none of them exotic — the server was doing blocking work in the one
-place that must never block, re-walking the filesystem for a registry it already
-knew, and paying for the same 90ms process spawn twice per screen refresh.
+# Tests for the host API's cost doctrine (DPLAN-0305 Audit 2).
+#
+# The owner, 2026-08-18: the phone lags. @devpulse audited and found three causes in
+# this branch, none of them exotic — the server was doing blocking work in the one
+# place that must never block, re-walking the filesystem for a registry it already
+# knew, and paying for the same 90ms process spawn twice per screen refresh.
+#
+# THREE PROPERTIES ARE PINNED HERE, AND EACH IS PINNED SO IT CAN GO RED:
+#
+# 1. A read route runs OFF the event loop. A handler declared `async def` runs ON
+#    the loop, so a 90ms exec inside it means the whole server answers nothing for
+#    90ms — including /v1/ping. Declared `def`, FastAPI runs it in the anyio
+#    threadpool. The structural test is DERIVED from the app's routing table, not
+#    from a list written down here, so a new read route added as async goes red
+#    without anyone remembering this file exists.
+#
+# 2. The blocking probe below can actually SEE a blocked loop. A test that starts
+#    a slow request and then checks a fast one answers is worthless if the harness
+#    gives each request its own event loop — it would pass against a fully async
+#    server too. So the probe carries a vacuity floor: the same measurement is run
+#    against a deliberately-async blocking route and MUST fail there.
+#
+# 3. The snapshot exec is coalesced. Within the TTL the answer is remembered, and
+#    concurrent callers asking the same question share ONE exec rather than each
+#    spawning their own. Both halves are counted, never timed.
+#
+# 4. The socket pump's threads are its OWN and its cap is a sentence. Eight was
+#    never a decision — it is what asyncio's default executor happens to be on a
+#    4-CPU host, and the ninth terminal connected, authenticated, and then never
+#    pumped a byte. A cap the operator cannot see is the worst kind.
+#
+# 5. The audit trail's caller detection fetches ONE frame. It used to build a
+#    FrameInfo for the whole stack, which is cheap in a script and 1.77ms deep
+#    inside a request. The fast path and the old walk must give the same answer —
+#    a faster audit trail that names the wrong module is not a win.
+#
+# NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py) —
+# every exec is a counted fake.
 
-THREE PROPERTIES ARE PINNED HERE, AND EACH IS PINNED SO IT CAN GO RED:
-
-1. A read route runs OFF the event loop. A handler declared `async def` runs ON
-   the loop, so a 90ms exec inside it means the whole server answers nothing for
-   90ms — including /v1/ping. Declared `def`, FastAPI runs it in the anyio
-   threadpool. The structural test is DERIVED from the app's routing table, not
-   from a list written down here, so a new read route added as async goes red
-   without anyone remembering this file exists.
-
-2. The blocking probe below can actually SEE a blocked loop. A test that starts
-   a slow request and then checks a fast one answers is worthless if the harness
-   gives each request its own event loop — it would pass against a fully async
-   server too. So the probe carries a vacuity floor: the same measurement is run
-   against a deliberately-async blocking route and MUST fail there.
-
-3. The snapshot exec is coalesced. Within the TTL the answer is remembered, and
-   concurrent callers asking the same question share ONE exec rather than each
-   spawning their own. Both halves are counted, never timed.
-
-4. The socket pump's threads are its OWN and its cap is a sentence. Eight was
-   never a decision — it is what asyncio's default executor happens to be on a
-   4-CPU host, and the ninth terminal connected, authenticated, and then never
-   pumped a byte. A cap the operator cannot see is the worst kind.
-
-5. The audit trail's caller detection fetches ONE frame. It used to build a
-   FrameInfo for the whole stack, which is cheap in a script and 1.77ms deep
-   inside a request. The fast path and the old walk must give the same answer —
-   a faster audit trail that names the wrong module is not a win.
-
-NOTHING HERE INVOKES THE REAL BINARY (the standing rule in test_host_fleet.py) —
-every exec is a counted fake.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that server.py parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — what each route returns, tests/test_host_fleet.py
+# seedgo: no-test-needed(external) — the real baud binary; every subprocess.run here is a counted fake
 
 import contextlib
 import json
@@ -107,13 +112,14 @@ def _completed(returncode: int, stdout: str = "", stderr: str = "") -> MagicMock
 
 ENVELOPE = {
     "project": "AIPASS",
-    "root": "/home/someone/Projects/AIPass",
+    # Data @baud would print, never opened: the paths only have to look like paths.
+    "root": "/srv/aipass",
     "generated_at": "2026-08-18T09:00:00Z",
     "error": None,
     "live_agent_sessions": [],
     "branches": [
-        {"name": "api", "project": "AIPASS", "has_room": True, "path": "/tmp/api"},
-        {"name": "baud", "project": "AIPASS", "has_room": False, "path": "/tmp/baud"},
+        {"name": "api", "project": "AIPASS", "has_room": True, "path": "/srv/aipass/api"},
+        {"name": "baud", "project": "AIPASS", "has_room": False, "path": "/srv/aipass/baud"},
     ],
 }
 

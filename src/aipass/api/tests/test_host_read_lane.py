@@ -3,67 +3,73 @@
 # Description: Tests for the host API read lane — feed cursor, file fence, diff
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/host/{feed,reads}.py and their routes.
+"""Tests for apps/handlers/host/feed.py, reads.py and git_reads.py, and their /v1 routes."""
 
-FPLAN-0411 Phase 2 (partial: feed + files + diff; fleet held on C1).
+# Tests for apps/handlers/host/{feed,reads}.py and their routes.
+#
+# FPLAN-0411 Phase 2 (partial: feed + files + diff; fleet held on C1).
+#
+# The two things that must not be got wrong here are the cursor (a stale one is
+# the TG 10-hour outage species) and the fence (a remote caller choosing what to
+# read). Both carry the most tests.
+#
+# Tests — handlers/host/feed.py (design call D3):
+# - read_feed: no cursor returns the most recent window, newest cursor
+# - read_feed: empty feed returns an empty envelope, no crash
+# - read_feed: missing feed file reads as empty, not an error
+# - read_feed: cursor mid-feed returns everything at or after it
+# - read_feed: boundary event is RE-DELIVERED (at-least-once, dupes over drops)
+# - read_feed: cursor older than the feed flags gap + gap_reason=feed_trimmed
+# - read_feed: cursor ahead of the feed clamps, returns empty, never spins
+# - read_feed: limit caps the window and reports more=True (no silent cap)
+# - read_feed: limit is clamped to MAX_LIMIT
+# - read_feed: malformed lines are skipped, good ones still returned
+# - read_feed: lines without a ts are skipped
+# - read_feed: file order is preserved (never re-sorted)
+# - read_feed: unreadable feed raises FeedUnavailable rather than faking empty
+# - read_feed: a real trim (400->200) leaves an old cursor flagged, not silent
+#
+# Tests — handlers/host/reads.py, git_reads.py and remotes.py (the name fence):
+# - _fence: absolute path refused
+# - _fence: '..' component refused
+# - _fence: nested '..' refused
+# - _fence: symlink escaping the branch refused (post-resolution check)
+# - _fence: empty name refused
+# - _fence: legitimate nested file accepted
+# - _fence: missing file refused
+# - resolve_branch_root: known branch resolves via the registry
+# - resolve_branch_root: email form resolves
+# - resolve_branch_root: unknown branch refused
+# - resolve_branch_root: empty branch refused
+# - resolve_branch_root: unreadable registry raises ReadUnavailable
+# - read_file: returns content and byte count
+# - read_file: over-cap file is REFUSED, never silently truncated
+# - read_file: non-UTF8 file refused
+# - read_file: project mismatch refused
+# - read_diff: routes through drone, never raw git
+# - read_diff: staged flag is passed through
+# - read_diff: drone missing raises ReadUnavailable
+# - read_diff: timeout raises ReadUnavailable
+# - read_diff: non-zero exit raises ReadUnavailable
+# - read_diff: oversized diff is truncated AND reports truncated=True
+#
+# Tests — routes:
+# - GET /v1/feed: 401 without a token
+# - GET /v1/feed: 200 with a read token, returns the envelope
+# - GET /v1/feed: gap surfaces through the route
+# - GET /v1/files: 401 without a token
+# - GET /v1/files: 200 returns file content
+# - GET /v1/files: fence violation is 400 with the error envelope
+# - GET /v1/diff: 200 returns diff text
+# - GET /v1/diff: unknown branch is 400
 
-The two things that must not be got wrong here are the cursor (a stale one is
-the TG 10-hour outage species) and the fence (a remote caller choosing what to
-read). Both carry the most tests.
-
-Tests — handlers/host/feed.py (design call D3):
-- read_feed: no cursor returns the most recent window, newest cursor
-- read_feed: empty feed returns an empty envelope, no crash
-- read_feed: missing feed file reads as empty, not an error
-- read_feed: cursor mid-feed returns everything at or after it
-- read_feed: boundary event is RE-DELIVERED (at-least-once, dupes over drops)
-- read_feed: cursor older than the feed flags gap + gap_reason=feed_trimmed
-- read_feed: cursor ahead of the feed clamps, returns empty, never spins
-- read_feed: limit caps the window and reports more=True (no silent cap)
-- read_feed: limit is clamped to MAX_LIMIT
-- read_feed: malformed lines are skipped, good ones still returned
-- read_feed: lines without a ts are skipped
-- read_feed: file order is preserved (never re-sorted)
-- read_feed: unreadable feed raises FeedUnavailable rather than faking empty
-- read_feed: a real trim (400->200) leaves an old cursor flagged, not silent
-
-Tests — handlers/host/reads.py, git_reads.py and remotes.py (the name fence):
-- _fence: absolute path refused
-- _fence: '..' component refused
-- _fence: nested '..' refused
-- _fence: symlink escaping the branch refused (post-resolution check)
-- _fence: empty name refused
-- _fence: legitimate nested file accepted
-- _fence: missing file refused
-- resolve_branch_root: known branch resolves via the registry
-- resolve_branch_root: email form resolves
-- resolve_branch_root: unknown branch refused
-- resolve_branch_root: empty branch refused
-- resolve_branch_root: unreadable registry raises ReadUnavailable
-- read_file: returns content and byte count
-- read_file: over-cap file is REFUSED, never silently truncated
-- read_file: non-UTF8 file refused
-- read_file: project mismatch refused
-- read_diff: routes through drone, never raw git
-- read_diff: staged flag is passed through
-- read_diff: drone missing raises ReadUnavailable
-- read_diff: timeout raises ReadUnavailable
-- read_diff: non-zero exit raises ReadUnavailable
-- read_diff: oversized diff is truncated AND reports truncated=True
-
-Tests — routes:
-- GET /v1/feed: 401 without a token
-- GET /v1/feed: 200 with a read token, returns the envelope
-- GET /v1/feed: gap surfaces through the route
-- GET /v1/files: 401 without a token
-- GET /v1/files: 200 returns file content
-- GET /v1/files: fence violation is 400 with the error envelope
-- GET /v1/diff: 200 returns diff text
-- GET /v1/diff: unknown branch is 400
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — drone's own diff output; read_diff's subprocess call is faked, drone tests it
+# seedgo: no-test-needed(covered_elsewhere) — token minting and the token store; tests/test_host_token_store.py
+# seedgo: no-test-needed(ruff) — that every module in apps/handlers/host/ parses and imports
 
 import concurrent.futures as cf
 import json
@@ -2117,7 +2123,7 @@ class TestStatusPerRow:
 
         assert rows["both.py"] == "MM"
 
-    def test_untracked_files_arrive_by_NAME_not_only_as_a_count(self, fake_repo: dict) -> None:
+    def test_untracked_files_arrive_by_name_not_only_as_a_count(self, fake_repo: dict) -> None:
         """
         The other half of the rider: the face could not paint a U chip on a file
         whose name it had never been told.
@@ -2525,7 +2531,7 @@ class TestARefusedRootIsNotReAskedEveryFiveSeconds:
 
         assert result["count"] == 1
 
-    def test_a_refusing_DOCUMENT_is_never_remembered(self, fake_repo: dict) -> None:
+    def test_a_refusing_document_is_never_remembered(self, fake_repo: dict) -> None:
         """
         The split this must not blur.
 
@@ -3396,18 +3402,19 @@ class TestRemoteURLForms:
         """
         assert self._web(remote_repo, "http://internal.example/o/r.git") == "http://internal.example/o/r"
 
-    def test_a_local_path_remote_has_no_web_form_and_says_so(self, remote_repo: dict) -> None:
+    def test_a_local_path_remote_has_no_web_form_and_says_so(self, remote_repo: dict, tmp_path: Path) -> None:
         """
         A directory is not a web page. `None` is the honest answer — a
         constructed scheme in front of a filesystem path would be a link card
         leading somewhere that has never existed.
         """
-        remote_repo["serve"](remote_document("/srv/mirrors/aipass.git"))
+        mirror = str(tmp_path / "mirrors" / "aipass.git")
+        remote_repo["serve"](remote_document(mirror))
 
         answer = host_git.read_git_remote("demo")
 
         assert answer["web"] is None
-        assert answer["url"] == "/srv/mirrors/aipass.git"
+        assert answer["url"] == mirror
 
     def test_a_relative_path_remote_has_no_web_form_either(self, remote_repo: dict) -> None:
         """`../sibling` is a path however few slashes it has."""
@@ -3626,7 +3633,7 @@ class TestWhichRepositoryADirectoryIsIn:
 
         assert host_reads.repository_of(deep) == inner
 
-    def test_a_marker_that_is_a_FILE_still_counts(self, tmp_path) -> None:
+    def test_a_marker_that_is_a_file_still_counts(self, tmp_path) -> None:
         """
         A worktree keeps a file where a clone keeps a directory.
 
@@ -3641,7 +3648,7 @@ class TestWhichRepositoryADirectoryIsIn:
 
         assert host_reads.repository_of(inside) == worktree
 
-    def test_no_repository_above_it_answers_None_not_a_guess(self, tmp_path) -> None:
+    def test_no_repository_above_it_answers_none_not_a_guess(self, tmp_path) -> None:
         """Absent is a real answer here; callers branch on it rather than assume."""
         loose = tmp_path / "just" / "some" / "directories"
         loose.mkdir(parents=True)

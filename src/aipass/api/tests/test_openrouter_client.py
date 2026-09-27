@@ -3,26 +3,33 @@
 # Description: Tests for OpenRouter client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for openrouter_client.py — OpenRouter client module orchestration.
+"""Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
 
-Tests:
-- handle_command routing for test, call, models, status, unknown
-- Help gate (--help) and introspection gate (no-args on "call")
-- log_operation called on every valid command
-- test_connection success / no-key / API-failure paths
-- list_models success / no-key / --all limiter
-- check_status with key / without key
-- get_response delegation to client handler
-"""
+# Tests for openrouter_client.py — OpenRouter client module orchestration.
+#
+# Tests:
+# - handle_command routing for test, call, models, status, unknown
+# - Help gate (--help) and introspection gate (no-args on "call")
+# - log_operation called on every valid command
+# - test_connection success / no-key / API-failure paths
+# - list_models success / no-key / --all limiter
+# - check_status with key / without key
+# - get_response delegation to client handler
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — OPENROUTER_HEADERS' values; the test compares with the product's constant
+# seedgo: no-test-needed(duplicate_test) — detect_caller_from_stack() itself, tests/test_caller_detection.py
+# seedgo: no-test-needed(through_the_command) — the real network request behind make_call(), mocked at the edge
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.handlers.openrouter.client import OPENROUTER_HEADERS, create_client
+from aipass.api.apps.modules import openrouter_client
 from aipass.api.apps.modules.openrouter_client import handle_command
 from aipass.api.apps.modules.openrouter_client import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
 
@@ -41,8 +48,6 @@ _MOD = "aipass.api.apps.modules.openrouter_client"
 @patch(f"{_MOD}.console")
 def test_handle_command_returns_false_for_unknown(mock_console, mock_header, mock_jh):
     """handle_command returns False when the command is not recognised."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("unknown", [])
 
     assert result is False
@@ -55,8 +60,6 @@ def test_handle_command_returns_false_for_unknown(mock_console, mock_header, moc
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_test(mock_console, mock_header, mock_jh, mock_test):
     """handle_command('test', []) delegates to test_connection()."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("test", [])
 
     assert result is True
@@ -69,8 +72,6 @@ def test_handle_command_routes_test(mock_console, mock_header, mock_jh, mock_tes
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_models(mock_console, mock_header, mock_jh, mock_list):
     """handle_command('models', []) delegates to list_models()."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("models", [])
 
     assert result is True
@@ -83,8 +84,6 @@ def test_handle_command_routes_models(mock_console, mock_header, mock_jh, mock_l
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_status(mock_console, mock_header, mock_jh, mock_status):
     """handle_command('status', []) delegates to check_status()."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("status", [])
 
     assert result is True
@@ -97,8 +96,6 @@ def test_handle_command_routes_status(mock_console, mock_header, mock_jh, mock_s
 @patch(f"{_MOD}.console")
 def test_handle_command_routes_call(mock_console, mock_header, mock_jh, mock_call):
     """handle_command('call', ['hello']) delegates to make_call with args."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("call", ["hello"])
 
     assert result is True
@@ -116,8 +113,6 @@ def test_handle_command_routes_call(mock_console, mock_header, mock_jh, mock_cal
 @patch(f"{_MOD}.console")
 def test_handle_command_help_gate(mock_console, mock_header, mock_jh, mock_help):
     """--help flag triggers print_help and returns True without logging."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("test", ["--help"])
 
     assert result is True
@@ -131,8 +126,6 @@ def test_handle_command_help_gate(mock_console, mock_header, mock_jh, mock_help)
 @patch(f"{_MOD}.console")
 def test_handle_command_call_no_args_executes(mock_console, mock_header, mock_jh, mock_error):
     """'call' with no args should execute (show error), not show introspection."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("call", [])
 
     assert result is True
@@ -151,8 +144,6 @@ def test_handle_command_call_no_args_executes(mock_console, mock_header, mock_jh
 @patch(f"{_MOD}.console")
 def test_handle_command_logs_operation(mock_console, mock_header, mock_jh, mock_test):
     """Valid commands log their operation via json_handler.log_operation."""
-    from aipass.api.apps.modules import openrouter_client
-
     openrouter_client.handle_command("test", [])
 
     mock_jh.log_operation.assert_called_once_with("openrouter_test", {"command": "test"})
@@ -180,8 +171,6 @@ def test_test_connection_success(mock_console, mock_header, mock_keys, mock_mode
     twin: "success was reported" and "no error was ALSO reported" are two
     facts, and a path that printed both would have passed the positive half.
     """
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     mock_models.fetch_models_from_api.return_value = [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]
 
@@ -205,8 +194,6 @@ def test_test_connection_no_key(mock_console, mock_header, mock_keys, mock_error
     MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
     `test_test_connection_no_key_no_success`, identical setup for one line.
     """
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "No key found in env"
 
@@ -230,8 +217,6 @@ def test_test_connection_api_failure(mock_console, mock_header, mock_keys, mock_
     MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
     `test_test_connection_api_failure_no_success`, identical setup for one line.
     """
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     mock_models.fetch_models_from_api.return_value = None
 
@@ -260,8 +245,6 @@ def test_list_models_success(mock_console, mock_header, mock_keys, mock_models, 
     MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
     `test_list_models_success_no_error`, the same call again for one line.
     """
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     fake_models = [
         {
@@ -294,8 +277,6 @@ def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error, mo
     MERGED 2026-09-07 (DPLAN-0323 contested band): the not-called half was
     `test_list_models_no_key_no_success`, identical setup for one line.
     """
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "Key not set"
 
@@ -312,8 +293,6 @@ def test_list_models_no_key(mock_console, mock_header, mock_keys, mock_error, mo
 @patch(f"{_MOD}.console")
 def test_list_models_limits_to_10(mock_console, mock_header, mock_keys, mock_models, mock_success):
     """Without --all flag, only 10 models are displayed from a larger list."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     fake_models = [
         {
@@ -347,8 +326,6 @@ def test_list_models_limits_to_10(mock_console, mock_header, mock_keys, mock_mod
 @patch(f"{_MOD}.console")
 def test_list_models_all_flag_shows_everything(mock_console, mock_header, mock_keys, mock_models, mock_success):
     """With --all flag, all models are displayed."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
     fake_models = [
         {
@@ -381,8 +358,6 @@ def test_list_models_all_flag_shows_everything(mock_console, mock_header, mock_k
 @patch(f"{_MOD}.console")
 def test_check_status_with_key(mock_console, mock_header, mock_keys, mock_client):
     """When API key exists, status shows masked key and cache stats."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "sk-or-v1-NOTREAL-test12345678"
     mock_client.get_cache_stats.return_value = {"cached_clients": 2, "max_cache_size": 5}
 
@@ -404,8 +379,6 @@ def test_check_status_with_key(mock_console, mock_header, mock_keys, mock_client
 @patch(f"{_MOD}.console")
 def test_check_status_no_key(mock_console, mock_header, mock_keys, mock_client):
     """When API key is missing, status shows 'no' and diagnosis."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = None
     mock_keys.diagnose_key.return_value = "OPENROUTER_API_KEY not set"
     mock_client.get_cache_stats.return_value = {"cached_clients": 0, "max_cache_size": 5}
@@ -425,8 +398,6 @@ def test_check_status_no_key(mock_console, mock_header, mock_keys, mock_client):
 @patch(f"{_MOD}.client", autospec=True)
 def test_get_response_delegates_to_handler(mock_client):
     """get_response passes through to client.get_response and returns its result."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_client.get_response.return_value = {
         "content": "Hello!",
         "id": "gen-123",
@@ -454,8 +425,6 @@ def test_get_response_delegates_to_handler(mock_client):
 @patch(f"{_MOD}.client", autospec=True)
 def test_get_response_returns_none_on_failure(mock_client):
     """get_response returns None when client handler returns None."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_client.get_response.return_value = None
 
     result = openrouter_client.get_response("fail prompt", caller="test")
@@ -475,8 +444,6 @@ def test_get_response_returns_none_on_failure(mock_client):
 @patch(f"{_MOD}.console")
 def test_list_models_formats_million_context(mock_console, mock_header, mock_keys, mock_models, mock_success):
     """Context length >= 1M formatted as 'XM'."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
     mock_models.fetch_models_from_api.return_value = [
         {"id": "big/model", "context_length": 2_000_000, "pricing": {"prompt": "0", "completion": "0"}}
@@ -500,8 +467,6 @@ def test_list_models_formats_million_context(mock_console, mock_header, mock_key
 @patch(f"{_MOD}.console")
 def test_list_models_formats_thousand_context(mock_console, mock_header, mock_keys, mock_models, mock_success):
     """Context length >= 1k formatted as 'Xk'."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
     mock_models.fetch_models_from_api.return_value = [
         {"id": "med/model", "context_length": 128_000, "pricing": {"prompt": "0.01", "completion": "0.02"}}
@@ -525,8 +490,6 @@ def test_list_models_formats_thousand_context(mock_console, mock_header, mock_ke
 @patch(f"{_MOD}.console")
 def test_list_models_formats_free_pricing(mock_console, mock_header, mock_keys, mock_models, mock_success):
     """Models with zero pricing show 'free'."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
     mock_models.fetch_models_from_api.return_value = [
         {"id": "free/model", "context_length": 4096, "pricing": {"prompt": "0", "completion": "0"}}
@@ -553,8 +516,6 @@ def test_list_models_formats_free_pricing(mock_console, mock_header, mock_keys, 
 @patch(f"{_MOD}.console")
 def test_make_call_no_model_shows_error(mock_console, mock_header, mock_error):
     """make_call without --model shows error."""
-    from aipass.api.apps.modules import openrouter_client
-
     openrouter_client.make_call(["What is AI?"])
 
     mock_error.assert_called_once()
@@ -567,8 +528,6 @@ def test_make_call_no_model_shows_error(mock_console, mock_header, mock_error):
 @patch(f"{_MOD}.console")
 def test_handle_command_call_no_args_shows_error(mock_console, mock_header, mock_jh, mock_error):
     """call with no args should show error, not introspection."""
-    from aipass.api.apps.modules import openrouter_client
-
     result = openrouter_client.handle_command("call", [])
 
     assert result is True
@@ -588,8 +547,6 @@ def test_handle_command_call_no_args_shows_error(mock_console, mock_header, mock
 @patch(f"{_MOD}.console")
 def test_list_models_fetch_failure(mock_console, mock_header, mock_keys, mock_models, mock_error):
     """When fetch_models_from_api returns None, error is shown."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
     mock_models.fetch_models_from_api.return_value = None
 
@@ -610,8 +567,6 @@ def test_list_models_fetch_failure(mock_console, mock_header, mock_keys, mock_mo
 @patch(f"{_MOD}.console")
 def test_handle_command_propagates_exception(mock_console, mock_header, mock_jh, mock_keys):
     """handle_command re-raises exceptions from downstream handlers."""
-    from aipass.api.apps.modules import openrouter_client
-
     mock_keys.get_api_key.side_effect = RuntimeError("handler failed")
 
     with pytest.raises(RuntimeError, match="handler failed"):
@@ -628,8 +583,6 @@ _CLIENT_MOD = "aipass.api.apps.handlers.openrouter.client"
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", False)
 def test_create_client_returns_none_when_sdk_unavailable():
     """create_client returns None when OpenAI SDK is not installed."""
-    from aipass.api.apps.handlers.openrouter.client import create_client
-
     result = create_client("FAKE-sk-or-testkey")
 
     assert result is None
@@ -638,16 +591,12 @@ def test_create_client_returns_none_when_sdk_unavailable():
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_returns_none_for_empty_key():
     """create_client returns None when api_key is empty string."""
-    from aipass.api.apps.handlers.openrouter.client import create_client
-
     assert create_client("") is None
 
 
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_returns_none_for_none_key():
     """create_client returns None when api_key is None."""
-    from aipass.api.apps.handlers.openrouter.client import create_client
-
     assert create_client(None) is None  # type: ignore[arg-type]
 
 
@@ -656,8 +605,6 @@ def test_create_client_returns_none_for_none_key():
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_success(mock_openai_cls, mock_jh):
     """create_client returns an OpenAI client instance on success."""
-    from aipass.api.apps.handlers.openrouter.client import create_client, OPENROUTER_HEADERS
-
     mock_client = MagicMock()
     mock_openai_cls.return_value = mock_client
 
@@ -677,8 +624,6 @@ def test_create_client_success(mock_openai_cls, mock_jh):
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_custom_timeout(mock_openai_cls, mock_jh):
     """create_client passes custom timeout to OpenAI constructor."""
-    from aipass.api.apps.handlers.openrouter.client import create_client
-
     mock_openai_cls.return_value = MagicMock()
 
     create_client("FAKE-sk-or-key", timeout=60)
@@ -690,8 +635,6 @@ def test_create_client_custom_timeout(mock_openai_cls, mock_jh):
 @patch(f"{_CLIENT_MOD}.OPENAI_AVAILABLE", True)
 def test_create_client_returns_none_on_exception(mock_openai_cls):
     """create_client returns None when OpenAI constructor raises."""
-    from aipass.api.apps.handlers.openrouter.client import create_client
-
     mock_openai_cls.side_effect = RuntimeError("connection refused")
 
     result = create_client("FAKE-sk-or-key")

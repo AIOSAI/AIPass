@@ -3,15 +3,19 @@
 # Description: Error Resilience Tests (from seedgo template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Error Resilience Tests for API branch.
+"""Tests for apps/handlers/json/json_handler.py under missing, corrupt and empty files."""
 
-Covers 4 tests:
-  - missing_file, corrupt_json, empty_file, nonexistent_dir
-"""
+# Error Resilience Tests for API branch.
+#
+# Covers 4 tests:
+#   - missing_file, corrupt_json, empty_file, nonexistent_dir
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the prax json service that json_handler delegates to; @prax's tests
+# seedgo: no-test-needed(ruff) — that apps/handlers/json/json_handler.py parses and imports
 
 import importlib
 import json
@@ -24,17 +28,17 @@ import pytest
 
 BRANCH_MODULE = "api"
 
-_handler_pkg = f"aipass.{BRANCH_MODULE}.apps.handlers"
-_json_mod_path = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
+_HANDLER_PKG = f"aipass.{BRANCH_MODULE}.apps.handlers"
+_JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _handler_pkg not in sys.modules:
-    _stub = types.ModuleType(_handler_pkg)
+if _HANDLER_PKG not in sys.modules:
+    _stub = types.ModuleType(_HANDLER_PKG)
     _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
     _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_handler_pkg] = _stub
+    sys.modules[_HANDLER_PKG] = _stub
 
-_mod = importlib.import_module(_json_mod_path)
-json_handler = _mod
+_mod = importlib.import_module(_JSON_MOD_PATH)
+JSON_HANDLER = _mod
 
 
 #: Isolation goes through the fleet seam, not a module attribute.
@@ -77,7 +81,7 @@ def test_missing_file(tmp_path: Path) -> None:
     assert not target.exists()
 
     try:
-        result = json_handler.load_json("ghost", "config")
+        result = JSON_HANDLER.load_json("ghost", "config")
     except FileNotFoundError:
         return
 
@@ -92,7 +96,7 @@ def test_corrupt_json(tmp_path: Path) -> None:
     target = json_dir / "corrupt_data.json"
     target.write_bytes(b"\x00\x01NOT-JSON{{{broken")
 
-    result = json_handler.ensure_json_exists("corrupt", "data")
+    result = JSON_HANDLER.ensure_json_exists("corrupt", "data")
     assert result is True
 
     raw = target.read_text(encoding="utf-8")
@@ -109,7 +113,7 @@ def test_empty_file(tmp_path: Path) -> None:
     target = json_dir / "empty_log.json"
     target.write_text("", encoding="utf-8")
 
-    result = json_handler.ensure_json_exists("empty", "log")
+    result = JSON_HANDLER.ensure_json_exists("empty", "log")
     assert result is True
 
     raw = target.read_text(encoding="utf-8")
@@ -133,7 +137,7 @@ def test_nonexistent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert not json_dir.exists()
 
     try:
-        result = json_handler.ensure_json_exists("nodir", "config")
+        result = JSON_HANDLER.ensure_json_exists("nodir", "config")
         assert json_dir.exists()
         assert result is True
     except (FileNotFoundError, OSError):

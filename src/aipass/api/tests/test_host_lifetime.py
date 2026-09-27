@@ -1,27 +1,35 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_host_lifetime.py
 # Description: Tests for a serve that outlives the shell that started it
+# Version: 1.0.0
+# Created: 2026-08-20
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Host API Lifetime Lane
+"""Tests for apps/handlers/host/lifetime.py, a detached serve, its record and its log."""
 
-A `host-api serve` routed through drone is a child of drone's exec timeout.
-@baud read the tailnet server's pane on 2026-08-19 and found fourteen cycles of
-"timed out after 43200s" followed by "restarting in 2s" — and the churn cost
-more than the downtime, because uvicorn's access log goes to stdout, stdout was
-that pane, and a day of history scrolled out of a bounded scrollback. By evening
-nobody could answer which bundle a phone had pulled.
+# Tests for the Host API Lifetime Lane
+#
+# A `host-api serve` routed through drone is a child of drone's exec timeout.
+# @baud read the tailnet server's pane on 2026-08-19 and found fourteen cycles of
+# "timed out after 43200s" followed by "restarting in 2s" — and the churn cost
+# more than the downtime, because uvicorn's access log goes to stdout, stdout was
+# that pane, and a day of history scrolled out of a bounded scrollback. By evening
+# nobody could answer which bundle a phone had pulled.
+#
+# The two halves are one defect: a server with nowhere to write has no history,
+# and a server held open by a caller cannot outlive that caller's patience.
+#
+# WHAT THESE TESTS GUARD MOST CAREFULLY is the pair of promises that make
+# detaching safe rather than merely convenient — the bind is validated BEFORE
+# anything is spawned, and the log is APPENDED to rather than truncated. Both are
+# one keyword in the implementation and both fail silently if that keyword goes.
 
-The two halves are one defect: a server with nowhere to write has no history,
-and a server held open by a caller cannot outlive that caller's patience.
-
-WHAT THESE TESTS GUARD MOST CAREFULLY is the pair of promises that make
-detaching safe rather than merely convenient — the bind is validated BEFORE
-anything is spawned, and the log is APPENDED to rather than truncated. Both are
-one keyword in the implementation and both fail silently if that keyword goes.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that lifetime.py parses and imports
+# seedgo: no-test-needed(constant) — STOP_POLL_SECONDS and SETTLE_SECONDS's values
+# seedgo: no-test-needed(external) — a real detached uvicorn; subprocess.Popen is patched, no server is spawned
+# seedgo: no-test-needed(covered_elsewhere) — the systemd unit text itself, tests/test_host_autostart.py
 
 import json
 import os
@@ -439,7 +447,9 @@ class TestStatusTellsTheTruthAboutAServerItDidNotStart:
         starts the real server. Reading the file first would answer with the
         dead pid while a healthy server listened on the same port.
         """
-        host_lifetime.record_path().write_text(json.dumps({"pid": 999, "host": "127.0.0.1", "port": 1}))
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": 999, "host": "127.0.0.1", "port": 1}), encoding="utf-8"
+        )
 
         record = host_lifetime.running()
 
@@ -448,7 +458,9 @@ class TestStatusTellsTheTruthAboutAServerItDidNotStart:
 
     def test_a_hand_started_server_is_still_named_as_such(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """The detached path keeps working and now says what it is."""
-        host_lifetime.record_path().write_text(json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}))
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}), encoding="utf-8"
+        )
         monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
 
         record = host_lifetime.running()
@@ -512,7 +524,9 @@ class TestStoppingASupervisedServerIsNotATrap:
 
     def test_a_detached_server_is_still_stopped_by_signal(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """No regression: the hand-started path did not change."""
-        host_lifetime.record_path().write_text(json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}))
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}), encoding="utf-8"
+        )
         alive = {"still": True}
         monkeypatch.setattr(host_lifetime, "_alive", lambda pid: alive["still"])
 
@@ -559,7 +573,7 @@ class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
 
         written = host_lifetime.write_unit()
 
-        assert "--host 127.0.0.1 --port 8790" in written.read_text()
+        assert "--host 127.0.0.1 --port 8790" in written.read_text(encoding="utf-8")
 
 
 class TestTwoServersAreNeverStartedByAccident:
@@ -607,7 +621,9 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
         installed is still on disk. Swallowing the refusal would report THAT
         pid — a hand-started server that has not existed since this morning.
         """
-        host_lifetime.record_path().write_text(json.dumps({"pid": 177102, "host": "10.0.0.1", "port": 8787}))
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": 177102, "host": "10.0.0.1", "port": 8787}), encoding="utf-8"
+        )
 
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")
@@ -661,7 +677,9 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
         machine with no systemd still finds a hand-started server exactly as it
         did before any of this existed.
         """
-        host_lifetime.record_path().write_text(json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}))
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}), encoding="utf-8"
+        )
         monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
         monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
 
@@ -719,7 +737,9 @@ class TestTheInstallReportNamesAConflictItCanSee:
         monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
         monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
         monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
-        host_lifetime.record_path().write_text(json.dumps({"pid": 4242, "host": "127.0.0.1", "port": 8790}))
+        host_lifetime.record_path().write_text(
+            json.dumps({"pid": 4242, "host": "127.0.0.1", "port": 8790}), encoding="utf-8"
+        )
 
         report = host_lifetime.autostart_report()
 

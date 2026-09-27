@@ -3,47 +3,53 @@
 # Description: Windows dead-cwd import defect - every api module imports without a readable cwd
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""No api module may read the working directory to be IMPORTED.
+"""Tests that every module under apps/ imports without a readable cwd, and apps/handlers/__init__.py's guard."""
 
-THE DEFECT (measured on the Windows CI gate 2026-08-31, @memory's finding):
-ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only for relative
-paths, the way posixpath does - and Path.resolve() routes through it. So on
-Windows every Path(__file__).resolve() REACHED AT IMPORT is an import-time
-working-directory dependency: a process whose cwd has been deleted cannot
-import the module at all. On POSIX the equivalent raise happens earlier and
-inside a try inspect already owns, which is why this was invisible on Linux
-for as long as it existed.
+# No api module may read the working directory to be IMPORTED.
+#
+# THE DEFECT (measured on the Windows CI gate 2026-08-31, @memory's finding):
+# ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only for relative
+# paths, the way posixpath does - and Path.resolve() routes through it. So on
+# Windows every Path(__file__).resolve() REACHED AT IMPORT is an import-time
+# working-directory dependency: a process whose cwd has been deleted cannot
+# import the module at all. On POSIX the equivalent raise happens earlier and
+# inside a try inspect already owns, which is why this was invisible on Linux
+# for as long as it existed.
+#
+# The discriminator is REACHED AT IMPORT, not written at module scope, so these
+# pins RUN the imports rather than grepping for spellings. A grep finds
+# spellings; only the run finds reachability.
+#
+# TWO WORLDS, because one cannot convict both species:
+#
+#   World A - wrap os.path.realpath so it reads os.getcwd() first (emulating
+#   ntpath), then deny os.getcwd. Convicts a raw resolve(). It CANNOT convict
+#   inspect.stack: denying getcwd kills abspath, so getmodule dies at
+#   getabsfile INSIDE inspect's own except and stack() completes green for the
+#   wrong reason (@daemon measured this).
+#
+#   World B - deny os.path.realpath directly and leave abspath working.
+#   Convicts inspect.stack via getmodule's unguarded realpath at
+#   inspect.py:1009.
+#
+# MEASURED IN THIS BRANCH: 61/61 modules red in both worlds before the cure.
+# The handlers guard masked everything (apps/__init__ does `from . import
+# handlers`, so every module died there first); curing it left 49/61, and the
+# traceback named ONE remaining line - json_handler.py:43's API_ROOT constant,
+# which nearly every module in this tree imports. 0/61 after both cures.
+#
+# That second site no longer exists: DPLAN-0325 (2026-09-04) replaced the
+# handler with the fleet shim, which derives its root from parents[3] and never
+# resolves. The measurement above is kept as the record of how the branch got
+# to 0/61 - do not grep for API_ROOT expecting to find it.
 
-The discriminator is REACHED AT IMPORT, not written at module scope, so these
-pins RUN the imports rather than grepping for spellings. A grep finds
-spellings; only the run finds reachability.
-
-TWO WORLDS, because one cannot convict both species:
-
-  World A - wrap os.path.realpath so it reads os.getcwd() first (emulating
-  ntpath), then deny os.getcwd. Convicts a raw resolve(). It CANNOT convict
-  inspect.stack: denying getcwd kills abspath, so getmodule dies at
-  getabsfile INSIDE inspect's own except and stack() completes green for the
-  wrong reason (@daemon measured this).
-
-  World B - deny os.path.realpath directly and leave abspath working.
-  Convicts inspect.stack via getmodule's unguarded realpath at
-  inspect.py:1009.
-
-MEASURED IN THIS BRANCH: 61/61 modules red in both worlds before the cure.
-The handlers guard masked everything (apps/__init__ does `from . import
-handlers`, so every module died there first); curing it left 49/61, and the
-traceback named ONE remaining line - json_handler.py:43's API_ROOT constant,
-which nearly every module in this tree imports. 0/61 after both cures.
-
-That second site no longer exists: DPLAN-0325 (2026-09-04) replaced the
-handler with the fleet shim, which derives its root from parents[3] and never
-resolves. The measurement above is kept as the record of how the branch got
-to 0/61 - do not grep for API_ROOT expecting to find it.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every api module parses; this file measures only the import's cwd
+# seedgo: no-test-needed(windows_compat) — a real Windows host's ntpath; world A emulates it here on POSIX
+# seedgo: no-test-needed(covered_elsewhere) — POSIX-only imports on Windows, tests/test_windows_import.py
 
 import ast
 import json
@@ -95,6 +101,8 @@ import importlib, json, os, sys
 WORLD = os.environ["PROBE_WORLD"]
 MODULES = json.loads(os.environ["PROBE_MODULES"])
 PRELOAD = json.loads(os.environ["PROBE_PRELOAD"])
+# An absolute path that is only ever handed to os.path, never opened.
+ANY_ABS = os.path.join(os.sep, "deadcwd_probe", "x")
 
 preload_failed = {}
 for name in PRELOAD:
@@ -128,18 +136,18 @@ if WORLD == "A":
     except OSError:
         control_live = True
         try:
-            os.path.basename("/tmp/x")
+            os.path.basename(ANY_ABS)
             control_no = True
         except OSError:
             control_no = False
 else:
     try:
-        os.path.realpath("/tmp/x")
+        os.path.realpath(ANY_ABS)
         control_live, control_no = False, None
     except OSError:
         control_live = True
         try:
-            os.path.abspath("/tmp/x")
+            os.path.abspath(ANY_ABS)
             control_no = True
         except OSError:
             control_no = False
@@ -182,6 +190,7 @@ def _run_probe(world: str, modules: list[str]) -> dict:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
     for line in proc.stdout.splitlines():
@@ -295,12 +304,14 @@ sys.path.insert(0, os.environ["PROBE_TMP"])
 jh = importlib.import_module("aipass.api.apps.handlers.json.json_handler")
 named = importlib.import_module("deadcwd_named_caller")
 
+ANY_ABS = os.path.join(os.sep, "deadcwd_probe", "x")
+
 def dead_realpath(*a, **k):
     raise OSError(2, "No such file or directory")
 os.path.realpath = dead_realpath
 
 try:
-    os.path.realpath("/tmp/x")
+    os.path.realpath(ANY_ABS)
     control_live = False
 except OSError:
     control_live = True
@@ -351,6 +362,7 @@ class TestCallerDetectionStillAnswersWithoutARealpath:
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=300,
         )
         verdict = None

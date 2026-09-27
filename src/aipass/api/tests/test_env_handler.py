@@ -3,15 +3,18 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/auth/env.py -- .env template creation.
+"""Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
 
-Tests:
-- create_env_template: openrouter provider, custom provider, no-overwrite,
-  file permissions, directory permissions, write failure
-"""
+# Tests:
+# - create_env_template: openrouter provider, custom provider, no-overwrite,
+#   file permissions, directory permissions, write failure
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the 0o600 / 0o700 modes on Windows, which has no Unix permission bits
+# seedgo: no-test-needed(ruff) — that env.py and keys.py parse and import
 
 from __future__ import annotations
 
@@ -23,6 +26,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.api.apps.handlers.auth import keys
 from aipass.api.apps.handlers.auth.env import create_env_template
 
 
@@ -100,8 +104,6 @@ class TestDiagnoseKeySuggestsRealCommand:
 
     def test_missing_key_message_names_init(self) -> None:
         """The suggestion points at a command api.py actually routes."""
-        from aipass.api.apps.handlers.auth import keys
-
         with patch.object(keys, "_read_key_from_secrets", return_value=None):
             message = keys.diagnose_key("openrouter")
 

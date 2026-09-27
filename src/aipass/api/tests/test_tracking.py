@@ -3,18 +3,22 @@
 # Description: Tests for usage tracking handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-13
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for tracking.py -- usage tracking handler.
+"""Tests for apps/handlers/usage/tracking.py, the usage tracking handler."""
 
-Tests:
-- get_generation_metrics() HTTP success, non-200, invalid structure, exception
-- store_usage_data() new file creation, existing file update, per-caller stats,
-  daily totals, newest-first ordering, exception handling, the json service's
-  keys kept on its data leg (with and without a 'data' key)
-"""
+# Tests for tracking.py -- usage tracking handler.
+#
+# Tests:
+# - get_generation_metrics() HTTP success, non-200, invalid structure, exception
+# - store_usage_data() new file creation, existing file update, per-caller stats,
+#   daily totals, newest-first ordering, exception handling, the json service's
+#   keys kept on its data leg (with and without a 'data' key)
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the live OpenRouter generation endpoint; requests.get is mocked, no network
+# seedgo: no-test-needed(constant) — DEFAULT_REQUEST_TIMEOUT's value
 
 import json
 from pathlib import Path

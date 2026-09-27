@@ -3,20 +3,24 @@
 # Description: Tests for provider configuration handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for config.provider — provider configuration handler.
+"""Tests for apps/handlers/config/provider.py, the provider configuration handler."""
 
-Tests:
-- merge_configs deep merge behavior
-- merge_configs in-place mutation and return value
-- merge_configs nested dict recursion
-- merge_configs non-dict overwrite
-- get_validation_rules known providers
-- get_validation_rules unknown provider returns None
-"""
+# Tests for config.provider — provider configuration handler.
+#
+# Tests:
+# - merge_configs deep merge behavior
+# - merge_configs in-place mutation and return value
+# - merge_configs nested dict recursion
+# - merge_configs non-dict overwrite
+# - get_validation_rules known providers
+# - get_validation_rules unknown provider returns None
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — PROVIDER_DEFAULTS' values, beyond the prefixes get_validation_rules returns
+# seedgo: no-test-needed(ruff) — that the handler parses and imports
 
 from unittest.mock import patch
 

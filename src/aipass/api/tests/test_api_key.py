@@ -3,28 +3,33 @@
 # Description: Tests for API Key Management Module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for api_key.py — API key management module.
+"""Tests for apps/modules/api_key.py, the API key management module."""
 
-Tests:
-- handle_command routing for all known commands
-- handle_command returns False for unknown commands
-- Help gate triggers print_help
-- Introspection gate triggers print_introspection for no-args
-- get_key success/failure paths
-- validate_key valid/invalid/no-key paths
-- init_env existing/create paths
-- list_providers workflow
-- json_handler.log_operation called on valid commands
-"""
+# Tests:
+# - handle_command routing for all known commands
+# - handle_command returns False for unknown commands
+# - Help gate triggers print_help
+# - Introspection gate triggers print_introspection for no-args
+# - get_key success/failure paths
+# - validate_key valid/invalid/no-key paths
+# - init_env existing/create paths
+# - list_providers workflow
+# - json_handler.log_operation called on valid commands
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that api_key.py parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — fetch_api_key and fetch_validate_key, tests/test_critical_paths.py
+# seedgo: no-test-needed(covered_elsewhere) — get_secret_cmd's secret read, tests/test_secrets.py
+# seedgo: no-test-needed(hardcoded_key) — any real key on disk; keys, env and provider are patched at the edge
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.api import discover_modules, route_command
 from aipass.api.apps.modules import api_key
 
 
@@ -627,8 +632,6 @@ class TestGoogleValidateFallsThrough:
 
     def test_validate_google_reaches_google_client_end_to_end(self):
         """Through the real router, `validate google` lands in google_client."""
-        from aipass.api.apps.api import discover_modules, route_command
-
         modules = discover_modules()
         with patch("aipass.api.apps.modules.google_client._cmd_validate") as mock_cmd:
             handled = route_command("validate", ["google"], modules)

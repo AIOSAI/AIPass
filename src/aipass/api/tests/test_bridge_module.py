@@ -3,19 +3,22 @@
 # Description: Tests for bridge contract registry module
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/modules/bridge.py -- contract registry.
+"""Tests for apps/modules/bridge.py, the contract registry."""
 
-Tests:
-- register + resolve: round-trip registration
-- resolve unknown: returns None
-- list_contracts: sorted listing
-- clear: empties registry
-- print_introspection: with and without contracts
-- handle_command: always returns False
-"""
+# Tests:
+# - register + resolve: round-trip registration
+# - resolve unknown: returns None
+# - list_contracts: sorted listing
+# - clear: empties registry
+# - print_introspection: with and without contracts
+# - handle_command: always returns False
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that bridge.py parses and imports
+# seedgo: no-test-needed(help_flag_safety) — drone's --help routing to this module, owned by that standard
 
 from __future__ import annotations
 

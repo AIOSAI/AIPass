@@ -1,32 +1,35 @@
-#!/usr/bin/env python3
 # =================== AIPass ====================
 # Name: test_parked_is_not_collected.py
 # Description: The parked directory contributes no tests, and can be proven to
 # Version: 1.0.0
 # Created: 2026-08-19
-# Modified: 2026-08-19
+# Modified: 2026-09-27
 # =============================================
 
-"""The park stays parked (archive doctrine, 2026-08-18).
+"""Tests for tests/parked/conftest.py, the barrier that keeps the park out of collection."""
 
-`tests/parked/` holds work that must survive a clone but must not run — today
-the capture-lane seed, 63 tests for a read-scope terminal that @baud's shipped
-`--capture-room` flags still point at. It lives there because `.archive/` is
-the owner's disposal zone, cleaned without warning, so nothing durable may sit in
-one.
+# The park stays parked (archive doctrine, 2026-08-18).
+#
+# `tests/parked/` holds work that must survive a clone but must not run — today
+# the capture-lane seed, 63 tests for a read-scope terminal that @baud's shipped
+# `--capture-room` flags still point at. It lives there because `.archive/` is
+# the owner's disposal zone, cleaned without warning, so nothing durable may sit in
+# one.
+#
+# WHY THIS FILE EXISTS. The park was protected by a naming habit: the house
+# `(disabled)` suffix instead of a `test_` prefix. @memory proved that habit is
+# not self-enforcing on 2026-08-19 — a file keeping its `test_` prefix is
+# collected whatever else the name says, and theirs was. Mine was safe by the
+# other half of the rule and had never been checked. So the directory now carries
+# a real barrier (`collect_ignore_glob` in its own conftest) and this file is what
+# notices when either the barrier or the reason for it stops being true.
+#
+# Deliberately NOT a check that the conftest exists. A test that asserts a file is
+# present passes while its contents do nothing; these run collection and read the
+# answer.
 
-WHY THIS FILE EXISTS. The park was protected by a naming habit: the house
-`(disabled)` suffix instead of a `test_` prefix. @memory proved that habit is
-not self-enforcing on 2026-08-19 — a file keeping its `test_` prefix is
-collected whatever else the name says, and theirs was. Mine was safe by the
-other half of the rule and had never been checked. So the directory now carries
-a real barrier (`collect_ignore_glob` in its own conftest) and this file is what
-notices when either the barrier or the reason for it stops being true.
-
-Deliberately NOT a check that the conftest exists. A test that asserts a file is
-present passes while its contents do nothing; these run collection and read the
-answer.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the parked capture-lane file still parses; ruff lints the park, pytest does not
 
 import subprocess
 import sys
@@ -46,6 +49,7 @@ def _collect(target: Path) -> subprocess.CompletedProcess:
         cwd=str(TESTS_DIR.parent),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
     )
 

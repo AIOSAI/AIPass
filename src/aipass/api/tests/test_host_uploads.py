@@ -3,36 +3,41 @@
 # Description: Tests for the host API photo lane — bytes onto disk, named by the server
 # Version: 1.0.0
 # Created: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for the Photo Lane
+"""Tests for apps/handlers/host/uploads.py and its POST /v1/files/upload route."""
 
-DPLAN-0300 Round 20. `POST /v1/files/upload` writes one image to disk and
-returns its absolute path — and that path is the entire product of the route,
-because the phone types it into the open attach socket and @baud's
-`deliverPaths` does the rest.
+# Tests for the Photo Lane
+#
+# DPLAN-0300 Round 20. `POST /v1/files/upload` writes one image to disk and
+# returns its absolute path — and that path is the entire product of the route,
+# because the phone types it into the open attach socket and @baud's
+# `deliverPaths` does the rest.
+#
+# THE THING THIS LANE COULD GET WRONG IS NOT "does the file arrive":
+#
+#   1. **Letting the caller name the file.** An upload's filename is
+#      attacker-controlled and there is no sanitiser worth trusting against every
+#      form of `../`. So the name is not cleaned — it is never read. These tests
+#      send hostile filenames and assert the bytes land under a generated name
+#      anyway, and that nothing appears outside the upload directory.
+#
+#   2. **Believing the Content-Type.** A header costs nothing to write. The magic
+#      bytes decide both acceptance and extension, so a `.png` on disk can never
+#      hold something that is not a PNG.
+#
+#   3. **Truncating instead of refusing.** A truncated image is not a smaller
+#      image, it is a corrupt one wearing a success response.
+#
+# Real files in a real tmp directory throughout. The interesting failures here are
+# filesystem-shaped — a partial file left behind, a mode set after creation, a
+# collision inside one second — and a mocked filesystem invents its way past all
+# three.
 
-THE THING THIS LANE COULD GET WRONG IS NOT "does the file arrive":
-
-  1. **Letting the caller name the file.** An upload's filename is
-     attacker-controlled and there is no sanitiser worth trusting against every
-     form of `../`. So the name is not cleaned — it is never read. These tests
-     send hostile filenames and assert the bytes land under a generated name
-     anyway, and that nothing appears outside the upload directory.
-
-  2. **Believing the Content-Type.** A header costs nothing to write. The magic
-     bytes decide both acceptance and extension, so a `.png` on disk can never
-     hold something that is not a PNG.
-
-  3. **Truncating instead of refusing.** A truncated image is not a smaller
-     image, it is a corrupt one wearing a success response.
-
-Real files in a real tmp directory throughout. The interesting failures here are
-filesystem-shaped — a partial file left behind, a mode set after creation, a
-collision inside one second — and a mocked filesystem invents its way past all
-three.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — handlers/host/attach.py, where the path goes; tests/test_host_attach.py
+# seedgo: no-test-needed(covered_elsewhere) — token issue and check in host_tokens; tests/test_host_token_store.py
 
 import os
 import stat

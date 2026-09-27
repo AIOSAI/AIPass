@@ -3,28 +3,35 @@
 # Description: Tests for Google API client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for google_client.py — Google API Client Module.
+"""Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
 
-Tests:
-- handle_command routing: help, introspection, validate, reauth, pass-through
-- get_drive_service() delegates to get_google_service()
-- get_google_service() standard and thread-safe paths
-- get_google_service() error paths: libs missing, auth failure
-- validate_google() success and failure
-- authenticate_google() success and failure
-- reauth_google() success and failure
-- api_call_with_retry() delegation
-- is_ssl_error() delegation
-"""
+# Tests for google_client.py — Google API Client Module.
+#
+# Tests:
+# - handle_command routing: help, introspection, validate, reauth, pass-through
+# - get_drive_service() delegates to get_google_service()
+# - get_google_service() standard and thread-safe paths
+# - get_google_service() error paths: libs missing, auth failure
+# - validate_google() success and failure
+# - authenticate_google() success and failure
+# - reauth_google() success and failure
+# - api_call_with_retry() delegation
+# - is_ssl_error() delegation
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — build_service() and its thread-safe twin, tests/test_service_factory_handler.py
+# seedgo: no-test-needed(covered) — the backoff behind api_call_with_retry(), tests/test_retry_handler.py
+# seedgo: no-test-needed(constant) — CREDS_PATH and CLIENT_SECRET_PATH's real locations; every test patches them
 
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from aipass.api.apps.handlers.google.auth import DEFAULT_SCOPES, load_credentials, refresh_credentials, run_oauth_flow
+from aipass.api.apps.modules import google_client
 from aipass.api.apps.modules.google_client import handle_command as _hc  # noqa: F401 — seedgo test_coverage detection
 
 
@@ -48,8 +55,6 @@ _MOD = "aipass.api.apps.modules.google_client"
 @patch(f"{_MOD}.warning")
 def test_handle_command_returns_false_no_args(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console):
     """handle_command returns False when args=[] and command != 'google'."""
-    from aipass.api.apps.modules import google_client
-
     result = google_client.handle_command("validate", [])
     assert result is False
 
@@ -67,8 +72,6 @@ def test_handle_command_returns_false_non_google_provider(
     _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console
 ):
     """handle_command returns False when provider is not 'google'."""
-    from aipass.api.apps.modules import google_client
-
     result = google_client.handle_command("validate", ["openrouter"])
     assert result is False
 
@@ -86,8 +89,6 @@ def test_handle_command_routes_validate_google(
     _warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
 ):
     """handle_command routes 'validate' with ['google'] to _cmd_validate."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.validate_credentials.return_value = True
@@ -111,8 +112,6 @@ def test_handle_command_routes_reauth_google(
     mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
 ):
     """handle_command routes 'reauth' with ['google'] to _cmd_reauth."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.reauth.return_value = MagicMock()
@@ -134,8 +133,6 @@ def test_handle_command_routes_reauth_google(
 @patch(f"{_MOD}.warning")
 def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, mock_console):
     """handle_command prints help when args=['google', '--help'] and returns True."""
-    from aipass.api.apps.modules import google_client
-
     result = google_client.handle_command("validate", ["google", "--help"])
 
     assert result is True
@@ -156,8 +153,6 @@ def test_handle_command_google_introspection(
     _warn, _err, _succ, mock_hdr, _json, _retry, _factory, mock_auth, mock_console
 ):
     """handle_command prints introspection when command='google' and args=[]."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CREDS_PATH.exists.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
@@ -181,8 +176,6 @@ def test_handle_command_unknown_command_returns_false(
     _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console
 ):
     """handle_command returns False for unknown commands with 'google' arg."""
-    from aipass.api.apps.modules import google_client
-
     result = google_client.handle_command("deploy", ["google"])
     assert result is False
 
@@ -203,8 +196,6 @@ def test_handle_command_unknown_command_returns_false(
 @patch(f"{_MOD}.warning")
 def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_drive_service() delegates to get_google_service('drive', 'v3')."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
     mock_factory.build_service.return_value = mock_service
@@ -231,8 +222,6 @@ def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mo
 @patch(f"{_MOD}.warning")
 def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_google_service() returns service via build_service when is_available=True."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
     mock_factory.build_service.return_value = mock_service
@@ -254,8 +243,6 @@ def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mo
 @patch(f"{_MOD}.warning")
 def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_google_service(thread_safe=True) calls build_thread_safe_service."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
     mock_factory.build_thread_safe_service.return_value = mock_service
@@ -277,8 +264,6 @@ def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry,
 @patch(f"{_MOD}.warning")
 def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """get_google_service() raises RuntimeError when libraries are not installed."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = False
 
     with pytest.raises(RuntimeError, match="not installed"):
@@ -296,8 +281,6 @@ def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, 
 @patch(f"{_MOD}.warning")
 def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
     """get_google_service() raises RuntimeError when build_service returns None."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_factory.build_service.return_value = None
 
@@ -318,8 +301,6 @@ def test_get_google_service_with_custom_scopes(
     _warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console
 ):
     """get_google_service() passes custom scopes through to build_service."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
     mock_factory.build_service.return_value = mock_service
@@ -347,8 +328,6 @@ def test_get_google_service_with_custom_scopes(
 @patch(f"{_MOD}.warning")
 def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """validate_google() returns True when credentials are valid."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.validate_credentials.return_value = True
 
     result = google_client.validate_google()
@@ -368,8 +347,6 @@ def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory,
 @patch(f"{_MOD}.warning")
 def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """validate_google() returns False when no valid credentials exist."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.validate_credentials.return_value = False
 
     result = google_client.validate_google()
@@ -388,8 +365,6 @@ def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory
 @patch(f"{_MOD}.warning")
 def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """validate_google() passes scopes to validate_credentials."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.validate_credentials.return_value = True
     scopes = ["https://www.googleapis.com/auth/calendar"]
 
@@ -415,8 +390,6 @@ def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _f
 @patch(f"{_MOD}.warning")
 def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """authenticate_google() returns True when authenticate returns credentials."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.authenticate.return_value = MagicMock()
 
     result = google_client.authenticate_google()
@@ -436,8 +409,6 @@ def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _f
 @patch(f"{_MOD}.warning")
 def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """authenticate_google() returns False when authenticate returns None."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.authenticate.return_value = None
 
     result = google_client.authenticate_google()
@@ -461,8 +432,6 @@ def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _f
 @patch(f"{_MOD}.warning")
 def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """reauth_google() returns True when reauth returns credentials."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.reauth.return_value = MagicMock()
 
     result = google_client.reauth_google()
@@ -482,8 +451,6 @@ def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory
 @patch(f"{_MOD}.warning")
 def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """reauth_google() returns False when reauth returns None."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.reauth.return_value = None
 
     result = google_client.reauth_google()
@@ -517,8 +484,6 @@ def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_ret
     exists to surface — the test was documenting a parameter production does
     not have, and anyone who copied it would have written a TypeError.
     """
-    from aipass.api.apps.modules import google_client
-
     mock_callable = MagicMock()
     mock_retry.api_call_with_retry.return_value = "result"
 
@@ -544,8 +509,6 @@ def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_ret
 @patch(f"{_MOD}.warning")
 def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console):
     """is_ssl_error() delegates to google_retry.is_ssl_error."""
-    from aipass.api.apps.modules import google_client
-
     test_error = Exception("SSL handshake failed")
     mock_retry.is_ssl_error.return_value = True
 
@@ -571,8 +534,6 @@ def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _fa
 @patch(f"{_MOD}.warning")
 def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """_cmd_validate shows error when Google libs are not installed."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = False
 
     google_client._cmd_validate()
@@ -592,8 +553,6 @@ def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _r
 @patch(f"{_MOD}.warning")
 def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """_cmd_validate shows error when client secret file is missing."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = False
 
@@ -614,8 +573,6 @@ def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, _json, _ret
 @patch(f"{_MOD}.warning")
 def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
     """_cmd_validate shows success when credentials are valid."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.validate_credentials.return_value = True
@@ -638,8 +595,6 @@ def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retr
 @patch(f"{_MOD}.warning")
 def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, mock_console):
     """_cmd_validate shows warning when credentials are invalid."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.validate_credentials.return_value = False
@@ -667,8 +622,6 @@ def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _re
 @patch(f"{_MOD}.warning")
 def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """_cmd_reauth shows error when Google libs are not installed."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = False
 
     google_client._cmd_reauth()
@@ -688,8 +641,6 @@ def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _ret
 @patch(f"{_MOD}.warning")
 def test_cmd_reauth_success(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
     """_cmd_reauth shows success when reauth returns credentials."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.reauth.return_value = MagicMock()
@@ -712,8 +663,6 @@ def test_cmd_reauth_success(_warn, _err, mock_succ, _hdr, mock_json, _retry, _fa
 @patch(f"{_MOD}.warning")
 def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
     """_cmd_reauth shows error when reauth returns None."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.reauth.return_value = None
@@ -741,8 +690,6 @@ def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _fa
 @patch(f"{_MOD}.warning")
 def test_handle_command_propagates_exception(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
     """handle_command re-raises exceptions from downstream handlers."""
-    from aipass.api.apps.modules import google_client
-
     mock_auth.is_available.side_effect = RuntimeError("handler failed")
 
     with pytest.raises(RuntimeError, match="handler failed"):
@@ -763,8 +710,6 @@ _AUTH = "aipass.api.apps.handlers.google.auth"
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_load_credentials_success(mock_creds_path, mock_creds_cls, mock_json):
     """load_credentials() returns Credentials when file exists and loads ok."""
-    from aipass.api.apps.handlers.google.auth import load_credentials
-
     mock_creds_path.exists.return_value = True
     mock_creds_obj = MagicMock()
     mock_creds_cls.from_authorized_user_file.return_value = mock_creds_obj
@@ -785,8 +730,6 @@ def test_load_credentials_success(mock_creds_path, mock_creds_cls, mock_json):
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_load_credentials_custom_scopes(mock_creds_path, mock_creds_cls, mock_json):
     """load_credentials() uses custom scopes when provided."""
-    from aipass.api.apps.handlers.google.auth import load_credentials
-
     mock_creds_path.exists.return_value = True
     custom_scopes = ["https://www.googleapis.com/auth/calendar.readonly"]
     mock_creds_cls.from_authorized_user_file.return_value = MagicMock()
@@ -802,8 +745,6 @@ def test_load_credentials_custom_scopes(mock_creds_path, mock_creds_cls, mock_js
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
 def test_load_credentials_libs_unavailable():
     """load_credentials() returns None when Google libs are not installed."""
-    from aipass.api.apps.handlers.google.auth import load_credentials
-
     result = load_credentials()
 
     assert result is None
@@ -813,8 +754,6 @@ def test_load_credentials_libs_unavailable():
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_load_credentials_no_file(mock_creds_path):
     """load_credentials() returns None when creds file does not exist."""
-    from aipass.api.apps.handlers.google.auth import load_credentials
-
     mock_creds_path.exists.return_value = False
 
     result = load_credentials()
@@ -829,8 +768,6 @@ def test_load_credentials_no_file(mock_creds_path):
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_load_credentials_exception(mock_creds_path, mock_creds_cls, mock_json, mock_logger):
     """load_credentials() returns None and logs error on exception."""
-    from aipass.api.apps.handlers.google.auth import load_credentials
-
     mock_creds_path.exists.return_value = True
     mock_creds_cls.from_authorized_user_file.side_effect = ValueError("corrupt file")
 
@@ -851,8 +788,6 @@ def test_load_credentials_exception(mock_creds_path, mock_creds_cls, mock_json, 
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_refresh_credentials_success(mock_request_cls, mock_save):
     """refresh_credentials() returns True and saves when refresh succeeds."""
-    from aipass.api.apps.handlers.google.auth import refresh_credentials
-
     mock_creds = MagicMock()
     mock_creds.expired = True
     mock_creds.refresh_token = "tok_refresh"
@@ -867,8 +802,6 @@ def test_refresh_credentials_success(mock_request_cls, mock_save):
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
 def test_refresh_credentials_libs_unavailable():
     """refresh_credentials() returns False when Google libs are not installed."""
-    from aipass.api.apps.handlers.google.auth import refresh_credentials
-
     result = refresh_credentials(MagicMock())
 
     assert result is False
@@ -877,8 +810,6 @@ def test_refresh_credentials_libs_unavailable():
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_refresh_credentials_none_creds():
     """refresh_credentials() returns False when creds is None."""
-    from aipass.api.apps.handlers.google.auth import refresh_credentials
-
     result = refresh_credentials(None)
 
     assert result is False
@@ -887,8 +818,6 @@ def test_refresh_credentials_none_creds():
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_refresh_credentials_not_expired():
     """refresh_credentials() returns False when creds are not expired."""
-    from aipass.api.apps.handlers.google.auth import refresh_credentials
-
     mock_creds = MagicMock()
     mock_creds.expired = False
     mock_creds.refresh_token = "tok_refresh"
@@ -901,8 +830,6 @@ def test_refresh_credentials_not_expired():
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_refresh_credentials_no_refresh_token():
     """refresh_credentials() returns False when no refresh token exists."""
-    from aipass.api.apps.handlers.google.auth import refresh_credentials
-
     mock_creds = MagicMock()
     mock_creds.expired = True
     mock_creds.refresh_token = None
@@ -918,8 +845,6 @@ def test_refresh_credentials_no_refresh_token():
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_refresh_credentials_exception(mock_request_cls, mock_save, mock_logger):
     """refresh_credentials() returns False on refresh exception."""
-    from aipass.api.apps.handlers.google.auth import refresh_credentials
-
     mock_creds = MagicMock()
     mock_creds.expired = True
     mock_creds.refresh_token = "tok_refresh"
@@ -943,8 +868,6 @@ def test_refresh_credentials_exception(mock_request_cls, mock_save, mock_logger)
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_run_oauth_flow_success(mock_secret_path, mock_flow_cls, mock_save):
     """run_oauth_flow() returns credentials after successful OAuth flow."""
-    from aipass.api.apps.handlers.google.auth import run_oauth_flow, DEFAULT_SCOPES
-
     mock_secret_path.exists.return_value = True
     mock_flow = MagicMock()
     mock_creds = MagicMock()
@@ -968,8 +891,6 @@ def test_run_oauth_flow_success(mock_secret_path, mock_flow_cls, mock_save):
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_run_oauth_flow_custom_params(mock_secret_path, mock_flow_cls, mock_save):
     """run_oauth_flow() passes custom scopes, port, and open_browser."""
-    from aipass.api.apps.handlers.google.auth import run_oauth_flow
-
     mock_secret_path.exists.return_value = True
     mock_flow = MagicMock()
     mock_creds = MagicMock()
@@ -990,8 +911,6 @@ def test_run_oauth_flow_custom_params(mock_secret_path, mock_flow_cls, mock_save
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
 def test_run_oauth_flow_libs_unavailable():
     """run_oauth_flow() returns None when Google libs are not installed."""
-    from aipass.api.apps.handlers.google.auth import run_oauth_flow
-
     result = run_oauth_flow()
 
     assert result is None
@@ -1001,8 +920,6 @@ def test_run_oauth_flow_libs_unavailable():
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_run_oauth_flow_no_client_secret(mock_secret_path):
     """run_oauth_flow() returns None when client secret file is missing."""
-    from aipass.api.apps.handlers.google.auth import run_oauth_flow
-
     mock_secret_path.exists.return_value = False
 
     result = run_oauth_flow()
@@ -1017,8 +934,6 @@ def test_run_oauth_flow_no_client_secret(mock_secret_path):
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", True)
 def test_run_oauth_flow_exception(mock_secret_path, mock_flow_cls, mock_save, mock_logger):
     """run_oauth_flow() returns None and logs error on exception."""
-    from aipass.api.apps.handlers.google.auth import run_oauth_flow
-
     mock_secret_path.exists.return_value = True
     mock_flow_cls.from_client_secrets_file.side_effect = OSError("bad secret file")
 

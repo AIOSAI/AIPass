@@ -3,21 +3,25 @@
 # Description: Critical path tests for API branch core functions
 # Version: 1.0.0
 # Created: 2026-03-31
-# Modified: 2026-03-31
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Critical path tests for the API branch.
+"""Tests for apps/modules/api_key.py and apps/modules/openrouter_client.py, the request pipeline."""
 
-Covers the 4 core functions that form the API request pipeline:
+# Critical path tests for the API branch.
+#
+# Covers the 4 core functions that form the API request pipeline:
+#
+# 1. get_api_key() - Key retrieval from secrets file
+# 2. validate_key() - Key format validation per provider rules
+# 3. get_response() - Main API call orchestrator
+# 4. extract_response() - Response content extraction
+#
+# All external dependencies are mocked. File-based tests use tmp_path.
 
-1. get_api_key() - Key retrieval from secrets file
-2. validate_key() - Key format validation per provider rules
-3. get_response() - Main API call orchestrator
-4. extract_response() - Response content extraction
-
-All external dependencies are mocked. File-based tests use tmp_path.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the real OpenRouter request; make_api_request is mocked, no network in tests
+# seedgo: no-test-needed(ruff) — that api_key.py and openrouter_client.py parse and import
 
 from unittest.mock import patch, MagicMock
 

@@ -3,15 +3,20 @@
 # Description: Tests for OpenRouter model fetching handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/openrouter/models.py -- model fetching.
+"""Tests for apps/handlers/openrouter/models.py, the OpenRouter model fetch."""
 
-Tests:
-- fetch_models_from_api: success, non-200, timeout, network error,
-  invalid JSON, missing 'data' field
-"""
+# Tests:
+# - fetch_models_from_api: success, non-200, timeout, network error,
+#   invalid JSON, missing 'data' field
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that models.py parses and imports
+# seedgo: no-test-needed(constant) — OPENROUTER_API_URL, DEFAULT_TIMEOUT and MODULE_NAME's values
+# seedgo: no-test-needed(network) — a real call to OpenRouter; requests.get is patched at the edge
+# seedgo: no-test-needed(hardcoded_key) — any real key; the tests hand the handler a stand-in string
 
 from __future__ import annotations
 

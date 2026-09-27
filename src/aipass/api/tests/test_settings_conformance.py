@@ -3,30 +3,34 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""
-The python runner for the shared settings conformance corpus (FPLAN-0438 R3).
+"""Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
 
-WHY THIS EXISTS. The settings lane is a faithful mirror of @baud's settings.rs,
-and a mirror drifts. @baud measured six real divergences between the two
-implementations in one night — not by reading each other's source, by running
-both — and every one of them was a place where two faces would have written the
-operator's own config differently while each believed it was correct.
+# The python runner for the shared settings conformance corpus (FPLAN-0438 R3).
+#
+# WHY THIS EXISTS. The settings lane is a faithful mirror of @baud's settings.rs,
+# and a mirror drifts. @baud measured six real divergences between the two
+# implementations in one night — not by reading each other's source, by running
+# both — and every one of them was a place where two faces would have written the
+# operator's own config differently while each believed it was correct.
+#
+# Prose cannot hold a mirror straight. Shared DATA can: one set of cases, in
+# plain JSON, that each runtime proves it satisfies in its own test suite. When
+# the two disagree from here on, a case goes red on one side and names the
+# disagreement, instead of an operator finding it.
+#
+# THE CASES ARE THE CONTRACT, not this file. This file only knows how to build a
+# starting state, call a door, and compare an answer. A rust runner walks the same
+# directory with serde and does the same three things — the JSON carries no python
+# in it anywhere, which is the whole point.
+#
+# See tests/conformance/settings/README.md for the case format.
 
-Prose cannot hold a mirror straight. Shared DATA can: one set of cases, in
-plain JSON, that each runtime proves it satisfies in its own test suite. When
-the two disagree from here on, a case goes red on one side and names the
-disagreement, instead of an operator finding it.
-
-THE CASES ARE THE CONTRACT, not this file. This file only knows how to build a
-starting state, call a door, and compare an answer. A rust runner walks the same
-directory with serde and does the same three things — the JSON carries no python
-in it anywhere, which is the whole point.
-
-See tests/conformance/settings/README.md for the case format.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered) — hooks_sound_get() and hooks_sound_set(), tests/test_host_settings.py
+# seedgo: no-test-needed(covered) — the rust side of the corpus, run by @baud's own suite against settings.rs
 
 import hashlib
 import json
