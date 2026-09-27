@@ -3,22 +3,23 @@
 # Description: Tests for push_central handler -- push to Plans Central
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for push_central handler -- push Flow plan data to PLANS.central.json."""
+"""Tests for apps/handlers/dashboard/push_central.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
 from pathlib import Path
 from unittest.mock import patch
 
+import aipass.flow.apps.handlers.dashboard.push_central as mod
+from aipass.flow.apps.handlers import repo_root
+from aipass.flow.apps.handlers.repo_root import find_repo_root
+
 _MOD = "aipass.flow.apps.handlers.dashboard.push_central"
-
-
-def _import_mod():
-    import aipass.flow.apps.handlers.dashboard.push_central as mod
-
-    return mod
 
 
 # =============================================
@@ -48,15 +49,10 @@ class TestFindRepoRoot:
 
     def test_delegates_to_the_one_implementation(self):
         """The private copy is gone: this must BE the shared answer."""
-        mod = _import_mod()
-        from aipass.flow.apps.handlers import repo_root
-
         assert mod._find_repo_root() == repo_root.find_repo_root()
 
     def test_returns_dir_containing_registry(self, tmp_path):
         """Returns the directory containing AIPASS_REGISTRY.json."""
-        from aipass.flow.apps.handlers.repo_root import find_repo_root
-
         marker = tmp_path / "AIPASS_REGISTRY.json"
         marker.write_text("{}", encoding="utf-8")
         child = tmp_path / "a" / "b" / "c"
@@ -66,8 +62,6 @@ class TestFindRepoRoot:
 
     def test_finds_marker_in_immediate_parent(self, tmp_path):
         """Finds AIPASS_REGISTRY.json in the immediate parent directory."""
-        from aipass.flow.apps.handlers.repo_root import find_repo_root
-
         parent_dir = tmp_path / "parent"
         parent_dir.mkdir()
         (parent_dir / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -85,8 +79,6 @@ class TestFindRepoRoot:
         move when the caller's shell moves (so a writer cannot be steered into a
         tree nobody chose).
         """
-        from aipass.flow.apps.handlers import repo_root
-
         sub = tmp_path / "sub"
         sub.mkdir()
 
@@ -128,8 +120,6 @@ class TestTheBareWorldIsStatedNotInherited:
 
     def test_no_marker_means_source_root_and_a_logged_fallback(self, monkeypatch):
         """Marker absent → SOURCE_ROOT, said out loud, never the process cwd."""
-        from aipass.flow.apps.handlers import repo_root
-
         monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
         logged = []
         monkeypatch.setattr(
@@ -147,8 +137,6 @@ class TestTheBareWorldIsStatedNotInherited:
 
     def test_the_marker_denial_is_live(self, tmp_path, monkeypatch):
         """Control: a denial that never bites makes the test above vacuous."""
-        from aipass.flow.apps.handlers import repo_root
-
         marker = tmp_path / repo_root.CORE_REGISTRY
         marker.write_text("{}", encoding="utf-8")
         assert repo_root.find_repo_root(tmp_path) == tmp_path
@@ -156,7 +144,7 @@ class TestTheBareWorldIsStatedNotInherited:
         monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
         assert repo_root.find_repo_root(tmp_path) == repo_root.SOURCE_ROOT
 
-    def test_the_fallback_records_without_ever_raising(self, mock_json_handler):
+    def test_the_fallback_records_without_ever_raising(self, tmp_path, mock_json_handler):
         """Six callers reach _record_fallback at IMPORT time.
 
         A diagnostic write that fails in a bare world must not become the import
@@ -171,7 +159,6 @@ class TestTheBareWorldIsStatedNotInherited:
         seedgo's contract for [flow] the moment both shared one process
         (CI coverage leg, DPLAN-0325 pair 7).
         """
-        from aipass.flow.apps.handlers import repo_root
 
         def explode(*args, **kwargs):
             raise OSError("no writable tree")
@@ -184,7 +171,7 @@ class TestTheBareWorldIsStatedNotInherited:
         # _record_fallback that returned early - never touching the diagnostic
         # write at all - passed this test while proving nothing about the bare
         # world it exists for.
-        assert repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, Path("/nowhere")) is None
+        assert repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, tmp_path / "nowhere") is None
         assert mock_json_handler.called
 
 
@@ -198,7 +185,6 @@ class TestGetAllRegistryFiles:
 
     def test_returns_discovered_registry_files(self):
         """Returns registry filenames from discovered plan types."""
-        mod = _import_mod()
         mock_types = {
             "flow_plans": {"registry_file": "fplan_registry.json"},
             "dev_plans": {"registry_file": "dplan_registry.json"},
@@ -217,7 +203,6 @@ class TestGetAllRegistryFiles:
 
     def test_deduplicates_registry_files(self):
         """Does not duplicate registry filenames when multiple types share the same file."""
-        mod = _import_mod()
         mock_types = {
             "flow_plans": {"registry_file": "fplan_registry.json"},
             "flow_plans_v2": {"registry_file": "fplan_registry.json"},
@@ -232,7 +217,6 @@ class TestGetAllRegistryFiles:
 
     def test_falls_back_on_discovery_exception(self):
         """Falls back to REGISTRY_FILE.name when discover_plan_types raises."""
-        mod = _import_mod()
         with patch(
             "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
             side_effect=RuntimeError("boom"),
@@ -243,7 +227,6 @@ class TestGetAllRegistryFiles:
 
     def test_falls_back_when_no_registry_file_key(self):
         """Falls back to default when config dicts lack registry_file key."""
-        mod = _import_mod()
         mock_types = {
             "flow_plans": {"prefix": "FPLAN"},
             "dev_plans": {"prefix": "DPLAN"},
@@ -259,7 +242,6 @@ class TestGetAllRegistryFiles:
 
     def test_skips_none_registry_file(self):
         """Skips entries where registry_file is None."""
-        mod = _import_mod()
         mock_types = {
             "flow_plans": {"registry_file": "fplan_registry.json"},
             "special": {"registry_file": None},
@@ -283,7 +265,6 @@ class TestLoadRegistry:
 
     def test_merges_multiple_registries(self, tmp_path):
         """Merges plans from multiple registry files using composite keys."""
-        mod = _import_mod()
         fplan_reg = {
             "plans": {"1": {"subject": "fplan one", "file_path": "/p/FPLAN-0001_test.md"}},
             "next_number": 5,
@@ -311,7 +292,6 @@ class TestLoadRegistry:
 
     def test_handles_missing_registry(self, tmp_path):
         """Gracefully handles a missing registry file."""
-        mod = _import_mod()
         with (
             patch.object(mod, "FLOW_JSON_DIR", tmp_path),
             patch.object(mod, "_get_all_registry_files", return_value=["nonexistent_registry.json"]),
@@ -322,7 +302,6 @@ class TestLoadRegistry:
 
     def test_keeps_highest_next_number(self, tmp_path):
         """Keeps the highest next_number across registries."""
-        mod = _import_mod()
         reg_a = {"plans": {}, "next_number": 3}
         reg_b = {"plans": {}, "next_number": 50}
         reg_c = {"plans": {}, "next_number": 20}
@@ -343,7 +322,6 @@ class TestLoadRegistry:
 
     def test_handles_corrupt_registry_gracefully(self, tmp_path):
         """Skips a corrupt registry file and continues with others."""
-        mod = _import_mod()
         (tmp_path / "bad_registry.json").write_text("not json!", encoding="utf-8")
         good_reg = {
             "plans": {"1": {"subject": "good", "file_path": "/p/GOOD-0001_test.md"}},
@@ -366,7 +344,6 @@ class TestLoadRegistry:
 
     def test_uses_prefix_from_filename(self, tmp_path):
         """Extracts prefix from plan file_path filename."""
-        mod = _import_mod()
         reg = {
             "plans": {"7": {"subject": "test", "file_path": "/x/XPLAN-0007_test.md"}},
             "next_number": 8,
@@ -383,7 +360,6 @@ class TestLoadRegistry:
 
     def test_fallback_prefix_from_registry_filename(self, tmp_path):
         """Uses registry filename prefix when file_path has no recognizable prefix."""
-        mod = _import_mod()
         reg = {
             "plans": {"3": {"subject": "no prefix", "file_path": "/x/some_file.md"}},
             "next_number": 4,
@@ -401,7 +377,6 @@ class TestLoadRegistry:
 
     def test_empty_registry_plans(self, tmp_path):
         """Handles registry file with empty plans dict."""
-        mod = _import_mod()
         reg = {"plans": {}, "next_number": 1}
         (tmp_path / "fplan_registry.json").write_text(json.dumps(reg), encoding="utf-8")
 
@@ -416,7 +391,6 @@ class TestLoadRegistry:
 
     def test_plan_with_empty_file_path(self, tmp_path):
         """Handles plan with empty file_path string."""
-        mod = _import_mod()
         reg = {
             "plans": {"1": {"subject": "no path", "file_path": ""}},
             "next_number": 2,
@@ -443,7 +417,6 @@ class TestExtractPlansByBranch:
 
     def test_groups_plans_by_branch(self):
         """Groups plans into per-branch sections by location path name."""
-        mod = _import_mod()
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -470,7 +443,6 @@ class TestExtractPlansByBranch:
 
     def test_extracts_active_and_closed(self):
         """Separates active and closed plans within a branch."""
-        mod = _import_mod()
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -501,7 +473,6 @@ class TestExtractPlansByBranch:
 
     def test_sorts_active_newest_first(self):
         """Active plans sorted by created date, newest first."""
-        mod = _import_mod()
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -527,7 +498,6 @@ class TestExtractPlansByBranch:
 
     def test_closed_limited_to_5(self):
         """Recently closed plans limited to 5 per branch."""
-        mod = _import_mod()
         plans = {}
         for i in range(1, 9):
             plans[f"FPLAN-{str(i).zfill(4)}"] = {
@@ -543,19 +513,16 @@ class TestExtractPlansByBranch:
 
     def test_empty_registry(self):
         """Returns empty dict for empty registry."""
-        mod = _import_mod()
         result = mod._extract_plans_by_branch({"plans": {}})
         assert result == {}
 
     def test_missing_plans_key(self):
         """Returns empty dict when registry has no plans key."""
-        mod = _import_mod()
         result = mod._extract_plans_by_branch({})
         assert result == {}
 
     def test_skips_plans_without_location(self):
         """Plans with empty location are skipped."""
-        mod = _import_mod()
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -572,7 +539,6 @@ class TestExtractPlansByBranch:
 
     def test_branch_section_structure(self):
         """Each branch section has required keys."""
-        mod = _import_mod()
         registry = {
             "plans": {
                 "FPLAN-0001": {
@@ -599,7 +565,6 @@ class TestExtractPlansByBranch:
 
     def test_plan_entries_have_branch_field(self):
         """Each plan entry includes the branch field."""
-        mod = _import_mod()
         registry = {
             "plans": {
                 "DPLAN-0001": {
@@ -625,7 +590,6 @@ class TestLoadCentral:
 
     def test_returns_empty_structure_when_file_missing(self, tmp_path):
         """Returns empty structure when PLANS.central.json does not exist."""
-        mod = _import_mod()
         with patch.object(mod, "CENTRAL_FILE", tmp_path / "nonexistent.json"):
             result = mod._load_central()
 
@@ -637,7 +601,6 @@ class TestLoadCentral:
 
     def test_loads_existing_central_file(self, tmp_path):
         """Loads and returns existing PLANS.central.json data."""
-        mod = _import_mod()
         central_data = {
             "generated_at": "2026-04-20T00:00:00Z",
             "branches": {"flow": {"branch_name": "FLOW"}},
@@ -655,7 +618,6 @@ class TestLoadCentral:
 
     def test_returns_empty_structure_on_corrupt_json(self, tmp_path):
         """Returns empty structure when PLANS.central.json contains invalid JSON."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         central_file.write_text("not valid json!!!", encoding="utf-8")
 
@@ -667,7 +629,6 @@ class TestLoadCentral:
 
     def test_returns_empty_structure_on_read_exception(self, tmp_path):
         """Returns empty structure when file read raises an exception."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         central_file.write_text("{}", encoding="utf-8")
 
@@ -690,7 +651,6 @@ class TestCalculateGlobalStatistics:
 
     def test_sums_across_branches(self):
         """Sums active and closed counts across all branches."""
-        mod = _import_mod()
         central_data = {
             "branches": {
                 "flow": {"statistics": {"active_count": 3, "total_closed": 5}},
@@ -705,7 +665,6 @@ class TestCalculateGlobalStatistics:
 
     def test_empty_branches(self):
         """Returns zeros for empty branches dict."""
-        mod = _import_mod()
         result = mod._calculate_global_statistics({"branches": {}})
         assert result["total_active"] == 0
         assert result["total_closed"] == 0
@@ -713,7 +672,6 @@ class TestCalculateGlobalStatistics:
 
     def test_no_branches_key(self):
         """Returns zeros when branches key is missing."""
-        mod = _import_mod()
         result = mod._calculate_global_statistics({})
         assert result["total_active"] == 0
         assert result["total_closed"] == 0
@@ -721,7 +679,6 @@ class TestCalculateGlobalStatistics:
 
     def test_branch_missing_statistics(self):
         """Handles branches without statistics key."""
-        mod = _import_mod()
         central_data = {
             "branches": {
                 "flow": {"statistics": {"active_count": 3, "total_closed": 5}},
@@ -735,7 +692,6 @@ class TestCalculateGlobalStatistics:
 
     def test_single_branch(self):
         """Handles a single branch correctly."""
-        mod = _import_mod()
         central_data = {
             "branches": {
                 "flow": {"statistics": {"active_count": 7, "total_closed": 12}},
@@ -757,7 +713,6 @@ class TestPushToPlansCentral:
 
     def test_success_returns_true(self, tmp_path, mock_json_handler):
         """Returns True on successful push."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 
@@ -797,7 +752,6 @@ class TestPushToPlansCentral:
 
     def test_writes_central_file(self, tmp_path):
         """Writes PLANS.central.json with correct structure."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 
@@ -827,7 +781,6 @@ class TestPushToPlansCentral:
 
     def test_writes_multiple_branches(self, tmp_path):
         """Writes per-branch sections from registry data."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 
@@ -871,7 +824,6 @@ class TestPushToPlansCentral:
 
     def test_creates_ai_central_dir(self, tmp_path):
         """Creates .ai_central directory if it does not exist."""
-        mod = _import_mod()
         ai_central = tmp_path / "new_ai_central"
         central_file = ai_central / "PLANS.central.json"
 
@@ -896,7 +848,6 @@ class TestPushToPlansCentral:
 
     def test_returns_false_on_exception(self, tmp_path):
         """Returns False when an exception occurs."""
-        mod = _import_mod()
         with (
             patch.object(mod, "AI_CENTRAL_DIR", tmp_path / ".ai_central"),
             patch.object(mod, "_load_registry", side_effect=RuntimeError("registry exploded")),
@@ -907,7 +858,6 @@ class TestPushToPlansCentral:
 
     def test_branch_section_has_correct_statistics(self, tmp_path):
         """Branch section statistics reflect actual plan counts."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 
@@ -949,7 +899,6 @@ class TestPushToPlansCentral:
 
     def test_global_statistics_updated(self, tmp_path):
         """Global statistics are recalculated from all branch sections."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 
@@ -995,7 +944,6 @@ class TestPushToPlansCentral:
 
     def test_log_operation_contains_expected_fields(self, tmp_path, mock_json_handler):
         """Log operation includes active_plans and branches_reporting."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 
@@ -1032,7 +980,6 @@ class TestPushToPlansCentral:
 
     def test_non_flow_branch_plans_in_central(self, tmp_path):
         """Regression: non-flow branch plans must appear in PLANS.central.json."""
-        mod = _import_mod()
         central_file = tmp_path / "PLANS.central.json"
         ai_central = tmp_path / ".ai_central"
 

@@ -3,18 +3,13 @@
 # Description: Tests for flow's entry point routing, help and introspection
 # Version: 1.0.0
 # Created: 2026-09-04
-# Modified: 2026-09-04
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for flow's CLI entry point.
+"""Tests for apps/flow.py, the CLI entry point."""
 
-Covers the four things the entry point promises: no-args shows introspection,
---help shows help without executing anything, a subcommand's --help never runs
-that subcommand, and an unknown command fails loudly with a non-zero code.
-
-The exit-code assertions are deliberate. A refusal that exits 0 is a refusal the
-shell reads as success, so the refusal path is pinned by test rather than assumed.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/flow.py parses and imports
 
 import sys
 

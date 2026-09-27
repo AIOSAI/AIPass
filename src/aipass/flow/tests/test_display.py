@@ -1,13 +1,25 @@
-"""Tests for plan display handler -- formatting and display functions."""
+# =================== AIPass ====================
+# Name: test_display.py
+# Description: Tests for apps/handlers/plan/display.py -- plan display formatting
+# Version: 1.0.0
+# Created: 2026-03-29
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/plan/display.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that display.py parses and imports
+# seedgo: no-test-needed(documentation) — the module's per-function docstrings
+
+import aipass.flow.apps.handlers.plan.display as mod
 
 
 # ─── Helpers ─────────────────────────────────────────────
 
 
 def _import(name: str):
-    """Import a function from display module inside test scope."""
-    import aipass.flow.apps.handlers.plan.display as mod
-
+    """Return a function from the display module."""
     return getattr(mod, name)
 
 
@@ -92,13 +104,13 @@ class TestDisplayPlanResult:
 
 
 class TestFormatPlanDeletionHeader:
-    def test_basic_header(self):
+    def test_basic_header(self, tmp_path):
         fn = _import("format_plan_deletion_header")
         plan_info = {
             "relative_path": "flow",
             "subject": "Test subject",
             "status": "open",
-            "file_path": "/tmp/FPLAN-0001.md",
+            "file_path": str(tmp_path / "FPLAN-0001.md"),
         }
         result = fn("0001", plan_info)
         assert "Close FPLAN-0001" in result
@@ -198,13 +210,13 @@ class TestFormatDeleteUsageError:
 
 
 class TestFormatRestoreHeader:
-    def test_basic_header(self):
+    def test_basic_header(self, tmp_path):
         fn = _import("format_restore_header")
         plan_info = {
             "relative_path": "flow",
             "subject": "Restore me",
             "status": "closed",
-            "file_path": "/tmp/FPLAN-0001.md",
+            "file_path": str(tmp_path / "FPLAN-0001.md"),
             "closed": "2026-03-19",
             "closed_reason": "completed",
         }
@@ -233,11 +245,12 @@ class TestFormatRestoreHeader:
 
 
 class TestFormatRestoreSuccess:
-    def test_with_location(self):
+    def test_with_location(self, tmp_path):
         fn = _import("format_restore_success")
-        result = fn("0001", restored_location="/home/user/plans")
+        restored = str(tmp_path / "plans")
+        result = fn("0001", restored_location=restored)
         assert "FPLAN-0001 restored" in result
-        assert "/home/user/plans" in result
+        assert restored in result
 
     def test_without_location(self):
         fn = _import("format_restore_success")

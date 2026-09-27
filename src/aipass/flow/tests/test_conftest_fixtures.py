@@ -3,37 +3,31 @@
 # Description: The autouse fixtures must actually reach what they claim to mock
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""A mock that reaches nothing passes every test that does not assert on it.
+"""Tests for tests/conftest.py's mock_logger and pre-import fixtures."""
 
-``mock_logger`` patched ``aipass.prax.apps.modules.logger.system_logger`` — the
-SOURCE attribute — while every flow module does
-``from ... import system_logger as logger`` at import time and holds its own
-binding. Patching upstream of a binding already taken reaches nothing, and it
-reached nothing for as long as the fixture existed. Nothing failed, because a
-mock nobody asserts on is indistinguishable from a mock that works.
-
-@seedgo published the technique next to the standard after @prax ruled
-(``drone @seedgo standard imports``). @spawn's note is the one worth keeping:
-the correct technique already existed in their tree at one call site, written
-before any of this came up — it just was not in the shared fixture. The right
-answer existed in the fleet and nobody had written it down.
-
-These tests are the writing-down. They assert the fixture's REACH, not its
-existence, so the next upstream/downstream mix-up is a red test rather than a
-silent hole.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that conftest.py and load_registry parse and import
 
 import sys
 from pathlib import Path
 
 import pytest
 
+import aipass.flow.apps as flow_apps
 import aipass.flow.apps.handlers.registry.load_registry as load_registry_module
 
 
+# WHY THIS CLASS EXISTS: mock_logger's fixture patches
+# aipass.prax.apps.modules.logger.system_logger — the SOURCE attribute — while
+# every flow module does `from ... import system_logger as logger` at import
+# time and holds its own binding. Patching upstream of a binding already taken
+# reaches nothing, and it reached nothing for as long as the fixture existed,
+# because a mock nobody asserts on is indistinguishable from a mock that
+# works. These tests assert the fixture's REACH, not its existence, so the
+# next upstream/downstream mix-up is a red test rather than a silent hole.
 class TestMockLoggerReachesTheConsumersBinding:
     """The fixture must replace what flow modules actually call."""
 
@@ -113,8 +107,6 @@ class TestThePreImportListIsComplete:
     def _module_level_repo_root_callers() -> set[str]:
         """Modules whose repo-root walk is evaluated when they load."""
         import ast
-
-        import aipass.flow.apps as flow_apps
 
         root = Path(flow_apps.__file__).parent
         callers = set()

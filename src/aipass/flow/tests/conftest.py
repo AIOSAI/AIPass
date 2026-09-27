@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared fixtures for flow tests - log redirect, console pin, command-state reset
+# Version: 1.1.0
+# Created: 2026-03-05
+# Modified: 2026-09-27
+# =============================================
+
 """Shared pytest fixtures for flow tests"""
 
 import os
@@ -23,6 +31,7 @@ import aipass.prax.apps.modules.logger  # noqa: F401
 import aipass.flow.apps.handlers.json.json_handler  # noqa: F401
 from aipass.flow.apps.handlers.json import json_handler as json_handler_module
 import aipass.cli.apps.modules  # noqa: F401
+from aipass.cli.apps.modules import display
 
 # Pre-import every module that calls find_repo_root() at MODULE level, for a
 # different reason: to move an IMPORT-TIME diagnostic out of every test window.
@@ -50,6 +59,21 @@ import aipass.flow.apps.handlers.plan.close_helpers  # noqa: F401
 import aipass.flow.apps.handlers.plan.restore_ops  # noqa: F401
 import aipass.flow.apps.modules.aggregate_central  # noqa: F401
 import aipass.flow.apps.modules.registry_monitor  # noqa: F401
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 def pytest_configure(config):
@@ -254,20 +278,6 @@ def mock_registry(tmp_path):
         },
     }
     registry_file = tmp_path / "fplan_registry.json"
-    registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-    return registry_file, registry
-
-
-@pytest.fixture
-def mock_template_registry(tmp_path):
-    """Create a mock template registry."""
-    registry = {
-        "types": {
-            "flow_plans": {"prefix": "FPLAN", "shorthand": "fplan", "created": "2026-03-07"},
-            "dev_plans": {"prefix": "DPLAN", "shorthand": "dplan", "created": "2026-03-07"},
-        }
-    }
-    registry_file = tmp_path / "template_registry.json"
     registry_file.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_file, registry
 

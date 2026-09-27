@@ -3,10 +3,13 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that mbank/process.py parses and imports
 
 import json
 import os
@@ -14,6 +17,18 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+import aipass.flow.apps.handlers.mbank.process as proc
+from aipass.flow.apps.handlers.mbank.process import (
+    archive_plan,
+    cleanup_temp_files,
+    get_closed_plans,
+    is_template_content,
+    load_flow_registry,
+    process_closed_plans,
+    save_flow_registry,
+    verify_and_heal_orphaned_plans,
+)
 
 _PROC = "aipass.flow.apps.handlers.mbank.process"
 
@@ -59,7 +74,6 @@ class TestIsTemplateContent:
 
     def test_default_template_detected(self):
         """Content with 3+ default bracket placeholders is a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Plan\n"
@@ -71,7 +85,6 @@ class TestIsTemplateContent:
 
     def test_master_template_detected(self):
         """Content with 3+ master bracket placeholders is a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Master Plan\n[What this phase accomplishes]\n[What the agent will build]\n[Files/outputs expected]\n"
@@ -80,7 +93,6 @@ class TestIsTemplateContent:
 
     def test_proposal_template_detected(self):
         """Content with 3+ proposal bracket placeholders is a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Proposal\n"
@@ -93,7 +105,6 @@ class TestIsTemplateContent:
 
     def test_real_content_not_template(self):
         """Content without bracket placeholders is not a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "# Implement OAuth flow\n"
@@ -106,7 +117,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_execution_log_overrides(self):
         """Checked execution log items signal real work, even with placeholders."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -118,7 +128,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_agent_completed_overrides(self):
         """Checked 'Agent completed' item signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -130,7 +139,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_seedgo_overrides(self):
         """Checked 'Seedgo checklist' item signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -142,7 +150,6 @@ class TestIsTemplateContent:
 
     def test_user_checked_all_goals_overrides(self):
         """Checked 'All goals achieved' item signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -154,7 +161,6 @@ class TestIsTemplateContent:
 
     def test_notes_section_with_real_content_overrides(self):
         """Real content in Notes section means the plan has been worked on."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -167,7 +173,6 @@ class TestIsTemplateContent:
 
     def test_notes_section_with_only_placeholder_still_template(self):
         """Notes section containing only the template placeholder does not override."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -180,7 +185,6 @@ class TestIsTemplateContent:
 
     def test_execution_log_with_many_lines_overrides(self):
         """More than 8 lines in Execution Log section signals real work."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         exec_lines = "\n".join(f"- Step {i}: did something" for i in range(10))
         content = (
@@ -194,7 +198,6 @@ class TestIsTemplateContent:
 
     def test_two_placeholders_not_enough(self):
         """Fewer than 3 bracket placeholders is not a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -205,13 +208,11 @@ class TestIsTemplateContent:
 
     def test_empty_content_not_template(self):
         """Empty content is not a template."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         assert is_template_content("") is False
 
     def test_mixed_placeholder_types_below_threshold(self):
         """Placeholders from different template types don't combine to reach threshold."""
-        from aipass.flow.apps.handlers.mbank.process import is_template_content
 
         content = (
             "[What do you want to achieve? Specific end state.]\n"
@@ -237,8 +238,6 @@ class TestArchivePlan:
         processed_dir = tmp_path / "processed"
 
         with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is True
@@ -254,8 +253,6 @@ class TestArchivePlan:
         (processed_dir / "FPLAN-0200.md").write_text("already there", encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is True
@@ -271,8 +268,6 @@ class TestArchivePlan:
         processed_dir = tmp_path / "deep" / "nested" / "processed"
 
         with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is True
@@ -289,8 +284,6 @@ class TestArchivePlan:
             patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
             patch("aipass.flow.apps.handlers.mbank.process.shutil.move", side_effect=OSError("disk full")),
         ):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is False
@@ -311,8 +304,6 @@ class TestArchivePlan:
             patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
             patch("aipass.flow.apps.handlers.mbank.process.shutil.move", side_effect=fake_move),
         ):
-            from aipass.flow.apps.handlers.mbank.process import archive_plan
-
             result = archive_plan(plan_file)
 
         assert result is False
@@ -332,8 +323,6 @@ class TestLoadFlowRegistryAdditional:
         (tmp_path / "custom_reg.json").write_text(json.dumps(data), encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            from aipass.flow.apps.handlers.mbank.process import load_flow_registry
-
             result = load_flow_registry(registry_file="custom_reg.json")
 
         assert result["next_number"] == 2
@@ -356,8 +345,6 @@ class TestSaveFlowRegistryAdditional:
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
         ):
-            from aipass.flow.apps.handlers.mbank.process import save_flow_registry
-
             save_flow_registry(data)
 
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
@@ -371,7 +358,6 @@ class TestSaveFlowRegistryAdditional:
         It used to give up on the first denial, so the plan was archived but
         the registry never learned it was processed.
         """
-        from aipass.flow.apps.handlers.mbank.process import save_flow_registry
 
         reg_file = tmp_path / "fplan_registry.json"
         lock = reg_file.with_suffix(".lock")
@@ -395,7 +381,6 @@ class TestSaveFlowRegistryAdditional:
         denial in the message after exactly the budget; the helper's own raise
         is a PermissionError chained to the last denial.
         """
-        import aipass.flow.apps.handlers.mbank.process as proc
 
         reg_file = tmp_path / "fplan_registry.json"
         before = {"next_number": 2, "plans": {"1": {"status": "closed"}}}
@@ -452,8 +437,6 @@ class TestGetClosedPlansAdditional:
                 side_effect=[Exception("corrupt"), {"plans": {}}],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         # Should not raise, returns empty because the good registry has no closed plans
@@ -487,8 +470,6 @@ class TestGetClosedPlansAdditional:
                 return_value=registry,
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         assert len(result) == 1
@@ -508,8 +489,6 @@ class TestCleanupTempFilesAdditional:
         with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", tmp_path):
             # Make .exists() return True but .glob() raise
             with patch.object(Path, "glob", side_effect=PermissionError("no access")):
-                from aipass.flow.apps.handlers.mbank.process import cleanup_temp_files
-
                 result = cleanup_temp_files()
 
         assert "scan_error" in result
@@ -548,8 +527,6 @@ class TestVerifyAndHealOrphanedPlansAdditional:
             ),
             patch.object(Path, "rename", side_effect=OSError("cross-device")),
         ):
-            from aipass.flow.apps.handlers.mbank.process import verify_and_heal_orphaned_plans
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 1
@@ -568,8 +545,6 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 side_effect=Exception("corrupt file"),
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import verify_and_heal_orphaned_plans
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 0
@@ -603,8 +578,6 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 return_value=["fplan_registry.json", "dplan_registry.json"],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import verify_and_heal_orphaned_plans
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 2
@@ -653,8 +626,6 @@ class TestProcessClosedPlansAdditional:
                 tmp_path / "fplan_registry.json",
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True
@@ -695,8 +666,6 @@ class TestProcessClosedPlansAdditional:
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             process_closed_plans()
 
         # Registry save was called with cleanup_completed=False
@@ -737,8 +706,6 @@ class TestProcessClosedPlansAdditional:
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             process_closed_plans()
 
         mock_json_handler.assert_called_once_with(
@@ -794,8 +761,6 @@ class TestProcessClosedPlansAdditional:
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", tmp_path / "fplan_registry.json"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True

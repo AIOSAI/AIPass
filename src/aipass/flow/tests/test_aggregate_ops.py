@@ -1,12 +1,25 @@
-"""Tests for aggregate_ops -- helper functions and aggregation implementation."""
+# =================== AIPass ====================
+# Name: test_aggregate_ops.py
+# Description: Tests for aggregate_ops -- registry, central file, and aggregation helpers
+# Version: 1.0.0
+# Created: 2026-03-29
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/plan/aggregate_ops.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import json
 import logging
 import os
-
-import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+
+import aipass.flow.apps.handlers.plan.aggregate_ops as mod
 
 
 # ─── Patch targets ───────────────────────────────────────
@@ -48,9 +61,7 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None):
 
 
 def _import(name: str):
-    """Import a function from aggregate_ops inside each test."""
-    import aipass.flow.apps.handlers.plan.aggregate_ops as mod
-
+    """Return a function from aggregate_ops for a test to call directly."""
     return getattr(mod, name)
 
 
@@ -191,8 +202,6 @@ class TestSaveBranchRegistry:
         """A denial past the budget: exactly the budget of attempts, the caller
         returns False and logs the chained PermissionError, nothing is written.
         """
-        import aipass.flow.apps.handlers.plan.aggregate_ops as mod
-
         reg_file = tmp_path / "registry.json"
         before = {"plans": {}, "next_number": 1}
         reg_file.write_text(json.dumps(before), encoding="utf-8")
@@ -478,8 +487,6 @@ class TestSaveCentral:
         """A denial past the budget: exactly the budget of attempts, save_central
         returns False and logs the denial, and the old file is untouched.
         """
-        import aipass.flow.apps.handlers.plan.aggregate_ops as mod
-
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
         central_file = central_dir / "PLANS.central.json"
@@ -635,13 +642,13 @@ class TestAggregateCentralImpl:
             result = aggregate_central_impl(heal=True, central_file=central_file, central_dir=central_dir)
         assert result is False
 
-    def test_returns_false_on_exception(self):
+    def test_returns_false_on_exception(self, tmp_path):
         aggregate_central_impl = _import("aggregate_central_impl")
         with patch(f"{_MOD}.load_central", side_effect=RuntimeError("boom")):
             result = aggregate_central_impl(
                 heal=True,
-                central_file=Path("/fake/PLANS.central.json"),
-                central_dir=Path("/fake"),
+                central_file=tmp_path / "PLANS.central.json",
+                central_dir=tmp_path,
             )
         assert result is False
 

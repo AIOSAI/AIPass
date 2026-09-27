@@ -3,13 +3,19 @@
 # Description: Unit tests for apps/modules/template_manager.py
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the template_manager module -- prefix suggestion, command routing."""
+"""Tests for apps/modules/template_manager.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that template_manager.py parses and imports
+# seedgo: no-test-needed(constant) — print_introspection's and print_help's literal banner text
 
 import pytest
 from unittest.mock import patch
+
+from aipass.flow.apps.modules.template_manager import _suggest_prefix, handle_command
 
 # ---------------------------------------------------------------------------
 # Module-level patch targets (patch where used, not where defined)
@@ -28,38 +34,26 @@ class TestSuggestPrefix:
 
     def test_testing_gives_tplan(self):
         """'testing' -> 'TPLAN'."""
-        from aipass.flow.apps.modules.template_manager import _suggest_prefix
-
         assert _suggest_prefix("testing") == "TPLAN"
 
     def test_skills_plans_gives_splan(self):
         """'skills_plans' -> 'SPLAN' (first word before underscore)."""
-        from aipass.flow.apps.modules.template_manager import _suggest_prefix
-
         assert _suggest_prefix("skills_plans") == "SPLAN"
 
     def test_dev_plans_gives_dplan(self):
         """'dev_plans' -> 'DPLAN'."""
-        from aipass.flow.apps.modules.template_manager import _suggest_prefix
-
         assert _suggest_prefix("dev_plans") == "DPLAN"
 
     def test_empty_string_returns_xplan(self):
         """Empty string edge case should return 'XPLAN' fallback."""
-        from aipass.flow.apps.modules.template_manager import _suggest_prefix
-
         assert _suggest_prefix("") == "XPLAN"
 
     def test_single_char_dir(self):
         """Single character directory name should work."""
-        from aipass.flow.apps.modules.template_manager import _suggest_prefix
-
         assert _suggest_prefix("a") == "APLAN"
 
     def test_uppercase_input(self):
         """Uppercase input first letter stays uppercase."""
-        from aipass.flow.apps.modules.template_manager import _suggest_prefix
-
         assert _suggest_prefix("Flow") == "FPLAN"
 
 
@@ -74,8 +68,6 @@ class TestHandleCommandRouting:
     def test_no_args_calls_introspection(self):
         """templates with no args shows introspection."""
         with patch(f"{_MOD}.print_introspection") as mock_intro:
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("templates", [])
 
             mock_intro.assert_called_once()
@@ -83,8 +75,6 @@ class TestHandleCommandRouting:
 
     def test_unknown_command_no_args_returns_false(self):
         """Non-template commands with no args are not claimed."""
-        from aipass.flow.apps.modules.template_manager import handle_command
-
         result = handle_command("post", [])
         assert result is False
 
@@ -99,8 +89,6 @@ class TestHandleCommandRouting:
         remove_type() with '--help' as the type name.
         """
         with patch(f"{_MOD}.print_help") as mock_help:
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command(verb, [help_flag])
 
             mock_help.assert_called_once()
@@ -113,8 +101,6 @@ class TestHandleCommandRouting:
         help for every command in the fleet and stop routing dead.
         """
         with patch(f"{_MOD}.print_help") as mock_help:
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             assert handle_command("frobnicate", ["--help"]) is False
             mock_help.assert_not_called()
 
@@ -126,8 +112,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.load_registry", return_value=mock_registry, autospec=True) as mock_lr,
             patch(f"{_MOD}._display_registered_types") as mock_display,
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("templates", [])
 
             mock_lr.assert_called_once()
@@ -139,8 +123,6 @@ class TestHandleCommandRouting:
     def test_register_no_args_shows_error(self):
         """'register' with insufficient args should show usage error."""
         with patch(f"{_MOD}.error") as mock_error, patch(f"{_MOD}.console"):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             # Note: empty args triggers introspection gate first,
             # so we pass one arg to get past introspection but still < 2
             result = handle_command("register", ["testing"])
@@ -157,8 +139,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             patch(f"{_MOD}.json_handler", spec=True),
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("register", ["testing", "TPLAN"])
 
             mock_add.assert_called_once_with("testing", "TPLAN")
@@ -173,8 +153,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             patch(f"{_MOD}.json_handler", spec=True),
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("register", ["testing", "TPLAN"])
 
             mock_add.assert_called_once_with("testing", "TPLAN")
@@ -185,8 +163,6 @@ class TestHandleCommandRouting:
     def test_register_invalid_prefix_not_uppercase(self):
         """Prefix that is not uppercase should be rejected."""
         with patch(f"{_MOD}.error") as mock_error, patch(f"{_MOD}.console"):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("register", ["testing", "bad"])
 
             mock_error.assert_called_once()
@@ -196,8 +172,6 @@ class TestHandleCommandRouting:
     def test_register_invalid_prefix_no_plan_suffix(self):
         """Prefix that doesn't end with PLAN should be rejected."""
         with patch(f"{_MOD}.error") as mock_error, patch(f"{_MOD}.console"):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("register", ["testing", "TFIX"])
 
             mock_error.assert_called_once()
@@ -209,8 +183,6 @@ class TestHandleCommandRouting:
     def test_unregister_no_args_shows_error(self):
         """'unregister' with no dir arg should show usage error."""
         with patch(f"{_MOD}.error") as mock_error:
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("unregister", [])
 
             mock_error.assert_called_once()
@@ -224,8 +196,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             patch(f"{_MOD}.json_handler", spec=True),
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("unregister", ["testing"])
 
             mock_rm.assert_called_once_with("testing")
@@ -240,8 +210,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             patch(f"{_MOD}.json_handler", spec=True),
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("unregister", ["testing"])
 
             mock_rm.assert_called_once_with("testing")
@@ -258,8 +226,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console") as mock_console,
             patch(f"{_MOD}.json_handler", spec=True),
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("scan", [])
 
             mock_scan.assert_called_once()
@@ -281,8 +247,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console") as mock_console,
             patch(f"{_MOD}.json_handler", spec=True),
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("scan", [])
 
             mock_scan.assert_called_once()
@@ -298,8 +262,6 @@ class TestHandleCommandRouting:
 
     def test_unknown_command_returns_false(self):
         """Unrecognized command should return False."""
-        from aipass.flow.apps.modules.template_manager import handle_command
-
         result = handle_command("frobnicate", ["something"])
 
         assert result is False
@@ -313,8 +275,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}._display_registered_types"),
             patch(f"{_MOD}.json_handler", spec=True) as mock_jh,
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("templates", [])
 
             assert result is True  # Command was handled
@@ -330,8 +290,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             patch(f"{_MOD}.json_handler", spec=True) as mock_jh,
         ):
-            from aipass.flow.apps.modules.template_manager import handle_command
-
             result = handle_command("scan", [])
 
             assert result is True  # Command was handled

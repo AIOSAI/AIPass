@@ -3,20 +3,14 @@
 # Description: Tests for flow.py CLI entry point
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for Flow CLI entry point (apps/flow.py)
+"""Tests for apps/flow.py."""
 
-Covers:
-- discover_modules() — module auto-discovery from modules/ directory
-- route_command() — command routing to modules
-- main() / _main_impl() — CLI entry point, argument parsing, dispatch
-- print_introspection() — module listing (no-args output)
-- print_help() — full help display
-- print_module_help() — per-module help display
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that flow.py parses and imports
+# seedgo: no-test-needed(stdlib) — the `if __name__ == "__main__":` guard's sys.exit() and os._exit() calls
 
 import sys
 from pathlib import Path
@@ -24,6 +18,15 @@ from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from aipass.flow.apps.flow import (
+    discover_modules,
+    main,
+    print_help,
+    print_introspection,
+    print_module_help,
+    route_command,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,8 +76,6 @@ class TestDiscoverModules:
 
     def test_empty_when_modules_dir_missing(self, tmp_path: Path) -> None:
         """Returns empty list when modules/ directory does not exist."""
-        from aipass.flow.apps.flow import discover_modules
-
         fake_dir = tmp_path / "nonexistent"
         with patch(f"{_FLOW}.MODULES_DIR", fake_dir):
             result = discover_modules()
@@ -82,8 +83,6 @@ class TestDiscoverModules:
 
     def test_discovers_module_with_handle_command(self, tmp_path: Path) -> None:
         """Discovers .py files that expose handle_command()."""
-        from aipass.flow.apps.flow import discover_modules
-
         # Create a fake .py file in the modules dir
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
@@ -102,8 +101,6 @@ class TestDiscoverModules:
 
     def test_skips_module_without_handle_command(self, tmp_path: Path) -> None:
         """Skips modules that lack handle_command()."""
-        from aipass.flow.apps.flow import discover_modules
-
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "no_handle.py").write_text("# stub", encoding="utf-8")
@@ -120,8 +117,6 @@ class TestDiscoverModules:
 
     def test_skips_underscore_files(self, tmp_path: Path) -> None:
         """Ignores files starting with underscore (e.g., __init__.py)."""
-        from aipass.flow.apps.flow import discover_modules
-
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "__init__.py").write_text("# init", encoding="utf-8")
@@ -140,8 +135,6 @@ class TestDiscoverModules:
 
     def test_handles_import_error_gracefully(self, tmp_path: Path) -> None:
         """Logs error and continues when a module fails to import."""
-        from aipass.flow.apps.flow import discover_modules
-
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "bad_mod.py").write_text("# broken", encoding="utf-8")
@@ -159,8 +152,6 @@ class TestDiscoverModules:
 
     def test_discovers_multiple_modules(self, tmp_path: Path) -> None:
         """Discovers all valid modules in the directory."""
-        from aipass.flow.apps.flow import discover_modules
-
         modules_dir = tmp_path / "modules"
         modules_dir.mkdir()
         (modules_dir / "alpha.py").write_text("# stub", encoding="utf-8")
@@ -194,8 +185,6 @@ class TestRouteCommand:
 
     def test_routes_to_handling_module(self) -> None:
         """Returns True when a module handles the command."""
-        from aipass.flow.apps.flow import route_command
-
         mod = _make_handling_module("create_plan")
         result = route_command("create", [".", "subject"], [mod])
 
@@ -204,8 +193,6 @@ class TestRouteCommand:
 
     def test_returns_false_when_no_module_handles(self) -> None:
         """Returns False when no module claims the command."""
-        from aipass.flow.apps.flow import route_command
-
         mod = _make_module("create_plan")  # handle_command returns False
         result = route_command("unknown", [], [mod])
 
@@ -213,8 +200,6 @@ class TestRouteCommand:
 
     def test_handles_broken_pipe_error(self) -> None:
         """Catches BrokenPipeError and returns True."""
-        from aipass.flow.apps.flow import route_command
-
         mod = _make_module("list_plans")
         mod.handle_command.side_effect = BrokenPipeError  # type: ignore[union-attr]
 
@@ -223,8 +208,6 @@ class TestRouteCommand:
 
     def test_handles_generic_exception(self) -> None:
         """Catches generic exceptions, logs, and continues to next module."""
-        from aipass.flow.apps.flow import route_command
-
         bad_mod = _make_module("bad")
         bad_mod.handle_command.side_effect = RuntimeError("kaboom")  # type: ignore[union-attr]
 
@@ -236,15 +219,11 @@ class TestRouteCommand:
 
     def test_returns_false_on_empty_modules(self) -> None:
         """Returns False when modules list is empty."""
-        from aipass.flow.apps.flow import route_command
-
         result = route_command("anything", [], [])
         assert result is False
 
     def test_stops_routing_after_first_handler(self) -> None:
         """Stops after the first module claims the command."""
-        from aipass.flow.apps.flow import route_command
-
         mod_a = _make_handling_module("first")
         mod_b = _make_module("second")
 
@@ -254,8 +233,6 @@ class TestRouteCommand:
 
     def test_all_modules_fail_with_exceptions(self) -> None:
         """Returns False when every module raises an exception."""
-        from aipass.flow.apps.flow import route_command
-
         mod = _make_module("failing")
         mod.handle_command.side_effect = ValueError("nope")  # type: ignore[union-attr]
 
@@ -273,8 +250,6 @@ class TestMain:
 
     def test_returns_1_when_no_modules(self) -> None:
         """Returns 1 and prints error when no modules discovered."""
-        from aipass.flow.apps.flow import main
-
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[]),
             patch.object(sys, "argv", ["flow"]),
@@ -284,8 +259,6 @@ class TestMain:
 
     def test_introspection_on_no_args(self) -> None:
         """Shows introspection when called with no arguments."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")
 
         with (
@@ -300,8 +273,6 @@ class TestMain:
 
     def test_version_long_flag(self) -> None:
         """--version prints version and returns 0."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")
 
         with (
@@ -313,8 +284,6 @@ class TestMain:
 
     def test_version_short_flag(self) -> None:
         """-V prints version and returns 0."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")
 
         with (
@@ -326,8 +295,6 @@ class TestMain:
 
     def test_help_long_flag(self) -> None:
         """--help shows help and returns 0."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")
 
         with (
@@ -342,8 +309,6 @@ class TestMain:
 
     def test_help_short_flag(self) -> None:
         """-h shows help and returns 0."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")
 
         with (
@@ -358,8 +323,6 @@ class TestMain:
 
     def test_help_word(self) -> None:
         """'help' word shows help and returns 0."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")
 
         with (
@@ -374,8 +337,6 @@ class TestMain:
 
     def test_routes_known_command(self) -> None:
         """Routes a valid command and returns 0."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_handling_module("create_plan")
 
         with (
@@ -389,8 +350,6 @@ class TestMain:
 
     def test_unknown_command_returns_1(self) -> None:
         """Returns 1 for an unrecognized command."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")  # handle_command returns False
 
         with (
@@ -403,8 +362,6 @@ class TestMain:
 
     def test_unknown_command_with_help_flag(self) -> None:
         """Shows module help when unknown command is followed by --help."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")  # handle_command returns False
 
         with (
@@ -419,8 +376,6 @@ class TestMain:
 
     def test_unknown_command_with_short_help_flag(self) -> None:
         """Shows module help when unknown command is followed by -h."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_module("create_plan")  # handle_command returns False
 
         with (
@@ -435,8 +390,6 @@ class TestMain:
 
     def test_command_with_no_extra_args(self) -> None:
         """Routes command with empty remaining args."""
-        from aipass.flow.apps.flow import main
-
         mod = _make_handling_module("list_plans")
 
         with (
@@ -450,8 +403,6 @@ class TestMain:
 
     def test_main_catches_unhandled_exception(self) -> None:
         """main() catches unexpected exceptions from _main_impl and returns 1."""
-        from aipass.flow.apps.flow import main
-
         with patch(f"{_FLOW}.discover_modules", side_effect=RuntimeError("boom")):
             with patch.object(sys, "argv", ["flow"]):
                 result = main()
@@ -468,8 +419,6 @@ class TestPrintIntrospection:
 
     def test_with_modules(self) -> None:
         """Displays module names and descriptions."""
-        from aipass.flow.apps.flow import print_introspection
-
         mod = _make_module("create_plan", doc="Create a new plan")
         with patch(f"{_FLOW}.console") as mock_console:
             print_introspection([mod])
@@ -480,8 +429,6 @@ class TestPrintIntrospection:
 
     def test_with_empty_modules(self) -> None:
         """Displays fallback text when no modules discovered."""
-        from aipass.flow.apps.flow import print_introspection
-
         with patch(f"{_FLOW}.console") as mock_console:
             print_introspection([])
 
@@ -491,8 +438,6 @@ class TestPrintIntrospection:
 
     def test_module_without_docstring(self) -> None:
         """Uses 'No description' when module has no docstring."""
-        from aipass.flow.apps.flow import print_introspection
-
         mod = _make_module("bare_mod", doc=None)
         with patch(f"{_FLOW}.console") as mock_console:
             print_introspection([mod])
@@ -528,8 +473,6 @@ class TestPrintIntrospection:
         are name-free now and asserted beside the names, so each column has to
         carry its own value.
         """
-        from aipass.flow.apps.flow import print_introspection
-
         assert len(names) >= 1
         docs = {name: f"purpose text {index}" for index, name in enumerate(names)}
 
@@ -553,8 +496,6 @@ class TestPrintHelp:
 
     def test_with_modules(self) -> None:
         """Shows formatted help with module listing."""
-        from aipass.flow.apps.flow import print_help
-
         mod = _make_module("create_plan", doc="Create a new plan")
         with patch(f"{_FLOW}.console") as mock_console:
             print_help([mod])
@@ -567,8 +508,6 @@ class TestPrintHelp:
 
     def test_with_empty_modules(self) -> None:
         """Shows help even when no modules are discovered."""
-        from aipass.flow.apps.flow import print_help
-
         with patch(f"{_FLOW}.console") as mock_console:
             print_help([])
 
@@ -590,8 +529,6 @@ class TestPrintHelp:
         lie rather than catching it. The contract now is the measured one -
         the table prints what executes and nothing else.
         """
-        from aipass.flow.apps.flow import print_help
-
         with patch(f"{_FLOW}.console") as mock_console:
             print_help([_make_module(module_name, doc="Any description")])
 
@@ -607,8 +544,6 @@ class TestPrintHelp:
         none of them under the derived name 'template', which the help table
         published as a command until 2026-09-15.
         """
-        from aipass.flow.apps.flow import print_help
-
         mod = _make_module("template_manager", doc="Template Manager Module")
         mod.COMMAND_VERBS = ("templates", "register", "unregister", "scan")
         with patch(f"{_FLOW}.console") as mock_console:
@@ -620,8 +555,6 @@ class TestPrintHelp:
 
     def test_module_without_docstring(self) -> None:
         """Uses 'No description' for undocumented modules."""
-        from aipass.flow.apps.flow import print_help
-
         mod = _make_module("mystery", doc=None)
         with patch(f"{_FLOW}.console") as mock_console:
             print_help([mod])
@@ -641,8 +574,6 @@ class TestPrintModuleHelp:
 
     def test_exact_match(self) -> None:
         """Finds module by exact name match."""
-        from aipass.flow.apps.flow import print_module_help
-
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
         with patch(f"{_FLOW}.console") as mock_console:
             print_module_help("create_plan", [mod])
@@ -658,8 +589,6 @@ class TestPrintModuleHelp:
         BOTH are patched and both are read - asserting only on console would
         have missed the whole message.
         """
-        from aipass.flow.apps.flow import print_module_help
-
         mod = _make_module("create_plan")
         with patch(f"{_FLOW}.console") as mock_console, patch(f"{_FLOW}.error") as mock_error:
             print_module_help("nonexistent", [mod])
@@ -670,8 +599,6 @@ class TestPrintModuleHelp:
 
     def test_module_without_docstring(self) -> None:
         """Shows 'No documentation available' for undocumented module."""
-        from aipass.flow.apps.flow import print_module_help
-
         mod = _make_module("bare_mod", doc=None)
         with patch(f"{_FLOW}.console") as mock_console:
             print_module_help("bare_mod", [mod])
@@ -689,8 +616,6 @@ class TestPrintModuleHelp:
         with the assertions it now carries, printing only the first line reds
         it; before, it asserted nothing and both spellings passed.
         """
-        from aipass.flow.apps.flow import print_module_help
-
         mod = _make_module(
             "list_plans",
             doc="\nList plans\n\nShows all plans in the registry.\n",

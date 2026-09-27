@@ -3,10 +3,14 @@
 # Description: Tests for handlers/__init__.py branch access guard
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-05-12
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for handlers/__init__.py — branch access guard."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
+# seedgo: no-test-needed(constant) — the ImportError's boilerplate framing text (banner lines, module-API hint)
 
 import subprocess
 import sys
@@ -39,24 +43,24 @@ from aipass.flow.apps.handlers import (
 class TestExtractBranchName:
     """Extract the branch name from various file paths."""
 
-    def test_flow_branch_path(self):
+    def test_flow_branch_path(self, tmp_path):
         """Path containing 'aipass/flow' returns 'flow'."""
-        result = _extract_branch_name("/home/user/Projects/AIPass/src/aipass/flow/apps/handlers/foo.py")
+        result = _extract_branch_name(str(tmp_path / "Projects/AIPass/src/aipass/flow/apps/handlers/foo.py"))
         assert result == "flow"
 
-    def test_memory_branch_path(self):
+    def test_memory_branch_path(self, tmp_path):
         """Path containing 'aipass/memory' returns 'memory'."""
-        result = _extract_branch_name("/home/user/Projects/AIPass/src/aipass/memory/apps/modules/vectorize.py")
+        result = _extract_branch_name(str(tmp_path / "Projects/AIPass/src/aipass/memory/apps/modules/vectorize.py"))
         assert result == "memory"
 
-    def test_nexus_branch_path(self):
+    def test_nexus_branch_path(self, tmp_path):
         """Path containing 'Nexus' returns the segment after it."""
-        result = _extract_branch_name("/home/user/Projects/AIPass/Nexus/core/main.py")
+        result = _extract_branch_name(str(tmp_path / "Projects/AIPass/Nexus/core/main.py"))
         assert result == "core"
 
-    def test_aipass_drone_path(self):
+    def test_aipass_drone_path(self, tmp_path):
         """Path containing 'aipass/drone' returns 'drone'."""
-        result = _extract_branch_name("/home/user/Projects/AIPass/src/aipass/drone/handler.py")
+        result = _extract_branch_name(str(tmp_path / "Projects/AIPass/src/aipass/drone/handler.py"))
         assert result == "drone"
 
     def test_unknown_path_returns_unknown(self):
@@ -64,9 +68,9 @@ class TestExtractBranchName:
         result = _extract_branch_name("/usr/lib/python3/site-packages/some_lib/util.py")
         assert result == "unknown"
 
-    def test_aipass_at_end_of_path(self):
+    def test_aipass_at_end_of_path(self, tmp_path):
         """If 'aipass' is the last segment there is no branch name after it."""
-        result = _extract_branch_name("/home/user/aipass")
+        result = _extract_branch_name(str(tmp_path / "aipass"))
         assert result == "unknown"
 
     def test_forward_slash_path(self):
@@ -150,7 +154,9 @@ class TestFindRealCaller:
             "exec(compile('RESULT = _frc()', '<string>', 'exec'), ns)\n"
             "print('RESULT:', ns['RESULT'])\n"
         )
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "RESULT: (None, None)" in result.stdout, result.stdout
@@ -178,9 +184,9 @@ class TestFindRealCaller:
 class TestGuardBranchAccess:
     """Test the import guard logic."""
 
-    def test_allows_same_branch_import(self):
+    def test_allows_same_branch_import(self, tmp_path):
         """Caller from the same branch (flow) is allowed through."""
-        caller = "/home/user/Projects/AIPass/src/aipass/flow/apps/modules/runner.py"
+        caller = str(tmp_path / "Projects/AIPass/src/aipass/flow/apps/modules/runner.py")
 
         with patch(
             "aipass.flow.apps.handlers._find_real_caller",
@@ -193,9 +199,9 @@ class TestGuardBranchAccess:
             # traceback.
             assert _guard_branch_access() is None
 
-    def test_blocks_external_branch_import(self):
+    def test_blocks_external_branch_import(self, tmp_path):
         """Caller from a different branch raises ImportError."""
-        caller = "/home/user/Projects/AIPass/src/aipass/drone/apps/modules/dispatcher.py"
+        caller = str(tmp_path / "Projects/AIPass/src/aipass/drone/apps/modules/dispatcher.py")
 
         with patch(
             "aipass.flow.apps.handlers._find_real_caller",
@@ -204,9 +210,9 @@ class TestGuardBranchAccess:
             with pytest.raises(ImportError, match="ACCESS DENIED"):
                 _guard_branch_access()
 
-    def test_error_message_contains_caller_branch(self):
+    def test_error_message_contains_caller_branch(self, tmp_path):
         """The ImportError message includes the caller's branch name."""
-        caller = "/home/user/Projects/AIPass/src/aipass/memory/apps/modules/indexer.py"
+        caller = str(tmp_path / "Projects/AIPass/src/aipass/memory/apps/modules/indexer.py")
 
         with patch(
             "aipass.flow.apps.handlers._find_real_caller",
@@ -215,9 +221,9 @@ class TestGuardBranchAccess:
             with pytest.raises(ImportError, match="memory"):
                 _guard_branch_access()
 
-    def test_error_message_contains_import_line(self):
+    def test_error_message_contains_import_line(self, tmp_path):
         """The ImportError message includes the blocked import line."""
-        caller = "/home/user/Projects/AIPass/src/aipass/drone/handler.py"
+        caller = str(tmp_path / "Projects/AIPass/src/aipass/drone/handler.py")
         import_line = "from aipass.flow.apps.handlers.json import json_handler"
 
         with patch(
@@ -277,14 +283,16 @@ class TestGuardBranchAccess:
             "exec(compile('h._guard_branch_access()', '<string>', 'exec'), {'h': h})\n"
             "print('ALLOWED')\n"
         )
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
 
         assert result.returncode == 0, result.stdout + result.stderr
         assert "ALLOWED" in result.stdout, result.stdout
 
-    def test_blocked_import_says_unknown_when_no_import_line(self):
+    def test_blocked_import_says_unknown_when_no_import_line(self, tmp_path):
         """When import_line is None, the error message says 'unknown'."""
-        caller = "/home/user/Projects/AIPass/src/aipass/drone/x.py"
+        caller = str(tmp_path / "Projects/AIPass/src/aipass/drone/x.py")
 
         with patch(
             "aipass.flow.apps.handlers._find_real_caller",

@@ -3,10 +3,13 @@
 # Description: Tests for lock_ops handler — atomic lock file management
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for lock_ops handler — atomic lock file management."""
+"""Tests for apps/handlers/runner/lock_ops.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that lock_ops.py parses and imports
 
 import os
 from pathlib import Path
@@ -14,19 +17,13 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.flow.apps.handlers.runner import lock_ops
 
 # ─── Patch targets ───────────────────────────────────────
 _MOD = "aipass.flow.apps.handlers.runner.lock_ops"
 
 # Captured before any test patches os.open: the stand-in below delegates here.
 _REAL_OS_OPEN = os.open
-
-
-def _import_lock_ops():
-    """Import lock_ops module and return it."""
-    import aipass.flow.apps.handlers.runner.lock_ops as mod
-
-    return mod
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0):
@@ -69,7 +66,7 @@ class TestTryCreateLock:
 
     def test_creates_lock_file_successfully(self, tmp_path):
         """Should create lock file with current PID and return True."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         result = mod.try_create_lock(lock)
         assert result is True
@@ -78,7 +75,7 @@ class TestTryCreateLock:
 
     def test_returns_false_if_lock_exists(self, tmp_path):
         """Should return False when lock file already exists."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("12345", encoding="utf-8")
         result = mod.try_create_lock(lock)
@@ -86,7 +83,7 @@ class TestTryCreateLock:
 
     def test_does_not_overwrite_existing_lock(self, tmp_path):
         """Existing lock content should be preserved on failure."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("99999", encoding="utf-8")
         mod.try_create_lock(lock)
@@ -98,7 +95,7 @@ class TestTryCreateLock:
         It used to escape try_create_lock on the first denial and crash the
         detached post-close runner, leaving the just-closed plan unprocessed.
         """
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
 
@@ -117,7 +114,7 @@ class TestTryCreateLock:
         already running", which would be a lie. Not forever: exactly the
         budget of attempts, then the last denial surfaces as the cause.
         """
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
@@ -137,7 +134,7 @@ class TestTryCreateLock:
 
     def test_file_exists_still_returns_false_at_once(self, tmp_path):
         """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("12345", encoding="utf-8")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=0)
@@ -160,7 +157,7 @@ class TestIsLockStale:
 
     def test_lock_with_current_pid_is_not_stale(self, tmp_path):
         """Lock file holding current PID should not be considered stale."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text(str(os.getpid()), encoding="utf-8")
         result = mod.is_lock_stale(lock)
@@ -168,7 +165,7 @@ class TestIsLockStale:
 
     def test_lock_with_dead_pid_is_stale(self, tmp_path):
         """Lock file holding a non-existent PID should be stale."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("999999999", encoding="utf-8")
         with patch(f"{_MOD}._pid_alive", return_value=False):
@@ -177,7 +174,7 @@ class TestIsLockStale:
 
     def test_lock_with_invalid_content_is_stale(self, tmp_path):
         """Lock file with non-integer content should be stale."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("not-a-pid", encoding="utf-8")
         result = mod.is_lock_stale(lock)
@@ -185,7 +182,7 @@ class TestIsLockStale:
 
     def test_lock_with_empty_content_is_stale(self, tmp_path):
         """Lock file with empty content should be stale."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("", encoding="utf-8")
         result = mod.is_lock_stale(lock)
@@ -193,7 +190,7 @@ class TestIsLockStale:
 
     def test_permission_error_treated_as_alive(self, tmp_path):
         """When _pid_alive says process exists, lock is valid (not stale)."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("1", encoding="utf-8")
         with patch(f"{_MOD}._pid_alive", return_value=True):
@@ -211,7 +208,7 @@ class TestAcquireLock:
 
     def test_acquires_fresh_lock(self, tmp_path):
         """Should acquire lock when no lock file exists."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         result = mod.acquire_lock(lock)
         assert result is True
@@ -219,7 +216,7 @@ class TestAcquireLock:
 
     def test_fails_when_another_process_holds_lock(self, tmp_path):
         """Should return False when lock held by a live process."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text(str(os.getpid()), encoding="utf-8")
         result = mod.acquire_lock(lock)
@@ -227,7 +224,7 @@ class TestAcquireLock:
 
     def test_recovers_stale_lock(self, tmp_path):
         """Should recover a stale lock (dead PID) and acquire it."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("999999999", encoding="utf-8")
         with patch(f"{_MOD}._pid_alive", return_value=False):
@@ -237,7 +234,7 @@ class TestAcquireLock:
 
     def test_fails_when_stale_lock_unlink_fails(self, tmp_path):
         """Should return False when stale lock can't be removed."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("999999999", encoding="utf-8")
         with (
@@ -249,7 +246,7 @@ class TestAcquireLock:
 
     def test_logs_json_operation_on_fresh_acquire(self, tmp_path, mock_json_handler):
         """Should log lock_acquired via json_handler on fresh lock."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         mod.acquire_lock(lock)
         mock_json_handler.assert_called()
@@ -259,7 +256,7 @@ class TestAcquireLock:
 
     def test_logs_stale_recovery_on_stale_acquire(self, tmp_path, mock_json_handler):
         """Should log stale_recovery=True when recovering stale lock."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("999999999", encoding="utf-8")
         with patch(f"{_MOD}._pid_alive", return_value=False):
@@ -271,7 +268,7 @@ class TestAcquireLock:
         """The re-create right after unlinking a stale lock is where Windows says
         delete-pending. It used to escape acquire_lock raw; now it waits and wins.
         """
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("999999999", encoding="utf-8")
         # First create meets the stale file (real FileExistsError); the second,
@@ -294,7 +291,7 @@ class TestAcquireLock:
         can never be created is not that, so acquire_lock lets the chained
         PermissionError through after the budget.
         """
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
@@ -320,7 +317,7 @@ class TestReleaseLock:
 
     def test_removes_existing_lock(self, tmp_path):
         """Should remove the lock file."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text(str(os.getpid()), encoding="utf-8")
         mod.release_lock(lock)
@@ -334,7 +331,7 @@ class TestReleaseLock:
         release_lock that created the file, or returned an error object, passed
         this test unchanged.
         """
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".nonexistent.lock"
         assert not lock.exists()
 
@@ -343,7 +340,7 @@ class TestReleaseLock:
 
     def test_logs_warning_on_os_error(self, tmp_path, mock_logger):
         """Should log warning when lock removal fails."""
-        mod = _import_lock_ops()
+        mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("12345", encoding="utf-8")
         with patch.object(Path, "unlink", side_effect=OSError("disk error")):

@@ -1,9 +1,15 @@
-"""Tests for plan handler functions in aipass.flow.apps.handlers.plan.*
+# =================== AIPass ====================
+# Name: test_plan_handlers.py
+# Description: Tests for apps/handlers/plan/create_ops.py and sibling plan handlers
+# Version: 1.0.0
+# Created: 2026-04-05
+# Modified: 2026-09-27
+# =============================================
 
-Covers: slugify_subject, create_plan_impl, create_plan_file,
-        build_plan_registry_entry, calculate_relative_location,
-        resolve_plan_location, auto_close_orphaned_plans, get_closed_plans.
-"""
+"""Tests for apps/handlers/plan/create_ops.py and sibling plan handlers."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import os
 import tempfile
@@ -270,7 +276,7 @@ class TestResolvePlanLocation:
             "aipass.flow.apps.handlers.plan.resolve_location._get_caller_cwd",
             return_value=tmp_path,
         ):
-            success, _, error = resolve_plan_location("/no/such/place", tmp_path)
+            success, _, error = resolve_plan_location(str(tmp_path / "no" / "such" / "place"), tmp_path)
 
         assert success is False
         assert "does not exist" in error
@@ -564,14 +570,14 @@ class TestCreatePlanImpl:
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     @patch("aipass.flow.apps.handlers.plan.create_ops.logger")
-    def test_location_resolution_failure(self, mock_log, mock_jh):
+    def test_location_resolution_failure(self, mock_log, mock_jh, tmp_path):
         deps = self._make_deps(
             resolve_plan_location=MagicMock(
                 return_value=(False, _TMP, "Dir not found"),
             ),
         )
 
-        success, _, _, _, err, _ = create_plan_impl(location="/bad/path", subject="test", **deps)
+        success, _, _, _, err, _ = create_plan_impl(location=str(tmp_path / "bad" / "path"), subject="test", **deps)
 
         assert success is False
         assert err == "Dir not found"

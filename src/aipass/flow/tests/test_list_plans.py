@@ -3,13 +3,19 @@
 # Description: Unit tests for apps/modules/list_plans.py
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the list_plans module -- command routing and orchestration."""
+"""Tests for apps/modules/list_plans.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that list_plans.py parses and imports
+# seedgo: no-test-needed(constant) — print_introspection's and print_help's literal banner text
 
 import pytest
 from unittest.mock import patch
+
+from aipass.flow.apps.modules.list_plans import handle_command, list_plans
 
 # ---------------------------------------------------------------------------
 # Module-level patch targets (patch where used, not where defined)
@@ -28,8 +34,6 @@ class TestHandleCommandRouting:
 
     def test_wrong_command_returns_false(self):
         """command != 'list' should return False immediately."""
-        from aipass.flow.apps.modules.list_plans import handle_command
-
         assert handle_command("create", []) is False
         assert handle_command("close", ["open"]) is False
         assert handle_command("", []) is False
@@ -37,8 +41,6 @@ class TestHandleCommandRouting:
     def test_no_args_calls_introspection(self):
         """command == 'list' with no args should call print_introspection."""
         with patch(f"{_MOD}.print_introspection") as mock_intro:
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             result = handle_command("list", [])
 
             mock_intro.assert_called_once()
@@ -48,8 +50,6 @@ class TestHandleCommandRouting:
     def test_help_flags_call_print_help(self, help_flag: str):
         """Help flags (--help, -h, help) should call print_help."""
         with patch(f"{_MOD}.print_help") as mock_help:
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             result = handle_command("list", [help_flag])
 
             mock_help.assert_called_once()
@@ -58,8 +58,6 @@ class TestHandleCommandRouting:
     def test_filter_open(self):
         """'list open' should call list_plans with filter_type='open'."""
         with patch(f"{_MOD}.list_plans") as mock_lp:
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             result = handle_command("list", ["open"])
 
             mock_lp.assert_called_once_with("open")
@@ -68,8 +66,6 @@ class TestHandleCommandRouting:
     def test_filter_closed(self):
         """'list closed' should call list_plans with filter_type='closed'."""
         with patch(f"{_MOD}.list_plans") as mock_lp:
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             result = handle_command("list", ["closed"])
 
             mock_lp.assert_called_once_with("closed")
@@ -78,8 +74,6 @@ class TestHandleCommandRouting:
     def test_filter_all(self):
         """'list all' should call list_plans with filter_type='all'."""
         with patch(f"{_MOD}.list_plans") as mock_lp:
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             result = handle_command("list", ["all"])
 
             mock_lp.assert_called_once_with("all")
@@ -100,8 +94,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             pytest.raises(SystemExit) as exit_info,
         ):
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             handle_command("list", ["garbage"])
 
         assert exit_info.value.code == 1
@@ -117,8 +109,6 @@ class TestHandleCommandRouting:
             patch(f"{_MOD}.console"),
             pytest.raises(SystemExit) as exit_info,
         ):
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             handle_command("list", ["open", "stray_token"])
 
         assert exit_info.value.code == 1
@@ -128,8 +118,6 @@ class TestHandleCommandRouting:
     def test_json_handler_called_on_filter_commands(self):
         """json_handler.log_operation should be called for filter commands."""
         with patch(f"{_MOD}.list_plans", autospec=True), patch(f"{_MOD}.json_handler", spec=True) as mock_jh:
-            from aipass.flow.apps.modules.list_plans import handle_command
-
             result = handle_command("list", ["open"])
 
             assert result is True  # Command was handled
@@ -161,8 +149,6 @@ class TestListPlansOrchestrator:
             patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl,
             patch(f"{_MOD}.console") as mock_console,
         ):
-            from aipass.flow.apps.modules.list_plans import list_plans
-
             result = list_plans("open")
 
             assert result is True
@@ -183,8 +169,6 @@ class TestListPlansOrchestrator:
         }
 
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.warning") as mock_warn:
-            from aipass.flow.apps.modules.list_plans import list_plans
-
             result = list_plans("all")
 
             assert result is True
@@ -202,8 +186,6 @@ class TestListPlansOrchestrator:
         }
 
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
-            from aipass.flow.apps.modules.list_plans import list_plans
-
             result = list_plans("open")
 
             assert result is False
@@ -221,8 +203,6 @@ class TestListPlansOrchestrator:
         }
 
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
-            from aipass.flow.apps.modules.list_plans import list_plans
-
             result = list_plans("open")
 
             assert result is False
@@ -245,8 +225,6 @@ class TestListPlansOrchestrator:
             patch(f"{_MOD}.format_plans_list") as mock_fpl,
             patch(f"{_MOD}.format_statistics_summary") as mock_fss,
         ):
-            from aipass.flow.apps.modules.list_plans import list_plans
-
             list_plans("closed")
 
             mock_impl.assert_called_once_with(
@@ -270,8 +248,6 @@ class TestListPlansOrchestrator:
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.console") as mock_console:
             mock_console.print.side_effect = BrokenPipeError("pipe closed")
 
-            from aipass.flow.apps.modules.list_plans import list_plans
-
             # Should not raise
             result = list_plans("open")
             assert result is True
@@ -289,8 +265,6 @@ class TestListPlansOrchestrator:
 
         with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.error") as mock_error:
             mock_error.side_effect = BrokenPipeError("pipe closed")
-
-            from aipass.flow.apps.modules.list_plans import list_plans
 
             # Should not raise
             result = list_plans("open")

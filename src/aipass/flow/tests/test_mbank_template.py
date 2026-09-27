@@ -1,10 +1,38 @@
+# =================== AIPass ====================
+# Name: test_mbank_template.py
+# Description: Tests for mbank/process.py and template handler functions
+# Version: 1.0.0
+# Created: 2026-09-20
+# Modified: 2026-09-27
+# =============================================
+
 """Tests for mbank/process.py and template handler functions."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the mbank/template handler files parse and import
 
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from aipass.flow.apps.handlers.mbank.process import (
+    cleanup_temp_files,
+    get_closed_plans,
+    load_flow_registry,
+    process_closed_plans,
+    save_flow_registry,
+    verify_and_heal_orphaned_plans,
+)
+from aipass.flow.apps.handlers.template import plan_type_loader as loader
+from aipass.flow.apps.handlers.template.get_template import (
+    TEMPLATES_DIR,
+    _substitute_placeholders,
+    get_template,
+)
+from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types
+from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
 
 
 # ===================================================================
@@ -27,8 +55,6 @@ class TestLoadFlowRegistry:
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
         ):
-            from aipass.flow.apps.handlers.mbank.process import load_flow_registry
-
             result = load_flow_registry()
 
         assert result["next_number"] == 3
@@ -41,8 +67,6 @@ class TestLoadFlowRegistry:
         (tmp_path / "dplan_registry.json").write_text(json.dumps(data), encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            from aipass.flow.apps.handlers.mbank.process import load_flow_registry
-
             result = load_flow_registry(registry_file="dplan_registry.json")
 
         assert result["next_number"] == 1
@@ -55,8 +79,6 @@ class TestLoadFlowRegistry:
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", missing),
         ):
-            from aipass.flow.apps.handlers.mbank.process import load_flow_registry
-
             with pytest.raises(Exception, match="Flow registry not found"):
                 load_flow_registry()
 
@@ -69,8 +91,6 @@ class TestLoadFlowRegistry:
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", bad_file),
         ):
-            from aipass.flow.apps.handlers.mbank.process import load_flow_registry
-
             with pytest.raises(Exception, match="Failed to load flow registry"):
                 load_flow_registry()
 
@@ -90,8 +110,6 @@ class TestSaveFlowRegistry:
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
         ):
-            from aipass.flow.apps.handlers.mbank.process import save_flow_registry
-
             save_flow_registry(data)
 
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
@@ -105,8 +123,6 @@ class TestSaveFlowRegistry:
         data = {"next_number": 1, "plans": {"1": {"status": "open"}}}
 
         with patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path):
-            from aipass.flow.apps.handlers.mbank.process import save_flow_registry
-
             save_flow_registry(data, registry_file="dplan_registry.json")
 
         saved = json.loads((tmp_path / "dplan_registry.json").read_text(encoding="utf-8"))
@@ -123,8 +139,6 @@ class TestSaveFlowRegistry:
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", bad_path),
         ):
-            from aipass.flow.apps.handlers.mbank.process import save_flow_registry
-
             with pytest.raises(Exception, match="Failed to save flow registry"):
                 save_flow_registry({"plans": {}})
 
@@ -164,8 +178,6 @@ class TestGetClosedPlans:
                 return_value={"orphans_found": 0, "successfully_healed": 0, "failed_to_heal": 0, "orphans": []},
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         assert len(result) == 1
@@ -201,8 +213,6 @@ class TestGetClosedPlans:
                 return_value={"orphans_found": 0, "successfully_healed": 0, "failed_to_heal": 0, "orphans": []},
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         assert len(result) == 0
@@ -232,8 +242,6 @@ class TestGetClosedPlans:
                 return_value={"orphans_found": 0, "successfully_healed": 0, "failed_to_heal": 0, "orphans": []},
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             result = get_closed_plans()
 
         assert len(result) == 0
@@ -260,8 +268,6 @@ class TestGetClosedPlans:
                 mock_heal,
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import get_closed_plans
-
             get_closed_plans()
 
         mock_heal.assert_called_once()
@@ -282,8 +288,6 @@ class TestCleanupTempFiles:
         (memory_dir / "real-plan-20260303.md").write_text("keep", encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir):
-            from aipass.flow.apps.handlers.mbank.process import cleanup_temp_files
-
             result = cleanup_temp_files()
 
         assert result["files_found"] == 2
@@ -299,8 +303,6 @@ class TestCleanupTempFiles:
         (memory_dir / "normal-plan.md").write_text("ok", encoding="utf-8")
 
         with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir):
-            from aipass.flow.apps.handlers.mbank.process import cleanup_temp_files
-
             result = cleanup_temp_files()
 
         assert result["files_found"] == 0
@@ -311,8 +313,6 @@ class TestCleanupTempFiles:
         nonexistent = tmp_path / "no_such_dir"
 
         with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", nonexistent):
-            from aipass.flow.apps.handlers.mbank.process import cleanup_temp_files
-
             result = cleanup_temp_files()
 
         assert result["files_found"] == 0
@@ -329,8 +329,6 @@ class TestCleanupTempFiles:
             patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir),
             patch.object(Path, "unlink", side_effect=PermissionError("denied")),
         ):
-            from aipass.flow.apps.handlers.mbank.process import cleanup_temp_files
-
             result = cleanup_temp_files()
 
         assert result["files_found"] == 1
@@ -373,10 +371,6 @@ class TestVerifyAndHealOrphanedPlans:
                 return_value=["fplan_registry.json"],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import (
-                verify_and_heal_orphaned_plans,
-            )
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 1
@@ -408,10 +402,6 @@ class TestVerifyAndHealOrphanedPlans:
                 return_value=["fplan_registry.json"],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import (
-                verify_and_heal_orphaned_plans,
-            )
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 0
@@ -441,10 +431,6 @@ class TestVerifyAndHealOrphanedPlans:
                 return_value=["fplan_registry.json"],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import (
-                verify_and_heal_orphaned_plans,
-            )
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 0
@@ -478,10 +464,6 @@ class TestVerifyAndHealOrphanedPlans:
                 return_value=["fplan_registry.json"],
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import (
-                verify_and_heal_orphaned_plans,
-            )
-
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 1
@@ -517,8 +499,6 @@ class TestProcessClosedPlans:
                 },
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True
@@ -578,8 +558,6 @@ class TestProcessClosedPlans:
             ),
             patch("aipass.flow.apps.handlers.mbank.process.REGISTRY_FILE", reg_file),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True
@@ -644,8 +622,6 @@ class TestProcessClosedPlans:
                 tmp_path / "fplan_registry.json",
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is True
@@ -659,8 +635,6 @@ class TestProcessClosedPlans:
             "aipass.flow.apps.handlers.mbank.process.get_closed_plans",
             side_effect=RuntimeError("unexpected boom"),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         assert result["success"] is False
@@ -687,8 +661,6 @@ class TestProcessClosedPlans:
                 mock_cleanup,
             ),
         ):
-            from aipass.flow.apps.handlers.mbank.process import process_closed_plans
-
             result = process_closed_plans()
 
         mock_cleanup.assert_called_once()
@@ -714,8 +686,6 @@ class TestGetTemplate:
             "aipass.flow.apps.handlers.template.get_template.TEMPLATES_DIR",
             templates_dir,
         ):
-            from aipass.flow.apps.handlers.template.get_template import get_template
-
             result = get_template("default", number=1, location="flow", subject="Test")
 
         assert "FPLAN-0001" in result
@@ -730,8 +700,6 @@ class TestGetTemplate:
             encoding="utf-8",
         )
 
-        from aipass.flow.apps.handlers.template.get_template import get_template
-
         result = get_template(template_path=custom, number=7, subject="Override", prefix="DPLAN")
 
         assert "DPLAN-0007" in result
@@ -741,8 +709,6 @@ class TestGetTemplate:
         """Verify custom prefix and digit count in plan_number."""
         tpl = tmp_path / "tpl.md"
         tpl.write_text("{plan_number}{tag}", encoding="utf-8")
-
-        from aipass.flow.apps.handlers.template.get_template import get_template
 
         result = get_template(template_path=tpl, number=3, prefix="XPLAN", digits=6)
 
@@ -757,8 +723,6 @@ class TestGetTemplate:
             "aipass.flow.apps.handlers.template.get_template.TEMPLATES_DIR",
             empty_dir,
         ):
-            from aipass.flow.apps.handlers.template.get_template import get_template
-
             with pytest.raises(FileNotFoundError, match="not found"):
                 get_template("nonexistent")
 
@@ -766,8 +730,6 @@ class TestGetTemplate:
         """The {today} placeholder is replaced with a date string."""
         tpl = tmp_path / "dated.md"
         tpl.write_text("Date: {today}{tag}", encoding="utf-8")
-
-        from aipass.flow.apps.handlers.template.get_template import get_template
 
         result = get_template(template_path=tpl, number=1)
 
@@ -792,8 +754,6 @@ class TestGetTemplate:
             encoding="utf-8",
         )
 
-        from aipass.flow.apps.handlers.template.get_template import get_template
-
         result = get_template(template_path=tpl, number=1, subject="Weekly")
 
         # Known placeholder still substituted...
@@ -808,8 +768,6 @@ class TestGetTemplate:
         tpl = tmp_path / "unknown.md"
         tpl.write_text("{plan_number} {not_a_placeholder}", encoding="utf-8")
 
-        from aipass.flow.apps.handlers.template.get_template import get_template
-
         result = get_template(template_path=tpl, number=2)
 
         assert result == "FPLAN-0002 {not_a_placeholder}"
@@ -823,8 +781,6 @@ class TestGetTemplate:
         so a known placeholder name with no value degrades to the literal token
         instead of raising KeyError and killing the whole template.
         """
-        from aipass.flow.apps.handlers.template.get_template import _substitute_placeholders
-
         result = _substitute_placeholders(
             "{plan_number} {subject} {tag}",
             {"subject": "Weekly"},  # every other known name deliberately absent
@@ -839,8 +795,6 @@ class TestGetTemplate:
         synthetic one, and pins VERA's v2.1 content (full clickable URLs,
         Bluesky posting from the caller's own branch dir).
         """
-        from aipass.flow.apps.handlers.template.get_template import TEMPLATES_DIR, get_template
-
         tpl = TEMPLATES_DIR / "playbook_plans" / "weekly_update.md"
         assert tpl.is_file(), f"weekly_update template missing at {tpl}"
 
@@ -887,13 +841,7 @@ class TestDiscoverPlanTypes:
                 return_value=prefix_map,
             ),
         ):
-            from aipass.flow.apps.handlers.template.plan_type_loader import (
-                discover_plan_types,
-            )
-
             # Reset cache to force fresh scan
-            import aipass.flow.apps.handlers.template.plan_type_loader as loader
-
             loader._plan_type_cache = None
 
             result = discover_plan_types()
@@ -927,12 +875,6 @@ class TestDiscoverPlanTypes:
                 return_value={},
             ),
         ):
-            from aipass.flow.apps.handlers.template.plan_type_loader import (
-                discover_plan_types,
-            )
-
-            import aipass.flow.apps.handlers.template.plan_type_loader as loader
-
             loader._plan_type_cache = None
 
             result = discover_plan_types()
@@ -957,12 +899,6 @@ class TestDiscoverPlanTypes:
                 return_value={"empty_plans": "EPLAN"},
             ),
         ):
-            from aipass.flow.apps.handlers.template.plan_type_loader import (
-                discover_plan_types,
-            )
-
-            import aipass.flow.apps.handlers.template.plan_type_loader as loader
-
             loader._plan_type_cache = None
 
             result = discover_plan_types()
@@ -986,12 +922,6 @@ class TestDiscoverPlanTypes:
                 return_value={},
             ),
         ):
-            from aipass.flow.apps.handlers.template.plan_type_loader import (
-                discover_plan_types,
-            )
-
-            import aipass.flow.apps.handlers.template.plan_type_loader as loader
-
             loader._plan_type_cache = None
 
             result = discover_plan_types()
@@ -1004,12 +934,6 @@ class TestDiscoverPlanTypes:
             "aipass.flow.apps.handlers.template.plan_type_loader.PLAN_TYPES_DIR",
             tmp_path / "nonexistent",
         ):
-            from aipass.flow.apps.handlers.template.plan_type_loader import (
-                discover_plan_types,
-            )
-
-            import aipass.flow.apps.handlers.template.plan_type_loader as loader
-
             loader._plan_type_cache = None
 
             result = discover_plan_types()
@@ -1046,8 +970,6 @@ class TestGetPrefixMap:
             ),
             patch("aipass.flow.apps.handlers.template.registry_ops.FLOW_ROOT", tmp_path),
         ):
-            from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
-
             result = get_prefix_map()
 
         assert result == {"flow_plans": "FPLAN", "dev_plans": "DPLAN"}
@@ -1074,8 +996,6 @@ class TestGetPrefixMap:
             ),
             patch("aipass.flow.apps.handlers.template.registry_ops.FLOW_ROOT", tmp_path),
         ):
-            from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
-
             result = get_prefix_map()
 
         assert "broken_type" not in result
@@ -1096,8 +1016,6 @@ class TestGetPrefixMap:
             ),
             patch("aipass.flow.apps.handlers.template.registry_ops.FLOW_ROOT", tmp_path),
         ):
-            from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
-
             result = get_prefix_map()
 
         assert "flow_plans" in result

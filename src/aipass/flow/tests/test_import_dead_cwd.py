@@ -3,64 +3,13 @@
 # Description: Every flow module imports, and keeps logging, without a readable working directory
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""Flow must import, and must keep its audit line alive, with no cwd.
+"""Tests for aipass/flow/apps/__init__.py and every module beneath it importing with no readable working directory."""
 
-THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-relayed by @devpulse). ``ntpath.realpath`` calls ``os.getcwd()``
-UNCONDITIONALLY — on its first lines, before it even asks whether the path is
-absolute — where ``posixpath`` only reads the cwd for a relative one. And
-``Path.resolve()`` routes through ``os.path.realpath``. So on Windows every
-module-level ``Path(__file__).resolve()`` is an import-time working-directory
-dependency, and a process whose cwd is gone cannot import the module at all.
-Guarding INSIDE that module's functions changes nothing: the import died before
-any of them existed.
-
-``inspect.stack()`` carries the same defect one layer down and needs a
-DIFFERENT world to convict it. It builds a ``FrameInfo`` per frame, and for a
-frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
-``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
-the equivalent raise happens EARLIER, inside ``getabsfile()``, where ``inspect``
-catches it — which is exactly why two calls on flow's every-import and
-every-write paths survived years of Linux CI carrying this.
-
-TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
-
-* **World A** emulates ntpath — ``os.path.realpath`` is wrapped to read
-  ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
-  ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
-  ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
-  reached.
-* **World B** denies ``os.path.realpath`` outright while ``abspath`` keeps
-  working. This is what reaches ``getmodule``'s unguarded call and convicts
-  ``inspect.stack()``.
-
-THIRD INGREDIENT for world B (@hooks): the frame must be ``<string>`` — an
-interpreter ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A
-heredoc-fed child puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile``
-early-returns, and the probe reports green while the same world kills imports
-for real. Every assertion below is preceded by a control that states whether its
-world is armed, so a probe that quietly stopped biting cannot pass itself off as
-a cure.
-
-WHAT FLOW CARRIED, measured not estimated. Before this build, **61 of 61** flow
-modules died on import in BOTH worlds — every one of them inside
-``handlers/__init__.py``, at the ``inspect.stack()`` on line 20 and the
-``Path(__file__).resolve()`` on line 21. Those two lines MASKED everything under
-them, which is why the count only became true as cures landed: curing the guard
-took it to 43/61 and revealed ``json/json_handler.py:38`` (masking 31 modules on
-its own) plus twelve more; routing all **29** module-level
-``Path(__file__).resolve()`` sites and all **7** private ``_find_repo_root``
-copies through ``handlers/repo_root.py`` took it to **0/62**.
-
-AND ONE LIVE SITE NO IMPORT PROBE REACHES. ``log_operation`` is the audit line
-flow writes on essentially every registry operation, and its
-``_get_caller_module_name`` called ``inspect.stack()``. The stack it walks is
-the CALLER'S, so the shape that convicts it is a ``<string>`` frame — which is
-precisely what @drone's router produces when it invokes flow.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the module parses and imports
 
 import ast
 import subprocess
@@ -68,6 +17,61 @@ import sys
 from pathlib import Path
 
 import pytest
+
+import aipass.flow.apps as flow_apps
+
+# THE MECHANISM, measured on the Windows CI gate 2026-08-31. ``ntpath.realpath``
+# calls ``os.getcwd()`` UNCONDITIONALLY — on its first lines, before it even
+# asks whether the path is absolute — where ``posixpath`` only reads the cwd
+# for a relative one. And ``Path.resolve()`` routes through
+# ``os.path.realpath``. So on Windows every module-level
+# ``Path(__file__).resolve()`` is an import-time working-directory dependency,
+# and a process whose cwd is gone cannot import the module at all. Guarding
+# INSIDE that module's functions changes nothing: the import died before any
+# of them existed.
+#
+# ``inspect.stack()`` carries the same defect one layer down and needs a
+# DIFFERENT world to convict it. It builds a ``FrameInfo`` per frame, and for a
+# frame whose filename is a PSEUDO-file it reaches ``getmodule()``, whose
+# ``os.path.realpath(f)`` sits outside every ``try`` in that function. On POSIX
+# the equivalent raise happens EARLIER, inside ``getabsfile()``, where
+# ``inspect`` catches it — which is exactly why two calls on flow's
+# every-import and every-write paths survived years of Linux CI carrying this.
+#
+# TWO WORLDS, and @seedgo's asymmetry is why both are here rather than one:
+#
+# * World A emulates ntpath — ``os.path.realpath`` is wrapped to read
+#   ``os.getcwd()`` first, then ``os.getcwd`` is denied. This convicts a raw
+#   ``resolve()``. It does NOT convict ``inspect.stack()`` on Linux, because
+#   ``getabsfile`` raises inside inspect's own catch before ``getmodule`` is
+#   reached.
+# * World B denies ``os.path.realpath`` outright while ``abspath`` keeps
+#   working. This is what reaches ``getmodule``'s unguarded call and convicts
+#   ``inspect.stack()``.
+#
+# THIRD INGREDIENT for world B: the frame must be ``<string>`` — an interpreter
+# ``-c`` or ``compile()`` frame — and NEVER ``<stdin>``. A heredoc-fed child
+# puts ``<stdin>`` in ``linecache.cache``, ``getsourcefile`` early-returns, and
+# the probe reports green while the same world kills imports for real. Every
+# assertion below is preceded by a control that states whether its world is
+# armed, so a probe that quietly stopped biting cannot pass itself off as a
+# cure.
+#
+# WHAT FLOW CARRIED, measured not estimated. Before this build, 61 of 61 flow
+# modules died on import in BOTH worlds — every one of them inside
+# ``handlers/__init__.py``, at the ``inspect.stack()`` on line 20 and the
+# ``Path(__file__).resolve()`` on line 21. Those two lines MASKED everything
+# under them, which is why the count only became true as cures landed: curing
+# the guard took it to 43/61 and revealed ``json/json_handler.py:38`` (masking
+# 31 modules on its own) plus twelve more; routing all 29 module-level
+# ``Path(__file__).resolve()`` sites and all 7 private ``_find_repo_root``
+# copies through ``handlers/repo_root.py`` took it to 0/62.
+#
+# AND ONE LIVE SITE NO IMPORT PROBE REACHES. ``log_operation`` is the audit
+# line flow writes on essentially every registry operation, and its
+# ``_get_caller_module_name`` called ``inspect.stack()``. The stack it walks is
+# the CALLER'S, so the shape that convicts it is a ``<string>`` frame — which
+# is precisely what @drone's router produces when it invokes flow.
 
 # Other branches' import-time code is held CONSTANT: preloaded in the healthy
 # world, before any denial. Their cure is their own build; this file measures
@@ -215,8 +219,6 @@ def _flow_modules() -> list[str]:
     species this file is about is a fix landing on some of N identical paths,
     and a list in a test is one more place for N to be undercounted.
     """
-    import aipass.flow.apps as flow_apps
-
     root = Path(flow_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
@@ -234,6 +236,7 @@ def _run_world(world: str, control: str, body: str) -> subprocess.CompletedProce
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=300,
     )
 
@@ -248,8 +251,6 @@ def _flow_modules_by_import_machinery() -> list[str]:
     belief agree with each other no matter how wrong they are.
     """
     import pkgutil
-
-    import aipass.flow.apps as flow_apps
 
     def walk(path: Path, prefix: str) -> set[str]:
         found = set()
@@ -864,7 +865,9 @@ except OSError:
 
     @staticmethod
     def _run(script: str) -> str:
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
         assert result.returncode == 0, result.stdout + result.stderr
         return result.stdout
 
@@ -879,7 +882,9 @@ except OSError:
         say UNAVAILABLE with the child's own reason and skip that row, never
         fail on an interpreter you do not have.
         """
-        result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, encoding="utf-8", timeout=120
+        )
         if result.returncode != 0:
             return result.stdout, (result.stderr.strip().splitlines() or ["no diagnostic"])[-1]
         return result.stdout, None
@@ -1879,8 +1884,6 @@ class TestNoModuleLevelLocationCallSurvives:
 
     @staticmethod
     def _apps_sources() -> list[Path]:
-        import aipass.flow.apps as flow_apps
-
         root = Path(flow_apps.__file__).parent
         return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts and ".archive" not in p.parts]
 

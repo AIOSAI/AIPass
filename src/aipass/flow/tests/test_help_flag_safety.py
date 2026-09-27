@@ -1,19 +1,41 @@
-"""Tests for whole-sequence help detection (DPLAN-0291 rule E).
+# =================== AIPass ====================
+# Name: test_help_flag_safety.py
+# Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
+# Version: 1.0.0
+# Created: 2026-08-13
+# Modified: 2026-09-27
+# =============================================
 
-The contract: a help flag ANYWHERE in the argument sequence means explain and
-do nothing else. Flow's verbs mutate plans -- `close FPLAN-0042 --help` used to
-CLOSE FPLAN-0042 -- so every canary here asserts two things together:
-help was printed AND the destructive target was never called.
+"""Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
 
-Free-text safety is asserted alongside it: a plan subject containing the word
-"help" must stay a subject.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that help_flags.py and the command modules parse and import
+# seedgo: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
 
 from unittest.mock import patch
 
 import pytest
 
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
+from aipass.flow.apps.handlers.runner import lock_ops
+from aipass.flow.apps.modules import (
+    aggregate_central,
+    close_plan,
+    create_plan,
+    list_plans,
+    post_close_runner,
+    registry_monitor,
+    restore_plan,
+    template_manager,
+)
+
+# The contract: a help flag ANYWHERE in the argument sequence means explain and
+# do nothing else. Flow's verbs mutate plans -- `close FPLAN-0042 --help` used to
+# CLOSE FPLAN-0042 -- so every canary here asserts two things together:
+# help was printed AND the destructive target was never called.
+#
+# Free-text safety is asserted alongside it: a plan subject containing the word
+# "help" must stay a subject.
 
 
 # ═══════════════════════════════════════════════════════════
@@ -77,20 +99,16 @@ class TestCloseHelpSafety:
         [["FPLAN-0042", "--help"], ["FPLAN-0042", "-h"], ["--all", "--help"]],
     )
     def test_help_after_plan_number_never_closes(self, args):
-        from aipass.flow.apps.modules import close_plan as mod
-
         with patch(f"{_CLOSE}.close_plan") as target, patch(f"{_CLOSE}.print_help") as help_fn:
-            handled = mod.handle_command("close", args)
+            handled = close_plan.handle_command("close", args)
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_normal_close_still_reaches_the_verb(self):
-        from aipass.flow.apps.modules import close_plan as mod
-
         with patch(f"{_CLOSE}.close_plan") as target, patch(f"{_CLOSE}.print_help") as help_fn:
-            mod.handle_command("close", ["FPLAN-0042"])
+            close_plan.handle_command("close", ["FPLAN-0042"])
 
         help_fn.assert_not_called()
         target.assert_called_once()
@@ -98,10 +116,8 @@ class TestCloseHelpSafety:
     def test_foreign_command_is_not_claimed(self):
         """Ownership check runs BEFORE the help gate -- a module must never
         hijack another module's --help (routers try modules in turn)."""
-        from aipass.flow.apps.modules import close_plan as mod
-
         with patch(f"{_CLOSE}.print_help") as help_fn:
-            handled = mod.handle_command("list", ["--help"])
+            handled = close_plan.handle_command("list", ["--help"])
 
         assert handled is False
         help_fn.assert_not_called()
@@ -120,10 +136,8 @@ class TestCreateHelpSafety:
         [[".", "Some subject", "--help"], [".", "-h"], [".", "Subject", "dplan", "--help"]],
     )
     def test_help_after_location_never_creates(self, args):
-        from aipass.flow.apps.modules import create_plan as mod
-
         with patch(f"{_CREATE}.create_plan") as target, patch(f"{_CREATE}.print_help") as help_fn:
-            handled = mod.handle_command("create", args)
+            handled = create_plan.handle_command("create", args)
 
         assert handled is True
         help_fn.assert_called_once()
@@ -131,22 +145,18 @@ class TestCreateHelpSafety:
 
     def test_subject_containing_help_still_creates(self):
         """Free text: 'help' inside a subject is a subject, not a request."""
-        from aipass.flow.apps.modules import create_plan as mod
-
         with (
             patch(f"{_CREATE}.create_plan", return_value=(True, 1, ".", "default", None)) as target,
             patch(f"{_CREATE}.print_help") as help_fn,
         ):
-            mod.handle_command("create", [".", "Fix the help system"])
+            create_plan.handle_command("create", [".", "Fix the help system"])
 
         help_fn.assert_not_called()
         target.assert_called_once()
 
     def test_foreign_command_is_not_claimed(self):
-        from aipass.flow.apps.modules import create_plan as mod
-
         with patch(f"{_CREATE}.print_help") as help_fn:
-            handled = mod.handle_command("close", ["--help"])
+            handled = create_plan.handle_command("close", ["--help"])
 
         assert handled is False
         help_fn.assert_not_called()
@@ -162,20 +172,16 @@ _RESTORE = "aipass.flow.apps.modules.restore_plan"
 class TestRestoreHelpSafety:
     @pytest.mark.parametrize("args", [["FPLAN-0042", "--help"], ["FPLAN-0042", "-h"]])
     def test_help_after_plan_number_never_restores(self, args):
-        from aipass.flow.apps.modules import restore_plan as mod
-
         with patch(f"{_RESTORE}.restore_plan") as target, patch(f"{_RESTORE}.print_help") as help_fn:
-            handled = mod.handle_command("restore", args)
+            handled = restore_plan.handle_command("restore", args)
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_foreign_command_is_not_claimed(self):
-        from aipass.flow.apps.modules import restore_plan as mod
-
         with patch(f"{_RESTORE}.print_help") as help_fn:
-            handled = mod.handle_command("close", ["--help"])
+            handled = restore_plan.handle_command("close", ["--help"])
 
         assert handled is False
         help_fn.assert_not_called()
@@ -191,20 +197,16 @@ _AGG = "aipass.flow.apps.modules.aggregate_central"
 class TestAggregateHelpSafety:
     @pytest.mark.parametrize("args", [["--heal", "--help"], ["--no-heal", "-h"]])
     def test_help_after_flag_never_aggregates(self, args):
-        from aipass.flow.apps.modules import aggregate_central as mod
-
         with patch(f"{_AGG}.aggregate_central") as target, patch(f"{_AGG}.print_help") as help_fn:
-            handled = mod.handle_command("aggregate", args)
+            handled = aggregate_central.handle_command("aggregate", args)
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_foreign_command_is_not_claimed(self):
-        from aipass.flow.apps.modules import aggregate_central as mod
-
         with patch(f"{_AGG}.print_help") as help_fn:
-            handled = mod.handle_command("close", ["--help"])
+            handled = aggregate_central.handle_command("close", ["--help"])
 
         assert handled is False
         help_fn.assert_not_called()
@@ -219,50 +221,40 @@ _TPL = "aipass.flow.apps.modules.template_manager"
 
 class TestTemplateManagerHelpSafety:
     def test_register_help_never_registers(self):
-        from aipass.flow.apps.modules import template_manager as mod
-
         with patch(f"{_TPL}.add_type") as target, patch(f"{_TPL}.print_help") as help_fn:
-            handled = mod.handle_command("register", ["audit_test", "--help"])
+            handled = template_manager.handle_command("register", ["audit_test", "--help"])
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_unregister_help_never_unregisters(self):
-        from aipass.flow.apps.modules import template_manager as mod
-
         with patch(f"{_TPL}.remove_type") as target, patch(f"{_TPL}.print_help") as help_fn:
-            handled = mod.handle_command("unregister", ["--help"])
+            handled = template_manager.handle_command("unregister", ["--help"])
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_templates_help_anywhere(self):
-        from aipass.flow.apps.modules import template_manager as mod
-
         with patch(f"{_TPL}.load_registry", autospec=True) as target, patch(f"{_TPL}.print_help") as help_fn:
-            handled = mod.handle_command("templates", ["verbose", "--help"])
+            handled = template_manager.handle_command("templates", ["verbose", "--help"])
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_scan_help_never_scans(self):
-        from aipass.flow.apps.modules import template_manager as mod
-
         with patch(f"{_TPL}.scan_unregistered") as target, patch(f"{_TPL}.print_help") as help_fn:
-            handled = mod.handle_command("scan", ["--help"])
+            handled = template_manager.handle_command("scan", ["--help"])
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_foreign_command_is_not_claimed(self):
-        from aipass.flow.apps.modules import template_manager as mod
-
         with patch(f"{_TPL}.print_help") as help_fn:
-            handled = mod.handle_command("close", ["--help"])
+            handled = template_manager.handle_command("close", ["--help"])
 
         assert handled is False
         help_fn.assert_not_called()
@@ -283,10 +275,8 @@ _POST = "aipass.flow.apps.modules.post_close_runner"
 
 class TestUnflaggedModulesHelpSafety:
     def test_list_help_after_filter_never_lists(self):
-        from aipass.flow.apps.modules import list_plans as mod
-
         with patch(f"{_LIST}.list_plans") as target, patch(f"{_LIST}.print_help") as help_fn:
-            handled = mod.handle_command("list", ["open", "--help"])
+            handled = list_plans.handle_command("list", ["open", "--help"])
 
         assert handled is True
         help_fn.assert_called_once()
@@ -294,20 +284,16 @@ class TestUnflaggedModulesHelpSafety:
 
     def test_registry_scan_help_never_heals(self):
         """`registry scan --help` reached scan_plan_files(), which WRITES."""
-        from aipass.flow.apps.modules import registry_monitor as mod
-
         with patch(f"{_REG}.scan_plan_files") as target, patch(f"{_REG}.print_help") as help_fn:
-            handled = mod.handle_command("registry", ["scan", "--help"])
+            handled = registry_monitor.handle_command("registry", ["scan", "--help"])
 
         assert handled is True
         help_fn.assert_called_once()
         target.assert_not_called()
 
     def test_post_help_never_processes(self):
-        from aipass.flow.apps.modules import post_close_runner as mod
-
         with patch(f"{_POST}.acquire_lock") as target, patch(f"{_POST}.print_help") as help_fn:
-            handled = mod.handle_command("post", ["--force", "--help"])
+            handled = post_close_runner.handle_command("post", ["--force", "--help"])
 
         assert handled is True
         help_fn.assert_called_once()
@@ -326,9 +312,6 @@ class TestUnflaggedModulesHelpSafety:
         gate is patched open here to reach the lock call at all.
         """
         import os
-
-        from aipass.flow.apps.handlers.runner import lock_ops
-        from aipass.flow.apps.modules import post_close_runner as mod
 
         lock = tmp_path / ".post_close_runner.lock"
         real_open = os.open
@@ -350,7 +333,7 @@ class TestUnflaggedModulesHelpSafety:
             patch("aipass.flow.apps.handlers.runner.lock_ops.os.open", side_effect=fake_open),
             patch("time.sleep"),
         ):
-            handled = mod.handle_command("post", ["run"])
+            handled = post_close_runner.handle_command("post", ["run"])
 
         assert handled is True
         target.assert_not_called()
@@ -362,10 +345,8 @@ class TestUnflaggedModulesHelpSafety:
         assert len(attempts) == lock_ops._CREATE_RETRIES
 
     def test_normal_registry_status_still_works(self):
-        from aipass.flow.apps.modules import registry_monitor as mod
-
         with patch(f"{_REG}.print_help") as help_fn:
-            handled = mod.handle_command("registry", ["status"])
+            handled = registry_monitor.handle_command("registry", ["status"])
 
         assert handled is True
         help_fn.assert_not_called()
