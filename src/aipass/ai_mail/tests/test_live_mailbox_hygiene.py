@@ -1,33 +1,35 @@
 # =================== AIPass ====================
 # Name: test_live_mailbox_hygiene.py
 # Description: Guard that test fixtures never appear in real citizens' mailboxes
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Guard against test fixtures leaking into live mailboxes.
+"""Tests for apps/handlers/paths.py's find_repo_root(), guarding live mailboxes for fixture leakage."""
 
-@devpulse flagged (2026-08-16) that a fixture-shaped mail — subject 'hello',
-body 'body', stamped ``2026-08-14T12:50:00Z`` — appeared in their live inbox,
-and asked whether this suite writes through the real delivery lane.
+# @devpulse flagged (2026-08-16) that a fixture-shaped mail — subject 'hello',
+# body 'body', stamped ``2026-08-14T12:50:00Z`` — appeared in their live inbox,
+# and asked whether this suite writes through the real delivery lane.
+#
+# Measured answer: it does not. A full suite run leaves all 17 live inboxes and
+# the notification feed byte-identical, and no fixture-shaped message exists in
+# any of them. I could not find the specific message they cited anywhere in the
+# mailbox tree.
+#
+# But their instinct about the SHAPE was exactly right, which is why this guard
+# exists. ``tests/test_delivery.py`` builds email_data with a default timestamp of
+# ``2026-03-29T12:00:00Z`` — ISO-8601 with a Z suffix. Live mail never looks like
+# that: every real producer writes ``YYYY-MM-DD HH:MM:SS`` (``create.py`` and
+# ``reply.py`` both use ``strftime``). So a Z-suffixed timestamp in a real inbox
+# is a reliable signature of fixture data written through the real lane.
+#
+# This test reads live mailboxes deliberately. It is the only way to check the
+# property that actually matters — the harness being correct in principle is what
+# was already believed on the day the fixture appeared.
 
-Measured answer: it does not. A full suite run leaves all 17 live inboxes and
-the notification feed byte-identical, and no fixture-shaped message exists in
-any of them. I could not find the specific message they cited anywhere in the
-mailbox tree.
-
-But their instinct about the SHAPE was exactly right, which is why this guard
-exists. ``tests/test_delivery.py`` builds email_data with a default timestamp of
-``2026-03-29T12:00:00Z`` — ISO-8601 with a Z suffix. Live mail never looks like
-that: every real producer writes ``YYYY-MM-DD HH:MM:SS`` (``create.py`` and
-``reply.py`` both use ``strftime``). So a Z-suffixed timestamp in a real inbox
-is a reliable signature of fixture data written through the real lane.
-
-This test reads live mailboxes deliberately. It is the only way to check the
-property that actually matters — the harness being correct in principle is what
-was already believed on the day the fixture appeared.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — json.JSONDecodeError's contract on a malformed file, not re-verified
 
 import json
 import re
@@ -35,6 +37,7 @@ from pathlib import Path
 
 import pytest
 
+import aipass.ai_mail.tests.test_live_mailbox_hygiene as guard_mod
 from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 # Live mail: "2026-08-16 10:03:15". Fixtures: "2026-03-29T12:00:00Z".
@@ -93,8 +96,6 @@ class TestNoFixturesInLiveMailboxes:
         asserts the guard fails. Without this, a guard that never fires is
         indistinguishable from a guard that cannot fire.
         """
-        import aipass.ai_mail.tests.test_live_mailbox_hygiene as guard_mod
-
         mailbox = tmp_path / "src" / "aipass" / "devpulse" / ".ai_mail.local"
         mailbox.mkdir(parents=True)
         (mailbox / "inbox.json").write_text(

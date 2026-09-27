@@ -1,32 +1,34 @@
 # =================== AIPass ====================
 # Name: test_cross_scope_addressing.py
 # Description: Tests that an out-of-scope address is refused honestly, not reported as unknown
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for honest refusal of hosted-project addresses (found by @api, 2026-08-14).
+"""Tests for apps/handlers/email/delivery.py -- honest refusal of hosted-project addresses."""
 
-@api tried to mail ``@baud`` from ``src/aipass/api`` and got
-``Unknown branch email: @baud (available: 17 branches)``. That message is
-false: @baud is a registered citizen of the hosted project ``projects/baud``,
-reachable by @devpulse's admin lane. The refusal is *correct* — fleet-to-project
-initiation is walled by the owner's ruling, replies only (DPLAN-0288) — but the
-stated reason was not, so @api spent the next five minutes hunting an addressing
-bug that did not exist and left two stray ping mails in @baud's inbox.
+# Found by @api, 2026-08-14. @api tried to mail ``@baud`` from ``src/aipass/api`` and got
+# ``Unknown branch email: @baud (available: 17 branches)``. That message is
+# false: @baud is a registered citizen of the hosted project ``projects/baud``,
+# reachable by @devpulse's admin lane. The refusal is *correct* — fleet-to-project
+# initiation is walled by the owner's ruling, replies only (DPLAN-0288) — but the
+# stated reason was not, so @api spent the next five minutes hunting an addressing
+# bug that did not exist and left two stray ping mails in @baud's inbox.
+#
+# Mail has two walls in this direction and they disagreed about honesty. The
+# inner wall, ``_check_cross_project_boundary``, already names both projects and
+# says "cross-project mail refused". The outer wall, address resolution, said the
+# address does not exist. A caller who trips the outer wall never learns there
+# was a policy at all.
+#
+# These tests pin the contract: explain the wall, do not deny the address —
+# and, critically, explaining must not open it. The diagnostic reads the project
+# registries to describe the failure and must never add them to the resolution
+# map, or the refusal it is describing would stop happening.
 
-Mail has two walls in this direction and they disagreed about honesty. The
-inner wall, ``_check_cross_project_boundary``, already names both projects and
-says "cross-project mail refused". The outer wall, address resolution, said the
-address does not exist. A caller who trips the outer wall never learns there
-was a policy at all.
-
-These tests pin the contract: **explain the wall, do not deny the address** —
-and, critically, explaining must not open it. The diagnostic reads the project
-registries to describe the failure and must never add them to the resolution
-map, or the refusal it is describing would stop happening.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — _describe_unresolved_address()'s fallback wording for a truly-unknown address
 
 import json
 from contextlib import contextmanager

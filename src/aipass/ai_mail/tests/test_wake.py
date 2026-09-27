@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-04-26
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for wake handler -- branch resolution, lock checking, PID checks, helpers."""
+"""Tests for apps/handlers/dispatch/wake.py and wake_dashboard.py."""
+
+# branch resolution, lock checking, PID checks, helpers.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DEFAULT_PROMPT's exact literal text
 
 import json
 import os
@@ -19,6 +24,8 @@ from pathlib import Path as _Path
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
+import aipass.prax.apps.modules.dashboard as prax_dashboard_mod
+from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
 from aipass.ai_mail.apps.handlers.dispatch.wake import (
     _read_json,
     _check_lock,
@@ -356,7 +363,7 @@ def test_get_pid_cwd_unsupported_platform(monkeypatch):
 def test_is_zombie_linux_not_zombie(monkeypatch, tmp_path):
     """Non-zombie process returns False."""
     status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tS (sleeping)\nPid:\t42\n")
+    status_file.write_text("Name:\tclaude\nState:\tS (sleeping)\nPid:\t42\n", encoding="utf-8")
     monkeypatch.setattr(
         "builtins.open",
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
@@ -367,7 +374,7 @@ def test_is_zombie_linux_not_zombie(monkeypatch, tmp_path):
 def test_is_zombie_linux_zombie(monkeypatch, tmp_path):
     """Zombie process returns True."""
     status_file = tmp_path / "status"
-    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\nPid:\t42\n")
+    status_file.write_text("Name:\tclaude\nState:\tZ (zombie)\nPid:\t42\n", encoding="utf-8")
     monkeypatch.setattr(
         "builtins.open",
         _fake_open_factory(str(status_file), {"/proc/42/status": str(status_file)}),
@@ -910,7 +917,7 @@ class TestLoadConfig:
 class TestIsBranchOccupied:
     """Tests for _is_branch_occupied() — checks for interactive Claude sessions."""
 
-    def test_no_claude_processes(self, monkeypatch):
+    def test_no_claude_processes(self, tmp_path, monkeypatch):
         """pgrep returns non-zero (no claude processes) -> not occupied."""
 
         class FakeResult:
@@ -918,7 +925,7 @@ class TestIsBranchOccupied:
             stdout = ""
 
         monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
-        assert _is_branch_occupied(_Path("/some/branch")) is False
+        assert _is_branch_occupied(tmp_path) is False
 
     def test_claude_in_different_dir(self, tmp_path, monkeypatch):
         """Claude running in a different directory -> not occupied."""
@@ -961,14 +968,14 @@ class TestIsBranchOccupied:
         monkeypatch.setattr(wake_mod, "_read_session_type", lambda pid_str: "daemon")
         assert _is_branch_occupied(tmp_path) is False
 
-    def test_pgrep_subprocess_failure_returns_false(self, monkeypatch):
+    def test_pgrep_subprocess_failure_returns_false(self, tmp_path, monkeypatch):
         """subprocess failure returns False."""
 
         def _fail(*a, **kw):
             raise subprocess.SubprocessError("pgrep failed")
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        assert _is_branch_occupied(_Path("/some/branch")) is False
+        assert _is_branch_occupied(tmp_path) is False
 
     def test_readlink_oserror_continues(self, tmp_path, monkeypatch):
         """OSError on readlink is caught, continues to next PID."""
@@ -1871,8 +1878,6 @@ class TestWakeBackOptOut:
 
     def test_a_declined_wake_back_is_written_on_the_register_row(self, tmp_path, monkeypatch):
         """A reader of the register can tell a declined wake-back from a lost one."""
-        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-
         _make_scheduled_fixtures(tmp_path, monkeypatch, citizen_class="aipass_framework")
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
@@ -2420,8 +2425,6 @@ class TestDaemonSessionMarking:
         _patch_wake_deps(monkeypatch)
         _record_spawn_routes(monkeypatch)
 
-        from aipass.ai_mail.apps.handlers.dispatch import register as register_mod
-
         opened = []
         monkeypatch.setattr(register_mod, "open_dispatch", lambda **kw: opened.append(kw) or "id", raising=True)
 
@@ -2657,7 +2660,7 @@ class TestRecipientDashboardRefresh:
         """Patch the prax entry point where the wake imports it from — the
         MODULE door (apps/modules/dashboard.py), which is prax's published
         surface and the only one another branch may read."""
-        import aipass.prax.apps.modules.dashboard as prax_refresh
+        prax_refresh = prax_dashboard_mod
 
         if fake is not None:
             monkeypatch.setattr(prax_refresh, "refresh_single_dashboard", fake)

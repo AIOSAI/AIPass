@@ -1,22 +1,24 @@
 # =================== AIPass ====================
 # Name: test_upsert.py
 # Description: Tests for upsert_key delivery (repeat-signal collapsing)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-10
-# Modified: 2026-08-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for upsert_key delivery.
+"""Tests for apps/handlers/email/delivery.py's upsert_key handling."""
 
-A repeating signal must occupy ONE inbox slot with a climbing counter, never
-a stack of identical messages. The rules under test:
+# A repeating signal must occupy ONE inbox slot with a climbing counter, never
+# a stack of identical messages. The rules under test:
+#
+# - match (same sender + same key + not closed) rewrites in place
+# - no match creates a normal new message at updates: 1
+# - a closed predecessor does NOT match — closing re-arms the signature
+# - an in-place update never wakes and never flips read status back to new
+# - upsert_key=None is byte-for-byte today's behavior
 
-- match (same sender + same key + not closed) rewrites in place
-- no match creates a normal new message at updates: 1
-- a closed predecessor does NOT match — closing re-arms the signature
-- an in-place update never wakes and never flips read status back to new
-- upsert_key=None is byte-for-byte today's behavior
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _auto_register_contact()'s broad except Exception around contact registration
 
 import json
 import pytest

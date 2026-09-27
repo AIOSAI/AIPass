@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_contacts.py
 # Description: Tests for the contacts address book handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-11
-# Modified: 2026-04-11
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for contacts address book handler (DPLAN-0121 Phase 5)."""
+"""Tests for apps/handlers/email/contacts.py."""
+
+# DPLAN-0121 Phase 5.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
 
 import json
 import pytest
@@ -19,6 +24,7 @@ from aipass.ai_mail.apps.handlers.email.contacts import (
     all_contacts,
     _load_contacts,
 )
+from aipass.ai_mail.apps.handlers.paths import find_repo_root
 
 
 # ---- Fixtures ------------------------------------------------
@@ -74,24 +80,25 @@ def test_get_contact_empty(isolated_contacts):
     assert result is None
 
 
-def test_get_contact_strips_at_sign(isolated_contacts):
+def test_get_contact_strips_at_sign(isolated_contacts, tmp_path):
     """get_contact strips leading @ before lookup."""
-    register_contact("devpulse", "AIPass", "/some/inbox.json")
+    inbox = str(tmp_path / "some" / "inbox.json")
+    register_contact("devpulse", "AIPass", inbox)
     result = get_contact("@devpulse")
     assert result is not None
-    assert result["inbox"] == "/some/inbox.json"
+    assert result["inbox"] == inbox
 
 
-def test_get_contact_case_insensitive(isolated_contacts):
+def test_get_contact_case_insensitive(isolated_contacts, tmp_path):
     """get_contact normalises to lowercase for lookup."""
-    register_contact("devpulse", "AIPass", "/some/inbox.json")
+    register_contact("devpulse", "AIPass", str(tmp_path / "some" / "inbox.json"))
     result = get_contact("DEVPULSE")
     assert result is not None
 
 
-def test_get_contact_not_found(isolated_contacts):
+def test_get_contact_not_found(isolated_contacts, tmp_path):
     """get_contact returns None for unknown branch."""
-    register_contact("devpulse", "AIPass", "/some/inbox.json")
+    register_contact("devpulse", "AIPass", str(tmp_path / "some" / "inbox.json"))
     result = get_contact("unknown")
     assert result is None
 
@@ -99,45 +106,47 @@ def test_get_contact_not_found(isolated_contacts):
 # ---- register_contact() tests ------------------------------
 
 
-def test_register_contact_creates_entry(isolated_contacts):
+def test_register_contact_creates_entry(isolated_contacts, tmp_path):
     """register_contact writes a new entry with correct fields."""
-    ok = register_contact("devpulse", "AIPass", "/path/to/inbox.json")
+    inbox = str(tmp_path / "path" / "to" / "inbox.json")
+    ok = register_contact("devpulse", "AIPass", inbox)
     assert ok is True
 
     result = get_contact("devpulse")
     assert result is not None
     assert result["project"] == "AIPass"
-    assert result["inbox"] == "/path/to/inbox.json"
+    assert result["inbox"] == inbox
     assert "last_seen" in result
 
 
-def test_register_contact_updates_existing(isolated_contacts):
+def test_register_contact_updates_existing(isolated_contacts, tmp_path):
     """register_contact updates last_seen on second registration."""
-    register_contact("devpulse", "AIPass", "/path/to/inbox.json")
+    register_contact("devpulse", "AIPass", str(tmp_path / "path" / "to" / "inbox.json"))
     first = get_contact("devpulse")
     assert first is not None
     assert "last_seen" in first
 
     # Re-register with new path
-    register_contact("devpulse", "AIPass", "/new/path/inbox.json")
+    new_inbox = str(tmp_path / "new" / "path" / "inbox.json")
+    register_contact("devpulse", "AIPass", new_inbox)
     updated = get_contact("devpulse")
     assert updated is not None
-    assert updated["inbox"] == "/new/path/inbox.json"
+    assert updated["inbox"] == new_inbox
     # last_seen should be present (may or may not change within same second)
     assert "last_seen" in updated
 
 
-def test_register_contact_strips_at_sign(isolated_contacts):
+def test_register_contact_strips_at_sign(isolated_contacts, tmp_path):
     """register_contact strips leading @ from branch name."""
-    ok = register_contact("@devpulse", "AIPass", "/inbox.json")
+    ok = register_contact("@devpulse", "AIPass", str(tmp_path / "inbox.json"))
     assert ok is True
     result = get_contact("devpulse")
     assert result is not None
 
 
-def test_register_contact_persists_to_disk(isolated_contacts):
+def test_register_contact_persists_to_disk(isolated_contacts, tmp_path):
     """register_contact writes JSON to disk that can be read back."""
-    register_contact("testbranch", "TestProject", "/test/inbox.json")
+    register_contact("testbranch", "TestProject", str(tmp_path / "test" / "inbox.json"))
 
     assert isolated_contacts.exists()
     with open(isolated_contacts, "r", encoding="utf-8") as f:
@@ -157,10 +166,10 @@ def test_all_contacts_empty(isolated_contacts):
     assert result == {}
 
 
-def test_all_contacts_returns_all(isolated_contacts):
+def test_all_contacts_returns_all(isolated_contacts, tmp_path):
     """all_contacts returns all registered contacts."""
-    register_contact("alpha", "AIPass", "/alpha/inbox.json")
-    register_contact("beta", "AIPass", "/beta/inbox.json")
+    register_contact("alpha", "AIPass", str(tmp_path / "alpha" / "inbox.json"))
+    register_contact("beta", "AIPass", str(tmp_path / "beta" / "inbox.json"))
 
     result = all_contacts()
     assert "alpha" in result
@@ -181,8 +190,6 @@ def test_conftest_isolates_contacts_file_by_default():
     2026-08-16, @devpulse). This does not need `isolated_contacts`: the
     autouse fixture must already apply here, same as in any other test.
     """
-    from aipass.ai_mail.apps.handlers.paths import find_repo_root
-
     live_path = find_repo_root() / "src/aipass/ai_mail/.ai_mail.local/contacts.json"
 
     assert contacts_mod.CONTACTS_FILE != live_path

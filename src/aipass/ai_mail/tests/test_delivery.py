@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_delivery.py
 # Description: Tests for email delivery handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for email delivery handler -- inbox migration, private branch check, delivery."""
+"""Tests for apps/handlers/email/delivery.py."""
+
+# Inbox migration, private branch check, delivery.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — _auto_register_sender()'s broad except Exception around contact auto-registration
 
 import json
 import pytest
@@ -427,11 +432,11 @@ def test_deliver_path_input_resolves_to_email(tmp_path, repo_root, noop_inbox_lo
     assert error == ""
 
 
-def test_deliver_path_input_unresolvable(repo_root, noop_inbox_lock):
+def test_deliver_path_input_unresolvable(repo_root, noop_inbox_lock, tmp_path):
     """Unresolvable path returns failure."""
     with patch.object(delivery_mod, "get_all_branches", return_value=[]):
         success, error = deliver_email_to_branch(
-            "/nonexistent/path",
+            str(tmp_path / "nonexistent" / "path"),
             _make_email_data(),
         )
 

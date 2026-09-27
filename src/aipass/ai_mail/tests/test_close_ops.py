@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for email close operations handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for email close operations handler -- batch close and post-ops."""
+"""Tests for apps/handlers/email/close_ops.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(json_handler) — json_handler.log_operation's exact call args here
 
 import pytest
 from pathlib import Path

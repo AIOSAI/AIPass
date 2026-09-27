@@ -1,18 +1,20 @@
 # =================== AIPass ====================
 # Name: test_verified_caller.py
 # Description: Tests for the verified-caller rail (FPLAN-0401 Phase 1)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the verified-caller rail.
+"""Tests for apps/handlers/users/verified_caller.py."""
 
-The rail exists because ``--from`` / ``--sender`` are unauthenticated strings:
-before this, ``dispatch @manager --from @daemon`` resolved ``sender="@daemon"``
-and unlocked the manager wake lane for any caller. Identity that gates a
-privilege may only come from the env drone stamps from real process ancestry.
-"""
+# The rail exists because ``--from`` / ``--sender`` are unauthenticated strings:
+# before this, ``dispatch @manager --from @daemon`` resolved ``sender="@daemon"``
+# and unlocked the manager wake lane for any caller. Identity that gates a
+# privilege may only come from the env drone stamps from real process ancestry.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the win32 console re-encoding guard at import time
 
 import re
 from pathlib import Path

@@ -1,13 +1,23 @@
-"""The dispatch register — what was promised, and what a reader can tell from it.
+# =================== AIPass ====================
+# Name: test_dispatch_register.py
+# Description: Tests for the dispatch register append-only log
+# Version: 1.0.1
+# Created: 2026-08-22
+# Modified: 2026-09-27
+# =============================================
 
-FPLAN-0452 P0.
+"""Tests for apps/handlers/dispatch/register.py: the append-only dispatch register."""
 
-The register's whole value is that crash detection costs nothing: an entry past
-its expected_by with no completion record is a FACT ABOUT A FILE, visible to
-anyone who looks, with no process running to discover it. These tests pin the
-properties that fact depends on — append-only, never production, honest about
-what it cannot parse.
-"""
+# FPLAN-0452 P0.
+#
+# The register's whole value is that crash detection costs nothing: an entry past
+# its expected_by with no completion record is a FACT ABOUT A FILE, visible to
+# anyone who looks, with no process running to discover it. These tests pin the
+# properties that fact depends on — append-only, never production, honest about
+# what it cannot parse.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — monitor_alive()'s Windows OpenProcess leg (_monitor_alive_windows)
 
 import json
 import os
@@ -19,7 +29,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from aipass.ai_mail.apps.handlers.dispatch import register
+from aipass.ai_mail.apps.handlers.dispatch import register, report
+from aipass.ai_mail.apps.handlers.notify import jsonl_records
 
 
 @pytest.fixture
@@ -120,9 +131,10 @@ class TestAppendOnly:
     def test_close_appends_a_second_record_and_leaves_the_first_intact(self, repo):
         import json
 
+        report_path = str(repo / "reports" / "x.json")
         dispatch_id = register.open_dispatch("@devpulse", "@ai_mail", "s", 7200, repo_root=repo)
         assert dispatch_id
-        register.close_dispatch(dispatch_id, "completed", "/reports/x.json", repo_root=repo)
+        register.close_dispatch(dispatch_id, "completed", report_path, repo_root=repo)
 
         lines = _lines(repo)
         assert len(lines) == 2, "close must APPEND, never rewrite"
@@ -130,7 +142,7 @@ class TestAppendOnly:
         closing = json.loads(lines[1])
         assert closing["dispatch_id"] == dispatch_id
         assert closing["status"] == "completed"
-        assert closing["report_path"] == "/reports/x.json"
+        assert closing["report_path"] == report_path
 
     def test_a_closed_dispatch_stops_being_outstanding(self, repo):
         dispatch_id = register.open_dispatch("@a", "@b", "s", 7200, repo_root=repo)
@@ -583,8 +595,6 @@ class TestEmptyAndUnreadableAreNotTheSameAnswer:
 
     def test_the_feed_keeps_the_tolerant_read(self, tmp_path):
         """Strictness is opt-in — a bell that raises at a delivery hook is worse."""
-        from aipass.ai_mail.apps.handlers.notify import jsonl_records
-
         unreadable = tmp_path / "feed.jsonl"
         unreadable.mkdir()
 
@@ -608,8 +618,6 @@ class TestTheSuiteCannotTouchProduction:
         assert register.register_file() != live
 
     def test_the_reports_directory_under_test_is_never_the_live_one(self):
-        from aipass.ai_mail.apps.handlers.dispatch import report
-
         live = Path(__file__).resolve().parents[4] / ".aipass" / report.REPORTS_DIRNAME
 
         assert live.name == report.REPORTS_DIRNAME, "anchor check: the live path must be real"

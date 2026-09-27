@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_registry_read.py
 # Description: Tests for registry read handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for registry read handler -- branch listing and email derivation."""
+"""Tests for apps/handlers/registry/read.py."""
+
+# Branch listing and email derivation.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — get_all_branches()'s broad except Exception fallback on a malformed registry file
 
 import json
 import pytest

@@ -1,5 +1,18 @@
-"""Tests for email send handler -- send_to_single, send_to_broadcast, collect_interactive_input,
-and resolve_dispatch_target from send_args."""
+# =================== AIPass ====================
+# Name: test_send_helpers.py
+# Description: Tests for email send handler and send_args dispatch resolution
+# Version: 1.0.0
+# Created: 2026-04-25
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""
+
+# Covers send_to_single, send_to_broadcast, collect_interactive_input,
+# resolve_dispatch_target and parse_send_args.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — send_to_single()'s exact console/log wording, only its return value
 
 import pytest
 from unittest.mock import patch, MagicMock
@@ -10,6 +23,7 @@ from aipass.ai_mail.apps.handlers.email.send import (
     collect_interactive_input,
 )
 from aipass.ai_mail.apps.handlers.email.send_args import (
+    parse_send_args,
     resolve_dispatch_target,
 )
 
@@ -36,19 +50,20 @@ def _silence_send_args_json_handler():
 # ---- send_to_single tests ------------------------------------
 
 
-def _make_user_info() -> dict:
+def _make_user_info(tmp_path) -> dict:
     """Build a minimal user_info dict for send tests."""
     return {
         "email_address": "@trigger",
         "display_name": "TRIGGER",
-        "mailbox_path": "/tmp/trigger/.ai_mail.local",
+        "mailbox_path": str(tmp_path / "trigger" / ".ai_mail.local"),
         "timestamp_format": "%Y-%m-%d %H:%M:%S",
     }
 
 
-def test_send_to_single_happy_path():
+def test_send_to_single_happy_path(tmp_path):
     """Successful single send returns (True, None)."""
-    mock_create = MagicMock(return_value="/tmp/email_file.json")
+    email_file = str(tmp_path / "email_file.json")
+    mock_create = MagicMock(return_value=email_file)
     mock_load = MagicMock(return_value={"subject": "Test", "message": "Body"})
     mock_deliver = MagicMock(return_value=(True, ""))
     mock_callback = MagicMock()
@@ -59,7 +74,7 @@ def test_send_to_single_happy_path():
         to_branch="@backup",
         subject="Test subject",
         message="Test body",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
@@ -75,14 +90,14 @@ def test_send_to_single_happy_path():
     assert success is True
     assert error is None
     mock_create.assert_called_once()
-    mock_load.assert_called_once_with("/tmp/email_file.json")
+    mock_load.assert_called_once_with(email_file)
     mock_deliver.assert_called_once()
     mock_log.assert_called_once_with("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})
 
 
-def test_send_to_single_load_fails():
+def test_send_to_single_load_fails(tmp_path):
     """Returns (False, error) when email file cannot be loaded."""
-    mock_create = MagicMock(return_value="/tmp/email_file.json")
+    mock_create = MagicMock(return_value=str(tmp_path / "email_file.json"))
     mock_load = MagicMock(return_value=None)
     mock_deliver = MagicMock()
     mock_log = MagicMock()
@@ -91,7 +106,7 @@ def test_send_to_single_load_fails():
         to_branch="@backup",
         subject="Test",
         message="Body",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
@@ -110,9 +125,9 @@ def test_send_to_single_load_fails():
     mock_deliver.assert_not_called()
 
 
-def test_send_to_single_delivery_fails():
+def test_send_to_single_delivery_fails(tmp_path):
     """Returns (False, error) when delivery function reports failure."""
-    mock_create = MagicMock(return_value="/tmp/email_file.json")
+    mock_create = MagicMock(return_value=str(tmp_path / "email_file.json"))
     mock_load = MagicMock(return_value={"subject": "Test", "message": "Body"})
     mock_deliver = MagicMock(return_value=(False, "Branch offline"))
     mock_log = MagicMock()
@@ -121,7 +136,7 @@ def test_send_to_single_delivery_fails():
         to_branch="@backup",
         subject="Test",
         message="Body",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
@@ -138,7 +153,7 @@ def test_send_to_single_delivery_fails():
     assert error == "Branch offline"
 
 
-def test_send_to_single_sets_auto_execute():
+def test_send_to_single_sets_auto_execute(tmp_path):
     """auto_execute flag is set on email_data before delivery."""
     captured_data = {}
 
@@ -147,14 +162,14 @@ def test_send_to_single_sets_auto_execute():
         captured_data.update(data)
         return (True, "")
 
-    mock_create = MagicMock(return_value="/tmp/email.json")
+    mock_create = MagicMock(return_value=str(tmp_path / "email.json"))
     mock_load = MagicMock(return_value={"subject": "Test", "message": "Body"})
 
     send_to_single(
         to_branch="@flow",
         subject="Test",
         message="Body",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=True,
         no_memory_save=True,
         reply_to=None,
@@ -175,13 +190,13 @@ def test_send_to_single_sets_auto_execute():
 # ---- send_to_broadcast tests ---------------------------------
 
 
-def test_send_to_broadcast_happy_path():
+def test_send_to_broadcast_happy_path(tmp_path):
     """Successful broadcast returns (True, success_count, total, results)."""
     branches = [
         {"email": "@flow", "name": "FLOW"},
         {"email": "@backup", "name": "BACKUP"},
     ]
-    mock_create = MagicMock(return_value="/tmp/broadcast.json")
+    mock_create = MagicMock(return_value=str(tmp_path / "broadcast.json"))
     mock_load = MagicMock(return_value={"subject": "Announce", "message": "Hello all"})
     mock_deliver = MagicMock(return_value=(True, ""))
     mock_log = MagicMock()
@@ -189,7 +204,7 @@ def test_send_to_broadcast_happy_path():
     ok, success_count, total, results = send_to_broadcast(
         subject="Announce",
         message="Hello all",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
@@ -209,17 +224,17 @@ def test_send_to_broadcast_happy_path():
     assert len(results) == 2
 
 
-def test_send_to_broadcast_load_fails():
+def test_send_to_broadcast_load_fails(tmp_path):
     """Returns failure when email file cannot be loaded."""
     branches = [{"email": "@flow", "name": "FLOW"}]
-    mock_create = MagicMock(return_value="/tmp/broadcast.json")
+    mock_create = MagicMock(return_value=str(tmp_path / "broadcast.json"))
     mock_load = MagicMock(return_value=None)
     mock_log = MagicMock()
 
     ok, success_count, total, error = send_to_broadcast(
         subject="Announce",
         message="Hello",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
@@ -237,14 +252,14 @@ def test_send_to_broadcast_load_fails():
     assert "could not be loaded" in error
 
 
-def test_send_to_broadcast_partial_failure():
+def test_send_to_broadcast_partial_failure(tmp_path):
     """Partial delivery failure returns correct counts."""
     branches = [
         {"email": "@flow", "name": "FLOW"},
         {"email": "@backup", "name": "BACKUP"},
         {"email": "@memory", "name": "MEMORY"},
     ]
-    mock_create = MagicMock(return_value="/tmp/broadcast.json")
+    mock_create = MagicMock(return_value=str(tmp_path / "broadcast.json"))
     mock_load = MagicMock(return_value={"subject": "Test", "message": "Body"})
     # First and third succeed, second fails
     mock_deliver = MagicMock(side_effect=[(True, ""), (False, "offline"), (True, "")])
@@ -253,7 +268,7 @@ def test_send_to_broadcast_partial_failure():
     ok, success_count, total, results = send_to_broadcast(
         subject="Test",
         message="Body",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
@@ -363,28 +378,28 @@ def test_resolve_dispatch_target_email_address():
     assert result == "@flow"
 
 
-def test_resolve_dispatch_target_path_with_registry_lookup():
+def test_resolve_dispatch_target_path_with_registry_lookup(tmp_path):
     """Returns registry email when path resolves via get_branch_info_fn."""
     mock_fn = MagicMock(return_value={"email": "@trigger", "name": "TRIGGER"})
 
-    result = resolve_dispatch_target("/home/user/trigger", True, get_branch_info_fn=mock_fn)
+    result = resolve_dispatch_target(str(tmp_path / "trigger"), True, get_branch_info_fn=mock_fn)
 
     assert result == "@trigger"
     mock_fn.assert_called_once()
 
 
-def test_resolve_dispatch_target_path_without_registry():
+def test_resolve_dispatch_target_path_without_registry(tmp_path):
     """Returns fallback @dirname when no registry function provided."""
-    result = resolve_dispatch_target("/home/user/flow", True, get_branch_info_fn=None)
+    result = resolve_dispatch_target(str(tmp_path / "flow"), True, get_branch_info_fn=None)
 
     assert result == "@flow"
 
 
-def test_resolve_dispatch_target_path_registry_not_found():
+def test_resolve_dispatch_target_path_registry_not_found(tmp_path):
     """Returns fallback @dirname when registry lookup returns None."""
     mock_fn = MagicMock(return_value=None)
 
-    result = resolve_dispatch_target("/home/user/backup", True, get_branch_info_fn=mock_fn)
+    result = resolve_dispatch_target(str(tmp_path / "backup"), True, get_branch_info_fn=mock_fn)
 
     assert result == "@backup"
 
@@ -401,8 +416,6 @@ def test_resolve_dispatch_target_tilde_path():
 
 def test_parse_send_args_joins_split_message():
     """When message body is split into multiple args, all are joined."""
-    from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
-
     result = parse_send_args(["@target", "Subject", "Line one", "Line two", "Line three"])
     assert result["mode"] == "direct"
     assert result["subject"] == "Subject"
@@ -411,8 +424,6 @@ def test_parse_send_args_joins_split_message():
 
 def test_parse_send_args_single_message_unchanged():
     """Single message arg is not altered."""
-    from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
-
     result = parse_send_args(["@target", "Subject", "Complete body here"])
     assert result["mode"] == "direct"
     assert result["message"] == "Complete body here"
@@ -420,8 +431,6 @@ def test_parse_send_args_single_message_unchanged():
 
 def test_parse_send_args_multiline_body_preserved():
     """A single arg with embedded newlines passes through intact."""
-    from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
-
     body = "First line\nSecond line\nThird line"
     result = parse_send_args(["@target", "Subject", body])
     assert result["message"] == body
@@ -436,7 +445,7 @@ def test_parse_send_args_multiline_body_preserved():
 # drone's 60s cap after every message had already been delivered.
 
 
-def test_broadcast_aggregates_central_once_not_per_recipient():
+def test_broadcast_aggregates_central_once_not_per_recipient(tmp_path):
     """One @all send = one central aggregation, whatever the recipient count.
 
     Red-first: the loop passed on_delivered to every delivery, so an 18-branch
@@ -450,21 +459,23 @@ def test_broadcast_aggregates_central_once_not_per_recipient():
     def per_recipient_callback(*_args, **_kwargs):
         aggregations()
 
+    branch_path = str(tmp_path / "branch" / "path")
+
     def deliver(_email, _data, on_delivered=None):
         if on_delivered is not None:
-            on_delivered("/branch/path", 1, 0, 1)
+            on_delivered(branch_path, 1, 0, 1)
         return True, ""
 
     ok, success_count, total, results = send_to_broadcast(
         subject="Announce",
         message="Hello all",
-        user_info=_make_user_info(),
+        user_info=_make_user_info(tmp_path),
         auto_execute=False,
         no_memory_save=False,
         reply_to=None,
         dispatched_to=None,
         branches=branches,
-        create_email_file_fn=MagicMock(return_value="/tmp/broadcast.json"),
+        create_email_file_fn=MagicMock(return_value=str(tmp_path / "broadcast.json")),
         load_email_file_fn=MagicMock(return_value={"subject": "Announce", "message": "Hello all"}),
         deliver_email_to_branch_fn=deliver,
         log_operation_fn=MagicMock(),

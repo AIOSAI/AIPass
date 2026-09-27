@@ -1,18 +1,19 @@
-# ===================AIPASS====================
-# META DATA HEADER
+# =================== AIPass ====================
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.3.0
+# Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
+# Version: 1.3.1
+# Created: 2026-03-05
+# Modified: 2026-09-27
 # Category: ai_mail/tests
-#
 # CHANGELOG (Max 5 entries):
+#   - v1.3.1 (2026-09-27): Template items 20/18 - pinned_console_width, clean_command_state;
+#     product imports hoisted to the top; unused mock_logger removed
 #   - v1.3.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam
 #     alone — mock_infrastructure lands each test in its own sandbox and
 #     mock_json_handler retires with the handler it mocked (DPLAN-0325)
 #   - v1.2.0 (2026-08-11): Autouse feed isolation — tests never touch the real notifications.jsonl
 #   - v1.1.0 (2026-03-27): Added mock_logger, mock_json_handler fixtures
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
-#
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -31,9 +32,12 @@ import pytest
 import shutil
 from pathlib import Path
 from typing import Generator
-from unittest.mock import MagicMock
 
+import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
+import aipass.ai_mail.apps.handlers.notify as notify_mod
+from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 
 # Never collect out of an archive. apps/handlers/.archive/ and tests/.archive/
 # hold the pre-DPLAN-0325 handler and its internals tests verbatim: they import
@@ -41,6 +45,21 @@ from aipass.ai_mail.apps.handlers.json import json_handler
 # a dot-prefixed part that was a SyntaxError. pytest's own norecursedirs already
 # skips dot-directories — this states the rule rather than relying on it.
 collect_ignore_glob = [".archive/*", "**/.archive/*"]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -79,8 +98,6 @@ def _isolate_notification_feed(tmp_path, monkeypatch):
     to the real .aipass/notifications.jsonl that BAUD renders — the toast era
     hid that leak because a toast vanishes; a feed line does not.
     """
-    import aipass.ai_mail.apps.handlers.notify as notify_mod
-
     monkeypatch.setattr(notify_mod, "FEED_PATH", tmp_path / "feed" / "notifications.jsonl")
 
 
@@ -177,8 +194,6 @@ def _isolate_dispatch_register(tmp_path, monkeypatch):
     file a handler writes to is production state, and the pattern is now: guard
     it in conftest the day the writer lands, not the day someone notices.
     """
-    from aipass.ai_mail.apps.handlers.dispatch import register, report
-
     # In its OWN subdirectory, never tmp_path itself: the marker file this needs
     # is exactly what the find_caller_registry tests build tmp_path to control,
     # and dropping a second AIPASS_REGISTRY.json beside theirs broke 15 of them.
@@ -200,8 +215,6 @@ def _isolate_contacts_file(tmp_path, monkeypatch):
     "verified" identity by branch_detection's contact lookup, serving a fixture
     mailbox in place of a real one (found live, 2026-08-16, @devpulse).
     """
-    import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
-
     monkeypatch.setattr(contacts_mod, "CONTACTS_FILE", tmp_path / "contacts" / "contacts.json")
 
 
@@ -221,10 +234,3 @@ def sample_test_data() -> dict:
     Customize this fixture for your module's needs
     """
     return {"test_key": "test_value", "sample_data": "example"}
-
-
-@pytest.fixture
-def mock_logger(monkeypatch):
-    """Mock the prax logger to prevent real log I/O during tests."""
-    mock_log = MagicMock()
-    return mock_log

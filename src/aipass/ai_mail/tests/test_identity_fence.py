@@ -1,28 +1,30 @@
 # =================== AIPass ====================
 # Name: test_identity_fence.py
 # Description: Tests for the caller identity fence (no branch under caller = refuse)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-21
-# Modified: 2026-08-21
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the caller identity fence.
+"""Tests for apps/handlers/users/branch_detection.py and the fence it enforces fleetwide."""
 
-The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
-ur cwd, and if aimail was run in root it should fail outright."
+# The owner's ruling, 2026-08-21: "ur dispatch should fail if u run from [outside]
+# ur cwd, and if aimail was run in root it should fail outright."
+#
+# The defect these pin (@devpulse, 0bb77ec2 / 096c9a42): running any ai_mail verb
+# from the repo root resolved to the @aipass CITIZEN and read its mailbox. The
+# mechanism is a name collision, not a missing policy — drone's
+# ``resolve_caller_identity(<repo root>)`` returns ``'aipass'`` derived from the
+# PROJECT directory name, ai_mail's contact lookup finds the same-named citizen,
+# and the identity is stamped "verified". A dispatch sent that way cost $1.41 and
+# woke the wrong citizen.
+#
+# The rule: ``AIPASS_CALLER_CWD`` is the evidence of where the caller actually
+# stood. When it is set and does not sit inside a branch, no identity is provable
+# and every verb refuses — a claim in ``AIPASS_CALLER_BRANCH`` cannot outvote it.
 
-The defect these pin (@devpulse, 0bb77ec2 / 096c9a42): running any ai_mail verb
-from the repo root resolved to the @aipass CITIZEN and read its mailbox. The
-mechanism is a name collision, not a missing policy — drone's
-``resolve_caller_identity(<repo root>)`` returns ``'aipass'`` derived from the
-PROJECT directory name, ai_mail's contact lookup finds the same-named citizen,
-and the identity is stamped "verified". A dispatch sent that way cost $1.41 and
-woke the wrong citizen.
-
-The rule: ``AIPASS_CALLER_CWD`` is the evidence of where the caller actually
-stood. When it is set and does not sit inside a branch, no identity is provable
-and every verb refuses — a claim in ``AIPASS_CALLER_BRANCH`` cannot outvote it.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 from pathlib import Path
 
@@ -30,6 +32,7 @@ import json
 
 import pytest
 
+from aipass.ai_mail.apps import ai_mail as entry
 from aipass.ai_mail.apps.handlers.users import branch_detection as bd
 from aipass.ai_mail.apps.handlers.users.branch_detection import detect_branch_from_pwd
 from aipass.ai_mail.apps.handlers.users.user import get_current_user
@@ -171,7 +174,6 @@ class TestEveryVerbIsFenced:
         """inbox, view, reply, send, dispatch — all of them. view/close/reply
         matter most: they resolve through _resolve_branch_path(), whose own
         fallback pointed at ai_mail's mailbox when detection failed."""
-        from aipass.ai_mail.apps import ai_mail as entry
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
@@ -181,7 +183,6 @@ class TestEveryVerbIsFenced:
     def test_help_still_works_from_anywhere(self, tmp_path, monkeypatch):
         """Help needs no identity and must not be fenced — @aipass's cross-OS
         preflight runs `drone @ai_mail --help` as a routing probe."""
-        from aipass.ai_mail.apps import ai_mail as entry
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "aipass")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
@@ -265,7 +266,6 @@ class TestProvenanceLiftsTheOverRefusal:
 
     def test_entry_point_lets_an_assigned_caller_through(self, tmp_path, monkeypatch):
         """End to end: the CLI fence stops refusing a credentialed caller."""
-        from aipass.ai_mail.apps import ai_mail as entry
 
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
@@ -299,7 +299,6 @@ class TestThePoisonedContactRowCannotOutvoteTheRegistry:
 
     def _poison(self, monkeypatch, tmp_path, victim_dir):
         """Stage a contact row for 'ai_mail' whose inbox is another branch's."""
-        from aipass.ai_mail.apps.handlers.users import branch_detection as bd
 
         contact_row = {"project": "", "inbox": str(victim_dir / ".ai_mail.local" / "inbox.json")}
         monkeypatch.setattr(
@@ -347,7 +346,6 @@ class TestThePoisonedContactRowCannotOutvoteTheRegistry:
         Without this, "registry first" would quietly become "registry only" and
         break every external-tier caller — the case contacts were built for.
         """
-        from aipass.ai_mail.apps.handlers.users import branch_detection as bd
 
         stranger = tmp_path / "outside" / "vera"
         (stranger / ".ai_mail.local").mkdir(parents=True)
@@ -470,7 +468,6 @@ class TestAProjectCitizenResolvesAgainstItsOwnRegistry:
 
     def test_the_mailbox_follows_the_corrected_root(self, monkeypatch, tmp_path):
         """The consequence the citizen actually feels: inbox and reply find his mail."""
-        from aipass.ai_mail.apps.handlers.users.user import get_current_user
 
         project_root, citizen = self._project(tmp_path)
         aipass_registry = tmp_path / "AIPASS_REGISTRY.json"

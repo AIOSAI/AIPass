@@ -1,38 +1,42 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: Tests for whole-sequence help-flag detection across the three CLI modules
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for help-flag safety (seedgo ``help_flag_safety``, DPLAN-0291 rule E).
+"""Tests for apps/handlers/cli/help_flags.py's wants_help() and the three CLI modules it gates."""
 
-All three modules gated help at ``args[0]`` only, so a flag one position later
-was discarded and the command ran instead. For a messaging branch that is not
-cosmetic: ``dispatch @target "Subject" "Body" --help`` reached
-``_orchestrate_dispatch_send`` and would have *sent the mail and woken the
-branch* it was asked to describe. Same class as @drone's ``rm`` shape, where a
-trailing ``--help`` deleted the real target first.
+# seedgo ``help_flag_safety``, DPLAN-0291 rule E.
+#
+# All three modules gated help at ``args[0]`` only, so a flag one position later
+# was discarded and the command ran instead. For a messaging branch that is not
+# cosmetic: ``dispatch @target "Subject" "Body" --help`` reached
+# ``_orchestrate_dispatch_send`` and would have *sent the mail and woken the
+# branch* it was asked to describe. Same class as @drone's ``rm`` shape, where a
+# trailing ``--help`` deleted the real target first.
+#
+# A question must never be executed as an instruction. Every test here mocks the
+# send and wake targets and asserts two things together — help was printed **and**
+# the side-effecting target was never called. Asserting only the first would pass
+# on code that explains itself after sending the mail.
+#
+# Two token classes, deliberately different:
+#
+# ``--help`` / ``-h``
+#     Unambiguous anywhere in the sequence, matched exactly. Exact match is what
+#     keeps real mail safe: a body reading "run --help for usage" arrives as one
+#     quoted argument and is not that token.
+#
+# ``help``
+#     A legitimate operand — a subject line can be the word "help", and for this
+#     branch that is a plausible message, not a typo. It therefore only reads as
+#     a request in the subcommand slot, position 0. None of the three modules
+#     owns a genuine ``help`` verb, so position 0 is free.
 
-A question must never be executed as an instruction. Every test here mocks the
-send and wake targets and asserts two things together — help was printed **and**
-the side-effecting target was never called. Asserting only the first would pass
-on code that explains itself after sending the mail.
-
-Two token classes, deliberately different:
-
-``--help`` / ``-h``
-    Unambiguous anywhere in the sequence, matched exactly. Exact match is what
-    keeps real mail safe: a body reading "run --help for usage" arrives as one
-    quoted argument and is not that token.
-
-``help``
-    A legitimate operand — a subject line can be the word "help", and for this
-    branch that is a plausible message, not a typo. It therefore only reads as
-    a request in the subcommand slot, position 0. None of the three modules
-    owns a genuine ``help`` verb, so position 0 is free.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — print_help()'s rendered wording; it is patched here, never rendered
 
 from unittest.mock import patch
 

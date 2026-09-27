@@ -1,4 +1,15 @@
-"""Tests for email reply handler -- get_email_by_id and send_reply."""
+# =================== AIPass ====================
+# Name: test_reply.py
+# Description: Tests for email reply handler
+# Version: 1.0.1
+# Created: 2026-04-25
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/email/reply.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 import pytest
@@ -435,7 +446,7 @@ def test_cross_project_reply_round_trip(tmp_path):
 
     assert success is True, msg
 
-    delivered = json.loads(ext_inbox.read_text())["messages"][0]
+    delivered = json.loads(ext_inbox.read_text(encoding="utf-8"))["messages"][0]
     assert delivered["from"] == "@branch_a"
     assert delivered["message"] == "Reply outbound"
     # The return address A stamped on the way out.
@@ -452,7 +463,7 @@ def test_cross_project_reply_round_trip(tmp_path):
 
     assert success2 is True, msg2
 
-    landed = json.loads(a_inbox.read_text())["messages"][0]
+    landed = json.loads(a_inbox.read_text(encoding="utf-8"))["messages"][0]
     assert landed["from"] == "@vera"
     assert landed["message"] == "Reply back inbound"
     # And the conversation can continue past this round too.

@@ -1,22 +1,24 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the admin dispatch lane's decision half.
+"""Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
 
-Split by responsibility:
-  - what the flag ROUTES -> test_wake.py::TestAdminManagerLane
-  - what EARNS the flag  -> here (5-leg verification + dispatch.py wiring)
+# Split by responsibility:
+#   - what the flag ROUTES -> test_wake.py::TestAdminManagerLane
+#   - what EARNS the flag  -> here (5-leg verification + dispatch.py wiring)
+#
+# The signing key lives outside every repo at ~/.aipass/admin_grant.key and does
+# not exist until the owner's ceremony. Nothing here creates it: every test that
+# needs a passing signature builds a throwaway key under tmp_path and hands its
+# path in explicitly.
 
-The signing key lives outside every repo at ~/.aipass/admin_grant.key and does
-not exist until the owner's ceremony. Nothing here creates it: every test that
-needs a passing signature builds a throwaway key under tmp_path and hands its
-path in explicitly.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — is_verified_admin_caller(), a thin bool wrapper this file never calls
 
 import json
 from contextlib import ExitStack
@@ -26,6 +28,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.ai_mail.apps.handlers.users.verified_caller import verify_admin_caller
+from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
+from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
 
 MOD = "aipass.ai_mail.apps.modules.dispatch"
 _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
@@ -55,8 +59,6 @@ def ceremony(tmp_path):
     Returns the paths so a test can break exactly one leg and assert that
     leg's named refusal.
     """
-    from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
-
     branch = tmp_path / "src" / "aipass" / "devpulse"
     (branch / "artifacts").mkdir(parents=True)
 
@@ -144,8 +146,6 @@ class TestVerifyAdminCaller:
 
     def test_admin_privilege_absent_is_refused(self, ceremony, monkeypatch):
         """Leg 3: a correctly signed cert that grants nothing grants nothing."""
-        from aipass.devpulse.apps.handlers.owner.admin_grant import compute_signature
-
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
         cert = {"owner": "devpulse", "type": "birth_certificate", "privileges": {"admin": False}}
         cert["signature"] = {"algo": "hmac-sha256", "value": compute_signature(cert, bytes.fromhex(_KEY_HEX))}
@@ -253,8 +253,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(True, "admin grant verified")),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert len(calls) == 1
@@ -265,8 +263,6 @@ class TestDispatchSendAdminWiring:
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "seedgo")
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert len(calls) == 1
@@ -276,8 +272,6 @@ class TestDispatchSendAdminWiring:
         """Unverifiable callers get the closed lane, no exception."""
         calls: list = []
         with _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=_wake_spy(calls))}):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
@@ -293,8 +287,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": verifier,
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         verifier.assert_not_called()
@@ -316,8 +308,6 @@ class TestDispatchSendAdminWiring:
                 ),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
@@ -338,8 +328,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(side_effect=_boom),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -360,8 +348,6 @@ class TestDispatchSendAdminWiring:
                 f"{_H_VERIFIED}.verify_admin_caller": MagicMock(return_value=(False, "lane dark")),
             }
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False

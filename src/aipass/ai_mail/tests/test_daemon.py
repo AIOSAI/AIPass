@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_daemon.py
 # Description: Tests for dispatch daemon handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for dispatch daemon handler -- config loading, state management, inbox scanning."""
+"""Tests for apps/handlers/dispatch/daemon.py -- config loading, state management, inbox scanning."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — cold_start_prompt/wake_prompt's exact text; only presence is asserted
 
 import json
 import os
@@ -642,7 +645,7 @@ def test_scan_and_ack_test_emails_acks_matching(tmp_path):
             {"id": "n1", "status": "new", "from_email": "@devpulse", "subject": "work", "body": "do something"},
         ]
     }
-    (ai_mail_local / "inbox.json").write_text(json.dumps(inbox))
+    (ai_mail_local / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
 
     with patch("aipass.ai_mail.apps.handlers.dispatch.test_token.auto_ack_test_email", return_value=True) as mock_ack:
         count = scan_and_ack_test_emails(branch_path, "@testbranch")
@@ -661,7 +664,7 @@ def test_scan_and_ack_test_emails_skips_closed(tmp_path):
             {"id": "t1", "status": "closed", "from_email": "@devpulse", "subject": "test", "body": TEST_TOKEN},
         ]
     }
-    (ai_mail_local / "inbox.json").write_text(json.dumps(inbox))
+    (ai_mail_local / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
 
     with patch("aipass.ai_mail.apps.handlers.dispatch.test_token.auto_ack_test_email") as mock_ack:
         count = scan_and_ack_test_emails(branch_path, "@testbranch")
@@ -706,11 +709,11 @@ def test_poll_cycle_resolves_relative_branch_path(tmp_path, monkeypatch):
             }
         ]
     }
-    (branch_dir / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox))
+    (branch_dir / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
 
     # Registry with relative path (real-world format)
     registry = {"branches": [{"email": "@ai_mail", "path": "src/aipass/ai_mail", "status": "active"}]}
-    (repo_root / "AIPASS_REGISTRY.json").write_text(json.dumps(registry))
+    (repo_root / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
 
     monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", repo_root / "AIPASS_REGISTRY.json")
     monkeypatch.setattr(daemon_mod, "_REPO_ROOT", repo_root)
@@ -758,10 +761,10 @@ def test_poll_cycle_absolute_path_unchanged(tmp_path, monkeypatch):
             }
         ]
     }
-    (branch_dir / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox))
+    (branch_dir / ".ai_mail.local" / "inbox.json").write_text(json.dumps(inbox), encoding="utf-8")
 
     registry = {"branches": [{"email": "@drone", "path": str(branch_dir), "status": "active"}]}
-    (repo_root / "AIPASS_REGISTRY.json").write_text(json.dumps(registry))
+    (repo_root / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
     monkeypatch.setattr(daemon_mod, "BRANCH_REGISTRY", repo_root / "AIPASS_REGISTRY.json")
     monkeypatch.setattr(daemon_mod, "_REPO_ROOT", repo_root)
 
@@ -972,7 +975,7 @@ def test_write_pid_file_no_existing(tmp_path, monkeypatch):
 
     assert result is True
     assert pid_file.exists()
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
 
 
 def test_write_pid_file_existing_alive_pid(tmp_path, monkeypatch):
@@ -1001,7 +1004,7 @@ def test_write_pid_file_existing_dead_pid(tmp_path, monkeypatch):
     result = _write_pid_file()
 
     assert result is True
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
 
 
 def test_write_pid_file_existing_permission_error(tmp_path, monkeypatch):
@@ -1030,7 +1033,7 @@ def test_write_pid_file_corrupt_pid_file(tmp_path, monkeypatch):
     result = _write_pid_file()
 
     assert result is True
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
 
 
 # ---- _write_pid_file: the Windows delete-pending denial -------------
@@ -1091,7 +1094,7 @@ def test_write_pid_file_first_create_denied_once_then_lands(tmp_path, monkeypatc
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [_denial(pid_file)], calls))
 
     assert _write_pid_file() is True
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
     assert len(calls) == 2
     assert fake_clock["sleeps"] == 1
 
@@ -1107,7 +1110,7 @@ def test_write_pid_file_retake_denied_once_then_lands(tmp_path, monkeypatch, fak
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, _denial(pid_file)], calls))
 
     assert _write_pid_file() is True
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
     assert len(calls) == 3
 
 
@@ -1132,7 +1135,7 @@ def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkey
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, pending_delete_completes], []))
 
     assert _write_pid_file() is True
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
 
 
 def test_write_pid_file_denial_that_never_clears_raises_at_budget(tmp_path, monkeypatch, fake_clock):
@@ -1172,7 +1175,7 @@ def test_run_daemon_starts_after_a_denied_pid_create(tmp_path, monkeypatch, fake
     pid_at_start = []
 
     def config_after_pid():
-        pid_at_start.append(pid_file.read_text().strip())
+        pid_at_start.append(pid_file.read_text(encoding="utf-8").strip())
         return {"poll_interval_seconds": 0, "kill_switch_path": str(tmp_path / "pause"), "autonomous_branches": []}
 
     monkeypatch.setattr(daemon_mod, "load_config", config_after_pid)
@@ -1206,7 +1209,7 @@ def test_remove_pid_file_different_pid(tmp_path, monkeypatch):
     _remove_pid_file()
 
     assert pid_file.exists()
-    assert pid_file.read_text().strip() == "999999"
+    assert pid_file.read_text(encoding="utf-8").strip() == "999999"
 
 
 def test_remove_pid_file_missing(tmp_path, monkeypatch):
@@ -2111,7 +2114,7 @@ def test_write_pid_file_atomic_no_existing(tmp_path, monkeypatch):
 
     assert result is True
     assert pid_file.exists()
-    assert int(pid_file.read_text().strip()) == os.getpid()
+    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
 
 
 def test_write_pid_file_atomic_race_second_loses(tmp_path, monkeypatch):

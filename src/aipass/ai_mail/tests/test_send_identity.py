@@ -1,34 +1,35 @@
 # =================== AIPass ====================
 # Name: test_send_identity.py
 # Description: Tests for sender identity detection chain
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-10
-# Modified: 2026-03-10
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for Sender Identity Detection
+"""Tests for apps/handlers/users/branch_detection.py and the sender identity chain in apps/handlers/email/send.py."""
 
-The identity chain is ai_mail's most critical and most fragile path.
-Every bug from sessions 4-7 traced back to identity detection failing.
+# The identity chain is ai_mail's most critical and most fragile path.
+# Every bug from sessions 4-7 traced back to identity detection failing.
+#
+# Tests cover:
+# - AIPASS_CALLER_BRANCH env var (primary, set by drone)
+# - AIPASS_BRANCH_NAME env var (fallback, set by dispatch_monitor)
+# - CWD-based .trinity/passport.json walk-up
+# - --from flag explicit override
+# - Failure cases (no identity, wrong identity, cascade failures)
+#
+# Audit v1 (2026-03-10): 3 agents verified all tests. Fixed 7 false positives.
+# Audit v2 (2026-03-10): 5 agents found 8 more issues:
+# - 5 tests hitting live registry instead of patched fixtures
+# - Contract tests matching commented-out code (substring, not line-aware)
+# - Contract tests missing env=spawn_env verification
+# - Registry fixtures using dict format when production uses list format
+# - No test for degenerate from_branch="@"
+# - No test for corrupted registry JSON
+# All fixed in v1.2.0.
 
-Tests cover:
-- AIPASS_CALLER_BRANCH env var (primary, set by drone)
-- AIPASS_BRANCH_NAME env var (fallback, set by dispatch_monitor)
-- CWD-based .trinity/passport.json walk-up
-- --from flag explicit override
-- Failure cases (no identity, wrong identity, cascade failures)
-
-Audit v1 (2026-03-10): 3 agents verified all tests. Fixed 7 false positives.
-Audit v2 (2026-03-10): 5 agents found 8 more issues:
-- 5 tests hitting live registry instead of patched fixtures
-- Contract tests matching commented-out code (substring, not line-aware)
-- Contract tests missing env=spawn_env verification
-- Registry fixtures using dict format when production uses list format
-- No test for degenerate from_branch="@"
-- No test for corrupted registry JSON
-All fixed in v1.2.0.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — os.environ.setdefault on the win32 import-time branch, unreachable on POSIX
 
 import json
 import os
@@ -36,12 +37,14 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+from aipass.ai_mail.apps.handlers.email.contacts import register_contact
 from aipass.ai_mail.apps.handlers.users.branch_detection import (
     detect_branch_from_pwd,
     find_branch_root,
     get_branch_info_from_registry,
     _lookup_branch_by_name,
     _find_caller_registry,
+    _get_contact_info,
 )
 from aipass.ai_mail.apps.handlers.email.send import resolve_sender_info
 from aipass.ai_mail.apps.handlers.email.send_args import parse_send_args
@@ -64,7 +67,8 @@ def temp_branch(tmp_path):
                     "branch_email": "@test_branch",
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return branch_dir
 
@@ -78,7 +82,8 @@ def two_branches(tmp_path):
         trinity = branch_dir / ".trinity"
         trinity.mkdir(parents=True)
         (trinity / "passport.json").write_text(
-            json.dumps({"branch_info": {"branch_name": name, "branch_email": f"@{name}"}})
+            json.dumps({"branch_info": {"branch_name": name, "branch_email": f"@{name}"}}),
+            encoding="utf-8",
         )
         branches[name] = branch_dir
 
@@ -101,7 +106,7 @@ def two_branches(tmp_path):
         }
     }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(registry, indent=2))
+    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return branches, registry_path
 
 
@@ -137,7 +142,7 @@ def temp_registry(tmp_path):
     }
     registry = {"branches": branch_data}
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(registry, indent=2))
+    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return registry_path, branch_data
 
 
@@ -160,7 +165,8 @@ def list_format_registry(tmp_path):
                     "branch_email": "@test_cwd_branch",
                 }
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     # List format — matches production AIPASS_REGISTRY.json
@@ -183,7 +189,7 @@ def list_format_registry(tmp_path):
         ]
     }
     registry_path = tmp_path / "AIPASS_REGISTRY.json"
-    registry_path.write_text(json.dumps(registry, indent=2))
+    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
     return branch_dir, registry_path
 
 
@@ -328,7 +334,7 @@ class TestFindBranchRoot:
         for b in [branch_a, branch_b]:
             trinity = b / ".trinity"
             trinity.mkdir(parents=True)
-            (trinity / "passport.json").write_text("{}")
+            (trinity / "passport.json").write_text("{}", encoding="utf-8")
 
         assert find_branch_root(branch_a) == branch_a
         assert find_branch_root(branch_b) == branch_b
@@ -380,7 +386,7 @@ class TestLookupBranchByName:
     def test_returns_none_when_registry_corrupted(self, tmp_path):
         """Should return None (not crash) when registry JSON is malformed."""
         corrupt_path = tmp_path / "AIPASS_REGISTRY.json"
-        corrupt_path.write_text("{this is not valid json!!!")
+        corrupt_path.write_text("{this is not valid json!!!", encoding="utf-8")
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", corrupt_path):
             result = _lookup_branch_by_name("anything")
             assert result is None
@@ -406,7 +412,7 @@ class TestGetBranchInfoFromRegistry:
         registry_path, branch_data = temp_registry
         # Patch both the registry path AND update the registry entry to use temp_branch's actual path
         branch_data["test_branch"]["path"] = str(temp_branch)
-        registry_path.write_text(json.dumps({"branches": branch_data}, indent=2))
+        registry_path.write_text(json.dumps({"branches": branch_data}, indent=2), encoding="utf-8")
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             result = get_branch_info_from_registry(temp_branch)
             assert result is not None
@@ -551,7 +557,7 @@ class TestDispatchEnvIsolation:
     def _load_active_source():
         """Load dispatch_monitor.py source with comment lines filtered out."""
         monitor_path = Path(__file__).resolve().parents[1] / "apps" / "handlers" / "dispatch" / "dispatch_monitor.py"
-        source = monitor_path.read_text()
+        source = monitor_path.read_text(encoding="utf-8")
         active_lines = [line for line in source.splitlines() if not line.strip().startswith("#")]
         return "\n".join(active_lines)
 
@@ -954,9 +960,6 @@ class TestGetContactInfo:
 
     def test_returns_none_when_branch_root_is_gone(self, clean_env, tmp_path):
         """A stale row (branch dir no longer on disk) falls through, unverified."""
-        from aipass.ai_mail.apps.handlers.email.contacts import register_contact
-        from aipass.ai_mail.apps.handlers.users.branch_detection import _get_contact_info
-
         dead_inbox = tmp_path / "gone" / ".ai_mail.local" / "inbox.json"
         register_contact("ghost", "AIPass", str(dead_inbox))
 
@@ -964,9 +967,6 @@ class TestGetContactInfo:
 
     def test_returns_info_when_branch_root_exists(self, clean_env, tmp_path):
         """A live row (branch dir present) still resolves normally."""
-        from aipass.ai_mail.apps.handlers.email.contacts import register_contact
-        from aipass.ai_mail.apps.handlers.users.branch_detection import _get_contact_info
-
         branch_root = tmp_path / "live_branch"
         (branch_root / ".ai_mail.local").mkdir(parents=True)
         inbox = branch_root / ".ai_mail.local" / "inbox.json"
@@ -980,8 +980,6 @@ class TestGetContactInfo:
 
     def test_no_contact_still_returns_none(self, clean_env):
         """Baseline: an unknown branch name is None, same as before this guard."""
-        from aipass.ai_mail.apps.handlers.users.branch_detection import _get_contact_info
-
         assert _get_contact_info("nobody-registered-this") is None
 
 
@@ -1117,7 +1115,7 @@ class TestIdentityResolutionLogging:
             os.environ["AIPASS_CALLER_BRANCH"] = "TEST_CWD_BRANCH"
             os.environ["AIPASS_CALLER_CWD"] = str(branch_dir.parent / "some_other_branch")
             (branch_dir.parent / "some_other_branch" / ".trinity").mkdir(parents=True)
-            (branch_dir.parent / "some_other_branch" / ".trinity" / "passport.json").write_text("{}")
+            (branch_dir.parent / "some_other_branch" / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
             detect_branch_from_pwd()
 
         assert any("AMBIGUOUS" in w for w in warnings), warnings
@@ -1150,12 +1148,12 @@ class TestIdentityResolutionLogging:
     # with the cwd walking every branch in the fleet -- burying the signal the
     # warning is for.
 
-    def _warn_with_source(self, registry_path, branch_dir, source, caller_branch="TEST_CWD_BRANCH"):
+    def _warn_with_source(self, monkeypatch, registry_path, branch_dir, source, caller_branch="TEST_CWD_BRANCH"):
         """Run detection with a disagreeing cwd and a given identity provenance."""
         warnings = []
         other = branch_dir.parent / "some_other_branch"
         (other / ".trinity").mkdir(parents=True, exist_ok=True)
-        (other / ".trinity" / "passport.json").write_text("{}")
+        (other / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
         with (
             patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path),
             patch("aipass.ai_mail.apps.handlers.users.branch_detection._get_contact_info", return_value=None),
@@ -1164,21 +1162,21 @@ class TestIdentityResolutionLogging:
                 side_effect=lambda msg, *a: warnings.append(msg % a if a else msg),
             ),
         ):
-            os.environ["AIPASS_CALLER_BRANCH"] = caller_branch
-            os.environ["AIPASS_CALLER_CWD"] = str(other)
+            monkeypatch.setenv("AIPASS_CALLER_BRANCH", caller_branch)
+            monkeypatch.setenv("AIPASS_CALLER_CWD", str(other))
             if source is not None:
-                os.environ["AIPASS_CALLER_IDENTITY_SOURCE"] = source
+                monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", source)
             detect_branch_from_pwd()
         return warnings
 
     @pytest.mark.parametrize("source", ["assigned", "passport"])
-    def test_credential_provenance_is_not_ambiguous(self, clean_env, list_format_registry, source):
+    def test_credential_provenance_is_not_ambiguous(self, clean_env, list_format_registry, source, monkeypatch):
         """assigned/passport vouch for the env var: the cwd disagreeing is expected."""
         branch_dir, registry_path = list_format_registry
-        warnings = self._warn_with_source(registry_path, branch_dir, source)
+        warnings = self._warn_with_source(monkeypatch, registry_path, branch_dir, source)
         assert not any("AMBIGUOUS" in w for w in warnings), warnings
 
-    def test_project_provenance_still_warns(self, clean_env, list_format_registry):
+    def test_project_provenance_still_warns(self, clean_env, list_format_registry, monkeypatch):
         """'project' names a DIRECTORY, never a citizen -- this is the $1.41 wake.
 
         @aipass the project directory and @aipass the citizen spell the same.
@@ -1186,30 +1184,32 @@ class TestIdentityResolutionLogging:
         written for, so provenance is the discriminator, not "did it resolve".
         """
         branch_dir, registry_path = list_format_registry
-        warnings = self._warn_with_source(registry_path, branch_dir, "project")
+        warnings = self._warn_with_source(monkeypatch, registry_path, branch_dir, "project")
         assert any("AMBIGUOUS" in w for w in warnings), warnings
 
-    def test_unknown_provenance_still_warns(self, clean_env, list_format_registry):
+    def test_unknown_provenance_still_warns(self, clean_env, list_format_registry, monkeypatch):
         """Unprovable is not proven-good: an unstamped caller keeps the warning."""
         branch_dir, registry_path = list_format_registry
-        warnings = self._warn_with_source(registry_path, branch_dir, "unknown")
+        warnings = self._warn_with_source(monkeypatch, registry_path, branch_dir, "unknown")
         assert any("AMBIGUOUS" in w for w in warnings), warnings
 
-    def test_credential_naming_an_unregistered_branch_still_warns(self, clean_env, list_format_registry):
+    def test_credential_naming_an_unregistered_branch_still_warns(self, clean_env, list_format_registry, monkeypatch):
         """A credential for a citizen nobody has heard of is a genuine conflict.
 
         Resolution falls through to synthesis, so nothing vouched for the name
         -- the provenance only says who STAMPED it, not that it resolves.
         """
         branch_dir, registry_path = list_format_registry
-        warnings = self._warn_with_source(registry_path, branch_dir, "assigned", caller_branch="nobody_by_that_name")
+        warnings = self._warn_with_source(
+            monkeypatch, registry_path, branch_dir, "assigned", caller_branch="nobody_by_that_name"
+        )
         assert any("AMBIGUOUS" in w for w in warnings), warnings
 
 
 class TestResolvedSenderLogging:
     """resolve_sender_info() logged only its input; the sender it produced was never recorded."""
 
-    def test_detected_sender_logs_resolved_identity(self):
+    def test_detected_sender_logs_resolved_identity(self, tmp_path):
         """The no-explicit-from path records who the sender became, not just `from_branch: null`."""
         calls = []
         user = {
@@ -1222,7 +1222,7 @@ class TestResolvedSenderLogging:
             "aipass.ai_mail.apps.handlers.email.send.json_handler.log_operation",
             side_effect=lambda op, data: calls.append((op, data)),
         ):
-            result = resolve_sender_info(None, Path("/x"), Path("/x/ai_mail"), lambda e: None, lambda: user)
+            result = resolve_sender_info(None, tmp_path / "x", tmp_path / "x" / "ai_mail", lambda e: None, lambda: user)
 
         assert result == user
         resolved = [d for op, d in calls if op == "resolved_sender"]
@@ -1231,14 +1231,14 @@ class TestResolvedSenderLogging:
         assert resolved[0]["strategy"] == "detected_from_caller_env"
         assert resolved[0]["in_from_branch"] is None
 
-    def test_explicit_sender_logs_strategy(self):
+    def test_explicit_sender_logs_strategy(self, tmp_path):
         """An explicit --from that misses the registry is recorded as an assumed path."""
         calls = []
         with patch(
             "aipass.ai_mail.apps.handlers.email.send.json_handler.log_operation",
             side_effect=lambda op, data: calls.append((op, data)),
         ):
-            resolve_sender_info("@ghost", Path("/x"), Path("/x/ai_mail"), lambda e: None, lambda: {})
+            resolve_sender_info("@ghost", tmp_path / "x", tmp_path / "x" / "ai_mail", lambda e: None, lambda: {})
 
         resolved = [d for op, d in calls if op == "resolved_sender"]
         assert resolved[0]["strategy"] == "explicit_from:assumed_path"

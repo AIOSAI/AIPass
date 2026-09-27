@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_dispatch_status.py
 # Description: Tests for dispatch status handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for dispatch status handler -- dispatch log I/O and age calculation."""
+"""Tests for apps/handlers/dispatch/status.py."""
+
+# Dispatch log I/O and age calculation.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — check_pid_status()'s subprocess.SubprocessError/OSError branch
 
 import json
 import pytest

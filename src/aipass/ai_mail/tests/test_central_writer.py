@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-03
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for central_writer -- inbox stats aggregation, central file output."""
+"""Tests for apps/handlers/central_writer.py."""
+
+# Inbox stats aggregation, central file output.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — OSError handling around a disk write failure in json_handler
 
 import json
 import os
@@ -36,21 +41,21 @@ def _suppress_logger(monkeypatch):
 # --- extract_branch_name tests ----------------------------------------
 
 
-def test_extract_branch_name_standard_path():
+def test_extract_branch_name_standard_path(tmp_path):
     """Standard .ai_mail.local path extracts uppercase branch name."""
-    inbox = Path("/repo/src/aipass/seedgo/.ai_mail.local/inbox.json")
+    inbox = tmp_path / "repo" / "src" / "aipass" / "seedgo" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "SEEDGO"
 
 
-def test_extract_branch_name_nested_path():
+def test_extract_branch_name_nested_path(tmp_path):
     """Deeply nested path still extracts the immediate parent of .ai_mail.local."""
-    inbox = Path("/repo/src/aipass/deep/nested/drone/.ai_mail.local/inbox.json")
+    inbox = tmp_path / "repo" / "src" / "aipass" / "deep" / "nested" / "drone" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "DRONE"
 
 
-def test_extract_branch_name_lowercase_dir():
+def test_extract_branch_name_lowercase_dir(tmp_path):
     """Lowercase directory name is uppercased."""
-    inbox = Path("/tmp/prax/.ai_mail.local/inbox.json")
+    inbox = tmp_path / "prax" / ".ai_mail.local" / "inbox.json"
     assert mod.extract_branch_name(inbox) == "PRAX"
 
 

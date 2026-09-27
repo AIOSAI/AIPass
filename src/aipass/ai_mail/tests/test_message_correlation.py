@@ -1,35 +1,37 @@
 # =================== AIPass ====================
 # Name: test_message_correlation.py
 # Description: Tests that a delivered message can be traced back to the sender's sent record
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for sender/recipient message correlation.
+"""Tests for apps/handlers/email/delivery.py and the reply/inbox_ops/inbox_cleanup correlation it enables."""
 
-WHY THIS EXISTS — a false outage, 2026-08-16.
+# WHY THIS EXISTS — a false outage, 2026-08-16.
+#
+# @seedgo replied to @devpulse at 10:03:15. The reply landed correctly. But
+# @devpulse searched their inbox for the id in @seedgo's ``sent/`` record
+# (``de0cef3e``) and found nothing, because delivery mints a FRESH id for the
+# recipient's copy (that message is ``361cefd6`` in their store). They reasonably
+# concluded a fleet-internal reply had been eaten mid-flight, and escalated it as
+# a live delivery outage caused by my in-flight fence work.
+#
+# Nothing was eaten. The two ids are two names for one message, and no field on
+# either side pointed at the other, so the message was untraceable by design.
+# On a branch whose whole job is delivering mail, "you cannot prove this message
+# arrived" is a real defect even when the delivery itself is perfect.
+#
+# The lanes also disagreed: ``deliver_to_inbox_file`` (cross-project replies)
+# already preserved the sender's id via ``setdefault``, while the main lane threw
+# it away. One system, two answers to "what is this message called".
+#
+# The fix is additive — the recipient's id stays authoritative for view/reply/
+# close, and the sender's id rides along as ``sent_id`` so either side can find
+# the other.
 
-@seedgo replied to @devpulse at 10:03:15. The reply landed correctly. But
-@devpulse searched their inbox for the id in @seedgo's ``sent/`` record
-(``de0cef3e``) and found nothing, because delivery mints a FRESH id for the
-recipient's copy (that message is ``361cefd6`` in their store). They reasonably
-concluded a fleet-internal reply had been eaten mid-flight, and escalated it as
-a live delivery outage caused by my in-flight fence work.
-
-Nothing was eaten. The two ids are two names for one message, and no field on
-either side pointed at the other, so the message was untraceable by design.
-On a branch whose whole job is delivering mail, "you cannot prove this message
-arrived" is a real defect even when the delivery itself is perfect.
-
-The lanes also disagreed: ``deliver_to_inbox_file`` (cross-project replies)
-already preserved the sender's id via ``setdefault``, while the main lane threw
-it away. One system, two answers to "what is this message called".
-
-The fix is additive — the recipient's id stays authoritative for view/reply/
-close, and the sender's id rides along as ``sent_id`` so either side can find
-the other.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(notify) — delivery.py's _emit_notification_event call, silenced here; see tests/test_notify.py
 
 import json
 from contextlib import contextmanager
@@ -43,6 +45,9 @@ from aipass.ai_mail.apps.handlers.email.delivery import (
     deliver_email_to_branch,
     deliver_to_inbox_file,
 )
+from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_opened
+from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
+from aipass.ai_mail.apps.handlers.email.reply import send_reply
 
 
 @pytest.fixture(autouse=True)
@@ -194,7 +199,6 @@ class TestReplyLaneCorrelates:
 
     def test_reply_sent_id_matches_the_senders_sent_record(self, tmp_path, repo_root, noop_inbox_lock):
         """The @seedgo -> @devpulse path, end to end."""
-        from aipass.ai_mail.apps.handlers.email.reply import send_reply
 
         branches = _setup_branch(tmp_path, email="@devpulse", name="DEVPULSE")
         sender_path = tmp_path / "branches" / "seedgo"
@@ -244,7 +248,6 @@ class TestFindMessage:
     """
 
     def test_finds_by_inbox_id(self):
-        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
         messages = [{"id": "361cefd6", "sent_id": "de0cef3e"}]
 
@@ -252,7 +255,6 @@ class TestFindMessage:
 
     def test_finds_by_sent_id(self):
         """The sender's id resolves to the recipient's copy."""
-        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
         messages = [{"id": "361cefd6", "sent_id": "de0cef3e"}]
 
@@ -266,7 +268,6 @@ class TestFindMessage:
         reply/close print back. Resolution must not depend on list order, so
         the decoy is placed FIRST.
         """
-        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
         decoy = {"id": "aaaaaaaa", "sent_id": "shared01"}
         real = {"id": "shared01", "sent_id": "bbbbbbbb"}
@@ -274,13 +275,11 @@ class TestFindMessage:
         assert find_message([decoy, real], "shared01") is real
 
     def test_returns_none_when_nothing_matches(self):
-        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
         assert find_message([{"id": "361cefd6"}], "nosuchid") is None
 
     def test_tolerates_messages_without_ids(self):
         """A malformed entry must not break lookup for every other message."""
-        from aipass.ai_mail.apps.handlers.email.inbox_ops import find_message
 
         messages = [{"no_id_here": True}, {"id": "361cefd6"}]
 
@@ -288,7 +287,6 @@ class TestFindMessage:
 
     def test_view_accepts_the_senders_id(self, tmp_path):
         """End to end: what @devpulse would have run."""
-        from aipass.ai_mail.apps.handlers.email.inbox_cleanup import mark_as_opened
 
         mailbox = tmp_path / ".ai_mail.local"
         mailbox.mkdir(parents=True)

@@ -1,18 +1,31 @@
-"""The completion report — what the finishing agent can honestly say about its run.
+# =================== AIPass ====================
+# Name: test_dispatch_report.py
+# Description: Completion report tests — build_report, write_report, fire_completed, and the sent-mail attribution scan
+# Version: 1.0.1
+# Created: 2026-08-22
+# Modified: 2026-09-27
+# =============================================
 
-FPLAN-0452 P1.
+"""Tests for apps/handlers/dispatch/report.py."""
 
-Two of these tests exist because of a specific argument, and they are the ones
-to keep if the file ever shrinks:
+# The completion report — what the finishing agent can honestly say about its run.
+#
+# FPLAN-0452 P1.
+#
+# Two of these tests exist because of a specific argument, and they are the ones
+# to keep if the file ever shrinks:
+#
+# * ``test_a_mail_written_by_someone_else_during_the_run_is_not_claimed`` is the
+#   difference between a RECORD and an INFERENCE. An mtime scan of ``sent/``
+#   attributes by TIME; the stamp attributes by AUTHORSHIP.
+# * ``test_bg_orphaned_ships_beside_an_empty_email_list`` pins the honesty
+#   requirement. A run whose background tasks were killed reports zero emails for
+#   an agent that believed it had replied — without the flag beside it, a reader
+#   concludes the agent ignored its mail.
 
-* ``test_a_mail_written_by_someone_else_during_the_run_is_not_claimed`` is the
-  difference between a RECORD and an INFERENCE. An mtime scan of ``sent/``
-  attributes by TIME; the stamp attributes by AUTHORSHIP.
-* ``test_bg_orphaned_ships_beside_an_empty_email_list`` pins the honesty
-  requirement. A run whose background tasks were killed reports zero emails for
-  an agent that believed it had replied — without the flag beside it, a reader
-  concludes the agent ignored its mail.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — REPORTS_DIRNAME, REPORTS_MAX_FILES, REPORTS_KEEP_FILES, RESULT_EXCERPT_CHARS values
+# seedgo: no-test-needed(stdlib) — build_report's reported_at datetime.now() wall-clock stamp is not asserted
 
 import json
 import time
@@ -21,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from aipass.ai_mail.apps.handlers.dispatch import report
+from aipass.trigger.apps.modules.core import trigger as trigger_module
 
 
 @pytest.fixture
@@ -283,10 +297,14 @@ class TestTheStamp:
 class TestThePush:
     """In-process only, and it must never take the run down with it."""
 
-    def test_a_trigger_failure_is_reported_not_raised(self, monkeypatch):
+    def test_a_trigger_failure_is_reported_not_raised(self, monkeypatch, tmp_path):
         """The durable write already happened; a failed push must not undo it."""
-        import sys
 
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", None)
+        def _raise(*args, **kwargs):
+            raise RuntimeError("trigger down")
 
-        assert report.fire_completed("abc", "@d", "@a", "/x.json") is False
+        monkeypatch.setattr(trigger_module, "fire", _raise)
+
+        report_path = str(tmp_path / "x.json")
+
+        assert report.fire_completed("abc", "@d", "@a", report_path) is False

@@ -1,4 +1,15 @@
-"""Tests for sent/deleted auto-purge handler -- purge_sent_folder, purge_deleted_folder, run_purge."""
+# =================== AIPass ====================
+# Name: test_purge.py
+# Description: Tests for sent/deleted auto-purge handler
+# Version: 1.0.1
+# Created: 2026-04-25
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/email/purge.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 import os

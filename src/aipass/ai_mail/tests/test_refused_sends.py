@@ -1,30 +1,33 @@
 # =================== AIPass ====================
 # Name: test_refused_sends.py
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for refused sends (FPLAN-0400 items B + C).
+"""Tests for apps/handlers/email/create.py, format.py and send.py."""
 
-Two failures, one surface, both found live by @baud sending from
-projects/baud into the AIPass repo:
+# Refused sends (FPLAN-0400 items B + C). Two failures, one surface, both found
+# live by @baud sending from projects/baud into the AIPass repo:
+#
+# B — the cross-project fence refused the send and the sent record still read
+#     ``status: "sent"``. The sender took "it's in my sent folder" as proof of
+#     delivery and had no way to learn the message never went.
+#
+# C — the refusal printed twice, then "Unknown command: email". The send was
+#     genuinely running twice: email_send.handle_command ignored its ``command``
+#     argument, so every command an earlier module declined — including a send
+#     that module had already run and reported as failed — was executed again
+#     here. Returning False for "ran and failed" is what sent the router on.
+#
+# The contract these pin: a handler returns True for "I recognised and ran this
+# command", never for "it worked". Failure is reported through error(), which
+# sets the process failure flag main() maps to exit 2.
 
-B — the cross-project fence refused the send and the sent record still read
-    ``status: "sent"``. The sender took "it's in my sent folder" as proof of
-    delivery and had no way to learn the message never went.
-
-C — the refusal printed twice, then "Unknown command: email". The send was
-    genuinely running twice: email_send.handle_command ignored its ``command``
-    argument, so every command an earlier module declined — including a send
-    that module had already run and reported as failed — was executed again
-    here. Returning False for "ran and failed" is what sent the router on.
-
-The contract these pin: a handler returns True for "I recognised and ran this
-command", never for "it worked". Failure is reported through error(), which
-sets the process failure flag main() maps to exit 2.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — format.py's other formatters (lookup_branch_alias, format_sender_display) parse
+# seedgo: no-test-needed(stdlib) — json.dump/json.load's own serialization inside create_email_file
 
 import json
 
@@ -33,10 +36,15 @@ from unittest.mock import MagicMock, patch
 
 from aipass.ai_mail.apps.handlers.email.create import (
     create_email_file,
+    load_email_file,
     mark_sent_record_refused,
 )
 from aipass.ai_mail.apps.handlers.email.format import format_email_list_item
 from aipass.ai_mail.apps.handlers.email.send import send_to_single, send_to_broadcast
+from aipass.ai_mail.apps.ai_mail import route_command
+from aipass.cli.apps.modules import error, reset_command_state, resolve_exit
+import aipass.ai_mail.apps.modules.email as email_mod
+import aipass.ai_mail.apps.modules.email_send as send_mod
 
 
 # ---- Fixtures ------------------------------------------------------------
@@ -138,8 +146,6 @@ class TestSendToSingleRefusedBookkeeping:
 
     def _send(self, tmp_path, deliver_result):
         """Run send_to_single against the real create/load handlers."""
-        from aipass.ai_mail.apps.handlers.email.create import load_email_file
-
         created = {}
 
         def _create(*args, **kwargs):
@@ -198,8 +204,6 @@ class TestSendToBroadcastRefusedBookkeeping:
 
     def _broadcast(self, tmp_path, deliver_results):
         """Run send_to_broadcast with a per-recipient delivery result queue."""
-        from aipass.ai_mail.apps.handlers.email.create import load_email_file
-
         created = {}
 
         def _create(*args, **kwargs):
@@ -316,8 +320,6 @@ class TestRefusedRecordIsVisible:
         mailbox holding 20 replies hid every recent send behind them — including
         the refused records this listing exists to surface.
         """
-        import aipass.ai_mail.apps.modules.email as email_mod
-
         sent = tmp_path / ".ai_mail.local" / "sent"
         sent.mkdir(parents=True)
 
@@ -361,8 +363,6 @@ class TestEmailSendClaimsOnlyItsOwnCommands:
         after dispatch.py had already run and reported it, and a second send
         went out under a command name this module never owned.
         """
-        import aipass.ai_mail.apps.modules.email_send as send_mod
-
         sends: list[list] = []
         monkeypatch.setattr(send_mod, "handle_send", lambda args: sends.append(args))
 
@@ -372,8 +372,6 @@ class TestEmailSendClaimsOnlyItsOwnCommands:
     @pytest.mark.parametrize("command", ["send", "email"])
     def test_owned_command_routes_to_handle_send(self, command, monkeypatch):
         """send and email are this module's own — they route through."""
-        import aipass.ai_mail.apps.modules.email_send as send_mod
-
         sends: list[list] = []
         monkeypatch.setattr(send_mod, "handle_send", lambda args: sends.append(args) or True)
 
@@ -387,8 +385,6 @@ class TestEmailSendClaimsOnlyItsOwnCommands:
         the filesystem happened to hand the router first could answer `inbox`
         with this module's introspection and return True.
         """
-        import aipass.ai_mail.apps.modules.email_send as send_mod
-
         intros: list[int] = []
         monkeypatch.setattr(send_mod, "print_introspection", lambda: intros.append(1))
 
@@ -406,8 +402,6 @@ class TestRecognisedButFailedStaysHandled:
         returned False the walk continued, the next module ran the same send
         again, and the router then declared the command unknown.
         """
-        from aipass.ai_mail.apps.ai_mail import route_command
-
         first = MagicMock()
         first.handle_command = MagicMock(return_value=True)
         second = MagicMock()
@@ -419,8 +413,6 @@ class TestRecognisedButFailedStaysHandled:
 
     def test_exit_code_is_two_for_a_handled_failure(self):
         """A refused send exits 2 (routed but failed), not 1 (unroutable)."""
-        from aipass.cli.apps.modules import error, reset_command_state, resolve_exit
-
         reset_command_state()
         error("Failed to deliver: refused")
         assert resolve_exit(True) == 2

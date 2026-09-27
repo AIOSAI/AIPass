@@ -1,26 +1,42 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for dispatch.py orchestrator functions.
+"""Tests for apps/modules/dispatch.py."""
 
-Covers: print_help, handle_command, _orchestrate_status,
-_orchestrate_wake, _orchestrate_dispatch_send, _orchestrate_daemon,
-print_introspection.
+# Covers: print_help, handle_command, _orchestrate_status,
+# _orchestrate_wake, _orchestrate_dispatch_send, _orchestrate_daemon,
+# print_introspection.
+#
+# All handler dependencies are mocked -- these tests verify orchestration
+# logic, not business logic.
 
-All handler dependencies are mocked -- these tests verify orchestration
-logic, not business logic.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the handler modules _orchestrate_dispatch_send reaches parse and import
+# seedgo: no-test-needed(constant) — DISPATCH_ID_ENV and the other literal env-var names dispatch.py reads
 
 import json
 from contextlib import ExitStack
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
+from aipass.ai_mail.apps.modules.dispatch import (
+    _orchestrate_daemon,
+    _orchestrate_dispatch_send,
+    _orchestrate_status,
+    _orchestrate_wake,
+    handle_command,
+    print_help,
+    print_introspection,
+)
+import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.modules.dispatch as dmod
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +92,6 @@ class TestPrintHelp:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import print_help
-
         print_help()
         combined = " ".join(printed)
         assert "dispatch" in combined.lower()
@@ -96,8 +110,6 @@ class TestHandleCommand:
 
     def test_non_dispatch_command_returns_false(self):
         """A command that is not 'dispatch' returns False."""
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         result = handle_command("email", ["inbox"])
         assert result is False
 
@@ -105,8 +117,6 @@ class TestHandleCommand:
         """'dispatch' with no args calls print_introspection."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         result = handle_command("dispatch", [])
         assert result is True
@@ -118,8 +128,6 @@ class TestHandleCommand:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         result = handle_command("dispatch", ["--help"])
         assert result is True
         combined = " ".join(printed)
@@ -130,8 +138,6 @@ class TestHandleCommand:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         result = handle_command("dispatch", ["-h"])
         assert result is True
 
@@ -139,8 +145,6 @@ class TestHandleCommand:
         """'dispatch help' prints help and returns True."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         result = handle_command("dispatch", ["help"])
         assert result is True
@@ -150,8 +154,6 @@ class TestHandleCommand:
         monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: [])
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         result = handle_command("dispatch", ["status"])
         assert result is True
@@ -165,8 +167,6 @@ class TestHandleCommand:
             lambda: True,
         )
 
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         result = handle_command("dispatch", ["daemon"])
         assert result is True
 
@@ -174,8 +174,6 @@ class TestHandleCommand:
         """'dispatch wake @branch' delegates to _orchestrate_wake."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         # No further args -> shows help
         result = handle_command("dispatch", ["wake"])
@@ -188,8 +186,6 @@ class TestHandleCommand:
             lambda args: True,
         )
 
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         result = handle_command("dispatch", ["@branch", "Subject", "Body"])
         assert result is True
 
@@ -199,8 +195,6 @@ class TestHandleCommand:
             f"{MOD}._orchestrate_dispatch_send",
             lambda args: True,
         )
-
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
 
         result = handle_command("dispatch", ["/some/path", "Subject", "Body"])
         assert result is True
@@ -218,16 +212,12 @@ class TestHandleCommand:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         result = handle_command("dispatch", ["bogus"])
         assert result is True
         assert any("Unknown dispatch subcommand" in e for e in errors)
 
     def test_non_dispatch_command_is_declined(self):
         """A command this module does not own returns False, unhandled."""
-        from aipass.ai_mail.apps.modules.dispatch import handle_command
-
         assert handle_command("email", ["@target", "Subject", "Body"]) is False
 
 
@@ -244,8 +234,6 @@ class TestOrchestrateStatus:
         monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: [])
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
 
         result = _orchestrate_status()
         assert result is True
@@ -266,8 +254,6 @@ class TestOrchestrateStatus:
         monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "5m ago")
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
 
         result = _orchestrate_status()
         assert result is True
@@ -292,8 +278,6 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
-
         result = _orchestrate_status()
         assert result is True
         combined = " ".join(printed)
@@ -315,8 +299,6 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
-
         result = _orchestrate_status()
         assert result is True
         combined = " ".join(printed)
@@ -337,8 +319,6 @@ class TestOrchestrateStatus:
         monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "3h ago")
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
 
         result = _orchestrate_status()
         assert result is True
@@ -362,8 +342,6 @@ class TestOrchestrateStatus:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
-
         result = _orchestrate_status()
         assert result is True
         combined = " ".join(printed)
@@ -385,8 +363,6 @@ class TestOrchestrateStatus:
         monkeypatch.setattr(f"{MOD}.calculate_age", lambda ts: "0m")
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_status
 
         result = _orchestrate_status()
         assert result is True
@@ -414,8 +390,6 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
         result = _orchestrate_wake([])
         assert result is True
         combined = " ".join(printed)
@@ -425,8 +399,6 @@ class TestOrchestrateWake:
         """--help prints wake help and returns True."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
         result = _orchestrate_wake(["--help"])
         assert result is True
@@ -438,8 +410,6 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
         result = _orchestrate_wake(["-h"])
         assert result is True
 
@@ -447,8 +417,6 @@ class TestOrchestrateWake:
         """'help' prints wake help and returns True."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
 
         result = _orchestrate_wake(["help"])
         assert result is True
@@ -465,8 +433,6 @@ class TestOrchestrateWake:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
         result = _orchestrate_wake(["--fresh"])
         assert result is True
         assert any("Missing" in e for e in errors)
@@ -482,8 +448,6 @@ class TestOrchestrateWake:
             "aipass.ai_mail.apps.handlers.dispatch.wake.is_wake_blocked",
             return_value=True,
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             result = _orchestrate_wake(["@protected"])
         assert result is True
         assert any("protected" in e for e in errors)
@@ -506,8 +470,6 @@ class TestOrchestrateWake:
                 return_value=(mock_status, True),
             ),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             result = _orchestrate_wake(["@branch"])
         assert result is True
         combined = " ".join(printed)
@@ -537,8 +499,6 @@ class TestOrchestrateWake:
                 return_value=(mock_status, False),
             ),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             result = _orchestrate_wake(["@branch"])
         assert result is True
         assert any("Wake failed for @branch" in e for e in errors)
@@ -567,8 +527,6 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             _orchestrate_wake(["--fresh", "@branch"])
         assert len(wake_calls) == 1
         assert wake_calls[0]["fresh"] is True
@@ -597,8 +555,6 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             _orchestrate_wake(["--model", "opus", "@branch"])
         assert len(wake_calls) == 1
         assert wake_calls[0]["model"] == "opus"
@@ -627,8 +583,6 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             _orchestrate_wake(["--sender", "@custom", "@branch"])
         return wake_calls
 
@@ -677,8 +631,6 @@ class TestOrchestrateWake:
                 side_effect=mock_wake,
             ),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             _orchestrate_wake(["@branch", "Check your inbox now"])
         assert len(wake_calls) == 1
         assert wake_calls[0]["msg"] == "Check your inbox now"
@@ -732,8 +684,6 @@ class TestOrchestrateDispatchSend:
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
         result = _orchestrate_dispatch_send(["@target", "Subject"])
         assert result is True
         assert any("Usage" in e for e in errors)
@@ -745,10 +695,6 @@ class TestOrchestrateDispatchSend:
 
         patches = _send_patches()
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -776,10 +722,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -806,10 +748,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -835,10 +773,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--fresh"])
 
         assert len(wake_calls) == 1
@@ -862,10 +796,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@custom_sender"])
 
         assert len(sender_calls) == 1
@@ -891,10 +821,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--model", "sonnet"])
 
         assert len(wake_calls) == 1
@@ -918,10 +844,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--no-memory-save"])
 
         assert len(header_calls) == 1
@@ -941,10 +863,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -962,10 +880,6 @@ class TestOrchestrateDispatchSend:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import (
-                _orchestrate_dispatch_send,
-            )
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -990,8 +904,6 @@ class TestOrchestrateDaemon:
             "aipass.ai_mail.apps.handlers.dispatch.daemon.run_daemon",
             side_effect=lambda: daemon_called.append(True),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_daemon
-
             result = _orchestrate_daemon()
 
         assert result is True
@@ -1012,8 +924,6 @@ class TestPrintIntrospection:
         """print_introspection prints module info."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-
-        from aipass.ai_mail.apps.modules.dispatch import print_introspection
 
         print_introspection()
         combined = " ".join(printed)
@@ -1039,8 +949,6 @@ class TestWakeBackMessaging:
 
         patches = _send_patches()
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert result is True
@@ -1063,8 +971,6 @@ class TestWakeBackMessaging:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         combined = " ".join(printed)
@@ -1077,8 +983,6 @@ class TestWakeBackMessaging:
 
         patches = _send_patches()
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body", "--no-watchdog"])
 
         assert result is True
@@ -1096,8 +1000,6 @@ class TestWakeBackMessaging:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         combined = " ".join(printed)
@@ -1136,8 +1038,6 @@ class TestSpoofedSenderRefusal:
         send = MagicMock(return_value=(True, None))
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             result = _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
 
         assert result is True
@@ -1159,8 +1059,6 @@ class TestSpoofedSenderRefusal:
             patch(f"{_H_WAKE}.is_wake_blocked", return_value=False),
             patch(f"{_H_WAKE}.wake_branch", wake),
         ):
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_wake
-
             result = _orchestrate_wake(["--sender", "@daemon", "@target"])
 
         assert result is True
@@ -1176,8 +1074,6 @@ class TestSpoofedSenderRefusal:
         wake = MagicMock()
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake})
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
 
         wake.assert_not_called()
@@ -1200,8 +1096,6 @@ class TestSpoofedSenderRefusal:
 
         patches = _send_patches({f"{_H_WAKE}.wake_branch": MagicMock(side_effect=mock_wake)})
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@daemon"])
 
         assert len(wake_calls) == 1
@@ -1230,8 +1124,6 @@ class TestSpoofedSenderRefusal:
             }
         )
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@spawn"])
 
         # The mail is still authored by @spawn...
@@ -1251,8 +1143,6 @@ class TestSpoofedSenderRefusal:
         send = MagicMock(return_value=(True, None))
         patches = _send_patches({f"{_H_WAKE}.wake_branch": wake, f"{_H_SEND}.send_to_single": send})
         with patches:
-            from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send
-
             _orchestrate_dispatch_send(["@target", "Subject", "Body", "--from", "@spawn"])
 
         send.assert_called_once()
@@ -1265,9 +1155,6 @@ class TestWakeBackPromiseMatchesDelivery:
     actually happen. A manager is never woken — it is mailed."""
 
     def _run(self, monkeypatch, sender_is_manager):
-        import aipass.ai_mail.apps.modules.dispatch as dmod
-        from aipass.ai_mail.apps.handlers.dispatch.wake import DispatchStatus
-
         printed = []
         status = DispatchStatus()
         status.ok("spawn", "agent started")
@@ -1329,8 +1216,6 @@ class TestBothVerbsAgreeAtTheManagerGate:
     @staticmethod
     def _verdicts_from_both_verbs() -> list:
         """The manager step each verb's wake recorded: [wake verb, send+wake verb]."""
-        import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
-
         real_wake = wake_mod.wake_branch
         verdicts: list = []
 
@@ -1339,8 +1224,6 @@ class TestBothVerbsAgreeAtTheManagerGate:
             status, ok = real_wake(*args, **kwargs)
             verdicts.append(status.find_step("manager"))
             return status, ok
-
-        from aipass.ai_mail.apps.modules.dispatch import _orchestrate_dispatch_send, _orchestrate_wake
 
         with patch(f"{_H_WAKE}.wake_branch", _spy):
             _orchestrate_wake(["@mgr"])

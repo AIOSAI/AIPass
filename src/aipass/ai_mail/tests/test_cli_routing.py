@@ -1,12 +1,17 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help display
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for CLI routing -- help flags, introspection, unknown commands, output capture."""
+"""Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""
+
+# Help flags, introspection, unknown commands, output capture.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the "-V" version alias and the exact "AI_MAIL v1.0.0" banner text
 
 import json
 import sys
@@ -22,6 +27,7 @@ from aipass.ai_mail.apps.ai_mail import (
     route_command,
     main,
 )
+from aipass.cli.apps.modules import error as cli_error
 
 
 # ---- Fixtures --------------------------------------------------------
@@ -250,8 +256,6 @@ def test_output_capture_with_stringio():
 
 def test_main_routed_but_failed_command_exits_nonzero(monkeypatch):
     """CANARY: a handled-but-failed command must not exit 0."""
-    from aipass.cli.apps.modules import error as cli_error
-
     reached = []
 
     class FailingModule:
@@ -293,7 +297,6 @@ def test_main_routed_and_succeeded_exits_zero(monkeypatch):
 
 def test_main_resets_failure_flag_between_runs(monkeypatch):
     """A previous command's failure must not leak into this process's exit."""
-    from aipass.cli.apps.modules import error as cli_error
 
     class OkModule:
         __name__ = "ok_module"

@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_create.py
 # Description: Tests for email file creation handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
-# Modified: 2026-04-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for email file creation handler -- create_email_file, load_email_file."""
+"""Tests for apps/handlers/email/create.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(windows_compat) — the sys.platform == "win32" stdout/stderr reconfigure block
 
 import json
 

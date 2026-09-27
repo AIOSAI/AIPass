@@ -1,17 +1,19 @@
 # =================== AIPass ====================
 # Name: test_session_pointer.py
 # Description: Tests for the durable per-branch session pointer
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-20
-# Modified: 2026-08-20
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for session_pointer -- encoding, round trip, atomicity, resume verdicts.
+"""Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
 
-Everything here runs against tmp_path. ``Path.home`` is monkeypatched wherever a
-test needs a transcript to exist, so no test can read or create anything under
-the real ``~/.claude`` or inside a live branch.
-"""
+# Everything here runs against tmp_path. ``Path.home`` is monkeypatched wherever a
+# test needs a transcript to exist, so no test can read or create anything under
+# the real ``~/.claude`` or inside a live branch.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — _BYTES_PER_MB, the internal MB conversion factor
 
 import json
 from pathlib import Path
@@ -20,6 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.session_pointer as mod
+from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import _get_jsonl_projects_dir
 from aipass.ai_mail.apps.handlers.dispatch.session_pointer import (
     mint_session_id,
     pointer_path,
@@ -104,26 +107,26 @@ def test_transcript_dir_encodes_windows_paths(fake_home):
     assert transcript_dir("C:\\repo\\AIPass").name == "C--repo-AIPass"
 
 
-def test_transcript_dir_lives_under_claude_projects(fake_home):
-    result = transcript_dir("/some/branch")
+def test_transcript_dir_lives_under_claude_projects(fake_home, tmp_path):
+    result = transcript_dir(str(tmp_path / "some" / "branch"))
     assert result.parent == fake_home / ".claude" / "projects"
 
 
-def test_transcript_dir_accepts_a_path_object(fake_home):
-    assert transcript_dir(Path("/some/branch")) == transcript_dir("/some/branch")
+def test_transcript_dir_accepts_a_path_object(fake_home, tmp_path):
+    sample = tmp_path / "some" / "branch"
+    assert transcript_dir(sample) == transcript_dir(str(sample))
 
 
-def test_transcript_file_appends_the_jsonl_name(fake_home):
-    result = transcript_file("/some/branch", "abc-123")
+def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
+    sample = str(tmp_path / "some" / "branch")
+    result = transcript_file(sample, "abc-123")
     assert result.name == "abc-123.jsonl"
-    assert result.parent == transcript_dir("/some/branch")
+    assert result.parent == transcript_dir(sample)
 
 
-def test_transcript_dir_matches_dispatch_monitors_encoding(fake_home):
+def test_transcript_dir_matches_dispatch_monitors_encoding(fake_home, tmp_path):
     """The two implementations must never disagree while both exist."""
-    from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import _get_jsonl_projects_dir
-
-    cwd = "/srv/branches/AIPass/src/aipass/ai_mail"
+    cwd = str(tmp_path / "srv" / "branches" / "AIPass" / "src" / "aipass" / "ai_mail")
     assert transcript_dir(cwd) == _get_jsonl_projects_dir(cwd)
 
 
@@ -613,7 +616,7 @@ class TestAnUnnameableHomeDoesNotRaise:
 
         assert "home" in reason.lower(), f"the reason must name the actual failure. Got: {reason}"
 
-    def test_transcript_dir_reports_the_absence_rather_than_guessing(self, monkeypatch):
+    def test_transcript_dir_reports_the_absence_rather_than_guessing(self, monkeypatch, tmp_path):
         """No home means no answer — not a plausible path that cannot exist.
 
         Returning a sentinel would make "this machine cannot name its home"
@@ -622,5 +625,6 @@ class TestAnUnnameableHomeDoesNotRaise:
         """
         self._home_is_unnameable(monkeypatch)
 
-        assert transcript_dir("/anywhere") is None
-        assert transcript_file("/anywhere", "sess") is None
+        somewhere = str(tmp_path / "anywhere")
+        assert transcript_dir(somewhere) is None
+        assert transcript_file(somewhere, "sess") is None

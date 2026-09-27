@@ -1,28 +1,30 @@
 # =================== AIPass ====================
 # Name: test_external_tier_resolution.py
 # Description: resolve_branch reaches the declared-roots external tier (FPLAN-0460)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""The external tier, through my door.
+"""Tests for apps/handlers/dispatch/wake.py -- the external tier, through my door."""
 
-@vera's first supervised fire failed at ``resolve: Branch not found: @vera``.
-Job DISCOVERY already knew the tier — @daemon reads @memory's fleet gateway —
-but the FIRE path came through ``wake.resolve_branch``, which knew three
-sources and none of them looked outside this repo. Discoverable but not
-wakeable: the tier was half-plumbed.
+# @vera's first supervised fire failed at ``resolve: Branch not found: @vera``.
+# Job DISCOVERY already knew the tier — @daemon reads @memory's fleet gateway —
+# but the FIRE path came through ``wake.resolve_branch``, which knew three
+# sources and none of them looked outside this repo. Discoverable but not
+# wakeable: the tier was half-plumbed.
+#
+# THE SEAM IS ``_REPO_ROOT``, not a patched gateway. @memory's
+# ``external_branches(repo_root=...)`` reads ``AIPASS_ROOTS.json`` at whatever
+# root it is handed, so pointing wake's ``_REPO_ROOT`` at a tmp home gives both
+# world states — anchor present and anchor absent — through the REAL gateway
+# code. Patching the gateway instead would have proven only that my mock returns
+# what I told it to, and the live defect was in whether the call happens at all.
+# Nothing here reads the real machine; every root, registry and passport below is
+# built in tmp_path.
 
-THE SEAM IS ``_REPO_ROOT``, not a patched gateway. @memory's
-``external_branches(repo_root=...)`` reads ``AIPASS_ROOTS.json`` at whatever
-root it is handed, so pointing wake's ``_REPO_ROOT`` at a tmp home gives both
-world states — anchor present and anchor absent — through the REAL gateway
-code. Patching the gateway instead would have proven only that my mock returns
-what I told it to, and the live defect was in whether the call happens at all.
-Nothing here reads the real machine; every root, registry and passport below is
-built in tmp_path.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — resolve_wake_model()'s ModelDecision, unrelated to address resolution
 
 import json
 from pathlib import Path
@@ -30,6 +32,7 @@ from pathlib import Path
 import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
+import aipass.ai_mail.apps.handlers.registry.read as read_mod
 
 
 @pytest.fixture(autouse=True)
@@ -247,8 +250,6 @@ class TestLocalAlwaysWins:
         )
         _declare(home, external)
 
-        import aipass.ai_mail.apps.handlers.registry.read as read_mod
-
         monkeypatch.setattr(read_mod, "get_caller_project_branches", lambda cwd: {"@strategy": str(caller_seat)})
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(caller_seat))
 
@@ -299,7 +300,7 @@ class TestCollisionsAreNamedNotGuessed:
         )
         return root
 
-    def test_the_first_DECLARED_root_wins_not_the_first_alphabetically(self, home, tmp_path, caplog):
+    def test_the_first_declared_root_wins_not_the_first_alphabetically(self, home, tmp_path, caplog):
         """The fleet's tie-break, proven end to end through @memory's gateway.
 
         This pin used to assert the opposite. ``declared_roots()`` returned

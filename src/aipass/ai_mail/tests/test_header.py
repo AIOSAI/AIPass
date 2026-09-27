@@ -1,4 +1,15 @@
-"""Tests for email header handler -- get_dispatch_header, prepend_dispatch_header."""
+# =================== AIPass ====================
+# Name: test_header.py
+# Description: Tests for email header handler
+# Version: 1.0.0
+# Created: 2026-04-25
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/email/header.py -- get_dispatch_header, prepend_dispatch_header."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — DISPATCH_HEADER and NO_MEMORY_SAVE_HEADER's exact wording
 
 import ast
 
