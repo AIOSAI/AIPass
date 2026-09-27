@@ -106,6 +106,7 @@ PATCH_READS_DRONE = "aipass.api.apps.handlers.host.reads.drone"
 # wrong module writes a real audit record for a fake read.
 PATCH_GIT_LOGGER = "aipass.api.apps.handlers.host.git_reads.logger"
 PATCH_GIT_JSON = "aipass.api.apps.handlers.host.git_reads.json_handler"
+PATCH_CACHE_LOGGER = "aipass.api.apps.handlers.host.read_cache.logger"
 PATCH_SERVER_LOGGER = "aipass.api.apps.handlers.host.server.logger"
 PATCH_HOST_FLEET = "aipass.api.apps.handlers.host.fleet"
 
@@ -1058,6 +1059,18 @@ class TestGitChangesCoalescesTheStampede:
             assert host_git.read_git_changes("demo")["branch"] == "demo"
 
         assert host_git._changes._failures == {}, "a recovered key must not keep its old failure"
+
+    def test_a_failed_flight_names_its_cache_key_in_the_log(self, fake_repo: dict) -> None:
+        """6b7f72e9's same-second twins logged one root each: only the key can say if two keys ran."""
+        with (
+            patch(PATCH_CACHE_LOGGER) as log,
+            patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("drone", 30)),
+            pytest.raises(host_reads.ReadUnavailable),
+        ):
+            host_git.read_git_changes("demo", project="AIPASS")
+
+        message, *values = log.warning.call_args.args
+        assert "('demo', 'AIPASS', 'branch')" in message % tuple(values)
 
 
 class TestGitStaysDroneOnlyOnThisLaneToo:

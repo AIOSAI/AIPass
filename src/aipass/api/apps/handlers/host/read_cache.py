@@ -3,7 +3,7 @@
 # Description: Host API Read Cache Handler — single-flight and TTL for expensive reads
 # Version: 1.0.0
 # Created: 2026-09-07
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -44,6 +44,7 @@ import time
 from typing import Any, Callable, Dict, Hashable, Optional
 
 from aipass.api.apps.handlers.json import json_handler
+from aipass.prax import logger
 
 
 class ReadCache:
@@ -157,6 +158,10 @@ class ReadCache:
                 with self._guard:
                     self._failure_count += 1
                     self._failures[key] = (self._failure_count, failure)
+                # The KEY, once per flight: a caller's own log names only what
+                # it resolved to, and two keys that resolve to one directory
+                # log alike (6b7f72e9's same-second twins, 2026-09-25).
+                logger.warning("[host_api] the %s read failed for key %r: %s", self.name, key, type(failure).__name__)
                 raise
             with self._guard:
                 self._entries[key] = (time.monotonic(), copy.deepcopy(answer))
