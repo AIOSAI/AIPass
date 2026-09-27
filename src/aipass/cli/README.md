@@ -25,6 +25,17 @@ That is the whole idea: import the function, call it, and the output matches
 every other branch in the system. The full symbol table, signatures and import
 paths are in [the display API](docs/display_api.md).
 
+## What It Does
+
+- Owns the render surface every branch prints through: `header`, `success`,
+  `error`, `warning`, `fatal`, `section`, the shared `console` and `err_console`,
+  and `escape` for values that carry literal square brackets.
+- Owns the operation templates, `operation_start` and `operation_complete`.
+- Owns the exit seam: `error()` marks the command failed, and `resolve_exit()`
+  turns that into the process exit code every `main()` returns.
+- Binds the fleet json service for this branch's own logs. It is a library: the
+  command line only introspects and demos it.
+
 ## Live Inventory
 
 The list of modules, verbs and flags is generated from the code that runs them, so it is not written down here and cannot go stale on this page:

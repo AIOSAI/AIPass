@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for CLI branch tests
-# Version: 4.0.0
+# Version: 4.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-03
+# Modified: 2026-09-27
 # =============================================
 
 """Shared pytest fixtures for CLI tests."""
@@ -13,7 +13,7 @@ import re
 import tempfile
 from io import StringIO
 from pathlib import Path
-from typing import List, Tuple
+from typing import Generator, List, Tuple
 
 # Redirect prax logs to temp directory during tests
 # Must be set before any prax imports to catch logger initialization
@@ -23,7 +23,9 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 import pytest
 from rich.console import Console
 
+from aipass.cli.apps import cli as branch_entry
 from aipass.cli.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the pre-service durability and provisioning suites) that must
@@ -76,23 +78,19 @@ def make_capture_console(**kwargs):
     return console, get_output
 
 
-@pytest.fixture
-def sample_data():
-    """Reusable sample test data for CLI module tests."""
-    return {
-        "module_name": "test_module",
-        "version": "1.0.0",
-        "config": {"max_log_entries": 100},
-        "created": "2026-01-01",
-        "last_updated": "2026-01-01",
-    }
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
 
 @pytest.fixture(autouse=True)
-def _ensure_test_isolation():
-    """Auto-applied fixture ensuring clean state between tests."""
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
     yield
-    # teardown: no shared state to clean up currently
+    display.reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +137,5 @@ def mock_logger(monkeypatch) -> List[Tuple[str, tuple]]:
         def error(self, *args, **kwargs):
             captured.append(("error", args))
 
-    from aipass.cli.apps import cli as cli_entry
-
-    monkeypatch.setattr(cli_entry, "logger", _CapturingLogger())
+    monkeypatch.setattr(branch_entry, "logger", _CapturingLogger())
     return captured

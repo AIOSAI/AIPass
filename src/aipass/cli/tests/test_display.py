@@ -1,13 +1,28 @@
-"""Unit tests for CLI display module -- Rich-formatted terminal output."""
+# =================== AIPass ====================
+# Name: test_display.py
+# Description: The display module — messages, header, routing, demo, exit seam, escape
+# Version: 1.1.0
+# Created: 2026-08-16
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/modules/display.py — the render surface every branch imports."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — that display.header and the other public functions carry docstrings
+# seedgo: no-test-needed(rich_markup) — that display.print_help's own literals keep their brackets
 
 import importlib
 import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
+from rich.markup import escape as rich_escape
 
+import aipass.cli
 from aipass.cli.apps import modules
 from aipass.cli.apps.modules import display, templates
+from aipass.trigger.apps.modules import core as trigger_core
 
 from .conftest import make_capture_console
 
@@ -326,8 +341,7 @@ class TestRunDemo:
             display.run_demo()
         mock_log.assert_called_once_with("display_demo")
 
-    @patch("aipass.cli.apps.handlers.json.json_handler.log_operation")
-    def test_run_demo_renders_expected_content(self, mock_log):
+    def test_run_demo_renders_expected_content(self):
         cons, get_output = _make_capture_console()
         err_cons, get_err_output = _make_capture_console()
         with (
@@ -523,32 +537,34 @@ class TestPrintHelpOutput:
 class TestHeaderTriggerLoading:
     """Verify header() lazy-loads trigger module."""
 
-    def test_header_loads_trigger_on_first_call(self):
-        cons, _get_output = _make_capture_console()
-        original_loaded = display._TRIGGER_LOADED
-        original_trigger = display._TRIGGER
-        try:
-            display._TRIGGER_LOADED = False
-            display._TRIGGER = None
-            with patch.object(display, "CONSOLE", cons):
-                display.header("Test")
-            assert display._TRIGGER_LOADED is True
-        finally:
-            display._TRIGGER_LOADED = original_loaded
-            display._TRIGGER = original_trigger
+    def test_header_loads_trigger_on_first_call(self, monkeypatch):
+        """The first header() loads trigger and fires its event with the title.
 
-    def test_header_handles_import_error_for_trigger(self):
+        Mutant: header() marks trigger loaded but never binds it — killed.
+        """
+        fired = []
+        monkeypatch.setattr(display, "_TRIGGER_LOADED", False)
+        monkeypatch.setattr(display, "_TRIGGER", None)
+        monkeypatch.setattr(trigger_core.trigger, "fire", lambda event, **kw: fired.append((event, kw)))
         cons, _get_output = _make_capture_console()
-        display._TRIGGER_LOADED = False
-        display._TRIGGER = None
+        with patch.object(display, "CONSOLE", cons):
+            display.header("Test")
+        assert fired == [("cli_header_displayed", {"title": "Test"})]
+
+    def test_header_handles_import_error_for_trigger(self, monkeypatch):
+        """With trigger unimportable, header() still renders and does not raise.
+
+        Mutant: drop the except ImportError around the lazy import — killed.
+        """
+        monkeypatch.setattr(display, "_TRIGGER_LOADED", False)
+        monkeypatch.setattr(display, "_TRIGGER", None)
+        cons, get_output = _make_capture_console()
         with (
             patch.object(display, "CONSOLE", cons),
             patch.dict("sys.modules", {"aipass.trigger.apps.modules.core": None}),
         ):
-            display._TRIGGER_LOADED = False
             display.header("Trigger Fail Test")
-        assert display._TRIGGER_LOADED is True
-        assert display._TRIGGER is None
+        assert "Trigger Fail Test" in get_output()
 
 
 class TestInfrastructureMocking:
@@ -659,9 +675,6 @@ class TestEscapeExport:
     PLACEHOLDER = "log [count]"
 
     def test_escape_is_published_on_both_surfaces(self):
-        import aipass.cli
-        from rich.markup import escape as rich_escape
-
         assert "escape" in modules.__all__
         assert modules.escape is rich_escape
         assert aipass.cli.escape is rich_escape

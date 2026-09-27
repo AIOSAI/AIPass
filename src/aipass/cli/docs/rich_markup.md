@@ -78,11 +78,11 @@ for the last three. Both halves are pinned in `tests/test_display.py`
 
 ## The checker
 
-seedgo's `Rich_Markup` checker used to read only the print site, so a help page
-assembled as a returned literal and printed by a caller elsewhere scored 100
-while its placeholders were eaten. It now follows a literal one hop to the call
-that consumes it (seedgo f23fab69). It deliberately does not flag a hand-escape,
-because of the styled-literal exception above.
+seedgo's `Rich_Markup` checker follows a string literal one hop to the console
+call that consumes it, so a help page assembled as a returned literal and printed
+by a caller elsewhere is judged where it prints, not where it is written. It
+deliberately does not flag a hand-escape, because of the styled-literal
+exception above.
 
 ---
 [← Back to the cli README](../README.md)

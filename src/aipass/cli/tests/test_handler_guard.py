@@ -1,20 +1,20 @@
-"""Tests for handlers/__init__.py cross-branch import guard.
+# =================== AIPass ====================
+# Name: test_handler_guard.py
+# Description: The cross-branch handler import guard — refusal, allowance, debug trace
+# Version: 1.1.0
+# Created: 2026-08-18
+# Modified: 2026-09-27
+# =============================================
 
-WHY THIS FILE WAS REWRITTEN (2026-08-18, S43). @seedgo's taxonomy study found
-this file was a COVERAGE MIRAGE: it carried a class named TestGuardBranchAccess
-while `_guard_branch_access()` — the 56-line function that IS this module's
-reason to exist — had no test at all. The worst offender asserted on
-`_find_real_caller()` while claiming to cover the AIPASS_DEBUG_GUARD contract;
-that variable is read inside `_guard_branch_access()`, so the assertion passed
-identically with the variable set or unset.
+"""Tests for apps/handlers/__init__.py — the cross-branch handler import guard."""
 
-A test named for a behaviour it never exercises is worse than no test: it
-occupies the slot where the real one would go. Every test below drives
-`_guard_branch_access()` itself, with `_find_real_caller` patched so the caller
-identity under test is the one being asserted.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — the guard with no readable cwd; tests/test_import_dead_cwd.py covers it
+# seedgo: no-test-needed(stdlib) — sys._getframe and linecache themselves, which the frame walk only reads
+# seedgo: no-test-needed(constant) — the package's __version__ string and the ImportError banner's rule lines
 
 import os
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -24,9 +24,32 @@ from aipass.cli.apps.handlers import (
     _find_real_caller,
     _guard_branch_access,
 )
+from aipass.cli.apps.handlers.json import json_handler
 
-FOREIGN = "/home/user/Projects/AIPass/src/aipass/drone/apps/modules/core.py"
-OURS = "/home/user/Projects/AIPass/src/aipass/cli/apps/modules/display.py"
+# WHY THIS FILE WAS REWRITTEN (2026-08-18, S43). @seedgo's taxonomy study found
+# this file was a COVERAGE MIRAGE: it carried a class named TestGuardBranchAccess
+# while `_guard_branch_access()` — the 56-line function that IS this module's
+# reason to exist — had no test at all. The worst offender asserted on
+# `_find_real_caller()` while claiming to cover the AIPASS_DEBUG_GUARD contract;
+# that variable is read inside `_guard_branch_access()`, so the assertion passed
+# identically with the variable set or unset.
+#
+# A test named for a behaviour it never exercises is worse than no test: it
+# occupies the slot where the real one would go. Every test below drives
+# `_guard_branch_access()` itself, with `_find_real_caller` patched so the caller
+# identity under test is the one being asserted.
+#
+# The underscore names are imported because they are the only door: the guard
+# runs once, at the package's first import, and a cached module never runs it
+# again. No command or public function reaches it a second time.
+#
+# The caller paths below sit under /opt, where an installed checkout lives, not
+# under a home directory: the guard parses path PARTS for "aipass", so the root
+# above it is irrelevant to the parsing, and nothing here touches the disk.
+
+THIS_FILE = str(Path(__file__).resolve())
+FOREIGN = "/opt/Projects/AIPass/src/aipass/drone/apps/modules/core.py"
+OURS = "/opt/Projects/AIPass/src/aipass/cli/apps/modules/display.py"
 IMPORT_LINE = "from aipass.cli.apps.handlers.json import json_handler"
 
 
@@ -41,19 +64,27 @@ class TestExtractBranchName:
         assert _extract_branch_name("/usr/lib/python3/site-packages/something.py") == "unknown"
 
     def test_returns_unknown_when_aipass_is_last(self):
-        assert _extract_branch_name("/home/user/aipass") == "unknown"
+        assert _extract_branch_name("/opt/aipass") == "unknown"
 
 
 class TestFindRealCaller:
     def test_returns_tuple(self):
+        """The pair is (resolved caller file, that caller's source line).
+
+        Mutant: return [resolved, import_line] from _find_real_caller — killed.
+        Mutant: drop the linecache read so import_line stays None — killed.
+        """
         result = _find_real_caller()
         assert isinstance(result, tuple)
-        assert len(result) == 2
+        assert result == (THIS_FILE, "result = _find_real_caller()")
 
     def test_finds_this_test_file(self):
+        """The first real frame above the guard's own file is this test file.
+
+        Mutant: start the walk at sys._getframe(2), one frame too far — killed.
+        """
         filepath, _import_line = _find_real_caller()
-        assert filepath is not None
-        assert "test_handler_guard" in filepath
+        assert filepath == THIS_FILE
 
 
 class TestGuardRefusesForeignBranches:
@@ -154,10 +185,14 @@ class TestGuardAllowsLegitimateCallers:
         assert "caller_file = None" in capsys.readouterr().err
 
     def test_real_in_branch_import_is_not_blocked(self):
-        """End to end, unpatched: this branch importing its own handler works."""
-        from aipass.cli.apps.handlers.json import json_handler
+        """End to end, unpatched: this branch importing its own handler works.
 
-        assert json_handler is not None
+        The import is the one at the top of this file (and conftest's, which
+        runs first); this pins that it bound the real shim, not a stand-in.
+        Mutant: the same-branch match reads f"/{MY_BRANCH}_/" — killed (the
+        guard refuses cli's own tests at collection).
+        """
+        assert json_handler.__name__ == "aipass.cli.apps.handlers.json.json_handler"
 
 
 class TestDebugTracing:
