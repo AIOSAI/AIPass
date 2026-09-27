@@ -1,16 +1,19 @@
 # =================== AIPass ====================
 # Name: test_trust.py
 # Description: Tests for trust CLI commands, init enrollment, setup.sh enrollment
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-07-15
-# Modified: 2026-08-02
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for trust/revoke CLI commands and init auto-enrollment.
+"""Tests for apps/modules/trust.py and the handlers it drives."""
 
-All tests use tmp dirs + monkeypatch REGISTRY_PATH so they never
-touch the real ~/.aipass registry.
-"""
+# Tests trust/revoke CLI commands and init auto-enrollment.
+# All tests use tmp dirs + monkeypatch REGISTRY_PATH so they never
+# touch the real ~/.aipass registry.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/trust.py parses and imports
 
 import os
 import shutil
@@ -20,6 +23,9 @@ from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
+from aipass.aipass.apps.modules.trust import handle_command
+from aipass.aipass.shared.project_home import _enroll_project
 from aipass.hooks.apps.handlers.config.trust_registry import (
     enroll,
     is_trusted,
@@ -112,8 +118,6 @@ def test_is_trusted_hash_mismatch(tmp_path):
 
 def test_trust_command_enrolls(tmp_path):
     """aipass trust <path> enrolls the project."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     project = tmp_path / "proj"
     project.mkdir()
     hooks_dir = project / ".aipass"
@@ -126,8 +130,6 @@ def test_trust_command_enrolls(tmp_path):
 
 def test_revoke_command_removes(tmp_path):
     """aipass revoke <path> removes enrollment."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     project = tmp_path / "proj"
     project.mkdir()
     hooks_dir = project / ".aipass"
@@ -141,42 +143,39 @@ def test_revoke_command_removes(tmp_path):
 
 def test_trust_command_no_hooks_json(tmp_path):
     """aipass trust <path> prints error when hooks.json is missing."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     project = tmp_path / "bare"
     project.mkdir()
     assert handle_command("trust", [str(project)]) is True
     assert is_trusted(str(project)) is False
 
 
-def test_revoke_command_not_enrolled(tmp_path):
-    """aipass revoke <path> handles non-enrolled project cleanly."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
+def test_revoke_command_not_enrolled(tmp_path, capsys: pytest.CaptureFixture[str]):
+    """Mutant: 'was not in the registry' line dropped from _do_revoke -> red."""
     project = tmp_path / "ghost"
     project.mkdir()
     assert handle_command("revoke", [str(project)]) is True
+    out, err = capsys.readouterr()
+    assert "was not in the registry" in out
+    assert is_trusted(str(project)) is False
 
 
-def test_trust_command_help():
-    """aipass trust --help returns True (handled)."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
+def test_trust_command_help(capsys: pytest.CaptureFixture[str]):
+    """Mutant: print_help() dropped from the trust --help branch -> red."""
     assert handle_command("trust", ["--help"]) is True
+    out, err = capsys.readouterr()
+    assert "USAGE:" in out
     assert handle_command("trust", []) is True
+    out, err = capsys.readouterr()
+    assert "No projects enrolled." in out
 
 
 def test_trust_ignores_unrelated_command():
     """handle_command returns False for unrelated commands."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     assert handle_command("doctor", []) is False
 
 
 def test_trust_not_a_directory(tmp_path):
     """aipass trust <file> prints error."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     fake = tmp_path / "not_a_dir.txt"
     fake.write_text("hi", encoding="utf-8")
     assert handle_command("trust", [str(fake)]) is True
@@ -190,8 +189,6 @@ def test_trust_not_a_directory(tmp_path):
 
 def test_init_project_enrolls(tmp_path, monkeypatch):
     """init_project auto-enrolls after copying hooks.json."""
-    from aipass.aipass.apps.handlers.init.bootstrap import init_project
-
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
         lambda p: False,
@@ -222,8 +219,6 @@ def test_init_project_enrolls(tmp_path, monkeypatch):
 
 def test_init_update_rehashes(tmp_path, monkeypatch):
     """init update re-enrolls after merging hooks.json (hash tracks new content)."""
-    from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
-
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
         lambda p: False,
@@ -268,8 +263,6 @@ def test_init_update_rehashes(tmp_path, monkeypatch):
 
 def test_enroll_project_skips_throwaway_path(tmp_path):
     """_enroll_project() refuses to enroll a pytest/temp-dir path (GH-712 leak fix)."""
-    from aipass.aipass.shared.project_home import _enroll_project
-
     project = tmp_path / "throwaway"
     project.mkdir()
     hooks_dir = project / ".aipass"
@@ -282,8 +275,6 @@ def test_enroll_project_skips_throwaway_path(tmp_path):
 
 def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
     """update_project()'s result dict flags whether enrollment happened."""
-    from aipass.aipass.apps.handlers.init.bootstrap import init_project, update_project
-
     monkeypatch.setattr(
         "aipass.aipass.apps.handlers.init.bootstrap.is_throwaway_path",
         lambda p: False,
@@ -326,8 +317,6 @@ def test_update_project_reports_trust_enrolled(tmp_path, monkeypatch):
 
 def test_prune_removes_stale_entries(tmp_path):
     """aipass trust prune drops entries whose project path no longer exists."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     live = tmp_path / "live"
     live.mkdir()
     hooks_dir = live / ".aipass"
@@ -433,6 +422,7 @@ def _run_enroll_block(script_dir: Path, home: Path) -> subprocess.CompletedProce
         ["bash", "-c", script],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=120,
         env=env,
     )
@@ -487,8 +477,6 @@ def test_setup_sh_enroll_block_fails_honestly(tmp_path):
 
 def test_prune_no_stale_entries(tmp_path):
     """aipass trust prune reports cleanly when nothing is stale."""
-    from aipass.aipass.apps.modules.trust import handle_command
-
     live = tmp_path / "live"
     live.mkdir()
     hooks_dir = live / ".aipass"

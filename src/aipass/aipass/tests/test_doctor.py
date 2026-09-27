@@ -1,12 +1,16 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor Phase 1
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for aipass doctor command — Phase 1 (FPLAN-0188)."""
+"""Tests for apps/modules/doctor.py and the handlers it drives."""
+# Originally scoped to Phase 1 (FPLAN-0188); grown since.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
 
 import json
 import os
@@ -14,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.handlers.system_detect import system_detector
 from aipass.aipass.apps.handlers.system_detect.system_detector import (
     detect_cpu,
     detect_git,
@@ -34,7 +39,26 @@ from aipass.aipass.apps.handlers.ui.progress import (
     make_doctor_progress,
     render_step_header,
 )
-from aipass.aipass.apps.modules.doctor import handle_command, run_doctor
+from aipass.aipass.apps.modules import _doctor_wire
+from aipass.aipass.apps.modules._doctor_wire import (
+    check_wire_verify,
+    merge_manifest_rows,
+    reconcile_stale_deny,
+)
+from aipass.aipass.apps.modules.doctor import (
+    CheckResult,
+    handle_command,
+    run_doctor,
+    run_doctor_preflight,
+    _check_drone_systems,
+    _check_global_aipass_home,
+    _check_home_agreement,
+    _check_identity,
+    _check_owner_seating,
+    _check_provider_manifest,
+    _find_manifest,
+    _fix_owner_seating,
+)
 
 
 # =============================================================================
@@ -251,15 +275,11 @@ _posix_only = pytest.mark.skipif(os.name == "nt", reason="forces os.name='posix'
 
 class TestShellFromParentProc:
     def test_non_posix_returns_none(self, monkeypatch) -> None:
-        from aipass.aipass.apps.handlers.system_detect import system_detector
-
         monkeypatch.setattr(system_detector.os, "name", "nt")
         assert system_detector._shell_from_parent_proc() is None
 
     @_posix_only
     def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
-        from aipass.aipass.apps.handlers.system_detect import system_detector
-
         fake_ppid = 424242
         proc_dir = tmp_path / str(fake_ppid)
         proc_dir.mkdir()
@@ -280,8 +300,6 @@ class TestShellFromParentProc:
 
     @_posix_only
     def test_missing_comm_file_returns_none(self, monkeypatch, tmp_path) -> None:
-        from aipass.aipass.apps.handlers.system_detect import system_detector
-
         fake_ppid = 999999
         monkeypatch.setattr(system_detector.os, "name", "posix")
         monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
@@ -298,8 +316,6 @@ class TestShellFromParentProc:
 
     @_posix_only
     def test_read_oserror_returns_none(self, monkeypatch) -> None:
-        from aipass.aipass.apps.handlers.system_detect import system_detector
-
         monkeypatch.setattr(system_detector.os, "name", "posix")
         monkeypatch.setattr(system_detector.os, "getppid", lambda: 1)
 
@@ -443,10 +459,11 @@ class TestDoctorHandleCommand:
         assert handle_command("init", ["--verbose"]) is False
 
     def test_no_args_runs_doctor(self) -> None:
-        """No args runs run_doctor (returns True when 0 errors)."""
-        with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0):
+        """Mutant: run_doctor call replaced by error_count = 0 -> red."""
+        with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0) as run:
             result = handle_command("doctor", [])
         assert result is True
+        run.assert_called_once_with(verbose=False, interactive=True, fix=False)
 
     def test_info_flag_calls_introspection(self) -> None:
         """--info flag triggers print_introspection (returns True)."""
@@ -470,11 +487,12 @@ class TestDoctorHandleCommand:
         mock_help.assert_called_once()
 
     def test_doctor_no_errors_returns_true(self) -> None:
-        """When run_doctor returns 0 errors, handle_command returns True."""
+        """Mutant: doctor_run log_operation dropped -> red."""
         with patch("aipass.aipass.apps.modules.doctor.run_doctor", return_value=0):
-            with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True):
+            with patch("aipass.aipass.apps.modules.doctor.json_handler", autospec=True) as jh:
                 result = handle_command("doctor", ["--check"])
         assert result is True
+        jh.log_operation.assert_called_once_with("doctor_run", {"error_count": 0, "fix": False})
 
     def test_doctor_with_errors_raises_system_exit(self) -> None:
         """When run_doctor returns errors, SystemExit(1) is raised."""
@@ -538,8 +556,6 @@ class TestRunDoctor:
 
     def test_run_doctor_counts_errors(self) -> None:
         """Error glyphs in results increment error count."""
-        from aipass.aipass.apps.modules.doctor import CheckResult
-
         fail_check = CheckResult("test", GLYPH_FAIL, "bad", "fix it")
         with (
             patch("aipass.aipass.apps.modules.doctor._check_system", return_value=[fail_check]),
@@ -553,8 +569,6 @@ class TestRunDoctor:
 
     def test_run_doctor_counts_only_errors_not_warnings(self) -> None:
         """Warning glyphs do not increment error count."""
-        from aipass.aipass.apps.modules.doctor import CheckResult
-
         warn_check = CheckResult("test", GLYPH_WARN, "minor", "")
         with (
             patch("aipass.aipass.apps.modules.doctor._check_system", return_value=[warn_check]),
@@ -577,8 +591,6 @@ class TestProviderManifest:
 
     def test_manifest_not_found_returns_warn(self) -> None:
         """Missing manifest → single WARN result."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=None):
             results = _check_provider_manifest()
         assert len(results) == 1
@@ -587,8 +599,6 @@ class TestProviderManifest:
 
     def test_manifest_unreadable_returns_warn(self, tmp_path) -> None:
         """Corrupt manifest file → WARN."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         bad_manifest = tmp_path / ".claude" / "provider_manifest.json"
         bad_manifest.parent.mkdir(parents=True)
         bad_manifest.write_text("not json{{{", encoding="utf-8")
@@ -600,8 +610,6 @@ class TestProviderManifest:
 
     def test_manifest_no_claude_section(self, tmp_path) -> None:
         """Manifest with no cli.claude → WARN."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({"cli": {}}), encoding="utf-8")
@@ -612,8 +620,6 @@ class TestProviderManifest:
 
     def test_all_hooks_present(self, tmp_path) -> None:
         """All hook scripts exist → PASS for hooks."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         cmd_a = "$AIPASS_HOME/bin/hook-bridge Stop"
@@ -656,8 +662,6 @@ class TestProviderManifest:
 
     def test_missing_hook_detected(self, tmp_path) -> None:
         """Missing hook command in provider settings → WARN."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         cmd = "$AIPASS_HOME/bin/hook-bridge Stop"
@@ -690,8 +694,6 @@ class TestProviderManifest:
         """A Scripts-path (Windows-transformed) hook entry must not be flagged missing against
         the POSIX-canonical manifest — write (_platform_bridge_command) and verify must agree
         (DPLAN-0234 Strand C)."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
@@ -718,8 +720,6 @@ class TestProviderManifest:
 
     def test_missing_hook_label_not_double_prefixed(self, tmp_path) -> None:
         """Command already shaped like 'event:label' must not get the event prefixed twice."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         cmd = "$AIPASS_HOME/bin/hook-bridge.py UserPromptSubmit:presence_gate"
@@ -740,8 +740,6 @@ class TestProviderManifest:
 
     def test_missing_hook_duplicate_matchers_deduped(self, tmp_path) -> None:
         """Same command missing under two matchers must appear once in the report, not twice."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         cmd = "$AIPASS_HOME/bin/hook-bridge PreCompact:pre_compact_prep"
@@ -772,8 +770,6 @@ class TestProviderManifest:
 
     def test_env_vars_all_present(self, tmp_path) -> None:
         """All manifest env vars present in provider settings → PASS."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(
@@ -796,8 +792,6 @@ class TestProviderManifest:
 
     def test_env_vars_missing(self, tmp_path) -> None:
         """Missing env var → WARN with var name."""
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text(
@@ -818,8 +812,6 @@ class TestProviderManifest:
 
     def test_find_manifest_walks_up(self, tmp_path, monkeypatch) -> None:
         """_find_manifest finds manifest by walking up from CWD."""
-        from aipass.aipass.apps.modules.doctor import _find_manifest
-
         manifest = tmp_path / ".claude" / "provider_manifest.json"
         manifest.parent.mkdir(parents=True)
         manifest.write_text("{}", encoding="utf-8")
@@ -859,8 +851,6 @@ class TestProviderSettingsScalars:
 
     @staticmethod
     def _run(manifest, tmp_path, **kwargs):
-        from aipass.aipass.apps.modules.doctor import _check_provider_manifest
-
         with (
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
@@ -913,9 +903,6 @@ class TestProviderSettingsScalars:
 
     def test_settings_row_from_an_earlier_pass_is_replaced_not_duplicated(self) -> None:
         """--fix/interactive re-runs the manifest check; the first pass's key row must not survive."""
-        from aipass.aipass.apps.modules._doctor_wire import merge_manifest_rows
-        from aipass.aipass.apps.modules.doctor import CheckResult
-
         first = [
             CheckResult("drone", GLYPH_PASS, "18 citizens", ""),
             CheckResult("hooks", GLYPH_WARN, "1 hook(s) missing", ""),
@@ -953,8 +940,6 @@ class TestHooksJsonCheck:
 
     def test_hooks_json_present_returns_pass(self, tmp_path) -> None:
         """When .aipass/hooks.json exists, check returns PASS."""
-        from aipass.aipass.apps.modules.doctor import _check_identity
-
         registry = tmp_path / "TEST_REGISTRY.json"
         registry.write_text(json.dumps({"metadata": {"id": "t"}, "branches": []}), encoding="utf-8")
         hooks_dir = tmp_path / ".aipass"
@@ -970,8 +955,6 @@ class TestHooksJsonCheck:
 
     def test_hooks_json_missing_returns_warn(self, tmp_path) -> None:
         """When .aipass/hooks.json is absent, check returns WARN."""
-        from aipass.aipass.apps.modules.doctor import _check_identity
-
         registry = tmp_path / "TEST_REGISTRY.json"
         registry.write_text(json.dumps({"metadata": {"id": "t"}, "branches": []}), encoding="utf-8")
 
@@ -993,8 +976,6 @@ class TestPassportRole:
     """Tests for the passport role read in _check_identity (round-2 addendum: identity.role, not top-level)."""
 
     def _run_with_passport(self, tmp_path, passport_data):
-        from aipass.aipass.apps.modules.doctor import _check_identity
-
         registry = tmp_path / "TEST_REGISTRY.json"
         registry.write_text(json.dumps({"metadata": {"id": "t"}, "branches": []}), encoding="utf-8")
         trinity = tmp_path / ".trinity"
@@ -1042,16 +1023,12 @@ class TestReconcileStaleDeny:
 
     def test_no_settings_file_returns_empty(self, tmp_path) -> None:
         """Missing settings.json returns no results."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         with patch("aipass.aipass.apps.handlers.provider_reconcile.Path.home", return_value=tmp_path):
             results = reconcile_stale_deny(fix=False)
         assert results == []
 
     def test_no_stale_rules_returns_pass(self, tmp_path) -> None:
         """Settings with no stale rm rules returns PASS."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
@@ -1066,8 +1043,6 @@ class TestReconcileStaleDeny:
 
     def test_stale_rules_detected_without_fix(self, tmp_path) -> None:
         """Stale rm rules present returns WARN when fix=False."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
@@ -1083,8 +1058,6 @@ class TestReconcileStaleDeny:
 
     def test_fix_removes_stale_rules(self, tmp_path) -> None:
         """fix=True removes stale rules and preserves others."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         original = {
@@ -1105,8 +1078,6 @@ class TestReconcileStaleDeny:
 
     def test_fix_single_stale_rule(self, tmp_path) -> None:
         """fix=True works when only one of two stale rules is present."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
@@ -1122,8 +1093,6 @@ class TestReconcileStaleDeny:
 
     def test_fix_idempotent(self, tmp_path) -> None:
         """Running fix twice is safe — second run returns PASS with no stale rules."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
@@ -1139,8 +1108,6 @@ class TestReconcileStaleDeny:
 
     def test_empty_deny_list_returns_pass(self, tmp_path) -> None:
         """Empty deny list returns PASS."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(json.dumps({"permissions": {"deny": []}}), encoding="utf-8")
@@ -1151,8 +1118,6 @@ class TestReconcileStaleDeny:
 
     def test_no_permissions_key_returns_pass(self, tmp_path) -> None:
         """Settings without permissions key returns PASS."""
-        from aipass.aipass.apps.modules._doctor_wire import reconcile_stale_deny
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(json.dumps({"env": {"FOO": "bar"}}), encoding="utf-8")
@@ -1167,8 +1132,6 @@ class TestCheckWireVerify:
 
     def test_pass_on_zero_exit(self) -> None:
         """Exit 0 from drone @hooks verify produces a PASS row."""
-        from aipass.aipass.apps.modules._doctor_wire import check_wire_verify
-
         fake = MagicMock(returncode=0, stdout="✓ Wire check passed\n\n0 errors, 0 warnings\n")
         with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake):
             results = check_wire_verify()
@@ -1178,8 +1141,6 @@ class TestCheckWireVerify:
 
     def test_fail_on_nonzero_exit(self) -> None:
         """Non-zero exit from drone @hooks verify produces a FAIL row."""
-        from aipass.aipass.apps.modules._doctor_wire import check_wire_verify
-
         fake = MagicMock(returncode=1, stdout="ERROR empty array\n2 errors, 0 warnings\n")
         with patch("aipass.aipass.apps.modules._doctor_wire.subprocess.run", return_value=fake):
             results = check_wire_verify()
@@ -1189,8 +1150,6 @@ class TestCheckWireVerify:
 
     def test_warn_on_drone_not_found(self) -> None:
         """FileNotFoundError (drone missing) produces a WARN row."""
-        from aipass.aipass.apps.modules._doctor_wire import check_wire_verify
-
         with patch(
             "aipass.aipass.apps.modules._doctor_wire.subprocess.run",
             side_effect=FileNotFoundError("drone"),
@@ -1202,8 +1161,6 @@ class TestCheckWireVerify:
     def test_warn_on_timeout(self) -> None:
         """TimeoutExpired produces a WARN row."""
         import subprocess as sp
-
-        from aipass.aipass.apps.modules._doctor_wire import check_wire_verify
 
         with patch(
             "aipass.aipass.apps.modules._doctor_wire.subprocess.run",
@@ -1235,8 +1192,6 @@ class TestPromptAutoWireIsatty:
 
     def test_non_tty_stdin_skips_prompt_and_declines(self) -> None:
         """Non-tty stdin must NOT call input() — it declines and warns instead."""
-        from aipass.aipass.apps.modules import _doctor_wire
-
         with (
             patch.object(_doctor_wire.sys, "stdin") as mock_stdin,
             patch("builtins.input") as mock_input,
@@ -1251,8 +1206,6 @@ class TestPromptAutoWireIsatty:
 
     def test_tty_stdin_prompts_and_respects_decline(self) -> None:
         """Tty stdin still prompts; a 'n' answer declines."""
-        from aipass.aipass.apps.modules import _doctor_wire
-
         with (
             patch.object(_doctor_wire.sys, "stdin") as mock_stdin,
             patch("builtins.input", return_value="n") as mock_input,
@@ -1266,8 +1219,6 @@ class TestPromptAutoWireIsatty:
 
     def test_tty_stdin_accepts_and_wires(self) -> None:
         """Tty stdin with a 'y' answer runs the wire and returns True."""
-        from aipass.aipass.apps.modules import _doctor_wire
-
         with (
             patch.object(_doctor_wire.sys, "stdin") as mock_stdin,
             patch("builtins.input", return_value="y"),
@@ -1290,8 +1241,6 @@ class TestCheckGlobalAipassHome:
 
     def test_nonexistent_path_is_error(self, tmp_path):
         """AIPASS_HOME pointing to a nonexistent path is flagged as error."""
-        from aipass.aipass.apps.modules.doctor import _check_global_aipass_home
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
@@ -1305,8 +1254,6 @@ class TestCheckGlobalAipassHome:
 
     def test_throwaway_path_is_error(self, tmp_path):
         """AIPASS_HOME pointing to a temp path is flagged as error."""
-        from aipass.aipass.apps.modules.doctor import _check_global_aipass_home
-
         settings = tmp_path / ".claude" / "settings.json"
         settings.parent.mkdir(parents=True)
         settings.write_text(
@@ -1320,8 +1267,6 @@ class TestCheckGlobalAipassHome:
 
     def test_valid_path_passes(self, tmp_path):
         """AIPASS_HOME pointing to a real, non-temp path passes."""
-        from aipass.aipass.apps.modules.doctor import _check_global_aipass_home, GLYPH_PASS
-
         real_home = tmp_path / "AIPass"
         real_home.mkdir()
         settings = tmp_path / ".claude" / "settings.json"
@@ -1342,8 +1287,6 @@ class TestCheckGlobalAipassHome:
 
     def test_no_settings_file_is_noop(self, tmp_path):
         """Missing ~/.claude/settings.json produces no results."""
-        from aipass.aipass.apps.modules.doctor import _check_global_aipass_home
-
         with patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path):
             results = _check_global_aipass_home()
         assert results == []
@@ -1358,8 +1301,6 @@ class TestCheckOwnerSeating:
     """Tests for owner/identity detection via sync-registry --check."""
 
     def test_clean_owner_returns_pass(self):
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         check_json = json.dumps({"clean": True, "owner": "vera", "owner_uid": "8fb38c96-abcd", "issues": []})
         mock_proc = MagicMock(returncode=0, stdout=check_json, stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
@@ -1370,8 +1311,6 @@ class TestCheckOwnerSeating:
         assert "8fb38c96" in results[0].detail
 
     def test_unseated_owner_returns_errors(self):
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         check_json = json.dumps(
             {
                 "clean": False,
@@ -1391,8 +1330,6 @@ class TestCheckOwnerSeating:
         assert results[0].label == "owner/no_owner"
 
     def test_issue_with_branch_field(self):
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         check_json = json.dumps(
             {
                 "clean": False,
@@ -1411,8 +1348,6 @@ class TestCheckOwnerSeating:
         assert results[0].label == "owner/entry_rid_stale"
 
     def test_drone_not_found_returns_warn(self):
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         with patch(
             "aipass.aipass.apps.modules.doctor.subprocess.run",
             side_effect=FileNotFoundError("drone"),
@@ -1425,8 +1360,6 @@ class TestCheckOwnerSeating:
     def test_timeout_returns_warn(self):
         import subprocess as _sp
 
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         with patch(
             "aipass.aipass.apps.modules.doctor.subprocess.run",
             side_effect=_sp.TimeoutExpired("drone", 30),
@@ -1436,8 +1369,6 @@ class TestCheckOwnerSeating:
         assert results[0].glyph == GLYPH_WARN
 
     def test_non_json_output_returns_warn(self):
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         mock_proc = MagicMock(returncode=1, stdout="not json at all", stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = _check_owner_seating()
@@ -1445,8 +1376,6 @@ class TestCheckOwnerSeating:
         assert results[0].glyph == GLYPH_WARN
 
     def test_empty_stdout_exit_zero(self):
-        from aipass.aipass.apps.modules.doctor import _check_owner_seating
-
         mock_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = _check_owner_seating()
@@ -1458,8 +1387,6 @@ class TestFixOwnerSeating:
     """Tests for owner/identity repair via sync-registry --fix."""
 
     def test_fix_success_returns_pass(self):
-        from aipass.aipass.apps.modules.doctor import _fix_owner_seating
-
         mock_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = _fix_owner_seating()
@@ -1468,8 +1395,6 @@ class TestFixOwnerSeating:
         assert "reconciled" in results[0].detail
 
     def test_fix_failure_returns_fail(self):
-        from aipass.aipass.apps.modules.doctor import _fix_owner_seating
-
         mock_proc = MagicMock(returncode=1, stdout="", stderr="owner conflict")
         with patch("aipass.aipass.apps.modules.doctor.subprocess.run", return_value=mock_proc):
             results = _fix_owner_seating()
@@ -1477,8 +1402,6 @@ class TestFixOwnerSeating:
         assert results[0].glyph == GLYPH_FAIL
 
     def test_fix_drone_not_found(self):
-        from aipass.aipass.apps.modules.doctor import _fix_owner_seating
-
         with patch(
             "aipass.aipass.apps.modules.doctor.subprocess.run",
             side_effect=FileNotFoundError("drone"),
@@ -1489,8 +1412,6 @@ class TestFixOwnerSeating:
 
     def test_fix_timeout(self):
         import subprocess as _sp
-
-        from aipass.aipass.apps.modules.doctor import _fix_owner_seating
 
         with patch(
             "aipass.aipass.apps.modules.doctor.subprocess.run",
@@ -1510,8 +1431,6 @@ class TestRunDoctorPreflight:
     """Tests for run_doctor_preflight — doctor-before-hello (round-2 addendum 2)."""
 
     def test_returns_error_count_and_empty_items_when_hooks_wired(self) -> None:
-        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
-
         groups = {
             "System": [],
             "Identity": [],
@@ -1526,8 +1445,6 @@ class TestRunDoctorPreflight:
         assert hook_action_items == []
 
     def test_still_broken_hooks_surfaced_as_action_items(self) -> None:
-        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
-
         groups = {
             "Services": [
                 CheckResult("hooks", GLYPH_WARN, "2 hook(s) missing from provider settings: Stop, Notification", ""),
@@ -1540,23 +1457,17 @@ class TestRunDoctorPreflight:
         assert any("wire verify:" in item for item in hook_action_items)
 
     def test_passing_checks_excluded_from_action_items(self) -> None:
-        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
-
         groups = {"Services": [CheckResult("hooks", GLYPH_PASS, "9 provider hooks wired", "")]}
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
             _error_count, hook_action_items = run_doctor_preflight()
         assert hook_action_items == []
 
     def test_fix_true_passed_through_to_compute_groups(self) -> None:
-        from aipass.aipass.apps.modules.doctor import run_doctor_preflight
-
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value={}) as mock_compute:
             run_doctor_preflight(fix=True)
         mock_compute.assert_called_once_with(fix=True)
 
     def test_error_count_reflects_fail_glyphs(self) -> None:
-        from aipass.aipass.apps.modules.doctor import CheckResult, run_doctor_preflight
-
         groups = {"System": [CheckResult("test", GLYPH_FAIL, "bad", "")]}
         with patch("aipass.aipass.apps.modules.doctor._compute_doctor_groups", return_value=groups):
             error_count, _hook_action_items = run_doctor_preflight()
@@ -1594,8 +1505,6 @@ class TestDroneCitizenCount:
                 return_value=set(registry_names),
             ),
         ):
-            from aipass.aipass.apps.modules.doctor import _check_drone_systems
-
             return _check_drone_systems()[0]
 
     def test_extra_system_is_named_not_silently_counted(self) -> None:
@@ -1660,8 +1569,6 @@ class TestHomeAgreement:
 
     @staticmethod
     def _run(active, configured):
-        from aipass.aipass.apps.modules.doctor import _check_home_agreement
-
         return _check_home_agreement(active, configured)
 
     def test_split_brain_is_an_error(self, tmp_path) -> None:

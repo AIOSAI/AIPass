@@ -1,18 +1,25 @@
 # =================== AIPass ====================
 # Name: test_readme_map.py
 # Description: Tests for readme_map handler
-# Version: 1.2.0
+# Version: 1.3.1
 # Created: 2026-05-12
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for readme_map — branch-name to README-path lookup."""
+"""Tests for apps/handlers/readme_map.py and the handlers it drives."""
+
+# branch-name to README-path lookup.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/readme_map.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public lookup functions carry docstrings
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import patch
 
+import aipass.aipass.apps.handlers.readme_map as rm
 from aipass.aipass.apps.handlers.readme_map import (
     _build_readme_map,
     _detect_aipass_root,
@@ -74,8 +81,6 @@ class TestBuildReadmeMap:
 
     def test_returns_dict(self, tmp_path: Path) -> None:
         """Returns a dict mapping branch names to Paths."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         # Create fake src/aipass structure with one branch README
         src_aipass = tmp_path / "src" / "aipass"
         drone_dir = src_aipass / "drone"
@@ -98,8 +103,6 @@ class TestBuildReadmeMap:
 
     def test_skips_missing_readmes(self, tmp_path: Path) -> None:
         """Branches without README.md are excluded."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         src_aipass = tmp_path / "src" / "aipass"
         # Create directory but no README
         (src_aipass / "drone").mkdir(parents=True)
@@ -127,8 +130,6 @@ class TestGetReadmePath:
 
     def test_returns_path_for_known_branch(self, tmp_path: Path) -> None:
         """Returns a Path for a branch that has a README."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         src_aipass = tmp_path / "src" / "aipass"
         cli_dir = src_aipass / "cli"
         cli_dir.mkdir(parents=True)
@@ -149,8 +150,6 @@ class TestGetReadmePath:
 
     def test_returns_none_for_unknown_branch(self, tmp_path: Path) -> None:
         """Returns None for a branch not in the map."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         src_aipass = tmp_path / "src" / "aipass"
         src_aipass.mkdir(parents=True)
 
@@ -176,14 +175,13 @@ class TestListBranches:
     """Tests for list_branches()."""
 
     def test_returns_list(self, tmp_path: Path) -> None:
-        """Returns a list of strings."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
+        """Mutant: dirs without a README.md listed -> red."""
         src_aipass = tmp_path / "src" / "aipass"
         for branch in ["drone", "prax"]:
             d = src_aipass / branch
             d.mkdir(parents=True)
             (d / "README.md").write_text(f"# {branch}\n", encoding="utf-8")
+        (src_aipass / "no_readme").mkdir()
 
         old_root = rm._AIPASS_ROOT
         old_map = rm._README_MAP
@@ -195,14 +193,10 @@ class TestListBranches:
             rm._AIPASS_ROOT = old_root
             rm._README_MAP = old_map
 
-        assert isinstance(result, list)
-        assert "drone" in result
-        assert "prax" in result
+        assert result == ["drone", "prax"]
 
     def test_empty_when_no_readmes(self, tmp_path: Path) -> None:
         """Returns empty list when no branches have READMEs."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         src_aipass = tmp_path / "src" / "aipass"
         src_aipass.mkdir(parents=True)
 
@@ -229,8 +223,6 @@ class TestLiveDiscovery:
 
     def test_discovers_arbitrary_new_branch(self, tmp_path: Path) -> None:
         """A branch dir that never existed before is found by the scan."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         src_aipass = tmp_path / "src" / "aipass"
         for branch in ["drone", "zeta_brand_new"]:
             d = src_aipass / branch
@@ -252,8 +244,6 @@ class TestLiveDiscovery:
 
     def test_missing_src_aipass_returns_empty(self, tmp_path: Path) -> None:
         """No src/aipass dir → empty map, no crash."""
-        import aipass.aipass.apps.handlers.readme_map as rm
-
         old_root = rm._AIPASS_ROOT
         old_map = rm._README_MAP
         try:

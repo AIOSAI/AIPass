@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scaffold_manifest.py
 # Description: Scaffold manifest + the conffile rule that decides what an update may overwrite
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-09
-# Modified: 2026-09-09
+# Modified: 2026-09-27
 # =============================================
 
 """Scaffold manifest — which AIPass version wrote which file, and its hash.
@@ -219,11 +219,10 @@ def write_manifest(target: Path, files: dict, version: str | None = None) -> Pat
 # =============================================================================
 
 
-def decide(rel: str, current: str | None, template: str | None, recorded: str | None) -> tuple:
+def decide(current: str | None, template: str | None, recorded: str | None) -> tuple:
     """Decide what an update may do to one managed file.
 
     Args:
-        rel: Path relative to the project root, for the reason string.
         current: sha256 of the file on disk, or None when absent.
         template: sha256 of the content the template would write, or None when
             the template is unavailable (no AIPASS_HOME, missing source file).

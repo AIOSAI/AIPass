@@ -1,23 +1,26 @@
 # =================== AIPass ====================
 # Name: test_bootstrap.py
 # Description: Tests for init bootstrap handler (DPLAN-0164)
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-05-04
-# Modified: 2026-05-04
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the init bootstrap handler.
+"""Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
 
-Covers _sanitize_name(), init_project(), update_project(), and
-scaffold_content generators — all file operations use tmp_path to
-stay fully isolated from the live filesystem.
-"""
+# Covers _sanitize_name(), init_project(), update_project(), and
+# scaffold_content generators — all file operations use tmp_path to
+# stay fully isolated from the live filesystem.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 import uuid
 from datetime import date
 from pathlib import Path
 
+import aipass
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import (
@@ -40,8 +43,6 @@ def _expected_aipass_home() -> str:
     rather than calling the detector, so the pin is a second derivation and not
     a restatement of the code under test.
     """
-    import aipass
-
     return str(Path(aipass.__file__).resolve().parent.parent.parent)
 
 
@@ -936,8 +937,6 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
     has env.AIPASS_HOME but no claudeMdExcludes — running update_project must
     retrofit the fence without disturbing the existing env block.
     """
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
     host, target = _make_nested_project(tmp_path)
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
@@ -957,8 +956,6 @@ def test_update_project_retrofits_claude_md_excludes_into_existing_settings(tmp_
 
 def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monkeypatch):
     """Running update_project a second time after the retrofit reports no further changes."""
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
     host, target = _make_nested_project(tmp_path)
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
@@ -981,8 +978,6 @@ def test_update_project_claude_md_excludes_retrofit_is_idempotent(tmp_path, monk
 
 def test_update_project_preserves_custom_claude_md_excludes_entries(tmp_path, monkeypatch):
     """update_project unions in the official fence entries without dropping a user's hand-added ones."""
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)
     host, target = _make_nested_project(tmp_path)
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(host))
@@ -1462,10 +1457,9 @@ def test_update_project_keeps_an_edited_tier_file(tmp_path):
 
 
 def test_global_prompt_md_returns_string():
-    """global_prompt_md() returns a non-empty string."""
+    """Mutant: global_prompt_md returns a stub string -> red."""
     result = sc.global_prompt_md("TestProject")
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert result.splitlines()[:3] == ["# TestProject — Project Context", "<!-- Injected every turn via hook. -->", ""]
 
 
 def test_global_prompt_md_contains_project_name():
@@ -1493,10 +1487,9 @@ def test_global_prompt_md_contains_aipass_context():
 
 
 def test_prep_md_returns_string():
-    """prep_md() returns a non-empty string."""
+    """Mutant: prep_md returns a stub string -> red."""
     result = sc.prep_md()
-    assert isinstance(result, str)
-    assert len(result) > 0
+    assert result.splitlines()[:2] == ["# Session Wrap-Up", ""]
 
 
 def test_prep_md_contains_session_wrap_up():
@@ -1552,29 +1545,25 @@ def test_inbox_json_has_mailbox_structure():
 
 def test_with_source_prepends_header(tmp_path):
     """with_source() prepends a source comment to content."""
-    from pathlib import Path
-
-    result = sc.with_source("hello world", Path("/foo/bar.md"))
-    assert result.startswith("<!-- Source: /foo/bar.md -->")
+    path = tmp_path / "foo" / "bar.md"
+    result = sc.with_source("hello world", path)
+    assert result.startswith(f"<!-- Source: {path.as_posix()} -->")
     assert "hello world" in result
 
 
-def test_with_source_preserves_content():
+def test_with_source_preserves_content(tmp_path):
     """with_source() does not alter the original content."""
-    from pathlib import Path
-
     original = "line 1\nline 2\nline 3"
-    result = sc.with_source(original, Path("/a/b.md"))
+    result = sc.with_source(original, tmp_path / "a" / "b.md")
     assert result.endswith(original)
 
 
-def test_with_source_header_is_first_line():
+def test_with_source_header_is_first_line(tmp_path):
     """with_source() puts the source header on line 1, content on line 2+."""
-    from pathlib import Path
-
-    result = sc.with_source("content", Path("/test.md"))
+    path = tmp_path / "test.md"
+    result = sc.with_source("content", path)
     lines = result.split("\n")
-    assert lines[0] == "<!-- Source: /test.md -->"
+    assert lines[0] == f"<!-- Source: {path.as_posix()} -->"
     assert lines[1] == "content"
 
 
@@ -1674,15 +1663,16 @@ def test_update_project_cleanup_does_not_touch_user_files(tmp_path):
 
 
 def test_update_project_removed_files_in_result(tmp_path):
-    """Return dict always contains the removed_files key."""
+    """Mutant: removed_files reported empty after a retire -> red."""
     target = tmp_path / "proj"
     target.mkdir()
     init_project(target, project_name="rkey")
+    stale = target / ".aipass" / "aipass_global_prompt.md"
+    stale.write_text("# old\n", encoding="utf-8")
 
     result = update_project(target)
 
-    assert "removed_files" in result
-    assert isinstance(result["removed_files"], list)
+    assert result["removed_files"] == [str(stale)]
 
 
 def test_update_project_cleanup_no_stale_is_noop(tmp_path):
@@ -1723,8 +1713,6 @@ def test_throwaway_path_allows_project():
 
 def test_settings_omits_throwaway_aipass_home(tmp_path, monkeypatch):
     """init_project skips settings.local.json when detected AIPASS_HOME is a throwaway path."""
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: str(tmp_path))
 
     target = tmp_path / "proj"
@@ -1747,8 +1735,6 @@ def test_minted_tracked_files_have_no_absolute_paths(tmp_path, monkeypatch):
     files. This walks every minted file that would actually be committed
     and greps it for the (fake) AIPASS_HOME value.
     """
-    from aipass.aipass.apps.handlers.init import bootstrap
-
     fake_home = str(tmp_path / f"fake_aipass_home_{uuid.uuid4().hex}")
     monkeypatch.setattr(bootstrap, "_detect_aipass_home", lambda: fake_home)
     monkeypatch.setattr(bootstrap, "is_throwaway_path", lambda _: False)

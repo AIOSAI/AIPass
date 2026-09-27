@@ -1,12 +1,18 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.1.0
+# Version: 1.2.1
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for aipass init_flow module — Phase 3 (FPLAN-0188)."""
+"""Tests for apps/modules/init_flow.py and the handlers it drives."""
+
+# Phase 3 (FPLAN-0188).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every stage function and helper in init_flow.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public stage_* functions carry docstrings
 
 import json
 from pathlib import Path
@@ -15,16 +21,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.aipass.apps.handlers.init.bootstrap import init_project
+from aipass.aipass.apps.modules import doctor
 from aipass.aipass.apps.modules.init_flow import (
     AIPASS_SPECIFIC_STAGES,
+    STYLE_CHOICES,
     TEMPLATE_AIPASS,
     TEMPLATE_CHOICES,
     TEMPLATE_EMPTY,
     TOTAL_STAGES,
+    _collect_provider_gaps,
     _get_last_completed_stage,
     _get_setup_progress,
     _handle_init_update,
     _save_stage,
+    _stamp_test_write_policy,
+    _write_init_report,
     handle_command,
     print_help,
     print_introspection,
@@ -112,13 +124,13 @@ class TestGetSetupProgress:
 
     def test_returns_defaults_on_missing_key(self, tmp_local_json) -> None:
         """Returns defaults when local.json has no setup_progress key."""
-        tmp_local_json.write_text(json.dumps({"user": {}}))
+        tmp_local_json.write_text(json.dumps({"user": {}}), encoding="utf-8")
         result = _get_setup_progress()
         assert result["last_completed_stage"] == 0
 
     def test_handles_corrupt_file(self, tmp_local_json) -> None:
         """Returns defaults on corrupt JSON."""
-        tmp_local_json.write_text("BAD JSON")
+        tmp_local_json.write_text("BAD JSON", encoding="utf-8")
         result = _get_setup_progress()
         assert result["last_completed_stage"] == 0
 
@@ -147,7 +159,7 @@ class TestSaveStage:
     def test_saves_stage_data(self, tmp_local_json) -> None:
         """Stage data is written to setup_progress.stages."""
         _save_stage(1, {"foo": "bar"})
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert stored["setup_progress"]["last_completed_stage"] == 1
         assert stored["setup_progress"]["stages"]["1"]["foo"] == "bar"
 
@@ -155,7 +167,7 @@ class TestSaveStage:
         """last_completed_stage advances after each save."""
         _save_stage(1, {})
         _save_stage(2, {})
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert stored["setup_progress"]["last_completed_stage"] == 2
 
     def test_preserves_existing_stages(self, tmp_local_json_with_progress: Path) -> None:
@@ -168,7 +180,7 @@ class TestSaveStage:
     def test_timestamps_stage(self, tmp_local_json) -> None:
         """Saved stage includes a 'timestamp' field."""
         _save_stage(1, {})
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert "timestamp" in stored["setup_progress"]["stages"]["1"]
 
     def test_stamps_test_write_policy_in_hooks_shape(self, tmp_local_json) -> None:
@@ -178,8 +190,6 @@ class TestSaveStage:
         them against their live file): agent_test_writing is the STRING "off" --
         a boolean is REFUSED -- allow is an array, block_test_edits a bool.
         """
-        from aipass.aipass.apps.modules.init_flow import _stamp_test_write_policy
-
         policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
         with patch(
             "aipass.aipass.apps.modules.init_flow._get_test_write_policy_path",
@@ -187,7 +197,7 @@ class TestSaveStage:
         ):
             assert _stamp_test_write_policy() is True
 
-        stored = json.loads(policy.read_text())
+        stored = json.loads(policy.read_text(encoding="utf-8"))
         assert stored["agent_test_writing"] == "off"
         assert not isinstance(stored["agent_test_writing"], bool)
         assert stored["allow"] == []
@@ -229,8 +239,6 @@ class TestSaveStage:
 
     def test_test_write_policy_is_never_clobbered(self, tmp_local_json) -> None:
         """An existing policy may hold a deliberate flip — init must not repeal it."""
-        from aipass.aipass.apps.modules.init_flow import _stamp_test_write_policy
-
         policy = tmp_local_json.parent.parent / ".aipass" / "test_write_policy.json"
         policy.parent.mkdir(parents=True, exist_ok=True)
         local_ruling = '{"agent_test_writing": "on", "allow": ["canary"]}'
@@ -301,7 +309,7 @@ class TestPrintIntrospection:
     def test_complete(self, tmp_local_json) -> None:
         """A finished setup reports completion through success(), not a stage line."""
         data = {"setup_progress": {"last_completed_stage": TOTAL_STAGES, "stages": {}}}
-        tmp_local_json.write_text(json.dumps(data))
+        tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
         with (
             patch("aipass.aipass.apps.modules.init_flow.console") as mock_console,
             patch("aipass.aipass.apps.modules.init_flow.success") as mock_success,
@@ -428,7 +436,7 @@ class TestRunInit:
     def test_already_complete_returns_zero(self, tmp_local_json) -> None:
         """Returns 0 immediately when all stages already done."""
         data = {"setup_progress": {"last_completed_stage": TOTAL_STAGES, "stages": {}}}
-        tmp_local_json.write_text(json.dumps(data))
+        tmp_local_json.write_text(json.dumps(data), encoding="utf-8")
         with patch("aipass.aipass.apps.modules.init_flow.console"):
             result = run_init(non_interactive=True)
         assert result == 0
@@ -524,7 +532,7 @@ class TestStages:
         with patch(f"{_MOD}.console"):
             result = stage_1_welcome()
         assert result == {}
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert stored["setup_progress"]["last_completed_stage"] == 1
 
     def test_stage_2_system_detect_returns_system_data(self, tmp_local_json) -> None:
@@ -542,7 +550,7 @@ class TestStages:
             detect_tmux=MagicMock(return_value=True),
             detect_wt=MagicMock(return_value=False),
         ):
-            result = stage_2_system_detect(non_interactive=True)
+            result = stage_2_system_detect()
         assert result["os"] == "Linux"
         assert result["python"] == "3.12.0"
         assert result["shell"] == "bash"
@@ -580,8 +588,6 @@ class TestStages:
 
     def test_stage_4_style_override(self, tmp_local_json) -> None:
         """style_override is honoured when it's a valid choice."""
-        from aipass.aipass.apps.modules.init_flow import STYLE_CHOICES
-
         override = STYLE_CHOICES[0]
         with patch(f"{_MOD}.console"):
             result = stage_4_style_questions(non_interactive=True, style_override=override)
@@ -691,7 +697,7 @@ class TestStages:
         mock_ps.sweep_summary.return_value = "1 ack / 1 timeout / 0 error"
         with patch(f"{_MOD}.console"):
             with patch.dict("sys.modules", {"aipass.aipass.apps.handlers.ping_sweep": mock_ps}):
-                result = stage_7_ping_sweep(non_interactive=True)
+                result = stage_7_ping_sweep()
         assert "ping_results" in result
 
     def test_stage_8_smoke_test_both_found(self, tmp_local_json) -> None:
@@ -744,7 +750,7 @@ class TestStages:
         with patch(f"{_MOD}.console"):
             result = stage_10_done()
         assert result == {}
-        stored = json.loads(tmp_local_json.read_text())
+        stored = json.loads(tmp_local_json.read_text(encoding="utf-8"))
         assert stored["setup_progress"]["last_completed_stage"] == 10
 
 
@@ -758,9 +764,6 @@ class TestProviderGaps:
 
     def test_collect_provider_gaps_reports_missing(self) -> None:
         """Non-pass manifest results are collected; run_doctor is never called."""
-        from aipass.aipass.apps.modules import doctor
-        from aipass.aipass.apps.modules.init_flow import _collect_provider_gaps
-
         gap = MagicMock(glyph="WARN", label="hooks", detail="wire the hook")
         passing = MagicMock(glyph=doctor.GLYPH_PASS, label="env", detail="")
         with patch.object(doctor, "_check_provider_manifest", return_value=[gap, passing]):
@@ -771,9 +774,6 @@ class TestProviderGaps:
 
     def test_collect_provider_gaps_swallows_errors(self) -> None:
         """A failing manifest check degrades to an empty dict, not a crash."""
-        from aipass.aipass.apps.modules import doctor
-        from aipass.aipass.apps.modules.init_flow import _collect_provider_gaps
-
         with patch.object(doctor, "_check_provider_manifest", side_effect=RuntimeError("boom")):
             with patch(f"{_MOD}.logger"):
                 gaps = _collect_provider_gaps()
@@ -781,25 +781,21 @@ class TestProviderGaps:
 
     def test_init_report_includes_provider_gaps(self, tmp_path: Path) -> None:
         """_write_init_report embeds provider gaps + action when the manifest reports them."""
-        from aipass.aipass.apps.modules.init_flow import _write_init_report
-
         agent_dir = tmp_path / "src" / "bot"
         agent_dir.mkdir(parents=True)
         with patch(f"{_MOD}._collect_provider_gaps", return_value={"hooks": "missing"}):
             _write_init_report(str(agent_dir), {"agent_name": "BOT"})
-        report = json.loads((agent_dir / "dropbox" / "init_report.json").read_text())
+        report = json.loads((agent_dir / "dropbox" / "init_report.json").read_text(encoding="utf-8"))
         assert report["provider_gaps"] == {"hooks": "missing"}
         assert "provider_action" in report
 
     def test_init_report_omits_provider_gaps_when_clean(self, tmp_path: Path) -> None:
         """No provider keys are written when the manifest is fully satisfied."""
-        from aipass.aipass.apps.modules.init_flow import _write_init_report
-
         agent_dir = tmp_path / "src" / "bot"
         agent_dir.mkdir(parents=True)
         with patch(f"{_MOD}._collect_provider_gaps", return_value={}):
             _write_init_report(str(agent_dir), {"agent_name": "BOT"})
-        report = json.loads((agent_dir / "dropbox" / "init_report.json").read_text())
+        report = json.loads((agent_dir / "dropbox" / "init_report.json").read_text(encoding="utf-8"))
         assert "provider_gaps" not in report
         assert "provider_action" not in report
 
@@ -1076,8 +1072,6 @@ class TestInitUpdateGitAuth:
         Built by the real init, never copied from a live project, so the door
         is exercised end to end — the plan is computed by the real handler.
         """
-        from aipass.aipass.apps.handlers.init.bootstrap import init_project
-
         target = root / "proj"
         target.mkdir()
         init_project(target, project_name="stamp")

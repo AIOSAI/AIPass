@@ -1,35 +1,38 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""Every ``*_REGISTRY.json`` walk in this tree must be case-SENSITIVE.
+"""Tests for shared/registry_discovery.py and its case-insensitive-filesystem pins."""
+# Every ``*_REGISTRY.json`` walk in this tree must be case-SENSITIVE.
+#
+# ``Path.glob`` asks the FILESYSTEM to match.  On Windows -- and on macOS by
+# default -- that match is case-insensitive, so ``*_REGISTRY.json`` also matches
+# ``*_registry.json``.  The bait ships in every branch: ``flow_json/*_registry.json``
+# plan counters and a ``.spawn/.template_registry.json`` (pathlib's ``*`` matches
+# dotfiles, unlike the ``glob`` module).  Measured on CI: ``find_registry()``
+# returned ``drone_command_registry.json`` as the fleet trust-anchor candidate.
+#
+# A registry is a TRUST ANCHOR -- it decides which installation a caller belongs
+# to, what project name lands on an identity, and where the delete lane thinks
+# root is.  A plan counter answering that is not a near miss; it is a different
+# question.
+#
+# These pins run RED ON LINUX by emulating the widened match, so no Windows box
+# is needed to keep them honest.
+#
+# 1.1.0 -- the CONTROL was the thing that assumed a host.  It asserted the raw
+# glob returns nothing, which is false on NTFS, so it failed on the Windows leg
+# of ebb8075d: broken on the exact platform the defect lives on.  The host is
+# PROBED now and both outcomes are pinned (see host_folds_case).  A
+# ``skipif`` was refused for the same reason -- it would retire the control where
+# it matters most.
 
-``Path.glob`` asks the FILESYSTEM to match.  On Windows -- and on macOS by
-default -- that match is case-insensitive, so ``*_REGISTRY.json`` also matches
-``*_registry.json``.  The bait ships in every branch: ``flow_json/*_registry.json``
-plan counters and a ``.spawn/.template_registry.json`` (pathlib's ``*`` matches
-dotfiles, unlike the ``glob`` module).  Measured on CI: ``find_registry()``
-returned ``drone_command_registry.json`` as the fleet trust-anchor candidate.
-
-A registry is a TRUST ANCHOR -- it decides which installation a caller belongs
-to, what project name lands on an identity, and where the delete lane thinks
-root is.  A plan counter answering that is not a near miss; it is a different
-question.
-
-These pins run RED ON LINUX by emulating the widened match, so no Windows box
-is needed to keep them honest.
-
-1.1.0 -- the CONTROL was the thing that assumed a host.  It asserted the raw
-glob returns nothing, which is false on NTFS, so it failed on the Windows leg
-of ebb8075d: broken on the exact platform the defect lives on.  The host is
-PROBED now and both outcomes are pinned (see :func:`host_folds_case`).  A
-``skipif`` was refused for the same reason -- it would retire the control where
-it matters most.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that the registry-discovery module and the modules it imports parse and import
 
 from __future__ import annotations
 
@@ -154,7 +157,7 @@ class TestTheEmulationIsNotBlind:
         else:
             assert found == set(), f"host does NOT fold case, so the raw glob must reach nothing -- got {found}"
 
-    def test_with_emulation_the_lowercase_decoy_IS_matched(self, tmp_path: Path, case_insensitive_fs) -> None:
+    def test_with_emulation_the_lowercase_decoy_is_matched(self, tmp_path: Path, case_insensitive_fs) -> None:
         """If this goes green-by-accident the whole file proves nothing."""
         root, _ = _project(tmp_path)
         names = {p.name for p in (root / "sub").glob("*_REGISTRY.json")}

@@ -1,43 +1,48 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Pins every aipass module against an unreadable working directory
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""No module in this branch may read the working directory to import.
+"""Tests that apps/aipass.py and every module beneath it import without reading a dead working directory."""
 
-THE MECHANISM (measured on the Windows CI gate 2026-08-31, @memory's finding)
-----------------------------------------------------------------------------
-``ntpath.realpath`` computes ``os.getcwd()`` UNCONDITIONALLY — on its first
-lines, before it checks whether the path is even absolute — and
-``Path.resolve()`` routes through it.  So on Windows every
-``Path(__file__).resolve()`` reached while a module is being imported is an
-import-time working-directory read, and a process whose cwd was deleted (or
-sits on a disconnected share) cannot import the module at all.
+# No module in this branch may read the working directory to import.
+#
+# THE MECHANISM (measured on the Windows CI gate 2026-08-31, @memory's finding)
+# ----------------------------------------------------------------------------
+# ``ntpath.realpath`` computes ``os.getcwd()`` UNCONDITIONALLY — on its first
+# lines, before it checks whether the path is even absolute — and
+# ``Path.resolve()`` routes through it.  So on Windows every
+# ``Path(__file__).resolve()`` reached while a module is being imported is an
+# import-time working-directory read, and a process whose cwd was deleted (or
+# sits on a disconnected share) cannot import the module at all.
+#
+# ``posixpath.realpath`` skips ``getcwd`` for an absolute path, which is why this
+# was invisible on Linux for as long as it existed.  These pins inject the
+# Windows behaviour as a CONDITION rather than a platform, so they run red on
+# this host: ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then
+# ``os.getcwd`` is denied.
+#
+# THE DISCRIMINATOR IS *REACHED AT IMPORT*, NOT *WRITTEN AT MODULE SCOPE*
+# -----------------------------------------------------------------------
+# A ``resolve()`` inside a function still counts when import-time code calls that
+# function — including a default argument evaluated during import.  A grep for
+# module-level assignments would miss those, so the pin imports every module in
+# the tree and lets the interpreter decide what is reached.
+#
+# WHY A CHILD PROCESS
+# -------------------
+# The injection has to land before any ``aipass`` module is imported, or a module
+# that already cached ``os.path.realpath`` would be measured against the real
+# one.  Other branches' import-time code is held CONSTANT by preloading it in the
+# healthy world first: their dead-cwd cure is their own build, and this file
+# measures aipass's sites only.
 
-``posixpath.realpath`` skips ``getcwd`` for an absolute path, which is why this
-was invisible on Linux for as long as it existed.  These pins inject the
-Windows behaviour as a CONDITION rather than a platform, so they run red on
-this host: ``os.path.realpath`` is wrapped to read ``os.getcwd()`` first, then
-``os.getcwd`` is denied.
-
-THE DISCRIMINATOR IS *REACHED AT IMPORT*, NOT *WRITTEN AT MODULE SCOPE*
------------------------------------------------------------------------
-A ``resolve()`` inside a function still counts when import-time code calls that
-function — including a default argument evaluated during import.  A grep for
-module-level assignments would miss those, so the pin imports every module in
-the tree and lets the interpreter decide what is reached.
-
-WHY A CHILD PROCESS
--------------------
-The injection has to land before any ``aipass`` module is imported, or a module
-that already cached ``os.path.realpath`` would be measured against the real
-one.  Other branches' import-time code is held CONSTANT by preloading it in the
-healthy world first: their dead-cwd cure is their own build, and this file
-measures aipass's sites only.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — each module's own logic; see tests/test_read.py
+# seedgo: no-test-needed(stdlib) — os.path.realpath's real Windows codepath; emulated, not run on Windows
 
 from __future__ import annotations
 
@@ -137,6 +142,7 @@ def _run(source: str) -> str:
         [sys.executable, "-c", source],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
     return result.stdout + result.stderr

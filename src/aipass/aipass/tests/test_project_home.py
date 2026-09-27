@@ -1,21 +1,26 @@
 # =================== AIPass ====================
 # Name: test_project_home.py
 # Description: Tests for shared/project_home.py — CLAUDE.md ancestor fence helpers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-31
-# Modified: 2026-07-31
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the CLAUDE.md ancestor-fence helpers in shared/project_home.py.
+"""Tests for shared/project_home.py and the CLAUDE.md ancestor-fence helpers it drives."""
 
-Covers _claude_md_excludes(), _claude_local_settings(nested=...),
-_merge_local_settings() (retrofit-safe union merge — the critical
-idempotency function, exercised directly here rather than only through
-callers), and find_fenceless_projects() (doctor's nested-project scan).
+# Covers _claude_md_excludes(), _claude_local_settings(nested=...),
+# _merge_local_settings() (retrofit-safe union merge — the critical
+# idempotency function, exercised directly here rather than only through
+# callers), and find_fenceless_projects() (doctor's nested-project scan).
+#
+# All file operations use tmp_path to stay fully isolated from the live
+# filesystem.
 
-All file operations use tmp_path to stay fully isolated from the live
-filesystem.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
+# seedgo: no-test-needed(covered_elsewhere) — is_throwaway_path, _detect_aipass_home, _claude_settings,
+# seedgo: no-test-needed(covered_elsewhere) — _enroll_project, is_projects_child; see tests/test_doctor.py
+# seedgo: no-test-needed(covered_elsewhere) — and tests/test_bootstrap.py
 
 import json
 from pathlib import Path
@@ -33,12 +38,13 @@ from aipass.aipass.shared.project_home import (
 # ---------------------------------------------------------------------------
 
 
-def test_claude_md_excludes_returns_host_and_dot_claude_paths():
+def test_claude_md_excludes_returns_host_and_dot_claude_paths(tmp_path):
     """Returns the two absolute paths a nested project must fence out."""
-    excludes = _claude_md_excludes("/home/x/AIPass")
+    home = str(tmp_path / "AIPass")
+    excludes = _claude_md_excludes(home)
     assert excludes == [
-        "/home/x/AIPass/CLAUDE.md",
-        "/home/x/AIPass/.claude/CLAUDE.md",
+        f"{home}/CLAUDE.md",
+        f"{home}/.claude/CLAUDE.md",
     ]
 
 
@@ -47,20 +53,22 @@ def test_claude_md_excludes_returns_host_and_dot_claude_paths():
 # ---------------------------------------------------------------------------
 
 
-def test_claude_local_settings_default_omits_excludes():
+def test_claude_local_settings_default_omits_excludes(tmp_path):
     """nested=False (the default) — no claudeMdExcludes key at all."""
-    data = json.loads(_claude_local_settings("/home/x/AIPass"))
-    assert data == {"env": {"AIPASS_HOME": "/home/x/AIPass"}}
+    home = str(tmp_path / "AIPass")
+    data = json.loads(_claude_local_settings(home))
+    assert data == {"env": {"AIPASS_HOME": home}}
     assert "claudeMdExcludes" not in data
 
 
-def test_claude_local_settings_nested_adds_excludes():
+def test_claude_local_settings_nested_adds_excludes(tmp_path):
     """nested=True adds claudeMdExcludes alongside env.AIPASS_HOME."""
-    data = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
-    assert data["env"] == {"AIPASS_HOME": "/home/x/AIPass"}
+    home = str(tmp_path / "AIPass")
+    data = json.loads(_claude_local_settings(home, nested=True))
+    assert data["env"] == {"AIPASS_HOME": home}
     assert data["claudeMdExcludes"] == [
-        "/home/x/AIPass/CLAUDE.md",
-        "/home/x/AIPass/.claude/CLAUDE.md",
+        f"{home}/CLAUDE.md",
+        f"{home}/.claude/CLAUDE.md",
     ]
 
 
@@ -69,24 +77,26 @@ def test_claude_local_settings_nested_adds_excludes():
 # ---------------------------------------------------------------------------
 
 
-def test_merge_local_settings_adds_excludes_to_env_only_existing():
+def test_merge_local_settings_adds_excludes_to_env_only_existing(tmp_path):
     """Existing file has only env.AIPASS_HOME (pre-fence era) — merge adds the fence."""
-    existing = {"env": {"AIPASS_HOME": "/home/x/AIPass"}}
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
+    home = str(tmp_path / "AIPass")
+    existing = {"env": {"AIPASS_HOME": home}}
+    generated = json.loads(_claude_local_settings(home, nested=True))
 
     merged = _merge_local_settings(existing, generated)
 
-    assert merged["env"] == {"AIPASS_HOME": "/home/x/AIPass"}
+    assert merged["env"] == {"AIPASS_HOME": home}
     assert merged["claudeMdExcludes"] == [
-        "/home/x/AIPass/CLAUDE.md",
-        "/home/x/AIPass/.claude/CLAUDE.md",
+        f"{home}/CLAUDE.md",
+        f"{home}/.claude/CLAUDE.md",
     ]
 
 
-def test_merge_local_settings_is_idempotent():
+def test_merge_local_settings_is_idempotent(tmp_path):
     """Merging the already-merged result against the same generated content is a no-op."""
-    existing = {"env": {"AIPASS_HOME": "/home/x/AIPass"}}
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
+    home = str(tmp_path / "AIPass")
+    existing = {"env": {"AIPASS_HOME": home}}
+    generated = json.loads(_claude_local_settings(home, nested=True))
 
     once = _merge_local_settings(existing, generated)
     twice = _merge_local_settings(once, generated)
@@ -94,39 +104,41 @@ def test_merge_local_settings_is_idempotent():
     assert once == twice
 
 
-def test_merge_local_settings_preserves_custom_excludes_entries():
+def test_merge_local_settings_preserves_custom_excludes_entries(tmp_path):
     """A user's hand-added claudeMdExcludes entry survives the merge alongside the official ones."""
+    home = str(tmp_path / "AIPass")
     existing = {
-        "env": {"AIPASS_HOME": "/home/x/AIPass"},
+        "env": {"AIPASS_HOME": home},
         "claudeMdExcludes": ["/custom/extra/CLAUDE.md"],
     }
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
+    generated = json.loads(_claude_local_settings(home, nested=True))
 
     merged = _merge_local_settings(existing, generated)
 
     assert merged["claudeMdExcludes"] == [
         "/custom/extra/CLAUDE.md",
-        "/home/x/AIPass/CLAUDE.md",
-        "/home/x/AIPass/.claude/CLAUDE.md",
+        f"{home}/CLAUDE.md",
+        f"{home}/.claude/CLAUDE.md",
     ]
 
 
-def test_merge_local_settings_does_not_duplicate_existing_official_entries():
+def test_merge_local_settings_does_not_duplicate_existing_official_entries(tmp_path):
     """Re-running the merge when the official entries are already present adds nothing twice."""
+    home = str(tmp_path / "AIPass")
     existing = {
-        "env": {"AIPASS_HOME": "/home/x/AIPass"},
+        "env": {"AIPASS_HOME": home},
         "claudeMdExcludes": [
-            "/home/x/AIPass/CLAUDE.md",
-            "/home/x/AIPass/.claude/CLAUDE.md",
+            f"{home}/CLAUDE.md",
+            f"{home}/.claude/CLAUDE.md",
         ],
     }
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
+    generated = json.loads(_claude_local_settings(home, nested=True))
 
     merged = _merge_local_settings(existing, generated)
 
     assert merged["claudeMdExcludes"] == [
-        "/home/x/AIPass/CLAUDE.md",
-        "/home/x/AIPass/.claude/CLAUDE.md",
+        f"{home}/CLAUDE.md",
+        f"{home}/.claude/CLAUDE.md",
     ]
 
 
@@ -140,39 +152,43 @@ def test_merge_local_settings_generated_env_wins_on_conflict():
     assert merged["env"]["AIPASS_HOME"] == "/new/current/home"
 
 
-def test_merge_local_settings_unions_extra_env_keys():
+def test_merge_local_settings_unions_extra_env_keys(tmp_path):
     """A user's hand-added env key survives; generated only ever contributes AIPASS_HOME."""
-    existing = {"env": {"AIPASS_HOME": "/home/x/AIPass", "SOME_CUSTOM_VAR": "1"}}
-    generated = {"env": {"AIPASS_HOME": "/home/x/AIPass"}}
+    home = str(tmp_path / "AIPass")
+    existing = {"env": {"AIPASS_HOME": home, "SOME_CUSTOM_VAR": "1"}}
+    generated = {"env": {"AIPASS_HOME": home}}
 
     merged = _merge_local_settings(existing, generated)
 
-    assert merged["env"] == {"AIPASS_HOME": "/home/x/AIPass", "SOME_CUSTOM_VAR": "1"}
+    assert merged["env"] == {"AIPASS_HOME": home, "SOME_CUSTOM_VAR": "1"}
 
 
-def test_merge_local_settings_preserves_unrelated_top_level_keys():
+def test_merge_local_settings_preserves_unrelated_top_level_keys(tmp_path):
     """Keys outside env/claudeMdExcludes (e.g. a user's own settings) are never touched."""
-    existing = {"env": {"AIPASS_HOME": "/home/x/AIPass"}, "somethingElse": {"foo": "bar"}}
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
+    home = str(tmp_path / "AIPass")
+    existing = {"env": {"AIPASS_HOME": home}, "somethingElse": {"foo": "bar"}}
+    generated = json.loads(_claude_local_settings(home, nested=True))
 
     merged = _merge_local_settings(existing, generated)
 
     assert merged["somethingElse"] == {"foo": "bar"}
 
 
-def test_merge_local_settings_no_excludes_key_when_neither_side_has_any():
+def test_merge_local_settings_no_excludes_key_when_neither_side_has_any(tmp_path):
     """Non-nested merge (no claudeMdExcludes on either side) never introduces the key."""
-    existing = {"env": {"AIPASS_HOME": "/home/x/AIPass"}}
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=False))
+    home = str(tmp_path / "AIPass")
+    existing = {"env": {"AIPASS_HOME": home}}
+    generated = json.loads(_claude_local_settings(home, nested=False))
 
     merged = _merge_local_settings(existing, generated)
 
     assert "claudeMdExcludes" not in merged
 
 
-def test_merge_local_settings_empty_existing():
+def test_merge_local_settings_empty_existing(tmp_path):
     """An empty existing dict (e.g. unparseable file rebuilt to {}) is filled entirely from generated."""
-    generated = json.loads(_claude_local_settings("/home/x/AIPass", nested=True))
+    home = str(tmp_path / "AIPass")
+    generated = json.loads(_claude_local_settings(home, nested=True))
 
     merged = _merge_local_settings({}, generated)
 

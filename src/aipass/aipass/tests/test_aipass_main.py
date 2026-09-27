@@ -1,20 +1,29 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.2.0
+# Version: 1.4.0
 # Created: 2026-05-12
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for aipass.py — main entry point and module discovery."""
+"""Tests for apps/aipass.py and the handlers it drives."""
+
+# main entry point and module discovery.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/aipass.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public entry-point functions carry docstrings
 
 from __future__ import annotations
 
 import importlib.metadata
+import re
 import types
 from unittest.mock import MagicMock, patch
 
+import pytest
 
+import aipass.aipass.apps.aipass as aipass_mod
 from aipass.aipass.apps.aipass import (
     _pyproject_version,
     _resolve_version,
@@ -121,10 +130,11 @@ class TestRouteCommand:
     """Tests for the route_command function."""
 
     def test_returns_true_when_module_handles(self) -> None:
-        """Returns True when a module successfully handles the command."""
+        """Mutant: True returned without asking the module -> red."""
         mod = MagicMock()
         mod.handle_command.return_value = True
-        assert route_command("test", [], [mod]) is True
+        assert route_command("test", ["x"], [mod]) is True
+        mod.handle_command.assert_called_once_with("test", ["x"])
 
     def test_returns_false_when_no_module_handles(self) -> None:
         """Returns False when no module handles the command."""
@@ -240,65 +250,68 @@ class TestResolveVersion:
 class TestMain:
     """Tests for the main() entry point."""
 
-    def test_version_flag(self) -> None:
-        """--version prints real package version and returns 0."""
+    def test_version_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: version line not printed -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, err = capsys.readouterr()
         assert result == 0
-        printed = mock_con.print.call_args[0][0]
-        assert printed.startswith("aipass ")
-        assert printed != "aipass 0.1.0"
+        assert out.startswith("aipass ")
+        assert out.strip() != "aipass 0.1.0"
+        assert err == ""
 
-    def test_version_flag_short(self) -> None:
-        """-V prints real package version and returns 0."""
+    def test_version_flag_short(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: version line not printed -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "-V"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 0
-        printed = mock_con.print.call_args[0][0]
-        assert printed.startswith("aipass ")
+        assert out.startswith("aipass ")
 
-    def test_version_flag_fallback(self) -> None:
-        """--version prints 'unknown' when no repo pyproject AND no metadata."""
+    def test_version_flag_fallback(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: version line not printed -> red."""
         _not_found = importlib.metadata.PackageNotFoundError
         with (
             patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
             patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
             patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None),
             patch("aipass.aipass.apps.aipass.importlib.metadata.version", side_effect=_not_found),
-            patch("aipass.aipass.apps.aipass.console") as mock_con,
         ):
             result = main()
+        out, _err = capsys.readouterr()
         assert result == 0
-        mock_con.print.assert_called_once_with("aipass unknown")
+        assert out == "aipass unknown\n"
 
-    def test_help_flag_shows_help(self) -> None:
-        """--help calls print_help and returns 0."""
+    def test_help_flag_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: --help prints the introspection instead of the help -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--help"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 0
-        mock_con.print.assert_called()
+        assert "Usage:" in out
+        assert "Examples:" in out
 
-    def test_h_flag_shows_help(self) -> None:
-        """-h shows help and returns 0."""
+    def test_h_flag_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: --help prints the introspection instead of the help -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "-h"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console"):
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 0
+        assert "Usage:" in out
 
-    def test_no_args_shows_help(self) -> None:
-        """No arguments shows introspection and returns 0."""
+    def test_no_args_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: bare invocation prints the full help -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console"):
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 0
+        assert "Run 'aipass --help' for usage and examples" in out
+        assert "Usage:" not in out
 
     def test_help_word_routes_to_module(self) -> None:
         """'help' as only arg routes to help_chat module, not root help."""
@@ -353,51 +366,52 @@ class TestMain:
         assert result == 0
         mod.handle_command.assert_called_once_with("new", ["--help"])
 
-    def test_trailing_help_unknown_command_reports_unknown(self) -> None:
-        """A trailing --help on an unroutable command still errors, not silently 0."""
+    def test_trailing_help_unknown_command_reports_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: help-guard 'Unknown command' line not printed -> red."""
         mod = MagicMock()
         mod.handle_command.return_value = False
         mod.__name__ = "aipass.aipass.apps.modules.trust"
         mod.COMMAND = "trust"
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "nosuch", "arg", "--help"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                with patch("aipass.aipass.apps.aipass.console"):
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
+        assert "Unknown command: nosuch" in out
 
-    def test_introspection_shows_public_commands(self) -> None:
-        """Introspection lists modules with COMMAND in _PUBLIC_COMMANDS."""
+    def test_introspection_shows_public_commands(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: no public command collected -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.help_chat")
         mod.__doc__ = "Help chatbot"
         mod.COMMAND = "help"  # type: ignore[attr-defined]
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    main()
-        printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
-        assert "help" in printed
+                main()
+        out, _err = capsys.readouterr()
+        assert "Commands:" in out
+        assert "README-backed Q&A" in out
 
-    def test_introspection_hides_non_public(self) -> None:
-        """Modules without COMMAND in _PUBLIC_COMMANDS are hidden."""
+    def test_introspection_hides_non_public(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: modules listed by file stem, public filter dropped -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.internal")
         mod.__doc__ = "Internal module"
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    main()
-        printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
-        assert "internal" not in printed
+                main()
+        out, _err = capsys.readouterr()
+        assert "internal" not in out
+        assert "Commands:" not in out
 
-    def test_unknown_command_returns_1(self) -> None:
-        """Unknown command prints error and returns 1."""
+    def test_unknown_command_returns_1(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: final 'Unknown command' line not printed -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "xyzzy"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
-        mock_con.print.assert_called_with("Unknown command: xyzzy")
+        assert out == "Unknown command: xyzzy\n"
 
     def test_known_command_routes_and_returns_0(self) -> None:
         """Known command that gets handled returns 0."""
@@ -411,37 +425,34 @@ class TestMain:
         assert result == 0
         mod.handle_command.assert_called_once_with("doctor", [])
 
-    def test_at_prefix_shows_drone_guidance(self) -> None:
-        """@drone prints guidance pointing to drone, not 'Unknown command'."""
+    def test_at_prefix_shows_drone_guidance(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: '@name is a drone routing target' line not printed -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "@drone"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
-        printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
-        assert "@drone" in printed
-        assert "drone routing target" in printed
-        assert "Unknown command" not in printed
+        assert "@drone is a drone routing target" in out
+        assert "Unknown command" not in out
 
-    def test_at_prefix_uses_actual_name(self) -> None:
-        """@memory prints guidance with the actual @name the user typed."""
+    def test_at_prefix_uses_actual_name(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: 'Reach an agent: drone @name' line not printed -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "@memory"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
-        printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
-        assert "@memory" in printed
-        assert "drone @memory" in printed
+        assert "@memory is a drone routing target" in out
+        assert "drone @memory ..." in out
 
-    def test_plain_bad_command_still_unknown(self) -> None:
-        """Non-@ bad command still prints 'Unknown command', not drone guidance."""
+    def test_plain_bad_command_still_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: final 'Unknown command' line not printed -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "frobnicate"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
-        mock_con.print.assert_called_with("Unknown command: frobnicate")
+        assert out == "Unknown command: frobnicate\n"
 
     def test_command_with_remaining_args(self) -> None:
         """Remaining args are passed to route_command."""
@@ -454,8 +465,8 @@ class TestMain:
                 main()
         mod.handle_command.assert_called_once_with("doctor", ["--verbose", "--fix"])
 
-    def test_help_shows_command_constant(self) -> None:
-        """Introspection uses module COMMAND constant, not file stem."""
+    def test_help_shows_command_constant(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: introspection names modules by file stem -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.help_chat")
         mod.__doc__ = "Help chatbot"
         mod.COMMAND = "help"  # type: ignore[attr-defined]
@@ -465,14 +476,13 @@ class TestMain:
                 "aipass.aipass.apps.aipass.discover_modules",
                 return_value=[mod],
             ):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    main()
-        printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
-        assert "help" in printed
-        assert "help_chat" not in printed
+                main()
+        out, _err = capsys.readouterr()
+        assert "README-backed Q&A" in out
+        assert "help_chat" not in out
 
-    def test_introspection_skips_no_command_module(self) -> None:
-        """Modules without COMMAND in _PUBLIC_COMMANDS are hidden from introspection."""
+    def test_introspection_skips_no_command_module(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: a module without COMMAND listed by file stem -> red."""
         mod = types.ModuleType("aipass.aipass.apps.modules.doctor")
         mod.__doc__ = "Doctor module"
         mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
@@ -481,53 +491,50 @@ class TestMain:
                 "aipass.aipass.apps.aipass.discover_modules",
                 return_value=[mod],
             ):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    main()
-        printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
-        assert (
-            "Commands:" not in printed or "doctor" not in printed.split("Commands:")[1]
-            if "Commands:" in printed
-            else True
-        )
+                main()
+        out, _err = capsys.readouterr()
+        assert "Commands:" not in out
+        assert "doctor" not in out
 
-    def test_multiword_unknown_routes_to_help(self) -> None:
-        """`aipass what is drone` falls through to help with the full question."""
+    def test_multiword_unknown_routes_to_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: 'answering as' notice not printed -> red."""
         mod = MagicMock()
         mod.handle_command.side_effect = lambda c, a: c == "help"
         mod.__name__ = "aipass.aipass.apps.modules.help_chat"
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "what", "is", "drone"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                with patch("aipass.aipass.apps.aipass.console"):
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 0
         mod.handle_command.assert_any_call("help", ["what", "is", "drone"])
+        assert "answering as: aipass help what is drone" in out
 
-    def test_multiword_with_flag_stays_unknown(self) -> None:
-        """A mistyped command carrying flags must NOT become a help search."""
+    def test_multiword_with_flag_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: final 'Unknown command' line not printed -> red."""
         mod = MagicMock()
         mod.handle_command.side_effect = lambda c, a: c == "help"
         mod.__name__ = "aipass.aipass.apps.modules.help_chat"
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "doctr", "--fix"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
-        mock_con.print.assert_called_with("Unknown command: doctr")
+        assert out == "Unknown command: doctr\n"
 
-    def test_single_unknown_word_stays_unknown(self) -> None:
-        """One unknown token keeps the loud error — no silent help fallback."""
+    def test_single_unknown_word_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: final 'Unknown command' line not printed -> red."""
         mod = MagicMock()
         mod.handle_command.side_effect = lambda c, a: c == "help"
         mod.__name__ = "aipass.aipass.apps.modules.help_chat"
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "xyzzy"]):
             with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
-                with patch("aipass.aipass.apps.aipass.console") as mock_con:
-                    result = main()
+                result = main()
+        out, _err = capsys.readouterr()
         assert result == 1
-        mock_con.print.assert_called_with("Unknown command: xyzzy")
+        assert out == "Unknown command: xyzzy\n"
 
-    def test_handler_crash_surfaces_error(self) -> None:
-        """Handler crash prints real error, not 'Unknown command'."""
+    def test_handler_crash_surfaces_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: crash reported on the console, not error() -> red."""
         mod = MagicMock()
         mod.handle_command.side_effect = RuntimeError("db connection failed")
         mod.__name__ = "aipass.aipass.apps.modules.doctor"
@@ -536,17 +543,14 @@ class TestMain:
                 "aipass.aipass.apps.aipass.discover_modules",
                 return_value=[mod],
             ):
-                with patch("aipass.aipass.apps.aipass.console"):
-                    with patch("aipass.aipass.apps.aipass.error") as mock_err:
-                        result = main()
+                result = main()
+        out, err = capsys.readouterr()
         assert result == 1
-        err_text = " ".join(str(a) for call in mock_err.call_args_list for a in call[0])
-        assert "db connection failed" in err_text
+        assert "'doctor' crashed: db connection failed" in err
+        assert "Unknown command" not in out
 
-    def test_import_failure_surfaces_on_command(self) -> None:
-        """Failed module import surfaces when user types that command."""
-        import aipass.aipass.apps.aipass as aipass_mod
-
+    def test_import_failure_surfaces_on_command(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: load failure reported on the console, not error() -> red."""
         with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "broken"]):
             with patch(
                 "aipass.aipass.apps.aipass.discover_modules",
@@ -554,13 +558,11 @@ class TestMain:
             ):
                 aipass_mod._import_failures.clear()
                 aipass_mod._import_failures["broken"] = ImportError("no module")
-                with patch("aipass.aipass.apps.aipass.console"):
-                    with patch("aipass.aipass.apps.aipass.error") as mock_err:
-                        result = main()
+                result = main()
+        out, err = capsys.readouterr()
         assert result == 1
-        err_text = " ".join(str(a) for call in mock_err.call_args_list for a in call[0])
-        assert "failed to load" in err_text
-        assert "no module" in err_text
+        assert "'broken' failed to load: no module" in err
+        assert "Unknown command" not in out
         aipass_mod._import_failures.clear()
 
 
@@ -578,24 +580,23 @@ class TestHelpAgreesWithCode:
     """
 
     @staticmethod
-    def _help_text() -> str:
-        """Rendered help as one plain string, markup and all."""
-        with patch("aipass.aipass.apps.aipass.console") as mock_con:
-            print_help(modules=[])
-        return " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
+    def _help_text(capsys: pytest.CaptureFixture[str]) -> str:
+        """Rendered help as the user reads it on stdout."""
+        print_help(modules=[])
+        return capsys.readouterr().out
 
-    def test_help_names_revoke(self) -> None:
+    def test_help_names_revoke(self, capsys: pytest.CaptureFixture[str]) -> None:
         """`revoke` routes in trust.py, so help must name it — it named only `trust`."""
-        assert "revoke <path>" in self._help_text()
+        assert "revoke <path>" in self._help_text(capsys)
 
-    def test_help_does_not_claim_bare_json_is_json_output(self) -> None:
+    def test_help_does_not_claim_bare_json_is_json_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         """JSON comes from `doctor --fix --json`; `--json` alone falls through."""
-        text = self._help_text()
+        text = self._help_text(capsys)
         assert "doctor --fix --json" in text
         assert "JSON output for structure scan" not in text
 
-    def test_help_names_init_run_not_bare_init(self) -> None:
+    def test_help_names_init_run_not_bare_init(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Bare `init` prints usage; `init run` is what walks the stages."""
-        text = self._help_text()
+        text = self._help_text(capsys)
         assert "init run" in text
-        assert "aipass init[/green]" not in text
+        assert re.search(r"aipass init(?! run)", text) is None

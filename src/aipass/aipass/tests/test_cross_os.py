@@ -1,17 +1,21 @@
 # =================== AIPass ====================
 # Name: test_cross_os.py
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-07-02
-# Modified: 2026-07-02
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the cross-OS gap registry (TDPLAN-0011 slice 1).
+"""Tests for apps/handlers/cross_os/gap_registry.py and the handlers it drives."""
 
-Covers: parser happy path, platform filtering (win32/darwin/linux),
-fail-to-error (missing/malformed doc), _check_cross_os() row shape, the
-doctor --cross-os subcommand, and the init stage-2 heads-up wiring.
-"""
+# Tests the cross-OS gap registry (TDPLAN-0011 slice 1).
+# Covers: parser happy path, platform filtering (win32/darwin/linux),
+# fail-to-error (missing/malformed doc), _check_cross_os() row shape, the
+# doctor --cross-os subcommand, and the init stage-2 heads-up wiring.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file in handlers/cross_os/ parses and imports
+# seedgo: no-test-needed(documentation) — that the public parser and preflight functions carry docstrings
 
 import contextlib
 import platform
@@ -44,9 +48,11 @@ from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYP
 from aipass.aipass.apps.modules.doctor import (
     _check_cross_os,
     _cross_os_gap_rows,
+    handle_command,
     run_cross_os,
     run_cross_os_record,
 )
+from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
 
 _HANDLER_MOD = "aipass.aipass.apps.handlers.cross_os.gap_registry"
 _PREFLIGHT_MOD = "aipass.aipass.apps.handlers.cross_os.preflight"
@@ -453,13 +459,16 @@ class TestCheckCrossOsComposed:
         row = next(r for r in results if r.label == "e2e suite (pre-flight)")
         assert row.glyph == GLYPH_WARN
 
-    def test_run_cross_os_returns_int_no_errors(self) -> None:
+    def test_run_cross_os_returns_int_no_errors(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: summary errors count dropped -> red."""
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            stack.enter_context(patch(f"{_DOCTOR_MOD}.console"))
             rc = run_cross_os()
         assert rc == 0
+        out, _err = capsys.readouterr()
+        assert "aipass doctor --cross-os" in out
+        assert "errors: 0" in out
 
 
 # =============================================================================
@@ -469,8 +478,6 @@ class TestCheckCrossOsComposed:
 
 class TestDoctorCrossOsCommand:
     def test_cross_os_flag_routes_to_run_cross_os(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -481,8 +488,6 @@ class TestDoctorCrossOsCommand:
 
     def test_cross_os_does_not_run_full_doctor(self) -> None:
         """The subcommand must not invoke the default full run."""
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0),
             patch(f"{_DOCTOR_MOD}.run_doctor") as mock_full,
@@ -493,8 +498,6 @@ class TestDoctorCrossOsCommand:
 
     def test_cross_os_alone_stays_light_no_e2e(self) -> None:
         """`--cross-os` without `--e2e` threads run_e2e=False."""
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -504,8 +507,6 @@ class TestDoctorCrossOsCommand:
 
     def test_cross_os_with_e2e_flag_threads_run_e2e_true(self) -> None:
         """Both `--cross-os` and `--e2e` present -> run_cross_os(run_e2e=True)."""
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os", return_value=0) as mock_run,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -520,42 +521,32 @@ class TestDoctorCrossOsCommand:
 
 
 class TestInitStage2HeadsUp:
-    def test_heads_up_prints_gaps(self) -> None:
-        from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
-
+    def test_heads_up_prints_gaps(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: per-gap line not printed -> red."""
         fake = [CrossOsGap("9", "route masks", "all", "printed as Unknown command", "aipass", "rec")]
-        with (
-            patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=fake),
-            patch(f"{_INIT_MOD}.console") as mock_console,
-        ):
+        with patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=fake):
             _print_os_gap_heads_up()
-        printed = " ".join(str(c.args[0]) for c in mock_console.print.call_args_list if c.args)
-        assert "gap #9" in printed
-        assert "Unknown command" in printed
+        out, _err = capsys.readouterr()
+        assert "gap #9" in out
+        assert "Unknown command" in out
 
-    def test_heads_up_no_gaps_prints_nothing(self) -> None:
-        from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
-
-        with (
-            patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=[]),
-            patch(f"{_INIT_MOD}.console") as mock_console,
-        ):
+    def test_heads_up_no_gaps_prints_nothing(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: empty-gaps early return removed -> red."""
+        with patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=[]):
             _print_os_gap_heads_up()
-        mock_console.print.assert_not_called()
+        out, err = capsys.readouterr()
+        assert out == ""
+        assert err == ""
 
-    def test_heads_up_error_warns_and_does_not_crash(self) -> None:
-        from aipass.aipass.apps.modules.init_flow import _print_os_gap_heads_up
-
-        with (
-            patch(
-                "aipass.aipass.apps.handlers.cross_os.gaps_for_platform",
-                side_effect=CrossOsGapError("doc missing"),
-            ),
-            patch(f"{_INIT_MOD}.console"),
-            patch(f"{_INIT_MOD}.warning") as mock_warning,
+    def test_heads_up_error_warns_and_does_not_crash(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: warning text emptied -> red."""
+        with patch(
+            "aipass.aipass.apps.handlers.cross_os.gaps_for_platform",
+            side_effect=CrossOsGapError("doc missing"),
         ):
             _print_os_gap_heads_up()  # must not raise
-        mock_warning.assert_called_once()
+        _out, err = capsys.readouterr()
+        assert "cross-OS gap registry unavailable" in err
 
 
 # =============================================================================
@@ -618,25 +609,22 @@ class TestBuildRunRecord:
         assert "✅" not in phase4
 
     def test_human_rows_marked_and_never_auto_ticked(self) -> None:
-        """Human-only rows must carry the human marker and NEVER the machine ✅."""
+        """Mutant: human box rendered as a ✔ tick -> red."""
         with contextlib.ExitStack() as stack:
             self._patch(stack)
             text = build_run_record(platform_name="linux")
         for prefix in (
-            "Phase 1 clean install",
-            "Phase 3 aipass init",
-            "Phase 5 daemons",
-            "Phase 7 interactive",
-            "Per-branch matrix",
+            "Phase 1 clean install ........",
+            "Phase 3 aipass init ..........",
+            "Phase 5 daemons ..............",
+            "Phase 7 interactive ..........",
+            "Per-branch matrix (13) .......",
         ):
             line = _line_starting(text, prefix)
-            assert line, f"missing row: {prefix}"
-            assert "— human" in line
-            assert "✅" not in line
+            assert line.removeprefix(prefix).split("   ")[0] == " ⬜ — human"
         # Overall verdict stays human, never a machine tick.
         verdict = _line_starting(text, "Overall verdict")
-        assert "— human" in verdict
-        assert "✅" not in verdict
+        assert verdict.startswith("Overall verdict: ⬜ — human (")
 
     def test_commit_and_tester_left_blank_with_hint(self) -> None:
         with contextlib.ExitStack() as stack:
@@ -669,16 +657,16 @@ class TestBuildRunRecord:
         assert "✅" not in phase2
 
     def test_e2e_recorded_when_flag_set(self) -> None:
+        """Mutant: e2e detail truncated in the record -> red."""
         with contextlib.ExitStack() as stack:
             self._patch(stack)
             mock_e2e = stack.enter_context(
                 patch(f"{_RECORD_MOD}.run_e2e", return_value=PreflightResult("e2e", True, "14 passed in 18.15s"))
             )
             text = build_run_record(platform_name="linux", run_heavy_e2e=True)
-        mock_e2e.assert_called_once()
+        mock_e2e.assert_called_once_with()
         phase2 = _line_starting(text, "Phase 2")
-        assert "✅" in phase2
-        assert "14 passed" in phase2
+        assert phase2 == "Phase 2 e2e suite (14/14) .... ✅ pre-flight (machine)   notes: 14 passed in 18.15s"
 
     def test_e2e_unrunnable_marked_could_not_run(self) -> None:
         unrunnable = PreflightResult("e2e", False, f"{E2E_UNRUNNABLE_PREFIX}: e2e dir not found")
@@ -781,8 +769,6 @@ class TestGenerateRunRecord:
 
 class TestDoctorCrossOsRecordCommand:
     def test_record_flag_routes_to_run_cross_os_record(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.run_cross_os") as mock_plain,
@@ -794,8 +780,6 @@ class TestDoctorCrossOsRecordCommand:
         mock_plain.assert_not_called()  # record path does not also run the plain group
 
     def test_record_default_path_when_no_value(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -804,8 +788,6 @@ class TestDoctorCrossOsRecordCommand:
         mock_rec.assert_called_once_with(None, run_e2e=False)
 
     def test_record_with_e2e_threads_run_e2e_true(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=0) as mock_rec,
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -815,8 +797,6 @@ class TestDoctorCrossOsRecordCommand:
         mock_rec.assert_called_once_with(None, run_e2e=True)
 
     def test_record_write_failure_exits_nonzero(self) -> None:
-        from aipass.aipass.apps.modules.doctor import handle_command
-
         with (
             patch(f"{_DOCTOR_MOD}.run_cross_os_record", return_value=1),
             patch(f"{_DOCTOR_MOD}.json_handler", autospec=True),
@@ -824,16 +804,16 @@ class TestDoctorCrossOsRecordCommand:
             with pytest.raises(SystemExit):
                 handle_command("doctor", ["--cross-os", "--record", "record.txt"])
 
-    def test_run_cross_os_record_returns_zero_on_success(self) -> None:
-        with (
-            patch(f"{_DOCTOR_MOD}.generate_run_record", return_value=Path("record.txt")),
-            patch(f"{_DOCTOR_MOD}.console"),
-        ):
+    def test_run_cross_os_record_returns_zero_on_success(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: written-path success line not printed -> red."""
+        with patch(f"{_DOCTOR_MOD}.generate_run_record", return_value=Path("record.txt")):
             assert run_cross_os_record("record.txt") == 0
+        out, _err = capsys.readouterr()
+        assert "Run Record written: record.txt" in out
 
-    def test_run_cross_os_record_returns_one_on_write_error(self) -> None:
-        with (
-            patch(f"{_DOCTOR_MOD}.generate_run_record", side_effect=RunRecordError("disk full")),
-            patch(f"{_DOCTOR_MOD}.console"),
-        ):
+    def test_run_cross_os_record_returns_one_on_write_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: write error not reported -> red."""
+        with patch(f"{_DOCTOR_MOD}.generate_run_record", side_effect=RunRecordError("disk full")):
             assert run_cross_os_record("record.txt") == 1
+        _out, err = capsys.readouterr()
+        assert "disk full" in err

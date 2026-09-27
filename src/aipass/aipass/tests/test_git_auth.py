@@ -1,17 +1,18 @@
 # =================== AIPass ====================
 # Name: test_git_auth.py
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-04
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for ``aipass init update``'s git-auth provisioning (DPLAN-0281 P2).
+"""Tests for apps/handlers/init/git_auth.py."""
+# Covers the repair set that makes drone's four owner-tier checks true for a
+# consuming project, the guardrail refusals that must never be repaired around,
+# and the independent post-repair verification.
 
-Covers the repair set that makes drone's four owner-tier checks true for a
-consuming project, the guardrail refusals that must never be repaired around,
-and the independent post-repair verification.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that git_auth.py and the modules it imports parse and import
 
 import json
 import os

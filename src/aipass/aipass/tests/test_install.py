@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.1.0
+# Version: 1.2.2
 # Created: 2026-07-05
-# Modified: 2026-09-14
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the aipass install module (DPLAN-0233)."""
+"""Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import os
 import subprocess as _sp
@@ -15,6 +18,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from aipass.aipass.apps.modules import install as _install
 from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
     REPO_URL,
@@ -22,6 +26,7 @@ from aipass.aipass.apps.modules.install import (
     _acquire_install_lock,
     _ask_permission_mode,
     _build_install_prompt,
+    _check_and_fix_owner,
     _clone_repo,
     _end_in_chat,
     _install_lock_path,
@@ -31,6 +36,7 @@ from aipass.aipass.apps.modules.install import (
     _print_next_steps,
     _registry_user_name,
     _resolve_home,
+    _run_doctor_preflight,
     _run_setup,
     handle_command,
     print_help,
@@ -370,13 +376,19 @@ class TestHandleCommand:
         """A non-install command is not handled here."""
         assert handle_command("doctor", []) is False
 
-    def test_help(self) -> None:
-        """--help is handled without exiting."""
+    def test_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: print_help() dropped from the --help branch -> red."""
         assert handle_command("install", ["--help"]) is True
+        out, err = capsys.readouterr()
+        assert "USAGE:" in out
+        assert "--non-interactive" in out
 
-    def test_info(self) -> None:
-        """--info is handled without exiting."""
+    def test_info(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: print_introspection() dropped from the --info branch -> red."""
         assert handle_command("install", ["--info"]) is True
+        out, err = capsys.readouterr()
+        assert "install Module" in out
+        assert "Default home:" in out
 
     def test_runs_and_exits(self) -> None:
         """A run request calls run_install and exits with its code."""
@@ -545,9 +557,9 @@ class TestEndInChat:
 
     _BINS = {"drone": "/x/drone", "aipass": "/x/aipass"}
 
-    def test_tty_launches_inline(self) -> None:
+    def test_tty_launches_inline(self, tmp_path) -> None:
         """Interactive TTY launches the @aipass concierge with the install prompt."""
-        home = Path("/fake/AIPass")
+        home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch(f"{_MOD}._ask_permission_mode", return_value="default"),
@@ -560,9 +572,9 @@ class TestEndInChat:
         prompt_arg = mock_launch.call_args[0][1]
         assert "Fresh AIPass install" in prompt_arg
 
-    def test_permission_choice_threads_into_launch(self) -> None:
+    def test_permission_choice_threads_into_launch(self, tmp_path) -> None:
         """Choosing bypass permissions launches claude with the skip-permissions variant."""
-        home = Path("/fake/AIPass")
+        home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch(f"{_MOD}._ask_permission_mode", return_value="skip-permissions"),
@@ -573,9 +585,9 @@ class TestEndInChat:
             _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
         assert mock_launch.call_args[0][3] == "skip-permissions"
 
-    def test_doctor_preflight_runs_before_launch(self) -> None:
+    def test_doctor_preflight_runs_before_launch(self, tmp_path) -> None:
         """The doctor-before-hello pass runs, and its findings reach the prompt."""
-        home = Path("/fake/AIPass")
+        home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch(f"{_MOD}._ask_permission_mode", return_value="default"),
@@ -588,9 +600,9 @@ class TestEndInChat:
         prompt_arg = mock_launch.call_args[0][1]
         assert "hooks: 2 hook(s) missing" in prompt_arg
 
-    def test_no_tty_skips_launch(self) -> None:
+    def test_no_tty_skips_launch(self, tmp_path) -> None:
         """Non-TTY skips the chat launch."""
-        home = Path("/fake/AIPass")
+        home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
@@ -599,9 +611,9 @@ class TestEndInChat:
             _end_in_chat(home, self._BINS, dry_run=False, no_chat=False)
         mock_launch.assert_not_called()
 
-    def test_no_chat_skips_launch_even_on_tty(self) -> None:
+    def test_no_chat_skips_launch_even_on_tty(self, tmp_path) -> None:
         """--no-chat skips the launch even when the shell is interactive."""
-        home = Path("/fake/AIPass")
+        home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
@@ -610,9 +622,9 @@ class TestEndInChat:
             _end_in_chat(home, self._BINS, dry_run=False, no_chat=True)
         mock_launch.assert_not_called()
 
-    def test_dry_run_skips_launch(self) -> None:
+    def test_dry_run_skips_launch(self, tmp_path) -> None:
         """Dry-run announces the launch but never calls it."""
-        home = Path("/fake/AIPass")
+        home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}.sys.stdin") as mock_stdin,
             patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
@@ -626,8 +638,6 @@ class TestRunDoctorPreflightWrapper:
     """The install-tail wrapper around doctor.run_doctor_preflight."""
 
     def test_returns_hook_action_items(self) -> None:
-        from aipass.aipass.apps.modules.install import _run_doctor_preflight
-
         with patch(
             "aipass.aipass.apps.modules.doctor.run_doctor_preflight",
             return_value=(0, ["hooks: 2 hook(s) missing"]),
@@ -636,8 +646,6 @@ class TestRunDoctorPreflightWrapper:
         assert result == ["hooks: 2 hook(s) missing"]
 
     def test_prints_loud_block_when_items_present(self, capsys) -> None:
-        from aipass.aipass.apps.modules.install import _run_doctor_preflight
-
         with patch(
             "aipass.aipass.apps.modules.doctor.run_doctor_preflight",
             return_value=(1, ["hooks: 2 hook(s) missing"]),
@@ -648,8 +656,6 @@ class TestRunDoctorPreflightWrapper:
         assert "hooks: 2 hook(s) missing" in captured.out
 
     def test_no_block_printed_when_hooks_clean(self, capsys) -> None:
-        from aipass.aipass.apps.modules.install import _run_doctor_preflight
-
         with patch("aipass.aipass.apps.modules.doctor.run_doctor_preflight", return_value=(0, [])):
             result = _run_doctor_preflight()
         captured = capsys.readouterr()
@@ -657,8 +663,6 @@ class TestRunDoctorPreflightWrapper:
         assert "ACTION NEEDED" not in captured.out
 
     def test_exception_surfaces_manual_run_action_item(self) -> None:
-        from aipass.aipass.apps.modules.install import _run_doctor_preflight
-
         with patch(
             "aipass.aipass.apps.modules.doctor.run_doctor_preflight",
             side_effect=RuntimeError("boom"),
@@ -695,12 +699,12 @@ class TestAskPermissionMode:
 class TestPrintNextSteps:
     """The installed banner shown before the welcome chat."""
 
-    def test_runs_without_error(self, tmp_path: Path) -> None:
-        """The banner names the install home and the three commands to try next."""
-        with patch(f"{_MOD}.console") as mock_console, patch(f"{_MOD}.success") as mock_success:
-            _print_next_steps(tmp_path)
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
-        assert mock_success.call_args[0][0] == f"AIPass is installed at {tmp_path}"
+    def test_runs_without_error(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: 'drone systems' line not printed -> red."""
+        _print_next_steps(tmp_path)
+        out, _err = capsys.readouterr()
+        printed = " ".join(out.split())
+        assert f"AIPass is installed at {tmp_path}" in printed
         assert "drone systems" in printed
         assert "aipass doctor" in printed
         assert "aipass init run" in printed
@@ -746,21 +750,21 @@ class TestRunChatOnly:
 class TestSmoke:
     """Help/introspection render and constants hold."""
 
-    def test_print_help_runs(self) -> None:
-        """print_help names the command, the step order and the init hand-off."""
-        with patch(f"{_MOD}.console") as mock_console:
-            print_help()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
-        assert "aipass install[/bold cyan] \u2014 one-command bootstrap of AIPass" in printed
+    def test_print_help_runs(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: --no-baud usage line not printed -> red."""
+        print_help()
+        out, _err = capsys.readouterr()
+        printed = " ".join(out.split())
+        assert "aipass install \u2014 one-command bootstrap of AIPass" in printed
         assert "resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> welcome chat" in printed
         assert "--no-baud" in printed
         assert "aipass init run" in printed
 
-    def test_print_introspection_runs(self) -> None:
-        """print_introspection names the module, the default home and the source."""
-        with patch(f"{_MOD}.console") as mock_console:
-            print_introspection()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
+    def test_print_introspection_runs(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: Source line not printed -> red."""
+        print_introspection()
+        out, _err = capsys.readouterr()
+        printed = " ".join(out.split())
         assert "install Module" in printed
         assert str(DEFAULT_HOME) in printed
         assert REPO_URL in printed
@@ -829,8 +833,6 @@ class TestCheckAndFixOwner:
     """Tests for install-time owner/identity check+fix retro-trigger."""
 
     def test_clean_check_skips_fix(self, tmp_path) -> None:
-        from aipass.aipass.apps.modules.install import _check_and_fix_owner
-
         mock_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch(
             "aipass.aipass.apps.modules.install.subprocess.run",
@@ -842,8 +844,6 @@ class TestCheckAndFixOwner:
         assert "--check" in args
 
     def test_issues_trigger_fix(self, tmp_path) -> None:
-        from aipass.aipass.apps.modules.install import _check_and_fix_owner
-
         check_proc = MagicMock(returncode=1, stdout="", stderr="")
         fix_proc = MagicMock(returncode=0, stdout="", stderr="")
         with patch(
@@ -856,8 +856,6 @@ class TestCheckAndFixOwner:
         assert "--fix" in fix_args
 
     def test_drone_not_found_is_silent(self, tmp_path) -> None:
-        from aipass.aipass.apps.modules.install import _check_and_fix_owner
-
         with patch(
             "aipass.aipass.apps.modules.install.subprocess.run",
             side_effect=FileNotFoundError("drone"),
@@ -865,10 +863,6 @@ class TestCheckAndFixOwner:
             _check_and_fix_owner(tmp_path)
 
     def test_timeout_is_silent(self, tmp_path) -> None:
-        import subprocess as _sp
-
-        from aipass.aipass.apps.modules.install import _check_and_fix_owner
-
         with patch(
             "aipass.aipass.apps.modules.install.subprocess.run",
             side_effect=_sp.TimeoutExpired("drone", 30),
@@ -892,8 +886,6 @@ class TestClonedBranchIsNamed:
 
     @staticmethod
     def _clone(tmp_path, branch_stdout="main\n", rc=0):
-        from aipass.aipass.apps.modules import install as _install
-
         home = tmp_path / "home"
         calls = []
 
@@ -933,8 +925,6 @@ class TestClonedBranchIsNamed:
 
     def test_unreadable_branch_does_not_fail_the_install(self, tmp_path) -> None:
         """Naming is a courtesy — it must never turn a good clone into a failure."""
-        from aipass.aipass.apps.modules import install as _install
-
         home = tmp_path / "home"
 
         def fake_run(cmd, *a, **kw):

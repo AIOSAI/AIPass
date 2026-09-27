@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_feedback.py
 # Description: Tests for aipass feedback — toggle alias for @hooks feedback pulse
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-07-18
-# Modified: 2026-07-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the aipass feedback module."""
+"""Tests for apps/modules/feedback.py and the feedback toggle command it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -25,13 +28,17 @@ class TestHandleCommand:
         """A non-feedback command is not handled."""
         assert handle_command("doctor", []) is False
 
-    def test_help(self) -> None:
-        """--help is handled."""
+    def test_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: help branch skips print_help -> red."""
         assert handle_command("feedback", ["--help"]) is True
+        out, _err = capsys.readouterr()
+        assert "toggle the feedback reminder" in out
 
-    def test_info(self) -> None:
-        """--info is handled."""
+    def test_info(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: --info branch skips print_introspection -> red."""
         assert handle_command("feedback", ["--info"]) is True
+        out, _err = capsys.readouterr()
+        assert "feedback Module" in out
 
     def test_unknown_arg_shows_error(self) -> None:
         """An unknown argument shows an error and help."""
@@ -102,28 +109,29 @@ class TestHandleCommand:
 
         assert exc.value.code == 3
 
-    def test_success_does_not_raise(self) -> None:
-        """The counterfactual: a clean run still returns True and exits 0."""
-        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)):
+    def test_success_does_not_raise(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: 'on' returns True without delegating -> red."""
+        with patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run:
             assert handle_command("feedback", ["on"]) is True
+        run.assert_called_once()
+        _out, err = capsys.readouterr()
+        assert err == ""
 
 
 class TestSmoke:
     """Help/introspection print the lines they advertise."""
 
-    def test_print_help_runs(self) -> None:
-        """print_help names the command and every one of its three forms."""
-        with patch(f"{_MOD}.console") as mock_console:
-            print_help()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
-        assert "aipass feedback[/bold cyan] \u2014 toggle the feedback reminder" in printed
-        assert "aipass feedback on[/green]" in printed
-        assert "aipass feedback off[/green]" in printed
+    def test_print_help_runs(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: help line for 'on' dropped -> red."""
+        print_help()
+        out, _err = capsys.readouterr()
+        assert "aipass feedback \u2014 toggle the feedback reminder" in out
+        assert "aipass feedback on" in out
+        assert "aipass feedback off" in out
 
-    def test_print_introspection_runs(self) -> None:
-        """print_introspection names the module and the command it delegates to."""
-        with patch(f"{_MOD}.console") as mock_console:
-            print_introspection()
-        printed = " ".join(str(a) for call in mock_console.print.call_args_list for a in call[0])
-        assert "feedback Module" in printed
-        assert "drone @hooks feedback on/off" in printed
+    def test_print_introspection_runs(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: delegate line dropped -> red."""
+        print_introspection()
+        out, _err = capsys.readouterr()
+        assert "feedback Module" in out
+        assert "drone @hooks feedback on/off" in out

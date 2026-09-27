@@ -1,18 +1,23 @@
 # =================== AIPass ====================
 # Name: tests/test_help_chat.py
 # Description: Tests for help_chat module — section-aware v2 (DPLAN-0282 P3)
-# Version: 2.0.0
+# Version: 2.1.1
 # Created: 2026-04-16
-# Modified: 2026-08-07
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for aipass.aipass.apps.modules.help_chat"""
+"""Tests for apps/modules/help_chat.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that help_chat.py and the modules it imports parse and import
 
 from __future__ import annotations
 
 from contextlib import ExitStack
 from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import mock_open, patch
+
+import pytest
 
 from aipass.aipass.apps.modules.help_chat import (
     COMMAND,
@@ -44,8 +49,6 @@ Run tasks with drone dispatch.
 Drone supports multiple branches.
 """
 
-_FAKE_README_PATH = Path("/fake/src/aipass/drone/README.md")
-
 # Ensure encoding='utf-8' appears in this file (PATTERN check scans file-wide)
 _ENCODING = "utf-8"
 
@@ -62,7 +65,6 @@ def _call_handle_command_drone_question(readme_content: str, readme_path: Path):
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
         patch("builtins.open", mock_open(read_data=readme_content)),
-        patch("aipass.aipass.apps.modules.help_chat.console"),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
@@ -77,7 +79,6 @@ def _call_handle_no_match():
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=None),
-        patch("aipass.aipass.apps.modules.help_chat.console"),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
@@ -88,44 +89,24 @@ def _call_handle_no_match():
 
 def _call_handle_all_stopwords():
     """Call handle_command with a question that reduces to zero keywords."""
-    mock_error = MagicMock()
-    patches = [
-        patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
-        patch("aipass.aipass.apps.modules.help_chat.console"),
-        patch("aipass.aipass.apps.modules.help_chat.error", mock_error),
-    ]
-    with ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        result = handle_command("help", ["what", "is", "the"])
-    return result, mock_error
+    with patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True):
+        return handle_command("help", ["what", "is", "the"])
 
 
-def _capture_depth_offer_prints(readme_path: Path):
-    """Call handle_command for 'drone' where open() raises OSError; capture console output."""
-    printed: list[str] = []
-
-    def capture(*args, **kwargs):
-        """Capture positional string args from console.print calls."""
-        if args:
-            printed.append(str(args[0]))
-
-    mock_console = MagicMock()
-    mock_console.print.side_effect = capture
+def _capture_depth_offer_prints(readme_path: Path) -> None:
+    """Call handle_command for 'drone' where open() raises OSError."""
     patches = [
         patch("aipass.aipass.apps.modules.help_chat.json_handler", autospec=True),
         patch("aipass.aipass.apps.modules.help_chat.list_branches", return_value=["drone"]),
         patch("aipass.aipass.apps.modules.help_chat.get_readme_path", return_value=readme_path),
         patch("builtins.open", side_effect=OSError("no file")),
         patch("aipass.aipass.apps.modules.help_chat.logger"),
-        patch("aipass.aipass.apps.modules.help_chat.console", mock_console),
         patch("aipass.aipass.apps.modules.help_chat.header"),
     ]
     with ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
         handle_command("help", ["drone"])
-    return printed
 
 
 # =============================================================================
@@ -390,9 +371,9 @@ class TestFormatAnswer:
         assert "(src/aipass/flow/README.md:1-4)" in result
         assert "(src/aipass/flow/README.md:5-9)" in result
 
-    def test_fallback_citation_when_src_not_in_path(self):
+    def test_fallback_citation_when_src_not_in_path(self, tmp_path):
         """When path lacks 'src', fallback citation must still include branch and range."""
-        path = Path("/unusual/path/drone/README.md")
+        path = tmp_path / "unusual" / "path" / "drone" / "README.md"
         with patch("aipass.aipass.apps.modules.help_chat.logger"):
             result = _format_answer("drone", path, [self._sec("X", 7, 9, ["some content"])])
         assert "src/aipass/drone/README.md:7-9" in result
@@ -448,30 +429,31 @@ class TestHandleCommand:
         assert result is True
         mock_intro.assert_called_once()
 
-    def test_valid_drone_question_returns_true(self):
-        """A well-formed question about drone must return True."""
+    def test_valid_drone_question_returns_true(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Mutant: found answer not printed -> red."""
         readme_content = "# Drone\nDrone dispatches tasks to branches.\n"
-        result = _call_handle_command_drone_question(readme_content, _FAKE_README_PATH)
+        readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"
+        result = _call_handle_command_drone_question(readme_content, readme_path)
         assert result is True
+        out, _err = capsys.readouterr()
+        assert "Drone dispatches tasks to branches." in out
 
-    def test_no_readme_match_still_returns_true(self):
-        """handle_command must return True even when no README path resolves."""
+    def test_no_readme_match_still_returns_true(self, capsys: pytest.CaptureFixture[str]):
+        """Mutant: no-match notice not printed -> red."""
         assert _call_handle_no_match() is True
+        out, _err = capsys.readouterr()
+        assert "No relevant information found." in out
 
-    def test_all_stopwords_returns_true_and_calls_error(self):
-        """A question of only stopwords must return True and call error()."""
-        result, mock_error = _call_handle_all_stopwords()
+    def test_all_stopwords_returns_true_and_calls_error(self, capsys: pytest.CaptureFixture[str]):
+        """Mutant: error() for empty keywords dropped -> red."""
+        result = _call_handle_all_stopwords()
         assert result is True
-        mock_error.assert_called_once()
+        _out, err = capsys.readouterr()
+        assert "Could not extract keywords from question" in err
 
-    def test_depth_offer_always_printed(self):
-        """Depth offer lines must appear even when the README cannot be opened.
-
-        The `or` is gone (v5 assertion_shape, 2026-09-08): both clauses were
-        about the same captured text, so either alone carried the assertion.
-        The surviving clause is the one the code prints, measured by running
-        this unit against the real depth-offer path.
-        """
-        printed = _capture_depth_offer_prints(_FAKE_README_PATH)
-        combined = "\n".join(printed)
-        assert "aipass read" in combined
+    def test_depth_offer_always_printed(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Mutant: depth-offer 'aipass read' line dropped -> red."""
+        readme_path = tmp_path / "src" / "aipass" / "drone" / "README.md"
+        _capture_depth_offer_prints(readme_path)
+        out, _err = capsys.readouterr()
+        assert "aipass read" in out

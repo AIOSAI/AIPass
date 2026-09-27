@@ -1,16 +1,18 @@
 # =================== AIPass ====================
 # Name: test_adopt.py
 # Description: Tests for aipass adopt — project adoption handler
-# Version: 1.0.0
+# Version: 1.1.2
 # Created: 2026-07-20
-# Modified: 2026-07-20
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the adopt handler and module.
+"""Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
 
-All file operations use tmp_path to stay fully isolated from the live
-filesystem. dry_run tests assert zero filesystem mutation.
-"""
+# All file operations use tmp_path to stay fully isolated from the live
+# filesystem. dry_run tests assert zero filesystem mutation.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — spawn_agent's own behavior; @spawn's function, mocked here
 
 import json
 import subprocess
@@ -19,16 +21,20 @@ from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.aipass import _PUBLIC_COMMANDS
 from aipass.aipass.apps.handlers.new_project.adopt import (
     GITIGNORE_MARKER,
     adopt_project,
 )
+from aipass.aipass.apps.modules.adopt import handle_command
 
 
 @pytest.fixture()
 def host_env(tmp_path):
     """Minimal AIPass host installation with an existing (pre-populated) project dir."""
-    (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps({"metadata": {"id": "host-id"}, "branches": []}))
+    (tmp_path / "AIPASS_REGISTRY.json").write_text(
+        json.dumps({"metadata": {"id": "host-id"}, "branches": []}), encoding="utf-8"
+    )
     projects = tmp_path / "projects"
     projects.mkdir()
     target = projects / "existing-site"
@@ -56,7 +62,7 @@ def test_adopt_rejects_missing_target(tmp_path):
 
 
 def test_adopt_rejects_non_projects_child(tmp_path):
-    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}")
+    (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     outside = tmp_path / "elsewhere" / "myapp"
     outside.mkdir(parents=True)
     with pytest.raises(RuntimeError, match="not <host>/projects/<name>"):
@@ -65,7 +71,7 @@ def test_adopt_rejects_non_projects_child(tmp_path):
 
 def test_adopt_rejects_already_adopted(host_env):
     _, target = host_env
-    (target / "EXISTING_SITE_REGISTRY.json").write_text("{}")
+    (target / "EXISTING_SITE_REGISTRY.json").write_text("{}", encoding="utf-8")
     with pytest.raises(RuntimeError, match="already adopted"):
         adopt_project(target, no_agent=True)
 
@@ -135,7 +141,7 @@ def test_adopt_gitignore_covers_symlinked_venv_and_registry_lock(host_env, tmp_p
     host, target = host_env
     aipass_home = tmp_path / "fake_aipass_home"
     (aipass_home / ".venv").mkdir(parents=True)
-    subprocess.run(["git", "init"], cwd=target, capture_output=True, text=True, check=True)
+    subprocess.run(["git", "init"], cwd=target, capture_output=True, text=True, encoding="utf-8", check=True)
 
     with (
         patch(
@@ -156,6 +162,7 @@ def test_adopt_gitignore_covers_symlinked_venv_and_registry_lock(host_env, tmp_p
         cwd=target,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0
     assert ".venv" in result.stdout.split()
@@ -189,10 +196,10 @@ def test_adopt_writes_registry_and_settings(host_env):
         result = adopt_project(target, no_agent=True)
     assert result["registry_file"] == "EXISTING-SITE_REGISTRY.json"
     assert (target / "EXISTING-SITE_REGISTRY.json").exists()
-    reg = json.loads((target / "EXISTING-SITE_REGISTRY.json").read_text())
+    reg = json.loads((target / "EXISTING-SITE_REGISTRY.json").read_text(encoding="utf-8"))
     assert reg["metadata"]["name"] == "EXISTING-SITE"
     assert (target / ".claude" / "settings.json").exists()
-    settings = json.loads((target / ".claude" / "settings.json").read_text())
+    settings = json.loads((target / ".claude" / "settings.json").read_text(encoding="utf-8"))
     assert "env" not in settings
 
 
@@ -201,6 +208,11 @@ def test_adopt_writes_claude_md_excludes_fence(host_env):
     always carry the claudeMdExcludes fence when AIPASS_HOME is detected — never
     just the bare env.AIPASS_HOME that `nested=False` would produce."""
     _, target = host_env
+    # literal_path (HELD): fake_home cannot be built from tmp_path — adopt.py's
+    # is_throwaway_path() (shared/project_home.py) treats any path under
+    # tempfile.gettempdir()/"/tmp" as throwaway and SKIPS writing
+    # settings.local.json entirely, so a tmp_path-built fake_home silently
+    # turns off the exact branch this test exercises.
     fake_home = "/fake/aipass/home"
     with (
         patch(
@@ -333,26 +345,25 @@ def test_adopt_dry_run_still_reports_gitignore_action(host_env):
 
 
 def test_module_handles_not_mine():
-    from aipass.aipass.apps.modules.adopt import handle_command
-
     assert handle_command("notmine", []) is False
 
 
-def test_module_handles_help():
-    from aipass.aipass.apps.modules.adopt import handle_command
-
+def test_module_handles_help(capsys: pytest.CaptureFixture[str]):
+    """Mutant: print_help() dropped from the --help branch -> red."""
     assert handle_command("adopt", ["--help"]) is True
+    out, err = capsys.readouterr()
+    assert "USAGE:" in out
+    assert "--dry-run" in out
 
 
-def test_module_handles_no_args():
-    from aipass.aipass.apps.modules.adopt import handle_command
-
+def test_module_handles_no_args(capsys: pytest.CaptureFixture[str]):
+    """Mutant: print_introspection() dropped from the bare branch -> red."""
     assert handle_command("adopt", []) is True
+    out, err = capsys.readouterr()
+    assert "Usage: aipass adopt" in out
 
 
 def test_module_rejects_unknown_option(host_env):
-    from aipass.aipass.apps.modules.adopt import handle_command
-
     _, target = host_env
     with patch("aipass.aipass.apps.modules.adopt.error") as mock_error:
         handle_command("adopt", [str(target), "--bogus"])
@@ -360,41 +371,37 @@ def test_module_rejects_unknown_option(host_env):
     assert "Unknown option" in mock_error.call_args[0][0]
 
 
-def test_module_adopt_by_absolute_path(host_env, monkeypatch):
-    from aipass.aipass.apps.modules.adopt import handle_command
-
+def test_module_adopt_by_absolute_path(host_env, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    """Mutant: Registry line not printed -> red."""
     host, target = host_env
     monkeypatch.chdir(host)
     with (
         _no_home(),
         patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
-        patch("aipass.aipass.apps.modules.adopt.console") as mock_con,
     ):
         handle_command("adopt", [str(target), "--no-agent"])
-    printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
+    out, _err = capsys.readouterr()
+    printed = " ".join(out.split())
     assert "Registry:" in printed
     assert "EXISTING-SITE_REGISTRY.json" in printed
 
 
-def test_module_adopt_by_bare_name(host_env, monkeypatch):
-    from aipass.aipass.apps.modules.adopt import handle_command
-
+def test_module_adopt_by_bare_name(host_env, monkeypatch, capsys: pytest.CaptureFixture[str]):
+    """Mutant: Registry line not printed -> red."""
     host, target = host_env
     monkeypatch.chdir(host)
     with (
         _no_home(),
         patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
-        patch("aipass.aipass.apps.modules.adopt.console") as mock_con,
     ):
         handle_command("adopt", ["existing-site", "--no-agent"])
-    printed = " ".join(str(a) for call in mock_con.print.call_args_list for a in call[0])
+    out, _err = capsys.readouterr()
+    printed = " ".join(out.split())
     assert "Registry:" in printed
     assert "EXISTING-SITE_REGISTRY.json" in printed
 
 
 def test_module_adopt_dry_run_reports_would_adopt(host_env, monkeypatch, capsys):
-    from aipass.aipass.apps.modules.adopt import handle_command
-
     host, target = host_env
     monkeypatch.chdir(host)
     with _no_home():
@@ -405,8 +412,6 @@ def test_module_adopt_dry_run_reports_would_adopt(host_env, monkeypatch, capsys)
 
 
 def test_module_adopt_missing_target_no_host(tmp_path, monkeypatch):
-    from aipass.aipass.apps.modules.adopt import handle_command
-
     monkeypatch.chdir(tmp_path)
     with (
         patch("aipass.aipass.apps.modules.adopt.error") as mock_error,
@@ -419,11 +424,9 @@ def test_module_adopt_missing_target_no_host(tmp_path, monkeypatch):
 
 
 def test_module_adopt_reports_refusal(host_env, monkeypatch):
-    from aipass.aipass.apps.modules.adopt import handle_command
-
     host, target = host_env
     monkeypatch.chdir(host)
-    (target / "EXISTING-SITE_REGISTRY.json").write_text("{}")
+    (target / "EXISTING-SITE_REGISTRY.json").write_text("{}", encoding="utf-8")
     with (
         patch("aipass.aipass.apps.modules.adopt.error") as mock_error,
         pytest.raises(SystemExit) as exc_info,
@@ -440,6 +443,4 @@ def test_module_adopt_reports_refusal(host_env, monkeypatch):
 
 
 def test_aipass_public_commands_includes_adopt():
-    from aipass.aipass.apps.aipass import _PUBLIC_COMMANDS
-
     assert "adopt" in _PUBLIC_COMMANDS

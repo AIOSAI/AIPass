@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-16
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -373,7 +373,7 @@ def _print_os_gap_heads_up() -> None:
         console.print(f"  [yellow]![/yellow] [dim]gap #{gap.number}: {gap.symptom} [{gap.status}][/dim]")
 
 
-def stage_2_system_detect(non_interactive: bool = False, dry_run: bool = False) -> Dict[str, Any]:
+def stage_2_system_detect(dry_run: bool = False) -> Dict[str, Any]:
     """Detect OS, Python, shell, RAM, CPU, install method, and optional tools."""
     console.print()
     console.print(render_step_header(2, TOTAL_STAGES, "System detection"))
@@ -620,7 +620,7 @@ def stage_6_first_agent(non_interactive: bool = False, dry_run: bool = False) ->
     return {"agent_name": agent_name, "agent_path": agent_path}
 
 
-def stage_7_ping_sweep(non_interactive: bool = False, dry_run: bool = False) -> Dict[str, Any]:
+def stage_7_ping_sweep(dry_run: bool = False) -> Dict[str, Any]:
     """Ping all registered branches via test-convention emails."""
     console.print()
     console.print(render_step_header(7, TOTAL_STAGES, "Pinging agents"))
@@ -669,7 +669,7 @@ def stage_7_ping_sweep(non_interactive: bool = False, dry_run: bool = False) -> 
     return {"ping_results": results}
 
 
-def stage_8_smoke_test(non_interactive: bool = False, dry_run: bool = False) -> Dict[str, Any]:
+def stage_8_smoke_test(dry_run: bool = False) -> Dict[str, Any]:
     """Verify drone and aipass binaries are on PATH."""
     console.print()
     console.print(render_step_header(8, TOTAL_STAGES, "Smoke test"))
@@ -947,13 +947,13 @@ def run_init(
 
     stage_fns = [
         (1, lambda: stage_1_welcome(dry_run=dry_run)),
-        (2, lambda: stage_2_system_detect(non_interactive, dry_run=dry_run)),
+        (2, lambda: stage_2_system_detect(dry_run=dry_run)),
         (3, lambda: stage_3_user_profile(non_interactive, name, accumulated, dry_run=dry_run)),
         (4, lambda: stage_4_style_questions(non_interactive, style, dry_run=dry_run)),
         (5, lambda: stage_5_tool_choice(non_interactive, cli, dry_run=dry_run)),
         (6, lambda: stage_6_first_agent(non_interactive, dry_run=dry_run)),
-        (7, lambda: stage_7_ping_sweep(non_interactive, dry_run=dry_run)),
-        (8, lambda: stage_8_smoke_test(non_interactive, dry_run=dry_run)),
+        (7, lambda: stage_7_ping_sweep(dry_run=dry_run)),
+        (8, lambda: stage_8_smoke_test(dry_run=dry_run)),
         (
             9,
             lambda: stage_9_handoff(

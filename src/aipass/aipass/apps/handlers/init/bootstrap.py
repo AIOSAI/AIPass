@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: bootstrap.py
 # Description: Init handler — bootstrap an AIPass project in any directory
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-14
-# Modified: 2026-04-22
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -602,7 +602,7 @@ def update_project(target: Path, *, apply: bool = True) -> dict:
     for rel, dest, template_text in managed:
         current_hash = sm.hash_file(dest)
         template_hash = sm.sha256_text(template_text) if template_text is not None else None
-        action, reason = sm.decide(rel, current_hash, template_hash, recorded.get(rel))
+        action, reason = sm.decide(current_hash, template_hash, recorded.get(rel))
         record(rel, dest, action, reason, template_text)
 
     # --- Seeds: created once, never rewritten. They exist to be filled in. ---

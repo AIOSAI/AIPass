@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_ping_sweep.py
 # Description: Tests for aipass ping_sweep handler Phase 3
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-16
-# Modified: 2026-04-16
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for ping_sweep handler — Phase 3 (FPLAN-0188)."""
+"""Tests for apps/handlers/ping_sweep/__init__.py — Phase 3 (FPLAN-0188)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — _discover_branches and _aipass_inbox_path; every test mocks both
 
 import json
 import subprocess
@@ -127,7 +130,8 @@ class TestWaitForAck:
                         }
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
             with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
@@ -149,7 +153,8 @@ class TestWaitForAck:
                         }
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
             with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
@@ -171,7 +176,8 @@ class TestWaitForAck:
                         }
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
             with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
@@ -181,7 +187,7 @@ class TestWaitForAck:
     def test_handles_corrupt_inbox(self, tmp_path) -> None:
         """Gracefully handles corrupt inbox.json (returns 'timeout')."""
         inbox = tmp_path / "inbox.json"
-        inbox.write_text("NOT JSON")
+        inbox.write_text("NOT JSON", encoding="utf-8")
         with patch("aipass.aipass.apps.handlers.ping_sweep._aipass_inbox_path", return_value=inbox):
             with patch("aipass.aipass.apps.handlers.ping_sweep.time.sleep"):
                 result = _wait_for_ack("seedgo", timeout=0)

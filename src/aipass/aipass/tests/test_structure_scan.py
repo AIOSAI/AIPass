@@ -1,12 +1,18 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-14
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for structure scanner handler — agent detection, placement, pollution, registry."""
+"""Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
+
+# Agent detection, placement, pollution, registry.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/structure_scan/structure_scanner.py parses and imports
+# seedgo: no-test-needed(documentation) — that the public scan and check functions carry docstrings
 
 import json
 import pytest
@@ -25,6 +31,7 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
 )
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
 from aipass.aipass.apps.modules.doctor import _check_structure
+from aipass.aipass.shared.registry_discovery import find_registry
 
 
 # =============================================================================
@@ -453,8 +460,6 @@ class TestRegistryConsistency:
 class TestFindRegistry:
     def test_finds_registry(self, tmp_path: Path) -> None:
         """Shared find_registry finds *_REGISTRY.json from start_path."""
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
         result = find_registry(start_path=tmp_path)
         assert result is not None
@@ -469,8 +474,6 @@ class TestFindRegistry:
         or a consumer like @spawn's ``load_registry``, which mints a fresh
         ``metadata.id`` for a path it is handed -- acts on that guess.
         """
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         isolated = tmp_path / "no_registry"
         isolated.mkdir()
         assert find_registry(start_path=isolated) is None
@@ -484,8 +487,6 @@ class TestFindRegistry:
         that happens to hold a registry made the old code answer with *that*
         file, discarding the question.  Restoring the fallback makes this red.
         """
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
         (elsewhere / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -497,8 +498,6 @@ class TestFindRegistry:
 
     def test_package_root_fallback_still_answers(self, tmp_path: Path) -> None:
         """None is the LAST resort — the package_root walk still resolves first."""
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         root = tmp_path / "proj"
         (root / "pkg" / "deep").mkdir(parents=True)
         (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
@@ -514,8 +513,6 @@ class TestFindRegistry:
         An operator who names a path is not guessing, so this one path is
         returned unchecked -- and it stays a Path, never None.
         """
-        from aipass.aipass.shared.registry_discovery import find_registry
-
         target = tmp_path / "declared" / "AIPASS_REGISTRY.json"
         monkeypatch.setenv("AIPASS_REGISTRY", str(target))
         assert find_registry(start_path=tmp_path) == target

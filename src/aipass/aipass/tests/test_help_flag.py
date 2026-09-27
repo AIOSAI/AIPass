@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: test_help_flag.py
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
-# Version: 1.0.0
+# Version: 1.2.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for help_flag.wants_help and every module's help gate.
+"""Tests for apps/handlers/help_flag.py and every module's help gate."""
+# The canaries below assert that asking for help NEVER performs the action.
+# Every doing-path is stubbed before the canary runs (prax doctrine: the
+# failing state RUNS, so a red canary must not be able to reach a real init,
+# install, enroll or spawn).
 
-The canaries below assert that asking for help NEVER performs the action.
-Every doing-path is stubbed before the canary runs (prax doctrine: the
-failing state RUNS, so a red canary must not be able to reach a real init,
-install, enroll or spawn).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module under apps/modules/ this file gates parses and imports
 
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.aipass.apps.handlers.help_flag import wants_help
+from aipass.aipass.apps.modules import help_chat, init_flow, trust
 
 # Ensure encoding='utf-8' appears (PATTERN check)
 _ENCODING = "utf-8"
@@ -140,58 +142,54 @@ class TestHelpGateCanaries:
     """Every module: a help probe prints help and performs no action."""
 
     def test_help_probe_is_handled_without_acting(
-        self, stem: str, command: str, args: list[str], _stub_every_doing_path
+        self, stem: str, command: str, args: list[str], _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """handle_command returns True having shown help — and never spawned."""
+        """Mutant: help gate returns True without printing -> red."""
         module = importlib.import_module(f"aipass.aipass.apps.modules.{stem}")
 
-        with patch.object(module, "console", MagicMock()):
-            try:
-                handled = module.handle_command(command, list(args))
-            except SystemExit as exc:  # a doing-path ran and exited
-                pytest.fail(f"{stem} help probe reached an action path (SystemExit {exc.code})")
+        try:
+            handled = module.handle_command(command, list(args))
+        except SystemExit as exc:  # a doing-path ran and exited
+            pytest.fail(f"{stem} help probe reached an action path (SystemExit {exc.code})")
 
         assert handled is True, f"{stem} did not handle the help probe"
+        out, _err = capsys.readouterr()
+        assert "aipass" in out, f"{stem} printed no help"
         _assert_nothing_happened(_stub_every_doing_path, stem)
 
 
 class TestInitFlowStandaloneDoor:
     """The named finding: init_flow's standalone __main__ hands raw argv in."""
 
-    def test_agent_help_does_not_spawn(self, _stub_every_doing_path) -> None:
-        """`init_flow.py agent --help` must not reach `drone @spawn create`."""
-        from aipass.aipass.apps.modules import init_flow
-
-        with patch.object(init_flow, "console", MagicMock()):
-            try:
-                handled = init_flow.handle_command("init", ["agent", "--help"])
-            except SystemExit as exc:
-                pytest.fail(f"standalone door reached the spawn path (SystemExit {exc.code})")
+    def test_agent_help_does_not_spawn(self, _stub_every_doing_path, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: init help USAGE line not printed -> red."""
+        try:
+            handled = init_flow.handle_command("init", ["agent", "--help"])
+        except SystemExit as exc:
+            pytest.fail(f"standalone door reached the spawn path (SystemExit {exc.code})")
 
         assert handled is True
+        assert "USAGE:" in capsys.readouterr().out
         _assert_nothing_happened(_stub_every_doing_path, "init agent --help")
 
-    def test_agent_h_short_flag_does_not_spawn(self, _stub_every_doing_path) -> None:
-        """Both dashed spellings — a half fix scores clean and stays exposed."""
-        from aipass.aipass.apps.modules import init_flow
-
-        with patch.object(init_flow, "console", MagicMock()):
-            try:
-                handled = init_flow.handle_command("init", ["agent", "-h"])
-            except SystemExit as exc:
-                pytest.fail(f"standalone door reached the spawn path (SystemExit {exc.code})")
+    def test_agent_h_short_flag_does_not_spawn(
+        self, _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: init help USAGE line not printed -> red."""
+        try:
+            handled = init_flow.handle_command("init", ["agent", "-h"])
+        except SystemExit as exc:
+            pytest.fail(f"standalone door reached the spawn path (SystemExit {exc.code})")
 
         assert handled is True
+        assert "USAGE:" in capsys.readouterr().out
         _assert_nothing_happened(_stub_every_doing_path, "init agent -h")
 
     def test_real_agent_creation_still_works(self, _stub_every_doing_path) -> None:
         """Pin the other direction: a genuine `init agent <name>` still spawns."""
-        from aipass.aipass.apps.modules import init_flow
-
         spawn = _stub_every_doing_path["subprocess.run"]
-        with patch.object(init_flow, "console", MagicMock()):
-            with pytest.raises(SystemExit):
-                init_flow.handle_command("init", ["agent", "realname"])
+        with pytest.raises(SystemExit):
+            init_flow.handle_command("init", ["agent", "realname"])
 
         assert spawn.called, "genuine agent creation must still reach spawn"
         cmd = spawn.call_args[0][0]
@@ -206,30 +204,27 @@ class TestTrustEnrollmentCanary:
     records the attempt without touching the trust registry.
     """
 
-    def test_help_probe_does_not_enroll(self, tmp_path, _stub_every_doing_path) -> None:
-        """A help probe against a valid, enrollable directory must not enroll."""
-        from aipass.aipass.apps.modules import trust
-
+    def test_help_probe_does_not_enroll(
+        self, tmp_path, _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Mutant: trust help enroll usage line altered -> red."""
         project = tmp_path / "enrollable"
         (project / ".aipass").mkdir(parents=True)
         (project / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
 
-        with patch.object(trust, "console", MagicMock()):
-            handled = trust.handle_command("trust", [str(project), "--help"])
+        handled = trust.handle_command("trust", [str(project), "--help"])
 
         assert handled is True
+        assert "aipass trust <path>" in capsys.readouterr().out
         _assert_nothing_happened(_stub_every_doing_path, "trust <dir> --help")
 
     def test_real_enrollment_still_works(self, tmp_path, _stub_every_doing_path) -> None:
         """Pin the other direction: a genuine enroll still reaches enroll()."""
-        from aipass.aipass.apps.modules import trust
-
         project = tmp_path / "enrollable"
         (project / ".aipass").mkdir(parents=True)
         (project / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
 
-        with patch.object(trust, "console", MagicMock()):
-            handled = trust.handle_command("trust", [str(project)])
+        handled = trust.handle_command("trust", [str(project)])
 
         assert handled is True
         assert _stub_every_doing_path["aipass.aipass.apps.modules.trust.enroll"].called
@@ -240,22 +235,16 @@ class TestHelpChatBareWordOptOut:
 
     def test_bare_help_word_is_answered_not_usage(self, _stub_every_doing_path) -> None:
         """`aipass help help` is a question about help, not a usage dump."""
-        from aipass.aipass.apps.modules import help_chat
-
         with patch.object(help_chat, "print_help", MagicMock()) as mock_help:
-            with patch.object(help_chat, "console", MagicMock()):
-                handled = help_chat.handle_command("help", ["help"])
+            handled = help_chat.handle_command("help", ["help"])
 
         assert handled is True
         mock_help.assert_not_called()
 
     def test_dashed_flag_still_shows_usage(self, _stub_every_doing_path) -> None:
         """The opt-out must not disarm --help for the help verb itself."""
-        from aipass.aipass.apps.modules import help_chat
-
         with patch.object(help_chat, "print_help", MagicMock()) as mock_help:
-            with patch.object(help_chat, "console", MagicMock()):
-                handled = help_chat.handle_command("help", ["what", "is", "drone", "--help"])
+            handled = help_chat.handle_command("help", ["what", "is", "drone", "--help"])
 
         assert handled is True
         mock_help.assert_called_once()
@@ -269,5 +258,4 @@ class TestOwnershipCheckRunsFirst:
         """A module must return False for a command it does not own."""
         module = importlib.import_module(f"aipass.aipass.apps.modules.{stem}")
 
-        with patch.object(module, "console", MagicMock()):
-            assert module.handle_command("not-my-command", ["--help"]) is False
+        assert module.handle_command("not-my-command", ["--help"]) is False

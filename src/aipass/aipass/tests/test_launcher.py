@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_launcher.py
 # Description: Tests for the repo-root ./aipass cold-clone launcher
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-05
-# Modified: 2026-07-05
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the repo-root ./aipass cold-clone launcher (bash script)."""
+"""Tests for the repo-root ./aipass launcher (bash), which forwards to apps/aipass.py once installed."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — apps/aipass.py's own command routing; see tests/test_aipass_main.py
 
 from __future__ import annotations
 
@@ -44,7 +47,7 @@ def _fake_venv_binary(tmp_path: Path, body: str) -> Path:
     venv_bin = tmp_path / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     fake = venv_bin / "aipass"
-    fake.write_text(f"#!/usr/bin/env bash\n{body}\n")
+    fake.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
     _make_executable(fake)
     return fake
 
@@ -62,12 +65,12 @@ class TestLauncherProperties:
 
     def test_shebang(self):
         """Launcher starts with bash shebang."""
-        first_line = LAUNCHER.read_text().splitlines()[0]
+        first_line = LAUNCHER.read_text(encoding="utf-8").splitlines()[0]
         assert first_line == "#!/usr/bin/env bash"
 
     def test_no_python_imports(self):
         """Launcher contains no Python imports (stdlib-only bash)."""
-        content = LAUNCHER.read_text()
+        content = LAUNCHER.read_text(encoding="utf-8")
         assert "import " not in content
         assert "from " not in content
 
@@ -82,6 +85,7 @@ class TestPreSetupHelp:
             ["bash", str(launcher)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "not set up yet" in result.stdout
@@ -94,6 +98,7 @@ class TestPreSetupHelp:
             ["bash", str(launcher), "doctor"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "not set up yet" in result.stdout
@@ -105,6 +110,7 @@ class TestPreSetupHelp:
             ["bash", str(launcher)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "Quick start" in result.stdout
@@ -118,13 +124,14 @@ class TestPreSetupInstall:
         """./aipass install execs setup.sh in the same directory."""
         launcher = _isolated_launcher(tmp_path)
         setup = tmp_path / "setup.sh"
-        setup.write_text('#!/usr/bin/env bash\necho "SETUP_CALLED $@"\n')
+        setup.write_text('#!/usr/bin/env bash\necho "SETUP_CALLED $@"\n', encoding="utf-8")
         _make_executable(setup)
 
         result = subprocess.run(
             ["bash", str(launcher), "install"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "SETUP_CALLED" in result.stdout
@@ -133,13 +140,14 @@ class TestPreSetupInstall:
         """Flags after 'install' pass through to setup.sh."""
         launcher = _isolated_launcher(tmp_path)
         setup = tmp_path / "setup.sh"
-        setup.write_text('#!/usr/bin/env bash\necho "FLAGS:$@"\n')
+        setup.write_text('#!/usr/bin/env bash\necho "FLAGS:$@"\n', encoding="utf-8")
         _make_executable(setup)
 
         result = subprocess.run(
             ["bash", str(launcher), "install", "--no-chat"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "--no-chat" in result.stdout
@@ -148,13 +156,14 @@ class TestPreSetupInstall:
         """--path and its value pass through to setup.sh."""
         launcher = _isolated_launcher(tmp_path)
         setup = tmp_path / "setup.sh"
-        setup.write_text('#!/usr/bin/env bash\necho "FLAGS:$@"\n')
+        setup.write_text('#!/usr/bin/env bash\necho "FLAGS:$@"\n', encoding="utf-8")
         _make_executable(setup)
 
         result = subprocess.run(
             ["bash", str(launcher), "install", "--path", str(tmp_path / "home")],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "--path" in result.stdout
@@ -172,6 +181,7 @@ class TestPostSetupForwarding:
             ["bash", str(launcher), "doctor"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "VENV_AIPASS doctor" in result.stdout
@@ -185,6 +195,7 @@ class TestPostSetupForwarding:
             ["bash", str(launcher), "install"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "VENV_AIPASS install" in result.stdout
@@ -198,6 +209,7 @@ class TestPostSetupForwarding:
             ["bash", str(launcher)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=5,
         )
         assert "VENV_AIPASS_NOARGS" in result.stdout

@@ -1,18 +1,19 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for admin-lane state reporting.
+"""Tests for apps/handlers/admin_lane.py."""
+# The rules this file exists to hold: the row NEVER errors (a dark lane is a
+# valid install), it NEVER names a ceremony command when the lane is dark (doctor
+# must not push), and it reports PRESENCE only — it must never grow into a second
+# implementation of @devpulse's five-leg contract.
 
-The rules this file exists to hold: the row NEVER errors (a dark lane is a
-valid install), it NEVER names a ceremony command when the lane is dark (doctor
-must not push), and it reports PRESENCE only — it must never grow into a second
-implementation of @devpulse's five-leg contract.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that admin_lane.py and the modules it imports parse and import
 
 import json
 from pathlib import Path

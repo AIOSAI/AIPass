@@ -1,13 +1,18 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-08-01
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for provider_wire — strip-and-readd hook merge kills the double-fire bug (DPLAN-0279),
-plus the additive settings scalar slot (DPLAN-0347)."""
+"""Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
+
+# Strip-and-readd hook merge kills the double-fire bug (DPLAN-0279),
+# plus the additive settings scalar slot (DPLAN-0347).
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
 from unittest.mock import patch

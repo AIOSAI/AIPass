@@ -1,12 +1,15 @@
 # =================== AIPass ====================
 # Name: test_sandbox_check.py
 # Description: Tests for sandbox prerequisite checker and doctor integration
-# Version: 1.0.0
+# Version: 1.1.1
 # Created: 2026-06-10
-# Modified: 2026-06-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for sandbox prereq checks — handler + doctor integration."""
+"""Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import shutil
 import socket
@@ -17,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
     check_bwrap_functional,
@@ -163,10 +167,14 @@ class TestCheckBwrapFunctional:
 
     @pytest.mark.skipif(not shutil.which("bwrap"), reason="bwrap not installed")
     def test_bwrap_functional_live(self):
+        """Mutant: bwrap exit code read inverted -> red."""
+        bwrap = shutil.which("bwrap") or "bwrap"
+        probe = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "true"]
+        sandbox_works = subprocess.run(probe, capture_output=True, timeout=10, check=False).returncode == 0
         result = check_bwrap_functional()
-        assert isinstance(result["ok"], bool)
-        if result["ok"]:
-            assert "succeeded" in result["detail"]
+        assert result["ok"] is sandbox_works
+        if sandbox_works:
+            assert result["detail"] == "trivial sandbox succeeded"
 
 
 # =============================================================================
@@ -287,22 +295,16 @@ class TestCheckSrtResolvable:
 class TestFindSrtResolver:
     def test_resolves_real_hooks_branch(self):
         """aipass.hooks is a real namespace package in this repo — resolver should be found."""
-        from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import _find_srt_resolver
-
-        resolver = _find_srt_resolver()
+        resolver = sandbox_checker._find_srt_resolver()
         assert resolver is not None
         assert resolver.name == "_srt_resolve.mjs"
         assert resolver.is_file()
 
     def test_missing_spec_returns_none(self, monkeypatch):
-        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
-
         monkeypatch.setattr(sandbox_checker.importlib.util, "find_spec", lambda name: None)
         assert sandbox_checker._find_srt_resolver() is None
 
     def test_missing_file_returns_none(self, monkeypatch, tmp_path):
-        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
-
         fake_spec = MagicMock(submodule_search_locations=[str(tmp_path)])
         monkeypatch.setattr(sandbox_checker.importlib.util, "find_spec", lambda name: fake_spec)
         assert sandbox_checker._find_srt_resolver() is None
@@ -315,15 +317,11 @@ class TestFindSrtResolver:
 
 class TestSrtInstallHint:
     def test_no_npm_falls_back_to_plain(self, monkeypatch):
-        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
-
         monkeypatch.setattr(shutil, "which", lambda name: None)
         hint = sandbox_checker._srt_install_hint()
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
     def test_npm_root_success_names_prefix(self, monkeypatch):
-        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
-
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/npm" if name == "npm" else None)
         mock_proc = MagicMock(returncode=0, stdout="/usr/local/lib/node_modules\n", stderr="")
         with patch(
@@ -335,8 +333,6 @@ class TestSrtInstallHint:
         assert "npm install -g @anthropic-ai/sandbox-runtime" in hint
 
     def test_npm_root_failure_falls_back_to_plain(self, monkeypatch):
-        from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
-
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/npm" if name == "npm" else None)
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
@@ -386,9 +382,9 @@ class TestCheckRgPresent:
 
 
 class TestCheckBrokerAlive:
-    def test_no_repo_root_no_env(self, monkeypatch):
+    def test_no_repo_root_no_env(self, monkeypatch, tmp_path):
         monkeypatch.delenv("AIPASS_HOME", raising=False)
-        monkeypatch.setattr(Path, "cwd", lambda: Path("/nonexistent"))
+        monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
         result = check_broker_alive(repo_root=None)
         assert result["alive"] is False
 
@@ -539,7 +535,7 @@ class TestCheckSandboxDoctor:
         fail_results = [r for r in results if r.glyph == GLYPH_FAIL]
         assert len(fail_results) >= 4, f"Flag ON + missing prereqs should produce FAILs, got {len(fail_results)}"
 
-    def test_flag_on_all_present_is_pass(self, monkeypatch):
+    def test_flag_on_all_present_is_pass(self, monkeypatch, tmp_path):
         monkeypatch.setenv("AIPASS_SANDBOX_ENABLED", "1")
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.is_linux", lambda: True)
         monkeypatch.setattr(
@@ -566,7 +562,7 @@ class TestCheckSandboxDoctor:
             "aipass.aipass.apps.modules.doctor.check_broker_alive",
             lambda repo_root=None: {"alive": True, "detail": "connected"},
         )
-        monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: Path("/tmp/fake"))
+        monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: tmp_path / "fake")
 
         results = _check_sandbox()
         # THE FLOOR (v5 unentered_assert, 2026-09-08). Seven rows measured from
