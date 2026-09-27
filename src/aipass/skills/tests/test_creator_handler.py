@@ -3,7 +3,7 @@
 # Description: Tests for skill creation handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-26
 # =============================================
 
 """
@@ -141,7 +141,7 @@ class TestCreateSkill:
     def test_placeholder_replacement(self, tmp_path):
         """Skill name replaces {{SKILL_NAME}} in created files."""
         result = create_skill("my-replaced", template_type="markdown_only", target_dir=tmp_path)
-        content = (Path(result["path"]) / "SKILL.md").read_text()
+        content = (Path(result["path"]) / "SKILL.md").read_text(encoding="utf-8")
         assert "my-replaced" in content
         assert "{{SKILL_NAME}}" not in content
 

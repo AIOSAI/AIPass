@@ -9,13 +9,8 @@
 """Integration tests for the full skill lifecycle: create -> discover -> load -> run."""
 
 import shutil
-import sys
 import tempfile
 from pathlib import Path
-
-skills_root = Path(__file__).resolve().parent.parent.parent
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
 
 from aipass.skills.apps.handlers.template import copy_template, get_template
 from aipass.skills.apps.modules.creator import create_skill
@@ -42,7 +37,7 @@ class TestFullLifecycle:
         assert (skill_path / "SKILL.md").exists()
 
         # Verify placeholder replacement
-        content = (skill_path / "SKILL.md").read_text()
+        content = (skill_path / "SKILL.md").read_text(encoding="utf-8")
         assert "test-md" in content
         assert "{{SKILL_NAME}}" not in content
 
@@ -164,7 +159,7 @@ class TestTemplates:
             target = Path(tmpdir) / "my-skill"
             result = copy_template(template["path"], target, "my-skill")
             assert result["success"] is True
-            content = (target / "SKILL.md").read_text()
+            content = (target / "SKILL.md").read_text(encoding="utf-8")
             assert "my-skill" in content
             assert "{{SKILL_NAME}}" not in content
         finally:

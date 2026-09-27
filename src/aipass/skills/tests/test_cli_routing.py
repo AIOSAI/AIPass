@@ -13,10 +13,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-skills_root = Path(__file__).resolve().parent.parent.parent
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
-
 from aipass.skills.apps.skills import handle_command, _parse_extra_args
 
 
@@ -194,17 +190,38 @@ class TestPrintIntrospection:
         assert "skills Entry Point" in captured.out
         assert "Run 'drone @skills --help' for usage information" in captured.out
 
-    def test_print_introspection_lists_modules(self, capsys):
-        """print_introspection: lists connected modules."""
+    def test_print_introspection_lists_every_module_on_disk(self, capsys):
+        """print_introspection: lists each apps/modules/*.py with its header Description."""
         from aipass.skills.apps.skills import print_introspection
 
+        modules_dir = Path(__file__).resolve().parent.parent / "apps" / "modules"
         print_introspection()
         captured = capsys.readouterr()
         assert "modules/" in captured.out
-        # Every module the introspection claims to connect, named. A module
-        # dropped from the listing fails here instead of passing on "modules/".
-        for module in ("discovery.py", "loader.py", "runner.py", "creator.py", "validator.py", "switch.py"):
-            assert module in captured.out, f"introspection does not list {module}"
+        on_disk = sorted(p for p in modules_dir.glob("*.py") if p.name != "__init__.py")
+        assert len(on_disk) > 0, "no modules found on disk - the oracle would be vacuous"
+        for path in on_disk:
+            description = next(
+                line.split(":", 1)[1].strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.startswith("# Description:")
+            )
+            assert f"{path.name} ({description})" in captured.out, f"introspection does not list {path.name}"
+        assert "__init__.py" not in captured.out
+
+    def test_print_introspection_derives_from_the_directory(self, tmp_path, capsys):
+        """print_introspection: the listing follows the directory, not a hand-kept list."""
+        from aipass.skills.apps.skills import print_introspection
+
+        (tmp_path / "__init__.py").write_text("", encoding="utf-8")
+        (tmp_path / "widget.py").write_text("# Description: Spin widgets\n", encoding="utf-8")
+        (tmp_path / "bare.py").write_text('"""No header here."""\n', encoding="utf-8")
+        print_introspection(modules_dir=tmp_path)
+        captured = capsys.readouterr()
+        assert "widget.py (Spin widgets)" in captured.out
+        assert "- bare.py\n" in captured.out
+        assert "__init__.py" not in captured.out
+        assert "discovery.py" not in captured.out
 
 
 class TestOutputCapture:
@@ -226,7 +243,7 @@ class TestOutputCapture:
         from aipass.skills.apps import skills as entry
 
         assert captured.out.strip() == f"SKILLS v{entry.VERSION}"
-        assert entry.VERSION == "1.1.0"
+        assert entry.VERSION == "1.1.1"
 
     def test_output_capture_unknown_command(self, capsys):
         """output_capture: unknown command names itself and points at help."""
@@ -252,6 +269,7 @@ class TestExitCodes:
             [sys.executable, str(entry), *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=120,
         )
 

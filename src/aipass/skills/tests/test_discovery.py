@@ -198,8 +198,8 @@ class TestDiscoverSkillsInPath:
         assert "system_status" in names
         assert "drone_commands" in names
 
-    def test_nonexistent_path(self):
-        skills = discover_skills_in_path("/nonexistent/path", "test")
+    def test_nonexistent_path(self, tmp_path):
+        skills = discover_skills_in_path(str(tmp_path / "nonexistent" / "path"), "test")
         assert skills == []
 
     def test_empty_dir(self):
@@ -234,7 +234,9 @@ class TestDiscoverSkillsInPath:
         with tempfile.TemporaryDirectory() as tmpdir:
             skill_dir = Path(tmpdir) / "my-skill"
             skill_dir.mkdir()
-            (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ndescription: A test\n---\n\n# Test\n")
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: my-skill\ndescription: A test\n---\n\n# Test\n", encoding="utf-8"
+            )
             skills = discover_skills_in_path(tmpdir, "project")
             assert len(skills) == 1
             assert skills[0]["name"] == "my-skill"
@@ -251,6 +253,6 @@ class TestParseFrontmatter:
             assert result["name"] == "test"
         Path(f.name).unlink()
 
-    def test_invalid_file(self):
-        result = parse_frontmatter("/nonexistent/file.md")
+    def test_invalid_file(self, tmp_path):
+        result = parse_frontmatter(str(tmp_path / "nonexistent" / "file.md"))
         assert result is None

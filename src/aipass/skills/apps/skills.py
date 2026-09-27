@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: skills.py
 # Description: Entry point CLI for drone @skills
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-26
 # =============================================
 
 """Skills system entry point.
@@ -37,23 +37,36 @@ from aipass.prax import logger
 from aipass.cli.apps.modules import console, error
 
 # One version string, printed by --version and carried in this file's header.
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 
-def print_introspection():
-    """Display module introspection info."""
+def _header_description(path):
+    """Return a module's '# Description:' header value, or None when it has none."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("# Description:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def print_introspection(modules_dir=None):
+    """Display module introspection info, derived from the modules directory.
+
+    Args:
+        modules_dir: Directory to list; defaults to this entry point's modules/.
+    """
+    modules_dir = Path(modules_dir) if modules_dir else Path(_script_dir) / "modules"
     console.print()
     console.print("[bold cyan]skills Entry Point[/bold cyan]")
     console.print("[dim]Capability framework for AI agents — discover, run, create, and validate skills[/dim]")
     console.print()
     console.print("[bold]Connected Modules:[/bold]")
     console.print("  [cyan]modules/[/cyan]")
-    console.print("    [dim]- discovery.py (discover_all — scan search paths for skills)[/dim]")
-    console.print("    [dim]- loader.py (load_skill — load SKILL.md metadata, body, and handler)[/dim]")
-    console.print("    [dim]- runner.py (run_skill — execute handler-based or markdown-only skills)[/dim]")
-    console.print("    [dim]- creator.py (create_skill — scaffold new skills from templates)[/dim]")
-    console.print("    [dim]- validator.py (validate_skill — check skill requirements)[/dim]")
-    console.print("    [dim]- switch.py (turn_on/turn_off — per-skill off-switch)[/dim]")
+    for path in sorted(modules_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        description = _header_description(path)
+        suffix = f" ({description})" if description else ""
+        console.print(f"    [dim]- {path.name}{suffix}[/dim]")
     console.print()
     console.print("[dim]Run 'drone @skills --help' for usage information[/dim]")
     console.print()

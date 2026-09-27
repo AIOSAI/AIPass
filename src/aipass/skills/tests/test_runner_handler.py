@@ -8,13 +8,6 @@
 
 """Tests for the skills runner handler, focusing on run_markdown edge cases."""
 
-import sys
-from pathlib import Path
-
-skills_root = Path(__file__).resolve().parent.parent.parent
-if str(skills_root) not in sys.path:
-    sys.path.insert(0, str(skills_root))
-
 from aipass.skills.apps.handlers.runner_handler import run_markdown, run_handler
 
 
