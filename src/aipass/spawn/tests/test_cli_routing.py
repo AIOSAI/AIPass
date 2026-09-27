@@ -1,16 +1,22 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for spawn CLI routing, help output, and introspection."""
+"""Tests for apps/spawn.py's CLI routing, help output, and introspection."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/spawn.py parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on print_help, print_introspection, and handle_create
 
 from unittest.mock import patch
 
 import pytest
+
+from aipass.spawn.apps.spawn import handle_create, main, print_help, print_introspection
 
 
 class TestCliRouting:
@@ -18,7 +24,6 @@ class TestCliRouting:
 
     def test_no_args_triggers_introspection(self):
         """main() with no args calls print_introspection."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn"]
@@ -29,7 +34,6 @@ class TestCliRouting:
 
     def test_help_flag(self):
         """main() with --help calls print_help."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn", "--help"]
@@ -40,7 +44,6 @@ class TestCliRouting:
 
     def test_short_help(self):
         """main() with -h calls print_help."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn", "-h"]
@@ -51,7 +54,6 @@ class TestCliRouting:
 
     def test_help_word(self):
         """main() with 'help' command calls print_help."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn", "help"]
@@ -62,7 +64,6 @@ class TestCliRouting:
 
     def test_unknown_command(self):
         """main() with unknown command returns 1."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn", "nonexistent_command"]
@@ -78,7 +79,6 @@ class TestCliRouting:
         this is the one door in the file that is SUPPOSED to exit zero, and the
         number is pinned rather than its type.
         """
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn"]
@@ -94,7 +94,6 @@ class TestCreateHelp:
 
     def test_create_help_flag(self):
         """create --help shows help instead of argparse error."""
-        from aipass.spawn.apps.spawn import handle_create
 
         with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
             result = handle_create(["--help"])
@@ -103,7 +102,6 @@ class TestCreateHelp:
 
     def test_create_short_help(self):
         """create -h shows help."""
-        from aipass.spawn.apps.spawn import handle_create
 
         with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
             result = handle_create(["-h"])
@@ -112,7 +110,6 @@ class TestCreateHelp:
 
     def test_create_help_with_class(self):
         """create specialist --help shows help."""
-        from aipass.spawn.apps.spawn import handle_create
 
         with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
             result = handle_create(["specialist", "--help"])
@@ -122,7 +119,6 @@ class TestCreateHelp:
     def test_create_help_beats_a_retired_class(self):
         """--help is answered before the retired-name refusal — asking for help
         is never the thing that gets refused."""
-        from aipass.spawn.apps.spawn import handle_create
 
         with patch("aipass.spawn.apps.spawn.print_help") as mock_help:
             result = handle_create(["aipass_framework", "--help"])
@@ -135,7 +131,6 @@ class TestCreateDryRun:
 
     def test_dry_run_returns_zero(self, tmp_path):
         """--dry-run returns 0 for valid target."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = str(tmp_path / "drytest")
         with patch("aipass.spawn.apps.spawn.console"), patch("aipass.spawn.apps.spawn.header"):
@@ -144,7 +139,6 @@ class TestCreateDryRun:
 
     def test_dry_run_creates_no_files(self, tmp_path):
         """--dry-run creates nothing on disk."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = tmp_path / "drytest"
         with patch("aipass.spawn.apps.spawn.console"), patch("aipass.spawn.apps.spawn.header"):
@@ -153,7 +147,6 @@ class TestCreateDryRun:
 
     def test_dry_run_existing_target_returns_error(self, tmp_path):
         """--dry-run returns 1 if target already exists."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = tmp_path / "existing"
         target.mkdir()
@@ -171,7 +164,6 @@ class TestTemplateFlag:
 
     def test_template_flag_unknown_treated_as_path(self, tmp_path):
         """--template with unknown value is treated as path (backward compat)."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = str(tmp_path / "path_test")
         with patch("aipass.spawn.apps.spawn.console"), patch("aipass.spawn.apps.spawn.error") as mock_error:
@@ -189,7 +181,6 @@ class TestCreateUnknownClassRefusal:
     def test_bare_unrecognized_token_refuses_no_branch_created(self, tmp_path, monkeypatch):
         """`create wizard` (no path arg) must refuse — not silently create a
         branch named WIZARD in ./wizard."""
-        from aipass.spawn.apps.spawn import handle_create
 
         monkeypatch.chdir(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -212,7 +203,6 @@ class TestCreateUnknownClassRefusal:
     def test_path_like_single_positional_still_creates(self, tmp_path):
         """A token carrying a path marker is unaffected — still creates via the
         default class exactly as before (legitimate `create <path>` usage)."""
-        from aipass.spawn.apps.spawn import handle_create
 
         target = tmp_path / "legit_agent"
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -235,8 +225,6 @@ class TestCreateUnknownClassRefusal:
         """
         import json
 
-        from aipass.spawn.apps.spawn import handle_create
-
         target = tmp_path / f"legit_{citizen_class}"
         registry = tmp_path / "AIPASS_REGISTRY.json"
         with patch("aipass.spawn.apps.spawn.console"):
@@ -254,7 +242,6 @@ class TestCreateUnknownClassRefusal:
         must not die as a bare argparse SystemExit(2) — the caller has to be told
         the name retired and what replaced it.
         """
-        from aipass.spawn.apps.spawn import handle_create
 
         target = tmp_path / "legacy_agent"
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -271,7 +258,6 @@ class TestCreateUnknownClassRefusal:
 
     def test_relative_dot_prefixed_token_still_creates(self, tmp_path, monkeypatch):
         """An explicit relative-path marker ('./name') disambiguates and still creates."""
-        from aipass.spawn.apps.spawn import handle_create
 
         monkeypatch.chdir(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -287,7 +273,6 @@ class TestPrintHelp:
 
     def test_print_help_runs(self):
         """print_help executes without error."""
-        from aipass.spawn.apps.spawn import print_help
 
         with patch("aipass.spawn.apps.spawn.console") as mock_console:
             with patch("aipass.spawn.apps.spawn.header"):
@@ -301,7 +286,6 @@ class TestPrintIntrospection:
 
     def test_print_introspection_runs(self):
         """print_introspection executes without error."""
-        from aipass.spawn.apps.spawn import print_introspection
 
         with patch("aipass.spawn.apps.spawn.console") as mock_console:
             print_introspection()
@@ -309,7 +293,6 @@ class TestPrintIntrospection:
 
     def test_output_capture(self):
         """Verify print_introspection mentions connected modules."""
-        from aipass.spawn.apps.spawn import print_introspection
 
         calls = []
         with patch("aipass.spawn.apps.spawn.console") as mock_console:
@@ -322,7 +305,6 @@ class TestPrintIntrospection:
 def test_output_capture():
     """Verify print_introspection mentions connected modules."""
     from io import StringIO
-    from aipass.spawn.apps.spawn import print_introspection
 
     buf = StringIO()
     calls = []

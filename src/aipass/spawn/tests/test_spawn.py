@@ -1,12 +1,16 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-05
-# Modified: 2026-03-07
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the aipass.spawn module."""
+"""Tests for apps/modules/core.py (spawn_agent) and apps/handlers/registry.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — docstrings on get_branch_name, normalize_branch_name and detect_profile
+# seedgo: no-test-needed(stdlib) — uuid.uuid4()'s randomness, which apps/modules/core.py mints citizen_id from
 
 import json
 import shutil
@@ -45,8 +49,8 @@ def tmp_registry(tmp_path):
 
 
 class TestMetadata:
-    def test_get_branch_name(self):
-        assert get_branch_name("/some/path/my_agent") == "my_agent"
+    def test_get_branch_name(self, tmp_path):
+        assert get_branch_name(str(tmp_path / "my_agent")) == "my_agent"
 
     def test_normalize_upper(self):
         assert normalize_branch_name("my-agent", "upper") == "MY_AGENT"
@@ -83,12 +87,12 @@ class TestPlaceholders:
             assert dead not in r, f"{dead} is back in the engine with nothing rendering it"
 
     def test_validate_clean_dir(self, tmp_path):
-        (tmp_path / "clean.txt").write_text("no placeholders here")
+        (tmp_path / "clean.txt").write_text("no placeholders here", encoding="utf-8")
         issues = validate_no_placeholders(tmp_path)
         assert issues == []
 
     def test_validate_catches_placeholders(self, tmp_path):
-        (tmp_path / "dirty.txt").write_text("Hello {{NAME}}")
+        (tmp_path / "dirty.txt").write_text("Hello {{NAME}}", encoding="utf-8")
         issues = validate_no_placeholders(tmp_path)
         assert len(issues) == 1
         assert "NAME" in issues[0][1]
@@ -139,7 +143,7 @@ class TestSpawnAgent:
         # Verify passport content. branch_name renders LOWERCASE in schema 2.0
         # (DPLAN-0319 R1 casing) — the UPPER form survives only as the registry
         # key and this result dict's branch_name, asserted above.
-        passport = json.loads((tmp_agent / ".trinity" / "passport.json").read_text())
+        passport = json.loads((tmp_agent / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["branch_info"]["branch_name"] == "test_agent"
         assert passport["identity"]["role"] == "Test Role"
 
@@ -158,7 +162,7 @@ class TestSpawnAgent:
         spawn_agent(str(tmp_agent), registry_path=str(tmp_registry))
         reg_file = tmp_agent / ".spawn" / ".template_registry.json"
         assert reg_file.exists()
-        data = json.loads(reg_file.read_text())
+        data = json.loads(reg_file.read_text(encoding="utf-8"))
         assert data["metadata"]["generated"] is True
         assert len(data["files"]) > 0
 
@@ -204,7 +208,7 @@ class TestSaveRegistry:
             ],
         }
         save_registry(reg_path, data)
-        saved = json.loads(reg_path.read_text())
+        saved = json.loads(reg_path.read_text(encoding="utf-8"))
         assert saved["branches"][0]["name"] == "ALPHA"
         assert saved["branches"][1]["name"] == "ZEBRA"
 
@@ -215,7 +219,7 @@ class TestSaveRegistry:
             "branches": [],
         }
         save_registry(reg_path, data)
-        saved = json.loads(reg_path.read_text())
+        saved = json.loads(reg_path.read_text(encoding="utf-8"))
         assert saved["metadata"]["last_updated"] != "2020-01-01"
 
     def test_handles_dict_branches(self, tmp_path):
@@ -225,7 +229,7 @@ class TestSaveRegistry:
             "branches": {"MY_AGENT": {"name": "MY_AGENT", "path": "my_agent"}},
         }
         save_registry(reg_path, data)
-        saved = json.loads(reg_path.read_text())
+        saved = json.loads(reg_path.read_text(encoding="utf-8"))
         assert isinstance(saved["branches"], list)
         assert saved["branches"][0]["name"] == "MY_AGENT"
 
@@ -235,13 +239,14 @@ class TestGetNextCitizenNumber:
 
     def test_empty_registry(self, tmp_path):
         reg_path = tmp_path / "TEST_REGISTRY.json"
-        reg_path.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}')
+        reg_path.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}', encoding="utf-8")
         assert get_next_citizen_number(reg_path) == 1
 
     def test_with_existing_branches(self, tmp_path):
         reg_path = tmp_path / "TEST_REGISTRY.json"
         reg_path.write_text(
-            '{"metadata":{"version":"1.0.0","total_branches":2},"branches":[{"name":"A"},{"name":"B"}]}'
+            '{"metadata":{"version":"1.0.0","total_branches":2},"branches":[{"name":"A"},{"name":"B"}]}',
+            encoding="utf-8",
         )
         assert get_next_citizen_number(reg_path) == 3
 
@@ -260,7 +265,8 @@ class TestPathContainment:
 
     def test_escaped_path_rejected(self, tmp_path):
         reg = tmp_path / "TEST_REGISTRY.json"
-        assert _validate_path_containment("/tmp/evil", reg) is False
+        escaped = tmp_path.parent / "evil"
+        assert _validate_path_containment(str(escaped), reg) is False
 
     def test_traversal_attack_rejected(self, tmp_path):
         reg = tmp_path / "TEST_REGISTRY.json"
@@ -285,12 +291,13 @@ class TestAtomicWriteAndLocking:
         branch = tmp_path / "agent_b"
         branch.mkdir()
         add_to_registry(reg, "AGENT_B", str(branch), "W", "@b")
-        data = json.loads(reg.read_text())
+        data = json.loads(reg.read_text(encoding="utf-8"))
         assert data["branches"][0]["name"] == "AGENT_B"
 
     def test_path_containment_blocks_add(self, tmp_path):
         reg = tmp_path / "TEST_REGISTRY.json"
-        result = add_to_registry(reg, "EVIL", "/tmp/evil", "W", "@evil")
+        escaped = tmp_path.parent / "evil"
+        result = add_to_registry(reg, "EVIL", str(escaped), "W", "@evil")
         assert result is False
-        data = json.loads(reg.read_text()) if reg.exists() else {"branches": []}
+        data = json.loads(reg.read_text(encoding="utf-8")) if reg.exists() else {"branches": []}
         assert len(data.get("branches", [])) == 0

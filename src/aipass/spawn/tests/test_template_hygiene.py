@@ -1,22 +1,40 @@
-"""Canaries for what the shipped templates are allowed to contain.
+# =================== AIPass ====================
+# Name: test_template_hygiene.py
+# Description: Canaries for what the shipped templates are allowed to contain
+# Version: 1.0.0
+# Created: 2026-08-13
+# Modified: 2026-09-27
+# =============================================
 
-A template is a blueprint: every file in it is copied into every new citizen,
-forever. Build artifacts that drift in are invisible — they cost nothing to
-create and never fail anything — so they need a standing test rather than a
-review pass.
+"""Tests for the shipped templates under templates/citizen/ and apps/handlers/file_ops.py's copy engine."""
 
-`.pytest_cache/` drifted in this way (flagged 2026-08-07, still shipping on
-2026-08-13): the copy engine skips `__pycache__` but not `.pytest_cache`, so
-every branch was born carrying spawn's own cached test node IDs
-(DPLAN-0291 audit).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/mint_verify.py and apps/handlers/docs_page.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on the mint_verify and docs_page helpers
 
 from pathlib import Path
 
 import pytest
 
 import aipass.spawn
+from aipass.spawn.apps.handlers import class_registry
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE
+from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
+from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths, verify_mint
+from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
+from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.spawn import handle_create
+
+# A template is a blueprint: every file in it is copied into every new citizen,
+# forever. Build artifacts that drift in are invisible — they cost nothing to
+# create and never fail anything — so they need a standing test rather than a
+# review pass.
+#
+# `.pytest_cache/` drifted in this way (flagged 2026-08-07, still shipping on
+# 2026-08-13): the copy engine skips `__pycache__` but not `.pytest_cache`, so
+# every branch was born carrying spawn's own cached test node IDs
+# (DPLAN-0291 audit).
 
 ARTIFACT_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
 
@@ -41,8 +59,6 @@ def test_the_class_registry_declares_two_classes_and_the_collector_finds_both():
     canaries it silently emptied.
     """
     import ast
-
-    from aipass.spawn.apps.handlers import class_registry
 
     source = Path(class_registry.__file__).read_text(encoding="utf-8")
     declared = next(
@@ -104,7 +120,6 @@ def test_copy_engine_skips_artifact_dirs():
     the one place that decision is written down. A cache dir missing from
     ``SKIP_NAMES`` is copied into every citizen minted after it.
     """
-    from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 
     assert ARTIFACT_DIRS <= set(SKIP_NAMES)
 
@@ -201,7 +216,6 @@ class TestMintCompleteness:
 
     def test_truncated_template_refuses_and_names_what_is_missing(self, tmp_path):
         """The refusal must name every file that never landed."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         template = _truncated_template(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
@@ -220,8 +234,6 @@ class TestMintCompleteness:
         """No half-citizen in the registry — refuse before the registry write."""
         import json
 
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         template = _truncated_template(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
 
@@ -239,8 +251,6 @@ class TestMintCompleteness:
     def test_cli_create_exits_nonzero_and_prints_no_success(self, tmp_path):
         """The command itself must not exit 0 or say "Agent created"."""
         from unittest.mock import patch
-
-        from aipass.spawn.apps.spawn import handle_create
 
         template = _truncated_template(tmp_path)
 
@@ -266,7 +276,6 @@ class TestMintCompleteness:
     @pytest.mark.parametrize("class_name", TEMPLATE_CLASSES)
     def test_complete_template_still_mints(self, tmp_path, class_name):
         """The guard must not fire on the real, whole templates — either class."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / f"whole_{class_name}"
         result = _spawn_agent(
@@ -285,7 +294,6 @@ class TestMintCompleteness:
         Nothing declares a contract, so the only honest check is that everything
         the directory does contain arrived. It does, so this must succeed.
         """
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         template = tmp_path / "bare_template"
         (template / "apps").mkdir(parents=True)
@@ -312,8 +320,6 @@ class TestExpectedMintPaths:
     """
 
     def test_branch_placeholder_is_rendered_not_literal(self, tmp_path):
-        from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths
-        from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
 
         replacements = build_replacements_dict(tmp_path / "my_agent", "my_agent")
         expected = expected_mint_paths(get_template_dir(), replacements, "my_agent")
@@ -324,8 +330,6 @@ class TestExpectedMintPaths:
     def test_verify_mint_returns_only_what_is_missing(self, tmp_path):
         """Present files stay silent; the one absent file is named."""
         import json
-
-        from aipass.spawn.apps.handlers.mint_verify import verify_mint
 
         template = tmp_path / "tmpl"
         (template / ".spawn").mkdir(parents=True)
@@ -359,9 +363,7 @@ class TestExpectedMintPaths:
         """
         import json
 
-        from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE as skeleton
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
+        skeleton = DOCS_PAGE_TEMPLATE
         template_dir = get_template_dir()
         assert skeleton.is_file(), f"the skeleton is missing: {skeleton}"
         assert template_dir not in skeleton.parents, "the skeleton sits inside the stamped tree"
@@ -378,7 +380,6 @@ class TestExpectedMintPaths:
 
     def test_a_newborns_docs_index_has_the_index_shape(self, tmp_path):
         """docs/README.md is born as back-link, title, one line - and no pages yet (DPLAN-0351)."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / "indexed"
         result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
@@ -400,8 +401,6 @@ class TestExpectedMintPaths:
         """
         import datetime
 
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "shaped"
         result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
         assert result["success"] is True, result.get("error")
@@ -421,8 +420,6 @@ class TestExpectedMintPaths:
     def test_every_link_in_a_newborns_readme_resolves_where_it_lands(self, tmp_path):
         """seedgo's check 8, on the newborn: no relative link may dangle wherever the citizen is minted."""
         import re
-
-        from aipass.spawn.apps.modules.core import _spawn_agent
 
         target = tmp_path / "deep" / "linked"
         result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
@@ -467,7 +464,6 @@ OPTIONAL_SECTIONS = ["## Why it is this way", "## What is not verified", "## Rel
 
 def test_the_docs_page_skeleton_has_the_shape_seedgo_scores():
     """Back-link, one H1, a prose purpose line, depth <= 3, the three fixed names last and in order."""
-    from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE
 
     lines = [line for line in DOCS_PAGE_TEMPLATE.read_text(encoding="utf-8").splitlines() if line.strip()]
 

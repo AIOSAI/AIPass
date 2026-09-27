@@ -1,18 +1,29 @@
 # =================== AIPass ====================
 # Name: test_contracts.py
 # Description: Tests for return types, exceptions, data structures, and init
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-27
-# Modified: 2026-03-27
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for type contracts, exception handling, data structures, and init provisioning."""
+"""Tests for apps/modules/core.py's mint contract and apps/handlers/json/json_handler.py's return/exception types."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/regenerate_registry.py and apps/spawn.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on handle_command, _spawn_agent, and read_json
+
+import importlib
 import json
 from pathlib import Path
 from unittest.mock import patch
 
+import aipass.spawn.apps.handlers.json.json_handler as json_handler_mod
+from aipass.spawn.apps.handlers.class_registry import get_template_dir
+from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.json.json_handler import read_json
+from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.regenerate_registry import handle_command
+from aipass.spawn.apps.spawn import handle_create, main
 
 
 class TestReturnTypeContracts:
@@ -25,7 +36,6 @@ class TestReturnTypeContracts:
         caller switches on, so a handler that started returning False for its own
         verb would have passed the old isinstance pin unnoticed.
         """
-        from aipass.spawn.apps.modules.regenerate_registry import handle_command
 
         with patch("aipass.spawn.apps.modules.regenerate_registry.print_introspection"):
             result = handle_command("regenerate-registry", [])
@@ -58,7 +68,6 @@ class TestExceptionContracts:
 
     def test_invalid_mode_raises(self):
         """Unknown command in main() returns error code, not exception."""
-        from aipass.spawn.apps.spawn import main
 
         with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
             mock_sys.argv = ["spawn", "totally_invalid_mode"]
@@ -72,7 +81,6 @@ class TestDataStructureContracts:
 
     def test_config_keys(self):
         """spawn_agent result dict contains all required keys."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
         import tempfile
 
         with tempfile.TemporaryDirectory() as td:
@@ -100,9 +108,6 @@ class TestDataStructureContracts:
         ``target`` built from an 8.3 short temp-dir name (Windows) would never
         compare equal to the resolved path it actually returns.
         """
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-        from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
-        from aipass.spawn.apps.modules.core import _spawn_agent
         import tempfile
 
         template = get_template_dir()
@@ -135,14 +140,10 @@ class TestInfrastructureMocking:
 
     def test_reimport_after_mock(self):
         """Verify module reimport works after mocking."""
-        from aipass.spawn.apps.handlers.json.json_handler import read_json as fn1
+        fn1 = read_json  # bound once, from the top-level import
 
-        # Re-import to verify clean state
-        import importlib
-        import aipass.spawn.apps.handlers.json.json_handler as mod
-
-        importlib.reload(mod)
-        from aipass.spawn.apps.handlers.json.json_handler import read_json as fn2
+        importlib.reload(json_handler_mod)
+        fn2 = json_handler_mod.read_json  # fetched fresh, off the reloaded module
 
         assert callable(fn1)
         assert callable(fn2)
@@ -153,7 +154,6 @@ class TestSuccessFailurePaths:
 
     def test_no_args_triggers_help(self):
         """create with no args returns error code 1."""
-        from aipass.spawn.apps.spawn import handle_create
 
         with patch("aipass.spawn.apps.spawn.error"):
             result = handle_create([])

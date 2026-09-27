@@ -1,25 +1,37 @@
-"""Pins that spawn's own mocking fixtures reach the code they claim to mock.
+# =================== AIPass ====================
+# Name: test_conftest_fixtures.py
+# Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
+# Version: 1.0.0
+# Created: 2026-08-30
+# Modified: 2026-09-27
+# =============================================
 
-A fixture that mocks nothing is worse than no fixture: it passes, it looks like
-coverage, and it lets the real object keep working — in this case writing into
-@prax's live state directory from inside a test run.
+"""Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""
 
-MEASURED by @memory, reproduced across the fleet by @seedgo (2026-08-30):
-`patch("aipass.prax.logger")` — the spelling spawn and four other branches
-used — never reached a single consumer. `file_ops` binds the logger OBJECT into
-its own globals at import (`from aipass.prax.apps.modules.logger import
-system_logger as logger`), and `aipass/prax/__init__.py` copies it once more one
-level up, so a patch at or above `aipass.prax` is always upstream of a copy
-already taken. Under all four techniques the fleet was using, the consumer's
-logger was still a live SystemLogger.
-
-The rule: THE LAST DOT MUST BE RESOLVED AT CALL TIME. These are identity pins,
-not behaviour pins, because identity is the thing that silently broke.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/file_ops.py and apps/handlers/json/json_handler.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on the conftest fixtures themselves
 
 from unittest.mock import Mock, patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
+from aipass.spawn.apps.handlers.json import json_handler
+
+# A fixture that mocks nothing is worse than no fixture: it passes, it looks
+# like coverage, and it lets the real object keep working — in this case
+# writing into @prax's live state directory from inside a test run.
+#
+# MEASURED by @memory, reproduced across the fleet by @seedgo (2026-08-30):
+# `patch("aipass.prax.logger")` — the spelling spawn and four other branches
+# used — never reached a single consumer. `file_ops` binds the logger OBJECT
+# into its own globals at import (`from aipass.prax.apps.modules.logger import
+# system_logger as logger`), and `aipass/prax/__init__.py` copies it once more
+# one level up, so a patch at or above `aipass.prax` is always upstream of a
+# copy already taken. Under all four techniques the fleet was using, the
+# consumer's logger was still a live SystemLogger.
+#
+# The rule: THE LAST DOT MUST BE RESOLVED AT CALL TIME. These are identity
+# pins, not behaviour pins, because identity is the thing that silently broke.
 
 
 class TestMockLoggerReachesItsConsumer:
@@ -78,13 +90,11 @@ class TestIsolateSpawnJsonActuallyRedirects:
 
     def test_the_handlers_directory_is_the_one_the_fixture_returns(self, _isolate_spawn_json):
         """Identity between what the fixture promises and what the shim does."""
-        from aipass.spawn.apps.handlers.json import json_handler
 
         assert json_handler.get_json_path("probe", "config").parent == _isolate_spawn_json
 
     def test_a_write_lands_in_the_sandbox_and_not_in_the_branch(self, _isolate_spawn_json):
         """The failure this guard exists for: a real file in spawn/spawn_json/."""
-        from aipass.spawn.apps.handlers.json import json_handler
 
         assert json_handler.ensure_json_exists("probe", "config") is True
         assert (_isolate_spawn_json / "probe_config.json").exists()

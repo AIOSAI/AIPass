@@ -1,37 +1,16 @@
-"""What the newborn's handler guard must survive on its very first import.
+# =================== AIPass ====================
+# Name: test_template_import_guard.py
+# Description: What the newborn's handler guard must survive on its very first import
+# Version: 1.0.0
+# Created: 2026-08-30
+# Modified: 2026-09-27
+# =============================================
 
-Every citizen is born carrying `apps/handlers/__init__.py` from the template,
-and that file runs `_guard_branch_access()` at import time — so a defect in it
-is not a defect in one branch, it is a defect in every branch the factory has
-ever shipped and every one it will ship.
+"""Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
 
-MEASURED 2026-08-30 (@drone's dead-cwd pin, reported by @devpulse): the guard
-resolved frame filenames BEFORE skipping pseudo-files like `<string>`, and
-`Path(...).resolve()` on a relative or pseudo filename calls `os.getcwd()`. Any
-process whose working directory had been deleted therefore died with
-FileNotFoundError while importing ANY branch. All 18 live copies were fixed in
-32db831c; these pins guard the TEMPLATE, so the next spawned branch is born
-with the guarded form instead of re-inheriting the defect.
-
-The tests render the template into a throwaway package and import it in a
-subprocess, because that is the only way to exercise a file whose whole
-behaviour happens at import time. The defect pins reproduce it in two worlds —
-an injected cwd failure that runs on every OS, and a genuinely deleted directory
-that runs wherever the OS allows the recipe — and the fence pins exist so the
-fix cannot be mistaken for a weakened guard: it must still refuse an outside
-caller and still admit an inside one.
-
-ON THE CPYTHON LINE NUMBERS IN THIS FILE (@skills' round-9 correction): every
-`pathlib.py:NNN` and `ntpath.py:NNN` below is a DATED COURTESY to the reader,
-not the claim. They were read on 3.12.3 here, and on the 3.10/3.11/3.13 sources
-fetched for the round that needed them, and they move between patch releases —
-@skills and I cited two different numbers for one getcwd read within a day. What
-is falsifiable, and what every comment states in words beside the number, is the
-MECHANISM and the ORDERING: which call happens above which check, and what is
-captured when. A pin whose reasoning rests on a line number fails open on the
-next bugfix release, silently, which is the line-scoped-waiver species one
-context over.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/core.py parses and imports
+# seedgo: no-test-needed(documentation) — docstrings on the guard's helper functions in the template
 
 import ast
 import importlib
@@ -46,6 +25,39 @@ import pytest
 from _pytest.outcomes import Failed, Skipped
 
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+from aipass.spawn.apps.modules import core
+
+# Every citizen is born carrying `apps/handlers/__init__.py` from the template,
+# and that file runs `_guard_branch_access()` at import time — so a defect in it
+# is not a defect in one branch, it is a defect in every branch the factory has
+# ever shipped and every one it will ship.
+#
+# MEASURED 2026-08-30 (@drone's dead-cwd pin, reported by @devpulse): the guard
+# resolved frame filenames BEFORE skipping pseudo-files like `<string>`, and
+# `Path(...).resolve()` on a relative or pseudo filename calls `os.getcwd()`. Any
+# process whose working directory had been deleted therefore died with
+# FileNotFoundError while importing ANY branch. All 18 live copies were fixed in
+# 32db831c; these pins guard the TEMPLATE, so the next spawned branch is born
+# with the guarded form instead of re-inheriting the defect.
+#
+# The tests render the template into a throwaway package and import it in a
+# subprocess, because that is the only way to exercise a file whose whole
+# behaviour happens at import time. The defect pins reproduce it in two worlds —
+# an injected cwd failure that runs on every OS, and a genuinely deleted directory
+# that runs wherever the OS allows the recipe — and the fence pins exist so the
+# fix cannot be mistaken for a weakened guard: it must still refuse an outside
+# caller and still admit an inside one.
+#
+# ON THE CPYTHON LINE NUMBERS IN THIS FILE (@skills' round-9 correction): every
+# `pathlib.py:NNN` and `ntpath.py:NNN` below is a DATED COURTESY to the reader,
+# not the claim. They were read on 3.12.3 here, and on the 3.10/3.11/3.13 sources
+# fetched for the round that needed them, and they move between patch releases —
+# @skills and I cited two different numbers for one getcwd read within a day. What
+# is falsifiable, and what every comment states in words beside the number, is the
+# MECHANISM and the ORDERING: which call happens above which check, and what is
+# captured when. A pin whose reasoning rests on a line number fails open on the
+# next bugfix release, silently, which is the line-scoped-waiver species one
+# context over.
 
 
 TEMPLATE_CLASSES = sorted(get_available_classes())
@@ -85,6 +97,7 @@ def _run(script: str, cwd: Path) -> subprocess.CompletedProcess:
         [sys.executable, "-c", textwrap.dedent(script).strip()],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(cwd),
     )
 
@@ -2846,6 +2859,7 @@ def test_newborn_still_refuses_an_outside_caller(class_name, tmp_path):
         [sys.executable, str(caller)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(tmp_path),
     )
 
@@ -2877,6 +2891,7 @@ def test_newborn_admits_its_own_code(class_name, tmp_path):
         [sys.executable, str(insider)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         cwd=str(tmp_path),
     )
 
@@ -3081,8 +3096,6 @@ class TestOptionalPeerImportsAreWideEnough:
         ids=["dead-cwd", "unreadable", "absent"],
     )
     def test_meta_tabs_fall_back_when_memory_is_broken_or_absent(self, exc, monkeypatch):
-        from aipass.spawn.apps.modules import core
-
         denier = self._deny("aipass.memory", exc)
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
@@ -3108,8 +3121,6 @@ class TestOptionalPeerImportsAreWideEnough:
         monkeypatch.setattr(sys, "meta_path", [denier] + sys.meta_path)
         for name in [m for m in sys.modules if m.startswith("aipass.memory")]:
             monkeypatch.delitem(sys.modules, name, raising=False)
-
-        from aipass.spawn.apps.modules import core
 
         with pytest.raises(ValueError):
             core._load_meta_tabs()
@@ -3341,6 +3352,7 @@ class TestNewbornsAreBornPinned:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=str(branch),
         )
 

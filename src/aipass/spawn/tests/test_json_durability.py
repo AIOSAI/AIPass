@@ -1,26 +1,16 @@
 # =================== META ====================
 # Name: test_json_durability.py
 # Description: Torn-write durability tests for spawn's JSON/text write paths
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-16
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Durability tests for every spawn write path that touches a live file.
+"""Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
 
-The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
-target in place, so a concurrent reader can land between the truncate and the
-write and read an empty or half-written file. Measured on spawn's passport write
-path before the fix: 38.17% of concurrent reads came back unusable.
-
-The required shape is stage-to-temp (``tempfile.mkstemp(dir=target.parent)``),
-write, ``fsync``, close, then ``os.replace`` — an atomic same-filesystem rename.
-A reader either sees the whole old file or the whole new file, never a gap.
-
-Each test class states which sites were genuinely RED before the fix; the sites
-that were already safe (``meta_ops`` / ``regenerate_registry_ops`` staged through
-a temp already) say so rather than pretending.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — docstrings on the handler functions this file drives
+# seedgo: no-test-needed(stdlib) — tempfile.mkstemp's filename-uniqueness guarantee
 
 import ast
 import errno
@@ -35,6 +25,29 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from aipass.spawn.apps.handlers import file_ops, regenerate_registry_ops
+from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
+from aipass.spawn.apps.handlers.json import json_handler
+from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
+from aipass.spawn.apps.handlers.registry import save_registry
+from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
+from aipass.spawn.apps.handlers.update_ops import _merge_json
+import aipass.spawn.apps.handlers.atomic_write as aw
+import aipass.spawn.apps.handlers.registry as registry_mod
+
+# The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
+# target in place, so a concurrent reader can land between the truncate and the
+# write and read an empty or half-written file. Measured on spawn's passport write
+# path before the fix: 38.17% of concurrent reads came back unusable.
+#
+# The required shape is stage-to-temp (``tempfile.mkstemp(dir=target.parent)``),
+# write, ``fsync``, close, then ``os.replace`` — an atomic same-filesystem rename.
+# A reader either sees the whole old file or the whole new file, never a gap.
+#
+# Each test class states which sites were genuinely RED before the fix; the sites
+# that were already safe (``meta_ops`` / ``regenerate_registry_ops`` staged through
+# a temp already) say so rather than pretending.
 
 
 # =============================================================================
@@ -419,7 +432,6 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_passport_write_is_never_read_torn(self, passport_world):
         """sync_registry_ops.fix_owner_identity — another citizen's identity file."""
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         reg = passport_world["registry"]
 
@@ -436,20 +448,17 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_template_registry_write_is_never_read_torn(self, spawned_branch):
         """file_ops.regenerate_template_registry — .spawn/.template_registry.json."""
-        from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 
         target = spawned_branch / ".spawn" / ".template_registry.json"
 
         def write_once(n):
-            regenerate_template_registry(spawned_branch)
+            file_ops.regenerate_template_registry(spawned_branch)
             return True
 
         _Racer(target, write_once).run().assert_clean()
 
     def test_json_merge_write_is_never_read_torn(self, merge_world):
         """update_ops._merge_json — a live branch's JSON during update --apply."""
-        from aipass.spawn.apps.handlers.json import json_handler
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
 
         dest = merge_world["dest"]
 
@@ -468,7 +477,6 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_branch_meta_write_is_never_read_torn(self, spawned_branch):
         """meta_ops.save_branch_meta — already temp-staged; regression pin only."""
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         target = spawned_branch / ".spawn" / ".branch_meta.json"
 
@@ -482,17 +490,16 @@ class TestConcurrentReaderNeverSeesTornFile:
 
     def test_regenerated_template_registry_is_never_read_torn(self, tmp_path):
         """regenerate_registry_ops — already temp-staged; regression pin only."""
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         for i in range(5):
             (template_dir / f"file_{i}.py").write_text(f"# {i}\n" * 20, encoding="utf-8")
-        regenerate_template_registry(template_dir)
+        regenerate_registry_ops.regenerate_template_registry(template_dir)
         target = template_dir / ".spawn" / ".template_registry.json"
 
         def write_once(n):
-            return "error" not in regenerate_template_registry(template_dir)
+            return "error" not in regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         _Racer(target, write_once).run().assert_clean()
 
@@ -513,42 +520,37 @@ class TestNoTempLitterSurvives:
     """
 
     def test_successful_passport_write_leaves_no_temp(self, passport_world):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         fix_owner_identity(registry_path=passport_world["registry"], dry_run=False)
 
         assert _stray_temps(passport_world["passport"].parent) == []
 
     def test_successful_branch_meta_write_leaves_no_temp(self, spawned_branch):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         assert save_branch_meta(spawned_branch, {"metadata": {}, "files": {}}) is True
 
         assert _stray_temps(spawned_branch / ".spawn") == []
 
     def test_successful_template_registry_write_leaves_no_temp(self, spawned_branch):
-        from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 
-        regenerate_template_registry(spawned_branch)
+        file_ops.regenerate_template_registry(spawned_branch)
 
         assert _stray_temps(spawned_branch / ".spawn") == []
 
     def test_failed_registry_regeneration_leaves_no_temp(self, tmp_path, monkeypatch):
         """RED before the fix: orphaned .template_registry.tmp after a failure."""
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         (template_dir / f"marker_{SENTINEL}.py").write_text("# payload\n", encoding="utf-8")
 
         with write_fails_midway(monkeypatch):
-            result = regenerate_template_registry(template_dir)
+            result = regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         assert "error" in result, "a failed registry write must report an error"
         assert _stray_temps(template_dir / ".spawn") == []
 
     def test_failed_branch_meta_write_leaves_no_temp(self, spawned_branch, monkeypatch):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         with write_fails_midway(monkeypatch):
             ok = save_branch_meta(spawned_branch, {"metadata": {"marker": SENTINEL}, "files": {}})
@@ -572,7 +574,6 @@ class TestFailedWriteKeepsOldContent:
 
     def test_helper_raises_on_write_failure(self, tmp_path, monkeypatch):
         """The shared helper must RAISE, never swallow. RED by absence pre-fix."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "thing.json"
         target.write_text('{"old": true}\n', encoding="utf-8")
@@ -606,7 +607,6 @@ class TestFailedWriteKeepsOldContent:
         which is a claim about the migration, not about durability. The fields are
         pinned separately instead, so a regression in either one is named.
         """
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         passport = passport_world["passport"]
         reg = passport_world["registry"]
@@ -634,7 +634,6 @@ class TestFailedWriteKeepsOldContent:
 
     def test_failed_json_merge_keeps_old_file(self, merge_world, monkeypatch):
         """RED before the fix: the branch's live JSON was left empty."""
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
 
         dest = merge_world["dest"]
         merge_world["template"].write_text(json.dumps({"section": {"marker": SENTINEL}}), encoding="utf-8")
@@ -648,7 +647,6 @@ class TestFailedWriteKeepsOldContent:
         assert json.loads(dest.read_text(encoding="utf-8")) == before
 
     def test_failed_branch_meta_write_keeps_old_meta(self, spawned_branch, monkeypatch):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         target = spawned_branch / ".spawn" / ".branch_meta.json"
         save_branch_meta(spawned_branch, {"metadata": {"round": "first"}, "files": {}})
@@ -683,59 +681,52 @@ class TestTempStagedBesideTarget:
         )
 
     def test_passport_stages_beside_passport(self, passport_world, mkstemp_spy):
-        from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 
         fix_owner_identity(registry_path=passport_world["registry"], dry_run=False)
 
         self._assert_staged_in(mkstemp_spy, passport_world["passport"].parent)
 
     def test_template_registry_stages_beside_registry(self, spawned_branch, mkstemp_spy):
-        from aipass.spawn.apps.handlers.file_ops import regenerate_template_registry
 
-        regenerate_template_registry(spawned_branch)
+        file_ops.regenerate_template_registry(spawned_branch)
 
         self._assert_staged_in(mkstemp_spy, spawned_branch / ".spawn")
 
     def test_json_merge_stages_beside_target(self, merge_world, mkstemp_spy):
-        from aipass.spawn.apps.handlers.update_ops import _merge_json
 
         _merge_json(merge_world["template"], merge_world["dest"], {}, False, False, merge_world["backup"])
 
         self._assert_staged_in(mkstemp_spy, merge_world["dest"].parent)
 
     def test_branch_meta_stages_beside_meta(self, spawned_branch, mkstemp_spy):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         save_branch_meta(spawned_branch, {"metadata": {}, "files": {}})
 
         self._assert_staged_in(mkstemp_spy, spawned_branch / ".spawn")
 
     def test_regenerated_registry_stages_beside_registry(self, tmp_path, mkstemp_spy):
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         (template_dir / "a.py").write_text("# a\n", encoding="utf-8")
 
-        regenerate_template_registry(template_dir)
+        regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         self._assert_staged_in(mkstemp_spy, template_dir / ".spawn")
 
     def test_copied_template_file_stages_beside_target(self, tmp_path, mkstemp_spy):
-        from aipass.spawn.apps.handlers.file_ops import copy_template
 
         template = tmp_path / "tpl"
         template.mkdir()
         (template / "hello.md").write_text("# hello {{BRANCH}}\n", encoding="utf-8")
         target = tmp_path / "out"
 
-        copy_template(template, target, {"BRANCH": "durable"})
+        file_ops.copy_template(template, target, {"BRANCH": "durable"})
 
         self._assert_staged_in(mkstemp_spy, target)
 
     def test_update_addition_stages_beside_target(self, tmp_path, mkstemp_spy):
         """update_ops' ADDITION arm — a missing template file written into a branch."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         # Driven through the helper directly: the ADDITION arm needs a whole
         # branch + registry world, and the property under test is the staging
@@ -763,7 +754,6 @@ class TestStagingNameIsUnique:
     """
 
     def test_branch_meta_staging_names_are_unique(self, spawned_branch, mkstemp_spy):
-        from aipass.spawn.apps.handlers.meta_ops import save_branch_meta
 
         for i in range(5):
             save_branch_meta(spawned_branch, {"metadata": {"round": i}, "files": {}})
@@ -773,14 +763,13 @@ class TestStagingNameIsUnique:
         assert len(set(names)) == 5, f"staging name collided across writes: {names}"
 
     def test_regenerated_registry_staging_names_are_unique(self, tmp_path, mkstemp_spy):
-        from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 
         template_dir = tmp_path / "some_template"
         template_dir.mkdir()
         (template_dir / "a.py").write_text("# a\n", encoding="utf-8")
 
         for _ in range(5):
-            regenerate_template_registry(template_dir)
+            regenerate_registry_ops.regenerate_template_registry(template_dir)
 
         names = [c["path"].name for c in mkstemp_spy if Path(c["dir"]) == template_dir / ".spawn"]
         assert len(names) == 5, f"expected 5 staged temps, recorded {len(names)}: {names}"
@@ -796,7 +785,6 @@ class TestAtomicWriteHelper:
     """The single choke point every fixed site routes through."""
 
     def test_writes_exact_bytes(self, tmp_path):
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "out.json"
         payload = json.dumps({"unicode": "café — ok", "n": 1}, indent=2, ensure_ascii=False) + "\n"
@@ -806,7 +794,6 @@ class TestAtomicWriteHelper:
         assert target.read_text(encoding="utf-8") == payload
 
     def test_overwrites_existing_target(self, tmp_path):
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
@@ -819,7 +806,6 @@ class TestAtomicWriteHelper:
     def test_uses_os_replace_not_path_rename(self, tmp_path, monkeypatch):
         """Path.rename cannot overwrite on Windows; os.replace can."""
         import os as _os
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         seen = []
         real_replace = _os.replace
@@ -839,7 +825,6 @@ class TestAtomicWriteHelper:
     def test_fsyncs_before_swap(self, tmp_path, monkeypatch):
         """Durability across power loss needs the bytes flushed before the rename."""
         import os as _os
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         order = []
         real_fsync, real_replace = _os.fsync, _os.replace
@@ -852,7 +837,6 @@ class TestAtomicWriteHelper:
 
     def test_encoding_failure_raises_and_leaves_no_temp(self, tmp_path):
         """A surrogate payload must not silently land, and must not litter."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "out.json"
 
@@ -884,7 +868,6 @@ class TestReplaceRetriesThroughSharingViolations:
     """
 
     def test_helper_exists_and_is_bounded(self):
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         assert hasattr(aw, "_replace_with_retry"), (
             "_replace_with_retry missing — a sharing violation still kills the write"
@@ -895,7 +878,6 @@ class TestReplaceRetriesThroughSharingViolations:
     def test_retries_through_a_transient_sharing_violation(self, tmp_path, monkeypatch):
         """Two sharing violations then success — the write still lands."""
         import os as _os
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         calls = {"count": 0}
         real_replace = _os.replace
@@ -918,7 +900,6 @@ class TestReplaceRetriesThroughSharingViolations:
 
     def test_retry_is_bounded_and_raises(self, tmp_path, monkeypatch):
         """A swap that never unblocks raises instead of retrying forever."""
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         calls = {"count": 0}
 
@@ -958,7 +939,6 @@ class TestReplaceRetriesThroughSharingViolations:
         nothing from ``time`` but ``sleep`` (one call site, line 73), so a stub
         carrying only ``sleep`` is the whole surface.
         """
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         sleeps = []
         monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
@@ -978,7 +958,6 @@ class TestReplaceRetriesThroughSharingViolations:
 
     def test_non_permission_error_propagates_immediately(self, tmp_path, monkeypatch):
         """A cross-device rename will not fix itself in 200ms — do not wait it out."""
-        import aipass.spawn.apps.handlers.atomic_write as aw
 
         calls = {"count": 0}
 
@@ -1010,7 +989,6 @@ class TestSaveRegistryStaysAtomic:
     """
 
     def test_save_registry_delegates_to_json_handler(self, tmp_path, monkeypatch):
-        import aipass.spawn.apps.handlers.registry as registry_mod
 
         seen = {}
 
@@ -1025,7 +1003,6 @@ class TestSaveRegistryStaysAtomic:
         assert seen["path"] == reg
 
     def test_save_registry_write_is_never_read_torn(self, tmp_path):
-        from aipass.spawn.apps.handlers.registry import save_registry
 
         reg = tmp_path / "AIPASS_REGISTRY.json"
         branches = [_entry(f"B{i}", f"b{i}") for i in range(12)]
@@ -1306,7 +1283,6 @@ class TestRacerReportsWeatherHonestly:
 
     def test_a_clean_exercised_race_still_passes(self, tmp_path):
         """The normal path is untouched."""
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "live.json"
 
@@ -1325,7 +1301,6 @@ class TestRacerReportsWeatherHonestly:
         This is the half that turns weather into latency: the timed window does
         not open until both sides have proven they are live.
         """
-        from aipass.spawn.apps.handlers.atomic_write import atomic_write_text
 
         target = tmp_path / "slow.json"
 

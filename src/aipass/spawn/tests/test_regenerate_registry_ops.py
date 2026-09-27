@@ -1,12 +1,16 @@
 # =================== AIPass ====================
 # Name: test_regenerate_registry_ops.py
 # Description: Tests for regenerate_registry_ops handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for regenerate_registry_ops: template registry regeneration, ID preservation, scanning."""
+"""Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that regenerate_registry_ops.py and regenerate_registry.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on the scan/regenerate helper functions
 
 import json
 from pathlib import Path
@@ -14,11 +18,13 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.handlers.regenerate_registry_ops import (
     regenerate_template_registry,
     _scan_template_directory,
     _next_id,
 )
+from aipass.spawn.apps.modules import regenerate_registry as regenerate_registry_module
 from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 
 
@@ -575,8 +581,6 @@ def _shipped_registry_path() -> Path:
     are archived, so this reads the live one through the class registry rather
     than hardcoding a name that a rename would point at nothing.
     """
-    from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
     return get_template_dir() / ".spawn" / ".template_registry.json"
 
 
@@ -697,26 +701,23 @@ class TestHandleRegenerateRegistry:
         """
         import shutil
 
-        from aipass.spawn.apps.handlers.class_registry import get_available_classes as real_classes
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir as real_template_dir
-
         sandbox = tmp_path / "templates"
         sandbox.mkdir()
-        for class_name in real_classes():
-            shutil.copytree(real_template_dir(class_name), sandbox / class_name)
+        for class_name in get_available_classes():
+            shutil.copytree(get_template_dir(class_name), sandbox / class_name)
 
         def fake_template_dir(class_name: str = "specialist") -> Path:
             return sandbox / class_name
 
         def fake_template_dirs() -> list[Path]:
-            return sorted({sandbox / class_name for class_name in real_classes()})
+            return sorted({sandbox / class_name for class_name in get_available_classes()})
 
         with (
             patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dir", side_effect=fake_template_dir),
             patch("aipass.spawn.apps.modules.regenerate_registry.get_template_dirs", side_effect=fake_template_dirs),
             patch(
                 "aipass.spawn.apps.modules.regenerate_registry.get_available_classes",
-                side_effect=real_classes,
+                side_effect=get_available_classes,
             ),
         ):
             yield
@@ -729,9 +730,11 @@ class TestHandleRegenerateRegistry:
         gate. If this fails, add the new name to the fixture above — do not
         widen the list without redirecting it.
         """
-        from aipass.spawn.apps.modules import regenerate_registry as module
-
-        found = {name for name in dir(module) if name.startswith("get_template_dir") or name.endswith("_template_dirs")}
+        found = {
+            name
+            for name in dir(regenerate_registry_module)
+            if name.startswith("get_template_dir") or name.endswith("_template_dirs")
+        }
 
         assert found == _TEMPLATE_LOOKUPS, (
             f"template lookups on the module changed: {sorted(found)} != {sorted(_TEMPLATE_LOOKUPS)}. "
@@ -797,9 +800,7 @@ class TestHandleRegenerateRegistry:
         never widened to the new one, so --all walked straight to the shipped
         tree while the single-class path stayed correctly sandboxed.
         """
-        from aipass.spawn.apps.modules import regenerate_registry as module
-
-        resolved = module.get_template_dirs()
+        resolved = regenerate_registry_module.get_template_dirs()
 
         assert resolved, "get_template_dirs() returned nothing — the --all branch would be a silent no-op"
         for template_dir in resolved:

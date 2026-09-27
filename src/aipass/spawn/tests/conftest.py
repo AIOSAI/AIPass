@@ -1,3 +1,11 @@
+# =================== AIPass ====================
+# Name: conftest.py
+# Description: Shared test fixtures for spawn test suite
+# Version: 1.1.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
+# =============================================
+
 """Shared test fixtures for spawn test suite."""
 
 import os
@@ -8,11 +16,13 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-import json
 import shutil
 import pytest
 from pathlib import Path
 from unittest.mock import patch
+
+import aipass.spawn.apps.handlers.file_ops as file_ops
+from aipass.cli.apps.modules import display
 
 
 # ---------------------------------------------------------------------------
@@ -127,28 +137,19 @@ def _shipped_templates_are_read_only():
     )
 
 
-@pytest.fixture
-def sample_data():
-    """Pre-populated JSON test data for spawn operations."""
-    return {
-        "metadata": {"version": "1.0.0", "created": "2026-03-27"},
-        "files": {"F001": {"path": "test.py", "hash": "abc123"}},
-        "directories": {"D001": {"path": "apps/"}},
-    }
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
 
-@pytest.fixture
-def mock_infrastructure(tmp_path):
-    """Mock filesystem structure mimicking a spawned branch."""
-    branch = tmp_path / "test_branch"
-    for d in ["apps/modules", "apps/handlers", ".trinity", ".aipass"]:
-        (branch / d).mkdir(parents=True)
-    passport = {
-        "branch_info": {"branch_name": "test_branch"},
-        "identity": {"citizen_class": "specialist"},
-    }
-    (branch / ".trinity" / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
-    return branch
+@pytest.fixture(autouse=True)
+def clean_command_state():
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture
@@ -180,9 +181,7 @@ def mock_json_handler():
     Uses patch.object on the module reference held by file_ops to avoid
     stale-reference issues when other test suites reload json_handler.
     """
-    import aipass.spawn.apps.handlers.file_ops as _fo
-
-    with patch.object(_fo.json_handler, "log_operation") as m:
+    with patch.object(file_ops.json_handler, "log_operation") as m:
         m.return_value = True
         yield m
 

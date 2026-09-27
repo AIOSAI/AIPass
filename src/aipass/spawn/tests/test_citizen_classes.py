@@ -1,21 +1,49 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-03-07
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
-"""Integration tests for the citizen class template system.
+"""Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
 
-Tests class registry, class-aware create,
-class-aware update, and backward compatibility.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that class_registry.py, core.py, and update_ops.py parse and import cleanly
+# seedgo: no-test-needed(ruff) — that registry.py, metadata.py, placeholders.py parse and import cleanly
+# seedgo: no-test-needed(ruff) — that update.py and spawn.py parse and import cleanly
+# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from pathlib import Path
 
 import pytest
+
+from aipass.spawn.apps.handlers.class_registry import (
+    CITIZEN_CLASSES,
+    IDENTITY_CITIZEN_CLASSES,
+    LEGACY_CLASSES,
+    class_for_citizen_number,
+    get_available_classes,
+    get_default_class,
+    get_template_dir,
+    get_template_dirs,
+    refuse_legacy_class,
+    resolve_template_class,
+    validate_class,
+)
+from aipass.spawn.apps.handlers.metadata import detect_profile
+from aipass.spawn.apps.handlers.placeholders import replace_placeholders
+from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
+from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
+from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.update import handle_update
+from aipass.spawn.apps.spawn import handle_create
+
+# Context kept from the file's original docstring:
+#
+# Integration tests for the citizen class template system.
+# Tests class registry, class-aware create, class-aware update, and backward compatibility.
 
 # =============================================================================
 # CLASS REGISTRY TESTS
@@ -36,41 +64,29 @@ class TestClassRegistry:
 
     def test_get_available_classes(self):
         """The roster is exactly manager + specialist — nothing more, nothing less."""
-        from aipass.spawn.apps.handlers.class_registry import get_available_classes
-
         assert get_available_classes() == LIVE_CLASSES
 
     def test_validate_class_valid(self):
         """Both live class names validate as True."""
-        from aipass.spawn.apps.handlers.class_registry import validate_class
-
         assert validate_class("specialist") is True
         assert validate_class("manager") is True
 
     def test_validate_class_invalid(self):
         """Unknown or empty class names validate as False."""
-        from aipass.spawn.apps.handlers.class_registry import validate_class
-
         assert validate_class("nonexistent") is False
         assert validate_class("") is False
 
     def test_validate_class_retired_birthright(self):
         """Retired 'birthright' class should validate as False."""
-        from aipass.spawn.apps.handlers.class_registry import validate_class
-
         assert validate_class("birthright") is False
 
     @pytest.mark.parametrize("retired", sorted(RETIRED_CLASSES))
     def test_validate_class_retired_names(self, retired):
         """The DPLAN-0319 R4 renames answer False — they are not classes any more."""
-        from aipass.spawn.apps.handlers.class_registry import validate_class
-
         assert validate_class(retired) is False
 
     def test_get_default_class(self):
         """Default citizen class is 'specialist' — the class most citizens are."""
-        from aipass.spawn.apps.handlers.class_registry import get_default_class
-
         assert get_default_class() == "specialist"
 
     def test_get_template_dir_is_the_one_citizen_dir(self):
@@ -81,8 +97,6 @@ class TestClassRegistry:
         construction the moment two classes shared one template, so both classes
         now resolve the SAME directory and its name is neutral.
         """
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
         paths = {cls: get_template_dir(cls) for cls in LIVE_CLASSES}
         assert {p.name for p in paths.values()} == {TEMPLATE_DIR_NAME}
         assert len(set(paths.values())) == 1, f"classes forked the template again: {paths}"
@@ -90,16 +104,12 @@ class TestClassRegistry:
 
     def test_get_template_dirs_deduplicates(self):
         """Iterating classes to do per-template work would do it twice, one dir."""
-        from aipass.spawn.apps.handlers.class_registry import get_template_dirs
-
         dirs = get_template_dirs()
         assert len(dirs) == 1
         assert dirs[0].name == TEMPLATE_DIR_NAME
 
     def test_get_template_dir_invalid_raises(self):
         """Requesting an unknown class raises ValueError."""
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
         with pytest.raises(ValueError, match="Unknown citizen class"):
             get_template_dir("nonexistent")
 
@@ -111,8 +121,6 @@ class TestClassRegistry:
         while the passport spawn writes says something else — the exact drift this
         rework exists to end.
         """
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
         with pytest.raises(ValueError) as exc:
             get_template_dir(retired)
 
@@ -127,12 +135,6 @@ class TestClassRegistry:
         It had no template of its own, so ``validate_class("manager")`` was False
         and the CLI could not accept it. It is a first-class registered class now.
         """
-        from aipass.spawn.apps.handlers.class_registry import (
-            CITIZEN_CLASSES,
-            IDENTITY_CITIZEN_CLASSES,
-            validate_class,
-        )
-
         assert validate_class("manager") is True
         assert "manager" in CITIZEN_CLASSES
         # The identity set used to be a strict SUPERSET of the template set; the
@@ -142,8 +144,6 @@ class TestClassRegistry:
     @pytest.mark.parametrize("citizen_class", LIVE_CLASSES)
     def test_resolve_template_class_passthrough_for_registered_classes(self, citizen_class):
         """Every registered class resolves to itself, unchanged."""
-        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
-
         assert resolve_template_class({"citizen_class": citizen_class}) == citizen_class
 
     def test_resolve_template_class_ignores_free_text_role(self):
@@ -154,8 +154,6 @@ class TestClassRegistry:
         inventing a distinction — and "project_agent" is a retired word besides.
         The class alone decides, whatever the role says.
         """
-        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
-
         assert resolve_template_class({"citizen_class": "manager", "role": "project_agent"}) == "manager"
         assert resolve_template_class({"citizen_class": "manager", "role": "orchestration_hub"}) == "manager"
         assert resolve_template_class({"citizen_class": "manager"}) == "manager"
@@ -163,16 +161,12 @@ class TestClassRegistry:
 
     def test_resolve_template_class_unknown_raises(self):
         """An unregistered citizen_class raises ValueError naming registered classes."""
-        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
-
         with pytest.raises(ValueError, match="Unknown citizen_class"):
             resolve_template_class({"citizen_class": "nonexistent"})
 
     @pytest.mark.parametrize("retired,replacement", sorted(RETIRED_CLASSES.items()))
     def test_resolve_template_class_refuses_a_retired_passport(self, retired, replacement):
         """A passport still on a retired class reads as "migrate me", not as a silent update."""
-        from aipass.spawn.apps.handlers.class_registry import resolve_template_class
-
         with pytest.raises(ValueError) as exc:
             resolve_template_class({"citizen_class": retired, "role": "anything"})
 
@@ -181,8 +175,6 @@ class TestClassRegistry:
     @pytest.mark.parametrize("retired,replacement", sorted(RETIRED_CLASSES.items()))
     def test_refuse_legacy_class_is_the_one_message(self, retired, replacement):
         """Every entry point quotes the same sentence, from the same table."""
-        from aipass.spawn.apps.handlers.class_registry import LEGACY_CLASSES, refuse_legacy_class
-
         assert LEGACY_CLASSES[retired] == replacement
         assert refuse_legacy_class(retired) == refuse_legacy_class(retired.upper())
         assert refuse_legacy_class("specialist") == ""
@@ -208,20 +200,18 @@ class TestMintTimeClass:
 
     @staticmethod
     def _class_of(branch_dir):
-        return json.loads((branch_dir / ".trinity" / "passport.json").read_text())["identity"]["citizen_class"]
+        return json.loads((branch_dir / ".trinity" / "passport.json").read_text(encoding="utf-8"))["identity"][
+            "citizen_class"
+        ]
 
     def test_class_for_citizen_number_is_the_rule_itself(self):
         """The pure function, pinned literally — one citizen number, one class."""
-        from aipass.spawn.apps.handlers.class_registry import class_for_citizen_number
-
         assert class_for_citizen_number(1) == "manager"
         for later in (2, 3, 17, 4000):
             assert class_for_citizen_number(later) == "specialist"
 
     def test_first_agent_mints_manager_second_mints_specialist(self, tmp_path):
         """The rule through a real mint, in a project that starts empty."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = self._fresh_registry(tmp_path)
 
         first = _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
@@ -238,8 +228,6 @@ class TestMintTimeClass:
     @pytest.mark.parametrize("explicit", LIVE_CLASSES)
     def test_explicit_caller_class_still_wins(self, tmp_path, explicit):
         """An explicit class overrides the number-derived one, in both directions."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = self._fresh_registry(tmp_path)
 
         # citizen #1 would derive "manager"; citizen #2 would derive "specialist".
@@ -260,8 +248,6 @@ class TestMintTimeClass:
         """
         from unittest.mock import patch
 
-        from aipass.spawn.apps.spawn import handle_create
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         with patch("aipass.spawn.apps.spawn.console"):
             assert handle_create([str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
@@ -274,8 +260,6 @@ class TestMintTimeClass:
         """Typing the class must still beat the derived one — even for citizen #1."""
         from unittest.mock import patch
 
-        from aipass.spawn.apps.spawn import handle_create
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
         with patch("aipass.spawn.apps.spawn.console"):
             assert handle_create(["specialist", str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
@@ -287,8 +271,6 @@ class TestCustomConfigReadmeGuide:
     """The custom_config/ README ships the S193 self-heal doctrine (DPLAN-0283 WS-C)."""
 
     def _readme(self):
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
         return get_template_dir() / "{{BRANCH}}_json" / "custom_config" / "README.md"
 
     def test_readme_carries_self_heal_doctrine(self):
@@ -310,8 +292,6 @@ class TestCustomConfigReadmeGuide:
 
     def test_readme_placeholders_resolve(self):
         """Every placeholder in the guide is one the scaffolder actually substitutes."""
-        from aipass.spawn.apps.handlers.placeholders import replace_placeholders
-
         rendered = replace_placeholders(
             self._readme().read_text(encoding="utf-8"),
             {"BRANCHNAME": "TESTBRANCH", "branchname": "testbranch", "BRANCH": "testbranch"},
@@ -331,8 +311,6 @@ class TestClassAwareCreate:
     @pytest.mark.parametrize("citizen_class", LIVE_CLASSES)
     def test_create_explicit_class_creates_full_scaffold(self, tmp_path, citizen_class):
         """drone @spawn create <class> @path creates the full scaffold, either class."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / f"{citizen_class}_agent"
         result = _spawn_agent(str(target), citizen_class=citizen_class)
 
@@ -343,8 +321,6 @@ class TestClassAwareCreate:
 
     def test_create_without_a_class_still_creates(self, tmp_path):
         """drone @spawn create @path needs no class — the mint decides it."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "default_agent"
         result = _spawn_agent(str(target))
 
@@ -354,18 +330,14 @@ class TestClassAwareCreate:
     @pytest.mark.parametrize("citizen_class", LIVE_CLASSES)
     def test_create_with_citizen_class_in_passport(self, tmp_path, citizen_class):
         """Created agents carry the class they were minted with, verbatim."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / f"class_test_{citizen_class}"
         _spawn_agent(str(target), citizen_class=citizen_class)
 
-        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["citizen_class"] == citizen_class
 
     def test_create_includes_integrations_scaffold(self, tmp_path):
         """Creation includes apps/integrations/README.md (DPLAN-0133)."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "integrations_test"
         result = _spawn_agent(str(target), citizen_class="specialist")
 
@@ -381,8 +353,6 @@ class TestClassAwareCreate:
         a loud refusal is the correct answer until its parallel fix lands, not a
         quiet substitution that would write a passport disagreeing with the call.
         """
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / f"legacy_{retired}"
         result = _spawn_agent(str(target), citizen_class=retired)
 
@@ -402,12 +372,10 @@ class TestClassAwareUpdate:
     @pytest.mark.parametrize("citizen_class", LIVE_CLASSES)
     def test_read_citizen_class_returns_what_the_passport_claims(self, tmp_path, citizen_class):
         """Both live classes read back unchanged."""
-        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-
         passport_dir = tmp_path / ".trinity"
         passport_dir.mkdir()
         passport = {"identity": {"citizen_class": citizen_class, "role": "test"}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport))
+        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
 
         assert _read_citizen_class(tmp_path) == citizen_class
 
@@ -415,12 +383,10 @@ class TestClassAwareUpdate:
     def test_read_citizen_class_refuses_an_unmigrated_passport(self, tmp_path, retired, replacement):
         """An un-migrated passport surfaces as "migrate this", not a silent update
         against a class it no longer claims."""
-        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-
         passport_dir = tmp_path / ".trinity"
         passport_dir.mkdir()
         passport = {"identity": {"citizen_class": retired, "role": "test"}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport))
+        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
 
         with pytest.raises(ValueError) as exc:
             _read_citizen_class(tmp_path)
@@ -429,30 +395,24 @@ class TestClassAwareUpdate:
 
     def test_read_citizen_class_missing_passport_raises(self, tmp_path):
         """Missing passport is a loud hard error, not a silent default class (DPLAN-0262)."""
-        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-
         with pytest.raises(FileNotFoundError, match="No passport.json"):
             _read_citizen_class(tmp_path)
 
     def test_read_citizen_class_no_field_raises(self, tmp_path):
         """Passport without citizen_class field is a loud hard error, not a silent default."""
-        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-
         passport_dir = tmp_path / ".trinity"
         passport_dir.mkdir()
         passport = {"identity": {"role": "test"}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport))
+        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
 
         with pytest.raises(ValueError, match="Unknown citizen_class"):
             _read_citizen_class(tmp_path)
 
     def test_read_citizen_class_corrupt_passport_raises(self, tmp_path):
         """Corrupt passport JSON is a loud hard error naming the passport path."""
-        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-
         passport_dir = tmp_path / ".trinity"
         passport_dir.mkdir()
-        (passport_dir / "passport.json").write_text("{not valid json")
+        (passport_dir / "passport.json").write_text("{not valid json", encoding="utf-8")
 
         with pytest.raises(ValueError, match="Corrupt or unreadable passport.json"):
             _read_citizen_class(tmp_path)
@@ -466,27 +426,21 @@ class TestClassAwareUpdate:
         one template shape, so the role is not consulted at all — a manager is a
         manager whatever it wrote in its own role field.
         """
-        from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-
         passport_dir = tmp_path / ".trinity"
         passport_dir.mkdir()
         passport = {"identity": {"citizen_class": "manager", "role": role}}
-        (passport_dir / "passport.json").write_text(json.dumps(passport))
+        (passport_dir / "passport.json").write_text(json.dumps(passport), encoding="utf-8")
 
         assert _read_citizen_class(tmp_path) == "manager"
 
     def test_update_all_requires_class_via_cli(self):
         """update --all without class should return error code."""
-        from aipass.spawn.apps.modules.update import handle_update
-
         result = handle_update(["--all"])
         assert result == 1
 
     def test_update_cli_accepts_class_with_all(self):
         """update specialist --all should parse correctly and call update_all with class filter."""
         from unittest.mock import patch
-
-        from aipass.spawn.apps.modules.update import handle_update
 
         # Mock update_all to isolate from real branch state
         mock_results = [
@@ -518,8 +472,6 @@ class TestTemplateStructure:
     """Tests verifying template directory structure."""
 
     def _template(self):
-        from aipass.spawn.apps.handlers.class_registry import get_template_dir
-
         return get_template_dir()
 
     def test_citizen_template_exists(self):
@@ -531,7 +483,7 @@ class TestTemplateStructure:
 
     def test_citizen_passport_has_class_placeholder(self):
         """The template passport has the citizen_class placeholder for rendering."""
-        passport = json.loads((self._template() / ".trinity" / "passport.json").read_text())
+        passport = json.loads((self._template() / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["citizen_class"] == "{{CITIZEN_CLASS}}"
 
     def test_template_passport_traits_is_an_empty_list_not_a_placeholder(self):
@@ -542,16 +494,16 @@ class TestTemplateStructure:
         written post-render by core.py instead (see TestAgentScaffoldContent) —
         without that write the flag would be accepted and silently dropped.
         """
-        passport = json.loads((self._template() / ".trinity" / "passport.json").read_text())
+        passport = json.loads((self._template() / ".trinity" / "passport.json").read_text(encoding="utf-8"))
 
         assert passport["identity"]["traits"] == []
         assert passport["identity"]["what_i_do"] == []
         assert passport["identity"]["what_i_dont_do"] == []
-        assert "{{TRAITS}}" not in (self._template() / ".trinity" / "passport.json").read_text()
+        assert "{{TRAITS}}" not in (self._template() / ".trinity" / "passport.json").read_text(encoding="utf-8")
 
     def test_template_passport_placeholder_set_is_the_2_0_one(self):
         """{{CWD}} (absolute, leaked $HOME) became {{PATH}}; {{RESIDENCY}} is new."""
-        raw = (self._template() / ".trinity" / "passport.json").read_text()
+        raw = (self._template() / ".trinity" / "passport.json").read_text(encoding="utf-8")
         passport = json.loads(raw)
 
         assert passport["branch_info"]["email"] == "{{EMAIL}}"
@@ -572,7 +524,7 @@ class TestTemplateStructure:
         """The template includes a non-empty local prompt."""
         prompt = self._template() / ".aipass" / "aipass_local_prompt.md"
         assert prompt.exists()
-        content = prompt.read_text()
+        content = prompt.read_text(encoding="utf-8")
         assert len(content) > 100, "Local prompt should have substantial content"
         assert "{{BRANCHNAME}}" in content
 
@@ -603,8 +555,6 @@ class TestAgentScaffoldContent:
 
     def test_created_agent_has_no_claude_md(self, tmp_path):
         """Branches should NOT have CLAUDE.md — project root covers it."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "content_test"
         _spawn_agent(str(target), role="Tester", purpose="Testing scaffold")
 
@@ -612,14 +562,12 @@ class TestAgentScaffoldContent:
 
     def test_created_agent_local_prompt_has_content(self, tmp_path):
         """Created agent's local prompt should reference branch identity."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "prompt_agent"
         _spawn_agent(str(target), purpose="Testing prompt")
 
         prompt = target / ".aipass" / "aipass_local_prompt.md"
         assert prompt.exists()
-        content = prompt.read_text()
+        content = prompt.read_text(encoding="utf-8")
         assert "PROMPT_AGENT" in content
         assert len(content) > 100
 
@@ -627,12 +575,10 @@ class TestAgentScaffoldContent:
         """Passport should include the agent's role if provided."""
         import json
 
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "role_test"
         _spawn_agent(str(target), role="Data Analyst", purpose="Reports")
 
-        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["role"] == "Data Analyst"
 
     def test_created_agent_passport_has_traits_as_a_list(self, tmp_path):
@@ -642,43 +588,35 @@ class TestAgentScaffoldContent:
         value into identity.traits AFTER the render. A bare string becomes a
         one-element list rather than being stored as a string in a list field.
         """
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "traits_test"
         _spawn_agent(str(target), role="Analyst", traits="curious, terse", purpose="Reports")
 
-        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == ["curious, terse"]
 
     def test_created_agent_passport_traits_accepts_a_real_list(self, tmp_path):
         """A caller who already has a list gets it stored as-is, not re-wrapped."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "traits_list_test"
         _spawn_agent(str(target), traits=["curious", "terse"], purpose="Reports")
 
-        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == ["curious", "terse"]
 
     def test_created_agent_passport_traits_empty_without_flag(self, tmp_path):
         """Omitting traits leaves the template's empty LIST — the identity hook
         skips the line when falsy, and [] is falsy just as "" was."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "no_traits_test"
         _spawn_agent(str(target), purpose="Testing default")
 
-        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == []
 
     def test_created_agent_passport_has_email(self, tmp_path):
         """Passport carries the branch address, so identity does not render 'Email: unknown'."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / "email_test"
         _spawn_agent(str(target), purpose="Testing email")
 
-        passport = json.loads((target / ".trinity" / "passport.json").read_text())
+        passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["branch_info"]["email"] == "@email_test"
 
 
@@ -692,10 +630,8 @@ class TestMultiAgentCoexistence:
 
     def test_two_agents_same_registry(self, tmp_path):
         """Two agents created with the same registry both register."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = tmp_path / "TEST_REGISTRY.json"
-        reg.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}')
+        reg.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}', encoding="utf-8")
 
         r1 = _spawn_agent(str(tmp_path / "agent_a"), registry_path=str(reg))
         r2 = _spawn_agent(str(tmp_path / "agent_b"), registry_path=str(reg))
@@ -703,7 +639,7 @@ class TestMultiAgentCoexistence:
         assert r1["success"] is True
         assert r2["success"] is True
 
-        data = json.loads(reg.read_text())
+        data = json.loads(reg.read_text(encoding="utf-8"))
         names = [b["name"] for b in data["branches"]]
         assert "AGENT_A" in names
         assert "AGENT_B" in names
@@ -711,10 +647,8 @@ class TestMultiAgentCoexistence:
 
     def test_three_agents_distinct_identities(self, tmp_path):
         """Three agents in same registry have distinct passports."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = tmp_path / "TEST_REGISTRY.json"
-        reg.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}')
+        reg.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}', encoding="utf-8")
 
         for name in ["alpha", "beta", "gamma"]:
             _spawn_agent(str(tmp_path / name), registry_path=str(reg), purpose=f"{name} purpose")
@@ -724,7 +658,7 @@ class TestMultiAgentCoexistence:
         # everybody — alpha is the project's first citizen, so alpha manages it.
         expected_class = {"alpha": "manager", "beta": "specialist", "gamma": "specialist"}
         for name in ["alpha", "beta", "gamma"]:
-            passport = json.loads((tmp_path / name / ".trinity" / "passport.json").read_text())
+            passport = json.loads((tmp_path / name / ".trinity" / "passport.json").read_text(encoding="utf-8"))
             assert passport["branch_info"]["branch_name"] == name
             assert passport["identity"]["citizen_class"] == expected_class[name]
 
@@ -749,36 +683,30 @@ class TestPassportOwnerFieldIsGone:
     """
 
     def test_newborn_passport_has_no_owner_field(self, tmp_path):
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
 
-        passport = json.loads((tmp_path / "first" / ".trinity" / "passport.json").read_text())
+        passport = json.loads((tmp_path / "first" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert "owner" not in passport["citizenship"], passport["citizenship"]
 
     def test_no_citizen_ever_gets_an_owner_field(self, tmp_path):
         """Not the first, not the fifth — the field is gone for everybody."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         for name in ["alpha", "beta", "gamma", "delta", "epsilon"]:
             _spawn_agent(str(tmp_path / name), registry_path=str(reg))
 
         for name in ["alpha", "beta", "gamma", "delta", "epsilon"]:
-            passport = json.loads((tmp_path / name / ".trinity" / "passport.json").read_text())
+            passport = json.loads((tmp_path / name / ".trinity" / "passport.json").read_text(encoding="utf-8"))
             assert "owner" not in passport["citizenship"], f"{name} was born with a self-declared owner flag"
 
     def test_the_registry_entry_still_seats_exactly_one_owner(self, tmp_path):
         """The authority that replaced it: one owner:true, on the first citizen."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
         _spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
         _spawn_agent(str(tmp_path / "third"), registry_path=str(reg))
 
-        entries = {b["name"]: b for b in json.loads(reg.read_text())["branches"]}
+        entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
         assert entries["FIRST"].get("owner") is True
         assert entries["SECOND"].get("owner") is not True
         assert entries["THIRD"].get("owner") is not True
@@ -795,21 +723,19 @@ class TestRetroactiveOwner:
 
     def test_retroactive_owner_prefers_the_manager(self, tmp_path):
         """Step 1: alpha is the project's first citizen, so alpha is its manager."""
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         _spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))
         _spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))
 
         # Strip owner from the registry entries to simulate legacy state (no sealed owner)
-        reg_data = json.loads(reg.read_text())
+        reg_data = json.loads(reg.read_text(encoding="utf-8"))
         for b in reg_data["branches"]:
             b.pop("owner", None)
-        reg.write_text(json.dumps(reg_data, indent=2))
+        reg.write_text(json.dumps(reg_data, indent=2), encoding="utf-8")
 
         _spawn_agent(str(tmp_path / "zeta"), registry_path=str(reg))
 
-        entries = {b["name"]: b for b in json.loads(reg.read_text())["branches"]}
+        entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
         assert entries["ALPHA"].get("owner") is True
         assert entries["BETA"].get("owner") is not True
         assert entries["ZETA"].get("owner") is not True
@@ -821,33 +747,28 @@ class TestRetroactiveOwner:
         Under the old step 2 that flag won. It must not win now — otherwise any
         citizen could seat itself by editing its own file.
         """
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         _spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))  # citizen #1 -> manager
         _spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))  # citizen #2 -> specialist
 
         beta_passport = tmp_path / "beta" / ".trinity" / "passport.json"
-        beta_data = json.loads(beta_passport.read_text())
+        beta_data = json.loads(beta_passport.read_text(encoding="utf-8"))
         beta_data["citizenship"]["owner"] = True
-        beta_passport.write_text(json.dumps(beta_data, indent=2))
+        beta_passport.write_text(json.dumps(beta_data, indent=2), encoding="utf-8")
 
-        reg_data = json.loads(reg.read_text())
+        reg_data = json.loads(reg.read_text(encoding="utf-8"))
         for b in reg_data["branches"]:
             b.pop("owner", None)
-        reg.write_text(json.dumps(reg_data, indent=2))
+        reg.write_text(json.dumps(reg_data, indent=2), encoding="utf-8")
 
         assert ensure_project_has_owner(reg) is True
 
-        entries = {b["name"]: b for b in json.loads(reg.read_text())["branches"]}
+        entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
         assert entries["ALPHA"].get("owner") is True, "a self-declared passport flag beat the manager"
         assert entries["BETA"].get("owner") is not True
 
     def test_created_date_fallback_when_nobody_is_a_manager(self, tmp_path):
         """Step 2 (the last one): oldest ``created`` wins when no manager exists."""
-        from aipass.spawn.apps.handlers.registry import pick_owner_branch
-
         for name in ("older", "newer"):
             trinity = tmp_path / name / ".trinity"
             trinity.mkdir(parents=True)
@@ -866,34 +787,28 @@ class TestRetroactiveOwner:
 
     def test_no_retroactive_change_when_an_owner_is_already_seated(self, tmp_path):
         """A registry that already seats an owner is left exactly as it is."""
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
         _spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
-        before = reg.read_text()
+        before = reg.read_text(encoding="utf-8")
 
         assert ensure_project_has_owner(reg) is False
-        assert reg.read_text() == before
+        assert reg.read_text(encoding="utf-8") == before
 
     def test_ensure_project_has_owner_direct(self, tmp_path):
         """Direct call to ensure_project_has_owner sets owner in the registry entry."""
-        from aipass.spawn.apps.handlers.registry import ensure_project_has_owner
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         reg = _fresh_registry(tmp_path)
         _spawn_agent(str(tmp_path / "agent_x"), registry_path=str(reg))
         _spawn_agent(str(tmp_path / "agent_y"), registry_path=str(reg))
 
-        reg_data = json.loads(reg.read_text())
+        reg_data = json.loads(reg.read_text(encoding="utf-8"))
         for b in reg_data["branches"]:
             b.pop("owner", None)
-        reg.write_text(json.dumps(reg_data, indent=2))
+        reg.write_text(json.dumps(reg_data, indent=2), encoding="utf-8")
 
         assert ensure_project_has_owner(reg) is True
 
-        entries = {b["name"]: b for b in json.loads(reg.read_text())["branches"]}
+        entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
         assert entries["AGENT_X"].get("owner") is True
         assert entries["AGENT_Y"].get("owner") is not True
 
@@ -924,9 +839,6 @@ class TestBirthCertificateSchema:
     @pytest.mark.parametrize("class_name", LIVE_CLASSES)
     def test_mint_carries_metadata_template(self, tmp_path, class_name):
         """A real create must render metadata.template with the detected profile."""
-        from aipass.spawn.apps.handlers.metadata import detect_profile
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / f"cert_{class_name}"
         result = _spawn_agent(str(target), citizen_class=class_name)
         assert result["success"] is True, result
@@ -941,9 +853,6 @@ class TestBirthCertificateSchema:
     @pytest.mark.parametrize("class_name", LIVE_CLASSES)
     def test_mint_description_matches_metadata(self, tmp_path, class_name):
         """The prose must name the same template the metadata records."""
-        from aipass.spawn.apps.handlers.metadata import detect_profile
-        from aipass.spawn.apps.modules.core import _spawn_agent
-
         target = tmp_path / f"desc_{class_name}"
         result = _spawn_agent(str(target), citizen_class=class_name)
         assert result["success"] is True, result

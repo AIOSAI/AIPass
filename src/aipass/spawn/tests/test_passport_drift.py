@@ -1,27 +1,16 @@
 # =================== META ====================
 # Name: test_passport_drift.py
 # Description: DPLAN-0262 — live passport drift vs template contract (permanent canary)
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-07-27
-# Modified: 2026-08-28
+# Modified: 2026-09-27
 # =============================================
 
-"""Passport drift detection — DPLAN-0262, 2.0-only since the DPLAN-0319 fleet run.
+"""Tests for apps/handlers/class_registry.py and apps/handlers/registry.py — the passport drift canary (DPLAN-0262)."""
 
-Templates guarantee certain branch_info/identity fields via placeholder
-substitution. `spawn update` auto-heals .trinity/passport.json against a narrow
-allowlist (branch_info.email, branch_info.git_branch, identity.traits — see
-update_ops._heal_passport); the live scan below is the permanent canary that
-says when a real passport has fallen behind what its template promises.
-
-This file was schema-tolerant during the DPLAN-0319 window (2.0 template on
-disk, 1.x fleet awaiting the migration GO). The fleet migration ran 2026-08-28
-(22/22, the owner's GO), the marker test went red on cue, and the schema-1 lane
-(frozen contract, class allowlist, drift helper, marker class and the 1.x-lane
-hermetic test) was removed in the same working set — the canary now judges
-every live passport against the live template's contract, and any passport
-declaring a pre-2.0 schema is reported as drift.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that class_registry.py and registry.py parse and import cleanly
+# seedgo: no-test-needed(documentation) — that the public functions in those modules carry docstrings
 
 import json
 from pathlib import Path
@@ -29,12 +18,30 @@ from pathlib import Path
 import pytest
 
 from aipass.prax.apps.modules.logger import system_logger as logger
+from aipass.spawn.apps.handlers import class_registry
 from aipass.spawn.apps.handlers.class_registry import (
     get_available_classes,
     get_template_dir,
     resolve_template_class,
 )
 from aipass.spawn.apps.handlers.registry import branches_as_list, find_registry, load_registry
+
+# Context kept from the file's original docstring — passport drift detection,
+# DPLAN-0262, 2.0-only since the DPLAN-0319 fleet run:
+#
+# Templates guarantee certain branch_info/identity fields via placeholder
+# substitution. `spawn update` auto-heals .trinity/passport.json against a narrow
+# allowlist (branch_info.email, branch_info.git_branch, identity.traits — see
+# update_ops._heal_passport); the live scan below is the permanent canary that
+# says when a real passport has fallen behind what its template promises.
+#
+# This file was schema-tolerant during the DPLAN-0319 window (2.0 template on
+# disk, 1.x fleet awaiting the migration GO). The fleet migration ran 2026-08-28
+# (22/22, the owner's GO), the marker test went red on cue, and the schema-1 lane
+# (frozen contract, class allowlist, drift helper, marker class and the 1.x-lane
+# hermetic test) was removed in the same working set — the canary now judges
+# every live passport against the live template's contract, and any passport
+# declaring a pre-2.0 schema is reported as drift.
 
 _CONTRACT_SECTIONS = ("branch_info", "identity")
 
@@ -56,7 +63,7 @@ def _is_schema_2(passport: dict) -> bool:
 
 def _template_contract_keys(citizen_class: str) -> dict:
     """Key set per section that citizen_class's template guarantees (schema 2.0)."""
-    passport = json.loads((get_template_dir(citizen_class) / ".trinity" / "passport.json").read_text())
+    passport = json.loads((get_template_dir(citizen_class) / ".trinity" / "passport.json").read_text(encoding="utf-8"))
     return {section: set(passport.get(section, {}).keys()) for section in _CONTRACT_SECTIONS}
 
 
@@ -112,8 +119,6 @@ class TestDriftDetectorHermetic:
         """
         import ast
 
-        from aipass.spawn.apps.handlers import class_registry
-
         source = Path(class_registry.__file__).read_text(encoding="utf-8")
         declared = next(
             node.value
@@ -151,7 +156,9 @@ class TestDriftDetectorHermetic:
         it, so the property gets a pin of its own rather than an assumption.
         """
         contract = _template_contract_keys("specialist")
-        passport = json.loads((get_template_dir("specialist") / ".trinity" / "passport.json").read_text())
+        passport = json.loads(
+            (get_template_dir("specialist") / ".trinity" / "passport.json").read_text(encoding="utf-8")
+        )
         passport["citizenship"]["seed"] = {"version": "2.0.0", "sha256": "a" * 64}
 
         assert _passport_drift(passport, contract) == {}
@@ -193,7 +200,7 @@ def _live_passports() -> list[tuple[str, dict]]:
             branch_path = reg_path.parent / branch_path
         passport_file = branch_path / ".trinity" / "passport.json"
         if passport_file.exists():
-            found.append((branch.get("name", "?"), json.loads(passport_file.read_text())))
+            found.append((branch.get("name", "?"), json.loads(passport_file.read_text(encoding="utf-8"))))
     return found
 
 
@@ -217,7 +224,7 @@ class TestLivePassportDrift:
                 report[name] = {"error": "no .trinity/passport.json"}
                 continue
 
-            passport = json.loads(passport_file.read_text())
+            passport = json.loads(passport_file.read_text(encoding="utf-8"))
 
             if _is_schema_2(passport):
                 try:

@@ -1,20 +1,16 @@
 # =================== AIPass ====================
 # Name: test_birth_receipt.py
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-08-27
-# Modified: 2026-09-19
+# Modified: 2026-09-27
 # =============================================
 
-"""Birth receipt lane tests (DPLAN-0318 marker 7).
+"""Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
 
-The receipt names which trinity template version a citizen carries. @memory's
-push stamps it for living branches; spawn stamps it at birth so a newborn is
-never born in violation of the receipt group.
-
-The shape is @memory's contract, copied not imported — the drift tests below
-go red if their sanctioned lane name or their gold source moves.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/receipt_ops.py and apps/modules/core.py parse and import
+# seedgo: no-test-needed(documentation) — docstrings on receipt_ops' public functions
 
 import ast
 import json
@@ -22,7 +18,20 @@ from pathlib import Path
 
 import pytest
 
-from aipass.spawn.apps.handlers import receipt_ops
+from aipass.hooks.apps.modules import grounding_content
+from aipass.prax.apps.modules import dashboard
+from aipass.spawn.apps.handlers import delete_ops, receipt_ops
+from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
+from aipass.spawn.apps.modules import core
+from aipass.spawn.apps.modules.core import _spawn_agent
+
+# Birth receipt lane (DPLAN-0318 marker 7). The receipt names which trinity
+# template version a citizen carries. @memory's push stamps it for living
+# branches; spawn stamps it at birth so a newborn is never born in violation
+# of the receipt group.
+#
+# The shape is @memory's contract, copied not imported — the drift tests
+# below go red if their sanctioned lane name or their gold source moves.
 
 
 MEMORY_RECEIPT_SOURCE = (
@@ -194,7 +203,6 @@ def test_trinity_seed_carries_no_status_block(seed_name):
 def test_the_one_template_is_what_every_class_mints_from():
     """Guard the collapse above: if a class ever gets its own dir again, the two
     seed checks would be silently testing only one of them."""
-    from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 
     classes = get_available_classes()
     assert len(classes) == 2, f"the class registry offers {classes} - the sweep below is not sweeping the fleet"
@@ -208,7 +216,6 @@ def test_the_one_template_is_what_every_class_mints_from():
 
 
 def test_a_minted_citizen_arrives_carrying_a_valid_receipt(tmp_path):
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     result = _spawn_agent(str(tmp_path / "newbie"), role="Test", purpose="receipt e2e")
 
@@ -228,8 +235,6 @@ def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, c
     copied here, so a bump over there moves this pin with it.
     """
     import datetime
-
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     result = _spawn_agent(str(tmp_path / "tested"), role="Test", purpose="test template receipt")
     assert result["success"] is True, result.get("error")
@@ -253,10 +258,8 @@ def test_a_minted_citizen_arrives_carrying_the_test_template_receipt(tmp_path, c
 
 def test_a_newborn_gets_no_test_receipt_when_seedgos_manifest_is_unreadable(tmp_path, monkeypatch):
     """An absent receipt reads as unstamped, which is true; an empty one would lie."""
-    from aipass.spawn.apps.handlers import receipt_ops as ops
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
-    monkeypatch.setattr(ops, "_seedgo_templates_dir", lambda: tmp_path / "no_such_gold")
+    monkeypatch.setattr(receipt_ops, "_seedgo_templates_dir", lambda: tmp_path / "no_such_gold")
 
     result = _spawn_agent(str(tmp_path / "unstamped"), role="Test", purpose="no gold manifest")
 
@@ -272,7 +275,6 @@ def test_a_newborn_gets_no_test_receipt_when_seedgos_manifest_is_unreadable(tmp_
 def test_an_unstampable_receipt_surfaces_but_does_not_abandon_the_birth(tmp_path, monkeypatch):
     """@memory's gold templates are another branch's files — a citizen that cannot
     be born because they are unreadable is worse than one missing a receipt."""
-    from aipass.spawn.apps.modules import core
 
     monkeypatch.setattr(core, "write_birth_receipt", lambda _: {"success": False, "error": "gold unreadable"})
     result = core._spawn_agent(str(tmp_path / "orphan"), role="Test", purpose="receipt failure")
@@ -284,7 +286,6 @@ def test_an_unstampable_receipt_surfaces_but_does_not_abandon_the_birth(tmp_path
 
 def test_the_receipt_is_stamped_before_the_citizen_is_registered(tmp_path, monkeypatch):
     """A registered citizen always carries a receipt — the order is the guarantee."""
-    from aipass.spawn.apps.modules import core
 
     seen = {}
 
@@ -308,8 +309,6 @@ def test_the_receipt_is_stamped_before_the_citizen_is_registered(tmp_path, monke
 
 def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch):
     """The archive is the only copy after the rmtree — a receipt left behind is lost."""
-    from aipass.spawn.apps.handlers import delete_ops
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     project = tmp_path / "project"
     project.mkdir()
@@ -340,7 +339,6 @@ def test_retire_carries_the_whole_trinity_into_the_archive(tmp_path, monkeypatch
 
 
 def test_adopting_a_directory_without_a_receipt_stamps_one(tmp_path):
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     target = tmp_path / "adoptee"
     _spawn_agent(str(target), role="Test", purpose="adopt receipt")
@@ -366,14 +364,12 @@ def _readme_cap() -> int:
 
 def _prompt_cap() -> int:
     """@hooks' cap, read off the module that enforces it at render time."""
-    from aipass.hooks.apps.modules import grounding_content
 
     return int(getattr(grounding_content, "BRANCH_CHAR_BUDGET"))
 
 
 def _dashboard_cap() -> int:
     """@prax's cap, read off its exported name."""
-    from aipass.prax.apps.modules import dashboard
 
     return int(getattr(dashboard, "DASHBOARD_CHAR_BUDGET"))
 
@@ -422,7 +418,6 @@ def test_a_newborn_is_born_inside_every_owners_cap(tmp_path):
     past a cap, every newborn starts in violation. This is the pin that makes
     that a red instead of a discovery six months later.
     """
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     result = _spawn_agent(str(tmp_path / "budgeted"), role="Test", purpose="birth budget")
     assert result["success"] is True
@@ -437,7 +432,6 @@ def test_a_newborn_is_born_inside_every_owners_cap(tmp_path):
 
 def test_every_newborn_passport_string_is_inside_memorys_per_string_cap(tmp_path):
     """The file budget is one number; a single runaway string is the other."""
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     _spawn_agent(str(tmp_path / "stringy"), role="Test", purpose="passport strings")
     cap = int(_memory_file_budgets()["passport.json"]["max_string_chars"])
@@ -456,7 +450,6 @@ def test_a_newborn_carries_its_own_dashboard_without_flow_or_prax(tmp_path):
     flow's change costs a newborn nothing. This pin is what would go red if the
     file ever left the template and birth started depending on another branch.
     """
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     _spawn_agent(str(tmp_path / "dashed"), role="Test", purpose="dashboard at birth")
 
@@ -512,7 +505,6 @@ def test_every_cap_is_read_from_its_owner_and_never_copied_into_this_file():
 
 def test_adoption_never_restamps_a_receipt_another_lane_wrote(tmp_path):
     """A push-stamped receipt records which lane last touched those files."""
-    from aipass.spawn.apps.modules.core import _spawn_agent
 
     target = tmp_path / "pushed"
     _spawn_agent(str(target), role="Test", purpose="adopt receipt")
