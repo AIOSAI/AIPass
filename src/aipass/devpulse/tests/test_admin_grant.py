@@ -185,15 +185,25 @@ def test_leg1_refuses_unverifiable_caller(world, monkeypatch):
     assert reason.startswith("leg1")
 
 
-def test_leg1_accepts_passport_walk(world, monkeypatch):
+def test_leg1_accepts_passport_walk(world, monkeypatch, tmp_path):
+    """The passport found by walking up from the caller's cwd names the caller.
+
+    The seat is a directory that is not called devpulse, so the directory-name
+    fallback cannot answer for the passport.
+    Mutant: branch_name read under another key -> red.
+    """
     _ceremony(world)
-    trinity = world["home"] / ".trinity"
-    trinity.mkdir()
+    seat = tmp_path / "elsewhere"
+    trinity = seat / ".trinity"
+    trinity.mkdir(parents=True)
     (trinity / "passport.json").write_text(json.dumps({"branch_info": {"branch_name": "devpulse"}}), encoding="utf-8")
+    deeper = seat / "apps" / "handlers"
+    deeper.mkdir(parents=True)
     monkeypatch.delenv("AIPASS_CALLER_BRANCH", raising=False)
-    monkeypatch.setenv("AIPASS_CALLER_CWD", str(world["home"]))
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(deeper))
     ok, reason = _verify(world)
-    assert ok, reason
+    assert ok is True, reason
+    assert reason == "admin grant verified"
 
 
 def test_leg2_refuses_missing_cert_at_registry_home(world):
