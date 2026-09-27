@@ -1,17 +1,21 @@
-"""Tests for the branch log watcher handler (apps/handlers/log_watcher.py)."""
-
 # =================== META ====================
 # Name: test_log_watcher.py
 # Description: Unit tests for branch log watcher event producer
 # Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for the branch log watcher handler (apps/handlers/log_watcher.py)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the centralized system_logs watcher, in test_watchers_log_watcher.py
+# seedgo: no-test-needed(covered_elsewhere) — the daemon that starts start_branch_log_watcher, in test_log_watcher_service.py
+# seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's; AIPass tests only its own files
 
 import json
 import sys
 import hashlib
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
@@ -36,7 +40,7 @@ _SYNTHETIC_ELSEWHERE = PurePosixPath("/synthetic/elsewhere")
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
+def _mock_infrastructure(monkeypatch, tmp_path):
     """Mock heavy infrastructure imports before log_watcher module loads."""
 
     mock_logger = MagicMock()
@@ -64,12 +68,14 @@ def _mock_infrastructure(monkeypatch):
     # -- trigger config (TRIGGER_ROOT, AIPASS_PKG_ROOT) ---------------------
     from aipass.trigger.apps.config import atomic_write_json
 
-    # Never written to — the module only joins names onto them. Built from the
-    # platform temp dir so the fixture is not asserting a POSIX layout.
-    fake_root = Path(tempfile.gettempdir())
+    # Built under tmp_path so every trigger_data.json flush the product makes
+    # (TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_data.json") lands in this
+    # test's own directory, never the live watcher positions.
+    fake_trigger_root = tmp_path / "fake_trigger_root"
+    fake_trigger_root.mkdir()
     mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = fake_root / "fake_trigger_root"
-    mock_config.AIPASS_PKG_ROOT = fake_root / "fake_aipass_pkg"
+    mock_config.TRIGGER_ROOT = fake_trigger_root
+    mock_config.AIPASS_PKG_ROOT = tmp_path / "fake_aipass_pkg"
     mock_config.atomic_write_json = atomic_write_json
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
@@ -170,7 +176,7 @@ class TestDetectBranchFromPath:
     def test_unknown_path_returns_unknown(self):
         """Returns UNKNOWN for paths that do not match any pattern."""
         lw = _import_log_watcher()
-        assert lw._detect_branch_from_path("/some/random/path.log") == "UNKNOWN"
+        assert lw._detect_branch_from_path(str(_SYNTHETIC_ELSEWHERE / "some" / "random" / "path.log")) == "UNKNOWN"
 
 
 # ---------------------------------------------------------------------------
@@ -285,12 +291,13 @@ class TestCallbackAndState:
         assert lw._fire_event is cb
 
     def test_clear_seen_hashes_empties_set(self):
-        """clear_seen_hashes empties the _seen_error_hashes set."""
+        """clear_seen_hashes empties the set in memory and on disk (mutant: its flush dropped)."""
         lw = _import_log_watcher()
+        lw.TRIGGER_DATA_FILE.write_text(json.dumps({"seen_error_hashes": ["test_hash"]}), encoding="utf-8")
         lw._seen_error_hashes.add("test_hash")
-        with patch.object(lw, "_flush_trigger_data"):
-            lw.clear_seen_hashes()
+        lw.clear_seen_hashes()
         assert len(lw._seen_error_hashes) == 0
+        assert json.loads(lw.TRIGGER_DATA_FILE.read_text(encoding="utf-8"))["seen_error_hashes"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -305,19 +312,21 @@ class TestShouldProcess:
         """.log file inside /aipass/branch/logs/ is accepted."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        assert watcher._should_process("/src/aipass/flow/logs/flow.log") is True
+        assert watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow.log")) is True
 
     def test_txt_file_rejected(self):
         """.txt file is rejected even if in the right directory."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        assert watcher._should_process("/src/aipass/flow/logs/notes.txt") is False
+        assert watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "notes.txt")) is False
 
     def test_excluded_file_rejected(self):
         """Excluded log files (e.g. dispatch.log) are rejected."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        assert watcher._should_process("/src/aipass/flow/logs/dispatch.log") is False
+        assert (
+            watcher._should_process(str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "dispatch.log")) is False
+        )
 
     def test_system_logs_accepted(self):
         """Log file inside /system_logs/ is accepted."""
@@ -349,7 +358,7 @@ class TestProcessLogLine:
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         line = f"{now} | my_module | ERROR | Database connection failed"
-        log_path = "/src/aipass/flow/logs/flow.log"
+        log_path = str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow.log")
 
         watcher._process_log_line(line, log_path)
 
@@ -367,7 +376,7 @@ class TestProcessLogLine:
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         line = f"{now} | handler | ERROR | Processed error error_hash=abc123"
-        watcher._process_log_line(line, "/src/aipass/flow/logs/flow.log")
+        watcher._process_log_line(line, str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow.log"))
 
         fire.assert_not_called()
 
@@ -380,7 +389,7 @@ class TestProcessLogLine:
 
         old = (datetime.now() - timedelta(seconds=600)).strftime("%Y-%m-%d %H:%M:%S.%f")
         line = f"{old} | mod | ERROR | Old error"
-        watcher._process_log_line(line, "/src/aipass/flow/logs/flow.log")
+        watcher._process_log_line(line, str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow.log"))
 
         fire.assert_not_called()
 
@@ -393,7 +402,7 @@ class TestProcessLogLine:
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         line = f"{now} | mod | INFO | All good"
-        watcher._process_log_line(line, "/src/aipass/flow/logs/flow.log")
+        watcher._process_log_line(line, str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow.log"))
 
         fire.assert_not_called()
 
@@ -424,8 +433,7 @@ class TestReadNewLines:
             f.write(f"{now} | mod | ERROR | New failure\n")
 
         # Patch _mark_data_dirty to avoid touching the real file
-        with patch.object(lw, "_mark_data_dirty"):
-            watcher._read_new_lines(file_path)
+        watcher._read_new_lines(file_path)
 
         # Position should have advanced
         assert watcher.log_positions[file_path] > 6  # beyond "line1\n"
@@ -445,8 +453,7 @@ class TestReadNewLines:
         # Write new small content
         log_file.write_text("short\n", encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            watcher._read_new_lines(file_path)
+        watcher._read_new_lines(file_path)
 
         # Position should be at the end of the new content
         assert watcher.log_positions[file_path] == log_file.stat().st_size
@@ -541,9 +548,8 @@ class TestRotationDrain:
         _rotate_log(log_file)
         log_file.write_text(_error_line("after rotation"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert any("missed one" in line for line in lines)
@@ -570,9 +576,8 @@ class TestRotationDrain:
         log_file.write_text(_error_line("fresh"), encoding="utf-8")
         watcher.log_positions[file_path] = 9999
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert not any("ancient" in line for line in lines)
@@ -590,9 +595,8 @@ class TestRotationDrain:
 
         log_file.write_text(_error_line("tiny"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -620,9 +624,8 @@ class TestRotationDrain:
             f.write(_error_line("short"))
         assert log_file.stat().st_ino == inode_before
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -648,9 +651,8 @@ class TestRotationDrain:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(_error_line("appended"))
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -672,10 +674,9 @@ class TestRotationDrain:
         # Rotate, leaving the new live file EMPTY (nothing written yet)
         _rotate_log(log_file)
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len([line for line in lines if "tail line" in line]) == 1
@@ -698,9 +699,8 @@ class TestRotationDrain:
         _rotate_log(log_file)
         log_file.write_text(_error_line("new"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -720,9 +720,8 @@ class TestRotationDrain:
         _rotate_log(log_file)
         log_file.write_text(_error_line("new"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -741,10 +740,9 @@ class TestRotationDrain:
         _rotate_log(log_file)
         log_file.write_text(_error_line("new"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_drain_rotated_tail", side_effect=RuntimeError("boom")):
-                with patch.object(watcher, "_process_log_line") as mock_proc:
-                    watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_drain_rotated_tail", side_effect=RuntimeError("boom")):
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -804,9 +802,8 @@ class TestInodeRotationDetection:
         log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
         assert log_file.stat().st_size > recorded_pos
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert any("missed one" in line for line in lines)
@@ -835,10 +832,9 @@ class TestInodeRotationDetection:
 
         log_file.write_text(_error_line("brand new"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(lw, "logger") as mock_logger:
-                with patch.object(watcher, "_process_log_line") as mock_proc:
-                    watcher._read_new_lines(file_path)
+        with patch.object(lw, "logger") as mock_logger:
+            with patch.object(watcher, "_process_log_line") as mock_proc:
+                watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert any("tail from two rotations ago" in line for line in lines)
@@ -869,9 +865,8 @@ class TestInodeRotationDetection:
         fresh = _fresh_lines(40)
         log_file.write_text("\n".join(fresh) + "\n", encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert not any("lost tail" in line for line in lines)
@@ -901,9 +896,8 @@ class TestInodeRotationDetection:
             f.write(_error_line("short"))
         assert log_file.stat().st_ino == inode_before
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -930,9 +924,8 @@ class TestInodeRotationDetection:
         with open(log_file, "a", encoding="utf-8") as f:
             f.write(_error_line("appended"))
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -956,9 +949,8 @@ class TestInodeRotationDetection:
         _rotate_chain(log_file)
         log_file.write_text(_error_line("new"), encoding="utf-8")
 
-        with patch.object(lw, "_mark_data_dirty"):
-            with patch.object(watcher, "_process_log_line") as mock_proc:
-                watcher._read_new_lines(file_path)
+        with patch.object(watcher, "_process_log_line") as mock_proc:
+            watcher._read_new_lines(file_path)
 
         lines = _processed_lines(mock_proc)
         assert len(lines) == 1
@@ -974,17 +966,17 @@ class TestInodeRotationDetection:
 class TestStartStopStatus:
     """Tests for start_branch_log_watcher, stop, is_active, get_watcher_status."""
 
-    def test_start_returns_none_when_watchdog_unavailable(self):
+    def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
         """start_branch_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
         lw = _import_log_watcher()
-        lw.WATCHDOG_AVAILABLE = False
+        monkeypatch.setattr(lw, "WATCHDOG_AVAILABLE", False)
         result = lw.start_branch_log_watcher()
         assert result is None
 
-    def test_is_branch_log_watcher_active_returns_false_when_not_started(self):
+    def test_is_branch_log_watcher_active_returns_false_when_not_started(self, monkeypatch):
         """is_branch_log_watcher_active returns False when no observer is set."""
         lw = _import_log_watcher()
-        lw._branch_log_observer = None
+        monkeypatch.setattr(lw, "_branch_log_observer", None)
         assert lw.is_branch_log_watcher_active() is False
 
     def test_get_watcher_status_returns_correct_shape(self):
@@ -1096,71 +1088,71 @@ class TestOnModified:
 class TestInitializePositions:
     """Tests for BranchLogWatcher.initialize_positions."""
 
-    def test_snaps_to_eof_when_no_persisted(self, tmp_path):
+    def test_snaps_to_eof_when_no_persisted(self, tmp_path, monkeypatch):
         """Without persisted positions, snaps all log files to EOF."""
         lw = _import_log_watcher()
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
-        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
-        lw._load_log_positions = MagicMock(return_value={})
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+        monkeypatch.setattr(lw, "_load_log_positions", MagicMock(return_value={}))
         branch_logs = tmp_path / "aipass" / "flow" / "logs"
         branch_logs.mkdir(parents=True)
         log_file = branch_logs / "core.log"
-        log_file.write_text("line1\nline2\n")
+        log_file.write_text("line1\nline2\n", encoding="utf-8")
         watcher = lw.BranchLogWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(log_file)] == log_file.stat().st_size
 
-    def test_uses_persisted_position_when_valid(self, tmp_path):
+    def test_uses_persisted_position_when_valid(self, tmp_path, monkeypatch):
         """Restores a persisted position that is within current file size."""
         lw = _import_log_watcher()
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
-        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
         branch_logs = tmp_path / "aipass" / "flow" / "logs"
         branch_logs.mkdir(parents=True)
         log_file = branch_logs / "core.log"
-        log_file.write_text("line1\nline2\n")
+        log_file.write_text("line1\nline2\n", encoding="utf-8")
         saved_pos = 5
-        lw._load_log_positions = MagicMock(return_value={str(log_file): saved_pos})
+        monkeypatch.setattr(lw, "_load_log_positions", MagicMock(return_value={str(log_file): saved_pos}))
         watcher = lw.BranchLogWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(log_file)] == saved_pos
 
-    def test_snaps_to_eof_when_persisted_beyond_size(self, tmp_path):
+    def test_snaps_to_eof_when_persisted_beyond_size(self, tmp_path, monkeypatch):
         """Resets to EOF when persisted position exceeds current file size."""
         lw = _import_log_watcher()
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
-        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
         branch_logs = tmp_path / "aipass" / "flow" / "logs"
         branch_logs.mkdir(parents=True)
         log_file = branch_logs / "core.log"
-        log_file.write_text("short")
-        lw._load_log_positions = MagicMock(return_value={str(log_file): 999999})
+        log_file.write_text("short", encoding="utf-8")
+        monkeypatch.setattr(lw, "_load_log_positions", MagicMock(return_value={str(log_file): 999999}))
         watcher = lw.BranchLogWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(log_file)] == log_file.stat().st_size
 
-    def test_skips_branches_without_logs_dir(self, tmp_path):
+    def test_skips_branches_without_logs_dir(self, tmp_path, monkeypatch):
         """Branch directories without a logs/ subdirectory are skipped."""
         lw = _import_log_watcher()
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
-        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
-        lw._load_log_positions = MagicMock(return_value={})
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+        monkeypatch.setattr(lw, "_load_log_positions", MagicMock(return_value={}))
         (tmp_path / "aipass" / "nologs").mkdir(parents=True)
         watcher = lw.BranchLogWatcher()
         watcher.initialize_positions()
         assert len(watcher.log_positions) == 0
 
-    def test_initializes_system_logs(self, tmp_path):
+    def test_initializes_system_logs(self, tmp_path, monkeypatch):
         """System log files are initialized to EOF during position setup."""
         lw = _import_log_watcher()
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
         (tmp_path / "aipass").mkdir(parents=True)
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
-        lw.SYSTEM_LOGS_DIR = sys_logs
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", sys_logs)
         log_file = sys_logs / "app.log"
-        log_file.write_text("data here\n")
-        lw._load_log_positions = MagicMock(return_value={})
+        log_file.write_text("data here\n", encoding="utf-8")
+        monkeypatch.setattr(lw, "_load_log_positions", MagicMock(return_value={}))
         watcher = lw.BranchLogWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(log_file)] == log_file.stat().st_size
@@ -1174,7 +1166,7 @@ class TestInitializePositions:
 class TestLoadSeenHashes:
     """Tests for _load_seen_hashes persistence."""
 
-    def test_loads_from_existing_file(self, tmp_path):
+    def test_loads_from_existing_file(self, tmp_path, monkeypatch):
         """Loads hashes from a valid trigger_data.json file."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
@@ -1182,36 +1174,36 @@ class TestLoadSeenHashes:
             json.dumps({"seen_error_hashes": ["aaa", "bbb"]}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = set()
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_seen_error_hashes", set())
         lw._load_seen_hashes()
         assert lw._seen_error_hashes == {"aaa", "bbb"}
 
-    def test_handles_missing_file(self, tmp_path):
+    def test_handles_missing_file(self, tmp_path, monkeypatch):
         """Missing file leaves _seen_error_hashes unchanged (no crash)."""
         lw = _import_log_watcher()
-        lw.TRIGGER_DATA_FILE = tmp_path / "nonexistent.json"
-        lw._seen_error_hashes = {"existing"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", tmp_path / "nonexistent.json")
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"existing"})
         lw._load_seen_hashes()
         assert lw._seen_error_hashes == {"existing"}
 
-    def test_handles_corrupt_json(self, tmp_path):
+    def test_handles_corrupt_json(self, tmp_path, monkeypatch):
         """Corrupt JSON resets _seen_error_hashes to empty set."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text("{invalid json", encoding="utf-8")
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = {"leftovers"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"leftovers"})
         lw._load_seen_hashes()
         assert lw._seen_error_hashes == set()
 
-    def test_handles_missing_key(self, tmp_path):
+    def test_handles_missing_key(self, tmp_path, monkeypatch):
         """File exists but has no seen_error_hashes key -- loads empty."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(json.dumps({"other_key": 1}), encoding="utf-8")
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._seen_error_hashes = {"old"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"old"})
         lw._load_seen_hashes()
         assert lw._seen_error_hashes == set()
 
@@ -1224,7 +1216,7 @@ class TestLoadSeenHashes:
 class TestLoadLogPositions:
     """Tests for _load_log_positions persistence."""
 
-    def test_loads_positions_from_file(self, tmp_path):
+    def test_loads_positions_from_file(self, tmp_path, monkeypatch):
         """Returns positions dict when trigger_data.json has log_positions."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
@@ -1232,25 +1224,25 @@ class TestLoadLogPositions:
             json.dumps({"log_positions": {"/a.log": 42, "/b.log": 99}}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
         result = lw._load_log_positions()
         assert result == {"/a.log": 42, "/b.log": 99}
 
-    def test_returns_empty_for_missing_file(self, tmp_path):
+    def test_returns_empty_for_missing_file(self, tmp_path, monkeypatch):
         """Returns empty dict when file does not exist."""
         lw = _import_log_watcher()
-        lw.TRIGGER_DATA_FILE = tmp_path / "nonexistent.json"
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", tmp_path / "nonexistent.json")
         assert lw._load_log_positions() == {}
 
-    def test_returns_empty_for_corrupt_json(self, tmp_path):
+    def test_returns_empty_for_corrupt_json(self, tmp_path, monkeypatch):
         """Returns empty dict when file has corrupt JSON."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text("not json!", encoding="utf-8")
-        lw.TRIGGER_DATA_FILE = data_file
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
         assert lw._load_log_positions() == {}
 
-    def test_returns_empty_when_positions_not_dict(self, tmp_path):
+    def test_returns_empty_when_positions_not_dict(self, tmp_path, monkeypatch):
         """Returns empty dict when log_positions is not a dict."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
@@ -1258,10 +1250,10 @@ class TestLoadLogPositions:
             json.dumps({"log_positions": "not_a_dict"}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
         assert lw._load_log_positions() == {}
 
-    def test_coerces_values_to_int(self, tmp_path):
+    def test_coerces_values_to_int(self, tmp_path, monkeypatch):
         """String position values are coerced to int."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
@@ -1269,7 +1261,7 @@ class TestLoadLogPositions:
             json.dumps({"log_positions": {"/x.log": "123"}}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
         result = lw._load_log_positions()
         assert result["/x.log"] == 123
         assert isinstance(result["/x.log"], int)
@@ -1283,30 +1275,30 @@ class TestLoadLogPositions:
 class TestLogInodesPersistence:
     """Tests for the 'log_inodes' key alongside 'log_positions'."""
 
-    def test_flush_and_load_round_trip(self, tmp_path):
+    def test_flush_and_load_round_trip(self, tmp_path, monkeypatch):
         """Positions and inodes round-trip through trigger_data.json."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/a.log": 50}
-        lw._active_watcher.log_inodes = {"/a.log": 4242}
-        lw._seen_error_hashes = set()
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/a.log": 50}, log_inodes={"/a.log": 4242})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", set())
 
         lw._flush_trigger_data(force=True)
 
         assert lw._load_log_positions() == {"/a.log": 50}
         assert lw._load_log_inodes() == {"/a.log": 4242}
 
-    def test_position_shape_unchanged(self, tmp_path):
+    def test_position_shape_unchanged(self, tmp_path, monkeypatch):
         """log_positions stays a plain Dict[str, int] - inodes live elsewhere."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/a.log": 50}
-        lw._active_watcher.log_inodes = {"/a.log": 4242}
-        lw._seen_error_hashes = set()
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/a.log": 50}, log_inodes={"/a.log": 4242})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", set())
 
         lw._flush_trigger_data(force=True)
 
@@ -1314,7 +1306,7 @@ class TestLogInodesPersistence:
         assert written["log_positions"] == {"/a.log": 50}
         assert written["log_inodes"] == {"/a.log": 4242}
 
-    def test_old_format_state_loads_without_error(self, tmp_path):
+    def test_old_format_state_loads_without_error(self, tmp_path, monkeypatch):
         """State written before this change (no log_inodes) still loads."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
@@ -1322,12 +1314,12 @@ class TestLogInodesPersistence:
             json.dumps({"log_positions": {"/a.log": 12}, "seen_error_hashes": ["abc"]}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
 
         assert lw._load_log_positions() == {"/a.log": 12}
         assert lw._load_log_inodes() == {}
 
-    def test_flush_without_watcher_leaves_position_state_untouched(self, tmp_path):
+    def test_flush_without_watcher_leaves_position_state_untouched(self, tmp_path, monkeypatch):
         """A flush with no active watcher does not wipe on-disk position state.
 
         With no watcher there is no in-memory position state to write, so
@@ -1340,9 +1332,9 @@ class TestLogInodesPersistence:
             json.dumps({"log_positions": {"/a.log": 50}, "log_inodes": {"/a.log": 7}}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._active_watcher = None
-        lw._seen_error_hashes = {"h1"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_active_watcher", None)
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"h1"})
 
         lw._flush_trigger_data(force=True)
 
@@ -1351,62 +1343,62 @@ class TestLogInodesPersistence:
         assert written["log_inodes"] == {"/a.log": 7}
         assert written["seen_error_hashes"] == ["h1"]
 
-    def test_load_returns_empty_for_missing_file(self, tmp_path):
+    def test_load_returns_empty_for_missing_file(self, tmp_path, monkeypatch):
         """Missing trigger_data.json yields an empty inode map."""
         lw = _import_log_watcher()
-        lw.TRIGGER_DATA_FILE = tmp_path / "nope.json"
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", tmp_path / "nope.json")
         assert lw._load_log_inodes() == {}
 
-    def test_load_returns_empty_when_not_dict(self, tmp_path):
+    def test_load_returns_empty_when_not_dict(self, tmp_path, monkeypatch):
         """Non-dict log_inodes value is ignored."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
         data_file.write_text(json.dumps({"log_inodes": "nope"}), encoding="utf-8")
-        lw.TRIGGER_DATA_FILE = data_file
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
         assert lw._load_log_inodes() == {}
 
-    def test_flush_persists_inodes(self, tmp_path):
+    def test_flush_persists_inodes(self, tmp_path, monkeypatch):
         """_flush_trigger_data writes the watcher's inodes to disk."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._data_dirty = True
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/x.log": 42}
-        lw._active_watcher.log_inodes = {"/x.log": 909}
-        lw._seen_error_hashes = set()
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_data_dirty", True)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/x.log": 42}, log_inodes={"/x.log": 909})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", set())
 
         lw._flush_trigger_data(force=True)
 
         assert lw._load_log_inodes() == {"/x.log": 909}
 
-    def test_initialize_positions_records_inodes(self, tmp_path):
+    def test_initialize_positions_records_inodes(self, tmp_path, monkeypatch):
         """initialize_positions records an inode for every tracked file."""
         lw = _import_log_watcher()
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
-        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
-        lw._load_log_positions = MagicMock(return_value={})
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+        monkeypatch.setattr(lw, "_load_log_positions", MagicMock(return_value={}))
         branch_logs = tmp_path / "aipass" / "flow" / "logs"
         branch_logs.mkdir(parents=True)
         log_file = branch_logs / "core.log"
-        log_file.write_text("line1\nline2\n")
+        log_file.write_text("line1\nline2\n", encoding="utf-8")
 
         watcher = lw.BranchLogWatcher()
         watcher.initialize_positions()
 
         assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
 
-    def test_initialize_positions_with_old_state(self, tmp_path):
+    def test_initialize_positions_with_old_state(self, tmp_path, monkeypatch):
         """Old-format persisted state (no log_inodes) initializes cleanly."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw.AIPASS_PKG_ROOT = tmp_path / "aipass"
-        lw.SYSTEM_LOGS_DIR = tmp_path / "system_logs"
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "AIPASS_PKG_ROOT", tmp_path / "aipass")
+        monkeypatch.setattr(lw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
         branch_logs = tmp_path / "aipass" / "flow" / "logs"
         branch_logs.mkdir(parents=True)
         log_file = branch_logs / "core.log"
-        log_file.write_text("line1\nline2\n")
+        log_file.write_text("line1\nline2\n", encoding="utf-8")
         data_file.write_text(
             json.dumps({"log_positions": {str(log_file): 6}}),
             encoding="utf-8",
@@ -1427,16 +1419,16 @@ class TestLogInodesPersistence:
 class TestDebouncedWriter:
     """Tests for time-based debounced coalesced writes to trigger_data.json."""
 
-    def test_rapid_events_coalesce_into_one_write(self, tmp_path):
+    def test_rapid_events_coalesce_into_one_write(self, tmp_path, monkeypatch):
         """N rapid _mark_data_dirty calls produce at most 1 write within the interval."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._last_flush_time = 0.0
-        lw._data_dirty = False
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/a.log": 100}
-        lw._active_watcher.log_inodes = {"/a.log": 111}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_last_flush_time", 0.0)
+        monkeypatch.setattr(lw, "_data_dirty", False)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/a.log": 100}, log_inodes={"/a.log": 111})
+        )
 
         write_count = 0
         real_write = lw.atomic_write_json
@@ -1453,16 +1445,16 @@ class TestDebouncedWriter:
 
         assert write_count == 1
 
-    def test_flush_writes_both_positions_and_hashes(self, tmp_path):
+    def test_flush_writes_both_positions_and_hashes(self, tmp_path, monkeypatch):
         """_flush_trigger_data writes both log_positions and seen_error_hashes."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._data_dirty = True
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/x.log": 42}
-        lw._active_watcher.log_inodes = {"/x.log": 4242}
-        lw._seen_error_hashes = {"hash1", "hash2"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_data_dirty", True)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/x.log": 42}, log_inodes={"/x.log": 4242})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"hash1", "hash2"})
 
         lw._flush_trigger_data(force=True)
 
@@ -1470,7 +1462,7 @@ class TestDebouncedWriter:
         assert data["log_positions"] == {"/x.log": 42}
         assert set(data["seen_error_hashes"]) == {"hash1", "hash2"}
 
-    def test_flush_merges_with_existing_data(self, tmp_path):
+    def test_flush_merges_with_existing_data(self, tmp_path, monkeypatch):
         """Unrelated keys already in trigger_data.json survive a flush."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
@@ -1478,12 +1470,12 @@ class TestDebouncedWriter:
             json.dumps({"unrelated_key": {"keep": "me"}}),
             encoding="utf-8",
         )
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._data_dirty = True
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/b.log": 77}
-        lw._active_watcher.log_inodes = {"/b.log": 7777}
-        lw._seen_error_hashes = {"x"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_data_dirty", True)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/b.log": 77}, log_inodes={"/b.log": 7777})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"x"})
 
         lw._flush_trigger_data(force=True)
 
@@ -1492,15 +1484,15 @@ class TestDebouncedWriter:
         assert written["log_positions"] == {"/b.log": 77}
         assert written["seen_error_hashes"] == ["x"]
 
-    def test_flush_handles_write_error(self, tmp_path):
+    def test_flush_handles_write_error(self, tmp_path, monkeypatch):
         """Write failure logs a warning but does not raise."""
         lw = _import_log_watcher()
-        lw.TRIGGER_DATA_FILE = tmp_path / "trigger_data.json"
-        lw._data_dirty = True
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/c.log": 10}
-        lw._active_watcher.log_inodes = {"/c.log": 1010}
-        lw._seen_error_hashes = {"z"}
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", tmp_path / "trigger_data.json")
+        monkeypatch.setattr(lw, "_data_dirty", True)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/c.log": 10}, log_inodes={"/c.log": 1010})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"z"})
 
         with patch.object(lw, "logger") as mock_logger:
             with patch.object(lw, "atomic_write_json", side_effect=PermissionError("denied")):
@@ -1509,16 +1501,16 @@ class TestDebouncedWriter:
         warnings = [str(call.args) for call in mock_logger.warning.call_args_list]
         assert any("Failed to flush trigger_data.json" in warning for warning in warnings)
 
-    def test_restart_survival(self, tmp_path):
+    def test_restart_survival(self, tmp_path, monkeypatch):
         """Flushed data survives reload — positions and hashes intact."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/srv.log": 999}
-        lw._active_watcher.log_inodes = {"/srv.log": 777}
-        lw._seen_error_hashes = {"abc", "def"}
-        lw._data_dirty = True
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/srv.log": 999}, log_inodes={"/srv.log": 777})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", {"abc", "def"})
+        monkeypatch.setattr(lw, "_data_dirty", True)
 
         lw._flush_trigger_data(force=True)
 
@@ -1528,16 +1520,16 @@ class TestDebouncedWriter:
         lw._load_seen_hashes()
         assert lw._seen_error_hashes == {"abc", "def"}
 
-    def test_force_flush_writes_even_when_not_dirty(self, tmp_path):
+    def test_force_flush_writes_even_when_not_dirty(self, tmp_path, monkeypatch):
         """force=True writes regardless of _data_dirty flag."""
         lw = _import_log_watcher()
         data_file = tmp_path / "trigger_data.json"
-        lw.TRIGGER_DATA_FILE = data_file
-        lw._data_dirty = False
-        lw._active_watcher = MagicMock()
-        lw._active_watcher.log_positions = {"/f.log": 10}
-        lw._active_watcher.log_inodes = {"/f.log": 1010}
-        lw._seen_error_hashes = set()
+        monkeypatch.setattr(lw, "TRIGGER_DATA_FILE", data_file)
+        monkeypatch.setattr(lw, "_data_dirty", False)
+        monkeypatch.setattr(
+            lw, "_active_watcher", SimpleNamespace(log_positions={"/f.log": 10}, log_inodes={"/f.log": 1010})
+        )
+        monkeypatch.setattr(lw, "_seen_error_hashes", set())
 
         lw._flush_trigger_data(force=True)
 
@@ -1545,27 +1537,29 @@ class TestDebouncedWriter:
         data = json.loads(data_file.read_text(encoding="utf-8"))
         assert data["log_positions"] == {"/f.log": 10}
 
-    def test_dirty_flag_cleared_after_flush(self):
+    def test_dirty_flag_cleared_after_flush(self, monkeypatch):
         """_data_dirty is False after a successful flush."""
         lw = _import_log_watcher()
-        lw._data_dirty = True
-        lw._active_watcher = None
-        with patch.object(lw, "atomic_write_json"):
-            lw._flush_trigger_data(force=True)
+        monkeypatch.setattr(lw, "_data_dirty", True)
+        monkeypatch.setattr(lw, "_active_watcher", None)
+        lw._flush_trigger_data(force=True)
         assert lw._data_dirty is False
 
-    def test_stop_watcher_forces_flush(self, tmp_path):
-        """stop_branch_log_watcher calls _flush_trigger_data(force=True)."""
+    def test_stop_watcher_forces_flush(self, tmp_path, monkeypatch):
+        """stop_branch_log_watcher calls _flush_trigger_data(force=True) (mutant: the observer left unjoined)."""
         lw = _import_log_watcher()
         mock_watcher = MagicMock()
         mock_watcher.log_positions = {"/a.log": 50}
-        lw._active_watcher = mock_watcher
-        lw._branch_log_observer = MagicMock()
-        lw._branch_log_observer.is_alive.return_value = True
+        monkeypatch.setattr(lw, "_active_watcher", mock_watcher)
+        observer = MagicMock()
+        observer.is_alive.return_value = True
+        monkeypatch.setattr(lw, "_branch_log_observer", observer)
 
         with patch.object(lw, "_flush_trigger_data") as mock_flush:
             lw.stop_branch_log_watcher()
             mock_flush.assert_called_once_with(force=True)
+        observer.join.assert_called_once_with(timeout=5.0)
+        assert lw._branch_log_observer is None
 
 
 # ---------------------------------------------------------------------------
@@ -1633,13 +1627,13 @@ class TestDetectBranchFromPathEdgeCases:
     def test_multiple_aipass_segments(self):
         """First valid aipass/branch/logs/ match wins."""
         lw = _import_log_watcher()
-        path = str(Path("/src") / "aipass" / "trigger" / "logs" / "inner.log")
+        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "trigger" / "logs" / "inner.log")
         assert lw._detect_branch_from_path(path) == "TRIGGER"
 
     def test_aipass_without_logs_subdir(self):
         """aipass/branch without /logs/ segment returns UNKNOWN."""
         lw = _import_log_watcher()
-        path = str(Path("/src") / "aipass" / "drone" / "core.log")
+        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "drone" / "core.log")
         assert lw._detect_branch_from_path(path) == "UNKNOWN"
 
     def test_system_logs_ai_mail_prefix(self):
@@ -1710,28 +1704,28 @@ class TestShouldProcessEdgeCases:
         """Exclusion matching is case-insensitive."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        path = str(Path("/src") / "aipass" / "flow" / "logs" / "DISPATCH.LOG")
+        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "DISPATCH.LOG")
         assert watcher._should_process(path) is False
 
     def test_non_log_extension_py(self):
         """.py file is rejected."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        path = str(Path("/src") / "aipass" / "flow" / "logs" / "handler.py")
+        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "handler.py")
         assert watcher._should_process(path) is False
 
     def test_excluded_trigger_log_watcher(self):
         """trigger_log_watcher.log is excluded (self-referential)."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        path = str(Path("/src") / "aipass" / "trigger" / "logs" / "trigger_log_watcher.log")
+        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "trigger" / "logs" / "trigger_log_watcher.log")
         assert watcher._should_process(path) is False
 
     def test_excluded_medic_suppressed(self):
         """medic_suppressed.jsonl is excluded."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
-        path = str(Path("/src") / "aipass" / "flow" / "logs" / "medic_suppressed.jsonl")
+        path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "medic_suppressed.jsonl")
         assert watcher._should_process(path) is False
 
 
@@ -1754,14 +1748,13 @@ class TestReadNewLinesDeeper:
         watcher.log_positions[file_path] = current_size
 
         watcher._process_log_line = MagicMock()
-        with patch.object(lw, "_mark_data_dirty"):
-            watcher._read_new_lines(file_path)
+        watcher._read_new_lines(file_path)
 
         watcher._process_log_line.assert_not_called()
         assert watcher.log_positions[file_path] == current_size
 
-    def test_debounce_flushes_when_interval_elapsed(self, tmp_path):
-        """_flush_trigger_data fires when flush interval has elapsed."""
+    def test_debounce_flushes_when_interval_elapsed(self, tmp_path, monkeypatch):
+        """The read position reaches trigger_data.json once the interval has elapsed (mutant: positions left out of the flush)."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
         log_file = tmp_path / "interval.log"
@@ -1770,12 +1763,15 @@ class TestReadNewLinesDeeper:
         file_path = str(log_file)
         watcher.log_positions[file_path] = 0
 
-        lw._last_flush_time = 0.0
-        with patch.object(lw, "_flush_trigger_data") as mock_flush:
-            watcher._read_new_lines(file_path)
-            mock_flush.assert_called_once()
+        monkeypatch.setattr(lw, "_active_watcher", watcher)
+        monkeypatch.setattr(lw, "_last_flush_time", 0.0)
+        watcher._read_new_lines(file_path)
 
-    def test_debounce_skips_flush_within_interval(self, tmp_path):
+        flushed = json.loads(lw.TRIGGER_DATA_FILE.read_text(encoding="utf-8"))
+        assert flushed["log_positions"] == {file_path: log_file.stat().st_size}
+        assert lw._data_dirty is False
+
+    def test_debounce_skips_flush_within_interval(self, tmp_path, monkeypatch):
         """_flush_trigger_data is NOT called when within flush interval."""
         lw = _import_log_watcher()
         import time
@@ -1787,7 +1783,7 @@ class TestReadNewLinesDeeper:
         file_path = str(log_file)
         watcher.log_positions[file_path] = 0
 
-        lw._last_flush_time = time.monotonic()
+        monkeypatch.setattr(lw, "_last_flush_time", time.monotonic())
         with patch.object(lw, "_flush_trigger_data") as mock_flush:
             watcher._read_new_lines(file_path)
             mock_flush.assert_not_called()
@@ -1803,12 +1799,11 @@ class TestReadNewLinesDeeper:
         watcher.log_positions[file_path] = 0
 
         watcher._process_log_line = MagicMock()
-        with patch.object(lw, "_mark_data_dirty"):
-            watcher._read_new_lines(file_path)
+        watcher._read_new_lines(file_path)
         watcher._process_log_line.assert_not_called()
 
     def test_file_truncated_resets_position(self, tmp_path):
-        """When file is smaller than stored position, resets to 0."""
+        """When file is smaller than stored position, resets to 0 (mutant: the truncation reset set to 1, not 0)."""
         lw = _import_log_watcher()
         watcher = lw.BranchLogWatcher()
         log_file = tmp_path / "truncated.log"
@@ -1818,17 +1813,17 @@ class TestReadNewLinesDeeper:
         watcher.log_positions[file_path] = 99999
 
         watcher._process_log_line = MagicMock()
-        with patch.object(lw, "_mark_data_dirty"):
-            watcher._read_new_lines(file_path)
+        watcher._read_new_lines(file_path)
 
-        watcher._process_log_line.assert_called_once()
+        watcher._process_log_line.assert_called_once_with(f"{now} | mod | ERROR | after rotation", file_path)
+        assert watcher.log_positions[file_path] == log_file.stat().st_size
 
 
 # ---------------------------------------------------------------------------
 # Tests -- BranchLogWatcher._process_log_line (deeper coverage)
 # ---------------------------------------------------------------------------
 
-_BRANCH_LOG_PATH = str(Path("/src") / "aipass" / "flow" / "logs" / "flow.log")
+_BRANCH_LOG_PATH = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "flow" / "logs" / "flow.log")
 
 
 class TestProcessLogLineDeeper:
@@ -1859,12 +1854,12 @@ class TestProcessLogLineDeeper:
         watcher._process_log_line(line, _BRANCH_LOG_PATH)
         fire.assert_not_called()
 
-    def test_registry_path_fires_event_with_registry_data(self):
+    def test_registry_path_fires_event_with_registry_data(self, monkeypatch):
         """Registry available: fires event with registry metadata."""
         lw = _import_log_watcher()
         fire = MagicMock()
         lw.set_event_callback(fire)
-        lw._REGISTRY_AVAILABLE = True
+        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
 
         mock_report = MagicMock(
             return_value={
@@ -1876,7 +1871,7 @@ class TestProcessLogLineDeeper:
                 "last_seen": "2026-04-26",
             }
         )
-        lw.registry_report = mock_report
+        monkeypatch.setattr(lw, "registry_report", mock_report)
 
         watcher = lw.BranchLogWatcher()
         line = self._make_error_line("DB connection lost")
@@ -1890,14 +1885,14 @@ class TestProcessLogLineDeeper:
         assert call_kwargs["fingerprint"] == "fp456"
         assert call_kwargs["count"] == 1
 
-    def test_registry_report_exception_falls_to_fallback(self):
+    def test_registry_report_exception_falls_to_fallback(self, monkeypatch):
         """Registry report raises: falls through to fallback path."""
         lw = _import_log_watcher()
         fire = MagicMock()
         lw.set_event_callback(fire)
-        lw._REGISTRY_AVAILABLE = True
+        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
 
-        lw.registry_report = MagicMock(side_effect=RuntimeError("registry down"))
+        monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
 
         with patch.dict(
             sys.modules,
@@ -1913,12 +1908,12 @@ class TestProcessLogLineDeeper:
         assert call_kwargs["message"] == "Fallback triggered"
         assert call_kwargs["count"] == 1
 
-    def test_fallback_lazy_import_succeeds(self):
+    def test_fallback_lazy_import_succeeds(self, monkeypatch):
         """Fallback path: lazy import succeeds, fires event."""
         lw = _import_log_watcher()
         fire = MagicMock()
         lw.set_event_callback(fire)
-        lw._REGISTRY_AVAILABLE = False
+        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", False)
 
         watcher = lw.BranchLogWatcher()
         line = self._make_error_line("Lazy import works")
@@ -1928,13 +1923,13 @@ class TestProcessLogLineDeeper:
         call_kwargs = fire.call_args[1]
         assert call_kwargs["message"] == "Lazy import works"
 
-    def test_local_count_tracking_increments(self):
+    def test_local_count_tracking_increments(self, monkeypatch):
         """Local count path: repeated errors increment counter."""
         lw = _import_log_watcher()
         fire = MagicMock()
         lw.set_event_callback(fire)
-        lw._REGISTRY_AVAILABLE = True
-        lw.registry_report = MagicMock(side_effect=RuntimeError("registry down"))
+        monkeypatch.setattr(lw, "_REGISTRY_AVAILABLE", True)
+        monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
         lw._fallback_error_counts.clear()
 
         with patch.dict(
@@ -1962,7 +1957,7 @@ class TestProcessLogLineDeeper:
             "_parse_prax_log_line",
             side_effect=TypeError("boom"),
         ):
-            watcher._process_log_line("any line", "/any/path.log")
+            watcher._process_log_line("any line", str(_SYNTHETIC_ELSEWHERE / "any" / "path.log"))
 
         fire.assert_not_called()
 
@@ -1972,7 +1967,7 @@ class TestProcessLogLineDeeper:
 # ---------------------------------------------------------------------------
 
 
-def _set_warning_capture(lw, enabled: bool) -> MagicMock:
+def _set_warning_capture(lw, enabled: bool, monkeypatch) -> MagicMock:
     """Answer the operator config the way a real config_loader would.
 
     config_loader is imported lazily inside _warning_capture_enabled, so the
@@ -1981,7 +1976,7 @@ def _set_warning_capture(lw, enabled: bool) -> MagicMock:
     """
     json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
     json_pkg.config_loader.section = MagicMock(return_value={"watch_branch_log_warnings": enabled})
-    lw._warning_capture_cache = (0.0, True)
+    monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, True))
     return json_pkg.config_loader.section
 
 
@@ -2057,10 +2052,10 @@ class TestProcessWarningLine:
     this path existed, a branch warning was read by nothing at all.
     """
 
-    def test_fires_warning_logged(self):
+    def test_fires_warning_logged(self, monkeypatch):
         """A fresh WARNING line fires the event with the lane's fields."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2078,10 +2073,10 @@ class TestProcessWarningLine:
         assert kwargs["log_file"] == _BRANCH_LOG_PATH
         assert kwargs["raw_line"] == line
 
-    def test_warn_alias_fires(self):
+    def test_warn_alias_fires(self, monkeypatch):
         """WARN is the same signal as WARNING."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2090,10 +2085,10 @@ class TestProcessWarningLine:
 
         assert fire.call_args[0][0] == "warning_logged"
 
-    def test_info_fires_nothing(self):
+    def test_info_fires_nothing(self, monkeypatch):
         """INFO is not a failure signal — the lane must not count it."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2103,10 +2098,10 @@ class TestProcessWarningLine:
 
         fire.assert_not_called()
 
-    def test_stale_warning_fires_nothing(self):
+    def test_stale_warning_fires_nothing(self, monkeypatch):
         """A replayed rotation must not re-count old warnings."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2116,10 +2111,10 @@ class TestProcessWarningLine:
 
         fire.assert_not_called()
 
-    def test_semantic_exclusion_fires_nothing(self):
+    def test_semantic_exclusion_fires_nothing(self, monkeypatch):
         """A line ABOUT an error artifact is not new signal."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2128,10 +2123,10 @@ class TestProcessWarningLine:
 
         fire.assert_not_called()
 
-    def test_capture_disabled_by_config_fires_nothing(self):
+    def test_capture_disabled_by_config_fires_nothing(self, monkeypatch):
         """An operator can switch branch-log warning reading off entirely."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, False)
+        _set_warning_capture(lw, False, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2140,10 +2135,10 @@ class TestProcessWarningLine:
 
         fire.assert_not_called()
 
-    def test_capture_enabled_by_config_fires(self):
-        """Positive control for the switch: the identical line fires when it is on."""
+    def test_capture_enabled_by_config_fires(self, monkeypatch):
+        """Positive control for the switch: the identical line fires when it is on (mutant: the event renamed error_detected)."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2151,11 +2146,12 @@ class TestProcessWarningLine:
         watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
 
         fire.assert_called_once()
+        assert fire.call_args[0][0] == "warning_logged"
 
-    def test_unexpected_failure_is_contained(self):
+    def test_unexpected_failure_is_contained(self, monkeypatch):
         """The watcher must survive a warning it cannot parse."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2169,16 +2165,16 @@ class TestProcessWarningLine:
 class TestWarningCaptureEnabled:
     """Reading the switch runs per log line, so it is cached and fails open."""
 
-    def test_reads_the_operator_setting(self):
+    def test_reads_the_operator_setting(self, monkeypatch):
         """False in the config means false here."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, False)
+        _set_warning_capture(lw, False, monkeypatch)
         assert lw._warning_capture_enabled() is False
 
-    def test_answer_is_cached_between_lines(self):
+    def test_answer_is_cached_between_lines(self, monkeypatch):
         """A config file read per log line would put file IO on the hot path."""
         lw = _import_log_watcher()
-        section = _set_warning_capture(lw, True)
+        section = _set_warning_capture(lw, True, monkeypatch)
 
         lw._warning_capture_enabled()
         lw._warning_capture_enabled()
@@ -2186,21 +2182,21 @@ class TestWarningCaptureEnabled:
 
         section.assert_called_once_with("escalation")
 
-    def test_unreadable_config_keeps_capture_on(self):
+    def test_unreadable_config_keeps_capture_on(self, monkeypatch):
         """Fails OPEN: losing the count silently is the failure the lane exists to stop."""
         lw = _import_log_watcher()
         json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
         json_pkg.config_loader.section = MagicMock(side_effect=OSError("disk gone"))
-        lw._warning_capture_cache = (0.0, False)
+        monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, False))
 
         assert lw._warning_capture_enabled() is True
 
-    def test_missing_key_defaults_to_on(self):
+    def test_missing_key_defaults_to_on(self, monkeypatch):
         """A config predating this setting still watches warnings."""
         lw = _import_log_watcher()
         json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
         json_pkg.config_loader.section = MagicMock(return_value={})
-        lw._warning_capture_cache = (0.0, False)
+        monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, False))
 
         assert lw._warning_capture_enabled() is True
 
@@ -2208,10 +2204,10 @@ class TestWarningCaptureEnabled:
 class TestProcessLogLineRoutesWarnings:
     """One entry point routes a line to the error path or the warning path."""
 
-    def test_warning_line_reaches_the_warning_path(self):
+    def test_warning_line_reaches_the_warning_path(self, monkeypatch):
         """A WARNING line falls through the ERROR parse into warning_logged."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2221,10 +2217,10 @@ class TestProcessLogLineRoutesWarnings:
         fire.assert_called_once()
         assert fire.call_args[0][0] == "warning_logged"
 
-    def test_error_line_still_takes_the_error_path(self):
+    def test_error_line_still_takes_the_error_path(self, monkeypatch):
         """The error path is unchanged: an ERROR line never becomes a warning."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2235,10 +2231,10 @@ class TestProcessLogLineRoutesWarnings:
         fire.assert_called_once()
         assert fire.call_args[0][0] == "error_detected"
 
-    def test_info_line_reaches_neither_path(self):
+    def test_info_line_reaches_neither_path(self, monkeypatch):
         """INFO is dropped by both parsers."""
         lw = _import_log_watcher()
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         fire = MagicMock()
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
@@ -2343,7 +2339,7 @@ class TestSystemLogTwinIsNotProcessedTwice:
         """The regression itself: prax's dual write yields ONE event."""
         lw = _import_log_watcher()
         _point_at_tree(lw, monkeypatch, tmp_path)
-        _set_warning_capture(lw, True)
+        _set_warning_capture(lw, True, monkeypatch)
         branch_log, system_log = _dual_write_tree(tmp_path, "hooks", "edit_gate")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line = f"{now} | captured_edit_gate | WARNING | [HOOKS] edit_gate: todos over limit (11/10)\n"

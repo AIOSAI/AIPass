@@ -1,11 +1,14 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.3.0
+# Description: Shared pytest fixtures for trigger tests
+# Created: 2025-11-08
+# Modified: 2026-09-27
+# Version: 1.4.0
 # Category: trigger/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.4.0 (2026-09-27): Template C1/C2 fixtures - pinned console width, command state reset
 #   - v1.3.0 (2026-09-12): Autouse catch-up state isolation (DPLAN-0339 step 2c)
 #   - v1.2.0 (2026-08-08): Autouse resync of parent-package attrs after sys.modules surgery (CI xdist red)
 #   - v1.1.0 (2026-08-08): Suite-wide escalation lane isolation
@@ -42,6 +45,7 @@ from aipass.trigger.apps.handlers import escalation as _escalation
 from aipass.trigger.apps.handlers.json import config_loader as _config_loader
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.cli.apps.modules import display
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the lane's template routing suite) that must not be collected
@@ -153,6 +157,21 @@ def _resync_module_attrs() -> Generator[None, None, None]:
                 and f"{pkg_name}.{attr}" not in sys.modules
             ):
                 delattr(pkg, attr)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()
 
 
 @pytest.fixture

@@ -3,7 +3,7 @@
 # Description: Structured error tracking and registry for Medic v2
 # Version: 2.4.0
 # Created: 2026-02-13
-# Modified: 2026-08-02
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -322,6 +322,7 @@ def circuit_breaker_trip(reason: str = "") -> None:
         reason: Optional reason string for logging/diagnostics
     """
     global _circuit_breaker
+    logger.info("Circuit breaker tripped: %s", reason or "manual")
     _circuit_breaker.state = "open"
     _circuit_breaker.opened_at = time.time()
     _circuit_breaker.summary_sent = False
@@ -842,7 +843,8 @@ def clear_resolved(days: int = 7) -> int:
         days: Age threshold in days (default: 7)
 
     Returns:
-        Count of removed entries
+        Count of removed entries (0 when nothing qualified), or -1 when the
+        registry could not be read or walked - a count can never be negative.
     """
     try:
         registry = _load_registry()
@@ -867,7 +869,7 @@ def clear_resolved(days: int = 7) -> int:
 
     except Exception as exc:
         logger.warning("Failed to clear resolved entries: %s", exc)
-        return 0
+        return -1
 
 
 def purge_stale(days: int = 30) -> int:
@@ -877,7 +879,8 @@ def purge_stale(days: int = 30) -> int:
         days: Age threshold in days (default: 30)
 
     Returns:
-        Count of removed entries
+        Count of removed entries (0 when nothing qualified), or -1 when the
+        registry could not be read or walked - a count can never be negative.
     """
     try:
         registry = _load_registry()
@@ -901,7 +904,7 @@ def purge_stale(days: int = 30) -> int:
 
     except Exception as exc:
         logger.warning("Failed to purge stale entries: %s", exc)
-        return 0
+        return -1
 
 
 def get_stats() -> dict:

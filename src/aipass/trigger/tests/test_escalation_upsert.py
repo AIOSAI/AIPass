@@ -3,24 +3,28 @@
 # Description: Tests that escalation digests upsert in place instead of stacking
 # Version: 1.0.0
 # Created: 2026-08-10
-# Modified: 2026-08-10
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the escalation digest upsert lane (FPLAN-0389 phase 2).
+"""Tests for apps/handlers/escalation.py digest upsert keys and the send adapter in handlers/events/registry.py."""
 
-Three things have to hold, and only the first is obvious:
+# FPLAN-0389 phase 2.
+# Three things have to hold, and only the first is obvious:
+#
+# 1. The escalation send carries the THREAD key, ``escalation:<LEVEL>:<branch>:<module>``
+#    — what the subject names, never the signature. On 2026-09-17 a per-signature
+#    key opened 29 threads under two subjects: one module's warnings named a
+#    different branch and field each time, so each was its own signature.
+# 2. The adapter FORWARDS that key to ai_mail. Its signature ends in ``**kwargs``,
+#    so a key threaded by the wrong name is swallowed with no error and no upsert —
+#    delivery still returns True and the inbox keeps stacking. That is the
+#    regression this file exists to catch.
+# 3. The medic and runaway paths carry NO key. They are unrelated errors that must
+#    stay one message each; sharing a key would collapse them into one.
 
-1. The escalation send carries the THREAD key, ``escalation:<LEVEL>:<branch>:<module>``
-   — what the subject names, never the signature. On 2026-09-17 a per-signature
-   key opened 29 threads under two subjects: one module's warnings named a
-   different branch and field each time, so each was its own signature.
-2. The adapter FORWARDS that key to ai_mail. Its signature ends in ``**kwargs``,
-   so a key threaded by the wrong name is swallowed with no error and no upsert —
-   delivery still returns True and the inbox keeps stacking. That is the
-   regression this file exists to catch.
-3. The medic and runaway paths carry NO key. They are unrelated errors that must
-   stay one message each; sharing a key would collapse them into one.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — counting, gating and digest bodies, in test_escalation.py
+# seedgo: no-test-needed(external) — ai_mail storing and upserting the message; AIPass tests only its own files
 
 import json
 import sys
@@ -30,6 +34,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers import escalation
+from aipass.trigger.apps.handlers.events import error_detected, runaway_handler
+from aipass.trigger.apps.handlers.events.registry import setup_handlers
+from aipass.trigger.apps.modules import core
 
 
 # ---------------------------------------------------------------------------
@@ -58,12 +66,12 @@ def cfg() -> Dict[str, Any]:
 @pytest.fixture
 def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     """The escalation module pointed at tmp state and a tmp trail."""
-    from aipass.trigger.apps.handlers import escalation
-
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
     monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
+    # The aged lane opens a registry row; never let it reach the live registry.
+    monkeypatch.setattr(escalation, "_registry_report", lambda **kwargs: {})
     escalation._config_cache = (0.0, None)
     escalation._branch_names_cache = (0.0, None)
     yield escalation
@@ -94,21 +102,29 @@ def mailbox(monkeypatch: pytest.MonkeyPatch) -> List[Dict[str, Any]]:
 
 
 @pytest.fixture
-def adapter(monkeypatch: pytest.MonkeyPatch, mailbox):
-    """The real _send_email_adapter closure, captured off the escalation wiring."""
-    from aipass.trigger.apps.handlers import escalation
+def wired(monkeypatch: pytest.MonkeyPatch, mailbox) -> Dict[str, Any]:
+    """The real send adapter setup_handlers builds, captured off each public setter.
 
-    core_mod = MagicMock()
-    core_mod.trigger = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core_mod)
+    The three setters are replaced by recorders, so this test never rewires the
+    handlers' module-level callbacks for the rest of the process. core.trigger
+    is a Mock so setup_handlers registers nothing on the live event bus.
+    """
+    monkeypatch.setattr(core, "trigger", MagicMock())
 
-    from aipass.trigger.apps.handlers.events.registry import setup_handlers
+    captured: Dict[str, Any] = {}
+    for name, module in (("escalation", escalation), ("medic", error_detected), ("runaway", runaway_handler)):
+        monkeypatch.setattr(module, "set_send_email_callback", lambda cb, name=name: captured.__setitem__(name, cb))
 
     setup_handlers()
 
-    captured = escalation._send_email
-    assert captured is not None, "setup_handlers did not wire the escalation email callback"
+    assert set(captured) == {"escalation", "medic", "runaway"}, "setup_handlers did not wire every email callback"
     return captured
+
+
+@pytest.fixture
+def adapter(wired: Dict[str, Any]):
+    """The real _send_email_adapter closure, as handed to the escalation lane."""
+    return wired["escalation"]
 
 
 WARNING_EVENT = {
@@ -353,21 +369,35 @@ class TestEscalationCarriesTheKey:
 
     def test_missing_outcome_is_recorded_as_none(self, monkeypatch, lane) -> None:
         """A callback that ignores the sink logs None, never a crash or a fake 'created'."""
-        monkeypatch.setattr(lane, "_send_email", lambda **kw: True)
+        offered: List[Any] = []
+
+        def _send_ignoring_sink(**kwargs: Any) -> bool:
+            offered.append(kwargs.get("upsert_result"))
+            return True
+
+        monkeypatch.setattr(lane, "_send_email", _send_ignoring_sink)
 
         _fire(lane, times=2)
 
         sent = [line for line in _trail(lane) if line.get("outcome") == "sent"]
+        assert offered == [{}], "the sink was offered once and left untouched"
         assert sent and sent[-1]["upsert_action"] is None
 
     def test_digests_sent_counter_still_counts_updates(self, monkeypatch, lane) -> None:
         """An update is a digest. The counter stays truthful about what left the branch."""
-        monkeypatch.setattr(lane, "_send_email", lambda **kw: True)
+        delivered: List[Dict[str, Any]] = []
+
+        def _send(**kwargs: Any) -> bool:
+            delivered.append(kwargs)
+            return True
+
+        monkeypatch.setattr(lane, "_send_email", _send)
 
         signature = _fire(lane, times=2)["signature"]
         _fire(lane, times=2)
 
         state = json.loads(lane.STATE_FILE.read_text(encoding="utf-8"))
+        assert len(delivered) == 2
         assert state["signatures"][signature]["digests_sent"] == 2
 
 
@@ -379,47 +409,33 @@ class TestEscalationCarriesTheKey:
 class TestOtherLanesUnkeyed:
     """Medic and runaway emails are one-per-error. A key here would merge them."""
 
-    def test_medic_error_path_sends_no_key(self, monkeypatch, mailbox) -> None:
-        from aipass.trigger.apps.handlers.events import error_detected
+    def test_medic_error_path_sends_no_key(self, wired, mailbox) -> None:
+        """The callback medic is handed sends one unkeyed message per error.
 
-        core_mod = MagicMock()
-        core_mod.trigger = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core_mod)
-
-        from aipass.trigger.apps.handlers.events.registry import setup_handlers
-
-        setup_handlers()
-
-        send = error_detected._send_email
-        assert send is not None, "setup_handlers did not wire the medic email callback"
-        send(
+        Mutant killed 2026-09-27: the adapter forwarding `upsert_key or "k"` to deliver_email_to_branch.
+        """
+        wired["medic"](
             to_branch="@backup",
             subject="Error in drive.py",
             message="traceback",
             auto_execute=True,
         )
 
+        assert [call["to_branch"] for call in mailbox] == ["@backup"]
         assert mailbox[-1]["upsert_key"] is None
 
-    def test_runaway_path_sends_no_key(self, monkeypatch, mailbox) -> None:
-        from aipass.trigger.apps.handlers.events import runaway_handler
+    def test_runaway_path_sends_no_key(self, wired, mailbox) -> None:
+        """The callback the runaway handler is handed sends one unkeyed message per alert.
 
-        core_mod = MagicMock()
-        core_mod.trigger = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core_mod)
-
-        from aipass.trigger.apps.handlers.events.registry import setup_handlers
-
-        setup_handlers()
-
-        send = runaway_handler._send_email
-        assert send is not None, "setup_handlers did not wire the runaway email callback"
-        send(
+        Mutant killed 2026-09-27: the adapter forwarding `upsert_key or "k"` to deliver_email_to_branch.
+        """
+        wired["runaway"](
             to_branch="@backup",
             subject="Runaway log",
             message="growing fast",
         )
 
+        assert [call["to_branch"] for call in mailbox] == ["@backup"]
         assert mailbox[-1]["upsert_key"] is None
 
     def test_dispatch_banner_survives_the_new_signature(self, adapter, mailbox) -> None:

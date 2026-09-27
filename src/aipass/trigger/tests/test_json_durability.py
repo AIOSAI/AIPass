@@ -3,20 +3,14 @@
 # Description: Cross-platform durability pins for config.py's write + lock helpers
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-08-18
+# Modified: 2026-09-27
 # =============================================
 
-"""Durability pins for atomic_write_json and json_file_lock.
+"""Tests for apps/config.py's durability helpers: atomic_write_json, json_file_lock and the retry reads."""
 
-Windows CI ran this tree to completion for the first time on 2026-08-18 and
-found what a POSIX-only green run cannot: `json_file_lock` yielded WITHOUT a
-lock on win32, so the read-modify-write serialisation proven here every day
-did not exist there at all. Reported by devpulse (70a10016) with the measured
-shape — increment_counter reached 26 of 100 on Windows.
-
-These pins exercise the win32 branch FROM LINUX by injecting a fake msvcrt, so
-the platform this branch cannot run on is still covered by construction.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — _acquire_lock_win32 against a real Windows host; driven here by injection
+# seedgo: no-test-needed(covered_elsewhere) — medic state's read-modify-write cycles over json_file_lock, in test_medic_state.py
 
 import json
 import os
@@ -83,17 +77,19 @@ class TestWindowsLockIsRealNotSkipped:
         assert fake.calls.count((fake.LK_NBLCK, 1)) == 4
 
     def test_win32_refuses_rather_than_running_unlocked(self, monkeypatch, tmp_path):
-        """Exhausting the retries RAISES. Silent data loss is the one forbidden outcome."""
+        """Exhausting the retries RAISES after a bounded wait (mutant: the win32 backoff sleep deleted)."""
         fake = _FakeMsvcrt(fail_times=config._LOCK_ATTEMPTS + 5)
         monkeypatch.setattr(config.sys, "platform", "win32")
         monkeypatch.setitem(sys.modules, "msvcrt", fake)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
+        sleeps: list = []
+        monkeypatch.setattr(config.time, "sleep", sleeps.append)
 
         entered = False
         with pytest.raises(OSError):
             with config.json_file_lock(tmp_path / "doc.json"):
                 entered = True
         assert entered is False, "body ran without the lock"
+        assert sleeps == [config._LOCK_BACKOFF_SECONDS] * (config._LOCK_ATTEMPTS - 1)
 
     def test_no_platform_yields_without_locking(self):
         """No branch of the lock may reach `yield` without taking a lock.
@@ -114,7 +110,7 @@ class TestReplaceSurvivesWindowsSharingViolations:
     """
 
     def test_success_after_transient_permission_errors(self, monkeypatch, tmp_path):
-        """A replace blocked twice still lands."""
+        """A replace blocked twice still lands, waiting once per refusal (mutant: a wait after success)."""
         attempts = {"n": 0}
 
         def flaky(src, dst):
@@ -123,10 +119,12 @@ class TestReplaceSurvivesWindowsSharingViolations:
                 raise PermissionError("sharing violation")
 
         monkeypatch.setattr(config.os, "replace", flaky)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
+        sleeps: list = []
+        monkeypatch.setattr(config.time, "sleep", sleeps.append)
 
         config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
         assert attempts["n"] == 3
+        assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * 2
 
     def test_exhaustion_raises_at_exactly_the_declared_attempts(self, monkeypatch, tmp_path):
         """Bounded, and the bound is the declared constant."""
@@ -137,7 +135,6 @@ class TestReplaceSurvivesWindowsSharingViolations:
             raise PermissionError("sharing violation")
 
         monkeypatch.setattr(config.os, "replace", always_blocked)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
 
         with pytest.raises(PermissionError):
             config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
@@ -215,7 +212,6 @@ class TestReadTextWithRetry:
         """Three sharing violations, then the real contents."""
         path, state, read_text = self._flaky(tmp_path, 3)
         monkeypatch.setattr(Path, "read_text", read_text)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
         assert config.read_text_with_retry(path) == "payload"
         assert state["seen"] == 3
 
@@ -237,7 +233,6 @@ class TestReadTextWithRetry:
         """
         path, state, read_text = self._flaky(tmp_path, 10_000)
         monkeypatch.setattr(Path, "read_text", read_text)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
         with pytest.raises(PermissionError):
             config.read_text_with_retry(path)
         assert state["seen"] == config._REPLACE_ATTEMPTS
@@ -303,11 +298,13 @@ class TestWindowsLockIsPositionAware:
         grows, so handle B opens at byte 64. Without the seek they lock
         different bytes and BOTH proceed — a lock that never collides. The
         seek is the only thing making them meet.
+        Mutant for the wait assert: the win32 backoff sleep deleted.
         """
         fake = _PositionalFakeMsvcrt()
         monkeypatch.setattr(config.sys, "platform", "win32")
         monkeypatch.setitem(sys.modules, "msvcrt", fake)
-        monkeypatch.setattr(config.time, "sleep", lambda _s: None)
+        sleeps: list = []
+        monkeypatch.setattr(config.time, "sleep", sleeps.append)
         doc = tmp_path / "doc.json"
         lock_path = doc.with_suffix(".lock")
         lock_path.write_text("", encoding="utf-8")
@@ -320,6 +317,7 @@ class TestWindowsLockIsPositionAware:
 
         assert fake.grants[0] == (0, 1), f"outer lock landed at {fake.grants[0]}, not byte 0"
         assert len(fake.grants) == 1, "a second lock was granted while the first was held"
+        assert len(sleeps) == config._LOCK_ATTEMPTS - 1, "the inner lock did not wait out its bound before refusing"
 
     def test_the_model_can_see_position_drift(self, monkeypatch, tmp_path):
         """Vacuity floor: prove the model WOULD grant two unsought locks.

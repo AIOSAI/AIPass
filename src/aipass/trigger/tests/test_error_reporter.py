@@ -1,16 +1,22 @@
-"""Tests for the error_reporter handler (apps/handlers/error_reporter.py)."""
-
 # =================== META ====================
 # Name: test_error_reporter.py
 # Description: Unit tests for error_reporter handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for the error_reporter handler (apps/handlers/error_reporter.py)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — how report() fingerprints and stores a row, in tests/test_error_registry.py
+# seedgo: no-test-needed(covered_elsewhere) — what the error_detected event does once fired, in tests/test_error_detected.py
 
 import sys
 import pytest
 from unittest.mock import MagicMock
+
+from aipass.trigger.apps.config import atomic_write_json
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +72,6 @@ def _mock_infrastructure(monkeypatch):
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (needed by error_registry import chain) -------------
-    from aipass.trigger.apps.config import atomic_write_json
 
     config_mock = MagicMock()
     config_mock.atomic_write_json = atomic_write_json
@@ -428,7 +433,7 @@ class TestReportError:
 
         assert result["dispatched"] is False
 
-    def test_calls_registry_report_with_correct_args(self):
+    def test_calls_registry_report_with_correct_args(self, tmp_path):
         """report_error calls _registry_report with the correct arguments."""
         reporter = _import_reporter()
         registry_report = _get_registry_report()
@@ -443,7 +448,7 @@ class TestReportError:
             error_type="TimeoutError",
             message="Connection timed out",
             component="API",
-            log_path="/var/log/api.log",
+            log_path=str(tmp_path / "api.log"),
             severity="high",
             fire_event=False,
         )
@@ -452,7 +457,7 @@ class TestReportError:
             error_type="TimeoutError",
             message="Connection timed out",
             component="API",
-            log_path="/var/log/api.log",
+            log_path=str(tmp_path / "api.log"),
             severity="high",
         )
 
@@ -495,7 +500,7 @@ class TestReportError:
         jh = _get_json_handler()
         jh.log_operation.assert_not_called()
 
-    def test_fire_event_passes_all_kwargs(self, monkeypatch):
+    def test_fire_event_passes_all_kwargs(self, monkeypatch, tmp_path):
         """report_error passes correct kwargs to trigger.fire."""
         reporter = _import_reporter()
         registry_report = _get_registry_report()
@@ -513,14 +518,14 @@ class TestReportError:
         trigger_mod.trigger = mock_trigger
         monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
 
-        reporter.report_error("ValueError", "bad value", "DRONE", log_path="/logs/drone.log")
+        reporter.report_error("ValueError", "bad value", "DRONE", log_path=str(tmp_path / "drone.log"))
 
         fire_call = mock_trigger.fire.call_args
         assert fire_call[0][0] == "error_detected"
         assert fire_call[1]["branch"] == "DRONE"
         assert fire_call[1]["module"] == "ValueError"
         assert fire_call[1]["message"] == "bad value"
-        assert fire_call[1]["log_path"] == "/logs/drone.log"
+        assert fire_call[1]["log_path"] == str(tmp_path / "drone.log")
         assert fire_call[1]["error_hash"] == "unique-id-42"
         assert fire_call[1]["fingerprint"] == "fp666aabbcc"
         assert fire_call[1]["registry_id"] == "unique-id-42"
@@ -570,7 +575,10 @@ class TestReportError:
         assert result["dispatched"] is False
 
     def test_fire_event_failure_still_logs_operation(self, monkeypatch):
-        """Even when trigger.fire fails, json_handler.log_operation is still called."""
+        """Even when trigger.fire fails, json_handler.log_operation is still called.
+
+        Mutant run 2026-09-27: log_operation logs branch=error_type -> red.
+        """
         reporter = _import_reporter()
         registry_report = _get_registry_report()
         registry_report.return_value = {
@@ -591,4 +599,4 @@ class TestReportError:
         reporter.report_error("ImportError", "No module foo", "FLOW")
 
         jh = _get_json_handler()
-        jh.log_operation.assert_called_once()
+        jh.log_operation.assert_called_once_with("error_reported", {"branch": "FLOW", "error_type": "ImportError"})

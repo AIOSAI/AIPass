@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-09-24
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -13,7 +13,7 @@
 # seedgo: no-test-needed(covered_elsewhere) — the digest body and the aged lane, in test_escalation.py
 # seedgo: no-test-needed(covered_elsewhere) — the two producers of this event, log_watcher and the catch-up scan
 # seedgo: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
-# seedgo: no-test-needed(constant) — the fixed prose of the investigation steps and the decision tree
+# seedgo: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps around its fields
 
 import json
 import sys
@@ -388,7 +388,7 @@ class TestHandleErrorDetectedHappyPath:
         """Logs dispatch_sent via json_handler after successful send."""
         mod = _import_module()
         _setup_happy_path(mod)
-        from aipass.trigger.apps.handlers.json import json_handler
+        json_handler = mod.json_handler
 
         json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
@@ -418,7 +418,7 @@ class TestHandleErrorDetectedHappyPath:
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.side_effect = RuntimeError("SMTP down")
-        from aipass.trigger.apps.handlers.json import json_handler
+        json_handler = mod.json_handler
 
         json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 
@@ -442,7 +442,7 @@ class TestHandleErrorDetectedHappyPath:
         mod = _import_module()
         send = _setup_happy_path(mod)
         send.return_value = False
-        from aipass.trigger.apps.handlers.json import json_handler
+        json_handler = mod.json_handler
 
         json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
 

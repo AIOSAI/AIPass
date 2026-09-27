@@ -1,18 +1,16 @@
 # =================== AIPass ====================
 # Name: test_errors.py
 # Description: Unit tests for the errors module (error registry management CLI)
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Unit tests for aipass.trigger.apps.modules.errors
+"""Tests for apps/modules/errors.py: the errors command routing and its report_error re-export."""
 
-Tests the handle_command routing and report_error public API.
-All heavy infrastructure (prax logger, json_handler, error_registry,
-error_reporter, cli display) is mocked via sys.modules before import.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — what the registry stores and returns, in tests/test_error_registry.py
+# seedgo: no-test-needed(covered_elsewhere) — how report_error fingerprints and dispatches, in tests/test_error_reporter.py
 
 import sys
 import tempfile
@@ -468,6 +466,8 @@ class TestHandleCommandHelp:
         result = handle_command("errors", ["-h"])
 
         assert result is True
+        rules = [str(c) for c in _mocks()["console"].rule.call_args_list]
+        assert any("COMMANDS" in text for text in rules), "-h must print the COMMANDS section"
 
     def test_help_subcommand_shows_help(self):
         """'help' as subcommand triggers help display."""
@@ -476,6 +476,8 @@ class TestHandleCommandHelp:
         result = handle_command("errors", ["help"])
 
         assert result is True
+        rules = [str(c) for c in _mocks()["console"].rule.call_args_list]
+        assert any("COMMANDS" in text for text in rules), "help must print the COMMANDS section"
 
 
 # ---------------------------------------------------------------------------
@@ -795,6 +797,41 @@ class TestHandleCommandClearResolved:
 
         mocks["clear_resolved"].assert_called_once_with(days=14)
 
+    def test_clear_resolved_failure_reports_error(self):
+        """clear-resolved reports a failed clear (-1) through error(), not as "nothing to clear".
+
+        Red first 2026-09-27 against _cmd_clear_resolved with no removed < 0 branch.
+        """
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        mocks = _mocks()
+        mocks["clear_resolved"].return_value = -1
+
+        assert handle_command("errors", ["clear-resolved"]) is True
+
+        mocks["error_fn"].assert_called_once()
+        assert "clear" in mocks["error_fn"].call_args[0][0].lower()
+        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
+        assert not any("no resolved" in text.lower() for text in printed_texts)
+
+    def test_purge_failure_reports_error(self):
+        """purge reports a failed purge (-1) through error(), never as "Purged -1 entries".
+
+        Red first 2026-09-27 against _cmd_purge with no removed < 0 branch.
+        """
+        from aipass.trigger.apps.modules.errors import handle_command
+
+        mocks = _mocks()
+        registry = sys.modules["aipass.trigger.apps.handlers.error_registry"]
+        registry.purge_stale.return_value = -1
+
+        assert handle_command("errors", ["purge"]) is True
+
+        mocks["error_fn"].assert_called_once()
+        assert "purge" in mocks["error_fn"].call_args[0][0].lower()
+        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
+        assert not any("Purged -1" in text for text in printed_texts)
+
     def test_clear_resolved_none_removed(self):
         """clear-resolved prints dim message when nothing was removed."""
         from aipass.trigger.apps.modules.errors import handle_command
@@ -805,70 +842,85 @@ class TestHandleCommandClearResolved:
         handle_command("errors", ["clear-resolved"])
 
         printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        has_no_resolved = any("no resolved" in text.lower() for text in printed_texts)
-        assert has_no_resolved, "Expected 'no resolved' message when nothing cleared"
+        assert any("no resolved" in text.lower() for text in printed_texts), (
+            "Expected 'no resolved' message when nothing cleared"
+        )
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers — _parse_args and _fmt_time
+# --key=value flags and the Last Seen cell, through the list command
 # ---------------------------------------------------------------------------
 
 
-class TestInternalHelpers:
-    """Tests for small internal helper functions."""
+class TestArgsAndTimeThroughList:
+    """--key=value parsing and the Last Seen cell, read off the list command."""
 
-    def test_parse_args_extracts_key_value(self):
-        """_parse_args parses --key=value pairs, stripping leading dashes."""
-        from aipass.trigger.apps.modules.errors import _parse_args
+    @staticmethod
+    def _last_seen_cell(last_seen: str) -> str:
+        """Run `errors list` over one entry and return the Last Seen cell it rendered."""
+        from aipass.trigger.apps.modules.errors import handle_command
 
-        result = _parse_args(["--status=new", "--limit=10", "positional"])
+        mocks = _mocks()
+        mocks["query"].return_value = [{"id": "e001", "fingerprint": "abc123def456", "last_seen": last_seen}]
+        handle_command("errors", ["list"])
+        return mocks["table_cls"].return_value.add_row.call_args[0][7]
 
-        assert result == {"status": "new", "limit": "10"}
+    def test_list_parses_key_value_flags(self):
+        """--key=value pairs reach query with the dashes stripped; a bare word is ignored.
 
-    def test_parse_args_empty(self):
-        """_parse_args returns empty dict for empty list."""
-        from aipass.trigger.apps.modules.errors import _parse_args
+        Mutant run 2026-09-27: _parse_args keeps the leading dashes (no lstrip) -> red.
+        """
+        from aipass.trigger.apps.modules.errors import handle_command
 
-        assert _parse_args([]) == {}
+        handle_command("errors", ["list", "--status=new", "--limit=10", "positional"])
 
-    def test_fmt_time_trims_iso_with_fractional(self):
-        """_fmt_time trims '2026-03-20T10:00:00.123456' to readable form."""
-        from aipass.trigger.apps.modules.errors import _fmt_time
+        _mocks()["query"].assert_called_once_with(status="new", component=None, severity=None, limit=10)
 
-        assert _fmt_time("2026-03-20T10:00:00.123456") == "2026-03-20 10:00:00"
+    def test_list_with_no_flags_uses_defaults(self):
+        """No flags parse to nothing: no filters and the default limit of 50.
 
-    def test_fmt_time_trims_iso_without_fractional(self):
-        """_fmt_time handles ISO without fractional seconds."""
-        from aipass.trigger.apps.modules.errors import _fmt_time
+        Mutant run 2026-09-27: _cmd_list default limit "50" -> "20" -> red.
+        """
+        from aipass.trigger.apps.modules.errors import handle_command
 
-        assert _fmt_time("2026-03-20T10:00:00") == "2026-03-20 10:00:00"
+        handle_command("errors", ["list"])
 
-    def test_fmt_time_passthrough_plain(self):
-        """_fmt_time passes through non-ISO strings unchanged."""
-        from aipass.trigger.apps.modules.errors import _fmt_time
+        _mocks()["query"].assert_called_once_with(status=None, component=None, severity=None, limit=50)
 
-        assert _fmt_time("yesterday") == "yesterday"
+    def test_last_seen_trims_iso_with_fractional(self):
+        """'2026-03-20T10:00:00.123456' renders as '2026-03-20 10:00:00'.
 
-    def test_parse_args_none_input(self):
-        """_parse_args handles None input gracefully (treats as empty)."""
-        from aipass.trigger.apps.modules.errors import _parse_args
+        Mutant run 2026-09-27: _fmt_time returns iso unchanged -> red.
+        """
+        assert self._last_seen_cell("2026-03-20T10:00:00.123456") == "2026-03-20 10:00:00"
 
-        # None is not a valid list, but the function should handle empty-like input
-        # The function iterates over args, so passing an empty iterable is the contract
-        assert _parse_args([]) == {}
+    def test_last_seen_trims_iso_without_fractional(self):
+        """ISO without fractional seconds still loses its T.
 
-    def test_fmt_time_empty_string(self):
-        """_fmt_time returns empty string unchanged when given empty string."""
-        from aipass.trigger.apps.modules.errors import _fmt_time
+        Mutant run 2026-09-27: _fmt_time returns iso unchanged -> red.
+        """
+        assert self._last_seen_cell("2026-03-20T10:00:00") == "2026-03-20 10:00:00"
 
-        assert _fmt_time("") == ""
+    def test_last_seen_passthrough_plain(self):
+        """A non-ISO string renders unchanged.
 
-    def test_fmt_time_none_like_string(self):
-        """_fmt_time handles a string with no T or dot as passthrough."""
-        from aipass.trigger.apps.modules.errors import _fmt_time
+        Mutant run 2026-09-27: _fmt_time's last return iso -> iso.upper() -> red.
+        """
+        assert self._last_seen_cell("yesterday") == "yesterday"
 
-        # No 'T' in the string means it falls through to the return-as-is path
-        assert _fmt_time("2026-03-20") == "2026-03-20"
+    def test_last_seen_empty_string(self):
+        """An empty last_seen renders as an empty cell.
+
+        Mutant run 2026-09-27: _fmt_time's last return iso -> iso or "?" -> red.
+        """
+        assert self._last_seen_cell("") == ""
+
+    def test_last_seen_date_only_passthrough(self):
+        """A date with no T or dot falls through unchanged.
+
+        Mutant run 2026-09-27: _fmt_time's last return iso -> iso.replace("-", "/") -> red.
+        """
+        assert self._last_seen_cell("2026-03-20") == "2026-03-20"
 
 
 # ---------------------------------------------------------------------------

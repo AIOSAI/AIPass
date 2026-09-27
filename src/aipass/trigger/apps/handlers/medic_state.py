@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic_state.py
 # Description: Medic state persistence and status collection handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-02-12
-# Modified: 2026-08-07
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -115,22 +115,24 @@ def read_config() -> dict:
     Read medic_state.json, migrating off the legacy path on first read.
 
     Returns:
-        Parsed config dict, or empty dict on failure
+        Parsed config dict, or empty dict when the file does not exist yet
 
-    Note:
-        Retried through read_text_with_retry — a refused read here becomes an
-        empty dict that write_config persists, taking every mute and the
-        circuit-breaker state with it. Same species as the json_handler loss
-        on Windows CI (32167459635). The never-clears residual is a todo.
+    Raises:
+        OSError, ValueError: the file exists but cannot be read or parsed.
+            Returning {} here once let write_config persist a blank over every
+            mute and the circuit-breaker state (the json_handler loss on
+            Windows CI, 32167459635). A write cycle now aborts instead, the
+            dispatch gate in escalation.py logs and carries on, and the CLI
+            entry point reports the error.
     """
     migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
-    try:
-        if MEDIC_STATE_FILE.exists():
-            return json.loads(read_text_with_retry(MEDIC_STATE_FILE))
-    except Exception as exc:
-        logger.warning("read_config failed: %s", exc)
+    if not MEDIC_STATE_FILE.exists():
         return {}
-    return {}
+    try:
+        return json.loads(read_text_with_retry(MEDIC_STATE_FILE))
+    except (OSError, ValueError) as exc:
+        logger.warning("read_config failed: %s", exc)
+        raise
 
 
 def write_config(data: dict) -> bool:

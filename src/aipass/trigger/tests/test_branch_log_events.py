@@ -1,16 +1,21 @@
-"""Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
-
 # =================== META ====================
 # Name: test_branch_log_events.py
 # Description: Unit tests for branch_log_events module
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-04-03
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for the branch_log_events module (apps/modules/branch_log_events.py)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the watcher in apps/handlers/log_watcher.py that it starts; its own tests cover it
 
 import sys
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
+
+from aipass.cli.apps.modules import display
 
 
 # ---------------------------------------------------------------------------
@@ -75,22 +80,8 @@ def _mock_infrastructure(monkeypatch):
     mock_config.atomic_write_json = atomic_write_json
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
-    # -- CLI console --------------------------------------------------------
-    mock_console = MagicMock()
-    cli_modules = MagicMock()
-    cli_modules.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    cli_display = MagicMock()
-    cli_display.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", cli_display)
-
-    # -- rich (for print_help Panel) ----------------------------------------
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.panel", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.console", MagicMock())
+    # The CLI console and rich are real: output is read with capsys, and a
+    # refusal through error() is read from cli's own failure flag.
 
     # -- Force re-import so mocks take effect -------------------------------
     monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.branch_log_events", raising=False)
@@ -108,11 +99,6 @@ def _get_log_watcher():
     return sys.modules["aipass.trigger.apps.handlers.log_watcher"]
 
 
-def _get_console():
-    """Return the mocked console from sys.modules."""
-    return sys.modules["aipass.cli.apps.modules"].console
-
-
 def _get_json_handler():
     """Return the mocked json_handler from sys.modules."""
     return sys.modules["aipass.trigger.apps.handlers.json.json_handler"]
@@ -121,20 +107,6 @@ def _get_json_handler():
 def _get_core_trigger():
     """Return the mocked trigger object from sys.modules."""
     return sys.modules["aipass.trigger.apps.modules.core"].trigger
-
-
-def _get_print_str_args(console):
-    """Extract all string positional arguments passed to console.print().
-
-    Returns a flat list of strings -- only positional args that are actual
-    str instances (ignoring MagicMock objects like Panel).
-    """
-    result = []
-    for call in console.print.call_args_list:
-        for arg in call.args:
-            if isinstance(arg, str):
-                result.append(arg)
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +149,7 @@ def test_stop_calls_stop_branch_log_watcher():
     mod = _import_module()
     mod.stop()
     watcher = _get_log_watcher()
-    watcher.stop_branch_log_watcher.assert_called_once()
+    assert watcher.stop_branch_log_watcher.call_args_list == [call()]
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +178,7 @@ def test_reset_hashes_calls_clear_seen_hashes():
     mod = _import_module()
     mod.reset_hashes()
     watcher = _get_log_watcher()
-    watcher.clear_seen_hashes.assert_called_once()
+    assert watcher.clear_seen_hashes.call_args_list == [call()]
 
 
 # ---------------------------------------------------------------------------
@@ -223,17 +195,19 @@ def test_handle_command_start_success():
     watcher.start_branch_log_watcher.assert_called_once()
 
 
-def test_handle_command_start_failure_prints_error():
-    """handle_command('start', []) prints failure when watcher fails to start."""
+def test_handle_command_start_failure_prints_error(capsys):
+    """A watcher that fails to start is reported through error(), which fails the command.
+
+    Mutant run: the failure sent through warning() instead of error() reddens this.
+    """
     mod = _import_module()
     watcher = _get_log_watcher()
     watcher.start_branch_log_watcher.return_value = None
     result = mod.handle_command("start", [])
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
-    assert any("Failed to start" in s for s in err_args), f"Expected failure message in error() args: {err_args}"
+    err = capsys.readouterr().err
+    assert display.command_failed() is True
+    assert "Failed to start" in err, f"Expected failure message on stderr: {err}"
 
 
 def test_handle_command_stop():
@@ -376,13 +350,11 @@ def test_handle_command_direct_help_word():
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_outputs_module_name():
+def test_print_introspection_outputs_module_name(capsys):
     """print_introspection prints module name and handler info."""
     mod = _import_module()
     mod.print_introspection()
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    output = "\n".join(printed)
+    output = capsys.readouterr().out
     assert "branch_log_events Module" in output
     assert "Connected Handlers:" in output
     assert "log_watcher.py" in output
@@ -393,13 +365,11 @@ def test_print_introspection_outputs_module_name():
 # ---------------------------------------------------------------------------
 
 
-def test_print_help_outputs_commands():
+def test_print_help_outputs_commands(capsys):
     """print_help prints command reference."""
     mod = _import_module()
     mod.print_help()
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    output = "\n".join(printed)
+    output = capsys.readouterr().out
     assert "start" in output
     assert "stop" in output
     assert "status" in output
@@ -411,13 +381,11 @@ def test_print_help_outputs_commands():
 # ---------------------------------------------------------------------------
 
 
-def test_handle_command_status_prints_all_fields():
+def test_handle_command_status_prints_all_fields(capsys):
     """handle_command('status', []) prints active, watchdog, hashes, root."""
     mod = _import_module()
     mod.handle_command("status", [])
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    output = "\n".join(printed)
+    output = capsys.readouterr().out
     assert "Active:" in output
     assert "Watchdog available:" in output
     assert "Seen error hashes:" in output

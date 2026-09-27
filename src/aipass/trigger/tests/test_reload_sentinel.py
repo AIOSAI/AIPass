@@ -3,34 +3,32 @@
 # Description: Tests the handler-mtime reload sentinel that keeps the watcher on shipped code
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the reload sentinel.
+"""Tests for apps/handlers/reload_sentinel.py, the handler-mtime reload sentinel."""
 
-The defect this guards against has bitten twice. The log watcher is a
-long-running process that imports trigger's handler modules once; editing a
-handler on disk changes nothing until the process restarts. On 2026-08-11 a
-signature fix sat unloaded for 25 hours while the branch reported it shipped,
-and @devpulse read the continuing noise as the fix being incomplete.
-
-Two properties matter more than the detection itself:
-
-1. A change must SETTLE before it counts. An editor writing a file mid-save
-   would otherwise restart the service into a half-written module.
-2. An UNSUPERVISED process must never exit. Under systemd a restart is free;
-   run by hand, exiting would stop log watching silently — trading a stale
-   watcher for no watcher, which is strictly worse.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — main() exiting RELOAD_EXIT_CODE when start() asks, in test_log_watcher_service.py
+# seedgo: no-test-needed(external) — systemd restarting the unit on RELOAD_EXIT_CODE; AIPass tests only its own files
 
 import os
 import threading
-import time
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
 import pytest
+from aipass.trigger.apps.config import trail_logger
+
+
+def _join_sentinel_loops() -> None:
+    """Wait for every reload-sentinel loop thread to observe its stop event and exit."""
+    for thread in threading.enumerate():
+        if thread.name == "reload-sentinel":
+            thread.join(timeout=2.0)
+            assert not thread.is_alive(), "a reload-sentinel loop outlived its stop event"
 
 
 @pytest.fixture
@@ -43,9 +41,6 @@ def sentinel(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     suite, which is exactly the trap that sent me hunting a reload warning no
     service had written.
     """
-    import aipass.trigger.apps.handlers.reload_sentinel as reload_sentinel
-    from aipass.trigger.apps.config import trail_logger
-
     monkeypatch.setattr(reload_sentinel, "logger", trail_logger(tmp_path / "reload_sentinel.jsonl"))
     # Same reasoning one layer down: log_operation() writes into the branch's
     # live trigger_json/ operational logs, so an unmocked test run files
@@ -81,7 +76,7 @@ def stop_event():
     event = threading.Event()
     yield event
     event.set()
-    time.sleep(0.05)  # let the loop observe it and exit before the patch lifts
+    _join_sentinel_loops()  # the loop has exited before the patch lifts
 
 
 def _age(path: Path, seconds: float) -> None:
@@ -232,7 +227,7 @@ class TestReloadDecision:
         monkeypatch.setattr(sentinel, "CHECK_INTERVAL_SECONDS", 0.01)
         reload_requested = sentinel.start(stop_event)
         stop_event.set()
-        time.sleep(0.1)
+        _join_sentinel_loops()
 
         assert reload_requested() is False
 
@@ -251,10 +246,20 @@ class TestReloadDecision:
     def test_a_crashing_check_does_not_stop_log_watching(self, sentinel, tree, monkeypatch, stop_event) -> None:
         """A broken sentinel is an inconvenience; a dead watcher is an outage."""
         monkeypatch.setattr(sentinel, "CHECK_INTERVAL_SECONDS", 0.01)
-        monkeypatch.setattr(sentinel, "evaluate", lambda _b: (_ for _ in ()).throw(OSError("disk gone")))
-        reload_requested = sentinel.start(stop_event)
-        time.sleep(0.15)
+        crashes: list[int] = []
+        crashed_twice = threading.Event()
 
+        def crash(_baseline: object) -> bool:
+            """Fail every check; signal once the loop has survived one crash."""
+            crashes.append(1)
+            if len(crashes) >= 2:
+                crashed_twice.set()
+            raise OSError("disk gone")
+
+        monkeypatch.setattr(sentinel, "evaluate", crash)
+        reload_requested = sentinel.start(stop_event)
+
+        assert crashed_twice.wait(timeout=3.0), "the loop must keep checking after a crash"
         assert stop_event.is_set() is False, "the watcher must still be running"
         assert reload_requested() is False
 

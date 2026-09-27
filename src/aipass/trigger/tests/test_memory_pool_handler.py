@@ -3,10 +3,13 @@
 # Description: Tests for memory_pool_auto_processed event handler
 # Version: 1.0.0
 # Created: 2026-06-06
-# Modified: 2026-06-06
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for memory_pool event handler."""
+"""Tests for apps/handlers/events/memory_pool.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the event wiring in apps/handlers/events/registry.py; the bus tests cover delivery
 
 import pytest
 from unittest.mock import MagicMock
@@ -236,7 +239,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
 
         log_file = tmp_path / "logs" / "memory_pool_handler.jsonl"
         assert log_file.exists()
-        content = log_file.read_text()
+        content = log_file.read_text(encoding="utf-8")
         assert "pool write failed" in content
 
 

@@ -1,12 +1,16 @@
 # =================== AIPass ====================
 # Name: test_error_registry.py
 # Description: Unit tests for the error_registry handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the error_registry handler -- dedup engine, circuit breaker, backoff."""
+"""Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the errors command that reads this registry, in tests/test_errors.py
+# seedgo: no-test-needed(covered_elsewhere) — the dispatch gate built on should_dispatch, in tests/test_error_detected.py
 
 import json
 import time
@@ -15,6 +19,8 @@ from dataclasses import fields
 import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
+
+from aipass.trigger.apps.config import atomic_write_json, read_text_with_retry
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +54,6 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
 
     # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json, read_text_with_retry
 
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
@@ -131,12 +136,12 @@ def test_normalize_strips_timestamps() -> None:
     assert "<timestamp>" in normalized
 
 
-def test_normalize_strips_paths() -> None:
+def test_normalize_strips_paths(tmp_path: Path) -> None:
     """normalize_message replaces absolute paths with a placeholder."""
     er = _import_registry()
-    raw = "Cannot read /home/user/project/data.json"
-    normalized = er.normalize_message(raw)
-    assert "/home/user" not in normalized
+    data_file = tmp_path / "project" / "data.json"
+    normalized = er.normalize_message(f"Cannot read {data_file}")
+    assert str(tmp_path) not in normalized
     assert "<path>" in normalized
 
 
@@ -179,7 +184,7 @@ def test_report_creates_new_entry(tmp_path: Path) -> None:
         error_type="ImportError",
         message="No module named 'foo'",
         component="FLOW",
-        log_path="/logs/flow.log",
+        log_path=str(tmp_path / "flow.log"),
         severity="high",
     )
 
@@ -795,6 +800,20 @@ def test_clear_resolved_keeps_non_resolved(tmp_path: Path) -> None:
     assert removed == 0
 
 
+def test_clear_resolved_unreadable_shape_returns_minus_one(tmp_path: Path) -> None:
+    """A registry clear_resolved cannot walk answers -1, never the 0 of "nothing to clear".
+
+    Red first 2026-09-27 against the old except that returned 0.
+    """
+    registry_file = tmp_path / "trigger_json" / "error_registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    registry_file.write_text(json.dumps({"errors": [], "metadata": {}}), encoding="utf-8")
+    er = _import_registry()
+
+    assert er.clear_resolved(days=7) == -1
+    assert json.loads(registry_file.read_text(encoding="utf-8"))["errors"] == []
+
+
 # ===========================================================================
 # 11. get_stats
 # ===========================================================================
@@ -1018,8 +1037,6 @@ class TestEmptyJsonResilience:
 
         er = _import_registry()
         result = er._load_registry()
-        assert isinstance(result, dict)
-        assert "errors" in result
         assert result["errors"] == {}
 
     def test_load_registry_corrupt_json(self, tmp_path: Path) -> None:
@@ -1031,8 +1048,7 @@ class TestEmptyJsonResilience:
 
         er = _import_registry()
         result = er._load_registry()
-        assert isinstance(result, dict)
-        assert "errors" in result
+        assert result["errors"] == {}
 
     def test_load_circuit_breaker_empty_config(self, tmp_path: Path) -> None:
         """_load_circuit_breaker_state returns default when its state file is empty."""
@@ -1132,6 +1148,20 @@ def test_purge_stale_returns_zero_on_empty_registry(tmp_path: Path) -> None:
 
     removed = er.purge_stale(days=30)
     assert removed == 0
+
+
+def test_purge_stale_unreadable_shape_returns_minus_one(tmp_path: Path) -> None:
+    """A registry purge_stale cannot walk answers -1, never the 0 of "nothing stale".
+
+    Red first 2026-09-27 against the old except that returned 0.
+    """
+    registry_file = tmp_path / "trigger_json" / "error_registry.json"
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    registry_file.write_text(json.dumps({"errors": [], "metadata": {}}), encoding="utf-8")
+    er = _import_registry()
+
+    assert er.purge_stale(days=30) == -1
+    assert json.loads(registry_file.read_text(encoding="utf-8"))["errors"] == []
 
 
 def test_purge_stale_custom_days(tmp_path: Path) -> None:
@@ -1391,7 +1421,7 @@ def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _refuse_once(mp, target: Path):
+def _refuse_once(mp, er):
     """Refuse ONE read of target with a Windows sharing violation.
 
     The same transient os.replace already retries for, seen from the reading
@@ -1399,29 +1429,34 @@ def _refuse_once(mp, target: Path):
     and _load_registry has the identical shape: a refused read returns a blank
     registry, and every caller writes that blank straight back.
     """
-    real = Path.read_text
     state = {"left": 1, "seen": 0}
 
-    def read_text(self_path, *args, **kwargs):
-        if str(self_path) == str(target) and state["left"]:
-            state["left"] -= 1
-            state["seen"] += 1
-            raise PermissionError(13, "used by another process")
-        return real(self_path, *args, **kwargs)
+    class _RefusingPath(Path):
+        """The registry path, refusing its first read; only er.REGISTRY_FILE is swapped."""
 
-    mp.setattr(Path, "read_text", read_text)
+        def read_text(self, *args, **kwargs):
+            if state["left"]:
+                state["left"] -= 1
+                state["seen"] += 1
+                raise PermissionError(13, "used by another process")
+            return super().read_text(*args, **kwargs)
+
+    mp.setattr(er, "REGISTRY_FILE", _RefusingPath(er.REGISTRY_FILE))
     return state
 
 
 def test_a_refused_read_does_not_wipe_the_registry(tmp_path: Path) -> None:
-    """A sharing violation mid-write must not cost the whole registry."""
+    """A sharing violation mid-write must not cost the whole registry.
+
+    Mutant run 2026-09-27: _load_registry reads REGISTRY_FILE.read_text directly (no retry) -> red.
+    """
     _seed_registry(tmp_path)
     er = _import_registry()
     er.report(error_type="ImportError", message="first", component="FLOW")
     assert len(json.loads(er.REGISTRY_FILE.read_text(encoding="utf-8"))["errors"]) == 1
 
     with pytest.MonkeyPatch.context() as mp:
-        state = _refuse_once(mp, er.REGISTRY_FILE)
+        state = _refuse_once(mp, er)
         er.report(error_type="ValueError", message="second", component="FLOW")
 
     assert state["seen"] == 1, "fixture refused nothing — test is vacuous"

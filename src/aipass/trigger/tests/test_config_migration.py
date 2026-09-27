@@ -3,17 +3,19 @@
 # Description: Tests for migrate_json_file - moving live state off trio-owned paths
 # Version: 1.0.0
 # Created: 2026-08-07
-# Modified: 2026-08-07
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for config.migrate_json_file and config._archive_legacy_file.
+"""Tests for apps/config.py: migrate_json_file and _archive_legacy_file."""
 
-The migration exists because json_handler's trio machinery owns every
-`<module>_<config|data|log>.json` name in trigger_json/ and regenerates any
-such file whose shape does not match its template. Live hand-written state
-parked on one of those names is one caller-name resolution away from being
-replaced by a blank template.
-"""
+# The migration exists because json_handler's trio machinery owns every
+# `<module>_<config|data|log>.json` name in trigger_json/ and regenerates any
+# such file whose shape does not match its template. Live hand-written state
+# parked on one of those names is one caller-name resolution away from being
+# replaced by a blank template.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the trio regeneration in apps/handlers/json/json_handler.py; the json handler owns it
 
 import json
 from pathlib import Path

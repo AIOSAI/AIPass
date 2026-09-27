@@ -3,14 +3,16 @@
 # Description: Tests for the escalation digest lane and its CLI module
 # Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-08-09
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for handlers/escalation.py — repeat-signature counting, digest gating, and modules/escalation.py."""
 
-import importlib
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the upsert key the digest carries into ai_mail, in test_escalation_upsert.py
+# seedgo: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
+
 import json
-import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -19,6 +21,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers import error_registry, escalation, medic_state
+from aipass.trigger.apps.handlers.events import error_detected
+from aipass.trigger.apps.handlers.json import config_loader
+from aipass.trigger.apps.modules import escalation as escalation_cli
 
 
 # ---------------------------------------------------------------------------
@@ -53,8 +59,6 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     The real file lock and real atomic writes run here on purpose: a mocked
     lock has already hidden a self-deadlock in this branch once.
     """
-    from aipass.trigger.apps.handlers import escalation
-
     monkeypatch.setattr(escalation, "STATE_FILE", tmp_path / "escalation_state.json")
     monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
@@ -88,50 +92,56 @@ def outbox(monkeypatch: pytest.MonkeyPatch, lane) -> List[Dict[str, Any]]:
 
 
 @pytest.fixture
+def refused(monkeypatch: pytest.MonkeyPatch, lane) -> List[Dict[str, Any]]:
+    """A delivery callback that records every attempt and refuses it."""
+    attempts: List[Dict[str, Any]] = []
+
+    def _refuse(**kwargs: Any) -> bool:
+        attempts.append(kwargs)
+        return False
+
+    monkeypatch.setattr(lane, "_send_email", _refuse)
+    return attempts
+
+
+@pytest.fixture
 def medic(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Registry + medic state describing an error medic is still handling itself.
 
-    Each of these is reached through a lazy import inside the lane, so the
-    modules are pulled in with importlib first: that guarantees the object
-    patched here is the same one the lane resolves out of sys.modules.
+    The lane reaches each of these through a lazy import that resolves out of
+    sys.modules at call time, so the module objects imported at the top of
+    this file are the ones patched here and the ones the lane reads.
     """
-    error_registry = importlib.import_module("aipass.trigger.apps.handlers.error_registry")
-    medic_state = importlib.import_module("aipass.trigger.apps.handlers.medic_state")
-    error_detected = importlib.import_module("aipass.trigger.apps.handlers.events.error_detected")
 
-    monkeypatch.setattr(error_registry, "is_suppressed", lambda fingerprint: False)
+    # Answers that depend on what the lane asks: a test suppresses a fingerprint
+    # by adding it to `suppressed`, and turns medic off through `switches`.
+    suppressed: set = set()
+    switches = {"medic_enabled": True}
+    monkeypatch.setattr(error_registry, "is_suppressed", lambda fingerprint: fingerprint in suppressed)
     monkeypatch.setattr(error_registry, "get_dispatch_count", lambda fingerprint: 0)
-    monkeypatch.setattr(medic_state, "is_enabled", lambda: True)
+    monkeypatch.setattr(medic_state, "is_enabled", lambda: switches["medic_enabled"])
     monkeypatch.setattr(medic_state, "get_muted_branches", lambda: [])
     monkeypatch.setattr(error_detected, "_get_registered_emails", lambda: {"@flow", "@memory"})
 
-    return SimpleNamespace(registry=error_registry, state=medic_state, dispatcher=error_detected)
+    return SimpleNamespace(
+        registry=error_registry,
+        state=medic_state,
+        dispatcher=error_detected,
+        suppressed=suppressed,
+        switches=switches,
+    )
 
 
 @pytest.fixture
 def cli(monkeypatch: pytest.MonkeyPatch, lane) -> SimpleNamespace:
-    """The escalation CLI module with a mocked console and json_handler."""
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", mock_json_handler)
+    """The real escalation CLI module; only its operation log is redirected.
 
-    console = MagicMock()
-    cli_modules = MagicMock()
-    cli_modules.console = console
-    cli_display = MagicMock()
-    cli_display.console = console
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", cli_display)
-
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.escalation", raising=False)
-    module = importlib.import_module("aipass.trigger.apps.modules.escalation")
-
-    return SimpleNamespace(module=module, console=console, log_operation=mock_json_handler.log_operation)
+    The console is the real one: tests read what it printed with capsys.
+    log_operation is replaced because the real one writes into trigger_json/.
+    """
+    log_operation = MagicMock(return_value=True)
+    monkeypatch.setattr(escalation_cli.json_handler, "log_operation", log_operation)
+    return SimpleNamespace(module=escalation_cli, log_operation=log_operation)
 
 
 # ---------------------------------------------------------------------------
@@ -499,15 +509,19 @@ class TestSignatureFragmentation:
         assert after == lane.compute_signature("WARNING", "prax", "q", "saw FLOW")
 
     def test_names_are_not_reread_inside_the_ttl(self, lane, monkeypatch, tmp_path) -> None:
-        """The cache is real: no file read per log line."""
+        """The cache is real: no file read per log line.
+
+        Mutant killed 2026-09-27: the TTL early return in _branch_name_pattern made unconditional-false.
+        """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text(json.dumps({"branches": [{"name": "FLOW"}]}), encoding="utf-8")
         monkeypatch.setattr(lane, "BRANCH_REGISTRY_FILE", registry)
         lane._branch_names_cache = (0.0, None)
-        lane.compute_signature("WARNING", "prax", "q", "warm the cache")
+        warm = lane.compute_signature("WARNING", "prax", "q", "saw FLOW")
 
         registry.unlink()
-        assert lane._branch_name_pattern() is not None
+        # Re-read, the missing registry would stop FLOW collapsing and move the signature.
+        assert lane.compute_signature("WARNING", "prax", "q", "saw FLOW") == warm
 
     def test_missing_registry_is_cached_not_reread(self, lane, monkeypatch, tmp_path) -> None:
         """A missing registry is an answer worth caching, not IO to repeat forever."""
@@ -714,7 +728,7 @@ class TestErrorEligibility:
 
     def test_medic_off_escalates(self, monkeypatch, lane, outbox, medic) -> None:
         """With medic off nothing dispatches, so repetition must reach the human."""
-        monkeypatch.setattr(medic.state, "is_enabled", lambda: False)
+        medic.switches["medic_enabled"] = False
 
         decision = _fire_error(lane, times=3)
 
@@ -748,8 +762,11 @@ class TestErrorEligibility:
         assert "no registered owner" in outbox[0]["message"]
 
     def test_suppressed_fingerprint_stays_silent(self, monkeypatch, lane, outbox, medic) -> None:
-        """A human called this benign (compass #219) — suppression beats 'already dispatched'."""
-        monkeypatch.setattr(medic.registry, "is_suppressed", lambda fingerprint: True)
+        """A human called this benign (compass #219) — suppression beats 'already dispatched'.
+
+        Mutant killed 2026-09-27: is_suppressed(fingerprint) -> is_suppressed("") in _is_error_eligible.
+        """
+        medic.suppressed.add(ERROR_EVENT["fingerprint"])
         monkeypatch.setattr(medic.registry, "get_dispatch_count", lambda fingerprint: 1)
 
         decision = _fire_error(lane, times=3)
@@ -760,7 +777,7 @@ class TestErrorEligibility:
     def test_escalate_suppressed_config_lifts_the_silence(self, monkeypatch, lane, outbox, medic, cfg) -> None:
         """Same suppressed error, escalate_suppressed on: the digest goes out."""
         cfg["escalate_suppressed"] = True
-        monkeypatch.setattr(medic.registry, "is_suppressed", lambda fingerprint: True)
+        medic.suppressed.add(ERROR_EVENT["fingerprint"])
         monkeypatch.setattr(medic.registry, "get_dispatch_count", lambda fingerprint: 1)
 
         decision = _fire_error(lane, times=3)
@@ -803,7 +820,7 @@ class TestConfigGates:
         self, monkeypatch, lane, outbox, cfg
     ) -> None:
         """The aged lane is an operator setting, and 0 is the old behaviour intact."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
         cfg["warning_age_hours"] = 0
 
         decision = _fire_aged_warning(lane)
@@ -813,7 +830,7 @@ class TestConfigGates:
 
     def test_an_unreadable_first_seen_keeps_the_manager_digest(self, monkeypatch, lane, outbox, cfg) -> None:
         """A stamp this lane cannot read must not silently retire the signal."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
         signature = _fire_warning(lane, times=1)["signature"]
         state = _read_state(lane)
         state["signatures"][signature]["first_seen"] = "not a timestamp"
@@ -845,6 +862,16 @@ class TestConfigGates:
 
         assert decision["outcome"] == "counted"
 
+    def test_a_failed_record_is_told_apart_from_a_switched_off_lane(self, monkeypatch, lane) -> None:
+        """None means the lane chose not to count; a crash inside it answers record_failed."""
+
+        def _unreadable() -> Dict[str, Any]:
+            raise OSError("config unreadable")
+
+        monkeypatch.setattr(lane, "get_config", _unreadable)
+
+        assert _fire_warning(lane, times=1) == {"signature": "", "count": 0, "outcome": "record_failed"}
+
     def test_incomplete_event_is_dropped(self, lane) -> None:
         """A record with no branch, module or message has nothing to key on."""
         assert lane.record_warning(branch="", module="watcher", message="x") is None
@@ -861,28 +888,25 @@ class TestConfigGates:
 class TestSendFailures:
     """A failed send must leave the signature ready to retry, not silently 'done'."""
 
-    def test_refused_delivery_reports_send_failed(self, monkeypatch, lane) -> None:
+    def test_refused_delivery_reports_send_failed(self, lane, refused) -> None:
         """A callback returning False is a failure, not a send."""
-        monkeypatch.setattr(lane, "_send_email", lambda **kwargs: False)
-
         decision = _fire_warning(lane, times=3)
 
         assert decision["outcome"] == "send_failed"
+        assert len(refused) == 1, "the digest was attempted once, at the threshold"
 
-    def test_refused_delivery_does_not_start_the_cooldown(self, monkeypatch, lane) -> None:
+    def test_refused_delivery_does_not_start_the_cooldown(self, lane, refused) -> None:
         """last_digest stays empty and digests_sent stays 0, so nothing is muted by a failure."""
-        monkeypatch.setattr(lane, "_send_email", lambda **kwargs: False)
-
         signature = _fire_warning(lane, times=3)["signature"]
 
         entry = _entry(lane, signature)
         assert entry["last_digest"] == ""
         assert entry["digests_sent"] == 0
 
-    def test_next_occurrence_retries_after_a_failure(self, monkeypatch, lane) -> None:
+    def test_next_occurrence_retries_after_a_failure(self, monkeypatch, lane, refused) -> None:
         """The window was not reset either, so the very next occurrence tries again."""
-        monkeypatch.setattr(lane, "_send_email", lambda **kwargs: False)
         _fire_warning(lane, times=3)
+        assert len(refused) == 1
 
         box: List[Dict[str, Any]] = []
 
@@ -1025,7 +1049,7 @@ class TestDigestEmail:
         self, monkeypatch, lane, outbox, cfg
     ) -> None:
         """24h of repetition into a manager's inbox is a pile. The owner gets it instead."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
 
         decision = _fire_aged_warning(lane)
 
@@ -1039,7 +1063,7 @@ class TestDigestEmail:
 
     def test_the_aged_notice_opens_a_registry_row_at_warning_level(self, monkeypatch, lane, outbox) -> None:
         """The row is what gives a repeat a lifecycle: suppress, resolve, a count."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
         rows: List[Dict[str, Any]] = []
 
         def _report(**kwargs: Any) -> Dict[str, Any]:
@@ -1058,7 +1082,7 @@ class TestDigestEmail:
 
     def test_an_unregistered_logging_branch_keeps_the_manager_digest(self, monkeypatch, lane, outbox, cfg) -> None:
         """Never drop the signal: with nobody to mail, the manager keeps hearing it."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: False)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "memory")
 
         decision = _fire_aged_warning(lane)
 
@@ -1067,7 +1091,7 @@ class TestDigestEmail:
 
     def test_an_aged_error_is_not_touched_by_the_warning_lane(self, monkeypatch, lane, outbox, cfg, medic) -> None:
         """Errors have medic. This lane is only for warnings, which have nothing."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
         medic.state.get_muted_branches = lambda: ["flow"]
 
         signature = _fire_error(lane, times=1)["signature"]
@@ -1079,7 +1103,7 @@ class TestDigestEmail:
 
     def test_every_rollup_lands_on_one_manager_thread(self, monkeypatch, lane, outbox, cfg) -> None:
         """The daily roll-up replaces the repeat digests — it must not become them."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
 
         _fire_aged_warning(lane)
         _fire_aged_warning(lane, message="a second aged condition")
@@ -1092,7 +1116,7 @@ class TestDigestEmail:
         self, monkeypatch, lane, outbox, cfg
     ) -> None:
         """Cadence paces the repeats; only a list that GREW is worth a rewrite."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
         signature = _fire_aged_warning(lane)["signature"]
         before = len([mail for mail in outbox if mail["to_branch"] == cfg["digest_recipient"]])
 
@@ -1105,7 +1129,7 @@ class TestDigestEmail:
 
     def test_the_rollup_names_every_open_aged_row(self, monkeypatch, lane, outbox, cfg) -> None:
         """One line per open row is the whole point: the manager sees the shape of it."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
 
         first = _fire_aged_warning(lane)["signature"]
         second = _fire_aged_warning(lane, message="a second aged condition")["signature"]
@@ -1234,7 +1258,7 @@ class TestReporting:
 
     def test_stats_count_the_rows_the_aged_lane_has_opened(self, monkeypatch, lane, outbox, cfg) -> None:
         """An operator must be able to see how many repeats went to their owners."""
-        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda branch: branch == "flow")
         _fire_aged_warning(lane)
 
         stats = lane.get_stats()
@@ -1376,9 +1400,6 @@ class TestConfigReadThrough:
     @pytest.fixture
     def operator_config(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Generator[Path, None, None]:
         """Point the real loader at an operator config file under tmp_path."""
-        from aipass.trigger.apps.handlers import escalation
-        from aipass.trigger.apps.handlers.json import config_loader
-
         path = tmp_path / "custom_config" / "trigger.config.json"
         monkeypatch.setattr(config_loader, "CONFIG_PATH", path)
         monkeypatch.setattr(config_loader, "logger", trail_logger(tmp_path / "config_loader.jsonl"))
@@ -1389,8 +1410,6 @@ class TestConfigReadThrough:
 
     def test_operator_values_win_over_defaults(self, operator_config: Path) -> None:
         """A threshold set in the file is the threshold the lane uses."""
-        from aipass.trigger.apps.handlers import escalation
-
         operator_config.parent.mkdir(parents=True, exist_ok=True)
         operator_config.write_text(json.dumps({"escalation": {"warning_threshold": 99}}), encoding="utf-8")
 
@@ -1400,9 +1419,6 @@ class TestConfigReadThrough:
 
     def test_missing_file_serves_defaults(self, operator_config: Path) -> None:
         """No file yet: defaults are served and the file is regenerated for the operator."""
-        from aipass.trigger.apps.handlers import escalation
-        from aipass.trigger.apps.handlers.json import config_loader
-
         cfg = escalation.get_config()
 
         assert cfg == config_loader.DEFAULT_CONFIG["escalation"]
@@ -1410,8 +1426,6 @@ class TestConfigReadThrough:
 
     def test_value_is_cached_until_reset(self, operator_config: Path) -> None:
         """The hot path does not re-read the file per log line; clearing the cache does."""
-        from aipass.trigger.apps.handlers import escalation
-
         operator_config.parent.mkdir(parents=True, exist_ok=True)
         operator_config.write_text(json.dumps({"escalation": {"warning_threshold": 99}}), encoding="utf-8")
         assert escalation.get_config()["warning_threshold"] == 99
@@ -1443,24 +1457,33 @@ class TestCliCommand:
         """`config` is core's command too."""
         assert cli.module.handle_command("config", []) is False
 
-    def test_escalation_status_is_handled(self, cli) -> None:
+    def test_escalation_status_is_handled(self, cli, capsys: pytest.CaptureFixture[str]) -> None:
         """`escalation status` renders and reports as handled."""
         assert cli.module.handle_command("escalation", ["status"]) is True
-        assert cli.console.print.called
+        assert "Escalation Digest" in capsys.readouterr().out
 
-    def test_escalation_list_is_handled(self, cli) -> None:
-        """`escalation list` renders and reports as handled."""
+    def test_escalation_list_is_handled(self, cli, capsys: pytest.CaptureFixture[str]) -> None:
+        """`escalation list` renders and reports as handled.
+
+        Mutant killed 2026-09-27: _handle_list(...) in _run_subcommand replaced by pass.
+        """
         assert cli.module.handle_command("escalation", ["list"]) is True
+        assert "No signatures tracked yet." in capsys.readouterr().out
 
-    def test_escalation_config_is_handled(self, cli) -> None:
-        """`escalation config` renders and reports as handled."""
+    def test_escalation_config_is_handled(self, cli, capsys: pytest.CaptureFixture[str]) -> None:
+        """`escalation config` renders and reports as handled.
+
+        Mutant killed 2026-09-27: _handle_config(...) in _run_subcommand replaced by pass.
+        """
         assert cli.module.handle_command("escalation", ["config"]) is True
+        out = capsys.readouterr().out
+        assert "Escalation config" in out
+        assert "warning_threshold = 3" in out
 
-    def test_no_subcommand_prints_introspection(self, cli) -> None:
+    def test_no_subcommand_prints_introspection(self, cli, capsys: pytest.CaptureFixture[str]) -> None:
         """A bare `escalation` introspects rather than guessing a subcommand."""
         assert cli.module.handle_command("escalation", []) is True
-        rendered = " ".join(str(call) for call in cli.console.print.call_args_list)
-        assert "escalation Module" in rendered
+        assert "escalation Module" in capsys.readouterr().out
 
     def test_unknown_subcommand_refuses_rather_than_showing_help(self, cli) -> None:
         """`escalation wat` returns False so the entry point can exit non-zero.
@@ -1481,31 +1504,30 @@ class TestCliCommand:
         assert cli.module.handle_command("escalation", ["help"]) is True
         printed.assert_called_once()
 
-    def test_status_renders_the_configured_recipient(self, cli, cfg) -> None:
+    def test_status_renders_the_configured_recipient(self, cli, cfg, capsys: pytest.CaptureFixture[str]) -> None:
         """Status shows where digests actually go, not a hardcoded address."""
         cli.module.handle_command("escalation", ["status"])
 
-        rendered = " ".join(str(call) for call in cli.console.print.call_args_list)
-        assert cfg["digest_recipient"] in rendered
+        assert cfg["digest_recipient"] in capsys.readouterr().out
 
-    def test_list_renders_tracked_signatures(self, cli, lane) -> None:
+    def test_list_renders_tracked_signatures(self, cli, lane, capsys: pytest.CaptureFixture[str]) -> None:
         """A counted signature shows up in `escalation list`."""
         signature = _fire_warning(lane, times=1)["signature"]
 
         cli.module.handle_command("escalation", ["list"])
 
-        rendered = " ".join(str(call) for call in cli.console.print.call_args_list)
+        rendered = capsys.readouterr().out
         assert signature in rendered
         assert WARNING_EVENT["message"] in rendered
 
-    def test_list_filters_by_level(self, cli, lane, medic) -> None:
+    def test_list_filters_by_level(self, cli, lane, medic, capsys: pytest.CaptureFixture[str]) -> None:
         """`escalation list error` hides warning signatures."""
         warning_signature = _fire_warning(lane, times=1)["signature"]
         error_signature = _fire_error(lane, times=1)["signature"]
 
         cli.module.handle_command("escalation", ["list", "error"])
 
-        rendered = " ".join(str(call) for call in cli.console.print.call_args_list)
+        rendered = capsys.readouterr().out
         assert error_signature in rendered
         assert warning_signature not in rendered
 

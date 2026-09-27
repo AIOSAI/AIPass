@@ -1,12 +1,16 @@
-"""Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
-
 # =================== META ====================
 # Name: test_watchers_log_watcher.py
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-08-04
+# Modified: 2026-09-27
 # =============================================
+
+"""Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — the live system_logs observer, owned by branch_log_events, in test_branch_log_events.py
+# seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's; AIPass tests only its own files
 
 import sys
 import hashlib
@@ -22,7 +26,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
+def _mock_infrastructure(monkeypatch, tmp_path):
     """Mock heavy infrastructure imports before watchers/log_watcher loads."""
 
     mock_logger = MagicMock()
@@ -51,7 +55,7 @@ def _mock_infrastructure(monkeypatch):
     from aipass.trigger.apps.config import atomic_write_json
 
     mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = Path("/tmp/fake_trigger_root")
+    mock_config.TRIGGER_ROOT = tmp_path / "src" / "aipass" / "trigger"
     mock_config.atomic_write_json = atomic_write_json
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
@@ -147,10 +151,10 @@ class TestDetectBranchFromLog:
         wlw = _import_watchers_lw()
         assert wlw._detect_branch_from_log("simple.log") == "SIMPLE"
 
-    def test_full_path(self):
+    def test_full_path(self, tmp_path):
         """Works with a full path, not just filename."""
         wlw = _import_watchers_lw()
-        assert wlw._detect_branch_from_log("/var/logs/trigger_events.log") == "TRIGGER"
+        assert wlw._detect_branch_from_log(str(tmp_path / "logs" / "trigger_events.log")) == "TRIGGER"
 
     def test_multiple_underscores(self):
         """ai_mail_dispatch.log returns AI (first part before underscore)."""
@@ -846,30 +850,30 @@ class TestLogFileWatcherInodeRotation:
 class TestStartStopActive:
     """Tests for start_log_watcher, stop_log_watcher, is_log_watcher_active."""
 
-    def test_start_returns_none_when_watchdog_unavailable(self):
+    def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
         """start_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
         wlw = _import_watchers_lw()
-        wlw.WATCHDOG_AVAILABLE = False
+        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", False)
         assert wlw.start_log_watcher() is None
 
-    def test_start_returns_none_when_dir_missing(self, tmp_path):
+    def test_start_returns_none_when_dir_missing(self, tmp_path, monkeypatch):
         """start_log_watcher returns None when SYSTEM_LOGS_DIR does not exist."""
         wlw = _import_watchers_lw()
-        wlw.SYSTEM_LOGS_DIR = tmp_path / "nonexistent"
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "nonexistent")
         assert wlw.start_log_watcher() is None
 
-    def test_is_log_watcher_active_false_when_not_started(self):
+    def test_is_log_watcher_active_false_when_not_started(self, monkeypatch):
         """is_log_watcher_active returns False when no observer is set."""
         wlw = _import_watchers_lw()
-        wlw._log_observer = None
+        monkeypatch.setattr(wlw, "_log_observer", None)
         assert wlw.is_log_watcher_active() is False
 
-    def test_is_log_watcher_active_false_when_observer_dead(self):
+    def test_is_log_watcher_active_false_when_observer_dead(self, monkeypatch):
         """is_log_watcher_active returns False when observer is not alive."""
         wlw = _import_watchers_lw()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = False
-        wlw._log_observer = mock_obs
+        monkeypatch.setattr(wlw, "_log_observer", mock_obs)
         assert wlw.is_log_watcher_active() is False
 
 
@@ -891,10 +895,10 @@ class TestWatcherOnModified:
         watcher.on_modified(event)
         watcher._read_new_lines.assert_not_called()
 
-    def test_skips_non_log_files(self):
+    def test_skips_non_log_files(self, monkeypatch, tmp_path):
         wlw = _import_watchers_lw()
-        logs_dir = Path("/fake/system_logs")
-        wlw.SYSTEM_LOGS_DIR = logs_dir
+        logs_dir = tmp_path / "system_logs"
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
         watcher._read_new_lines = MagicMock()
         event = MagicMock()
@@ -904,21 +908,21 @@ class TestWatcherOnModified:
         watcher.on_modified(event)
         watcher._read_new_lines.assert_not_called()
 
-    def test_skips_files_outside_system_logs(self):
+    def test_skips_files_outside_system_logs(self, monkeypatch, tmp_path):
         wlw = _import_watchers_lw()
-        wlw.SYSTEM_LOGS_DIR = Path("/fake/system_logs")
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
         watcher = wlw.LogFileWatcher()
         watcher._read_new_lines = MagicMock()
         event = MagicMock()
         event.is_directory = False
-        event.src_path = str(Path("/other/place/app.log"))
+        event.src_path = str(tmp_path / "other" / "place" / "app.log")
         watcher.on_modified(event)
         watcher._read_new_lines.assert_not_called()
 
-    def test_processes_valid_log_file(self):
+    def test_processes_valid_log_file(self, monkeypatch, tmp_path):
         wlw = _import_watchers_lw()
-        logs_dir = Path("/fake/system_logs")
-        wlw.SYSTEM_LOGS_DIR = logs_dir
+        logs_dir = tmp_path / "system_logs"
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
         watcher._read_new_lines = MagicMock()
         event = MagicMock()
@@ -927,7 +931,7 @@ class TestWatcherOnModified:
         watcher.on_modified(event)
         watcher._read_new_lines.assert_called_once_with(str(logs_dir / "app.log"))
 
-    def test_a_read_failure_is_reported_and_costs_only_that_event(self):
+    def test_a_read_failure_is_reported_and_costs_only_that_event(self, monkeypatch, tmp_path):
         """IOError is swallowed — but it is named, and the watcher keeps watching.
 
         The whole unit was the call itself, which a bare `except: pass` passes
@@ -936,8 +940,8 @@ class TestWatcherOnModified:
         and the board stays green. Named cause, and the next event still lands.
         """
         wlw = _import_watchers_lw()
-        logs_dir = Path("/fake/system_logs")
-        wlw.SYSTEM_LOGS_DIR = logs_dir
+        logs_dir = tmp_path / "system_logs"
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
         watcher._read_new_lines = MagicMock(side_effect=IOError("disk error"))
         event = MagicMock()
@@ -968,57 +972,57 @@ class TestWatcherOnModified:
 class TestWatcherInitializePositions:
     """Tests for LogFileWatcher.initialize_positions."""
 
-    def test_initializes_to_eof(self, tmp_path):
+    def test_initializes_to_eof(self, tmp_path, monkeypatch):
         wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
-        wlw.SYSTEM_LOGS_DIR = sys_logs
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
         log_file = sys_logs / "app.log"
-        log_file.write_text("test data\n")
+        log_file.write_text("test data\n", encoding="utf-8")
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(log_file)] == log_file.stat().st_size
 
-    def test_initializes_inodes(self, tmp_path):
+    def test_initializes_inodes(self, tmp_path, monkeypatch):
         """Inodes are recorded alongside positions at startup."""
         wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
-        wlw.SYSTEM_LOGS_DIR = sys_logs
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
         log_file = sys_logs / "app.log"
-        log_file.write_text("test data\n")
+        log_file.write_text("test data\n", encoding="utf-8")
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
 
-    def test_handles_missing_dir(self, tmp_path):
+    def test_handles_missing_dir(self, tmp_path, monkeypatch):
         wlw = _import_watchers_lw()
-        wlw.SYSTEM_LOGS_DIR = tmp_path / "nonexistent"
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "nonexistent")
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert len(watcher.log_positions) == 0
 
-    def test_multiple_files(self, tmp_path):
+    def test_multiple_files(self, tmp_path, monkeypatch):
         wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
-        wlw.SYSTEM_LOGS_DIR = sys_logs
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
         f1 = sys_logs / "a.log"
         f2 = sys_logs / "b.log"
-        f1.write_text("aaa")
-        f2.write_text("bbbbb")
+        f1.write_text("aaa", encoding="utf-8")
+        f2.write_text("bbbbb", encoding="utf-8")
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert watcher.log_positions[str(f1)] == 3
         assert watcher.log_positions[str(f2)] == 5
 
-    def test_ignores_non_log_files(self, tmp_path):
+    def test_ignores_non_log_files(self, tmp_path, monkeypatch):
         wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
-        wlw.SYSTEM_LOGS_DIR = sys_logs
-        (sys_logs / "data.txt").write_text("not a log")
-        (sys_logs / "real.log").write_text("log data")
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
+        (sys_logs / "data.txt").write_text("not a log", encoding="utf-8")
+        (sys_logs / "real.log").write_text("log data", encoding="utf-8")
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert len(watcher.log_positions) == 1
@@ -1058,15 +1062,17 @@ class TestSystemLogsOwnership:
         scheduled.start.assert_not_called()
 
     def test_start_leaves_no_observer_behind(self, tmp_path, monkeypatch):
-        """Declining must not park a live observer in module state."""
+        """Declining must not build an observer or park one in module state (mutant: WatchdogObserver() built)."""
         wlw = _import_watchers_lw()
         wlw.WATCHDOG_AVAILABLE = True
         wlw.SYSTEM_LOGS_DIR = tmp_path
         wlw._log_observer = None
-        monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock())
+        observer_cls = MagicMock()
+        monkeypatch.setattr(wlw, "WatchdogObserver", observer_cls)
 
         wlw.start_log_watcher()
 
+        observer_cls.assert_not_called()
         assert wlw._log_observer is None
         assert wlw.is_log_watcher_active() is False
 

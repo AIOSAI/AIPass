@@ -3,13 +3,18 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-03-24
+# Modified: 2026-09-27
 # =============================================
 
-"""Unit tests for aipass.trigger.apps.modules.core — Trigger event bus."""
+"""Tests for apps/modules/core.py, the Trigger event bus."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the handlers under apps/handlers/events/ the bus dispatches to; each has its own test file
+
+import sys
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +71,7 @@ def _mock_infrastructure(monkeypatch):
 
 
 @pytest.fixture()
-def trigger_cls():
+def trigger_cls(monkeypatch):
     """Import and return a clean Trigger class after mocking.
 
     Resets all class-level state so tests are fully isolated.
@@ -74,16 +79,16 @@ def trigger_cls():
     from aipass.trigger.apps.modules.core import Trigger
 
     # Reset mutable class state between tests
-    Trigger._handlers = {}
-    Trigger._history = []
-    Trigger._initialized = False
-    Trigger._firing = False
-    Trigger._deferred_queue = []
-    Trigger._draining_deferred = False
-    Trigger._log_watcher_started = False
-    Trigger._handler_failures = {}
-    Trigger._disabled_handlers = set()
-    Trigger._alias_warned = set()
+    monkeypatch.setattr(Trigger, "_handlers", {})
+    monkeypatch.setattr(Trigger, "_history", [])
+    monkeypatch.setattr(Trigger, "_initialized", False)
+    monkeypatch.setattr(Trigger, "_firing", False)
+    monkeypatch.setattr(Trigger, "_deferred_queue", [])
+    monkeypatch.setattr(Trigger, "_draining_deferred", False)
+    monkeypatch.setattr(Trigger, "_log_watcher_started", False)
+    monkeypatch.setattr(Trigger, "_handler_failures", {})
+    monkeypatch.setattr(Trigger, "_disabled_handlers", set())
+    monkeypatch.setattr(Trigger, "_alias_warned", set())
     return Trigger
 
 
@@ -119,13 +124,16 @@ def test_on_multiple_events(trigger_cls):
 
 
 def test_fire_calls_registered_handler(trigger_cls):
-    """fire() invokes every handler registered for that event."""
+    """fire() invokes every handler registered for that event.
+
+    Mutant run: fire() dropping its fire_event callback reddens this.
+    """
     handler = MagicMock()
     trigger_cls.on("deploy", handler)
 
     trigger_cls.fire("deploy")
 
-    handler.assert_called_once()
+    assert handler.call_args_list == [call(fire_event=trigger_cls.fire)]
 
 
 def test_fire_no_handlers_does_not_error(trigger_cls):
@@ -169,7 +177,10 @@ def test_fire_injects_fire_event_callback(trigger_cls):
 
 
 def test_fire_multiple_handlers_same_event(trigger_cls):
-    """fire() calls every handler registered for the same event."""
+    """fire() calls every handler registered for the same event.
+
+    Mutant run: fire() dropping its fire_event callback reddens this.
+    """
     h1 = MagicMock()
     h2 = MagicMock()
     h3 = MagicMock()
@@ -180,9 +191,8 @@ def test_fire_multiple_handlers_same_event(trigger_cls):
 
     trigger_cls.fire("build")
 
-    h1.assert_called_once()
-    h2.assert_called_once()
-    h3.assert_called_once()
+    for handler in (h1, h2, h3):
+        assert handler.call_args_list == [call(fire_event=trigger_cls.fire)]
 
 
 def test_fire_handler_exception_does_not_block_others(trigger_cls):
@@ -670,8 +680,22 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _coerce_value (CLI `fire key=value` typing)
+# Tests -- CLI `fire key=value` typing
 # ---------------------------------------------------------------------------
+
+
+def _fire_value(trigger_cls, monkeypatch, token):
+    """Fire `probe value=<token>` through the command; return what the handler received.
+
+    Registration is marked done so no handler but the probe is ever wired.
+    """
+    monkeypatch.setattr(trigger_cls, "_initialized", True)
+    probe = MagicMock()
+    trigger_cls.on("typing_probe", probe)
+    core = sys.modules[trigger_cls.__module__]
+    assert core.handle_command("fire", ["typing_probe", f"value={token}"]) is True
+    assert probe.call_count == 1
+    return probe.call_args.kwargs["value"]
 
 
 @pytest.mark.parametrize(
@@ -687,7 +711,7 @@ def test_different_branches_have_independent_failure_counts(trigger_cls):
         "1e3",  # float() reshapes to 1000.0
     ],
 )
-def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
+def test_fire_never_mangles_a_token_it_cannot_round_trip(trigger_cls, monkeypatch, token):
     """A value is only typed when the numeric form is byte-identical.
 
     Identity tokens travelling through `fire key=value` are strings that may
@@ -695,10 +719,10 @@ def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
     time, and handle_error_detected annotates fingerprint/error_hash/
     registry_id as str. Coercing "00123456" to int 123456 both breaks the type
     contract and silently deletes a character from the user's token.
+    Reached through `fire key=value`. Mutant run: dropping the round-trip guard
+    in _coerce_value (plain int()/float()) reddens this.
     """
-    from aipass.trigger.apps.modules.core import _coerce_value
-
-    result = _coerce_value(token)
+    result = _fire_value(trigger_cls, monkeypatch, token)
     if result != token:
         assert str(result) == token, f"{token!r} was mangled into {result!r}"
     assert result == token
@@ -709,21 +733,23 @@ def test_coerce_value_never_mangles_a_token_it_cannot_round_trip(token):
     ("token", "expected"),
     [("2", 2), ("0", 0), ("-7", -7), ("1.5", 1.5), ("-0.25", -0.25)],
 )
-def test_coerce_value_still_types_lossless_numbers(token, expected):
-    """The guard must not over-correct: count=2 has to arrive as an int."""
-    from aipass.trigger.apps.modules.core import _coerce_value
+def test_fire_still_types_lossless_numbers(trigger_cls, monkeypatch, token, expected):
+    """The guard must not over-correct: count=2 has to arrive as an int.
 
-    result = _coerce_value(token)
+    Mutant run: _coerce_value returning every value as a string reddens this.
+    """
+    result = _fire_value(trigger_cls, monkeypatch, token)
     assert result == expected
     assert isinstance(result, type(expected))
 
 
-def test_coerce_value_leaves_plain_strings_alone():
-    """Non-numeric values are untouched, as before."""
-    from aipass.trigger.apps.modules.core import _coerce_value
+def test_fire_leaves_plain_strings_alone(trigger_cls, monkeypatch):
+    """Non-numeric values are untouched, as before.
 
-    assert _coerce_value("api") == "api"
-    assert _coerce_value("a1b2c3d4") == "a1b2c3d4"
+    Mutant run: _coerce_value upper-casing a string it cannot type reddens this.
+    """
+    tokens = ["api", "a1b2c3d4"]
+    assert [_fire_value(trigger_cls, monkeypatch, token) for token in tokens] == tokens
 
 
 def test_fire_cli_delivers_all_digit_identity_token_unmangled(trigger_cls):
@@ -837,7 +863,7 @@ class TestDeprecatedEventAliases:
         handler = MagicMock()
         trigger_cls.on("profile_write_failed", handler)
 
-        summary = trigger_cls.fire("file_deleted", path="/store.json")
+        summary = trigger_cls.fire("file_deleted", path="store.json")
 
         handler.assert_called_once()
         assert summary["handlers"] == 1
@@ -850,18 +876,21 @@ class TestDeprecatedEventAliases:
         """
         trigger_cls.on("profile_write_failed", MagicMock())
 
-        summary = trigger_cls.fire("file_deleted", path="/store.json")
+        summary = trigger_cls.fire("file_deleted", path="store.json")
 
         assert summary["event"] == "profile_write_failed"
 
     def test_a_handler_registered_on_the_old_name_still_hears_the_new_one(self, trigger_cls):
-        """The alias resolves on registration too, not only on fire."""
+        """The alias resolves on registration too, not only on fire.
+
+        Mutant run: fire() dropping its fire_event callback reddens this.
+        """
         handler = MagicMock()
         trigger_cls.on("file_deleted", handler)
 
-        trigger_cls.fire("profile_write_failed", path="/store.json")
+        trigger_cls.fire("profile_write_failed", path="store.json")
 
-        handler.assert_called_once()
+        assert handler.call_args_list == [call(path="store.json", fire_event=trigger_cls.fire)]
 
     def test_off_under_the_old_name_actually_unregisters(self, trigger_cls):
         """on(old) + off(old) must cancel out.
@@ -960,5 +989,6 @@ def test_a_handler_registered_here_is_visible_through_a_fresh_import(trigger_cls
     handler = MagicMock()
     trigger_cls.on("identity_probe", handler)
 
-    assert "identity_probe" in reimported._handlers
-    assert handler in reimported._handlers["identity_probe"]
+    reimported.fire("identity_probe")
+
+    assert handler.call_args_list == [call(fire_event=reimported.fire)]

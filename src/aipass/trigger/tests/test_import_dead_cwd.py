@@ -1,56 +1,63 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
-# Name: test_import_dead_cwd.py - trigger imports without a readable cwd
-# Date: 2026-08-31
-# Version: 1.3.0
+# Name: test_import_dead_cwd.py
+# Description: trigger imports without a readable cwd
+# Created: 2026-08-31
+# Modified: 2026-09-27
+# Version: 1.3.1
 # Category: trigger/tests
 # =============================================
 
-"""Every trigger module must import without a readable working directory.
+"""Tests that apps/trigger.py and every module under apps/ import without a readable cwd."""
 
-THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
-relayed round 4): ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only
-for relative paths, the way posixpath does - and Path.resolve() routes through
-it. So on Windows every Path(__file__).resolve() REACHED AT IMPORT is a
-working-directory read, and a process whose cwd was deleted cannot import the
-module at all.
+# THE MECHANISM, measured on the Windows CI gate 2026-08-31 (@memory's finding,
+# relayed round 4): ntpath.realpath calls os.getcwd() UNCONDITIONALLY - not only
+# for relative paths, the way posixpath does - and Path.resolve() routes through
+# it. So on Windows every Path(__file__).resolve() REACHED AT IMPORT is a
+# working-directory read, and a process whose cwd was deleted cannot import the
+# module at all.
+#
+# WHY THIS BRANCH, LOUDLY. @prax reproduced it on Linux against trigger and their
+# traceback is the reason this file exists: prax's logger imports
+# discovery/watcher.py, which imports aipass.trigger.apps.modules.core, which ran
+# trigger's handler guard, which died on line 12. One guard in one branch took
+# down every consumer of prax's logger. Trigger carried eight import-time sites
+# plus the guard.
+#
+# THE WORLD injects ntpath's behaviour as a CONDITION rather than a platform:
+# os.path.realpath is wrapped to read os.getcwd() first, then os.getcwd is denied.
+# The injection happens in a child process before any aipass import, so no module
+# has cached the real functions. In-process this property is unobservable - the
+# imports already happened - which is why every world here is a subprocess.
+#
+# AND THE INJECTION HAS TO REACH THE CALL. Patching os.path.realpath only reaches
+# sites that look the name up each time. CPython 3.10's pathlib captures a copy at
+# its own first import (_NormalAccessor.realpath), so on 3.10 the order of imports
+# decides whether this whole file measures anything - and 3.10 is in the CI matrix.
+# _ACCESSOR_PATCH rebinds the captured copy too, so the world arms on every
+# interpreter rather than on luck. Credit: @flow found it, @memory read the 3.10
+# source, @devpulse relayed it.
+#
+# WHY THE PRELOAD LIST IS SHORT HERE. The fleet pattern preloads peer branches in
+# the healthy world so a pin measures its own branch only. Trigger cannot preload
+# @prax: prax's logger imports trigger, so preloading prax would import the very
+# sites under test in the healthy world and the pin would go green measuring
+# nothing. It is preloaded UNDER the denial instead, which is sound because prax's
+# own cure landed 2026-08-31 (verified: prax imports clean in this world). @cli was preloaded
+# healthy while its guard still walked inspect.stack(); that preload was retired
+# 2026-08-31 once their cure was verified from here.
 
-WHY THIS BRANCH, LOUDLY. @prax reproduced it on Linux against trigger and their
-traceback is the reason this file exists: prax's logger imports
-discovery/watcher.py, which imports aipass.trigger.apps.modules.core, which ran
-trigger's handler guard, which died on line 12. One guard in one branch took
-down every consumer of prax's logger. Trigger carried eight import-time sites
-plus the guard.
-
-THE WORLD injects ntpath's behaviour as a CONDITION rather than a platform:
-os.path.realpath is wrapped to read os.getcwd() first, then os.getcwd is denied.
-The injection happens in a child process before any aipass import, so no module
-has cached the real functions. In-process this property is unobservable - the
-imports already happened - which is why every world here is a subprocess.
-
-AND THE INJECTION HAS TO REACH THE CALL. Patching os.path.realpath only reaches
-sites that look the name up each time. CPython 3.10's pathlib captures a copy at
-its own first import (_NormalAccessor.realpath), so on 3.10 the order of imports
-decides whether this whole file measures anything - and 3.10 is in the CI matrix.
-_ACCESSOR_PATCH rebinds the captured copy too, so the world arms on every
-interpreter rather than on luck. Credit: @flow found it, @memory read the 3.10
-source, @devpulse relayed it.
-
-WHY THE PRELOAD LIST IS SHORT HERE. The fleet pattern preloads peer branches in
-the healthy world so a pin measures its own branch only. Trigger cannot preload
-@prax: prax's logger imports trigger, so preloading prax would import the very
-sites under test in the healthy world and the pin would go green measuring
-nothing. It is preloaded UNDER the denial instead, which is sound because prax's
-own cure landed 2026-08-31 (verified: prax imports clean in this world). @cli was preloaded
-healthy while its guard still walked inspect.stack(); that preload was retired
-2026-08-31 once their cure was verified from here.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — what each module under apps/modules/ does once imported; each has its own test file
 
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from aipass.trigger.apps.config import module_file
+from aipass.trigger.apps.handlers import repo_root
 
 # Peers held constant in the healthy world, before the denial.
 #
@@ -238,6 +245,8 @@ def _run(world: str) -> subprocess.CompletedProcess:
         [sys.executable, "-c", world],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
 
@@ -799,8 +808,6 @@ def test_repo_root_refuses_a_case_folded_marker(tmp_path, monkeypatch):
     exists() SURVIVED that shape on Linux. Path.exists is given the answer a
     folding filesystem would give, which is the call the defect actually makes.
     """
-    from aipass.trigger.apps.handlers import repo_root
-
     bait_dir = tmp_path / "bait"
     bait_dir.mkdir()
     (bait_dir / "aipass_registry.json").write_text("{}", encoding="utf-8")
@@ -844,8 +851,6 @@ def test_the_folding_injection_is_a_real_negative_control(tmp_path, monkeypatch)
     Proves the previous test's refusal comes from exists_exactly and not from
     ext4 answering no - a green that would survive deleting the cure.
     """
-    from aipass.trigger.apps.handlers import repo_root
-
     bait_dir = tmp_path / "bait"
     bait_dir.mkdir()
     (bait_dir / "aipass_registry.json").write_text("{}", encoding="utf-8")
@@ -913,3 +918,18 @@ def test_the_no_caller_branch_needs_no_cwd():
     assert "IMPORTED" in out, (
         f"the guard's no-caller arm still depends on a readable cwd:\nstdout={out}\nstderr={result.stderr}"
     )
+
+
+def test_module_file_resolves_through_a_symlink(tmp_path):
+    """module_file hands back the real file behind a symlinked __file__.
+
+    Every import-time path in this branch starts at module_file, so the healthy
+    arm is the one that runs on every machine. Red against a module_file that
+    returns Path(file) without trying .resolve().
+    """
+    real = tmp_path / "real_module.py"
+    real.write_text("", encoding="utf-8")
+    link = tmp_path / "linked_module.py"
+    link.symlink_to(real)
+
+    assert module_file(str(link)) == real.resolve()

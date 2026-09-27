@@ -3,10 +3,13 @@
 # Description: Tests for simple event handler functions and the warning escalation lane
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-08-08
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for cli, memory_template_updated, and warning_logged event handlers."""
+"""Tests for apps/handlers/events/cli.py, memory_template_updated.py and warning_logged.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the lane internals in apps/handlers/escalation.py; the escalation tests cover them
 
 import json
 import sys
@@ -16,14 +19,12 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.config import atomic_write_json, migrate_json_file, trail_logger
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock heavy infrastructure imports for all six handler modules."""
-    from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
-
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.AIPASS_PKG_ROOT = tmp_path / "aipass"
@@ -353,12 +354,12 @@ class TestWarningLoggedFeedsEscalation:
             branch="flow",
             message="queue depth 91%",
             module_name="watcher",
-            log_file="/logs/flow.log",
+            log_file=str(Path("logs") / "flow.log"),
             raw_line="2026-08-08 | watcher | WARNING | queue depth 91%",
         )
 
         row = lane.mod.get_signatures()[0]
-        assert row["log_file"] == "/logs/flow.log"
+        assert row["log_file"] == str(Path("logs") / "flow.log")
         assert row["samples"] == ["2026-08-08 | watcher | WARNING | queue depth 91%"]
 
     def test_repeats_with_variable_paths_share_one_signature(self, lane) -> None:

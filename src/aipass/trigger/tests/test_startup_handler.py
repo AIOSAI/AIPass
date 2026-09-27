@@ -3,7 +3,7 @@
 # Description: Tests for startup event handler
 # Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-09-24
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""

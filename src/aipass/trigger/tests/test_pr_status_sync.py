@@ -3,10 +3,15 @@
 # Description: Tests for pr_created and pr_merged event handlers
 # Version: 1.0.0
 # Created: 2026-03-30
-# Modified: 2026-03-30
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for pr_status_sync event handlers."""
+"""Tests for apps/handlers/events/pr_status_sync.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the event wiring in apps/handlers/events/registry.py; the bus tests cover delivery
+
+import subprocess
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -106,10 +111,17 @@ class TestHandlePrCreated:
 
     @patch("subprocess.Popen")
     def test_none_defaults(self, mock_popen: MagicMock) -> None:
-        """Handles None parameters gracefully."""
+        """Handles None parameters gracefully and still launches the sync.
+
+        Mutant run: the sync launched with a truncated command reddens this.
+        """
         mod = _import_module()
         mod.handle_pr_created()  # All defaults
-        mock_popen.assert_called_once()
+        mock_popen.assert_called_once_with(
+            ["drone", "@prax", "status", "sync"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 class TestHandlePrMerged:
@@ -167,7 +179,14 @@ class TestHandlePrMerged:
 
     @patch("subprocess.Popen")
     def test_none_defaults(self, mock_popen: MagicMock) -> None:
-        """Handles None parameters gracefully."""
+        """Handles None parameters gracefully and still launches the sync.
+
+        Mutant run: the sync launched with a truncated command reddens this.
+        """
         mod = _import_module()
         mod.handle_pr_merged()  # All defaults
-        mock_popen.assert_called_once()
+        mock_popen.assert_called_once_with(
+            ["drone", "@prax", "status", "sync"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )

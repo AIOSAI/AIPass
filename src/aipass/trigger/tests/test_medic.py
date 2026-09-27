@@ -1,17 +1,24 @@
-"""Tests for the medic toggle module (apps/modules/medic.py)."""
-
 # =================== META ====================
 # Name: test_medic.py
 # Description: Unit tests for medic module handle_command
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-12
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for the medic toggle module (apps/modules/medic.py)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the state file format in apps/handlers/medic_state.py; the medic state tests cover it
+
+import re
 import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
+from rich.text import Text
+
+from aipass.cli.apps.modules import display
 from aipass.trigger.apps.handlers.medic_state import parse_duration
 
 
@@ -72,23 +79,8 @@ def _mock_infrastructure(monkeypatch):
     medic_state_mod.DEFAULT_OFF_SECONDS = 86400
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.medic_state", medic_state_mod)
 
-    # -- CLI console (lazy import inside handle_command) --------------------
-    mock_console = MagicMock()
-    cli_modules = MagicMock()
-    cli_modules.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # display submodule (used in print_introspection)
-    cli_display = MagicMock()
-    cli_display.console = mock_console
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", cli_display)
-
-    # -- rich.panel (used in on/off/help) -----------------------------------
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.panel", MagicMock())
-    monkeypatch.setitem(sys.modules, "rich.console", MagicMock())
+    # The CLI console and rich are real (2026-09-27): output is read with
+    # capsys, and a refusal through error() from stderr and cli's failure flag.
 
     # -- Force re-import so mocks take effect -------------------------------
     monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.medic", raising=False)
@@ -106,28 +98,19 @@ def _get_medic_state():
     return sys.modules["aipass.trigger.apps.handlers.medic_state"]
 
 
-def _get_console():
-    """Return the mocked console from sys.modules."""
-    return sys.modules["aipass.cli.apps.modules"].console
-
-
 def _get_json_handler():
     """Return the mocked json_handler from sys.modules."""
     return sys.modules["aipass.trigger.apps.handlers.json.json_handler"]
 
 
-def _get_print_str_args(console):
-    """Extract all string positional arguments passed to console.print().
+def _printed(capsys):
+    """The lines the real console wrote to stdout."""
+    return capsys.readouterr().out.splitlines()
 
-    Returns a flat list of strings -- only positional args that are actual
-    str instances (ignoring MagicMock objects like Panel).
-    """
-    result = []
-    for call in console.print.call_args_list:
-        for arg in call.args:
-            if isinstance(arg, str):
-                result.append(arg)
-    return result
+
+def _plain(markup):
+    """What a markup string reads as once rich renders it."""
+    return Text.from_markup(markup).plain
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +118,7 @@ def _get_print_str_args(console):
 # ---------------------------------------------------------------------------
 
 
-def test_handle_command_on_enables_medic():
+def test_handle_command_on_enables_medic(capsys):
     """handle_command('on', []) calls set_enabled(True), prints Panel, returns True."""
     medic = _import_medic()
 
@@ -147,8 +130,7 @@ def test_handle_command_on_enables_medic():
     state = _get_medic_state()
     state.set_enabled.assert_called_with(True)
     # Verify console.print was called (Panel is a mock object, but it was called)
-    console = _get_console()
-    assert console.print.call_count >= 1, "console.print should be called with success Panel"
+    assert "".join(_printed(capsys)).strip(), "the success Panel should be printed"
 
 
 def test_handle_command_on_starts_service_when_inactive():
@@ -175,8 +157,11 @@ def test_handle_command_on_logs_operation():
     jh.log_operation.assert_called_with("medic_toggled", {"command": "on"})
 
 
-def test_handle_command_on_failure_prints_error():
-    """When set_enabled returns False, 'on' prints the exact failure message."""
+def test_handle_command_on_failure_prints_error(capsys):
+    """When set_enabled returns False, 'on' prints the exact failure message.
+
+    Mutant run: this refusal printed instead of sent through error() reddens this.
+    """
     medic = _import_medic()
     state = _get_medic_state()
     state.set_enabled.return_value = False
@@ -186,9 +171,8 @@ def test_handle_command_on_failure_prints_error():
             result = medic.handle_command("on", [])
 
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
     assert any("Failed to enable Medic" in s for s in err_args), f"Expected failure message in error() args: {err_args}"
 
 
@@ -197,7 +181,7 @@ def test_handle_command_on_failure_prints_error():
 # ---------------------------------------------------------------------------
 
 
-def test_handle_command_off_disables_medic():
+def test_handle_command_off_disables_medic(capsys):
     """handle_command('off', []) calls set_enabled with 24h TTL, prints Panel, returns True."""
     medic = _import_medic()
 
@@ -208,8 +192,7 @@ def test_handle_command_off_disables_medic():
     assert result is True
     state = _get_medic_state()
     state.set_enabled.assert_called_with(False, duration_seconds=86400.0)
-    console = _get_console()
-    assert console.print.call_count >= 1, "console.print should be called with success Panel"
+    assert "".join(_printed(capsys)).strip(), "the success Panel should be printed"
 
 
 def test_handle_command_off_forever_stops_service():
@@ -237,8 +220,11 @@ def test_handle_command_off_ttl_keeps_watcher():
     mock_ctl.assert_not_called()
 
 
-def test_handle_command_off_failure_prints_error():
-    """When set_enabled returns False, 'off' prints the exact failure message."""
+def test_handle_command_off_failure_prints_error(capsys):
+    """When set_enabled returns False, 'off' prints the exact failure message.
+
+    Mutant run: this refusal printed instead of sent through error() reddens this.
+    """
     medic = _import_medic()
     state = _get_medic_state()
     state.set_enabled.return_value = False
@@ -248,9 +234,8 @@ def test_handle_command_off_failure_prints_error():
             result = medic.handle_command("off", [])
 
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
     assert any("Failed to disable Medic" in s for s in err_args), (
         f"Expected failure message in error() args: {err_args}"
     )
@@ -276,20 +261,19 @@ def test_handle_command_status_returns_current_state():
     state.get_rate_limit_stats.assert_called_once()
 
 
-def test_handle_command_status_shows_enabled():
+def test_handle_command_status_shows_enabled(capsys):
     """When medic is enabled, status output includes the ENABLED state line."""
     medic = _import_medic()
 
     with patch.object(medic, "_is_service_active", return_value=True):
         medic.handle_command("status", [])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    state_line = "  State:           [green]ENABLED[/green]"
+    printed = _printed(capsys)
+    state_line = _plain("  State:           [green]ENABLED[/green]")
     assert state_line in printed, f"Expected state line '{state_line}' in printed args: {printed}"
 
 
-def test_handle_command_status_shows_disabled():
+def test_handle_command_status_shows_disabled(capsys):
     """When medic is disabled, status output includes the DISABLED state line."""
     medic = _import_medic()
     state = _get_medic_state()
@@ -298,13 +282,12 @@ def test_handle_command_status_shows_disabled():
     with patch.object(medic, "_is_service_active", return_value=False):
         medic.handle_command("status", [])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    state_line = "  State:           [yellow]DISABLED[/yellow]"
+    printed = _printed(capsys)
+    state_line = _plain("  State:           [yellow]DISABLED[/yellow]")
     assert state_line in printed, f"Expected state line '{state_line}' in printed args: {printed}"
 
 
-def test_handle_command_status_shows_muted_branches():
+def test_handle_command_status_shows_muted_branches(capsys):
     """When branches are muted, status lists them with expiry info."""
     medic = _import_medic()
     state = _get_medic_state()
@@ -316,14 +299,13 @@ def test_handle_command_status_shows_muted_branches():
     with patch.object(medic, "_is_service_active", return_value=True):
         medic.handle_command("status", [])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
+    printed = _printed(capsys)
     muted_lines = [p for p in printed if "Muted branches:" in p]
     assert muted_lines, f"Expected muted branches line in printed args: {printed}"
     assert "@speakeasy" in muted_lines[0] and "@api" in muted_lines[0]
 
 
-def test_handle_command_status_suppression_hint_when_disabled():
+def test_handle_command_status_suppression_hint_when_disabled(capsys):
     """When medic is disabled, status prints the exact suppression hint."""
     medic = _import_medic()
     state = _get_medic_state()
@@ -332,9 +314,8 @@ def test_handle_command_status_suppression_hint_when_disabled():
     with patch.object(medic, "_is_service_active", return_value=False):
         medic.handle_command("status", [])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    hint = "  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.jsonl[/dim]"
+    printed = _printed(capsys)
+    hint = _plain("  [dim]All error dispatch suppressed. Errors logged to medic_suppressed.jsonl[/dim]")
     assert hint in printed, f"Expected suppression hint '{hint}' in printed args: {printed}"
 
 
@@ -371,40 +352,42 @@ def test_handle_command_mute_branch_without_at():
     state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
 
 
-def test_handle_command_mute_prints_confirmation():
-    """Successful mute prints confirmation with TTL info."""
+def test_handle_command_mute_prints_confirmation(capsys):
+    """Successful mute prints confirmation with TTL info.
+
+    Mutant run: the TTL computed in minutes instead of hours reddens this.
+    """
     medic = _import_medic()
     medic.handle_command("mute", ["@api"])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    mute_lines = [p for p in printed if "Muted" in p and "@api" in p]
-    assert mute_lines, f"Expected mute confirmation for @api in printed args: {printed}"
+    printed = _printed(capsys)
+    assert "  Muted @api — auto-expires in 24h" in printed, printed
 
 
-def test_handle_command_mute_failure_prints_error():
-    """When mute_branch returns False, the exact error message is printed."""
+def test_handle_command_mute_failure_prints_error(capsys):
+    """When mute_branch returns False, the exact error message is printed.
+
+    Mutant run: this refusal printed instead of sent through error() reddens this.
+    """
     medic = _import_medic()
     state = _get_medic_state()
     state.mute_branch.return_value = False
 
     medic.handle_command("mute", ["@api"])
 
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
     assert any("Failed to mute" in s for s in err_args), f"Expected mute failure message in error() args: {err_args}"
 
 
-def test_handle_command_mute_without_branch_name():
+def test_handle_command_mute_without_branch_name(capsys):
     """handle_command('mute', []) prints the exact usage error when no branch given."""
     medic = _import_medic()
     result = medic.handle_command("mute", [])
 
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
     assert any("Missing branch name" in s for s in err_args), f"Expected usage error in error() args: {err_args}"
     # Should NOT have called mute_branch
     state = _get_medic_state()
@@ -426,19 +409,21 @@ def test_handle_command_unmute_branch():
     state.unmute_branch.assert_called_once_with("speakeasy")
 
 
-def test_handle_command_unmute_prints_confirmation():
+def test_handle_command_unmute_prints_confirmation(capsys):
     """Successful unmute prints the exact confirmation message."""
     medic = _import_medic()
     medic.handle_command("unmute", ["@flow"])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
-    expected = "  [green]Unmuted[/green] @flow — dispatch resumed"
+    printed = _printed(capsys)
+    expected = _plain("  [green]Unmuted[/green] @flow — dispatch resumed")
     assert expected in printed, f"Expected unmute confirmation '{expected}' in printed args: {printed}"
 
 
-def test_handle_command_unmute_already_unmuted():
-    """Unmuting a branch that is not muted prints the exact failure message."""
+def test_handle_command_unmute_already_unmuted(capsys):
+    """Unmuting a branch that is not muted prints the exact failure message.
+
+    Mutant run: this refusal printed instead of sent through error() reddens this.
+    """
     medic = _import_medic()
     state = _get_medic_state()
     state.unmute_branch.return_value = False
@@ -446,23 +431,21 @@ def test_handle_command_unmute_already_unmuted():
     result = medic.handle_command("unmute", ["@nonexistent"])
 
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
     assert any("Failed to unmute" in s for s in err_args), (
         f"Expected unmute failure message in error() args: {err_args}"
     )
 
 
-def test_handle_command_unmute_without_branch_name():
+def test_handle_command_unmute_without_branch_name(capsys):
     """handle_command('unmute', []) prints the exact usage error when no branch given."""
     medic = _import_medic()
     result = medic.handle_command("unmute", [])
 
     assert result is True
-    cli_modules = sys.modules["aipass.cli.apps.modules"]
-    cli_modules.error.assert_called()
-    err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
+    err_args = capsys.readouterr().err.splitlines()
+    assert display.command_failed() is True
     assert any("Missing branch name" in s for s in err_args), f"Expected usage error in error() args: {err_args}"
     state = _get_medic_state()
     state.unmute_branch.assert_not_called()
@@ -560,26 +543,22 @@ def test_handle_command_medic_routes_mute_with_args():
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _extract_branch_name helper
+# Tests -- branch name normalisation, through the command
 # ---------------------------------------------------------------------------
 
 
-def test_extract_branch_name_strips_at():
-    """_extract_branch_name removes leading @ and lowercases."""
+@pytest.mark.parametrize("raw", ["@Speakeasy", "src/aipass/speakeasy", "speakeasy"])
+def test_mute_normalises_the_branch_name_it_is_given(raw):
+    """`medic mute` strips @, lowercases and takes a path's last component.
+
+    Reached through the command, not the private helper. Mutant run: the
+    helper returning its input unchanged reddens the @ and path cases.
+    """
     medic = _import_medic()
-    assert medic._extract_branch_name("@Speakeasy") == "speakeasy"
+    medic.handle_command("mute", [raw])
 
-
-def test_extract_branch_name_from_path():
-    """_extract_branch_name extracts the last path component."""
-    medic = _import_medic()
-    assert medic._extract_branch_name("src/aipass/speakeasy") == "speakeasy"
-
-
-def test_extract_branch_name_plain():
-    """_extract_branch_name handles a plain name."""
-    medic = _import_medic()
-    assert medic._extract_branch_name("api") == "api"
+    state = _get_medic_state()
+    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
 
 
 # ---------------------------------------------------------------------------
@@ -622,7 +601,7 @@ def test_handle_command_on_extra_args_ignored():
 # ---------------------------------------------------------------------------
 
 
-def test_print_help_names_every_verb_the_router_accepts():
+def test_print_help_names_every_verb_the_router_accepts(capsys):
     """Help lists all seven medic verbs — a verb the router takes but help hides is a defect.
 
     This asked for capsys and then read nothing, and its own comment admitted
@@ -631,23 +610,24 @@ def test_print_help_names_every_verb_the_router_accepts():
     on an empty capture. The mocked console's call args are the real output,
     and the verb list is taken from the router rather than retyped, so adding a
     verb without documenting it is what turns this red.
+    Mutant run: deleting the `on` line from print_help reddens this.
     """
     medic = _import_medic()
 
     medic.print_help()
 
-    console = _get_console()
-    output = "\n".join(_get_print_str_args(console))
+    output = "\n".join(_printed(capsys))
     routed = ["on", "off", "status", "mute", "unmute", "volume-mute", "volume-unmute"]
     # Floors the loop: an empty list would make every assertion below vacuous
     # and the unit would pass by never running. Seven is the gate list in
     # handle_command (medic.py:494), counted 2026-09-08.
     assert len(routed) == 7
-    for verb in routed:
-        assert f"[bold]{verb}[/bold]" in output, f"medic help never documents the '{verb}' verb"
+    documented = {m.group(1) for m in re.finditer(r"^  ([a-z-]+) ", output, re.MULTILINE)}
+    undocumented = [verb for verb in routed if verb not in documented]
+    assert undocumented == [], f"medic help never documents: {undocumented}"
 
 
-def test_output_capture_status_contains_all_fields():
+def test_output_capture_status_contains_all_fields(capsys):
     """output_capture: status command output contains all expected field labels."""
     medic = _import_medic()
     state = _get_medic_state()
@@ -659,8 +639,7 @@ def test_output_capture_status_contains_all_fields():
     with patch.object(medic, "_is_service_active", return_value=True):
         medic.handle_command("status", [])
 
-    console = _get_console()
-    printed = _get_print_str_args(console)
+    printed = _printed(capsys)
     output = "\n".join(printed)
     for field in ["State:", "Log watcher:", "Muted branches:", "Suppressed:", "Rate limited:"]:
         assert field in output, f"Status output missing field: {field}"
@@ -759,14 +738,14 @@ class TestErrorCatchupDoor:
         """It is a library door, not a subcommand — `medic catchup` must not route.
 
         Adding it to the command table would put a live fleet-wide error scan
-        one typo away from an operator's shell.
+        one typo away from an operator's shell. Mutant run: handle_command
+        claiming an unknown subcommand (return True) reddens the routing assert.
         """
         medic = _import_medic()
         scan = MagicMock()
         monkeypatch.setattr(medic, "run_startup_catchup", scan)
-        monkeypatch.setattr(medic, "print_help", MagicMock())
 
-        medic.handle_command("medic", ["catchup"])
+        assert medic.handle_command("medic", ["catchup"]) is False
 
         scan.assert_not_called()
 
@@ -776,7 +755,7 @@ class TestErrorCatchupDoor:
 # ---------------------------------------------------------------------------
 
 
-def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on():
+def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on(capsys):
     """ "stopped — run medic on" is advice that cannot work where there is no systemd.
 
     macOS and Windows have no systemctl at all; the watcher there is not
@@ -791,12 +770,12 @@ def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on()
         with patch.object(medic, "systemd_available", return_value=False):
             medic.handle_command("status", [])
 
-    output = "\n".join(_get_print_str_args(_get_console()))
+    output = "\n".join(_printed(capsys))
     assert "no systemd on this host" in output, output
-    assert "run [bold]medic on[/bold]" not in output, output
+    assert "run medic on" not in output, output
 
 
-def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_systemd():
+def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_systemd(capsys):
     """ "failed to start" reads as a broken unit; the truth is a hostless door."""
     medic = _import_medic()
 
@@ -806,7 +785,5 @@ def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_system
                 with patch.object(medic, "systemd_available", return_value=False):
                     medic.handle_command("on", [])
 
-    panel_text = "\n".join(
-        str(arg) for call in sys.modules["rich.panel"].Panel.call_args_list for arg in call.args if isinstance(arg, str)
-    )
+    panel_text = capsys.readouterr().out
     assert "unavailable — no systemd on this host" in panel_text, panel_text

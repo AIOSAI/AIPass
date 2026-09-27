@@ -3,10 +3,13 @@
 # Description: Unit tests for the whole-sequence help-flag predicate
 # Version: 1.0.0
 # Created: 2026-08-13
-# Modified: 2026-08-13
+# Modified: 2026-09-27
 # =============================================
 
-"""Unit tests for aipass.trigger.apps.handlers.cli.help_flags."""
+"""Tests for apps/handlers/cli/help_flags.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(behaviour) — the routing in apps/trigger.py that calls the predicate; the entry point tests cover it
 
 import pytest
 
@@ -55,8 +58,13 @@ def test_dashed_flag_counts_at_any_position(args):
     ],
 )
 def test_no_flag_means_run_the_command(args):
-    """Matching is exact, so a flag-shaped substring inside a value is safe."""
+    """Matching is exact, so a flag-shaped substring inside a value is safe.
+
+    The same list with a real flag appended does ask, so the refusal is about
+    the tokens, not the command. Mutant run: the dashed-flag check removed reddens this.
+    """
     assert wants_help(args) is False
+    assert wants_help([*args, "--help"]) is True
 
 
 def test_dashed_flag_inside_a_key_value_pair_is_a_payload():
@@ -92,8 +100,11 @@ def test_bare_word_help_past_position_zero_is_an_operand(args):
 
     This is the whole reason the bare word is treated differently from the
     dashed forms: it is a legitimate value in this branch's own commands.
+    The same list led by the bare word asks for the manual, so position is
+    the whole difference. Mutant run: the bare-word branch returning False reddens this.
     """
     assert wants_help(args) is False
+    assert wants_help([HELP_BARE_WORD, *args]) is True
 
 
 def test_bare_word_can_be_switched_off_entirely():

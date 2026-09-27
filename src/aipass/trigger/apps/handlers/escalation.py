@@ -3,7 +3,7 @@
 # Description: Repeat-signature escalation digest — repeat warns/errors email the operator
 # Version: 1.5.0
 # Created: 2026-08-08
-# Modified: 2026-09-20
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -547,7 +547,8 @@ def record_warning(
         raw_line: Full log line, kept as a digest sample
 
     Returns:
-        Decision dict, or None when the lane is off or the input is unusable
+        Decision dict, or None when the lane is off or the input is unusable;
+        outcome "record_failed" when counting raised
     """
     return _record("WARNING", branch, module, message, log_file, raw_line, fingerprint="")
 
@@ -570,7 +571,8 @@ def record_error(
         raw_line: Full log line, kept as a digest sample
 
     Returns:
-        Decision dict, or None when the lane is off or the input is unusable
+        Decision dict, or None when the lane is off or the input is unusable;
+        outcome "record_failed" when counting raised
     """
     return _record("ERROR", branch, module, message, log_file, raw_line, fingerprint=fingerprint)
 
@@ -599,7 +601,9 @@ def _record(
         fingerprint: Registry fingerprint (errors only)
 
     Returns:
-        Decision dict {signature, count, outcome} or None
+        Decision dict {signature, count, outcome}; None when the lane chose not
+        to count (off, ignored branch, unusable input); outcome "record_failed"
+        with an empty signature when counting itself raised
     """
     try:
         if not branch or not module or not message:
@@ -671,7 +675,7 @@ def _record(
 
     except Exception as exc:
         logger.warning(f"escalation record failed for {branch}/{module}: {exc}")
-        return None
+        return {"signature": "", "count": 0, "outcome": "record_failed"}
 
 
 def _evaluate_digest(
@@ -736,7 +740,7 @@ def _evaluate_digest(
 
     aged = _aged_owner(level, entry, cfg, now)
     if aged is not None:
-        return _send_aged_notice(signature, entry, cfg, window_count, window_seconds, siblings, aged)
+        return _send_aged_notice(signature, entry, window_count, window_seconds, siblings, aged)
 
     recipient = str(cfg.get("digest_recipient", "@devpulse"))
     subject, body = build_digest(signature, entry, window_count, window_seconds, reason, recipient, siblings)
@@ -829,7 +833,6 @@ def _evaluate_digest(
 def _send_aged_notice(
     signature: str,
     entry: Dict[str, Any],
-    cfg: Dict[str, Any],
     window_count: int,
     window_seconds: int,
     siblings: Optional[List[Tuple[str, Dict[str, Any]]]],
@@ -840,7 +843,6 @@ def _send_aged_notice(
     Args:
         signature: Repeat signature
         entry: Mutable state entry for this signature
-        cfg: Escalation config section
         window_count: Occurrences inside the window
         window_seconds: Window length in seconds
         siblings: Other signatures in the same thread

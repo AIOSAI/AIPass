@@ -1,30 +1,16 @@
-# ===================AIPASS====================
-# META DATA HEADER
-# Name: test_service_control.py - systemd unit lifecycle for the log watcher
-# Date: 2026-08-31
-# Version: 1.0.0
-# Category: trigger/tests
+# =================== AIPass ====================
+# Name: test_service_control.py
+# Description: Tests for the systemd unit lifecycle of the log watcher
+# Version: 1.1.0
+# Created: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
-"""Pins for the systemd control surface extracted from medic.py.
+"""Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""
 
-WHY THIS FILE EXISTS. The extraction (2026-08-31, medic.py 599 -> 526 lines)
-did not create these functions, it revealed that nothing tested them: all forty
-medic tests patch ``_systemctl`` out, so its body — the subprocess call, the
-exit-code reading, the failure path — had never been executed by the suite.
-Measured, not assumed: mutating ``return result.returncode == 0`` to
-``return True`` left all 40 medic tests green.
-
-Nothing here shells out to the real systemctl. The subprocess boundary is the
-thing under test, so it is the thing replaced.
-
-AND NEITHER DOES ANYTHING ASK THIS HOST WHETHER IT HAS ONE (2026-09-12). Every
-case states the host fact it needs: ``systemd_present`` or ``systemd_absent``.
-Before the probe landed these cases read the author's Linux box through
-``shutil.which`` by accident, which is the same species of assumption the
-probe exists to cure - on a macOS runner the "success" cases would have run
-nothing at all.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — medic's start/stop decisions on top of _systemctl, in test_medic.py
+# seedgo: no-test-needed(external) — what systemctl itself does with SERVICE_NAME; AIPass tests only its own files
 
 import subprocess
 import tempfile
@@ -33,6 +19,10 @@ from pathlib import Path
 import pytest
 
 from aipass.trigger.apps.handlers import service_control
+
+# Nothing here shells out to the real systemctl: the host fact is stated per
+# test through PATH (systemd_present / systemd_absent), and every test that
+# can reach exec replaces subprocess.run, the boundary under test.
 
 
 class RecordingLogger:
@@ -49,19 +39,31 @@ class RecordingLogger:
 
 
 @pytest.fixture
-def systemd_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A host that has systemctl on PATH - stated, never inherited."""
-    monkeypatch.setattr(
-        service_control.shutil,
-        "which",
-        lambda name: "/usr/bin/systemctl" if name == "systemctl" else None,
-    )
+def systemd_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A host that has systemctl on PATH - stated, never inherited: PATH holds only an inert stub."""
+    bin_dir = tmp_path / "systemd_bin"
+    bin_dir.mkdir()
+    for name in ("systemctl", "systemctl.exe"):  # the .exe is what which() finds on Windows
+        stub = bin_dir / name
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
 
 
 @pytest.fixture
-def systemd_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A host with no systemd at all: macOS, Windows, a bare container."""
-    monkeypatch.setattr(service_control.shutil, "which", lambda name: None)
+def systemd_absent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A host with no systemd at all: macOS, Windows, a bare container - PATH holds nothing."""
+    empty = tmp_path / "empty_bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+
+
+@pytest.fixture
+def recorded_ops(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    """Stand-in for json_handler.log_operation, which writes the live trigger_json/ logs."""
+    ops: list[tuple] = []
+    monkeypatch.setattr(service_control.json_handler, "log_operation", lambda *a, **kw: ops.append((a, kw)))
+    return ops
 
 
 @pytest.fixture
@@ -211,11 +213,13 @@ class TestNoSystemdHost:
         self, monkeypatch: pytest.MonkeyPatch, systemd_absent, recorded_log: RecordingLogger
     ) -> None:
         """ "systemctl failed" sends a reader to the unit; this sends them to the host."""
-        monkeypatch.setattr(service_control.subprocess, "run", lambda *a, **kw: None)
+        ran: list[tuple] = []
+        monkeypatch.setattr(service_control.subprocess, "run", lambda *a, **kw: ran.append(a))
 
         service_control._systemctl("is-active")
 
         assert any("is-active" in line for line in recorded_log.warnings), recorded_log.warnings
+        assert ran == [], "the refusal must come before exec"
 
     def test_systemd_available_reads_the_path_not_the_platform(self, systemd_absent) -> None:
         assert service_control.systemd_available() is False
@@ -263,7 +267,7 @@ class TestInstallArgv:
     """What the install actually says to systemd, argv by argv."""
 
     def test_daemon_reload_carries_no_unit_name_and_enable_carries_one(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path, systemd_present
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path, systemd_present, recorded_ops
     ) -> None:
         """Measured 2026-09-12: ``daemon-reload <unit>`` exits 1, "Too many
         arguments." — the reload between install and enable had never run.
@@ -274,7 +278,6 @@ class TestInstallArgv:
         monkeypatch.setattr(service_control, "_SERVICE_UNIT_PATH", unit)
         monkeypatch.setattr(service_control, "_TEMPLATE_PATH", template)
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
-        monkeypatch.setattr(service_control.json_handler, "log_operation", lambda *a, **kw: None)
 
         calls: list[list[str]] = []
 
@@ -289,20 +292,27 @@ class TestInstallArgv:
             ["systemctl", "--user", "daemon-reload"],
             ["systemctl", "--user", "enable", service_control.SERVICE_NAME],
         ]
+        assert [op[0][0] for op in recorded_ops] == ["systemd_unit_installed"]
 
     def test_the_rendered_unit_carries_the_resolved_home(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path, systemd_present
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path, systemd_present, recorded_ops
     ) -> None:
+        """The unit on disk and the install record both carry it (mutant: the install record dropped)."""
         unit = tmp_path / "trigger-log-watcher.service"
         template = tmp_path / "unit.template"
         template.write_text("ExecStart={{AIPASS_HOME}}/run\n", encoding="utf-8")
         monkeypatch.setattr(service_control, "_SERVICE_UNIT_PATH", unit)
         monkeypatch.setattr(service_control, "_TEMPLATE_PATH", template)
         monkeypatch.setenv("AIPASS_HOME", str(tmp_path))
-        monkeypatch.setattr(service_control.json_handler, "log_operation", lambda *a, **kw: None)
         monkeypatch.setattr(
             service_control.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", "")
         )
 
         assert service_control._ensure_service_installed() is True
         assert unit.read_text(encoding="utf-8") == f"ExecStart={tmp_path}/run\n"
+        assert recorded_ops == [
+            (
+                ("systemd_unit_installed", {"unit": str(unit), "aipass_home": str(tmp_path)}),
+                {"module_name": service_control.MODULE_NAME},
+            )
+        ]
