@@ -541,3 +541,35 @@ class TestGenuineDuplicatesStillRenumber:
         assert len(result["renumbered"]) == 1
         # 0008, not 0901 — the unrelated DPLAN must not drive the FPLAN sequence.
         assert result["renumbered"][0]["new_number"] == "0008"
+
+
+class TestDuplicateSurvivorIsDeterministic:
+    """Which file keeps the number is identity, not the order the OS walked."""
+
+    @staticmethod
+    def _survivor(mod, root: Path, reverse_walk: bool) -> str:
+        """Scan ``root`` with the walk emitted in a chosen order; name the keeper."""
+        alpha = _write_plan(root / "alpha", "FPLAN-0007_alpha_2026-08-13.md")
+        beta = _write_plan(root / "beta", "FPLAN-0007_beta_2026-08-13.md")
+        real_walk = os.walk
+
+        def ordered_walk(top, **kwargs):
+            steps = list(real_walk(top, **kwargs))
+            return reversed(steps) if reverse_walk else iter(steps)
+
+        with patch.object(mod.os, "walk", ordered_walk):
+            with patch.object(mod, "_fire_event", MagicMock(return_value=True)):
+                mod.scan_plan_files_impl(root, load_registry=lambda: {"plans": {}})
+
+        survivors = [p.name for p in (alpha, beta) if p.exists()]
+        assert len(survivors) == 1, f"expected exactly one keeper, got {survivors}"
+        return survivors[0]
+
+    def test_same_file_keeps_the_number_in_either_walk_order(self, tmp_path):
+        """Reversing the walk must not hand the number to the other file."""
+        mod = _import_monitor_ops()
+
+        forward = self._survivor(mod, tmp_path / "forward", reverse_walk=False)
+        backward = self._survivor(mod, tmp_path / "backward", reverse_walk=True)
+
+        assert forward == backward, f"walk order chose the keeper: forward kept {forward}, reversed kept {backward}"
