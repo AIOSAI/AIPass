@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_contracts.py
 # Description: Contract tests for the memory entry point and its data handling
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-28
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -9,107 +9,21 @@
 
 """Tests for apps/memory.py."""
 
-# Contract tests for memory branch.
-#
-# Covers exception contracts, return type contracts, and data structure
-# contracts. These tests verify behavioral guarantees of the memory
-# module's data handling: what it raises, what it returns, and what data
-# shapes it produces.
-#
-# Exception contracts (3 items):
-#   - _create_default / ValueError for unknown types
-#   - save_json / invalid structure rejection
-#   - invalid_mode / invalid_type rejection
-#
-# Return type contracts:
-#   - paths_return_path: pathlib.Path return verification
-#
-# Data structure contracts:
-#   - config_keys: module_name verification
+# Contract tests for memory branch: the entry point's import shape and exit
+# codes, the modules' script-safe imports, and the passport's identity keys.
+# (2026-09-27: four tests that raised or built their own values and never
+# called @memory code were retired - gold standard case 3, the stdlib or the
+# test's own helper under test.)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — discover_modules() per module, pinned in tests/test_fleet_gateway.py
+# seedgo: no-test-needed(documentation) — the wording of print_help() and print_introspection() panels
+# seedgo: no-test-needed(external) — resolve_exit and console from @cli; only the exit codes they yield are pinned
 
-import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from aipass.memory.apps import memory as memory_entry
-
-# ---------------------------------------------------------------------------
-# Exception Contracts
-# ---------------------------------------------------------------------------
-
-
-class TestExceptionContracts:
-    """Tests verifying that memory functions raise correctly on invalid input."""
-
-    def test_create_default_raises_on_unknown_type(self) -> None:
-        """_create_default with an unknown type must raise ValueError.
-
-        This contract ensures that factory functions reject invalid json
-        types rather than silently returning garbage data. The memory
-        branch enforces type safety at the write boundary.
-        """
-        # Verify the ValueError contract for _create_default pattern:
-        # unknown types must be rejected with a clear error message.
-        with pytest.raises(ValueError, match="Unknown"):
-            # Simulate the _create_default contract: unknown types raise
-            raise ValueError("Unknown json type: __nonexistent__")
-
-    def test_save_json_rejects_invalid_structure(self, tmp_path: Path) -> None:
-        """save_json must reject data with invalid structure.
-
-        The memory branch enforces that all persisted data must be a dict.
-        Non-dict values (int, list, str, None) are rejected at the save
-        boundary. This mirrors the save_json contract from json_handler.
-        """
-        # Verify save_json contract: non-serializable objects are rejected
-        with pytest.raises(TypeError):
-            json.dumps(object())
-
-        # Verify the contract that save_json rejects non-dict data
-        data = [1, 2, 3]  # Invalid: must be dict
-        assert not isinstance(data, dict), "save_json requires dict, not list"
-
-    def test_validate_rejects_invalid_mode(self) -> None:
-        """Validation must reject data with an invalid_type or invalid_mode.
-
-        Memory files must be dicts. Attempting to operate with an
-        invalid_mode triggers a ValueError. This is the standard
-        contract for type-safe JSON operations.
-        """
-        # Verify pytest.raises(ValueError) pattern for invalid_mode
-        with pytest.raises(ValueError, match="invalid"):
-            raise ValueError("invalid mode: expected dict, got NoneType")
-
-
-# ---------------------------------------------------------------------------
-# Return Type Contracts
-# ---------------------------------------------------------------------------
-
-
-class TestReturnTypeContracts:
-    """Tests verifying correct return types from memory functions."""
-
-    def test_paths_return_path_type(self, tmp_path: Path) -> None:
-        """Memory file paths must be pathlib.Path instances.
-
-        The memory branch works with Path objects throughout its I/O
-        layer. This test verifies that isinstance(result, Path) holds
-        for all path operations in the memory subsystem.
-        """
-        memory_dir = tmp_path / ".trinity"
-        memory_dir.mkdir(parents=True)
-        local_json = memory_dir / "local.json"
-        local_json.write_text("{}", encoding="utf-8")
-
-        result = local_json
-        assert isinstance(result, Path), f"Memory paths must be pathlib.Path, got {type(result)}"
-        assert result.exists()
-
 
 # ---------------------------------------------------------------------------
 # Data Structure Contracts
@@ -166,7 +80,7 @@ class TestEntryPointImportContract:
             for num, line in enumerate(source.splitlines(), start=1)
             if line.strip().startswith("from .")
         ]
-        assert not offenders, "Relative imports in the entry point script:\n" + "\n".join(offenders)
+        assert offenders == [], "Relative imports in the entry point script:\n" + "\n".join(offenders)
 
     def test_entry_point_imports_no_handlers_directly(self) -> None:
         """The entry point routes to modules; only modules may import handlers.
@@ -181,7 +95,7 @@ class TestEntryPointImportContract:
             for num, line in enumerate(source.splitlines(), start=1)
             if "aipass.memory.apps.handlers" in line and "import" in line
         ]
-        assert not offenders, "Handler imported directly in the entry point:\n" + "\n".join(offenders)
+        assert offenders == [], "Handler imported directly in the entry point:\n" + "\n".join(offenders)
 
 
 class TestUnknownArgumentExitsNonZero:
@@ -201,7 +115,7 @@ class TestUnknownArgumentExitsNonZero:
 
     def _run_main(self, argv: list[str]) -> int:
         """Call the entry point's main() with argv, returning its exit code."""
-        with patch.object(sys, "argv", ["memory", *argv]):
+        with patch("sys.argv", ["memory", *argv]):
             return memory_entry.main()
 
     def test_an_unknown_verb_exits_non_zero(self) -> None:
@@ -264,4 +178,4 @@ class TestModuleScriptImportContract:
             for num, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
                 if line.strip().startswith("from .."):
                     offenders.append(f"{path.name}:{num}: {line.strip()}")
-        assert not offenders, "Relative imports in script-executable modules:\n" + "\n".join(offenders)
+        assert offenders == [], "Relative imports in script-executable modules:\n" + "\n".join(offenders)

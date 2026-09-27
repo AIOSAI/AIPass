@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_import_isolation.py
 # Description: Pins against sys.modules poisoning of the handlers.json package
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-27
 # Modified: 2026-09-27
 # =============================================
@@ -234,7 +234,7 @@ class TestNobodyEvictsThePackageOneWay:
             for variable in set(installs.findall(source)):
                 if f"{variable}.__path__" not in source:
                     offenders.append(f"{path.name}: {variable} is installed at {_PACKAGE} with no __path__")
-        assert not offenders, "package stand-ins that are not packages:\n  " + "\n  ".join(offenders)
+        assert offenders == [], "package stand-ins that are not packages:\n  " + "\n  ".join(offenders)
 
     # Measured 2026-08-30. Every stand-in installed at a name this suite ALSO
     # installs children under — i.e. impersonating a package — while carrying no
@@ -291,12 +291,12 @@ class TestNobodyEvictsThePackageOneWay:
         beneath it, so a package added tomorrow is covered without editing this.
         """
         new = self._bare_package_stand_ins() - self.KNOWN_BARE_PACKAGE_STAND_INS
-        assert not new, "new package stand-in with no __path__:\n  " + "\n  ".join(sorted(new))
+        assert new == set(), "new package stand-in with no __path__:\n  " + "\n  ".join(sorted(new))
 
     def test_the_inventory_does_not_outlive_what_it_inventories(self):
         """A stale allow-list is how a fixed thing stays 'known broken' forever."""
         stale = self.KNOWN_BARE_PACKAGE_STAND_INS - self._bare_package_stand_ins()
-        assert not stale, "fixed — remove from KNOWN_BARE_PACKAGE_STAND_INS:\n  " + "\n  ".join(sorted(stale))
+        assert stale == set(), "fixed — remove from KNOWN_BARE_PACKAGE_STAND_INS:\n  " + "\n  ".join(sorted(stale))
 
     @pytest.mark.parametrize("name", ["test_tab_renderer", "test_config_loader"])
     def test_the_converted_fixtures_still_use_delitem(self, name):

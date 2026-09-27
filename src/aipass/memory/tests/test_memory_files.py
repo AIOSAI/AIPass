@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_memory_files.py
 # Description: Tests for memory_files.py, the memory file safe I/O handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
@@ -37,3 +37,6 @@
 # next agent a sanctioned-looking way to recreate the drift.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — read_memory_file() and write_memory_file(), tests/test_changed_entries.py
+# seedgo: no-test-needed(covered_elsewhere) — violation_line(), read_memory_file_data(): tests/test_changed_entries.py
+# seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), pinned in tests/test_handlers.py

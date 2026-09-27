@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_declared_roots.py
 # Description: Pins the declared-roots anchor and the external tier it opens
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-30
 # Modified: 2026-09-27
 # =============================================
@@ -37,6 +37,8 @@
 # accumulates by accident.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — registry_scope.resident_registry_paths(); tests/test_residency_scope.py
+# seedgo: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
 
 import json
 from pathlib import Path
@@ -243,11 +245,11 @@ class TestARetiredCitizenStaysRetired:
     """
 
     def test_an_archived_passport_is_not_a_citizen(self, machine):
+        """Mutant (2026-09-27, killed): the external walk returning no rows at all."""
         _write(machine.parent / "wren/src/.archive/ghosttown/.trinity/passport.json", {"citizenship": {}})
         _write(machine / rs.DECLARED_ROOTS, _roots(_root_row("../wren")))
-        names = [item["name"] for item in rs.external_branches(machine)]
-        assert "ghosttown" not in [n.lower() for n in names], names
-        assert names, "the live citizens must still be found -- an empty result would pass vacuously"
+        names = sorted(item["name"].lower() for item in rs.external_branches(machine))
+        assert names == ["quiet", "wren"], "only the registry's live citizens, and never the archived passport"
 
     def test_a_registry_that_retired_a_branch_does_not_return_it(self, machine):
         """The registry is the authority on liveness, and it is consulted."""
@@ -481,6 +483,8 @@ class TestTheLiveMachineIsReachable:
         What would still matter is a declaration that CONTRADICTS presence: an
         external citizen claiming ``core`` or ``resident``. Nothing honours that
         today, and this is the line that goes red before anything does.
+
+        No mutant run (2026-09-27): the oracle is sibling repos' live passports, not a product line.
         """
         projects = rs.find_repo_root().parent
         contradicting = []
@@ -493,7 +497,7 @@ class TestTheLiveMachineIsReachable:
                     declared = rs.declared_residency(item["path"])
                     if declared not in (None, rs.RESIDENCY_EXTERNAL):
                         contradicting.append((item["name"], declared))
-        assert not contradicting, (
+        assert contradicting == [], (
             f"external citizens declare a residency they do not hold: {contradicting} -- revisit the presence rule"
         )
 

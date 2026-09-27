@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_config_verbs.py
 # Description: Tests for the `config` verbs (rollover limit get/set/set-default) and the todo verbs
-# Version: 1.6.0
+# Version: 1.6.1
 # Created: 2026-08-16
 # Modified: 2026-09-27
 # =============================================
@@ -41,6 +41,8 @@
 # accident these verbs exist to prevent.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch() itself, tests/test_config_loader.py
+# seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings() arithmetic, pinned in tests/test_config_loader.py
 
 import copy
 import importlib
@@ -494,11 +496,12 @@ class TestCountCeilingRefusal:
         _run(verbs, "set-default", "sessions", "40")
         assert verbs.path.read_bytes() == before
 
-    def test_exactly_the_ceiling_is_accepted_by_set(self, verbs) -> None:
-        """The ceiling is the largest LEGAL count, not the first illegal one."""
+    def test_exactly_the_ceiling_is_accepted_by_set(self, verbs, capsys) -> None:
+        """The ceiling is the largest LEGAL count, not the first illegal one - written, and never refused on screen."""
         ceiling = _ceiling(verbs, "sessions")
         assert _run(verbs, "set", "@memory", "sessions", str(ceiling)) is True
         assert _rollover_section(verbs)["per_branch"]["memory"]["local"]["sessions"]["count"] == ceiling
+        assert "may keep at most" not in _unwrapped(_streams(capsys))
 
     def test_exactly_the_ceiling_is_accepted_by_set_default(self, verbs) -> None:
         ceiling = _ceiling(verbs, "sessions", None)
@@ -517,9 +520,11 @@ class TestCountCeilingRefusal:
         assert "entry_limits.file_budgets" in payload["suggestion"]
 
     def test_the_flat_cap_still_answers_first(self, verbs, capsys) -> None:
-        """101 is out of bounds before it is over budget -- the older, cheaper no."""
+        """101 is out of bounds before it is over budget -- the older, cheaper no, and the only one."""
         _run(verbs, "set", "@memory", "sessions", "101")
-        assert "Count must not exceed 100 (got 101)" in _streams(capsys)
+        out = _unwrapped(_streams(capsys))
+        assert _unwrapped("Count must not exceed 100 (got 101)") in out
+        assert "may keep at most" not in out
 
 
 class TestMissingArgumentRefusals:
@@ -1780,7 +1785,7 @@ class TestJsonRefusals:
     @pytest.mark.parametrize("args", _CASES)
     def test_suggestion_matches_the_human_sentence(self, verbs, capsys, args) -> None:
         payload = _payload(verbs, capsys, *args, "--json")
-        assert payload["suggestion"] is not None
+        assert payload["suggestion"].strip() != ""
         capsys.readouterr()
         _run(verbs, *args)
         assert payload["suggestion"] in _streams(capsys)
@@ -2013,12 +2018,12 @@ class TestThePrintedExamplesAreLegalCommands:
         # file holding `set @b sessions 12`. Leaving it out would let the one
         # page operators copy from drift past its own ceiling unpinned.
         source = "".join(
-            Path(module.__file__).read_text(encoding="utf-8")
+            Path(str(module.__file__)).read_text(encoding="utf-8")
             for module in (rollover_mod, rollover_config, config_content)
         )
         ceilings = config_loader.get_count_ceilings()
         examples = re.findall(r"config set(?:-default)?(?: @\w+)? (\w+) (\d+)", source)
-        assert examples, "no example commands found — the pin would pass vacuously"
+        assert len(examples) >= 1, "no example commands found — the pin would pass vacuously"
         for entry_type, raw in examples:
             ceiling = ceilings.get(entry_type, {}).get("ceiling")
             if ceiling is None:

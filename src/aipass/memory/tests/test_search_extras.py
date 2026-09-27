@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_search_extras.py
 # Description: Tests for search query_executor subprocess encoding and vector search
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-25
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -17,6 +17,8 @@
 # All tests use mocks -- no live subprocess, ML model, or ChromaDB access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — query_executor._pin_plan_id_matches(); tests/test_chroma_source_match.py
+# seedgo: no-test-needed(external) — the memory venv interpreter _get_memory_python() finds; every subprocess is stubbed
 
 import json
 import subprocess

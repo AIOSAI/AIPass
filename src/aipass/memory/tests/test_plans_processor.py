@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_plans_processor.py
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
 # Modified: 2026-09-27
 # =============================================
@@ -13,6 +13,8 @@
 # Covers: from aipass.memory.apps.handlers.intake.plans_processor import process_plans
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the embed_subprocess.py child _embed_texts() spawns; sealed at subprocess
+# seedgo: no-test-needed(covered_elsewhere) — chroma_subprocess.py's store: tests/test_chroma_source_match.py
 
 import hashlib
 import json

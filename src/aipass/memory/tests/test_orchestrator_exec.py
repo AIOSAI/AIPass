@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_orchestrator_exec.py
 # Description: Tests for the orchestrator execute_rollover pipeline
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-26
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -14,6 +14,9 @@
 # Covers: from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — what @trigger does with the rollover_complete event Trigger.fire sends
+# seedgo: no-test-needed(covered_elsewhere) — the stats update_central writes, in tests/test_central_writer.py
+# seedgo: no-test-needed(covered_elsewhere) — the pool run process_memory_pool does, in tests/test_intake.py
 
 import sys
 from unittest.mock import MagicMock
@@ -490,7 +493,10 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         orch.execute_rollover()
-        mock_trigger_cls.fire.assert_called_once()
+        # Mutant: success_count dropped from the rollover_complete payload — killed.
+        mock_trigger_cls.fire.assert_called_once_with(
+            "rollover_complete", triggers_count=1, success_count=1, failed_count=0
+        )
 
     def test_post_rollover_central_update(self, monkeypatch, tmp_path):
         """After success, central_writer.update_central is called."""
@@ -507,7 +513,9 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         orch.execute_rollover()
-        mock_central.update_central.assert_called_once()
+        # Mutant: the "Central stats updated" log line reworded — killed.
+        mock_central.update_central.assert_called_once_with()
+        orch.logger.info.assert_any_call("[rollover] Central stats updated")
 
     def test_post_rollover_pool_processing(self, monkeypatch, tmp_path):
         """After success, pool_processor is called."""
@@ -524,7 +532,9 @@ class TestExecuteRolloverFullPipeline:
         monkeypatch.setattr(_POOL_PROCESS, mock_pool.process_memory_pool)
 
         orch.execute_rollover()
-        mock_pool.process_memory_pool.assert_called_once()
+        # Mutant: the pool's files_processed count dropped from its log line — killed.
+        mock_pool.process_memory_pool.assert_called_once_with()
+        orch.logger.info.assert_any_call("[rollover] Memory pool: 2 files processed")
 
     def test_post_rollover_trigger_exception(self, monkeypatch, tmp_path):
         """Trigger.fire raises but does not crash the pipeline."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_archive.py
 # Description: Archive indexer handler — file info, index load/save/build, new-file check, status
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-05
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -16,6 +16,7 @@
 # All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — CODE_ARCHIVE_PATH and INDEX_PATH, the live locations; repointed at tmp_path here
 
 import json
 from pathlib import Path

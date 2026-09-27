@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_lint.py
 # Description: check_entry validator, the read-only lint handler and the lint module (FPLAN-0270 phase 2)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-13
 # Modified: 2026-09-27
 # =============================================
@@ -20,6 +20,7 @@
 #   - Lint handler is read-only (files unchanged after scan)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — the wording of lint's print_help() and print_introspection() panels
 
 import importlib
 import json
@@ -472,7 +473,10 @@ class TestUnknownBranchIsAnError:
         succeeded.assert_not_called()
 
     def test_known_branch_still_scans(self) -> None:
-        """The guard must not block a real branch."""
+        """The guard must not block a real branch.
+
+        Mutant: _execute_lint hands run_lint branch_filter=None — killed.
+        """
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
@@ -481,10 +485,13 @@ class TestUnknownBranchIsAnError:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter="memory")
 
-        scanned.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter="memory")
 
     def test_known_branch_match_is_case_insensitive(self) -> None:
-        """run_lint matches case-insensitively, so the guard must too."""
+        """run_lint matches case-insensitively, so the guard must too.
+
+        Mutant: _execute_lint hands run_lint branch_filter=None — killed.
+        """
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
@@ -493,9 +500,10 @@ class TestUnknownBranchIsAnError:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter="MEMORY")
 
-        scanned.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter="MEMORY")
 
     def test_no_filter_scans_everything(self) -> None:
+        """Mutant: _execute_lint hands run_lint an empty branch list — killed."""
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
@@ -504,7 +512,7 @@ class TestUnknownBranchIsAnError:
                 with patch.object(lint, "_display_results"):
                     lint._execute_lint(branch_filter=None)
 
-        scanned.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter=None)
 
     def test_a_declared_external_branch_is_not_refused(self) -> None:
         """The read lane resolves names through the scope that holds the external tier.
@@ -1085,6 +1093,7 @@ class TestFieldsModeDisplay:
         assert "No .trinity fields to measure" in captured.out + captured.err
 
     def test_the_fields_mode_reaches_the_display(self) -> None:
+        """Mutant: _execute_lint_fields drops the branch filter on its way to the display — killed."""
         lint = self._lint_module()
         registry = [{"name": "memory", "path": str(Path(tempfile.gettempdir()) / "memory")}]
 
@@ -1093,8 +1102,8 @@ class TestFieldsModeDisplay:
                 with patch.object(lint, "_display_field_results") as displayed:
                     lint._execute_lint_fields(branch_filter="memory")
 
-        scanned.assert_called_once()
-        displayed.assert_called_once()
+        scanned.assert_called_once_with(registry, branch_filter="memory")
+        displayed.assert_called_once_with({"success": True}, "memory")
 
     def test_an_unknown_branch_is_refused_in_fields_mode_too(self) -> None:
         lint = self._lint_module()

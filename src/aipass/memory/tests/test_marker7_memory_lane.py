@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_marker7_memory_lane.py
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-27
 # Modified: 2026-09-27
 # =============================================
@@ -31,7 +31,10 @@
 # - **A template bump heals through the push's gates** — never around them.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — rollover.show_status(), driven by tests/test_rollover_pipeline.py
+# seedgo: no-test-needed(covered_elsewhere) — trinity_push.build_frame(), the push's write; tests/test_trinity_push.py
 
+import hashlib
 import json
 import sys
 import types
@@ -53,6 +56,7 @@ from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import trinity_push
 from aipass.memory.apps.handlers.templates import template_bump
 from aipass.memory.apps.handlers.rollover import normalizer
+from aipass.memory.apps.handlers.json import config_loader
 from aipass.memory.apps.handlers.json import entry_limits
 from aipass.memory.apps.handlers.json import memory_files
 from aipass.memory.apps.handlers import write_fence
@@ -188,6 +192,8 @@ class TestOneFleetOneDefinition:
 
         There is no collision today; that is luck, not a guard. Six external
         names against twenty-two of ours, and nothing stops the twenty-third.
+
+        Mutant (2026-09-27, killed): `wanted` built from `rolled[:1]` only.
         """
         seen = []
         monkeypatch.setattr(
@@ -196,10 +202,12 @@ class TestOneFleetOneDefinition:
             lambda name, path, config: seen.append((name, Path(path))) or {"success": True},
         )
         # Every citizen in the fleet claims to have rolled, external ones included.
-        every_name = [item["name"] for item in registry_scope.fleet_branches()]
+        fleet = registry_scope.fleet_branches()
+        every_name = [item["name"] for item in fleet]
+        in_repo = {item["name"] for item in fleet if item.get("residency") != registry_scope.RESIDENCY_EXTERNAL}
         rollover._normalize_rolled(every_name)
 
-        assert seen, "nothing was normalized, so the scope was never exercised"
+        assert {name for name, _ in seen} == in_repo, "every in-repo citizen that rolled heals, and nobody else"
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for _, p in seen if home not in p.resolve().parents and p.resolve() != home]
         assert not outside, f"normalize would write outside this repo: {outside}"
@@ -250,12 +258,14 @@ class TestOneFleetOneDefinition:
         Measured while writing it: three external citizens (@verify, @vera,
         @research) carry 49 over-cap entries between them. Rollover reaching
         them would be a lane writing into repos nobody declared it for.
+
+        Mutant (2026-09-27, killed): detector's core registry read replaced by `[]`.
         """
         rolled = {Path(item["path"]).resolve() for item in detector._read_registry()}
-        assert rolled, "an empty scope proves nothing about what it excludes"
+        assert _MEMORY_ROOT.resolve() in rolled, "a scope without this branch proves nothing about what it excludes"
         home = registry_scope.REPO_ROOT.resolve()
         outside = [p for p in rolled if home not in p.parents and p != home]
-        assert not outside, f"rollover would write outside this repo: {outside}"
+        assert outside == [], f"rollover would write outside this repo: {outside}"
 
     # -- THE WRITE FENCE (2026-09-18) -----------------------------------------
     #
@@ -549,23 +559,25 @@ class TestRolloverHealsWhatItTouches:
         """
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
-            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs"),
+            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
             patch.object(rollover, "_normalize_rolled") as normalized,
         ):
             rollover.run_rollover()
 
         normalized.assert_called_once_with(["guinea"])
+        tabs.assert_called_once_with(branches=["guinea"])
 
     def test_the_rollover_normalizes_only_the_branches_it_rolled(self):
         """The 2026-08-25 shape: a per-branch verb with a fleet-wide tail."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea", "guinea")),
-            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs"),
+            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
             patch.object(rollover, "_normalize_rolled") as normalized,
         ):
             rollover.run_rollover()
 
         assert normalized.call_args.args[0] == ["guinea"]
+        tabs.assert_called_once_with(branches=["guinea"])
 
     def test_nothing_rolled_means_nothing_normalized(self):
         """Idle costs nothing — the law of the marker, at the call site."""
@@ -583,7 +595,7 @@ class TestRolloverHealsWhatItTouches:
         """The entries are already archived. A cosmetic re-render cannot undo that."""
         with (
             patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
-            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs"),
+            patch("aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs") as tabs,
             patch.object(normalizer, "normalize_branch", side_effect=RuntimeError("frame boom")),
             patch.object(
                 registry_scope,
@@ -592,6 +604,8 @@ class TestRolloverHealsWhatItTouches:
             ),
         ):
             assert rollover.run_rollover() is True
+
+        tabs.assert_called_once_with(branches=["guinea"])
 
 
 # =============================================================================
@@ -606,12 +620,96 @@ class TestSyncLinesTellsTheTruth:
     fleet-wide `refresh_all_tabs()` inside what is now a read-only reporter.
     """
 
+    @staticmethod
+    def _tmp_fleet(tmp_path: Path, monkeypatch) -> tuple[list[Path], MagicMock]:
+        """A one-citizen fleet under tmp_path, and the detector pointed at it.
+
+        The reporter reads every branch the detector's write scope names; left
+        alone that is the live machine's fleet. The core registry is read off
+        ``detector._REPO_ROOT`` and caller discovery walks the cwd, so both are
+        repointed: the only memory files in reach are the two written here.
+        """
+        trinity = tmp_path / "guinea" / ".trinity"
+        trinity.mkdir(parents=True)
+        local = trinity / "local.json"
+        local.write_text('{\n  "sessions": []\n}\n', encoding="utf-8")
+        observations = trinity / "observations.json"
+        observations.write_text('{\n  "observations": []\n}\n', encoding="utf-8")
+        registry = {"branches": [{"name": "GUINEA", "path": "guinea", "status": "active"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+        monkeypatch.setattr(line_counter, "json_handler", MagicMock())
+        recorder = MagicMock()
+        monkeypatch.setattr(rollover, "json_handler", recorder)
+        return [local, observations], recorder
+
     def test_the_reporter_verb_exists_under_a_true_name(self):
         assert "report-lines" in rollover.SUBCOMMANDS
 
-    def test_the_old_name_still_routes_and_says_what_changed(self):
-        """Never a silent removal: the old verb answers, and names its successor."""
+    def test_the_old_name_still_routes_and_says_what_changed(self, tmp_path, monkeypatch, capsys):
+        """Never a silent removal: the old verb answers, and names its successor.
+
+        The router's True alone passed with the rename notice deleted and the
+        reporter never run; the notice and the measured count are the effect.
+        """
+        self._tmp_fleet(tmp_path, monkeypatch)
+
         assert rollover.handle_command("rollover", ["sync-lines"]) is True
+
+        said = capsys.readouterr()
+        assert "'sync-lines' is now 'report-lines'" in said.err, said.err
+        assert "Measured 2 files" in said.out, said.out
+
+    def test_the_reporter_measures_the_fleet_and_writes_nothing(self, tmp_path, monkeypatch, capsys):
+        """report_line_counts, run for real over a tmp_path fleet.
+
+        Mutation: dropping `_handler_sync_line_counts()` for a constant zero
+        result, or re-adding a stamp write to the measured files.
+        """
+        files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
+        before = [path.read_bytes() for path in files]
+
+        rollover.report_line_counts()
+
+        assert "Measured 2 files" in capsys.readouterr().out
+        assert [path.read_bytes() for path in files] == before
+        recorder.log_operation.assert_called_once_with("rollover_report_lines", {"measured": 2, "failed": 0})
+
+    def test_push_defaults_rewrites_per_branch_in_a_redirected_config(self, tmp_path, monkeypatch, capsys):
+        """push_defaults, run for real — against a tmp_path config, never the operator's.
+
+        It WRITES memory.config.json, so the redirect is proved before the call:
+        the patched loader must be the very module the product's function-local
+        import will resolve, its path must sit under tmp_path, and the operator
+        file's bytes are hashed before and after. A redirect that stopped
+        holding fails here instead of writing the live file.
+
+        Mutation: merging per_branch instead of replacing it (the stale entry
+        survives), or dropping the operator's other keys on the write.
+        """
+        _files, recorder = self._tmp_fleet(tmp_path, monkeypatch)
+        seeded = tmp_path / "memory.config.json"
+        operator_file = _MEMORY_ROOT / "memory_json" / "custom_config" / "memory.config.json"
+        seeded.write_text(
+            json.dumps({"operator_key": "kept", "rollover": {"per_branch": {"stale": {"local": {}}}}}),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(config_loader, "_CONFIG_PATH", seeded)
+        monkeypatch.setattr(config_loader, "_find_repo_root", lambda: tmp_path)
+        assert sys.modules.get(config_loader.__name__) is config_loader, "the product would import an unpatched loader"
+        live_before = hashlib.sha256(operator_file.read_bytes()).hexdigest() if operator_file.exists() else None
+
+        rollover.push_defaults()
+
+        live_after = hashlib.sha256(operator_file.read_bytes()).hexdigest() if operator_file.exists() else None
+        assert live_after == live_before, "the operator's memory.config.json was written"
+        written = json.loads(seeded.read_text(encoding="utf-8"))
+        assert written["operator_key"] == "kept"
+        assert set(written["rollover"]["per_branch"]) == {"guinea"}
+        assert written["rollover"]["per_branch"]["guinea"]["local"]["todos"] == {"count": 10}
+        assert "Pushed defaults to 1 branches" in capsys.readouterr().out
+        recorder.log_operation.assert_called_once_with("push_defaults", {"branches": 1, "json": False})
 
     def test_the_reporter_does_not_re_render_the_fleets_tabs(self):
         """A read-only reporter that rewrites 22 branches' files is the old lie again."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_watch_module.py
 # Description: watch module routing, help, session start/failure, runner handler, introspection
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -24,6 +24,8 @@
 #   - Introspection names the monitor handlers it is wired to
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — the SIGINT handler _start_session installs via signal.signal; needs a real signal
+# seedgo: no-test-needed(external) — watch_runner.wait_forever(), blocks until Ctrl+C; patched at every call here
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -148,13 +150,15 @@ class TestWatchArguments:
         assert "watch" in suggestion
 
     def test_rejected_invocation_is_logged(self, watch_module):
-        """A refused command is an operational event, not just terminal output."""
+        """A refused command is an operational event, not just terminal output.
+
+        Mutant (2026-09-27, killed): the event logged as "watch_start" instead of "watch_rejected".
+        """
         module, _ = watch_module
         with patch.object(module, "_start_session"), patch.object(module, "error"):
             with patch.object(module.json_handler, "log_operation") as logged:
                 module.handle_command("watch", ["forever"])
-        logged.assert_called_once()
-        assert "forever" in str(logged.call_args)
+        logged.assert_called_once_with("watch_rejected", {"argument": "forever", "args": ["forever"]})
 
 
 # ---------------------------------------------------------------------------
@@ -169,12 +173,14 @@ class TestWatchSession:
     handlers/monitor/watch_runner.py (cli separation standard).
     """
 
-    def test_session_starts_the_watcher_and_blocks(self, watch_module):
+    def test_session_starts_the_watcher_and_blocks(self, watch_module, capsys):
+        """Mutant (2026-09-27, killed): the reported count read as 0 instead of the watcher's."""
         module, mocks = watch_module
         with patch.object(module, "wait_forever") as loop:
             module._start_session()
-        mocks["watcher"].start_memory_watcher.assert_called_once()
-        loop.assert_called_once()
+        mocks["watcher"].start_memory_watcher.assert_called_once_with()
+        loop.assert_called_once_with()
+        assert "Watching 17 branch directories" in capsys.readouterr().out
 
     def test_session_reports_failure_and_never_blocks(self, watch_module):
         """A failed start must not fall through into the wait loop, where it
@@ -189,11 +195,13 @@ class TestWatchSession:
         assert "no registry" in " ".join(str(a) for a in errored.call_args.args)
         loop.assert_not_called()
 
-    def test_session_shows_the_over_cap_count(self, watch_module):
+    def test_session_shows_the_over_cap_count(self, watch_module, capsys):
+        """Mutant (2026-09-27, killed): `ready` forced to 0 instead of the detector's files_ready."""
         module, mocks = watch_module
         with patch.object(module, "wait_forever"):
             module._start_session()
-        mocks["detector"].get_rollover_stats.assert_called_once()
+        mocks["detector"].get_rollover_stats.assert_called_once_with()
+        assert "Current: 34 files monitored, 3 ready for rollover" in capsys.readouterr().out
 
 
 class TestWatchRunnerHandler:
@@ -217,11 +225,13 @@ class TestWatchRunnerHandler:
         assert "boom" in str(logged.call_args)
 
     def test_stop_watching_delegates(self, watch_module):
+        """Mutant (2026-09-27, killed): the stop_memory_watcher() call dropped from stop_watching."""
         _, mocks = watch_module
         runner = mocks["runner"]
-        with patch.object(runner.json_handler, "log_operation"):
+        with patch.object(runner.json_handler, "log_operation") as logged:
             runner.stop_watching()
-        mocks["watcher"].stop_memory_watcher.assert_called_once()
+        mocks["watcher"].stop_memory_watcher.assert_called_once_with()
+        logged.assert_called_once_with("watch_stop", {"success": True})
 
     def test_handler_prints_nothing(self, watch_module):
         """Display belongs to the module -- a printing handler breaks that."""

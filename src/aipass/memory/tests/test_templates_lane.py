@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_templates_lane.py
 # Description: Pins for the live templates lane — spawn propagation, receipt status, the bump site, and two refusals
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-27
 # Modified: 2026-09-27
 # =============================================
@@ -30,6 +30,8 @@
 # those by accident.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — gold_versions() and bump_pending(), tests/test_marker7_memory_lane.py
+# seedgo: no-test-needed(documentation) — the wording of print_help() and print_introspection()
 
 from pathlib import Path
 from unittest.mock import patch

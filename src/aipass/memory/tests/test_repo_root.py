@@ -1,8 +1,8 @@
 # =================== AIPass ====================
 # Name: test_repo_root.py
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
-# Version: 1.2.1
-# Created: 2026-09-15
+# Version: 1.2.2
+# Created: 2026-08-31
 # Modified: 2026-09-27
 # =============================================
 
@@ -30,6 +30,7 @@
 #     an environment we do not run locally is not a guard, it is a report.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — module_file() on Windows, where resolve() reads the cwd; the sweep pins its callers
 
 import importlib
 import inspect
@@ -674,7 +675,8 @@ class TestTheFilterHasOneImplementationForFourWalks:
     """
 
     def test_registry_scope_delegates_rather_than_carrying_a_twin(self):
-        source = inspect.getsource(registry_scope._exactly_named)
+        # The module's text, sliced to the helper: the claim is about its source, not a call into it.
+        source = inspect.getsource(registry_scope).split("def _exactly_named(", 1)[1].split("\ndef ", 1)[0]
 
         assert "repo_root.exactly_named" in source, "the ten-copy lesson, one package over"
         assert "endswith" not in source.split('"""')[-1], "a second implementation is a second answer"

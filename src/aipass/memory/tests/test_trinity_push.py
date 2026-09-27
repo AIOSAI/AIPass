@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_push.py
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-27
 # Modified: 2026-09-27
 # =============================================
@@ -25,6 +25,8 @@
 # push that skips its step (see the mutation notes in the class docstrings).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — the real store behind get_by_ids_subprocess(); a fake store_client stands in
+# seedgo: no-test-needed(covered_elsewhere) — compose_meta() text the push writes: tests/test_tab_renderer.py
 
 import copy
 import json

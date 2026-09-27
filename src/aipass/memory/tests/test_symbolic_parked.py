@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_symbolic_parked.py
 # Description: Pins the park of the symbolic fragments tier (the owner's ruling, 2026-08-14)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
 # Modified: 2026-09-27
 # =============================================
@@ -136,7 +136,7 @@ class TestLiveLaneUntouched:
             encoding="utf-8"
         )
         live = [ln for ln in source.splitlines() if ln.strip().startswith("from . import symbolic")]
-        assert not live, f"live lane still imports the parked tier: {live}"
+        assert live == [], f"live lane still imports the parked tier: {live}"
 
     def test_the_live_entry_points_still_import(self):
         for dotted in (
@@ -147,7 +147,7 @@ class TestLiveLaneUntouched:
             "aipass.memory.apps.modules.search",
             "aipass.memory.apps.modules.governance",
         ):
-            assert importlib.import_module(dotted) is not None
+            assert importlib.import_module(dotted).__name__ == dotted
 
     def test_governance_is_not_parked(self):
         """Governance is a SEPARATE tier and is live on the prompt lane (@hooks compass_recall)."""
@@ -259,4 +259,4 @@ class TestParkIsNeverCollected:
     def test_a_parked_test_file_would_otherwise_have_matched(self):
         """Guard the guard: if no parked file looks like a test, the pin is vacuous."""
         tempting = [p.name for p in _PARK.parent.rglob("test_*.py")]
-        assert tempting, "no parked file matches test_*.py — this pin no longer pins anything"
+        assert len(tempting) >= 1, "no parked file matches test_*.py — this pin no longer pins anything"

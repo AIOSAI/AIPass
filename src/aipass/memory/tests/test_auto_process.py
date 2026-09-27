@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_auto_process.py
 # Description: Tests for the intake auto_process handler and the pool module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-06
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -24,6 +24,9 @@
 # All tests use mocks/tmp_path — no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — spawn_background and run_once, in tests/test_auto_process_background.py
+# seedgo: no-test-needed(covered_elsewhere) — what process_memory_pool does with a drop, in tests/test_intake.py
+# seedgo: no-test-needed(covered_elsewhere) — the rollover execute_rollover runs, in tests/test_orchestrator_exec.py
 
 import json
 import sys
@@ -42,6 +45,13 @@ def _auto_process_logs_nowhere(monkeypatch):
     auto_process is imported at the top of the file and bound the real ones."""
     monkeypatch.setattr(auto_process, "logger", MagicMock())
     monkeypatch.setattr(auto_process, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
+
+
+def _pool_enabled(monkeypatch, enabled):
+    """Answer the memory_pool question at the config edge; every other section reads empty."""
+    monkeypatch.setattr(
+        auto_process.config_loader, "section", lambda name: {"enabled": enabled} if name == "memory_pool" else {}
+    )
 
 
 # ===========================================================================
@@ -107,7 +117,7 @@ class TestRunPoolProcessing:
 
     def test_skips_when_disabled(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: False)
+        _pool_enabled(monkeypatch, False)
 
         result = mod.run_pool_processing()
 
@@ -116,7 +126,7 @@ class TestRunPoolProcessing:
 
     def test_returns_zero_when_pool_empty(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
 
         mock_process = MagicMock(return_value={"success": True, "files_processed": 0, "total_chunks": 0})
         with patch(
@@ -130,7 +140,7 @@ class TestRunPoolProcessing:
 
     def test_returns_count_when_files_processed(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
 
         mock_process = MagicMock(return_value={"success": True, "files_processed": 3, "total_chunks": 15})
         with patch(
@@ -145,7 +155,7 @@ class TestRunPoolProcessing:
 
     def test_handles_processing_error(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
 
         with patch(
             "aipass.memory.apps.handlers.intake.pool_processor.process_memory_pool",
@@ -167,7 +177,7 @@ class TestAutoProcess:
 
     def test_skips_everything_when_disabled(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: False)
+        _pool_enabled(monkeypatch, False)
 
         result = mod.auto_process()
 
@@ -177,7 +187,7 @@ class TestAutoProcess:
 
     def test_empty_pool_no_rollover_triggers(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
         monkeypatch.setattr(
             mod,
             "run_pool_processing",
@@ -197,7 +207,7 @@ class TestAutoProcess:
 
     def test_pool_processed_no_rollover(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
         monkeypatch.setattr(
             mod,
             "run_pool_processing",
@@ -216,7 +226,7 @@ class TestAutoProcess:
 
     def test_pool_and_rollover_both_fire(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
         monkeypatch.setattr(
             mod,
             "run_pool_processing",
@@ -236,7 +246,7 @@ class TestAutoProcess:
 
     def test_pool_failure_sets_success_false(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
         monkeypatch.setattr(
             mod,
             "run_pool_processing",
@@ -254,7 +264,7 @@ class TestAutoProcess:
 
     def test_rollover_failure_sets_success_false(self, monkeypatch):
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
         monkeypatch.setattr(
             mod,
             "run_pool_processing",
@@ -273,7 +283,7 @@ class TestAutoProcess:
     def test_idempotent_second_run_no_new_work(self, monkeypatch):
         """Empty pool stays empty — both calls return 0 files."""
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
 
         call_count = {"pool": 0}
 
@@ -298,7 +308,7 @@ class TestAutoProcess:
     def test_first_call_processes_second_call_noop(self, monkeypatch):
         """With keep_recent=0, first call archives all files, second finds empty pool."""
         mod = auto_process
-        monkeypatch.setattr(mod, "_load_pool_enabled", lambda: True)
+        _pool_enabled(monkeypatch, True)
 
         call_count = {"n": 0}
 
@@ -454,10 +464,12 @@ class TestPoolHandleCommand:
         assert mod.handle_command("pool", ["status"]) is True
         assert mock.call_count == 1
 
-    def test_rejects_unknown_subcommand(self, monkeypatch):
+    def test_rejects_unknown_subcommand(self, capsys):
         mod = pool
 
         assert mod.handle_command("pool", ["bogus"]) is True
+        captured = capsys.readouterr()
+        assert "Unknown subcommand: 'bogus'" in captured.out + captured.err
 
     def test_ignores_unrelated_command(self, monkeypatch):
         mod = pool

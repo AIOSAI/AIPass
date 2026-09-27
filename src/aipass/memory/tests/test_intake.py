@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: tests/test_intake.py
 # Description: Tests for the intake/pool_processor handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-03
 # Modified: 2026-09-27
 # =============================================
@@ -24,6 +24,9 @@
 # All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — _notify_failure() sends real mail to @devpulse; stubbed, its call is asserted
+# seedgo: no-test-needed(external) — _update_central_and_dashboard() rewrites the live central file; stubbed here
+# seedgo: no-test-needed(external) — the real chromadb and fastembed write path of process_file_to_vectors()
 
 import json
 import sys
@@ -381,25 +384,15 @@ class TestProcessFileToVectors:
         test_file = tmp_path / "test.md"
         test_file.write_text("Some content here.", encoding="utf-8")
 
-        # Remove chromadb from modules so the import inside the function fails
-        monkeypatch.delitem(sys.modules, "chromadb", raising=False)
-        monkeypatch.delitem(sys.modules, "fastembed", raising=False)
-
-        # Patch the builtins __import__ to raise for chromadb
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
-
-        def _fake_import(name, *args, **kwargs):
-            """Intercept imports to simulate missing chromadb."""
-            if name == "chromadb":
-                raise ImportError("chromadb not installed")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr("builtins.__import__", _fake_import)
+        # A None entry in sys.modules is the interpreter's own "not installed":
+        # the function-local `import chromadb` raises ImportError, and nothing
+        # process-wide (builtins.__import__) is replaced to get there.
+        monkeypatch.setitem(sys.modules, "chromadb", None)
 
         result = mod.process_file_to_vectors(test_file, "test_collection")
 
         assert result["success"] is False
-        assert "error" in result
+        assert "chromadb" in result["error"]
 
 
 # ===========================================================================
@@ -687,16 +680,8 @@ class TestGetPoolStatus:
 
         monkeypatch.setattr(mod, "load_config", lambda: {"enabled": False, "supported_extensions": [".md"]})
 
-        # Make chromadb import raise
-        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
-
-        def _fake_import(name, *args, **kwargs):
-            """Intercept imports to simulate missing chromadb."""
-            if name == "chromadb":
-                raise ImportError("no chromadb")
-            return original_import(name, *args, **kwargs)
-
-        monkeypatch.setattr("builtins.__import__", _fake_import)
+        # Make chromadb import raise: a None module entry is "not installed".
+        monkeypatch.setitem(sys.modules, "chromadb", None)
 
         result = mod.get_pool_status()
 

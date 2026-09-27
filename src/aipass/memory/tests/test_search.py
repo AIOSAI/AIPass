@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_search.py
 # Description: Tests for the search orchestration module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
@@ -16,44 +16,33 @@
 # All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(documentation) — the wording of the print_help() panel
 
-import sys
 from unittest.mock import MagicMock
+
+from aipass.memory.apps.modules import search
 
 
 # ---------------------------------------------------------------------------
-# Helpers: build the full mock graph that search.py needs at import time
+# Helpers: patch the real search module's collaborators at the edge
 # ---------------------------------------------------------------------------
 
 
 def _prepare_search_mocks(monkeypatch):
-    """Insert mocks for every module-level import search.py touches.
+    """Patch, on the real search module, the collaborators the tests assert against.
 
+    The console stays real (a test reads it with capsys); Panel, error, warning
+    and the query executor are replaced on the module and restored at teardown.
     Returns a dict of key mock objects so tests can assert against them.
     """
-    # rich
     mock_panel = MagicMock()
-    mock_box = MagicMock()
-    rich_panel_mod = MagicMock()
-    rich_panel_mod.Panel = mock_panel
-    rich_box_mod = MagicMock()
-    rich_box_mod.box = mock_box
-    monkeypatch.setitem(sys.modules, "rich.panel", rich_panel_mod)
-    monkeypatch.setitem(sys.modules, "rich", MagicMock())
-
-    # aipass.cli console / error / warning
-    mock_console = MagicMock()
     mock_error = MagicMock()
     mock_warning = MagicMock()
-    cli_modules_mod = MagicMock()
-    cli_modules_mod.console = mock_console
-    cli_modules_mod.error = mock_error
-    cli_modules_mod.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules_mod)
+    monkeypatch.setattr(search, "Panel", mock_panel)
+    monkeypatch.setattr(search, "error", mock_error)
+    monkeypatch.setattr(search, "warning", mock_warning)
 
-    # aipass.memory.apps.handlers.search.query_executor
+    # the query executor: never a live vector search
     mock_execute_search = MagicMock(
         return_value={
             "success": True,
@@ -69,25 +58,9 @@ def _prepare_search_mocks(monkeypatch):
             ],
         }
     )
-    mock_query_executor = MagicMock()
-    mock_query_executor.execute_search = mock_execute_search
-
-    search_handlers_pkg = MagicMock()
-    search_handlers_pkg.query_executor = mock_query_executor
-
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.memory.apps.handlers.search",
-        search_handlers_pkg,
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.memory.apps.handlers.search.query_executor",
-        mock_query_executor,
-    )
+    monkeypatch.setattr(search, "_handler_execute_search", mock_execute_search)
 
     return {
-        "console": mock_console,
         "error": mock_error,
         "warning": mock_warning,
         "execute_search": mock_execute_search,
@@ -96,24 +69,11 @@ def _prepare_search_mocks(monkeypatch):
 
 
 def _import_search(monkeypatch):
-    """Prepare mocks and import (or reimport) the search module.
+    """Patch the real search module's edges and return it.
 
     Returns (search_module, mocks_dict).
     """
-    mocks = _prepare_search_mocks(monkeypatch)
-
-    # Remove cached module so it gets re-imported with our mocks
-    sys.modules.pop("aipass.memory.apps.modules.search", None)
-
-    # Also clear the parent package's cached attribute so Python
-    # re-executes the module code with fresh mocks.
-    parent = sys.modules.get("aipass.memory.apps.modules")
-    if parent is not None and hasattr(parent, "search"):
-        delattr(parent, "search")
-
-    from aipass.memory.apps.modules import search
-
-    return search, mocks
+    return search, _prepare_search_mocks(monkeypatch)
 
 
 # ---------------------------------------------------------------------------
@@ -155,12 +115,14 @@ class TestHandleCommandRouting:
         assert result is False
 
     def test_search_routes_correctly(self, monkeypatch):
-        """'search' command should return True (handled), not False."""
-        search_mod, _mocks = _import_search(monkeypatch)
+        """'search' command should return True (handled), not False, having run the query."""
+        search_mod, mocks = _import_search(monkeypatch)
 
         result = search_mod.handle_command("search", ["some query"])
 
         assert result is True
+        mocks["execute_search"].assert_called_once_with(query="some query", branch=None, memory_type=None, n_results=5)
+        mocks["error"].assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -307,16 +269,21 @@ class TestHandleCommandArgParsing:
         assert result is True
         mocks["error"].assert_called_once_with("Search query required")
 
-    def test_empty_args_calls_introspection(self, monkeypatch):
-        """Empty args list should trigger introspection, not crash."""
+    def test_empty_args_calls_introspection(self, monkeypatch, capsys):
+        """Empty args list runs the REAL introspection to the terminal, not crash, and searches nothing.
+
+        Widened from its twin above, which mocks print_introspection: this one
+        reads what reached stdout, so a crash inside the introspection body reddens it.
+        """
         search_mod, mocks = _import_search(monkeypatch)
-        mock_introspect = MagicMock()
-        monkeypatch.setattr(search_mod, "print_introspection", mock_introspect)
 
         result = search_mod.handle_command("search", [])
 
+        out = capsys.readouterr().out
         assert result is True
-        mock_introspect.assert_called_once()
+        assert "search Module" in out
+        assert "handlers/search/" in out
+        mocks["execute_search"].assert_not_called()
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rollover_pipeline.py
 # Description: Rollover pipeline — orchestrator, extractor, rollover module, normalize, line counter
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-04-25
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -27,6 +27,8 @@
 # All tests use mocks or tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — rollover.report_line_counts(); tests/test_marker7_memory_lane.py
+# seedgo: no-test-needed(external) — the real encoder and vector store behind store_vectors_subprocess()
 
 import json
 import logging
@@ -1237,19 +1239,23 @@ class TestARefusedWriteMustNotReadAsASuccessfulRollover:
         target = tmp_path / "local.json"
         target.write_text("{}", encoding="utf-8")
 
-        monkeypatch.setattr(ext, "write_memory_file_simple", lambda *a, **k: False)
+        writer = MagicMock(return_value=False)
+        monkeypatch.setattr(ext, "write_memory_file_simple", writer)
 
         with pytest.raises(OSError):
             ext._write_memory_file(target, {"sessions": []})
+        writer.assert_called_once_with(target, {"sessions": []})
 
     def test_a_successful_write_still_returns_quietly(self, monkeypatch, tmp_path):
         ext, _ = _import_extractor(monkeypatch)
         target = tmp_path / "local.json"
         target.write_text("{}", encoding="utf-8")
 
-        monkeypatch.setattr(ext, "write_memory_file_simple", lambda *a, **k: True)
+        writer = MagicMock(return_value=True)
+        monkeypatch.setattr(ext, "write_memory_file_simple", writer)
 
         assert ext._write_memory_file(target, {"sessions": []}) is None
+        writer.assert_called_once_with(target, {"sessions": []})
 
     def test_the_refusal_reaches_the_caller_as_a_failed_extraction(self, monkeypatch, tmp_path):
         """The whole point: a refused write must NOT be reported as archived.
@@ -1274,10 +1280,12 @@ class TestARefusedWriteMustNotReadAsASuccessfulRollover:
             "per_branch": {branch_key: {"local": {"sessions": {"count": 2}}}},
         }
         mocks["memory_files"].read_memory_file_data.return_value = data
-        monkeypatch.setattr(ext, "write_memory_file_simple", lambda *a, **k: False)
+        writer = MagicMock(return_value=False)
+        monkeypatch.setattr(ext, "write_memory_file_simple", writer)
 
         result = ext.extract_items(file_path)
 
+        assert writer.call_args.args[0] == file_path, "the refusal must come from the rolled file's own write"
         assert result["success"] is False
         # A refused write returns the failure and NOTHING ELSE -- no `extracted`
         # key at all, so no caller can read partial work out of a dead run.
@@ -1633,6 +1641,7 @@ class TestRunRollover:
         assert result is True
 
     def test_displays_failure_details(self, monkeypatch):
+        """Mutant (2026-09-27, killed): the failure line printing the trigger alone, no stage or error."""
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["orchestrator"].execute_rollover.return_value = {
             "success": False,
@@ -1642,7 +1651,7 @@ class TestRunRollover:
             "results": [],
         }
         rollover.run_rollover()
-        mocks["error"].assert_called()
+        mocks["error"].assert_called_once_with("BAD.local.json - embedding: model not found")
 
     def test_a_run_where_everything_failed_still_states_its_score(self, monkeypatch):
         """0/1 is a result. Printing nothing lets a total failure read as a quiet run.
@@ -1677,13 +1686,14 @@ class TestShowStatus:
     """Test show_status calls detector.get_rollover_stats and prints output."""
 
     def test_displays_error_on_failure(self, monkeypatch):
+        """Mutant (2026-09-27, killed): the status error printed without the detector's reason."""
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["detector"].get_rollover_stats.return_value = {
             "success": False,
             "error": "Registry not found",
         }
         rollover.show_status()
-        mocks["error"].assert_called()
+        mocks["error"].assert_called_once_with("Failed to get status: Registry not found")
 
     def test_displays_v2_branch_details(self, monkeypatch):
         rollover, mocks = _import_rollover_module(monkeypatch)
@@ -1734,13 +1744,14 @@ class TestCheckTriggers:
         mocks["error"].assert_not_called()
 
     def test_displays_error_on_failure(self, monkeypatch):
+        """Mutant (2026-09-27, killed): the trigger-check error printed without the detector's reason."""
         rollover, mocks = _import_rollover_module(monkeypatch)
         mocks["detector"].check_all_branches.return_value = {
             "success": False,
             "error": "Cannot read registry",
         }
         rollover.check_triggers()
-        mocks["error"].assert_called()
+        mocks["error"].assert_called_once_with("Failed to check triggers: Cannot read registry")
 
     def test_undrainable_files_are_listed_without_the_ready_phrase(self, monkeypatch):
         """@hooks' PreCompact fires a fleet run on 'ready for rollover', and no run can move these files."""
@@ -1993,22 +2004,26 @@ class TestValveLoggingIsBounded:
         assert "NOTHING DRAINED" in warnings[0]
 
     def test_a_partial_refusal_is_not_called_a_skip_loop(self):
-        """Some drained means the lane still moves — warn, but do not alarm."""
+        """Some drained means the lane still moves — warn, but do not alarm.
+
+        Mutant (2026-09-27, killed): `excess` computed one short of `len(entries) - limit`.
+        """
         old = [{"number": 60 - i, "date": "2026-01-01", "value": "old"} for i in range(40)]
         # Misplaced entries at the very END so they land inside the candidate
         # tail alongside genuinely-old ones — the mixed case.
         entries = [{"number": 65, "date": "2026-01-01", "value": "head"}] + old + self._misplaced(5)
         kept, warnings, _debugs = self._run(entries, 15, 65)
-        assert kept
+        assert len(kept) == 26
         assert len(warnings) == 1
         assert "NOTHING DRAINED" not in warnings[0]
 
     def test_no_refusals_logs_nothing(self):
+        """Mutant (2026-09-27, killed): `excess` computed one short of `len(entries) - limit`."""
         entries = [{"number": 100 - i, "date": "2026-01-01", "value": "v"} for i in range(40)]
         kept, warnings, debugs = self._run(entries, 15, 100)
-        assert kept
-        assert not warnings
-        assert not debugs
+        assert len(kept) == 25
+        assert warnings == []
+        assert debugs == []
 
     def test_the_valve_still_holds_every_misplaced_entry_back(self):
         """Log volume changed; the protection must not have."""
@@ -2072,9 +2087,10 @@ class TestASkippedTriggerIsNotSilentlyDropped:
         )
 
     def test_the_skip_carries_the_reason_the_extractor_gave(self):
+        """Mutant (2026-09-27, killed): the reason fixed to "no excess" instead of the extractor's message."""
         skipped = self._run_with_skip().get("skipped", [])
-        assert skipped, "the skip must be reported, not dropped"
-        assert "exceed" in skipped[0]["reason"], skipped[0]
+        assert len(skipped) == 1, "the skip must be reported, not dropped"
+        assert skipped[0]["reason"] == "No entries exceed v2 limits", skipped[0]
 
     def test_a_skipped_trigger_is_not_counted_as_a_success(self):
         """The file was not archived. Calling it a success would be the lie."""

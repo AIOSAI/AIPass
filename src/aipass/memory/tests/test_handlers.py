@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_handlers.py
 # Description: Handler-layer tests — rollover extractor, line counter, normalize and the todos operational schema
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-01
 # Modified: 2026-09-27
 # =============================================
@@ -14,11 +14,15 @@
 #   - rollover/extractor.py  (_extract_items_v2, helpers)
 #   - tracking/line_counter.py (_count_physical_lines, update_line_count)
 #   - schema/normalize.py (normalize_memory_file)
-#   - todos[] operational schema (rollover ignores, caps enforced)
+#   - todos[] operational schema (rollover ignores them)
 #
 # All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — update_all_memory_files() fleet walk, tests/test_orchestrator_exec.py
+# seedgo: no-test-needed(covered_elsewhere) — normalize_all_memory_files() fleet walk, tests/test_unified_schema.py
+# seedgo: no-test-needed(covered_elsewhere) — extract_with_metadata() wrapper, tests/test_unified_schema.py
+# seedgo: no-test-needed(covered_elsewhere) — the todos count cap, check_todos() in tests/test_detector.py
 
 import json
 from pathlib import Path
@@ -637,29 +641,6 @@ class TestTodosOperational:
         assert len(data["todos"]) == 5
         assert data["todos"][0]["id"] == "t1"
         assert data["todos"][4]["id"] == "t5"
-
-    def test_todos_schema_shape(self):
-        """Validate the expected todos[] item schema: id, text, created, optional priority."""
-        todo_item = {"id": "t1", "text": "Fix the bug", "created": "2026-06-07"}
-        assert "id" in todo_item
-        assert "text" in todo_item
-        assert "created" in todo_item
-
-        todo_with_priority = {**todo_item, "priority": "high"}
-        assert todo_with_priority["priority"] == "high"
-
-    def test_todos_cap_enforced(self):
-        """max_todos and todo_text_max_chars are the cap boundaries."""
-        limits = {
-            "max_todos": 10,
-            "todo_text_max_chars": 200,
-        }
-        todos = [{"id": f"t{i}", "text": "x" * 200, "created": "2026-06-07"} for i in range(10)]
-        assert len(todos) <= limits["max_todos"]
-        assert all(len(t["text"]) <= limits["todo_text_max_chars"] for t in todos)
-
-        over_cap = todos + [{"id": "t11", "text": "extra", "created": "2026-06-07"}]
-        assert len(over_cap) > limits["max_todos"]
 
     def test_todos_survives_full_extraction_cycle(self, monkeypatch, tmp_path):
         """End-to-end: extract_items on a file with todos[] preserves them completely."""

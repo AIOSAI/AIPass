@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_trinity_standard.py
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-25
 # Modified: 2026-09-27
 # =============================================
@@ -21,6 +21,8 @@
 # unmeasurable field is a VIOLATION, and keep-N keeps N.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — render_tab() caps numbers and todo_context(): tests/test_tab_renderer.py
+# seedgo: no-test-needed(covered_elsewhere) — the lint command lane over lint_handler.run_lint(): tests/test_lint.py
 
 import json
 import sys
@@ -165,7 +167,10 @@ class TestUnmeasurableFieldIsAViolation:
         assert hits[0]["reason"] == "unmeasurable"
 
     def test_the_violation_still_carries_the_keys_its_consumers_print(self):
-        """@hooks edit_gate formats these with %d — a None would raise there."""
+        """@hooks edit_gate formats these with %d — a None would raise there.
+
+        Mutant: _violation publishes the entry's key in "container" — killed.
+        """
         before = {"observations": []}
         after = {"observations": [{"number": 1, "note": ["x"]}]}
         hit = el.changed_entries(before, after, _limits())[0]
@@ -173,6 +178,15 @@ class TestUnmeasurableFieldIsAViolation:
             assert key in hit
         assert isinstance(hit["length"], int)
         assert isinstance(hit["over_by"], int)
+        published = {key: hit[key] for key in ("entry_type", "container", "key", "length", "cap", "over_by")}
+        assert published == {
+            "entry_type": "observations",
+            "container": "observations",
+            "key": "0",
+            "length": 0,
+            "cap": 300,
+            "over_by": 0,
+        }
 
 
 # =============================================================================

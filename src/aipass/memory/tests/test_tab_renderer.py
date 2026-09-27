@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_tab_renderer.py
 # Description: Tests for tab_renderer handler (FPLAN-0285)
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-06-25
 # Modified: 2026-09-27
 # =============================================
@@ -20,6 +20,8 @@
 #   7. The todos tab: pad size, backlog file, next #N from pad + backlog (DPLAN-0345).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — template_usage(), template_semantics(): tests/test_trinity_standard.py
+# seedgo: no-test-needed(covered_elsewhere) — receipt.bump_config_rendered() per refresh: tests/test_trinity_standard.py
 
 import importlib
 import json

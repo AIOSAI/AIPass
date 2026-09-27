@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_changed_entries.py
 # Description: changed_entries diff helper and the write_memory_file entry-limits wiring (FPLAN-0270 phase 3)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-13
 # Modified: 2026-09-27
 # =============================================
@@ -19,6 +19,8 @@
 #     non-trinity files unaffected, passport.json unaffected.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — write_memory_file_simple(), read_memory_file_data(): test_memory_files.py
+# seedgo: no-test-needed(covered_elsewhere) — load_entry_limits() config merge, fed in here: tests/test_entry_limits.py
 
 import importlib
 import json
@@ -960,8 +962,9 @@ class TestTheNearCapLineArrivesWhileThereIsStillRoom:
             memory_files.logger, "warning", lambda message, *a, **k: records.append(str(message)), raising=False
         )
 
-        memory_files._validate_entry_limits(target, {"key_learnings": {"b": "x" * 190}})
+        result = memory_files.write_memory_file(target, {"key_learnings": {"b": "x" * 190}})
 
+        assert result["success"] is True, result
         assert any("NEAR" in line and "190/200" in line and "10 chars of headroom" in line for line in records), records
         assert logging  # the import is the point: nothing here reconfigures logging
 
@@ -1122,11 +1125,23 @@ class TestTheClosedFieldShape:
         assert (hits[0]["length"], hits[0]["cap"]) == (30, 20)
 
     def test_the_six_published_keys_stay_ints_on_every_new_reason(self):
-        """@hooks formats length/cap/over_by with %d — a None there crashes the renderer."""
-        for entry in (self._entry(mood="x"), self._entry(status="x" * 50), self._entry(tags=["a"] * 9)):
-            for hit in self._authored([], [entry]):
-                for key in ("length", "cap", "over_by"):
-                    assert isinstance(hit[key], int), f"{hit['reason']}.{key} is {hit[key]!r}"
+        """@hooks formats length/cap/over_by with %d — a None there crashes the renderer.
+
+        Mutant: check_fields hands unknown_field a cap of 1 instead of 0 (still an int) — killed.
+        """
+        published = [
+            (hit["reason"], hit["length"], hit["cap"], hit["over_by"])
+            for entry in (self._entry(mood="x"), self._entry(status="x" * 50), self._entry(tags=["a"] * 9))
+            for hit in self._authored([], [entry])
+        ]
+        for reason, *numbers in published:
+            for value in numbers:
+                assert isinstance(value, int), f"{reason} published {value!r}"
+        assert published == [
+            ("unknown_field", 1, 0, 0),
+            ("field_over_cap", 50, 40, 10),
+            ("field_over_cap", 9, 3, 6),
+        ]
 
     # -- reused reasons, not new ones ----------------------------------------
 

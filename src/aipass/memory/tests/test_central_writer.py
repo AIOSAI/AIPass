@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for the central writer handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-05
 # Modified: 2026-09-27
 # =============================================
@@ -18,6 +18,10 @@
 # All tests use mocks/tmp_path -- no live filesystem or infrastructure access.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — _find_repo_root's delegation to repo_root, in tests/test_repo_root.py
+# seedgo: no-test-needed(covered_elsewhere) — when the rollover calls update_central, in tests/test_orchestrator_exec.py
+# seedgo: no-test-needed(external) — the live central file CENTRAL_FILE names; every test here redirects it to tmp_path
+# seedgo: no-test-needed(shared) — the json_handler.log_operation entry update_central writes; the json handler's lane
 
 import json
 import sqlite3
@@ -37,10 +41,10 @@ from aipass.memory.apps.handlers import repo_root as rr
 
 def _import_central_writer(monkeypatch, tmp_path):
     """Import central_writer with mocked dependencies and paths at tmp_path."""
-    sys.modules.pop("aipass.memory.apps.handlers.central_writer", None)
+    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.central_writer", raising=False)
     parent = sys.modules.get("aipass.memory.apps.handlers")
     if parent is not None and hasattr(parent, "central_writer"):
-        delattr(parent, "central_writer")
+        monkeypatch.delattr(parent, "central_writer")
 
     from aipass.memory.apps.handlers import central_writer
 
@@ -157,23 +161,20 @@ class TestCountArchiveFiles:
     def test_access_failure_raises(self, monkeypatch, tmp_path):
         """Should raise Exception when directory access fails."""
         cw = _import_central_writer(monkeypatch, tmp_path)
-        archive = tmp_path / ".archive"
-        archive.mkdir(parents=True)
 
-        # Force glob to fail
-        monkeypatch.setattr(cw, "ARCHIVE_DIR", archive)
-        original_glob = Path.glob
+        class _DeniedArchive:
+            """An archive that exists but refuses listing — handed to the product, pathlib untouched."""
 
-        def broken_glob(self, pattern):
-            raise PermissionError("access denied")
+            def exists(self):
+                return True
 
-        monkeypatch.setattr(Path, "glob", broken_glob)
+            def glob(self, pattern):
+                raise PermissionError(f"access denied listing {pattern}")
 
-        try:
-            with pytest.raises(Exception, match="Failed to count archive files"):
-                cw.count_archive_files()
-        finally:
-            monkeypatch.setattr(Path, "glob", original_glob)
+        monkeypatch.setattr(cw, "ARCHIVE_DIR", _DeniedArchive())
+
+        with pytest.raises(Exception, match=r"Failed to count archive files: access denied listing \*\.md"):
+            cw.count_archive_files()
 
 
 # ===========================================================================
@@ -489,11 +490,9 @@ class TestTheBareWorldTheOldPinCouldNotSurvive:
         live = rr.SOURCE_ROOT
 
         def _exists_exactly(path):
-            try:
-                Path(path).relative_to(live)
-            except ValueError:
-                return real(path)
-            return False
+            if Path(path).is_relative_to(live):
+                return False
+            return real(path)
 
         monkeypatch.setattr(rr, "exists_exactly", _exists_exactly)
 

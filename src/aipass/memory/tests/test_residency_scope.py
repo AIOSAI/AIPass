@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_residency_scope.py
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-28
 # Modified: 2026-09-27
 # =============================================
@@ -52,6 +52,8 @@
 # strength of another still standing.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — registry_scope.external_branches(); tests/test_declared_roots.py
+# seedgo: no-test-needed(covered_elsewhere) — registry_scope.overlaps_home(); tests/test_roots_lifecycle.py
 
 import json
 import logging
@@ -183,11 +185,18 @@ class TestDiscoveryIsRegistryLedAndShallow:
         The non-empty guard is the whole test. A depth rule asserted inside a
         loop is proven by the paths that ENTER it, so a discovery returning
         nothing passes this green while checking nothing at all.
+
+        Mutant (2026-09-27, killed): the glob widened to `**/*_REGISTRY.json`.
         """
         found = rs.resident_registry_paths(fleet)
-        assert found, "discovery returned nothing, so the depth rule was never exercised"
-        for path in found:
-            assert len(path.relative_to(fleet / "projects").parts) == 2, f"discovered below depth one: {path}"
+        relative = sorted(path.relative_to(fleet / "projects").as_posix() for path in found)
+        assert relative == [
+            "ghost/GHOST_REGISTRY.json",
+            "impostor/IMPOSTOR_REGISTRY.json",
+            "live/LIVE_REGISTRY.json",
+            "martian/MARTIAN_REGISTRY.json",
+            "mute/MUTE_REGISTRY.json",
+        ], f"discovered below depth one, or missed a project: {relative}"
 
     def test_a_missing_projects_directory_is_not_an_error(self, tmp_path):
         """A clean checkout carries no ``projects/`` and must not raise."""
@@ -312,13 +321,15 @@ class TestEveryLaneReadsTheOneDefinition:
         SELECT on it" — with the tuple deleted the honest claim is stronger and
         simpler: the name appears nowhere, so nothing can quietly grow a second
         definition out of it again.
+
+        No mutant run (2026-09-27): the pin reads apps/ source off disk, which a module mutant cannot reach.
         """
         offenders = []
         for path in sorted(self._APPS.rglob("*.py")):
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
                 if "RESIDENT_REGISTRIES" in line:
                     offenders.append(f"{path.relative_to(self._APPS)}:{number}: {line.strip()}")
-        assert not offenders, "the retired resident tuple is back:\n  " + "\n  ".join(offenders)
+        assert offenders == [], "the retired resident tuple is back:\n  " + "\n  ".join(offenders)
 
     def test_the_push_lane_resolves_through_registry_scope(self):
         source = (self._APPS / "handlers" / "templates" / "trinity_push.py").read_text(encoding="utf-8")
@@ -466,10 +477,11 @@ class TestTheRecordCarriesTheAddress:
     """
 
     def test_every_record_carries_an_email_key(self, fleet):
+        """Mutant (2026-09-27, killed): the `"email"` key dropped from the record."""
         records = rs.fleet_branches(fleet)
-        assert records, "nothing was discovered, so the record shape was never exercised"
+        assert len(records) >= 3, f"too few records to exercise the record shape: {records}"
         addressless = [r["name"] for r in records if "email" not in r]
-        assert not addressless, f"records with no email key: {addressless}"
+        assert addressless == [], f"records with no email key: {addressless}"
 
     def test_the_email_is_the_registrys_verbatim_not_derived_from_the_name(self, tmp_path):
         """A row whose address looks nothing like its name or its directory.
@@ -505,11 +517,14 @@ class TestTheRecordCarriesTheAddress:
         assert record["email"] is None
 
     def test_the_live_fleet_is_addressable_end_to_end(self, live_fleet):
-        """The guard that would have caught this before @daemon had to ask."""
+        """The guard that would have caught this before @daemon had to ask.
+
+        Mutant (2026-09-27, killed): the `"email"` key dropped from the record.
+        """
         records = rs.fleet_branches(live_fleet)
-        assert records, "live discovery returned nothing -- this proved nothing"
+        assert "memory" in {r["name"] for r in records}, "live discovery missed this branch -- this proved nothing"
         unaddressed = [r["name"] for r in records if not r.get("email")]
-        assert not unaddressed, f"live citizens with no address in their registry row: {unaddressed}"
+        assert unaddressed == [], f"live citizens with no address in their registry row: {unaddressed}"
 
     def test_each_record_gets_its_own_rows_address_not_a_neighbours(self, tmp_path):
         """Three rows, three addresses, none guessable from its own name.

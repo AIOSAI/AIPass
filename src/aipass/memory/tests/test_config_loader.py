@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_config_loader.py
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-06-13
 # Modified: 2026-09-27
 # =============================================
@@ -26,6 +26,10 @@
 #                                       the clamp on load, and that no shipped default clamps.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — set_branch_limit and set_default_limit, in tests/test_entry_limits.py
+# seedgo: no-test-needed(covered_elsewhere) — push_defaults_to_per_branch fleet push, in tests/test_config_verbs.py
+# seedgo: no-test-needed(covered_elsewhere) — get_count_ceilings and get_effective_limits, in tests/test_config_verbs.py
+# seedgo: no-test-needed(shared) — the json_handler.log_operation audit entries load() writes; the json handler's lane
 
 import copy
 import importlib
@@ -190,14 +194,22 @@ class TestMissingFile:
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
-        monkeypatch.setattr(mod, "_write_config_file", lambda config: False)
+        attempts = []
+
+        def _refuse_write(config):
+            attempts.append(config)
+            return False
+
+        monkeypatch.setattr(mod, "_write_config_file", _refuse_write)
 
         result = mod.load()
 
+        assert attempts == [mod.DEFAULT_CONFIG], "the regeneration never tried to write the defaults"
         assert result == mod.DEFAULT_CONFIG
         mod.logger.error.assert_not_called()  # _write_config_file owns that log
 
     def test_logs_absence(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the "No config at" message reworded in load() — killed."""
         missing_path = tmp_path / "nope" / "memory.config.json"
         mod = _get_module()
         monkeypatch.setattr(mod, "_CONFIG_PATH", missing_path)
@@ -205,7 +217,7 @@ class TestMissingFile:
         mock_logger = mod.logger
         mod.load()
 
-        mock_logger.info.assert_called()
+        mock_logger.info.assert_any_call(f"[config_loader] No config at {missing_path}, regenerating from defaults")
 
 
 # ===========================================================================
@@ -320,6 +332,7 @@ class TestMalformedJson:
         assert mod.load()["entry_limits"]["enforce"] is False
 
     def test_logs_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the "Malformed JSON in" message reworded in load() — killed."""
         config_dir = tmp_path / "custom_config"
         config_dir.mkdir(parents=True, exist_ok=True)
         bad_config = config_dir / "memory.config.json"
@@ -331,7 +344,8 @@ class TestMalformedJson:
         mock_logger = mod.logger
         mod.load()
 
-        mock_logger.error.assert_called()
+        mock_logger.error.assert_called_once()
+        assert mock_logger.error.call_args[0][0].startswith(f"[config_loader] Malformed JSON in {bad_config}: ")
 
 
 # ===========================================================================
@@ -383,8 +397,10 @@ class TestUnreadableFile:
         mock_logger = mod.logger
         mod.load()
 
-        mock_logger.error.assert_called()
-        assert "UnicodeDecodeError" in mock_logger.error.call_args[0][0]
+        # Mutant: the exception type dropped from the "Cannot read" message in load() — killed.
+        mock_logger.error.assert_called_once()
+        expected = f"[config_loader] Cannot read {bad_config}: UnicodeDecodeError: "
+        assert mock_logger.error.call_args[0][0].startswith(expected)
 
     def test_unopenable_file_returns_defaults_instead_of_raising(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -553,13 +569,14 @@ class TestSection:
     """
 
     def test_returns_known_section(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: section() adding a key to what it returns — killed."""
         mod = _get_module()
         config_path = _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG))
         monkeypatch.setattr(mod, "_CONFIG_PATH", config_path)
 
         result = mod.section("memory_pool")
 
-        assert isinstance(result, dict)
+        assert result == mod.DEFAULT_CONFIG["memory_pool"]
         assert "enabled" in result
 
     def test_returns_entry_limits_section(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

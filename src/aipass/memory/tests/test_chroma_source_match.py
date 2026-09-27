@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_chroma_source_match.py
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-23
 # Modified: 2026-09-27
 # =============================================
@@ -22,6 +22,8 @@
 # All tests use a fake collection -- no live ChromaDB.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
+# seedgo: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in here
 
 import pytest
 

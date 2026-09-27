@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_roots_lifecycle.py
 # Description: Pins the template, verbs and healing for AIPASS_ROOTS.json
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-30
 # Modified: 2026-09-27
 # =============================================
@@ -38,6 +38,9 @@
 # the original bytes and printing what it could not carry across.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — handle_command's writing verbs hit the live find_repo_root() file; add_root() pinned
+# seedgo: no-test-needed(shared) — show_roots() table text; list_roots() rows it prints are pinned here
+# seedgo: no-test-needed(shared) — json_handler.log_operation() audit line on each roots command
 
 import json
 import pathlib
@@ -187,12 +190,13 @@ class TestAddRefusesAtWriteWhatTheReaderRefusesAtRead:
         assert _read(home)["roots"] == []
 
     def test_the_same_root_cannot_be_declared_twice(self, home):
+        """Mutant: add_root's duplicate refusal writes a second row before refusing — killed."""
         rf.init_roots(home, today=TODAY)
         rf.add_root(home, "../wren", today=TODAY)
         ok, message = rf.add_root(home, str(home.parent / "wren"), today=TODAY)
         assert not ok, "the same directory was declared twice under two spellings"
         assert "already" in message.lower()
-        assert len(_read(home)["roots"]) == 1
+        assert [row["path"] for row in _read(home)["roots"]] == ["../wren"]
 
     def test_the_label_defaults_to_the_directory_name(self, home):
         rf.init_roots(home, today=TODAY)
@@ -227,12 +231,16 @@ class TestRemoveTakesOnlyWhatIsThere:
         assert [row["path"] for row in _read(home)["roots"]] == ["../Demo"]
 
     def test_removing_something_never_declared_is_refused_not_ignored(self, home):
-        """A no-op that reports success teaches the operator the wrong thing."""
+        """A no-op that reports success teaches the operator the wrong thing.
+
+        Mutant: remove_root's not-declared refusal writes an empty roots[] before refusing — killed.
+        """
         rf.init_roots(home, today=TODAY)
         rf.add_root(home, "../wren", today=TODAY)
         ok, message = rf.remove_root(home, "../Demo", today=TODAY)
         assert not ok
         assert "not declared" in message.lower()
+        assert [row["path"] for row in _read(home)["roots"]] == ["../wren"]
         assert len(_read(home)["roots"]) == 1
 
     def test_a_root_that_no_longer_exists_on_disk_can_still_be_removed(self, home):
@@ -315,10 +323,15 @@ class TestHealingIsDeliberateAndNeverReDeclares:
         assert _read(home)["roots"] == [], "a salvaged path was silently re-declared"
 
     def test_heal_refuses_when_there_is_no_file_at_all(self, home):
-        """Absent is `init`'s job. Two verbs that both create is one too many."""
-        ok, message, _ = rf.heal(home, today=TODAY)
+        """Absent is `init`'s job. Two verbs that both create is one too many.
+
+        Mutant: heal's absent-file refusal writes render_scaffold() before refusing — killed.
+        """
+        ok, message, salvaged = rf.heal(home, today=TODAY)
         assert not ok
         assert "init" in message.lower()
+        assert salvaged == []
+        assert not (home / rs.DECLARED_ROOTS).exists(), "heal created the file init owns"
 
 
 class TestOnePredicateNotTwo:

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_entry_limits.py
 # Description: entry_limits config reader and the apps/modules/limits.py gateway over it
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-06-13
 # Modified: 2026-09-27
 # Category: memory/tests
@@ -22,6 +22,9 @@
 # patch config_loader._CONFIG_PATH rather than a removed entry_limits attr.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — classify_entries(), is_near_cap(): tests/test_changed_entries.py
+# seedgo: no-test-needed(covered_elsewhere) — check_fields() per field, pinned in tests/test_unified_schema.py
+# seedgo: no-test-needed(covered_elsewhere) — resolve_entry_types() merge, pinned in tests/test_trinity_standard.py
 
 import json
 from pathlib import Path
@@ -553,4 +556,4 @@ class TestTheLimitsGatewayIsADoorNotACopy:
 
         limits.handle_command("limits", [])
 
-        assert not writes, f"the gateway's CLI wrote config: {writes}"
+        assert writes == [], f"the gateway's CLI wrote config: {writes}"

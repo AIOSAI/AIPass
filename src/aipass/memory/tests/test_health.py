@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_health.py
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
 # Modified: 2026-09-27
 # =============================================
@@ -28,6 +28,8 @@
 #     files did not, and the gap was the actual bug)
 
 # The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — entry cap rules in handlers/json/lint_handler.py; tests/test_lint.py
+# seedgo: no-test-needed(covered_elsewhere) — detector.read_scope(), the name resolver; tests/test_residency_scope.py
 
 import json
 from pathlib import Path
