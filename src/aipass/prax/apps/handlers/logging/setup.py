@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: setup.py
 # Description: Logger Setup & Management
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-10
-# Modified: 2026-08-11
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 _system_logger: Optional[logging.Logger] = None
 _captured_loggers: Dict[str, logging.Logger] = {}
 _captured_loggers_lock = threading.Lock()
+# Held across a whole logger BUILD, not just the cache read. Every build of one
+# module configures the same shared logging.getLogger object, so two threads
+# that both miss the cache both clear it and both add handlers: N racing first
+# calls left 2N handlers and every later line of that module written N times,
+# for the life of the process (@api's twin ERROR lines, 2026-09-27). Re-entrant
+# because a build can log through prax on its own thread.
+_logger_build_lock = threading.RLock()
 _terminal_output_enabled = False
 
 # Try to import terminal handler support
@@ -114,6 +121,21 @@ def setup_individual_logger(
         if module_name in _captured_loggers:
             return _captured_loggers[module_name]
 
+    with _logger_build_lock:
+        # Checked again under the build lock: the thread that held it may have
+        # just built this very logger.
+        with _captured_loggers_lock:
+            if module_name in _captured_loggers:
+                return _captured_loggers[module_name]
+        return _build_individual_logger(module_name, caller_path, caller_branch)
+
+
+def _build_individual_logger(
+    module_name: str,
+    caller_path: Optional[str],
+    caller_branch: Optional[str],
+) -> logging.Logger:
+    """Build and cache one module's logger. Called only under _logger_build_lock."""
     # Log new logger creation
     if _system_logger:
         _system_logger.info(f"Creating logger for module: {module_name}")

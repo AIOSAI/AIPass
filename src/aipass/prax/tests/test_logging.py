@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_logging.py
 # Description: Tests for prax logging subsystem
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-29
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for prax logging subsystem — covers introspection, config helpers,
@@ -11,7 +11,10 @@ and template placeholder replacement."""
 
 import copy
 import sys
+import threading
 from unittest.mock import MagicMock, patch
+
+from aipass.prax.apps.handlers.logging import setup as setup_handler
 
 
 # =============================================
@@ -284,6 +287,76 @@ class TestSetupExternalRouting:
                         setup.setup_individual_logger("navigator", caller_path=fake_module)
 
         assert len(get_calls) == 0
+
+
+class TestConcurrentFirstCallsBuildOneLogger:
+    """A module's first log line, arriving on several threads at once, must build one handler set."""
+
+    THREADS = 8
+
+    def _sandbox(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(setup_handler, "get_system_logs_dir", lambda: tmp_path / "system_logs")
+        monkeypatch.setattr(setup_handler, "get_module_logs_dir", lambda branch: tmp_path / branch / "logs")
+        monkeypatch.setattr(setup_handler, "_system_logger", None)
+        monkeypatch.setattr(setup_handler, "_terminal_output_enabled", False)
+        monkeypatch.setattr(setup_handler, "_captured_loggers", {})
+
+    def test_a_later_line_is_written_once_after_a_racing_first_call(self, monkeypatch, tmp_path):
+        """api's twin ERROR lines (6b7f72e9): N racing first calls wrote every later line N times."""
+        self._sandbox(monkeypatch, tmp_path)
+        barrier = threading.Barrier(self.THREADS)
+
+        def first_call(i):
+            barrier.wait()
+            setup_handler.setup_individual_logger("race_probe", caller_branch="probe").error("root %d timed out", i)
+
+        threads = [threading.Thread(target=first_call, args=(i,)) for i in range(self.THREADS)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        built = setup_handler.setup_individual_logger("race_probe", caller_branch="probe")
+        try:
+            built.info("a later line")
+            local = (tmp_path / "probe" / "logs" / "race_probe.log").read_text(encoding="utf-8")
+            central = (tmp_path / "system_logs" / "probe_race_probe.log").read_text(encoding="utf-8")
+        finally:
+            for handler in list(built.handlers):
+                handler.close()
+                built.removeHandler(handler)
+
+        assert local.count("a later line") == 1
+        assert central.count("a later line") == 1
+        assert sorted(line.split(" | ")[-1] for line in local.splitlines() if "timed out" in line) == sorted(
+            f"root {i} timed out" for i in range(self.THREADS)
+        )
+
+    def test_racing_first_calls_build_the_logger_once(self, monkeypatch, tmp_path):
+        self._sandbox(monkeypatch, tmp_path)
+        built_reports = []
+        monkeypatch.setattr(
+            setup_handler, "_system_logger", MagicMock(info=lambda message: built_reports.append(message))
+        )
+        barrier = threading.Barrier(self.THREADS)
+        results = []
+
+        def first_call():
+            barrier.wait()
+            results.append(setup_handler.setup_individual_logger("build_probe", caller_branch="probe"))
+
+        threads = [threading.Thread(target=first_call) for _ in range(self.THREADS)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        for handler in list(results[0].handlers):
+            handler.close()
+            results[0].removeHandler(handler)
+
+        assert [m for m in built_reports if m.startswith("Creating logger")] == [
+            "Creating logger for module: build_probe"
+        ]
 
 
 # =============================================
