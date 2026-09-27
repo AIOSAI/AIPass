@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_json_durability.py
 # Description: Torn-write durability tests for spawn's JSON/text write paths
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-16
 # Modified: 2026-09-27
 # =============================================
@@ -15,6 +15,7 @@
 import ast
 import errno
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -35,6 +36,8 @@ from aipass.spawn.apps.handlers.sync_registry_ops import fix_owner_identity
 from aipass.spawn.apps.handlers.update_ops import _merge_json
 import aipass.spawn.apps.handlers.atomic_write as aw
 import aipass.spawn.apps.handlers.registry as registry_mod
+
+logger = logging.getLogger(__name__)
 
 # The defect these pin: ``open(path, 'w')`` / ``Path.write_text(...)`` truncate the
 # target in place, so a concurrent reader can land between the truncate and the
@@ -68,6 +71,25 @@ RACE_WARMUP_SECONDS = 20.0
 SENTINEL = "SPAWN-DURABILITY-FAULT-a1b2c3"
 
 
+class _ModuleView:
+    """atomic_write's OWN binding of a stdlib module, with named functions swapped.
+
+    Every fault and spy in this file is installed as ``monkeypatch.setattr(aw,
+    "os", _ModuleView(os, replace=...))`` — the consuming module's name, never an
+    attribute on the shared ``os`` / ``tempfile`` module, which would reach every
+    thread in the process (same rule as the ``aw.time`` stub below). Every write
+    site under test routes through atomic_write_text, so this one binding is the
+    whole surface. Anything not overridden falls through to the real module.
+    """
+
+    def __init__(self, real, **overrides):
+        self._real = real
+        self.__dict__.update(overrides)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
 class _Racer:
     """Runs writer threads against reader threads over one target file.
 
@@ -92,10 +114,10 @@ class _Racer:
         self._lock = threading.Lock()
         # One-way flags, set by the threads the instant they first succeed, so
         # run() can watch the race come alive. The per-thread counters above are
-        # only merged at join time, which is far too late to wait on. A bool
-        # that goes False -> True exactly once needs no lock under the GIL.
-        self._saw_read = False
-        self._saw_write = False
+        # only merged at join time, which is far too late to wait on. Events, so
+        # run() blocks on the real condition and wakes the instant it holds.
+        self._saw_read = threading.Event()
+        self._saw_write = threading.Event()
 
     def _writer(self):
         n = 0
@@ -112,7 +134,7 @@ class _Racer:
             # the call under test decided there was nothing to write.
             if self.write_once(n) is True:
                 effective += 1
-                self._saw_write = True
+                self._saw_write.set()
             n += 1
         with self._lock:
             self.writes += effective
@@ -140,25 +162,28 @@ class _Racer:
                 # skip reason has to be able to tell them apart — that is the
                 # difference between a slow starter and a starved scheduler.
                 missing += 1
+                logger.debug("racer: target absent: %s", self.target)
                 continue
-            except PermissionError:
+            except PermissionError as exc:
                 # Windows refuses the open while a concurrent os.replace is in
                 # flight. A refused open is share-mode semantics — not a torn
                 # document, and not counted as a read. Counted separately so a
                 # run starved by share-mode collisions says so out loud.
                 refused += 1
+                logger.debug("racer: open refused: %s (%s)", self.target, exc)
                 continue
             reads += 1
-            self._saw_read = True
+            self._saw_read.set()
             if raw == "":
                 empty += 1
                 continue
             try:
                 json.loads(raw)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as exc:
                 # The defect this whole file exists to catch: a half-written
                 # document. Recorded, and assert_clean fails on it.
                 unparseable += 1
+                logger.warning("racer: torn read of %s: %s", self.target, exc)
         with self._lock:
             self.reads += reads
             self.empty += empty
@@ -181,10 +206,12 @@ class _Racer:
         for t in threads:
             t.start()
 
+        # Block on the real condition, bounded by ONE shared deadline: the two
+        # waits together never exceed ``warmup``.
         deadline = time.monotonic() + warmup
-        while time.monotonic() < deadline and not (self._saw_read and self._saw_write):
-            time.sleep(0.005)
-        self.warmed_up = self._saw_read and self._saw_write
+        self._saw_read.wait(timeout=warmup)
+        self._saw_write.wait(timeout=max(0.0, deadline - time.monotonic()))
+        self.warmed_up = self._saw_read.is_set() and self._saw_write.is_set()
 
         time.sleep(seconds)
         self._stop = True
@@ -265,47 +292,40 @@ def write_fails_midway(monkeypatch):
     """Make the write syscall fail for any payload carrying SENTINEL.
 
     Models a disk filling up between the open and the write — the exact failure
-    the atomic shape exists to survive. Both mechanisms are covered so the test
-    is honest against either implementation:
+    the atomic shape exists to survive. The fault is installed on atomic_write's
+    own ``os`` binding (``_ModuleView``), which is the staged temp write every
+    site under test reaches. A durable path loses the temp file and keeps the
+    target.
 
-    * ``Path.write_text`` truncates the target and then fails, which is precisely
-      what the real ``write_text`` does under ENOSPC (it opens with mode 'w').
-    * ``os.write`` fails, which is what the staged temp write hits.
+    This used to also swap ``pathlib.Path.write_text`` process-wide, to be honest
+    against the pre-fix raw sites. Those sites are gone, and
+    TestNoRawTruncatingWritesInSource reds the day one grows back; a site that
+    regressed past atomic_write would also escape this fault entirely, so the
+    "failed write" tests below would see a write that SUCCEEDED and go red.
 
-    A durable path loses the temp file and keeps the target; the raw path has
-    already destroyed the target by the time it fails.
+    Mutant: os.unlink(tmp_path) -> pass (temp orphaned on failure) -> red (2 tests).
     """
-    import os as _os
-    import pathlib
-
-    real_write_text = pathlib.Path.write_text
-    real_os_write = _os.write
-
-    def fake_write_text(self, data, *args, **kwargs):
-        if isinstance(data, str) and SENTINEL in data:
-            # Faithful to write_text: the file is opened 'w' (truncated) first.
-            with open(self, "w", encoding="utf-8"):
-                pass
-            raise OSError(errno.ENOSPC, "No space left on device")
-        return real_write_text(self, data, *args, **kwargs)
+    real_os_write = os.write
 
     def fake_os_write(fd, data):
         if isinstance(data, (bytes, bytearray)) and SENTINEL.encode() in data:
             raise OSError(errno.ENOSPC, "No space left on device")
         return real_os_write(fd, data)
 
-    monkeypatch.setattr(pathlib.Path, "write_text", fake_write_text)
-    monkeypatch.setattr(_os, "write", fake_os_write)
+    monkeypatch.setattr(aw, "os", _ModuleView(os, write=fake_os_write))
     yield
     monkeypatch.undo()
 
 
 @pytest.fixture
 def mkstemp_spy(monkeypatch):
-    """Record every ``tempfile.mkstemp`` call's staging directory."""
-    import tempfile as _tempfile
+    """Record every ``tempfile.mkstemp`` call's staging directory.
 
-    real_mkstemp = _tempfile.mkstemp
+    Installed on atomic_write's own ``tempfile`` binding, not the shared module.
+
+    Mutant: mkstemp(dir=path.parent) -> mkstemp(dir=path.parent.parent) -> red (7 tests).
+    """
+    real_mkstemp = tempfile.mkstemp
     calls = []
 
     def spy(*args, **kwargs):
@@ -313,7 +333,7 @@ def mkstemp_spy(monkeypatch):
         calls.append({"dir": kwargs.get("dir"), "path": Path(path)})
         return fd, path
 
-    monkeypatch.setattr(_tempfile, "mkstemp", spy)
+    monkeypatch.setattr(aw, "tempfile", _ModuleView(tempfile, mkstemp=spy))
     return calls
 
 
@@ -804,17 +824,18 @@ class TestAtomicWriteHelper:
         assert _stray_temps(tmp_path) == []
 
     def test_uses_os_replace_not_path_rename(self, tmp_path, monkeypatch):
-        """Path.rename cannot overwrite on Windows; os.replace can."""
-        import os as _os
+        """Path.rename cannot overwrite on Windows; os.replace can.
 
+        Mutant: os.replace(source, destination) -> os.rename(source, destination) -> red.
+        """
         seen = []
-        real_replace = _os.replace
+        real_replace = os.replace
 
         def spy(src, dst):
             seen.append((src, dst))
             return real_replace(src, dst)
 
-        monkeypatch.setattr(aw.os, "replace", spy)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=spy))
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
 
@@ -823,13 +844,21 @@ class TestAtomicWriteHelper:
         assert len(seen) == 1, "the swap must go through os.replace"
 
     def test_fsyncs_before_swap(self, tmp_path, monkeypatch):
-        """Durability across power loss needs the bytes flushed before the rename."""
-        import os as _os
+        """Durability across power loss needs the bytes flushed before the rename.
 
+        Mutant: os.fsync(fd) deleted -> red.
+        """
         order = []
-        real_fsync, real_replace = _os.fsync, _os.replace
-        monkeypatch.setattr(aw.os, "fsync", lambda fd: (order.append("fsync"), real_fsync(fd))[1])
-        monkeypatch.setattr(aw.os, "replace", lambda s, d: (order.append("replace"), real_replace(s, d))[1])
+        real_fsync, real_replace = os.fsync, os.replace
+        monkeypatch.setattr(
+            aw,
+            "os",
+            _ModuleView(
+                os,
+                fsync=lambda fd: (order.append("fsync"), real_fsync(fd))[1],
+                replace=lambda s, d: (order.append("replace"), real_replace(s, d))[1],
+            ),
+        )
 
         aw.atomic_write_text(tmp_path / "out.json", "data\n")
 
@@ -867,20 +896,38 @@ class TestReplaceRetriesThroughSharingViolations:
     before this sweep, so these are the first eyes on it.
     """
 
-    def test_helper_exists_and_is_bounded(self):
+    def test_helper_exists_and_is_bounded(self, tmp_path, monkeypatch):
+        """The SHIPPED bound and backoff, measured through the public write.
 
-        assert hasattr(aw, "_replace_with_retry"), (
-            "_replace_with_retry missing — a sharing violation still kills the write"
-        )
-        assert aw._REPLACE_ATTEMPTS > 1, "a single attempt is not a retry"
-        assert aw._REPLACE_BACKOFF_SECONDS > 0, "a zero backoff spins instead of waiting"
+        Read off what atomic_write_text actually does against a swap that never
+        unblocks, rather than off the private constants: more than one attempt
+        (a single attempt is not a retry), and every wait between them is a real,
+        non-zero wait (a zero backoff spins instead of waiting). aw's own ``time``
+        binding is stubbed, so the ~200ms of shipped backoff is recorded, not slept.
+
+        Mutant: _REPLACE_ATTEMPTS = 40 -> _REPLACE_ATTEMPTS = 1 -> red.
+        """
+        attempts = []
+        sleeps = []
+
+        def blocked(src, dst):
+            attempts.append(dst)
+            raise PermissionError(13, "sharing violation", str(dst))
+
+        monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=blocked))
+
+        with pytest.raises(PermissionError):
+            atomic_write_text(tmp_path / "out.json", "new\n")
+
+        assert len(attempts) > 1, "a single attempt is not a retry"
+        assert len(sleeps) == len(attempts) - 1
+        assert all(s > 0 for s in sleeps), f"a zero backoff spins instead of waiting: {sleeps}"
 
     def test_retries_through_a_transient_sharing_violation(self, tmp_path, monkeypatch):
         """Two sharing violations then success — the write still lands."""
-        import os as _os
-
         calls = {"count": 0}
-        real_replace = _os.replace
+        real_replace = os.replace
 
         def flaky(src, dst):
             calls["count"] += 1
@@ -888,7 +935,7 @@ class TestReplaceRetriesThroughSharingViolations:
                 raise PermissionError(13, "sharing violation", str(dst))
             return real_replace(src, dst)
 
-        monkeypatch.setattr(aw.os, "replace", flaky)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=flaky))
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
 
@@ -899,7 +946,13 @@ class TestReplaceRetriesThroughSharingViolations:
         assert _stray_temps(tmp_path) == []
 
     def test_retry_is_bounded_and_raises(self, tmp_path, monkeypatch):
-        """A swap that never unblocks raises instead of retrying forever."""
+        """A swap that never unblocks raises instead of retrying forever.
+
+        The bound is set by the test (3), so the count is compared to a number
+        this test chose, not read back off the product.
+
+        Mutant: attempt == _REPLACE_ATTEMPTS - 1 -> attempt == _REPLACE_ATTEMPTS - 2 -> red.
+        """
 
         calls = {"count": 0}
 
@@ -907,15 +960,16 @@ class TestReplaceRetriesThroughSharingViolations:
             calls["count"] += 1
             raise PermissionError(13, "sharing violation", str(dst))
 
-        monkeypatch.setattr(aw.os, "replace", blocked)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=blocked))
         monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
+        monkeypatch.setattr(aw, "_REPLACE_ATTEMPTS", 3)
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
 
         with pytest.raises(PermissionError):
             aw.atomic_write_text(target, "new\n")
 
-        assert calls["count"] == aw._REPLACE_ATTEMPTS, "bound not honoured"
+        assert calls["count"] == 3, "bound not honoured"
         assert target.read_text(encoding="utf-8") == "old\n", "the live file was damaged"
         assert _stray_temps(tmp_path) == []
 
@@ -938,14 +992,24 @@ class TestReplaceRetriesThroughSharingViolations:
         module's binding, not something upstream of it. atomic_write uses
         nothing from ``time`` but ``sleep`` (one call site, line 73), so a stub
         carrying only ``sleep`` is the whole surface.
+
+        Bound and backoff are set by the test (4 attempts, 0.25s), so the
+        expected list is built from numbers this test chose.
+
+        Mutant: time.sleep(_REPLACE_BACKOFF_SECONDS) -> time.sleep(0) -> red.
         """
 
         sleeps = []
         monkeypatch.setattr(aw, "time", SimpleNamespace(sleep=sleeps.append))
+        monkeypatch.setattr(aw, "_REPLACE_ATTEMPTS", 4)
+        monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0.25)
         monkeypatch.setattr(
-            aw.os,
-            "replace",
-            lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(dst))),
+            aw,
+            "os",
+            _ModuleView(
+                os,
+                replace=lambda src, dst: (_ for _ in ()).throw(PermissionError(13, "sharing violation", str(dst))),
+            ),
         )
         target = tmp_path / "out.json"
         target.write_text("old\n", encoding="utf-8")
@@ -954,7 +1018,7 @@ class TestReplaceRetriesThroughSharingViolations:
             aw.atomic_write_text(target, "new\n")
 
         # One wait between each pair of attempts — never after the last, which raises.
-        assert sleeps == [aw._REPLACE_BACKOFF_SECONDS] * (aw._REPLACE_ATTEMPTS - 1)
+        assert sleeps == [0.25, 0.25, 0.25]
 
     def test_non_permission_error_propagates_immediately(self, tmp_path, monkeypatch):
         """A cross-device rename will not fix itself in 200ms — do not wait it out."""
@@ -965,7 +1029,7 @@ class TestReplaceRetriesThroughSharingViolations:
             calls["count"] += 1
             raise OSError(errno.EXDEV, "invalid cross-device link")
 
-        monkeypatch.setattr(aw.os, "replace", broken)
+        monkeypatch.setattr(aw, "os", _ModuleView(os, replace=broken))
         monkeypatch.setattr(aw, "_REPLACE_BACKOFF_SECONDS", 0)
 
         with pytest.raises(OSError) as caught:
@@ -1317,21 +1381,21 @@ class TestRacerReportsWeatherHonestly:
 
 
 @contextmanager
-def _target(content):
+def _target(tmp_path: Path, content):
     """A _Racer over a throwaway file with a known final state, zero samples.
 
     ``content=None`` leaves the target absent. The counters start at zero on
     purpose: these pins measure what the DIRECT read contributes, so the
-    sampling readers must have contributed nothing.
+    sampling readers must have contributed nothing. Lives in the test's own
+    tmp_path, never a bare system temp dir.
     """
-    with tempfile.TemporaryDirectory() as tmp:
-        target = Path(tmp) / "final_state.json"
-        if content is not None:
-            target.write_text(content, encoding="utf-8")
-        racer = _Racer(target, lambda n: True)
-        racer.reads = 0
-        racer.writes = 0
-        yield racer
+    target = tmp_path / "final_state.json"
+    if content is not None:
+        target.write_text(content, encoding="utf-8")
+    racer = _Racer(target, lambda n: True)
+    racer.reads = 0
+    racer.writes = 0
+    yield racer
 
 
 def _verdict(racer):
@@ -1370,9 +1434,9 @@ class TestTheFinalStateIsCheckedDirectly:
     fails.
     """
 
-    def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self):
+    def test_a_torn_file_nobody_sampled_is_a_red_not_a_skip(self, tmp_path):
         """reads == 0 must not launder a file that is torn right now."""
-        with _target('{"half') as racer:
+        with _target(tmp_path, '{"half') as racer:
             verdict, message = _verdict(racer)
 
         assert verdict == "FAILED", (
@@ -1382,31 +1446,31 @@ class TestTheFinalStateIsCheckedDirectly:
         assert "torn" in message.lower()
         assert "UNPARSEABLE" in message
 
-    def test_an_empty_file_nobody_sampled_is_a_red_not_a_skip(self):
-        with _target("") as racer:
+    def test_an_empty_file_nobody_sampled_is_a_red_not_a_skip(self, tmp_path):
+        with _target(tmp_path, "") as racer:
             verdict, message = _verdict(racer)
 
         assert verdict == "FAILED", f"an empty target was reported {verdict}: {message}"
         assert "EMPTY" in message
 
-    def test_a_missing_target_is_still_a_skip_not_a_tear(self):
+    def test_a_missing_target_is_still_a_skip_not_a_tear(self, tmp_path):
         """Never created is not torn — the distinction the skip exists for."""
-        with _target(None) as racer:
+        with _target(tmp_path, None) as racer:
             verdict, message = _verdict(racer)
 
         assert verdict == "SKIPPED", f"a never-created target was reported {verdict}"
         assert "final=absent" in message
 
-    def test_a_whole_file_at_the_end_does_not_invent_a_tear(self):
+    def test_a_whole_file_at_the_end_does_not_invent_a_tear(self, tmp_path):
         """Positive control — the direct read must not manufacture reds."""
-        with _target('{"round": 7}\n') as racer:
+        with _target(tmp_path, '{"round": 7}\n') as racer:
             racer.reads = 5
             racer.writes = 5
             verdict, message = _verdict(racer)
 
         assert verdict == "PASSED", f"a whole file was reported {verdict}: {message}"
 
-    def test_an_unreadable_target_is_not_convicted_as_torn(self):
+    def test_an_unreadable_target_is_not_convicted_as_torn(self, tmp_path):
         """Share-mode / permission refusal is not evidence of tearing.
 
         The world here is built by chmod, and chmod does not build it
@@ -1422,12 +1486,13 @@ class TestTheFinalStateIsCheckedDirectly:
         the test says so with what it measured. @memory's ruling, applied —
         probe the host, do not skipif what a probe can measure.
         """
-        with _target('{"whole": true}') as racer:
+        with _target(tmp_path, '{"whole": true}') as racer:
             racer.target.chmod(0o000)
             try:
                 try:
                     racer.target.read_text(encoding="utf-8")
-                except OSError:
+                except OSError as exc:
+                    logger.debug("probe: chmod 0o000 made the target unreadable: %s", exc)
                     unreadable = True
                 else:
                     unreadable = False

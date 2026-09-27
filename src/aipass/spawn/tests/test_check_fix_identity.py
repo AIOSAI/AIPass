@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_check_fix_identity.py
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-07-11
 # Modified: 2026-09-27
 # =============================================
@@ -16,7 +16,7 @@ import json
 
 from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
 from aipass.spawn.apps.handlers.sync_registry_ops import check_owner_identity, fix_owner_identity
-from aipass.spawn.apps.modules.core import _adopt_existing
+from aipass.spawn.apps.handlers.adoption_ops import adopt_existing
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
 
@@ -544,9 +544,13 @@ class TestLegacyCitizenClassMigration:
 
 
 class TestAdoptCallsEnsureOwner:
-    """Test that _adopt_existing calls ensure_project_has_owner."""
+    """Test that adopt_existing calls ensure_project_has_owner."""
 
     def test_adopt_seats_owner(self, tmp_path):
+        """Adoption seats an owner and repairs the passport's registry_id against the found registry.
+
+        Mutant: adopt_existing drops its fix_passport_registry_id call -> red.
+        """
         from unittest.mock import patch
 
         branch_dir = tmp_path / "my_agent"
@@ -562,11 +566,17 @@ class TestAdoptCallsEnsureOwner:
         # The adoption lane lives in handlers/adoption_ops (split out of core when
         # core crossed the 600-line standard); core re-exports it, but patches
         # must target the module where the names are actually looked up.
-        with patch("aipass.spawn.apps.handlers.adoption_ops.find_registry", return_value=reg):
-            with patch("aipass.spawn.apps.handlers.adoption_ops.ensure_project_has_owner") as mock_owner:
-                with patch("aipass.spawn.apps.handlers.adoption_ops.fix_passport_registry_id"):
-                    _adopt_existing(branch_dir, "", None, None)
-                    mock_owner.assert_called_once_with(reg)
+        # update_ops.find_registry is the template update's by-name lookup; it walks
+        # from the CWD, so it is pointed at the tmp_path registry too.
+        with (
+            patch("aipass.spawn.apps.handlers.adoption_ops.find_registry", return_value=reg),
+            patch("aipass.spawn.apps.handlers.update_ops.find_registry", return_value=reg),
+            patch("aipass.spawn.apps.handlers.adoption_ops.ensure_project_has_owner") as mock_owner,
+            patch("aipass.spawn.apps.handlers.adoption_ops.fix_passport_registry_id") as mock_fix_rid,
+        ):
+            adopt_existing(branch_dir, "", None, None)
+        mock_owner.assert_called_once_with(reg)
+        mock_fix_rid.assert_called_once_with(branch_dir, reg)
 
 
 class TestFixDryRunFullyReadOnly:

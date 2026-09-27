@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-03-07
 # Modified: 2026-09-27
 # =============================================
@@ -36,7 +36,7 @@ from aipass.spawn.apps.handlers.metadata import detect_profile
 from aipass.spawn.apps.handlers.placeholders import replace_placeholders
 from aipass.spawn.apps.handlers.registry import ensure_project_has_owner, pick_owner_branch
 from aipass.spawn.apps.handlers.update_ops import _read_citizen_class
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create
 
@@ -214,9 +214,9 @@ class TestMintTimeClass:
         """The rule through a real mint, in a project that starts empty."""
         reg = self._fresh_registry(tmp_path)
 
-        first = _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
-        second = _spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
-        third = _spawn_agent(str(tmp_path / "third"), registry_path=str(reg))
+        first = spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
+        second = spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
+        third = spawn_agent(str(tmp_path / "third"), registry_path=str(reg))
 
         assert first["citizen_number"] == 1
         assert second["citizen_number"] == 2
@@ -231,13 +231,13 @@ class TestMintTimeClass:
         reg = self._fresh_registry(tmp_path)
 
         # citizen #1 would derive "manager"; citizen #2 would derive "specialist".
-        _spawn_agent(str(tmp_path / "one"), registry_path=str(reg), citizen_class=explicit)
-        _spawn_agent(str(tmp_path / "two"), registry_path=str(reg), citizen_class=explicit)
+        spawn_agent(str(tmp_path / "one"), registry_path=str(reg), citizen_class=explicit)
+        spawn_agent(str(tmp_path / "two"), registry_path=str(reg), citizen_class=explicit)
 
         assert self._class_of(tmp_path / "one") == explicit
         assert self._class_of(tmp_path / "two") == explicit
 
-    def test_cli_create_without_a_class_lets_the_mint_decide(self, tmp_path):
+    def test_cli_create_without_a_class_lets_the_mint_decide(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """REGRESSION (found by this deliverable, fixed in apps/spawn.py).
 
         ``handle_create`` seeded ``citizen_class = get_default_class()`` when the
@@ -246,24 +246,25 @@ class TestMintTimeClass:
         time and the mint-time decision could never fire. A fresh project's first
         citizen was born a specialist with no manager anywhere in it.
         """
-        from unittest.mock import patch
-
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        with patch("aipass.spawn.apps.spawn.console"):
-            assert handle_create([str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
-            assert handle_create([str(tmp_path / "sibling"), "--registry", str(registry)]) == 0
+        assert handle_create([str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
+        assert handle_create([str(tmp_path / "sibling"), "--registry", str(registry)]) == 0
 
+        out = capsys.readouterr().out
+        assert "Agent created: FIRSTBORN" in out
+        assert "Agent created: SIBLING" in out
         assert self._class_of(tmp_path / "firstborn") == "manager"
         assert self._class_of(tmp_path / "sibling") == "specialist"
 
-    def test_cli_create_with_an_explicit_class_still_wins(self, tmp_path):
-        """Typing the class must still beat the derived one — even for citizen #1."""
-        from unittest.mock import patch
+    def test_cli_create_with_an_explicit_class_still_wins(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """Typing the class must still beat the derived one — even for citizen #1.
 
+        Mutant: handle_create's success report drops the class from 'Class: ...' -> red.
+        """
         registry = tmp_path / "AIPASS_REGISTRY.json"
-        with patch("aipass.spawn.apps.spawn.console"):
-            assert handle_create(["specialist", str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
+        assert handle_create(["specialist", str(tmp_path / "firstborn"), "--registry", str(registry)]) == 0
 
+        assert "Class: specialist" in capsys.readouterr().out
         assert self._class_of(tmp_path / "firstborn") == "specialist"
 
 
@@ -312,7 +313,7 @@ class TestClassAwareCreate:
     def test_create_explicit_class_creates_full_scaffold(self, tmp_path, citizen_class):
         """drone @spawn create <class> @path creates the full scaffold, either class."""
         target = tmp_path / f"{citizen_class}_agent"
-        result = _spawn_agent(str(target), citizen_class=citizen_class)
+        result = spawn_agent(str(target), citizen_class=citizen_class)
 
         assert result["success"] is True, result.get("error")
         assert (target / "apps").exists()
@@ -322,7 +323,8 @@ class TestClassAwareCreate:
     def test_create_without_a_class_still_creates(self, tmp_path):
         """drone @spawn create @path needs no class — the mint decides it."""
         target = tmp_path / "default_agent"
-        result = _spawn_agent(str(target))
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        result = spawn_agent(str(target), registry_path=str(registry))
 
         assert result["success"] is True
         assert (target / "apps").exists()
@@ -331,7 +333,7 @@ class TestClassAwareCreate:
     def test_create_with_citizen_class_in_passport(self, tmp_path, citizen_class):
         """Created agents carry the class they were minted with, verbatim."""
         target = tmp_path / f"class_test_{citizen_class}"
-        _spawn_agent(str(target), citizen_class=citizen_class)
+        spawn_agent(str(target), citizen_class=citizen_class)
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["citizen_class"] == citizen_class
@@ -339,7 +341,7 @@ class TestClassAwareCreate:
     def test_create_includes_integrations_scaffold(self, tmp_path):
         """Creation includes apps/integrations/README.md (DPLAN-0133)."""
         target = tmp_path / "integrations_test"
-        result = _spawn_agent(str(target), citizen_class="specialist")
+        result = spawn_agent(str(target), citizen_class="specialist")
 
         assert result["success"] is True
         assert (target / "apps" / "integrations").is_dir()
@@ -354,7 +356,7 @@ class TestClassAwareCreate:
         quiet substitution that would write a passport disagreeing with the call.
         """
         target = tmp_path / f"legacy_{retired}"
-        result = _spawn_agent(str(target), citizen_class=retired)
+        result = spawn_agent(str(target), citizen_class=retired)
 
         assert result["success"] is False
         assert retired in result["error"]
@@ -556,14 +558,14 @@ class TestAgentScaffoldContent:
     def test_created_agent_has_no_claude_md(self, tmp_path):
         """Branches should NOT have CLAUDE.md — project root covers it."""
         target = tmp_path / "content_test"
-        _spawn_agent(str(target), role="Tester", purpose="Testing scaffold")
+        spawn_agent(str(target), role="Tester", purpose="Testing scaffold")
 
         assert not (target / "CLAUDE.md").exists()
 
     def test_created_agent_local_prompt_has_content(self, tmp_path):
         """Created agent's local prompt should reference branch identity."""
         target = tmp_path / "prompt_agent"
-        _spawn_agent(str(target), purpose="Testing prompt")
+        spawn_agent(str(target), purpose="Testing prompt")
 
         prompt = target / ".aipass" / "aipass_local_prompt.md"
         assert prompt.exists()
@@ -576,7 +578,7 @@ class TestAgentScaffoldContent:
         import json
 
         target = tmp_path / "role_test"
-        _spawn_agent(str(target), role="Data Analyst", purpose="Reports")
+        spawn_agent(str(target), role="Data Analyst", purpose="Reports")
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["role"] == "Data Analyst"
@@ -589,7 +591,7 @@ class TestAgentScaffoldContent:
         one-element list rather than being stored as a string in a list field.
         """
         target = tmp_path / "traits_test"
-        _spawn_agent(str(target), role="Analyst", traits="curious, terse", purpose="Reports")
+        spawn_agent(str(target), role="Analyst", traits="curious, terse", purpose="Reports")
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == ["curious, terse"]
@@ -597,7 +599,7 @@ class TestAgentScaffoldContent:
     def test_created_agent_passport_traits_accepts_a_real_list(self, tmp_path):
         """A caller who already has a list gets it stored as-is, not re-wrapped."""
         target = tmp_path / "traits_list_test"
-        _spawn_agent(str(target), traits=["curious", "terse"], purpose="Reports")
+        spawn_agent(str(target), traits=["curious", "terse"], purpose="Reports")
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == ["curious", "terse"]
@@ -606,7 +608,7 @@ class TestAgentScaffoldContent:
         """Omitting traits leaves the template's empty LIST — the identity hook
         skips the line when falsy, and [] is falsy just as "" was."""
         target = tmp_path / "no_traits_test"
-        _spawn_agent(str(target), purpose="Testing default")
+        spawn_agent(str(target), purpose="Testing default")
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["identity"]["traits"] == []
@@ -614,7 +616,7 @@ class TestAgentScaffoldContent:
     def test_created_agent_passport_has_email(self, tmp_path):
         """Passport carries the branch address, so identity does not render 'Email: unknown'."""
         target = tmp_path / "email_test"
-        _spawn_agent(str(target), purpose="Testing email")
+        spawn_agent(str(target), purpose="Testing email")
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["branch_info"]["email"] == "@email_test"
@@ -633,8 +635,8 @@ class TestMultiAgentCoexistence:
         reg = tmp_path / "TEST_REGISTRY.json"
         reg.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}', encoding="utf-8")
 
-        r1 = _spawn_agent(str(tmp_path / "agent_a"), registry_path=str(reg))
-        r2 = _spawn_agent(str(tmp_path / "agent_b"), registry_path=str(reg))
+        r1 = spawn_agent(str(tmp_path / "agent_a"), registry_path=str(reg))
+        r2 = spawn_agent(str(tmp_path / "agent_b"), registry_path=str(reg))
 
         assert r1["success"] is True
         assert r2["success"] is True
@@ -651,7 +653,7 @@ class TestMultiAgentCoexistence:
         reg.write_text('{"metadata":{"version":"1.0.0","total_branches":0},"branches":[]}', encoding="utf-8")
 
         for name in ["alpha", "beta", "gamma"]:
-            _spawn_agent(str(tmp_path / name), registry_path=str(reg), purpose=f"{name} purpose")
+            spawn_agent(str(tmp_path / name), registry_path=str(reg), purpose=f"{name} purpose")
 
         # branch_name renders LOWERCASE in schema 2.0 (R1 casing), and the class
         # is derived from the citizen number (R3) rather than being one value for
@@ -684,7 +686,7 @@ class TestPassportOwnerFieldIsGone:
 
     def test_newborn_passport_has_no_owner_field(self, tmp_path):
         reg = _fresh_registry(tmp_path)
-        _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
 
         passport = json.loads((tmp_path / "first" / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert "owner" not in passport["citizenship"], passport["citizenship"]
@@ -693,7 +695,7 @@ class TestPassportOwnerFieldIsGone:
         """Not the first, not the fifth — the field is gone for everybody."""
         reg = _fresh_registry(tmp_path)
         for name in ["alpha", "beta", "gamma", "delta", "epsilon"]:
-            _spawn_agent(str(tmp_path / name), registry_path=str(reg))
+            spawn_agent(str(tmp_path / name), registry_path=str(reg))
 
         for name in ["alpha", "beta", "gamma", "delta", "epsilon"]:
             passport = json.loads((tmp_path / name / ".trinity" / "passport.json").read_text(encoding="utf-8"))
@@ -702,9 +704,9 @@ class TestPassportOwnerFieldIsGone:
     def test_the_registry_entry_still_seats_exactly_one_owner(self, tmp_path):
         """The authority that replaced it: one owner:true, on the first citizen."""
         reg = _fresh_registry(tmp_path)
-        _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
-        _spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
-        _spawn_agent(str(tmp_path / "third"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "third"), registry_path=str(reg))
 
         entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
         assert entries["FIRST"].get("owner") is True
@@ -724,8 +726,8 @@ class TestRetroactiveOwner:
     def test_retroactive_owner_prefers_the_manager(self, tmp_path):
         """Step 1: alpha is the project's first citizen, so alpha is its manager."""
         reg = _fresh_registry(tmp_path)
-        _spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))
-        _spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))
 
         # Strip owner from the registry entries to simulate legacy state (no sealed owner)
         reg_data = json.loads(reg.read_text(encoding="utf-8"))
@@ -733,7 +735,7 @@ class TestRetroactiveOwner:
             b.pop("owner", None)
         reg.write_text(json.dumps(reg_data, indent=2), encoding="utf-8")
 
-        _spawn_agent(str(tmp_path / "zeta"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "zeta"), registry_path=str(reg))
 
         entries = {b["name"]: b for b in json.loads(reg.read_text(encoding="utf-8"))["branches"]}
         assert entries["ALPHA"].get("owner") is True
@@ -748,8 +750,8 @@ class TestRetroactiveOwner:
         citizen could seat itself by editing its own file.
         """
         reg = _fresh_registry(tmp_path)
-        _spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))  # citizen #1 -> manager
-        _spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))  # citizen #2 -> specialist
+        spawn_agent(str(tmp_path / "alpha"), registry_path=str(reg))  # citizen #1 -> manager
+        spawn_agent(str(tmp_path / "beta"), registry_path=str(reg))  # citizen #2 -> specialist
 
         beta_passport = tmp_path / "beta" / ".trinity" / "passport.json"
         beta_data = json.loads(beta_passport.read_text(encoding="utf-8"))
@@ -788,8 +790,8 @@ class TestRetroactiveOwner:
     def test_no_retroactive_change_when_an_owner_is_already_seated(self, tmp_path):
         """A registry that already seats an owner is left exactly as it is."""
         reg = _fresh_registry(tmp_path)
-        _spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
-        _spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "first"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "second"), registry_path=str(reg))
         before = reg.read_text(encoding="utf-8")
 
         assert ensure_project_has_owner(reg) is False
@@ -798,8 +800,8 @@ class TestRetroactiveOwner:
     def test_ensure_project_has_owner_direct(self, tmp_path):
         """Direct call to ensure_project_has_owner sets owner in the registry entry."""
         reg = _fresh_registry(tmp_path)
-        _spawn_agent(str(tmp_path / "agent_x"), registry_path=str(reg))
-        _spawn_agent(str(tmp_path / "agent_y"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "agent_x"), registry_path=str(reg))
+        spawn_agent(str(tmp_path / "agent_y"), registry_path=str(reg))
 
         reg_data = json.loads(reg.read_text(encoding="utf-8"))
         for b in reg_data["branches"]:
@@ -840,7 +842,7 @@ class TestBirthCertificateSchema:
     def test_mint_carries_metadata_template(self, tmp_path, class_name):
         """A real create must render metadata.template with the detected profile."""
         target = tmp_path / f"cert_{class_name}"
-        result = _spawn_agent(str(target), citizen_class=class_name)
+        result = spawn_agent(str(target), citizen_class=class_name)
         assert result["success"] is True, result
 
         cert = json.loads((target / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))
@@ -854,7 +856,7 @@ class TestBirthCertificateSchema:
     def test_mint_description_matches_metadata(self, tmp_path, class_name):
         """The prose must name the same template the metadata records."""
         target = tmp_path / f"desc_{class_name}"
-        result = _spawn_agent(str(target), citizen_class=class_name)
+        result = spawn_agent(str(target), citizen_class=class_name)
         assert result["success"] is True, result
 
         cert = json.loads((target / "artifacts" / "birth_certificate.json").read_text(encoding="utf-8"))

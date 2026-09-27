@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_output_streams.py
 # Description: Stream-routing tests for spawn's user-facing output
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
 # Modified: 2026-09-27
 # =============================================
@@ -12,13 +12,16 @@
 # seedgo: no-test-needed(ruff) — that every handler module this file imports parses and imports
 # seedgo: no-test-needed(documentation) — docstrings on print_help and the handler --help paths
 
+import json
+from unittest.mock import patch
+
 import pytest
 
 from aipass.spawn.apps.modules.delete import handle_delete
 from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 from aipass.spawn.apps.modules.regenerate_registry import handle_regenerate_registry
 from aipass.spawn.apps.modules.repair import handle_repair
-from aipass.spawn.apps.modules.sync_registry import _print_summary, handle_sync_registry
+from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import print_help
 
@@ -88,16 +91,28 @@ class TestHelpGoesToStdout:
 class TestReportSectionsStayWhole:
     """A report section's header and its items belong on the same stream."""
 
-    def test_stale_names_never_land_under_healthy_on_stdout(self, capsys):
+    def test_stale_names_never_land_under_healthy_on_stdout(self, tmp_path, capsys):
+        """Driven through `sync-registry` against a tmp_path project: alpha is whole,
+        ghost is registered with no directory, stranger has a passport but no entry.
 
-        _print_summary(
-            {
-                "healthy": ["alpha"],
-                "stale": ["ghost"],
-                "unregistered": ["stranger"],
-                "fixed": False,
-            }
+        Mutant: stale names printed to stdout instead of stderr -> red.
+        """
+        for name in ("alpha", "stranger"):
+            (tmp_path / name / ".trinity").mkdir(parents=True)
+            (tmp_path / name / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "metadata": {"version": "1.0.0", "last_updated": "2026-01-01", "id": "proj-id"},
+                    "branches": [{"name": "ALPHA", "path": "alpha"}, {"name": "GHOST", "path": "ghost"}],
+                }
+            ),
+            encoding="utf-8",
         )
+
+        with patch("aipass.spawn.apps.handlers.sync_registry_ops.find_registry", return_value=registry):
+            handle_sync_registry([])
 
         captured = capsys.readouterr()
         assert "alpha" in captured.out

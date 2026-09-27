@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_template_hygiene.py
 # Description: Canaries for what the shipped templates are allowed to contain
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
 # Modified: 2026-09-27
 # =============================================
@@ -23,7 +23,7 @@ from aipass.spawn.apps.handlers.docs_page import DOCS_PAGE_TEMPLATE
 from aipass.spawn.apps.handlers.file_ops import SKIP_NAMES
 from aipass.spawn.apps.handlers.mint_verify import expected_mint_paths, verify_mint
 from aipass.spawn.apps.handlers.placeholders import build_replacements_dict
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.spawn import handle_create
 
 # A template is a blueprint: every file in it is copied into every new citizen,
@@ -220,7 +220,7 @@ class TestMintCompleteness:
         template = _truncated_template(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
 
-        result = _spawn_agent(
+        result = spawn_agent(
             str(tmp_path / "minted"),
             template_dir=str(template),
             registry_path=str(registry),
@@ -237,7 +237,7 @@ class TestMintCompleteness:
         template = _truncated_template(tmp_path)
         registry = tmp_path / "AIPASS_REGISTRY.json"
 
-        result = _spawn_agent(
+        result = spawn_agent(
             str(tmp_path / "minted"),
             template_dir=str(template),
             registry_path=str(registry),
@@ -248,16 +248,16 @@ class TestMintCompleteness:
             names = [b["name"] for b in json.loads(registry.read_text(encoding="utf-8")).get("branches", [])]
             assert "MINTED" not in names, f"broken citizen registered anyway: {names}"
 
-    def test_cli_create_exits_nonzero_and_prints_no_success(self, tmp_path):
-        """The command itself must not exit 0 or say "Agent created"."""
+    def test_cli_create_exits_nonzero_and_prints_no_success(self, tmp_path, capsys: pytest.CaptureFixture[str]):
+        """The command itself must not exit 0 or say "Agent created".
+
+        Mutant: the failure arm prints "Agent created" before its error -> red.
+        """
         from unittest.mock import patch
 
         template = _truncated_template(tmp_path)
 
-        with (
-            patch("aipass.spawn.apps.spawn.console") as mock_console,
-            patch("aipass.spawn.apps.spawn.error") as mock_error,
-        ):
+        with patch("aipass.spawn.apps.spawn.error") as mock_error:
             code = handle_create(
                 [
                     str(tmp_path / "minted"),
@@ -269,7 +269,7 @@ class TestMintCompleteness:
             )
 
         assert code == 1
-        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        printed = capsys.readouterr().out
         assert "Agent created" not in printed, printed
         mock_error.assert_called_once()
 
@@ -278,7 +278,7 @@ class TestMintCompleteness:
         """The guard must not fire on the real, whole templates — either class."""
 
         target = tmp_path / f"whole_{class_name}"
-        result = _spawn_agent(
+        result = spawn_agent(
             str(target),
             citizen_class=class_name,
             registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
@@ -301,7 +301,7 @@ class TestMintCompleteness:
         (template / "notes.md").write_text("hello\n", encoding="utf-8")
 
         target = tmp_path / "bare_minted"
-        result = _spawn_agent(
+        result = spawn_agent(
             str(target),
             template_dir=str(template),
             registry_path=str(tmp_path / "AIPASS_REGISTRY.json"),
@@ -373,7 +373,7 @@ class TestExpectedMintPaths:
         assert not [rel for rel in claimed if rel.endswith(skeleton.name)], "the manifest claims the skeleton"
 
         target = tmp_path / "skeleton_free"
-        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
         assert result["success"] is True, result.get("error")
         assert sorted(p.name for p in (target / "docs").iterdir()) == ["README.md"]
         assert not list(target.rglob(skeleton.name)), "a newborn carries the skeleton"
@@ -382,7 +382,7 @@ class TestExpectedMintPaths:
         """docs/README.md is born as back-link, title, one line - and no pages yet (DPLAN-0351)."""
 
         target = tmp_path / "indexed"
-        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
         assert result["success"] is True, result.get("error")
 
         index = (target / "docs" / "README.md").read_text(encoding="utf-8")
@@ -402,7 +402,7 @@ class TestExpectedMintPaths:
         import datetime
 
         target = tmp_path / "shaped"
-        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
         assert result["success"] is True, result.get("error")
 
         readme = (target / "README.md").read_text(encoding="utf-8")
@@ -422,7 +422,7 @@ class TestExpectedMintPaths:
         import re
 
         target = tmp_path / "deep" / "linked"
-        result = _spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
+        result = spawn_agent(str(target), registry_path=str(tmp_path / "AIPASS_REGISTRY.json"))
         assert result["success"] is True, result.get("error")
 
         readme = (target / "README.md").read_text(encoding="utf-8")

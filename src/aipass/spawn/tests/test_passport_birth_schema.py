@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_passport_birth_schema.py
 # Description: The passport 2.0 contract AT BIRTH — block order, key order, new fields
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-28
 # Modified: 2026-09-27
 # =============================================
@@ -20,7 +20,7 @@ import pytest
 
 import aipass.spawn.apps.handlers.placeholders as placeholders
 from aipass.spawn.apps.handlers.class_registry import get_template_dir
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.core import spawn_agent
 
 # Context kept from the file's original docstring — what a freshly minted
 # passport must look like (DPLAN-0319, Passport 2.0):
@@ -40,7 +40,7 @@ from aipass.spawn.apps.modules.core import _spawn_agent
 # derived from the template file, so a template edit that silently reshuffles keys
 # fails here instead of being copied into the assertion.
 #
-# The mint is driven end-to-end through ``_spawn_agent`` rather than read off the
+# The mint is driven end-to-end through ``spawn_agent`` rather than read off the
 # template, because the render, the ``--traits`` post-render write and the JSON
 # round-trip through json_handler all sit between the template and the file a
 # citizen is actually born with — and any one of them could reorder it.
@@ -105,7 +105,7 @@ def _fresh_registry(path: Path) -> Path:
 def _mint(tmp_path: Path, name: str = "newborn", **kwargs) -> dict:
     """Mint one citizen into tmp_path and return its passport, keys in file order."""
     registry = _fresh_registry(tmp_path / "TEST_REGISTRY.json")
-    result = _spawn_agent(str(tmp_path / name), registry_path=str(registry), **kwargs)
+    result = spawn_agent(str(tmp_path / name), registry_path=str(registry), **kwargs)
     assert result["success"] is True, result.get("error")
     return json.loads((tmp_path / name / ".trinity" / "passport.json").read_text(encoding="utf-8"))
 

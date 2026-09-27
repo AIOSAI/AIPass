@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_passport_drift.py
 # Description: DPLAN-0262 — live passport drift vs template contract (permanent canary)
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-07-27
 # Modified: 2026-09-27
 # =============================================
@@ -125,7 +125,8 @@ class TestDriftDetectorHermetic:
             for node in ast.parse(source).body
             if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "CITIZEN_CLASSES" for t in node.targets)
         )
-        from_source = sorted(key.value for key in declared.keys)
+        assert isinstance(declared, ast.Dict), f"CITIZEN_CLASSES is no longer a dict literal: {ast.dump(declared)}"
+        from_source = sorted(str(key.value) for key in declared.keys if isinstance(key, ast.Constant))
 
         assert len(from_source) == 2, f"class_registry.py declares {from_source}"
         assert sorted(get_available_classes()) == from_source, (
@@ -208,6 +209,10 @@ class TestLivePassportDrift:
     """DPLAN-0262: permanent canary against the real, currently-registered passports."""
 
     def test_all_registered_passports_match_template_contract(self):
+        """Every live passport matches its class's template contract (read-only canary).
+
+        Mutant: resolve_template_class's `return citizen_class` -> `return "no_such_class"` -> red.
+        """
         reg_path = _live_registry_path()
         if reg_path is None:
             pytest.skip("No live AIPASS_REGISTRY.json on this machine (gitignored — expected in CI)")
@@ -248,7 +253,7 @@ class TestLivePassportDrift:
             if drift:
                 report[name] = drift
 
-        assert not report, (
+        assert report == {}, (
             f"{len(report)} live passport(s) drifted from their declared schema's contract "
             f"(DPLAN-0262 canary; DPLAN-0319 schema window — see this module's docstring):\n"
             f"{json.dumps(report, indent=2, sort_keys=True)}"

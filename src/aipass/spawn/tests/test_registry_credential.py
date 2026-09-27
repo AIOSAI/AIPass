@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_registry_credential.py
 # Description: metadata.id — the project credential a new registry is born with
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-24
 # Modified: 2026-09-27
 # =============================================
@@ -26,7 +26,7 @@ from aipass.spawn.apps.handlers.registry import (
     resolve_project_credential,
     save_registry,
 )
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.core import spawn_agent
 
 # A project registry's ``metadata.id`` is the branch-registry lock: every passport
 # in that project carries it as ``citizenship.registry_id``, and BAUD renders it
@@ -289,38 +289,48 @@ class TestAbsentRegistryResolverIsHandled:
     """
 
     def test_is_protected_answers_not_protected_when_there_is_no_registry(self, tmp_path, monkeypatch):
-
-        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: None)
+        """Mutant: is_protected skips find_registry and assumes None -> red."""
+        asked: list = []
+        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: asked.append((a, k)))
 
         protected, reason = registry_module.is_protected("somebranch")
 
+        assert asked, "is_protected never asked the resolver"
         assert protected is False
         assert reason
 
     def test_the_protected_floor_still_wins_without_a_registry(self, tmp_path, monkeypatch):
-        """A missing registry must never unprotect infrastructure."""
+        """A missing registry must never unprotect infrastructure.
 
-        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: None)
+        Mutant: the hardcoded floor check disabled (if False) -> red.
+        """
+        asked: list = []
+        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: asked.append((a, k)))
 
         protected, reason = registry_module.is_protected("spawn")
 
+        assert asked == [], "the floor must answer before any registry is looked for"
         assert protected is True
         assert "infrastructure" in reason
 
     def test_ensure_admin_refuses_rather_than_crashing(self, monkeypatch):
-
-        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: None)
+        """Mutant: ensure_admin skips find_registry and assumes None -> red."""
+        asked: list = []
+        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: asked.append((a, k)))
 
         status, reason = registry_module.ensure_admin()
 
+        assert asked, "ensure_admin never asked the resolver"
         assert status == "refused"
         assert "registry" in reason.lower()
 
     def test_get_owner_returns_none_when_there_is_no_registry(self, monkeypatch):
-
-        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: None)
+        """Mutant: get_owner skips find_registry and assumes None -> red."""
+        asked: list = []
+        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: asked.append((a, k)))
 
         assert registry_module.get_owner() is None
+        assert asked == [((), {"start_path": None})]
 
 
 class TestCreatePathStillStampsACredential:
@@ -339,7 +349,7 @@ class TestCreatePathStillStampsACredential:
         project.mkdir()
         (project / "pyproject.toml").write_text("[project]\nname='brandnew'\n", encoding="utf-8")
 
-        result = _spawn_agent(str(project / "src" / "brandnew" / "widget"))
+        result = spawn_agent(str(project / "src" / "brandnew" / "widget"))
         assert result.get("success"), result
 
         passport = json.loads(
@@ -360,22 +370,27 @@ class TestNoRegistryAnywhereIsHandledOnTheCreatePath:
     """The other consumers of the now-nullable resolver, pinned by behaviour."""
 
     def test_relative_path_falls_back_to_the_bare_name(self, tmp_path, monkeypatch):
-
-        monkeypatch.setattr(placeholders, "find_registry", lambda *a, **k: None)
+        """Mutant: resolve_relative_path skips find_registry and assumes None -> red."""
+        asked: list = []
+        monkeypatch.setattr(placeholders, "find_registry", lambda *a, **k: asked.append(k))
         target = tmp_path / "nowhere" / "widget"
         target.mkdir(parents=True)
 
         assert placeholders.resolve_relative_path(target) == "widget"
+        assert asked == [{"start_path": target.parent}]
 
     def test_replacements_leave_registry_id_empty_rather_than_inventing_one(self, tmp_path, monkeypatch):
-
-        monkeypatch.setattr(placeholders, "find_registry", lambda *a, **k: None)
+        """Mutant: build_replacements_dict skips find_registry and assumes None -> red."""
+        asked: list = []
+        monkeypatch.setattr(placeholders, "find_registry", lambda *a, **k: asked.append(k))
         target = tmp_path / "nowhere" / "widget"
         target.mkdir(parents=True)
 
         replacements = placeholders.build_replacements_dict(str(target), "widget")
 
         assert replacements["REGISTRY_ID"] == "", "a credential nobody issued was substituted"
+        # Asked twice: once for the credential, once for the relative passport path.
+        assert asked.count({"start_path": target.parent}) == 2, asked
 
 
 class TestEveryResolverConsumerRefusesByName:

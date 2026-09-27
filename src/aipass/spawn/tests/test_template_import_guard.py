@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-30
 # Modified: 2026-09-27
 # =============================================
@@ -1204,8 +1204,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
             _require_live_world(_FakeResult(), "realpath-denied")
         except Failed as exc:
             assert "no known platform reason" in str(exc), exc
-        except Skipped:
-            pytest.fail("the gate SKIPPED an inert realpath-denied world instead of failing it")
+        except Skipped as exc:
+            raise Failed("the gate SKIPPED an inert realpath-denied world instead of failing it") from exc
         else:
             pytest.fail("the gate accepted an inert realpath-denied world without complaint")
 
@@ -2206,18 +2206,6 @@ class TestTheProbeLiteralNamesAnAbsolutePathOnTheRunner:
     child prints PROBE_NO_DRIVE — instead of being asserted from Linux.
     """
 
-    def test_a_rooted_driveless_literal_carries_no_drive_on_nt(self):
-        rooted = ntpath.join(ntpath.sep, "definitely", "not", "here")
-
-        assert ntpath.splitdrive(rooted)[0] == "", (
-            f"the mechanism this file guards against stopped being true: {rooted!r}"
-        )
-        assert ntpath.splitdrive(ntpath.join("D:" + ntpath.sep, "definitely"))[0] == "D:"
-
-    def test_the_child_builds_its_literal_from_the_anchor_not_from_the_separator(self):
-        """The cure, pinned where it is spelled — there is exactly one spelling."""
-        assert "abspath(os.sep)" in _PROBE_LITERAL, _PROBE_LITERAL
-
     @pytest.mark.parametrize(
         ("os_name", "anchor_drive", "expected"),
         [
@@ -2815,7 +2803,11 @@ class TestBothConstructionsAgree:
         Readable from Linux, so both answers are observable without a Windows
         box: what is pinned is what the skipped tests SAY, not that they ran.
         """
-        marks = [m for m in test_newborn_import_survives_a_deleted_working_directory.pytestmark if m.name == "skipif"]
+        marks = [
+            m
+            for m in getattr(test_newborn_import_survives_a_deleted_working_directory, "pytestmark")
+            if m.name == "skipif"
+        ]
         assert len(marks) == 1, "the deleted-cwd recipe lost its platform skip"
 
         reason = marks[0].kwargs["reason"]
@@ -2913,7 +2905,7 @@ def _unguarded_module_level_resolves(source: str) -> list:
     tree = ast.parse(source)
 
     guarded = {
-        node.lineno
+        getattr(node, "lineno")
         for block in ast.walk(tree)
         if isinstance(block, ast.Try)
         for node in ast.walk(block)
@@ -2931,7 +2923,7 @@ def _unguarded_module_level_resolves(source: str) -> list:
     # runs at import and is not followed here. That needs a call graph, and
     # naming the gap beats a pin that reads like it covers more than it does.
     found = []
-    pending = list(tree.body)
+    pending: list[ast.AST] = list(tree.body)
     while pending:
         node = pending.pop()
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):

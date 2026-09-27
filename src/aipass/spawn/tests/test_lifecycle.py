@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, sync-registry)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-03-07
 # Modified: 2026-09-27
 # =============================================
@@ -10,8 +10,9 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in apps/handlers/ and apps/modules/ parses and imports
-# seedgo: no-test-needed(documentation) — that delete_branch, sync_registry and _spawn_agent carry docstrings
+# seedgo: no-test-needed(documentation) — that delete_branch, sync_registry and spawn_agent carry docstrings
 
+import io
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -20,13 +21,13 @@ import pytest
 
 from aipass.spawn.apps.handlers.delete_ops import delete_branch
 from aipass.spawn.apps.handlers.registry import fix_passport_registry_id
-from aipass.spawn.apps.handlers.sync_registry_ops import _scan_for_branches, sync_registry
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
+from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.modules.delete import handle_delete
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 
 # Also exercises apps/modules/delete.py's and apps/modules/sync_registry.py's CLI entry points,
-# apps/modules/core.py's _spawn_agent() adopt-existing path, and apps/handlers/registry.py's
+# apps/modules/core.py's spawn_agent() adopt-existing path, and apps/handlers/registry.py's
 # fix_passport_registry_id().
 
 # ---------------------------------------------------------------------------
@@ -204,16 +205,19 @@ class TestDeleteBranch:
         assert result["success"] is False
         assert "not found" in result.get("error", "").lower()
 
-    def test_delete_confirmation_cancelled(self, repo_root, mock_branch, mock_registry):
-        """Cancelling confirmation should not delete."""
+    def test_delete_confirmation_cancelled(self, repo_root, mock_branch, mock_registry, monkeypatch):
+        """Cancelling confirmation should not delete.
 
-        with (
-            patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry),
-            patch("builtins.input", return_value="n"),
-        ):
+        The answer arrives on stdin (the sanctioned edge), not by replacing input().
+        Mutant: the prompt accepts any answer but "y" -> red.
+        """
+
+        monkeypatch.setattr("sys.stdin", io.StringIO("n\n"))
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
             result = delete_branch("test_api", confirm=True)
 
         assert result["success"] is False
+        assert result["error"] == "Cancelled by user"
         assert mock_branch.exists()
 
     @pytest.mark.parametrize("where", ["outside", "root"])
@@ -344,22 +348,41 @@ class TestSyncRegistry:
 # ---------------------------------------------------------------------------
 
 
+def _scan_through_sync(project, monkeypatch, fix=False):
+    """Discover branches the way the command does: sync_registry from inside the project.
+
+    The project gets an empty registry of its own and the CWD moves into it, so
+    find_registry() resolves to the tmp registry and never walks up to the live one.
+    Every discovered branch is therefore reported as unregistered.
+    """
+    reg = project / "SCAN_REGISTRY.json"
+    reg.write_text(
+        json.dumps({"metadata": {"version": "1.0.0", "total_branches": 0}, "branches": []}), encoding="utf-8"
+    )
+    monkeypatch.chdir(project)
+    return sync_registry(fix=fix), reg
+
+
 class TestSyncRegistryCwdAware:
     """Tests for CWD-aware sync_registry — external project support."""
 
-    def test_finds_root_level_agents(self, tmp_path):
-        """Agents at project root (project/agent/) should be discovered."""
+    def test_finds_root_level_agents(self, tmp_path, monkeypatch):
+        """Agents at project root (project/agent/) should be discovered, at their own path.
+
+        Mutant: the root-level scan is dropped -> red.
+        """
 
         agent = tmp_path / "my_agent"
         agent.mkdir()
         (agent / ".trinity").mkdir()
         (agent / ".trinity" / "passport.json").write_text('{"name": "MY_AGENT"}', encoding="utf-8")
 
-        result = _scan_for_branches(tmp_path)
-        assert "my_agent" in result
-        assert result["my_agent"] == agent
+        result, reg = _scan_through_sync(tmp_path, monkeypatch, fix=True)
+        assert result["unregistered"] == ["my_agent"]
+        entries = json.loads(reg.read_text(encoding="utf-8"))["branches"]
+        assert [(e["name"], e["path"]) for e in entries] == [("MY_AGENT", "my_agent")]
 
-    def test_finds_src_level_agents(self, tmp_path):
+    def test_finds_src_level_agents(self, tmp_path, monkeypatch):
         """Agents at src/ level (project/src/agent/) should be discovered."""
 
         agent = tmp_path / "src" / "my_agent"
@@ -367,10 +390,10 @@ class TestSyncRegistryCwdAware:
         (agent / ".trinity").mkdir()
         (agent / ".trinity" / "passport.json").write_text('{"name": "MY_AGENT"}', encoding="utf-8")
 
-        result = _scan_for_branches(tmp_path)
-        assert "my_agent" in result
+        result, _reg = _scan_through_sync(tmp_path, monkeypatch)
+        assert result["unregistered"] == ["my_agent"]
 
-    def test_finds_nested_src_agents(self, tmp_path):
+    def test_finds_nested_src_agents(self, tmp_path, monkeypatch):
         """Agents at src/namespace/agent/ (AIPass-style) should be discovered."""
 
         agent = tmp_path / "src" / "aipass" / "drone"
@@ -378,10 +401,10 @@ class TestSyncRegistryCwdAware:
         (agent / ".trinity").mkdir()
         (agent / ".trinity" / "passport.json").write_text('{"name": "DRONE"}', encoding="utf-8")
 
-        result = _scan_for_branches(tmp_path)
-        assert "drone" in result
+        result, _reg = _scan_through_sync(tmp_path, monkeypatch)
+        assert result["unregistered"] == ["drone"]
 
-    def test_skips_dotdirs_and_dunder(self, tmp_path):
+    def test_skips_dotdirs_and_dunder(self, tmp_path, monkeypatch):
         """Directories starting with . or __ should be skipped."""
 
         for name in [".hidden", "__pycache__"]:
@@ -390,17 +413,17 @@ class TestSyncRegistryCwdAware:
             (d / ".trinity").mkdir()
             (d / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
 
-        result = _scan_for_branches(tmp_path)
-        assert len(result) == 0
+        result, _reg = _scan_through_sync(tmp_path, monkeypatch)
+        assert result["unregistered"] == []
 
-    def test_skips_dirs_without_passport(self, tmp_path):
+    def test_skips_dirs_without_passport(self, tmp_path, monkeypatch):
         """Directories without .trinity/passport.json should be skipped."""
 
         (tmp_path / "no_passport").mkdir()
         (tmp_path / "no_passport" / "README.md").write_text("# hi", encoding="utf-8")
 
-        result = _scan_for_branches(tmp_path)
-        assert len(result) == 0
+        result, _reg = _scan_through_sync(tmp_path, monkeypatch)
+        assert result["unregistered"] == []
 
     def test_external_project_sync(self, tmp_path):
         """sync_registry should work with an external project registry."""
@@ -583,8 +606,24 @@ class TestSyncRegistryCwdAware:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def adoption_update_reads_tmp_registry(tmp_path, monkeypatch):
+    """Point adoption's template-update step at the test's own registry.
+
+    adopt_existing registers into the registry it is handed, then calls
+    update_branch(name), which resolves the name through find_registry() —
+    the registry above the CWD, i.e. the LIVE fleet registry. Every adoption
+    test writes its registry at tmp_path/TEST_REGISTRY.json, so that is where
+    the update step must look too.
+    """
+    reg = tmp_path / "TEST_REGISTRY.json"
+    monkeypatch.setattr("aipass.spawn.apps.handlers.update_ops.find_registry", lambda *a, **k: reg)
+    return reg
+
+
+@pytest.mark.usefixtures("adoption_update_reads_tmp_registry")
 class TestAdoptExisting:
-    """Tests for _spawn_agent adopting existing directories with passports."""
+    """Tests for spawn_agent adopting existing directories with passports."""
 
     def test_adopt_existing_with_passport(self, tmp_path):
         """Target with .trinity/passport.json should be adopted, not rejected."""
@@ -614,7 +653,7 @@ class TestAdoptExisting:
             encoding="utf-8",
         )
 
-        result = _spawn_agent(str(agent), registry_path=str(reg_path))
+        result = spawn_agent(str(agent), registry_path=str(reg_path))
 
         assert result["success"] is True
         assert result["adopted"] is True
@@ -633,7 +672,7 @@ class TestAdoptExisting:
         agent.mkdir()
         (agent / "README.md").write_text("# just a dir", encoding="utf-8")
 
-        result = _spawn_agent(str(agent))
+        result = spawn_agent(str(agent))
 
         assert result["success"] is False
         assert "already exists" in result["error"]
@@ -665,7 +704,7 @@ class TestAdoptExisting:
             encoding="utf-8",
         )
 
-        result = _spawn_agent(str(agent), registry_path=str(reg_path))
+        result = spawn_agent(str(agent), registry_path=str(reg_path))
 
         assert result["success"] is True
         reg = json.loads(reg_path.read_text(encoding="utf-8"))
@@ -705,14 +744,26 @@ class TestAdoptExisting:
             encoding="utf-8",
         )
 
-        result = _spawn_agent(str(agent), registry_path=str(reg_path))
+        result = spawn_agent(str(agent), registry_path=str(reg_path))
 
         assert result["success"] is True
         passport = json.loads((agent / ".trinity" / "passport.json").read_text(encoding="utf-8"))
         assert passport["citizenship"]["registry_id"] == "new-uuid-5678"
 
-    def test_adopt_skips_registry_id_fix_when_already_correct(self, tmp_path):
-        """Adoption does not modify passport when registry_id already matches."""
+    def test_adopt_skips_registry_id_fix_when_already_correct(self, tmp_path, monkeypatch):
+        """Adoption does not modify passport when registry_id already matches.
+
+        The template-update step after registration heals passports on its own
+        allowlist, a separate writer; it is replaced by a recorder here so the
+        mtime answers for fix_passport_registry_id alone, and the recorder is
+        asserted so the step is still proven to run.
+        Mutant: fix_passport_registry_id writes even when the ids match -> red.
+        """
+        updated = []
+        monkeypatch.setattr(
+            "aipass.spawn.apps.handlers.update_ops.update_branch",
+            lambda name, *a, **k: updated.append(name) or {"additions": 0},
+        )
 
         agent = tmp_path / "matched_agent"
         agent.mkdir()
@@ -747,12 +798,13 @@ class TestAdoptExisting:
         # Get mtime before adoption to detect writes
         before_mtime = (agent / ".trinity" / "passport.json").stat().st_mtime
 
-        result = _spawn_agent(str(agent), registry_path=str(reg_path))
+        result = spawn_agent(str(agent), registry_path=str(reg_path))
 
         assert result["success"] is True
         after_mtime = (agent / ".trinity" / "passport.json").stat().st_mtime
         # File should NOT have been rewritten (ids already match)
         assert before_mtime == after_mtime
+        assert updated == ["matched_agent"]
 
 
 # ---------------------------------------------------------------------------
@@ -906,12 +958,15 @@ class TestFixPassportRegistryId:
 class TestHandleDelete:
     """Tests for handle_delete() CLI entry."""
 
-    def test_help_flag(self):
-        """--help should show usage (not crash)."""
+    def test_help_flag(self, capsys):
+        """--help should show usage (not crash) and exit 0, unlike the no-args usage error.
 
-        # No args -> usage
-        result = handle_delete([])
-        assert result == 1
+        Mutant: the --help intercept is removed -> red.
+        """
+
+        result = handle_delete(["--help"])
+        assert result == 0
+        assert "Usage: drone @spawn delete <@branch>" in capsys.readouterr().out
 
     def test_protected_branch_via_handle(self, repo_root, mock_registry):
         """handle_delete should reject protected branches."""

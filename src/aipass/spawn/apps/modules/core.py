@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: core.py
 # Description: Main orchestrator for agent spawning
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-05
-# Modified: 2026-09-21
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -205,14 +205,14 @@ def handle_command(command: str, args: List[str]) -> bool:
                 i += 2
             else:
                 i += 1
-        result = _spawn_agent(target_path, **kwargs)
+        result = spawn_agent(target_path, **kwargs)
         return result["success"]
     else:
         logger.error(f"Unknown spawn command: {command}")
         return False
 
 
-def _spawn_agent(
+def spawn_agent(
     target_path,
     role="",
     traits: str | list[str] | tuple[str, ...] = "",
@@ -520,5 +520,15 @@ def _spawn_agent(
 # standard. Re-exported under the old private names so the module seam the tests
 # and callers know stays put.
 _birth_from_seed = birth_from_seed
+
+
+def _spawn_agent(*args, **kwargs):
+    """The old private name of spawn_agent, kept for seedgo's quality pack, which imports it.
+
+    spawn_agent is the public door (DPLAN-0354 leg 2).
+    """
+    return spawn_agent(*args, **kwargs)
+
+
 _adopt_existing = adopt_existing
 _error = error_result

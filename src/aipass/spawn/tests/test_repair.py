@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair handler — move, registry path update, pollution cleanup
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-05-15
 # Modified: 2026-09-27
 # =============================================
@@ -26,7 +26,6 @@ from aipass.spawn.apps.handlers.delete_ops import delete_branch
 from aipass.spawn.apps.handlers.registry import is_protected
 from aipass.spawn.apps.handlers.repair_ops import (
     ARCHIVE_EXCLUDE,
-    _registry_in,
     cleanup_pollution,
     detect_pollution,
     move_branch,
@@ -92,6 +91,21 @@ def _make_project(tmp_path, project_name="testproj", branches=None):
     }
     registry_path.write_text(json.dumps(registry_data), encoding="utf-8")
     return project, registry_path
+
+
+def _empty_registry(project):
+    """Give a tmp project a registry of its own, with no branches.
+
+    Without one, ``is_protected`` falls back to ``find_registry()``, which walks
+    up to the LIVE fleet registry — a pollution test must answer from its own
+    tmp_path, never from the machine it runs on.
+    """
+    reg = project / f"{project.name.upper()}_REGISTRY.json"
+    reg.write_text(
+        json.dumps({"metadata": {"version": "1.0.0", "total_branches": 0}, "branches": []}),
+        encoding="utf-8",
+    )
+    return reg
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +253,7 @@ class TestDetectPollution:
         project = tmp_path / "compass"
         project.mkdir()
         (project / "compass").mkdir()
+        _empty_registry(project)
 
         issues = detect_pollution(project)
         assert len(issues) == 1
@@ -251,6 +266,7 @@ class TestDetectPollution:
         project = tmp_path / "myproj"
         project.mkdir()
         (project / "src" / "mypkg" / "mypkg").mkdir(parents=True)
+        _empty_registry(project)
 
         issues = detect_pollution(project)
         assert len(issues) == 1
@@ -283,6 +299,7 @@ class TestCleanupPollution:
         dup = project / "compass"
         dup.mkdir()
         (dup / "junk.txt").write_text("pollution", encoding="utf-8")
+        _empty_registry(project)
 
         result = cleanup_pollution(project)
         assert result["success"] is True
@@ -298,6 +315,7 @@ class TestCleanupPollution:
         project.mkdir()
         dup = project / "compass"
         dup.mkdir()
+        _empty_registry(project)
 
         result = cleanup_pollution(project, dry_run=True)
         assert result["success"] is True
@@ -546,13 +564,13 @@ class TestIsProtected:
             json.dumps({"name": "MINIMAL", "role": "test"}), encoding="utf-8"
         )
 
-        protected, _reason = is_protected("minimal", branch_dir=branch)
+        protected, _reason = is_protected("minimal", branch_dir=branch, registry_path=_empty_registry(tmp_path))
         assert protected is False
 
-    def test_unknown_branch_not_protected(self):
+    def test_unknown_branch_not_protected(self, tmp_path):
         """Completely unknown branch is not protected."""
 
-        protected, _reason = is_protected("nonexistent", branch_dir=None, registry_path=None)
+        protected, _reason = is_protected("nonexistent", branch_dir=None, registry_path=_empty_registry(tmp_path))
         assert protected is False
 
 
@@ -605,6 +623,7 @@ class TestDetectPollutionProtection:
         project = tmp_path / "myproj"
         project.mkdir()
         (project / "src" / "mypkg" / "mypkg").mkdir(parents=True)
+        _empty_registry(project)
 
         issues = detect_pollution(project)
         assert len(issues) == 1
@@ -694,12 +713,27 @@ class TestDeleteOwnerProtection:
 class TestArchiveExclude:
     """Tests for ARCHIVE_EXCLUDE constant shared between repair_ops and delete_ops."""
 
-    def test_archive_exclude_defined_in_repair_ops(self):
-        """ARCHIVE_EXCLUDE is a set in repair_ops."""
+    def test_archive_exclude_defined_in_repair_ops(self, tmp_path):
+        """ARCHIVE_EXCLUDE is a set in repair_ops, and the pollution archive honours it.
+
+        Mutant: cleanup_pollution copies without the ARCHIVE_EXCLUDE ignore -> red.
+        """
 
         assert isinstance(ARCHIVE_EXCLUDE, set)
         assert ".venv" in ARCHIVE_EXCLUDE
         assert ".git" in ARCHIVE_EXCLUDE
+
+        project = tmp_path / "compass"
+        dup = project / "compass"
+        (dup / ".venv").mkdir(parents=True)
+        (dup / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+        (dup / "junk.txt").write_text("pollution", encoding="utf-8")
+        _empty_registry(project)
+
+        result = cleanup_pollution(project)
+
+        archive = Path(result["cleaned"][0]["archive"])
+        assert sorted(p.name for p in archive.iterdir()) == ["junk.txt"]
 
     def test_delete_ops_imports_archive_exclude(self):
         """delete_ops imports ARCHIVE_EXCLUDE from repair_ops (same object)."""
@@ -815,7 +849,9 @@ class TestRegistryLookupIsCaseSensitive:
         # The decoy sorts first, so an unfiltered first-match returns it.
         assert sorted(p.name for p in tmp_path.glob("*_REGISTRY.json"))[0] == decoy.name
 
-        assert _registry_in(tmp_path) == real
+        # Reached through repair_project, the public door onto the one lookup.
+        # Mutant: the lookup drops its case-sensitive suffix check -> red.
+        assert repair_project(tmp_path, dry_run=True)["registry"] == real.name
 
     def test_repair_project_reports_the_real_registry(self, tmp_path, monkeypatch):
         """End-to-end through the call site, not just the helper."""
@@ -841,7 +877,7 @@ class TestRegistryLookupIsCaseSensitive:
 
         _case_insensitive_listing(monkeypatch)
 
-        assert _registry_in(tmp_path) == theirs
+        assert repair_project(tmp_path, dry_run=True)["registry"] == theirs.name
 
     def test_absence_is_reported_as_absence(self, tmp_path, monkeypatch):
 
@@ -849,7 +885,9 @@ class TestRegistryLookupIsCaseSensitive:
 
         _case_insensitive_listing(monkeypatch)
 
-        assert _registry_in(tmp_path) is None
+        result = repair_project(tmp_path, dry_run=True)
+        assert result["success"] is False
+        assert result["error"] == f"No *_REGISTRY.json found in {tmp_path.resolve()}"
 
     def test_both_call_sites_go_through_the_one_lookup(self):
         """The extraction is the fix — a second inline glob would undo it."""

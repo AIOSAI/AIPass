@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_passport_migration.py
 # Description: DPLAN-0319 — passport 2.0 fleet migration: order, drops, lanes, idempotency
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-28
 # Modified: 2026-09-27
 # =============================================
@@ -781,9 +781,12 @@ class TestNoHardcodedHomePaths:
                 assert not value.startswith("/"), f"{target.path}: absolute value {value!r}"
 
     def test_live_fleet_copy_has_no_home_substring_left(self, live_fleet_copy):
-        migrate_fleet(live_fleet_copy, confirm=True, run_date=RUN_DATE)
+        """The sweep must cover every planted passport, or it proves nothing about the ones it skipped."""
+        planted = sorted(live_fleet_copy.rglob("passport.json"))
+        receipt = migrate_fleet(live_fleet_copy, confirm=True, run_date=RUN_DATE)
+        assert receipt["scanned"] == len(planted), "the sweep below must cover every planted passport"
         targets = discover_passports(live_fleet_copy)
-        assert targets, "the live copy fixture planted no passports - the sweep below would prove nothing"
+        assert sorted(t.path for t in targets) == planted
         for target in targets:
             assert "/home/" not in target.path.read_text(encoding="utf-8"), target.path
 
@@ -884,9 +887,7 @@ class TestCli:
         assert handle_migrate_passports(["--wipe-everything"]) == 1
 
     def test_entry_point_routes_the_command(self, synthetic_fleet, monkeypatch):
-        import sys
-
-        monkeypatch.setattr(sys, "argv", ["spawn", "migrate-passports", "--root", str(synthetic_fleet)])
+        monkeypatch.setattr("sys.argv", ["spawn", "migrate-passports", "--root", str(synthetic_fleet)])
         assert spawn_entry.main() == 0
 
 
@@ -1147,11 +1148,13 @@ class TestLiveBaselineGuardsOnTheWorld:
         assert "core-only" in reason
 
     def test_the_skip_reason_reports_the_counts_it_saw(self, tmp_path):
+        """Mutant: discover_passports files core passports as residents -> red."""
         for i in range(3):
             self._plant(tmp_path, Path(f"src/aipass/branch{i}"))
 
-        _, reason = _fleet_baseline_verdict(tmp_path)
+        shape, reason = _fleet_baseline_verdict(tmp_path)
 
+        assert shape == (3, 3, 0)
         assert reason is not None
         assert "3 core" in reason
         assert "0 resident" in reason
@@ -1184,4 +1187,4 @@ class TestLiveBaselineGuardsOnTheWorld:
             f"the verdict must measure exactly when a resident is present: shape={shape} reason={reason!r}"
         )
         if total and resident == 0:
-            assert f"{core} core, 0 resident" in reason, reason
+            assert reason is not None and f"{core} core, 0 resident" in reason, reason

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_file_ops.py
 # Description: Tests for file_ops handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-03
 # Modified: 2026-09-27
 # =============================================
@@ -15,15 +15,11 @@
 import hashlib
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from aipass.spawn.apps.handlers.file_ops import (
     SKIP_NAMES,
-    _replace_path_placeholders,
-    _should_skip,
-    _walk,
     copy_template,
     ensure_directory,
     regenerate_template_registry,
@@ -177,8 +173,7 @@ class TestCopyTemplate:
         assert content == "original"
         assert any("config.txt" in s and "exists" in s for s in skipped)
 
-    @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_copy_template_binary_fallback(self, _mock_logger, tmp_path: Path, mock_json_handler) -> None:
+    def test_copy_template_binary_fallback(self, tmp_path: Path, mock_json_handler) -> None:
         """Binary files trigger fallback to shutil.copy2."""
         _ = mock_json_handler
         template = tmp_path / "template"
@@ -252,30 +247,36 @@ class TestRenamePlaceholderPaths:
 
 
 class TestWalk:
-    """Tests for _walk()."""
+    """The template walk, observed through copy_template()."""
 
-    def test_walk_yields_all_items(self, tmp_path: Path) -> None:
-        """_walk yields files and dirs, but skips recursing into .git."""
-        (tmp_path / "a.txt").write_text("a", encoding="utf-8")
-        sub = tmp_path / "subdir"
+    def test_walk_yields_all_items(self, tmp_path: Path, mock_json_handler) -> None:
+        """The walk reaches files and nested dirs, but never recurses into .git.
+
+        Mutant: the walk recurses into .git -> red.
+        """
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        template.mkdir()
+        (template / "a.txt").write_text("a", encoding="utf-8")
+        sub = template / "subdir"
         sub.mkdir()
         (sub / "b.txt").write_text("b", encoding="utf-8")
 
         # .git dir should not be recursed into
-        git_dir = tmp_path / ".git"
+        git_dir = template / ".git"
         git_dir.mkdir()
         (git_dir / "HEAD").write_text("ref: refs/heads/main", encoding="utf-8")
 
-        items = list(_walk(tmp_path))
-        names = [item.name for item in items]
+        target = tmp_path / "target"
+        target.mkdir()
+        copied, skipped = copy_template(template, target, REPLACEMENTS)
 
-        assert "a.txt" in names
-        assert "subdir" in names
-        assert "b.txt" in names
-        # .git itself is yielded but not recursed into
-        assert ".git" in names
-        # HEAD inside .git should NOT appear
-        assert "HEAD" not in names
+        assert (target / "a.txt").read_text(encoding="utf-8") == "a"
+        assert (target / "subdir" / "b.txt").read_text(encoding="utf-8") == "b"
+        assert "subdir/ (dir)" in copied
+        # .git itself is walked (and skipped) but never recursed into
+        assert skipped == [".git"]
+        assert not (target / ".git").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -284,23 +285,66 @@ class TestWalk:
 
 
 class TestShouldSkip:
-    """Tests for _should_skip()."""
+    """The skip rule, observed through copy_template()."""
 
-    def test_should_skip_pycache(self) -> None:
-        """__pycache__ in any path component triggers skip."""
-        assert _should_skip(Path("__pycache__"))
-        assert _should_skip(Path("some" / Path("__pycache__") / Path("mod.pyc")))
+    def test_should_skip_pycache(self, tmp_path: Path, mock_json_handler) -> None:
+        """__pycache__ in any path component keeps the file out of the copy.
 
-    def test_should_skip_normal_file(self) -> None:
-        """Normal paths are not skipped."""
-        assert not _should_skip(Path("apps/handlers/file_ops.py"))
-        assert not _should_skip(Path("README.md"))
+        Mutant: the skip rule never skips -> red.
+        """
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        (template / "__pycache__").mkdir(parents=True)
+        (template / "some" / "__pycache__").mkdir(parents=True)
+        (template / "some" / "__pycache__" / "mod.pyc").write_bytes(b"\x00")
 
-    def test_should_skip_all_skip_names(self) -> None:
-        """Every entry in SKIP_NAMES triggers a skip."""
+        target = tmp_path / "target"
+        target.mkdir()
+        _copied, skipped = copy_template(template, target, REPLACEMENTS)
+
+        assert "__pycache__" in skipped
+        assert "some/__pycache__" in skipped
+        assert not (target / "__pycache__").exists()
+        assert not (target / "some" / "__pycache__").exists()
+
+    def test_should_skip_normal_file(self, tmp_path: Path, mock_json_handler) -> None:
+        """Normal paths are copied, not skipped.
+
+        Mutant: the skip rule skips everything -> red.
+        """
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        (template / "apps" / "handlers").mkdir(parents=True)
+        (template / "apps" / "handlers" / "file_ops.py").write_text("x = 1\n", encoding="utf-8")
+        (template / "README.md").write_text("# readme\n", encoding="utf-8")
+
+        target = tmp_path / "target"
+        target.mkdir()
+        _copied, skipped = copy_template(template, target, REPLACEMENTS)
+
+        assert skipped == []
+        assert (target / "apps" / "handlers" / "file_ops.py").read_text(encoding="utf-8") == "x = 1\n"
+        assert (target / "README.md").read_text(encoding="utf-8") == "# readme\n"
+
+    def test_should_skip_all_skip_names(self, tmp_path: Path, mock_json_handler) -> None:
+        """Every entry in SKIP_NAMES keeps its file out of the copy.
+
+        Mutant: .ruff_cache dropped from the skip test -> red.
+        """
+        _ = mock_json_handler
         assert len(SKIP_NAMES) == 6, f"SKIP_NAMES holds {sorted(SKIP_NAMES)} - the sweep below is not the whole set"
+        template = tmp_path / "template"
+        template.mkdir()
         for name in SKIP_NAMES:
-            assert _should_skip(Path(name)), f"{name} should be skipped"
+            (template / name).write_text("skip me", encoding="utf-8")
+
+        target = tmp_path / "target"
+        target.mkdir()
+        _copied, skipped = copy_template(template, target, REPLACEMENTS)
+
+        assert sorted(skipped) == sorted(SKIP_NAMES)
+        for name in SKIP_NAMES:
+            assert not (target / name).exists(), f"{name} should be skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -309,28 +353,53 @@ class TestShouldSkip:
 
 
 class TestReplacePathPlaceholders:
-    """Tests for _replace_path_placeholders()."""
+    """Path placeholder replacement, observed through copy_template()."""
 
-    def test_replace_path_placeholders(self) -> None:
-        """Placeholder tokens in path components are replaced."""
-        rel = Path("{{BRANCH}}_json") / "{{BRANCHNAME}}_config.py"
-        result = _replace_path_placeholders(rel, REPLACEMENTS)
+    def test_replace_path_placeholders(self, tmp_path: Path, mock_json_handler) -> None:
+        """Placeholder tokens in path components are replaced.
 
-        assert result == Path("testagent_json") / "TESTAGENT_config.py"
+        Mutant: path components copied without placeholder replacement -> red.
+        """
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        (template / "{{BRANCH}}_json").mkdir(parents=True)
+        (template / "{{BRANCH}}_json" / "{{BRANCHNAME}}_config.py").write_text("x", encoding="utf-8")
 
-    def test_replace_path_placeholders_no_match(self) -> None:
+        target = tmp_path / "target"
+        target.mkdir()
+        copied, _skipped = copy_template(template, target, REPLACEMENTS)
+
+        assert (target / "testagent_json" / "TESTAGENT_config.py").is_file()
+        assert "testagent_json/TESTAGENT_config.py" in copied
+        assert not (target / "{{BRANCH}}_json").exists()
+
+    def test_replace_path_placeholders_no_match(self, tmp_path: Path, mock_json_handler) -> None:
         """Paths without placeholders pass through unchanged."""
-        rel = Path("apps") / "handlers" / "init.py"
-        result = _replace_path_placeholders(rel, REPLACEMENTS)
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        (template / "apps" / "handlers").mkdir(parents=True)
+        (template / "apps" / "handlers" / "init.py").write_text("x", encoding="utf-8")
 
-        assert result == rel
+        target = tmp_path / "target"
+        target.mkdir()
+        copied, _skipped = copy_template(template, target, REPLACEMENTS)
 
-    def test_replace_path_placeholders_empty(self) -> None:
-        """Single-component path with no parts returns original."""
-        rel = Path("file.txt")
-        result = _replace_path_placeholders(rel, {})
+        assert (target / "apps" / "handlers" / "init.py").is_file()
+        assert "apps/handlers/init.py" in copied
 
-        assert result == Path("file.txt")
+    def test_replace_path_placeholders_empty(self, tmp_path: Path, mock_json_handler) -> None:
+        """With no replacements, a single-component path keeps its name."""
+        _ = mock_json_handler
+        template = tmp_path / "template"
+        template.mkdir()
+        (template / "file.txt").write_text("x", encoding="utf-8")
+
+        target = tmp_path / "target"
+        target.mkdir()
+        copied, _skipped = copy_template(template, target, {})
+
+        assert copied == ["file.txt"]
+        assert (target / "file.txt").is_file()
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +410,7 @@ class TestReplacePathPlaceholders:
 class TestRegenerateTemplateRegistry:
     """Tests for regenerate_template_registry()."""
 
-    @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_creates_json(self, mock_logger, tmp_path: Path) -> None:
+    def test_regenerate_template_registry_creates_json(self, tmp_path: Path) -> None:
         """Running regeneration creates .spawn/.template_registry.json."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
@@ -359,8 +427,7 @@ class TestRegenerateTemplateRegistry:
         assert "directories" in data
         assert data["metadata"]["generated"] is True
 
-    @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_hashes_content(self, mock_logger, tmp_path: Path) -> None:
+    def test_regenerate_template_registry_hashes_content(self, tmp_path: Path) -> None:
         """SHA-256 hashes in the registry match actual file content."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
@@ -382,8 +449,7 @@ class TestRegenerateTemplateRegistry:
         assert entry["path"] == "hashme.txt"
         assert entry["content_hash"] == expected_hash
 
-    @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_detects_placeholders(self, mock_logger, tmp_path: Path) -> None:
+    def test_regenerate_template_registry_detects_placeholders(self, tmp_path: Path) -> None:
         """Files containing {{BRANCH}} are flagged with has_branch_placeholder."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()
@@ -401,8 +467,7 @@ class TestRegenerateTemplateRegistry:
         assert files_by_name["with_placeholder.txt"]["has_branch_placeholder"] is True
         assert files_by_name["no_placeholder.txt"]["has_branch_placeholder"] is False
 
-    @patch("aipass.spawn.apps.handlers.file_ops.logger")
-    def test_regenerate_template_registry_skips_spawn_dir(self, mock_logger, tmp_path: Path) -> None:
+    def test_regenerate_template_registry_skips_spawn_dir(self, tmp_path: Path) -> None:
         """.spawn/ internal files are excluded from the registry."""
         spawn_dir = tmp_path / ".spawn"
         spawn_dir.mkdir()

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared test fixtures for spawn test suite
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
 # Modified: 2026-09-27
 # =============================================
@@ -16,7 +16,6 @@ import tempfile
 if "AIPASS_TEST_LOG_DIR" not in os.environ:
     os.environ["AIPASS_TEST_LOG_DIR"] = tempfile.mkdtemp(prefix="aipass_test_logs_")
 
-import shutil
 import pytest
 from pathlib import Path
 from unittest.mock import patch
@@ -26,7 +25,7 @@ from aipass.cli.apps.modules import display
 
 
 # ---------------------------------------------------------------------------
-# Registry backup/restore — prevents test ghost entries in AIPASS_REGISTRY.json
+# Live registry tripwire — no test reads or writes AIPASS_REGISTRY.json
 # ---------------------------------------------------------------------------
 
 
@@ -36,27 +35,33 @@ def _find_registry_path() -> Path:
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _protect_registry(tmp_path_factory):
-    """Backup AIPASS_REGISTRY.json before the test session, restore after.
+def _live_registry_is_never_written():
+    """Fail the session if any test moved the live AIPASS_REGISTRY.json.
 
-    Prevents tests that call spawn_agent/grant_passport without a
-    registry_path override from permanently polluting the real registry.
-
-    The backup lives under pytest's tmp dir, never beside the real registry:
-    writing it into the repo root meant a crashed or killed suite orphaned an
-    AIPASS_REGISTRY.json.test_backup there (flagged by @backup, APLAN-0007).
+    This used to be a backup-and-restore (_protect_registry). A restore is a
+    repair, not a seal: a run killed midway left whatever a test had written,
+    and copy2 put the old mtime back, so a rewrite of equal bytes never showed.
+    Every test now hands the product a tmp_path registry (DPLAN-0354 leg 2).
+    This fixture only watches: sha256 and mtime before, the same after. On a
+    move it puts the bytes back so the fleet keeps its citizens, and fails.
     """
     reg = _find_registry_path()
-    backup = tmp_path_factory.mktemp("registry_backup") / "AIPASS_REGISTRY.json.test_backup"
-
-    if reg.exists():
-        shutil.copy2(reg, backup)
+    if not reg.exists():
+        yield
+        return
+    before = reg.read_bytes()
+    mtime = reg.stat().st_mtime_ns
 
     yield
 
-    if backup.exists():
-        shutil.copy2(backup, reg)
-        backup.unlink()
+    after = reg.read_bytes() if reg.exists() else b""
+    moved = after != before or not reg.exists() or reg.stat().st_mtime_ns != mtime
+    if moved:
+        reg.write_bytes(before)
+        pytest.fail(
+            "a test wrote the live AIPASS_REGISTRY.json - hand the product a tmp_path registry",
+            pytrace=False,
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_admin_fence.py
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-12
 # Modified: 2026-09-27
 # =============================================
@@ -29,7 +29,7 @@ from aipass.spawn.apps.handlers.class_registry import (
 )
 from aipass.spawn.apps.handlers.registry import ADMIN_BRANCH, ensure_admin
 from aipass.spawn.apps.handlers.sync_registry_ops import resolve_sync_template_class
-from aipass.spawn.apps.modules.core import _spawn_agent
+from aipass.spawn.apps.modules.core import spawn_agent
 from aipass.spawn.apps.modules.grant_admin import handle_grant_admin
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main
@@ -223,15 +223,17 @@ class TestGrantAdminCli:
         assert handle_grant_admin(["--registry", str(registry)]) == 1
 
     def test_entry_point_routes_grant_admin(self):
-        """main() routes the command to the module."""
+        """main() routes the command to the module.
 
-        with patch("aipass.spawn.apps.spawn.sys") as mock_sys:
-            mock_sys.argv = ["spawn", "grant-admin", "--help"]
+        Mutant: main hands grant-admin [] instead of its remaining args -> red.
+        """
+
+        with patch("sys.argv", ["spawn", "grant-admin", "--help"]):
             with patch("aipass.spawn.apps.modules.grant_admin.handle_grant_admin", return_value=0) as mock_handler:
                 result = main()
 
         assert result == 0
-        mock_handler.assert_called_once()
+        mock_handler.assert_called_once_with(["--help"])
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +288,7 @@ class TestAdminClassRefusal:
 
         target = tmp_path / "would_be_admin"
 
-        result = _spawn_agent(str(target), citizen_class="admin")
+        result = spawn_agent(str(target), citizen_class="admin")
 
         assert result["success"] is False
         assert "devpulse" in result["error"].lower()
@@ -297,7 +299,7 @@ class TestAdminClassRefusal:
 
         target = tmp_path / "would_be_admin"
 
-        result = _spawn_agent(str(target), template_dir="admin")
+        result = spawn_agent(str(target), template_dir="admin")
 
         assert result["success"] is False
         assert "devpulse" in result["error"].lower()

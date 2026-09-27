@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_spawn.py
 # Description: Test suite for spawn module
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
 # Modified: 2026-09-27
 # =============================================
@@ -29,7 +29,6 @@ from aipass.spawn.apps.handlers.registry import (
     add_to_registry,
     save_registry,
     get_next_citizen_number,
-    _validate_path_containment,
 )
 
 
@@ -256,22 +255,27 @@ class TestGetNextCitizenNumber:
 
 
 class TestPathContainment:
-    """Tests for _validate_path_containment()."""
+    """Path containment, observed through add_to_registry() on a tmp_path registry."""
 
     def test_contained_path_accepted(self, tmp_path):
+        """Mutant: containment rejects every path -> red."""
         reg = tmp_path / "TEST_REGISTRY.json"
         branch = tmp_path / "my_agent"
-        assert _validate_path_containment(str(branch), reg) is True
+        assert add_to_registry(reg, "MY_AGENT", str(branch), "Test", "@my_agent") is True
+        assert [b["name"] for b in load_registry(reg)["branches"]] == ["MY_AGENT"]
 
     def test_escaped_path_rejected(self, tmp_path):
+        """Mutant: containment accepts every path -> red."""
         reg = tmp_path / "TEST_REGISTRY.json"
         escaped = tmp_path.parent / "evil"
-        assert _validate_path_containment(str(escaped), reg) is False
+        assert add_to_registry(reg, "EVIL", str(escaped), "Test", "@evil") is False
+        assert not reg.exists()
 
     def test_traversal_attack_rejected(self, tmp_path):
         reg = tmp_path / "TEST_REGISTRY.json"
         branch = str(tmp_path / ".." / ".." / "tmp" / "evil")
-        assert _validate_path_containment(branch, reg) is False
+        assert add_to_registry(reg, "EVIL", branch, "Test", "@evil") is False
+        assert not reg.exists()
 
 
 class TestAtomicWriteAndLocking:

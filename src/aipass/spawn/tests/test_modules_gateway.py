@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_modules_gateway.py
 # Description: Tests for the apps.modules package gateway re-exports
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-28
 # Modified: 2026-09-27
 # =============================================
@@ -260,12 +260,18 @@ class TestRefuseLegacyClassThroughGateway:
         ],
     )
     def test_every_retired_name_names_both_values(self, retired, replacement):
+        """The refusal ties THIS retired name to THIS replacement.
+
+        A bare ``replacement in message`` could not fail: the sentence names both
+        'manager' and 'specialist' for every retired name. The pairing is the claim.
+
+        Mutant: now means '{replacement}' -> now means 'specialist' -> red.
+        """
 
         message = refuse_legacy_class(retired)
 
-        assert message
-        assert retired in message
-        assert replacement in message
+        assert f"'{retired}' now means '{replacement}'" in message, message
+        assert f"Pass '{replacement}' explicitly" in message, message
 
     @pytest.mark.parametrize("live", ["manager", "specialist"])
     def test_live_classes_are_not_refused(self, live):
