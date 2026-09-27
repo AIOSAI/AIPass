@@ -3,7 +3,7 @@
 # Description: Idempotent systemd user timer installer for daemon scheduler
 # Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -71,7 +71,11 @@ def print_help():
 
 
 def _run_systemctl(*args: str) -> bool:
-    """Run a systemctl --user command. Returns True on success."""
+    """Run a systemctl --user command. Returns True on success.
+
+    Every failure, a non-zero exit, a missing systemctl or a timeout, answers False
+    after printing error(), and True is returned only by a zero exit.
+    """
     cmd = ["systemctl", "--user", *args]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)

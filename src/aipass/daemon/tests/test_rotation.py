@@ -136,7 +136,7 @@ class FakeStatus:
         self.summary = summary
 
 
-def rotation_json(capsys, roster, jobs=(), runstate=None, lane=True, real_blocklist=False) -> dict:
+def rotation_json(capsys, roster, jobs=(), runstate=None, lane: bool | None = True, real_blocklist=False) -> dict:
     """The payload `drone @daemon rotation --json` prints for this roster, jobs and runstate.
 
     lane=None leaves ai_mail's live signature probe unpatched; real_blocklist
@@ -197,6 +197,21 @@ class TestBuildRoster:
             roster = build_roster()
         assert [c["email"] for c in roster] == ["@ai_mail", "@drone", "@flow", "@seedgo"]
         assert roster[1]["path"] == FRAMEWORK / "drone", "sorting must carry each record whole"
+
+    def test_an_unreadable_passport_is_left_off_the_roster(self, fleet, classes):
+        """A citizen whose passport cannot be read may be a manager: it sits this night out, knob or no knob.
+
+        Mutant killed: build_roster treating an unreadable class (None) as a worker.
+        """
+        unreadable = dict(classes, **{"@commons": None})
+        for include_managers in (False, True):
+            with (
+                patch(f"{HANDLER}.active_citizens", return_value=fleet),
+                patch(f"{HANDLER}.citizen_class_for", side_effect=lambda p: unreadable[f"@{p.name}"]),
+            ):
+                roster = build_roster(include_managers=include_managers)
+            assert "@commons" not in [c["email"] for c in roster]
+            assert "@backup" in [c["email"] for c in roster]
 
     def test_empty_fleet_gives_empty_roster(self):
         with patch(f"{HANDLER}.active_citizens", return_value=[]):

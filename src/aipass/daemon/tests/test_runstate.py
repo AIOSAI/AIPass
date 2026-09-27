@@ -249,6 +249,24 @@ class TestIntervalDue:
         recent = (AT - timedelta(minutes=5)).isoformat()
         assert due(INTERVAL, AT, last_run=recent) is False
 
+    @pytest.mark.parametrize("interval", ["60", None, "abc", 0, -5], ids=["str", "none", "garbage", "zero", "negative"])
+    def test_an_unreadable_interval_is_not_due(self, interval):
+        """An interval that is not a positive number is not due, whatever last_run says.
+
+        It answered due on every tick: no fire can repair the owner's schedule, so the
+        job fired every two minutes for as long as the file stayed wrong.
+        Mutant killed: the interval check removed (the TypeError answered due, the code before 2026-09-27).
+        """
+        recent = (AT - timedelta(minutes=1)).isoformat()
+        assert due({"type": "interval", "interval_minutes": interval}, AT, last_run=recent) is False
+
+    def test_an_unreadable_last_run_is_due(self):
+        """An unparseable last_run answers due: the fire writes a fresh stamp, so the job recovers.
+
+        Mutant killed: the parse failure answering not due (the job would never run again).
+        """
+        assert due(INTERVAL, AT, last_run="not-a-timestamp") is True
+
 
 class TestOnceDue:
     def test_due_today(self):

@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_red_flag_detector.py
 # Description: Red flag detection engine tests — code changed without a memory update
 # Version: 1.1.0
@@ -9,7 +9,7 @@
 """Tests for apps/handlers/monitoring/red_flag_detector.py — code changed with no memory update."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — STATUS_RED_FLAG, STATUS_OK, STATUS_NO_ACTIVITY and STATUS_ERROR's strings, compared by name
+# seedgo: no-test-needed(constant) — the four STATUS_* strings (RED_FLAG, OK, NO_ACTIVITY, ERROR), compared by name
 # seedgo: no-test-needed(stdlib) — datetime.fromisoformat's accepted formats beyond the three pinned here
 
 from datetime import datetime
@@ -93,7 +93,10 @@ class TestParseIsoDatetime:
         assert _latest_code_change(tmp_path, "2026-03-20T10:00:00") == "2026-03-20T10:00:00"
 
     def test_valid_iso_string_with_microseconds(self, tmp_path):
-        """Mutant killed: _parse_iso_datetime drops microseconds (.replace(microsecond=0))."""
+        """Parse ISO datetime string containing microseconds.
+
+        Mutant killed: _parse_iso_datetime drops microseconds (.replace(microsecond=0)).
+        """
         assert _latest_code_change(tmp_path, "2026-03-20T10:30:00.123456") == "2026-03-20T10:30:00.123456"
 
     def test_valid_iso_date_only(self, tmp_path):
@@ -106,11 +109,17 @@ class TestParseIsoDatetime:
         assert _latest_code_change(tmp_path, None) is None
 
     def test_invalid_string_returns_none(self, tmp_path):
-        """Mutant killed: _parse_iso_datetime's except (ValueError, TypeError) removed."""
+        """Invalid/garbage string returns None.
+
+        Mutant killed: _parse_iso_datetime's except (ValueError, TypeError) removed.
+        """
         assert _latest_code_change(tmp_path, "not-a-date") is None
 
     def test_partial_iso_returns_none(self, tmp_path):
-        """Mutant killed: _parse_iso_datetime's except (ValueError, TypeError) removed."""
+        """Malformed ISO string returns None.
+
+        Mutant killed: _parse_iso_datetime's except (ValueError, TypeError) removed.
+        """
         assert _latest_code_change(tmp_path, "2026-13-40T99:99:99") is None
 
 

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.daemon.apps import daemon as daemon_entry
 from aipass.daemon.apps.handlers.schedule import runstate as rs
 from aipass.daemon.apps.handlers.schedule import tick_lock
 from aipass.daemon.apps.handlers.schedule.runstate import job_key
@@ -462,6 +463,30 @@ class TestTickAccounting:
             self._locked_tick(tmp_path, errno.ENOLCK)
         assert raised.value.errno == errno.ENOLCK
         self.fire.assert_not_called()
+
+    def test_a_broken_lock_is_named_by_the_router_not_called_unknown(self, tmp_path, capsys):
+        """Through `drone @daemon run`: a broken lock exits 1 and names the run, never "Unknown command".
+
+        The router used to log a module's exception and fall through to the next module,
+        so the one verb that raised was reported as a verb nobody knows.
+        Mutant killed: route_command's generic except logging and moving on (the code before 2026-09-27).
+        """
+        fake_fcntl = MagicMock(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8)
+        fake_fcntl.flock.side_effect = OSError(errno.ENOLCK, "no locks available")
+        with (
+            patch.object(tick_lock, "fcntl", fake_fcntl),
+            patch(f"{RUN}.LOCK_FILE", tmp_path / "schedule.lock"),
+            patch(f"{RUN}.discover_jobs", return_value=[]),
+            patch(f"{RUN}._fire_job") as fire,
+            patch("sys.argv", ["daemon", "run"]),
+        ):
+            with pytest.raises(SystemExit) as stopped:
+                daemon_entry.main()
+        assert stopped.value.code == 1
+        err = capsys.readouterr().err
+        assert f"run failed: {OSError(errno.ENOLCK, 'no locks available')}" in err
+        assert "Unknown command" not in err
+        fire.assert_not_called()
 
 
 class TestRotationIsUnchanged:

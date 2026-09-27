@@ -121,10 +121,11 @@ defect it exists to report. Proven by mutation — with the end-of-session readi
 `active: inactive`, the run reports `14 passed, 1 error`. A suite can no longer pass and take the
 scheduler down in the same run.
 
-**If a test must reach the real timer**, it takes the `timer_host_state` fixture and only that: it
-records `is-enabled` / `is-active` / the unit-file list, restores exactly what it recorded in a
-`finally`, and then asserts the restore matched. Idempotent by construction — it restores *to a
-recorded state* rather than toggling. No test needs it today; it is the contract for the next one.
+**No test reaches the real timer.** The conftest offers no fixture that opens the seal: every test
+runs with `_run_systemctl` as a `MagicMock(return_value=True)` (the fixture yields it, so a test can
+read its calls) and `_UNIT_DIR` / `_STATE_DIR` under that test's own `tmp_path`. A test that
+patches `_run_systemctl` again only swaps one stand-in for another. What stands behind the seal is
+the sentinel above, and it reads the live timer; nothing in the suite writes it.
 
 ## Making a mutation run safe
 
@@ -132,10 +133,12 @@ A mutation run is the dangerous case, because the whole point of one is to disab
 what still passes — and the guard being disabled is often the one holding the verb back.
 
 - **A harness that shells out to `pytest` is safe with nothing to remember.** The seal is autouse
-  and session-scoped, so every subprocess run inherits it. This is the shape used for FPLAN-0524's
+  and applies to every test (function-scoped, one fresh `tmp_path` each), so every subprocess run
+  that collects from `tests/` inherits it. This is the shape used for FPLAN-0524's
   own four mutations.
 - **A harness that imports `timer_install` and calls a verb directly is not.** It bypasses the
-  conftest entirely and must take `timer_host_state`, or patch the three seams itself.
+  conftest entirely and must patch the three seams itself (`_run_systemctl`, `_UNIT_DIR`,
+  `_STATE_DIR`), as `_seal_timer_host_state` does.
 - **Say plainly what changed:** the FPLAN-0492 wave 2b harness (2026-09-07) had neither. It
   replaced the gate call and ran the pins in-process, which is exactly how the scheduler ended up
   uninstalled. The rule above is the line that changes.

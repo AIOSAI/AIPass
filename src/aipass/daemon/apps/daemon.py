@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Entry point CLI for drone @daemon
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -94,8 +94,13 @@ def route_command(command: str, args: List[str], modules: List[Any]) -> bool:
         except UnknownArgument as refusal:
             error(f"{refusal.verb}: unknown argument '{refusal.token}'", refusal.usage or None)
             sys.exit(1)
+        # Every module refuses a verb it does not own before doing any work, so an
+        # exception here comes from the module that owns the verb: name it and stop.
+        # Moving on to the next module reported the verb as "Unknown command".
         except Exception as e:
-            logger.error(f"[DAEMON] Module {module.__name__} error: {e}")
+            logger.error(f"[DAEMON] Module {module.__name__} error: {e}", exc_info=True)
+            error(f"{command} failed: {e}")
+            sys.exit(1)
 
     return False
 

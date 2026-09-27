@@ -638,17 +638,34 @@ class TestCitizenClass:
     def test_missing_passport_returns_empty(self, tmp_path):
         assert citizen_class_for(tmp_path) == ""
 
-    def test_malformed_passport_returns_empty(self, tmp_path):
+    def test_malformed_passport_returns_none(self, tmp_path):
+        """A passport that exists but cannot be read answers None, never "" (not a manager).
+
+        "" let a manager whose passport was corrupt be woken by the sweep and put on the rounds roster.
+        Mutant killed: the parse failure answering "" (the code before 2026-09-27).
+        """
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("{not json", encoding="utf-8")
-        assert citizen_class_for(tmp_path) == ""
+        assert citizen_class_for(tmp_path) is None
 
-    def test_non_dict_passport_returns_empty(self, tmp_path):
+    def test_non_dict_passport_returns_none(self, tmp_path):
+        """Mutant killed: a non-dict passport answering "" (the code before 2026-09-27)."""
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         (trinity / "passport.json").write_text("[]", encoding="utf-8")
-        assert citizen_class_for(tmp_path) == ""
+        assert citizen_class_for(tmp_path) is None
+
+    @pytest.mark.parametrize("identity", [{"citizen_class": None}, {"citizen_class": 7}, "manager"])
+    def test_an_unreadable_class_returns_none(self, tmp_path, identity):
+        """A class that is not a string is as unreadable as a corrupt file: None, never a worker.
+
+        Mutant killed: the class returned unchecked (null leaked through, a non-dict identity raised).
+        """
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / "passport.json").write_text(json.dumps({"identity": identity}), encoding="utf-8")
+        assert citizen_class_for(tmp_path) is None
 
 
 # ── Declared residency (DPLAN-0319 wave 3) ───────────

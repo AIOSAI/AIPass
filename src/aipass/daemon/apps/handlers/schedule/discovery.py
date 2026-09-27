@@ -3,7 +3,7 @@
 # Description: Decentralized .daemon/ schedule file discovery
 # Version: 2.3.0
 # Created: 2026-06-15
-# Modified: 2026-09-11
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -273,21 +273,34 @@ def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
     return _SRC_AIPASS / dir_name
 
 
-def citizen_class_for(branch_path: Path) -> str:
-    """Read citizen_class from a branch passport. Returns '' when unreadable."""
+def citizen_class_for(branch_path: Path) -> Optional[str]:
+    """Read citizen_class from a branch passport.
+
+    A missing passport answers '' (no class, an ordinary citizen). A passport that
+    exists but cannot be read answers None, which no passport can hold: it may be a
+    manager's, so callers must not treat it as a worker (the sweep skips it, the
+    rounds roster leaves it off).
+    """
     passport_file = branch_path / ".trinity" / "passport.json"
+    if not passport_file.exists():
+        return ""
     try:
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
-        logger.info("[discovery] Could not read passport at %s: %s", passport_file, e)
-        return ""
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("[discovery] Could not read passport at %s: %s", passport_file, e)
+        return None
 
     if not isinstance(passport, dict):
-        logger.info("[discovery] Non-dict passport at %s", passport_file)
-        return ""
+        logger.warning("[discovery] Non-dict passport at %s", passport_file)
+        return None
 
-    return passport.get("identity", {}).get("citizen_class", "")
+    identity = passport.get("identity", {})
+    citizen_class = identity.get("citizen_class", "") if isinstance(identity, dict) else None
+    if not isinstance(citizen_class, str):
+        logger.warning("[discovery] Unreadable citizen_class in passport at %s", passport_file)
+        return None
+    return citizen_class
 
 
 def _validate_job(job: dict, file_path: Path) -> bool:
@@ -334,7 +347,11 @@ def _validate_job(job: dict, file_path: Path) -> bool:
 
 
 def _load_schedule_file(file_path: Path) -> Optional[dict]:
-    """Load and validate a schedule.json file. Returns parsed dict or None."""
+    """Load and validate a schedule.json file. Returns parsed dict or None.
+
+    An unreadable file answers None like a malformed one, so the caller skips
+    that one file with a warning and one bad file cannot stop the fleet's tick.
+    """
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)

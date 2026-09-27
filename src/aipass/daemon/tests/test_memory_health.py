@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # Name: test_memory_health.py
 # Description: Memory health handler tests — .trinity files present, well-shaped and fresh
 # Version: 1.2.0
@@ -10,7 +10,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — os.stat's mtime and json.load's parse; only what the handler does with them
-# seedgo: no-test-needed(constant) — FRESHNESS_WARNING_DAYS and FRESHNESS_RED_DAYS values; each threshold test passes its own
+# seedgo: no-test-needed(constant) — FRESHNESS_WARNING_DAYS / FRESHNESS_RED_DAYS; each threshold test passes its own
 
 import json
 import os
@@ -420,7 +420,10 @@ class TestCheckFreshness:
         assert result["status"] == "OK"
 
     def test_days_ago_is_rounded(self, tmp_path: Path) -> None:
-        """days_ago is rounded to two places. Mutant killed: round(days_ago, 2) removed."""
+        """days_ago value is a numeric type, rounded to two places.
+
+        Mutant killed: round(days_ago, 2) removed.
+        """
         f = tmp_path / "rounded.json"
         f.write_text("{}", encoding="utf-8")
         stamp = time.time() - (1.23456 * 86400)

@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin

@@ -104,16 +104,22 @@ def oldest_age_beside(branch: Path, timestamp: str) -> float:
     stamped = message(0)
     stamped["timestamp"] = timestamp
     write_inbox(branch, [stamped, message(30)])
-    return scan_branch_inbox(branch, "@test", now=NOW)["oldest_age_hours"]
+    result = scan_branch_inbox(branch, "@test", now=NOW)
+    assert result is not None
+    return result["oldest_age_hours"]
 
 
 class TestParseTimestamp:
     def test_ai_mail_format(self, branch_dir):
-        assert oldest_age_beside(branch_dir, "2026-08-09 12:00:00") == 48.0
+        """Mutant killed: strptime's result .replace(second=0) in _parse_timestamp (49.4, not 49.3)."""
+        assert oldest_age_beside(branch_dir, "2026-08-09 10:39:30") == 49.3
 
     def test_iso_format_fallback(self, branch_dir):
-        """Mutant killed: _parse_timestamp returns None instead of trying datetime.fromisoformat."""
-        assert oldest_age_beside(branch_dir, "2026-08-09T12:00:00") == 48.0
+        """Mutant killed: _parse_timestamp returns None instead of trying datetime.fromisoformat.
+
+        Mutant killed: fromisoformat's result .replace(second=0) in _parse_timestamp (49.4, not 49.3).
+        """
+        assert oldest_age_beside(branch_dir, "2026-08-09T10:39:30") == 49.3
 
     def test_garbage_returns_none(self, branch_dir):
         """Mutant killed: the fromisoformat except (ValueError, TypeError) removed from _parse_timestamp."""
@@ -147,6 +153,7 @@ class TestScanBranchInbox:
         """Mutant killed: age_hours >= stale_hours narrowed to > in scan_branch_inbox."""
         write_inbox(branch_dir, [message(DEFAULT_STALE_HOURS)])
         result = scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert result is not None
         assert result["stale_count"] == 1
         assert result["oldest_age_hours"] == float(DEFAULT_STALE_HOURS)
 
@@ -166,9 +173,11 @@ class TestScanBranchInbox:
         assert result["unread_total"] == 2
 
     def test_custom_threshold(self, branch_dir):
-        write_inbox(branch_dir, [message(5)])
         """Mutant killed: scan_branch_inbox compares against DEFAULT_STALE_HOURS, ignoring stale_hours."""
-        assert scan_branch_inbox(branch_dir, "@test", now=NOW, stale_hours=4)["stale_count"] == 1
+        write_inbox(branch_dir, [message(5)])
+        result = scan_branch_inbox(branch_dir, "@test", now=NOW, stale_hours=4)
+        assert result is not None
+        assert result["stale_count"] == 1
         assert scan_branch_inbox(branch_dir, "@test", now=NOW, stale_hours=8) is None
 
     def test_missing_inbox_returns_none(self, branch_dir):
@@ -198,17 +207,33 @@ class TestScanBranchInbox:
         assert result["skip_reason"] == SKIP_MANAGER
 
     def test_non_manager_branch_is_wakeable(self, branch_dir):
-        write_inbox(branch_dir, [message(48)])
         """Mutant killed: _skip_reason returns SKIP_MANAGER for any readable passport."""
+        write_inbox(branch_dir, [message(48)])
         write_passport(branch_dir, "aipass_framework")
         result = scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert result is not None
         assert {key: result[key] for key in ("owner", "skip_reason")} == {"owner": "@test", "skip_reason": None}
 
     def test_missing_passport_is_wakeable(self, branch_dir):
         """Mutant killed: _skip_reason returns SKIP_MANAGER when the passport is unreadable."""
         write_inbox(branch_dir, [message(48)])
         result = scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert result is not None
         assert {key: result[key] for key in ("owner", "skip_reason")} == {"owner": "@test", "skip_reason": None}
+
+    def test_unreadable_passport_is_not_wakeable(self, branch_dir):
+        """A passport that exists but cannot be read may belong to a manager: not woken, and the reason named.
+
+        Mutant killed: _skip_reason ignoring an unreadable passport (the manager would be woken).
+        """
+        write_inbox(branch_dir, [message(48)])
+        (branch_dir / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        result = scan_branch_inbox(branch_dir, "@test", now=NOW)
+        assert result is not None
+        assert {key: result[key] for key in ("owner", "skip_reason")} == {
+            "owner": "@test",
+            "skip_reason": "passport_unreadable",
+        }
 
 
 # ── find_stale_inboxes ────────────────────────────────

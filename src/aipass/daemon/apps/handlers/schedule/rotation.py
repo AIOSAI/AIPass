@@ -116,6 +116,11 @@ def build_roster(include_managers: bool = DEFAULT_INCLUDE_MANAGERS, repo_root: O
         entry = dict(citizen)
         entry["citizen_class"] = citizen_class_for(citizen["path"])
 
+        # An unreadable passport may be a manager's: it sits this night out, knob or no knob.
+        if entry["citizen_class"] is None:
+            logger.warning("[rotation] %s excluded from roster (passport unreadable)", email)
+            continue
+
         if entry["citizen_class"] == MANAGER_CLASS and not include_managers:
             logger.info("[rotation] %s excluded from roster (manager, include_managers off)", email)
             continue
