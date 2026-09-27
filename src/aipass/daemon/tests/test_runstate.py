@@ -1,4 +1,16 @@
-"""Tests for daemon runstate tracking and due-logic."""
+# =================== AIPass ====================
+# Name: test_runstate.py
+# Description: Tests for the scheduler runstate — load/save, due-logic, catch-up, slots
+# Version: 1.1.0
+# Created: 2026-06-15
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/schedule/runstate.py — the scheduler's runstate and its due-logic."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — WINDOW_MINUTES' and MISSED_MARKER's values; the tests read them, never restate them
+# seedgo: no-test-needed(stdlib) — json's parse of the runstate file and datetime.fromisoformat's accepted forms
 
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -14,13 +26,6 @@ from aipass.daemon.apps.handlers.schedule.runstate import (
     is_job_due,
     update_job_runstate,
     prune_orphans,
-    _is_daily_due,
-    _is_hourly_due,
-    _is_interval_due,
-    _is_once_due,
-    _already_ran_today,
-    _already_ran_this_hour,
-    _slot_anchor,
     is_catch_up_fire,
     missed_window,
     needs_slot_seed,
@@ -113,7 +118,7 @@ class TestRunstateIO:
         assert loaded["jobs"]["@x/y"]["last_run"] == "2026-01-01T00:00:00"
 
     def test_load_corrupted_json(self, tmp_runstate):
-        tmp_runstate.write_text("{bad json")
+        tmp_runstate.write_text("{bad json", encoding="utf-8")
         data = load_runstate()
         assert data == {"version": 1, "jobs": {}}
 
@@ -150,112 +155,115 @@ class TestRunstateIO:
         )
 
 
-# ── Due-logic: _already_ran_today / _already_ran_this_hour
+# ── Due-logic, per schedule type, through is_job_due ──
+#
+# Every schedule is asked the way the tick asks it: is_job_due(job, runstate,
+# now) with a stated instant. catch_up is pinned False on the windowed jobs so
+# only the in-window arm answers — the late arm has its own classes below.
+
+AT = datetime(2026, 9, 7, 4, 0)
+
+
+def due(schedule: dict, now: datetime, last_run=None, completed=None) -> bool:
+    """is_job_due for one job whose runstate row carries *last_run* / *completed*."""
+    job = {"owner": "@x", "id": "j", "enabled": True, "schedule": schedule, "prompt": "p"}
+    row = {}
+    if last_run is not None:
+        row["last_run"] = last_run
+    if completed is not None:
+        row["completed"] = completed
+    return is_job_due(job, {"jobs": {"@x/j": row}}, now=now)
+
+
+DAILY = {"type": "daily", "time": "04:00", "catch_up": False}
+HOURLY = {"type": "hourly", "time": "30", "catch_up": False}
 
 
 class TestAlreadyRan:
     def test_no_last_run(self):
-        now = datetime.now()
-        assert _already_ran_today(None, now) is False
-        assert _already_ran_this_hour(None, now) is False
+        assert due(DAILY, AT) is True
+        assert due(HOURLY, AT.replace(minute=30)) is True
 
     def test_ran_today(self):
-        now = datetime.now()
-        assert _already_ran_today(now.isoformat(), now) is True
+        """Mutant killed: _already_ran_today answering False for a run earlier today."""
+        assert due(DAILY, AT.replace(minute=5), last_run=AT.replace(minute=1).isoformat()) is False
 
     def test_ran_yesterday(self):
-        now = datetime.now()
-        yesterday = (now - timedelta(days=1)).isoformat()
-        assert _already_ran_today(yesterday, now) is False
+        yesterday = (AT - timedelta(days=1)).isoformat()
+        assert due(DAILY, AT, last_run=yesterday) is True
 
     def test_ran_this_hour(self):
-        now = datetime.now()
-        assert _already_ran_this_hour(now.isoformat(), now) is True
+        at = AT.replace(minute=35)
+        assert due(HOURLY, at, last_run=AT.replace(minute=31).isoformat()) is False
 
     def test_ran_last_hour(self):
-        now = datetime.now()
-        last_hour = (now - timedelta(hours=1)).isoformat()
-        assert _already_ran_this_hour(last_hour, now) is False
+        at = AT.replace(minute=35)
+        last_hour = (at - timedelta(hours=1)).isoformat()
+        assert due(HOURLY, at, last_run=last_hour) is True
 
     def test_invalid_timestamp(self):
-        now = datetime.now()
-        assert _already_ran_today("not-a-date", now) is False
-        assert _already_ran_this_hour("not-a-date", now) is False
-
-
-# ── Due-logic: individual schedule types ─────────────
+        # An unreadable last_run is read as "never ran", not as "ran".
+        assert due(DAILY, AT, last_run="not-a-date") is True
+        assert due(HOURLY, AT.replace(minute=30), last_run="not-a-date") is True
 
 
 class TestDailyDue:
     def test_within_window(self):
-        now = datetime.now().replace(hour=4, minute=0, second=0)
-        schedule = {"type": "daily", "time": "04:00"}
-        assert _is_daily_due(schedule, None, now) is True
+        """Both edges of the +/-15 window are inside it. Mutant killed: WINDOW_MINUTES narrowed to 14."""
+        for minute_off in (-15, 0, 15):
+            assert due(DAILY, AT + timedelta(minutes=minute_off)) is True, minute_off
 
     def test_outside_window(self):
-        now = datetime.now().replace(hour=12, minute=0, second=0)
-        schedule = {"type": "daily", "time": "04:00"}
-        assert _is_daily_due(schedule, None, now) is False
+        assert due(DAILY, AT.replace(hour=12)) is False
 
     def test_already_ran(self):
-        now = datetime.now().replace(hour=4, minute=5, second=0)
-        schedule = {"type": "daily", "time": "04:00"}
-        assert _is_daily_due(schedule, now.isoformat(), now) is False
+        at = AT.replace(minute=5)
+        assert due(DAILY, at, last_run=at.isoformat()) is False
 
     def test_invalid_time(self):
-        now = datetime.now()
-        assert _is_daily_due({"time": "bad"}, None, now) is False
+        assert due({"type": "daily", "time": "bad", "catch_up": False}, AT) is False
 
 
 class TestHourlyDue:
     def test_within_window(self):
-        now = datetime.now().replace(minute=30, second=0)
-        schedule = {"type": "hourly", "time": "30"}
-        assert _is_hourly_due(schedule, None, now) is True
+        """Both edges of the hourly +/-15 window are inside it."""
+        for minute in (15, 30, 45):
+            assert due(HOURLY, AT.replace(minute=minute)) is True, minute
 
     def test_outside_window(self):
-        now = datetime.now().replace(minute=0, second=0)
-        schedule = {"type": "hourly", "time": "30"}
-        assert _is_hourly_due(schedule, None, now) is False
+        assert due(HOURLY, AT.replace(minute=0)) is False
+
+
+INTERVAL = {"type": "interval", "interval_minutes": 60}
 
 
 class TestIntervalDue:
     def test_never_run(self):
-        schedule = {"type": "interval", "interval_minutes": 60}
-        assert _is_interval_due(schedule, None, datetime.now()) is True
+        assert due(INTERVAL, AT) is True
 
     def test_elapsed(self):
-        now = datetime.now()
-        old = (now - timedelta(minutes=120)).isoformat()
-        schedule = {"type": "interval", "interval_minutes": 60}
-        assert _is_interval_due(schedule, old, now) is True
+        old = (AT - timedelta(minutes=120)).isoformat()
+        assert due(INTERVAL, AT, last_run=old) is True
 
     def test_not_elapsed(self):
-        now = datetime.now()
-        recent = (now - timedelta(minutes=5)).isoformat()
-        schedule = {"type": "interval", "interval_minutes": 60}
-        assert _is_interval_due(schedule, recent, now) is False
+        recent = (AT - timedelta(minutes=5)).isoformat()
+        assert due(INTERVAL, AT, last_run=recent) is False
 
 
 class TestOnceDue:
     def test_due_today(self):
-        now = datetime.now()
-        schedule = {"type": "once", "due_date": now.strftime("%Y-%m-%d")}
-        assert _is_once_due(schedule, None, now) is True
+        assert due({"type": "once", "due_date": AT.strftime("%Y-%m-%d")}, AT) is True
 
     def test_future(self):
-        now = datetime.now()
-        future = (now + timedelta(days=7)).strftime("%Y-%m-%d")
-        schedule = {"type": "once", "due_date": future}
-        assert _is_once_due(schedule, None, now) is False
+        future = (AT + timedelta(days=7)).strftime("%Y-%m-%d")
+        assert due({"type": "once", "due_date": future}, AT) is False
 
     def test_completed(self):
-        now = datetime.now()
-        schedule = {"type": "once", "due_date": now.strftime("%Y-%m-%d")}
-        assert _is_once_due(schedule, now.isoformat(), now) is False
+        schedule = {"type": "once", "due_date": AT.strftime("%Y-%m-%d")}
+        assert due(schedule, AT, completed=AT.isoformat()) is False
 
     def test_no_due_date(self):
-        assert _is_once_due({}, None, datetime.now()) is False
+        assert due({"type": "once"}, AT) is False
 
 
 # ── is_job_due (integration) ─────────────────────────
@@ -433,8 +441,16 @@ class TestCatchUpDueness:
         assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is False
 
     def test_opted_in_a_closed_window_fires_late(self):
+        """A late daily fire is due, is named a catch-up, and still reports the miss.
+
+        Mutant killed: missed_window answering False for a job with catch_up on
+        (the late fire would hide that the window was ever missed).
+        """
         job = windowed_job(catch_up=True)
-        assert is_job_due(job, {"jobs": {}}, now=datetime(2026, 9, 7, 9, 0)) is True
+        late = datetime(2026, 9, 7, 9, 0)
+        assert is_job_due(job, {"jobs": {}}, now=late) is True
+        assert is_catch_up_fire(job, {"jobs": {}}, now=late) is True
+        assert missed_window(job, {"jobs": {}}, now=late) is True, "catching up does not unmiss the window"
 
     def test_catch_up_cannot_double_fire_the_same_day(self):
         # The bound is _already_ran_today: once today's catch-up has run, the
@@ -540,21 +556,28 @@ def slotted_job(slot=None, minutes=WEEK_MINUTES, owner="@seedgo", job_id="shadow
 
 
 class TestSlotAnchor:
+    """The anchor a slot seeds, read off seed_interval_slot's answer."""
+
     def test_a_past_slot_rolls_forward_by_whole_intervals(self):
         # The anchor names a RHYTHM, so a slot left in the past keeps its phase
         # instead of making the job instantly overdue.
-        anchor = _slot_anchor("2026-08-02T03:00:00", WEEK_MINUTES, datetime(2026, 9, 7, 9, 0))
-        assert anchor == datetime(2026, 9, 6, 3, 0)
+        job = slotted_job(slot="2026-08-02T03:00:00")
+        assert seed_interval_slot({"jobs": {}}, job, now=datetime(2026, 9, 7, 9, 0)) == "2026-09-06T03:00:00"
 
     def test_a_future_slot_seeds_one_interval_behind_itself(self):
-        anchor = _slot_anchor("2026-09-13T03:00:00", WEEK_MINUTES, datetime(2026, 9, 7, 9, 0))
-        assert anchor == datetime(2026, 9, 6, 3, 0)
+        """Mutant killed: _slot_anchor returning a future slot unshifted."""
+        job = slotted_job(slot="2026-09-13T03:00:00")
+        assert seed_interval_slot({"jobs": {}}, job, now=datetime(2026, 9, 7, 9, 0)) == "2026-09-06T03:00:00"
 
     def test_unreadable_slot_is_refused(self):
-        assert _slot_anchor("next tuesday", WEEK_MINUTES, datetime(2026, 9, 7, 9, 0)) is None
+        job = slotted_job(slot="next tuesday")
+        assert seed_interval_slot({"jobs": {}}, job, now=datetime(2026, 9, 7, 9, 0)) is None
 
     def test_non_positive_interval_is_refused(self):
-        assert _slot_anchor("2026-09-06T03:00:00", 0, datetime(2026, 9, 7, 9, 0)) is None
+        runstate = {"jobs": {}}
+        job = slotted_job(slot="2026-09-06T03:00:00", minutes=0)
+        assert seed_interval_slot(runstate, job, now=datetime(2026, 9, 7, 9, 0)) is None
+        assert runstate["jobs"] == {}, "a refused slot must leave no row behind"
 
 
 class TestNeedsSlotSeed:

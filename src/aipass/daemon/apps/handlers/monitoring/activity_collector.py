@@ -3,7 +3,7 @@
 # Description: Branch Activity Data Collector
 # Version: 0.2.0
 # Created: 2026-01-30
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -101,7 +101,7 @@ def _get_file_mtime(file_path: Path) -> Optional[datetime]:
     return None
 
 
-def _is_memory_file(file_path: Path, branch_name: str) -> bool:
+def _is_memory_file(file_path: Path) -> bool:
     """
     Check if a file is a memory file for this branch.
 
@@ -114,7 +114,6 @@ def _is_memory_file(file_path: Path, branch_name: str) -> bool:
 
     Args:
         file_path: Path to check.
-        branch_name: Name of the branch (uppercase).
 
     Returns:
         True if file is a memory file.
@@ -134,14 +133,13 @@ def _is_memory_file(file_path: Path, branch_name: str) -> bool:
 
 
 def _scan_directory_files(
-    directory: Path, branch_name: str, since: Optional[datetime] = None, max_depth: int = 5
+    directory: Path, since: Optional[datetime] = None, max_depth: int = 5
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Scan a directory for code and memory files.
 
     Args:
         directory: Directory to scan.
-        branch_name: Name of the branch (uppercase).
         since: Only include files modified since this time.
         max_depth: Maximum directory depth to scan.
 
@@ -175,7 +173,7 @@ def _scan_directory_files(
             "mtime_datetime": mtime,
         }
 
-        if _is_memory_file(item, branch_name):
+        if _is_memory_file(item):
             memory_files.append(file_info)
         elif item.suffix == CODE_FILE_EXTENSION:
             code_files.append(file_info)
@@ -229,7 +227,7 @@ def scan_branch_activity(branch_name: str, branch_path: str, since: Optional[dat
         since = datetime.now() - timedelta(hours=24)
 
     directory = Path(branch_path)
-    scan_result = _scan_directory_files(directory, branch_name, since)
+    scan_result = _scan_directory_files(directory, since)
 
     # Find the most recent activity
     all_files = scan_result["code_files"] + scan_result["memory_files"]

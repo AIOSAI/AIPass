@@ -3,54 +3,60 @@
 # Description: Blocked is not ran — a wake that never started must not consume the period
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-08-30
+# Modified: 2026-09-27
 # =============================================
 
-"""
-BLOCKED IS NOT RAN — the second face of "a failed fire consumes its period".
+"""Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
 
-Dispatched by @devpulse with the live chain measured on this machine: the 19:47
-daemon wake of @vera opened an interactive tmux room, she finished in minutes,
-and the room then SAT AT THE PROMPT for 90+ minutes. wake_branch refuses to
-spawn into an occupied branch, ``_fire_job`` recorded that refusal as a failure,
-and ``record_job_failure`` stamped ``last_run`` — so tonight's leftover room
-would have swallowed tomorrow's 10:00 fire. A scheduler whose every fire plants
-the blocker for its next fire is the defect shape.
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — _BLOCKED_RETRY_MINUTES by value; the 09:54 / 09:58 pair measures its effect
 
-Two halves, one contract, both pinned here:
-
-  1. SCHEDULED LANE. ``run.py`` passes ``scheduled=True``, so a manager target
-     goes headless through dispatch_monitor instead of an unattended tmux room
-     nobody closes. No room, so no self-blocking. rotation.py was already doing
-     this; run.py was the odd path out, and two lanes in one caller disagreeing
-     is its own defect.
-
-  2. BLOCKED IS NOT RAN. When the wake never STARTED — occupancy, a live
-     dispatch lock, autonomous_pause, a lock we could not take — the job stays
-     DUE and retries on later ticks inside its window. ``last_run`` is only
-     stamped by a wake that actually started.
-
-The bound is stated, not omitted: a blocked fire buys a short retry hold
-(``_BLOCKED_RETRY_MINUTES``). Removing a suppression has to be replaced by a
-bound rather than by nothing — an INTERVAL job measures from its last ATTEMPT,
-so a blocked-forever interval job with no hold would re-attempt on every
-~2-minute tick for as long as the target stayed busy.
-"""
-
-from datetime import datetime, timedelta
+import errno
+from contextlib import ExitStack
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.daemon.apps.handlers.schedule import runstate as rs
-from aipass.daemon.apps.modules import run as run_mod
+from aipass.daemon.apps.handlers.schedule import tick_lock
+from aipass.daemon.apps.handlers.schedule.runstate import job_key
 from aipass.daemon.apps.modules.run import (
     OUTCOME_BLOCKED,
     OUTCOME_FAILED,
     OUTCOME_FIRED,
-    _fire_job,
+    handle_command,
     run_tick,
 )
+
+# BLOCKED IS NOT RAN — the second face of "a failed fire consumes its period".
+#
+# Dispatched by @devpulse with the live chain measured on this machine: the 19:47
+# daemon wake of @vera opened an interactive tmux room, she finished in minutes,
+# and the room then SAT AT THE PROMPT for 90+ minutes. wake_branch refuses to
+# spawn into an occupied branch, ``_fire_job`` recorded that refusal as a failure,
+# and ``record_job_failure`` stamped ``last_run`` — so tonight's leftover room
+# would have swallowed tomorrow's 10:00 fire. A scheduler whose every fire plants
+# the blocker for its next fire is the defect shape.
+#
+# Two halves, one contract, both pinned here:
+#
+#   1. SCHEDULED LANE. ``run.py`` passes ``scheduled=True``, so a manager target
+#      goes headless through dispatch_monitor instead of an unattended tmux room
+#      nobody closes. No room, so no self-blocking. rotation.py was already doing
+#      this; run.py was the odd path out, and two lanes in one caller disagreeing
+#      is its own defect.
+#
+#   2. BLOCKED IS NOT RAN. When the wake never STARTED — occupancy, a live
+#      dispatch lock, autonomous_pause, a lock we could not take — the job stays
+#      DUE and retries on later ticks inside its window. ``last_run`` is only
+#      stamped by a wake that actually started.
+#
+# The bound is stated, not omitted: a blocked fire buys a short retry hold
+# (``_BLOCKED_RETRY_MINUTES``). Removing a suppression has to be replaced by a
+# bound rather than by nothing — an INTERVAL job measures from its last ATTEMPT,
+# so a blocked-forever interval job with no hold would re-attempt on every
+# ~2-minute tick for as long as the target stayed busy.
 
 RUN = "aipass.daemon.apps.modules.run"
 
@@ -110,14 +116,39 @@ BLOCKLISTED = FakeStatus([("fail", "blocklist", "@devpulse is on WAKE_BLOCKLIST 
 SPAWNED = FakeStatus([("ok", "spawn", "session started")])
 
 
+def _fire_due(job, *seams):
+    """Fire *job* through run_tick, due now, with *seams* entered. Returns (outcome, detail, runstate).
+
+    The outcome is the tick's own count; the detail is the error the job's row
+    keeps (a blocked reason or a failure message), None after a clean fire.
+    """
+    runstate = {"jobs": {}}
+    with ExitStack() as stack:
+        stack.enter_context(patch(f"{RUN}.discover_jobs", return_value=[job]))
+        stack.enter_context(patch(f"{RUN}.load_runstate", return_value=runstate))
+        stack.enter_context(patch(f"{RUN}.is_job_due", return_value=True))
+        stack.enter_context(patch(f"{RUN}.missed_window", return_value=False))
+        stack.enter_context(patch(f"{RUN}.save_runstate", return_value=True))
+        stack.enter_context(patch(f"{RUN}._should_notify", return_value=False))
+        for seam in seams:
+            stack.enter_context(seam)
+        results = run_tick()
+    counts = (results["fired"], results["failed"], results["blocked"])
+    outcome = {(1, 0, 0): OUTCOME_FIRED, (0, 1, 0): OUTCOME_FAILED, (0, 0, 1): OUTCOME_BLOCKED}.get(counts)
+    detail = runstate["jobs"].get(job_key(job["owner"], job["id"]), {}).get("last_error")
+    return outcome, detail, runstate
+
+
 def _fire_with(status, ok, job=None):
-    """Run _fire_job against a stubbed wake_branch. Returns (outcome, detail)."""
+    """Fire one due job through the tick against a stubbed wake_branch. Returns ((outcome, detail), wake).
+
+    Mutant killed through it: run.py's _BLOCKED_STEPS emptied (every gate read as a failure).
+    """
     fake_wake = MagicMock(return_value=(status, ok))
-    with (
-        patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", fake_wake),
-        patch(f"{RUN}._should_notify", return_value=False),
-    ):
-        return _fire_job(job or _job(), {"jobs": {}}), fake_wake
+    outcome, detail, _ = _fire_due(
+        job or _job(), patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", fake_wake)
+    )
+    return (outcome, detail), fake_wake
 
 
 # ── Half 1: the scheduled lane ───────────────────────
@@ -185,11 +216,9 @@ class TestBlockedClassification:
         assert outcome == OUTCOME_FIRED
 
     def test_an_exception_is_a_failure_not_a_block(self):
-        with (
-            patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("boom")),
-            patch(f"{RUN}._should_notify", return_value=False),
-        ):
-            outcome, detail = _fire_job(_job(), {"jobs": {}})
+        outcome, detail, _ = _fire_due(
+            _job(), patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("boom"))
+        )
         assert outcome == OUTCOME_FAILED
         assert "boom" in detail
 
@@ -280,8 +309,7 @@ class TestBlockedStaysDueAndRetries:
     def test_the_retry_hold_is_a_bound_not_a_suppression(self):
         """A blocked fire holds briefly, then retries — inside the same window."""
         st = self._blocked_at("2026-08-30T09:52:00")
-        held = datetime(2026, 8, 30, 9, 54)  # 2 min later — next tick
-        assert held - datetime(2026, 8, 30, 9, 52) < timedelta(minutes=rs._BLOCKED_RETRY_MINUTES)
+        held = datetime(2026, 8, 30, 9, 54)  # 2 min later — next tick, inside the hold
         assert rs.is_job_due(_job(), st, now=held) is False
         assert rs.is_job_due(_job(), st, now=datetime(2026, 8, 30, 9, 58)) is True
 
@@ -320,13 +348,20 @@ class TestBlockedIsNotAFailureStatus:
         None — "never ran" — for a job that ran perfectly well before it was
         refused once. A block says nothing about whether the period's work was
         done; it says the wake could not start.
+
+        Mutant killed: "blocked" added to _FAILURE_STATUSES. Measured through
+        is_job_due on the day of the real run, past the block's hold: the run
+        at 10:00 is the day's work, so a second fire at 10:12 is not due.
         """
-        st = {"last_run": "2026-08-29T10:00:11", "last_status": "blocked", "last_blocked_at": "2026-08-30T09:52:00"}
-        assert rs._due_from(st) == "2026-08-29T10:00:11"
+        entry = {"last_run": "2026-08-30T10:00:11", "last_status": "blocked", "last_blocked_at": "2026-08-30T10:05:00"}
+        st = {"jobs": {"@vera/release-watch": entry}}
+        assert rs.is_job_due(_job(), st, now=datetime(2026, 8, 30, 10, 12)) is False
 
     def test_a_failed_entry_still_measures_from_nothing(self):
-        st = {"last_run": "2026-08-29T10:00:11", "last_status": "failed", "last_failure_at": "2026-08-29T10:00:11"}
-        assert rs._due_from(st) is None
+        """Mutant killed: "failed" dropped from _FAILURE_STATUSES — the failed 10:00 would count as the day's run."""
+        entry = {"last_run": "2026-08-30T10:00:11", "last_status": "failed", "last_failure_at": "2026-08-30T10:00:11"}
+        st = {"jobs": {"@vera/release-watch": entry}}
+        assert rs.is_job_due(_job(), st, now=datetime(2026, 8, 30, 10, 12)) is True
 
 
 class TestTickAccounting:
@@ -375,6 +410,8 @@ class TestTickAccounting:
         LOCK_FILE is seamed to tmp_path: the live daemon_json/schedule.lock is
         the one the systemd timer takes every two minutes, and a test grabbing
         it would either skip its own tick or make the real one skip.
+
+        Mutant killed: _run_with_lock answering 0 whatever the tick counted.
         """
         with (
             patch(f"{RUN}.LOCK_FILE", tmp_path / "schedule.lock"),
@@ -383,22 +420,70 @@ class TestTickAccounting:
             patch(f"{RUN}.save_runstate", return_value=True),
             patch(f"{RUN}._fire_job", return_value=(outcome, "detail")),
         ):
-            assert run_mod._run_with_lock(dry_run=False) == expected_rc
+            # Through the verb: a red tick is the router's sys.exit, a green one returns True.
+            if expected_rc:
+                with pytest.raises(SystemExit) as stopped:
+                    handle_command("run", [])
+                assert stopped.value.code == expected_rc
+            else:
+                assert handle_command("run", []) is True
+
+    def _locked_tick(self, tmp_path, flock_errno):
+        """Through the verb, with flock refusing by `flock_errno`; returns the `_fire_job` mock."""
+        fake_fcntl = MagicMock(LOCK_EX=2, LOCK_NB=4, LOCK_UN=8)
+        fake_fcntl.flock.side_effect = OSError(flock_errno, "flock refused")
+        with (
+            patch.object(tick_lock, "fcntl", fake_fcntl),
+            patch(f"{RUN}.LOCK_FILE", tmp_path / "schedule.lock"),
+            patch(f"{RUN}.discover_jobs", return_value=[_job(schedule=INTERVAL)]),
+            patch(f"{RUN}.load_runstate", return_value={"jobs": {}}),
+            patch(f"{RUN}.save_runstate", return_value=True),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")) as fire,
+        ):
+            self.fire = fire
+            answer = handle_command("run", [])
+        return answer, fire
+
+    def test_a_held_lock_steps_aside_green(self, tmp_path):
+        """Another tick holds the lock: this one fires nothing and exits green.
+
+        Mutant killed: tick_lock._CONTENDED emptied (contention raised as an error).
+        """
+        answer, fire = self._locked_tick(tmp_path, errno.EWOULDBLOCK)
+        assert answer is True
+        fire.assert_not_called()
+
+    def test_a_broken_lock_is_an_error_not_a_skip(self, tmp_path):
+        """A flock failure that is not contention raises; it never reads as "another tick is running".
+
+        Mutant killed: acquire() answering None for every OSError (the code before 2026-09-27).
+        """
+        with pytest.raises(OSError) as raised:
+            self._locked_tick(tmp_path, errno.ENOLCK)
+        assert raised.value.errno == errno.ENOLCK
+        self.fire.assert_not_called()
 
 
 class TestRotationIsUnchanged:
     """A rotation miss already advances the pointer — it must keep consuming the night."""
 
-    def test_rotation_miss_is_not_reclassified_as_blocked(self):
+    def test_rotation_miss_is_not_reclassified_as_blocked(self, caplog):
         job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="rounds")
-        with patch(f"{RUN}.fire_rotation", return_value=(True, "missed @backup: lock")) as mock_rotation:
-            outcome, detail = _fire_job(job, {"jobs": {}})
+        with (
+            patch(f"{RUN}.fire_rotation", return_value=(True, "missed @backup: lock")) as mock_rotation,
+            caplog.at_level("INFO"),
+        ):
+            outcome, detail, runstate = _fire_due(job)
         assert outcome == OUTCOME_FIRED
-        assert detail == "missed @backup: lock"
+        assert detail is None
+        assert "[run] Fired @daemon/rounds: missed @backup: lock" in caplog.text
+        assert runstate["jobs"]["@daemon/rounds"]["last_status"] == "success", "a missed night is a spent night"
         mock_rotation.assert_called_once()
 
     def test_rotation_failure_is_a_failure(self):
+        """Mutant killed: _fire_job mapping rotation's ok=False onto OUTCOME_BLOCKED."""
         job = _job(schedule={"type": "rotation", "time": "05:00"}, owner="@daemon", job_id="rounds")
         with patch(f"{RUN}.fire_rotation", return_value=(False, "rotation roster is empty")):
-            outcome, _detail = _fire_job(job, {"jobs": {}})
+            outcome, detail, _ = _fire_due(job)
         assert outcome == OUTCOME_FAILED
+        assert detail == "rotation roster is empty"

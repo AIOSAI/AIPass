@@ -1,4 +1,16 @@
-"""Tests for decentralized .daemon/ schedule discovery."""
+# =================== AIPass ====================
+# Name: test_discovery.py
+# Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
+# Version: 1.1.0
+# Created: 2026-06-15
+# Modified: 2026-09-27
+# =============================================
+
+"""Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — parsing the registry files inside fleet.fleet_branches(); @memory's own tests
+# seedgo: no-test-needed(constant) — RESIDENCY_CORE and RESIDENCY_RESIDENT spellings, re-exported from @memory's fleet
 
 import json
 import os
@@ -18,9 +30,7 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
     branch_path_for,
     citizen_class_for,
     declared_residency,
-    _validate_job,
-    _load_schedule_file,
-    _PROJECTS_DIR_NAME,
+    framework_root,
     REQUIRED_JOB_KEYS,
     RESIDENCY_CORE,
     RESIDENCY_RESIDENT,
@@ -72,34 +82,58 @@ def sample_registry():
     }
 
 
-# ── _validate_job ─────────────────────────────────────
+# ── job validation, through discover_jobs ─────────────
+
+
+KEEP = {"id": "keep", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "kept"}
+
+
+@pytest.fixture
+def one_branch(temp_src_aipass, sample_registry):
+    """One core citizen (@testbranch) with an empty .daemon/, discovery pointed at the temp tree."""
+    root, src = temp_src_aipass
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
+    daemon_dir = src / "testbranch" / ".daemon"
+    daemon_dir.mkdir(parents=True)
+    with patched_roots(root, src):
+        yield daemon_dir
+
+
+def discovered_ids(daemon_dir: Path, *jobs: dict) -> list:
+    """The ids discover_jobs() returns when schedule.json holds KEEP followed by `jobs`."""
+    doc = {"version": 1, "jobs": [KEEP, *jobs]}
+    (daemon_dir / "schedule.json").write_text(json.dumps(doc), encoding="utf-8")
+    return [job["id"] for job in discover_jobs()]
 
 
 class TestValidateJob:
-    def test_valid_job(self):
+    def test_valid_job(self, one_branch):
         job = {"id": "test", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "do stuff"}
-        assert _validate_job(job, Path("test.json")) is True
+        assert discovered_ids(one_branch, job) == ["keep", "test"]
 
-    def test_missing_required_key(self):
-        job = {"id": "test", "schedule": {"type": "daily"}}
-        assert _validate_job(job, Path("test.json")) is False
+    def test_missing_required_key(self, one_branch):
+        """Mutant killed: the REQUIRED_JOB_KEYS check removed from _validate_job."""
+        job = {"schedule": {"type": "daily"}, "prompt": "do stuff"}
+        assert discovered_ids(one_branch, job) == ["keep"]
 
-    def test_non_dict_schedule(self):
+    def test_non_dict_schedule(self, one_branch):
+        """Mutant killed: the isinstance(schedule, dict) check removed from _validate_job."""
         job = {"id": "test", "schedule": "daily", "prompt": "do stuff"}
-        assert _validate_job(job, Path("test.json")) is False
+        assert discovered_ids(one_branch, job) == ["keep"]
 
-    def test_invalid_schedule_type(self):
+    def test_invalid_schedule_type(self, one_branch):
+        """Mutant killed: the VALID_SCHEDULE_TYPES check removed from _validate_job."""
         job = {"id": "test", "schedule": {"type": "biweekly"}, "prompt": "do stuff"}
-        assert _validate_job(job, Path("test.json")) is False
+        assert discovered_ids(one_branch, job) == ["keep"]
 
-    def test_all_valid_schedule_types(self):
-        # The floor. An empty VALID_SCHEDULE_TYPES would make the loop below a
-        # silent pass — and _validate_job reads that same set, so emptying it
+    def test_all_valid_schedule_types(self, one_branch):
+        # The floor. An empty VALID_SCHEDULE_TYPES would make the list below
+        # empty — and _validate_job reads that same set, so emptying it
         # rejects every job while this unit stayed green. Five, counted live.
         assert len(VALID_SCHEDULE_TYPES) == 5, f"expected five schedule types, got {sorted(VALID_SCHEDULE_TYPES)}"
-        for stype in VALID_SCHEDULE_TYPES:
-            job = {"id": "test", "schedule": {"type": stype}, "prompt": "do stuff"}
-            assert _validate_job(job, Path("test.json")) is True
+        stypes = sorted(VALID_SCHEDULE_TYPES)
+        jobs = [{"id": f"t-{stype}", "schedule": {"type": stype}, "prompt": "do stuff"} for stype in stypes]
+        assert discovered_ids(one_branch, *jobs) == ["keep"] + [f"t-{stype}" for stype in stypes]
 
     def test_required_keys_constant(self):
         # prompt left the required set at DPLAN-0338: a job now says exactly one
@@ -123,18 +157,20 @@ def command_job(**extra) -> dict:
 
 
 class TestCommandJobValidation:
-    def test_a_command_job_is_valid(self):
-        assert _validate_job(command_job(), Path("test.json")) is True
+    def test_a_command_job_is_valid(self, one_branch):
+        assert discovered_ids(one_branch, command_job()) == ["keep", "sweep"]
 
-    def test_prompt_and_command_together_is_refused_and_named(self, caplog):
+    def test_prompt_and_command_together_is_refused_and_named(self, one_branch, caplog):
+        """Mutant killed: len(actions) != 1 weakened to len(actions) < 1 in _validate_job."""
         with caplog.at_level("WARNING"):
-            assert _validate_job(command_job(prompt="tend"), Path("test.json")) is False
+            assert discovered_ids(one_branch, command_job(prompt="tend")) == ["keep"]
         assert "exactly one of prompt or command, found prompt and command" in caplog.text
 
-    def test_neither_is_refused_and_named(self, caplog):
+    def test_neither_is_refused_and_named(self, one_branch, caplog):
+        """Mutant killed: len(actions) != 1 weakened to len(actions) > 1 in _validate_job."""
         job = {"id": "empty", "schedule": {"type": "daily", "time": "04:00"}}
         with caplog.at_level("WARNING"):
-            assert _validate_job(job, Path("test.json")) is False
+            assert discovered_ids(one_branch, job) == ["keep"]
         assert "exactly one of prompt or command, found neither" in caplog.text
 
     @pytest.mark.parametrize(
@@ -149,87 +185,86 @@ class TestCommandJobValidation:
             42,
         ],
     )
-    def test_a_command_that_is_not_a_drone_verb_is_refused(self, command, caplog):
+    def test_a_command_that_is_not_a_drone_verb_is_refused(self, command, one_branch, caplog):
+        """Mutant killed: _validate_job ignores command_job_problem()'s answer."""
         with caplog.at_level("WARNING"):
-            assert _validate_job(command_job(command=command), Path("test.json")) is False
+            assert discovered_ids(one_branch, command_job(command=command)) == ["keep"]
         assert "Command job 'sweep' refused" in caplog.text
 
-    def test_a_rotation_command_job_is_refused(self, caplog):
+    def test_a_rotation_command_job_is_refused(self, one_branch, caplog):
         job = command_job(schedule={"type": "rotation", "time": "05:00"})
         with caplog.at_level("WARNING"):
-            assert _validate_job(job, Path("test.json")) is False
+            assert discovered_ids(one_branch, job) == ["keep"]
         assert "rotation" in caplog.text
 
     @pytest.mark.parametrize("timeout", [0, -5, "600", True, 1.5, None])
-    def test_a_bad_timeout_is_refused(self, timeout, caplog):
+    def test_a_bad_timeout_is_refused(self, timeout, one_branch, caplog):
         with caplog.at_level("WARNING"):
-            assert _validate_job(command_job(timeout_seconds=timeout), Path("test.json")) is False
+            assert discovered_ids(one_branch, command_job(timeout_seconds=timeout)) == ["keep"]
         assert "timeout_seconds must be a positive whole number" in caplog.text
 
-    def test_a_whole_number_timeout_is_accepted(self):
-        assert _validate_job(command_job(timeout_seconds=30), Path("test.json")) is True
+    def test_a_whole_number_timeout_is_accepted(self, one_branch):
+        assert discovered_ids(one_branch, command_job(timeout_seconds=30)) == ["keep", "sweep"]
 
     @pytest.mark.parametrize("notify", [{"email": "devpulse"}, {"email": "@"}, {"email": 5}, "yes", 1])
-    def test_a_bad_notify_is_refused(self, notify, caplog):
+    def test_a_bad_notify_is_refused(self, notify, one_branch, caplog):
         with caplog.at_level("WARNING"):
-            assert _validate_job(command_job(notify=notify), Path("test.json")) is False
+            assert discovered_ids(one_branch, command_job(notify=notify)) == ["keep"]
         assert "notify" in caplog.text
 
     @pytest.mark.parametrize("notify", [True, False, {"email": "@devpulse"}])
-    def test_a_good_notify_is_accepted(self, notify):
-        assert _validate_job(command_job(notify=notify), Path("test.json")) is True
+    def test_a_good_notify_is_accepted(self, notify, one_branch):
+        assert discovered_ids(one_branch, command_job(notify=notify)) == ["keep", "sweep"]
 
-    def test_a_wake_block_is_ignored_with_a_warning(self, caplog):
+    def test_a_wake_block_is_ignored_with_a_warning(self, one_branch, caplog):
+        """Mutant killed: the 'wake block ignored' warning removed from _validate_job."""
         with caplog.at_level("WARNING"):
-            assert _validate_job(command_job(wake={"fresh": True, "model": "opus"}), Path("test.json")) is True
+            assert discovered_ids(one_branch, command_job(wake={"fresh": True, "model": "opus"})) == ["keep", "sweep"]
         assert "wake block ignored" in caplog.text
 
-    def test_notify_email_on_a_prompt_job_is_named_not_silently_dropped(self, caplog):
+    def test_notify_email_on_a_prompt_job_is_named_not_silently_dropped(self, one_branch, caplog):
+        """Mutant killed: the 'notify.email works on command jobs only' warning removed."""
         job = {"id": "tend", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "x", "notify": {"email": "@a"}}
         with caplog.at_level("WARNING"):
-            assert _validate_job(job, Path("test.json")) is True
+            assert discovered_ids(one_branch, job) == ["keep", "tend"]
         assert "notify.email works on command jobs only" in caplog.text
 
 
-# ── _load_schedule_file ──────────────────────────────
+# ── schedule file loading, through discover_jobs ──────
+
+
+def ids_beside(daemon_dir: Path, raw: str) -> list:
+    """The ids discover_jobs() returns when a_bad.json holds `raw`, read before a good schedule.json."""
+    (daemon_dir / "a_bad.json").write_text(raw, encoding="utf-8")
+    (daemon_dir / "schedule.json").write_text(json.dumps({"jobs": [KEEP]}), encoding="utf-8")
+    return [job["id"] for job in discover_jobs()]
 
 
 class TestLoadScheduleFile:
-    def test_valid_file(self, tmp_path):
-        f = tmp_path / "schedule.json"
+    def test_valid_file(self, one_branch):
         data = {"version": 1, "jobs": [{"id": "x", "schedule": {"type": "daily"}, "prompt": "y"}]}
-        f.write_text(json.dumps(data))
-        result = _load_schedule_file(f)
-        assert result is not None
-        assert len(result["jobs"]) == 1
+        assert ids_beside(one_branch, json.dumps(data)) == ["x", "keep"]
 
-    def test_missing_file(self, tmp_path):
-        result = _load_schedule_file(tmp_path / "nonexistent.json")
-        assert result is None
+    def test_unreadable_file(self, one_branch):
+        """Mutant killed: _load_schedule_file's except narrowed to json.JSONDecodeError."""
+        (one_branch / "a_dir.json").mkdir()  # matches *.json, and open() raises OSError on it
+        assert ids_beside(one_branch, json.dumps({"jobs": []})) == ["keep"]
 
-    def test_invalid_json(self, tmp_path):
-        f = tmp_path / "bad.json"
-        f.write_text("{invalid json")
-        result = _load_schedule_file(f)
-        assert result is None
+    def test_invalid_json(self, one_branch):
+        """Mutant killed: _load_schedule_file's except narrowed to OSError."""
+        assert ids_beside(one_branch, "{invalid json") == ["keep"]
 
-    def test_non_dict_root(self, tmp_path):
-        f = tmp_path / "list.json"
-        f.write_text("[]")
-        result = _load_schedule_file(f)
-        assert result is None
+    def test_non_dict_root(self, one_branch):
+        """Mutant killed: the isinstance(data, dict) check removed from _load_schedule_file."""
+        assert ids_beside(one_branch, '["jobs"]') == ["keep"]
 
-    def test_missing_jobs_array(self, tmp_path):
-        f = tmp_path / "nojobs.json"
-        f.write_text('{"version": 1}')
-        result = _load_schedule_file(f)
-        assert result is None
+    def test_missing_jobs_array(self, one_branch):
+        """Mutant killed: the '"jobs" not in data' check removed from _load_schedule_file."""
+        assert ids_beside(one_branch, '{"version": 1}') == ["keep"]
 
-    def test_non_list_jobs(self, tmp_path):
-        f = tmp_path / "badjobs.json"
-        f.write_text('{"jobs": "not a list"}')
-        result = _load_schedule_file(f)
-        assert result is None
+    def test_non_list_jobs(self, one_branch):
+        """Mutant killed: the isinstance(data["jobs"], list) check removed from _load_schedule_file."""
+        assert ids_beside(one_branch, '{"jobs": "not a list"}') == ["keep"]
 
 
 # ── _build_branch_map ────────────────────────────────
@@ -248,7 +283,7 @@ class TestCitizenRecordShape:
 
     def test_record_carries_dir_name_and_source(self, sample_registry, temp_src_aipass):
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         write_passport(src / "testbranch", residency=RESIDENCY_CORE)
 
@@ -268,7 +303,7 @@ class TestCitizenRecordShape:
         future reader will wonder why this call passes 'registry'.
         """
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         write_passport(src / "testbranch", residency=RESIDENCY_CORE)
 
@@ -279,7 +314,7 @@ class TestCitizenRecordShape:
 
     def test_inactive_branches_never_arrive(self, sample_registry, temp_src_aipass):
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         (src / "inactive").mkdir()
 
@@ -287,7 +322,7 @@ class TestCitizenRecordShape:
 
     def test_empty_registry_is_not_an_error(self, temp_src_aipass):
         root, _src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps({"branches": []}), encoding="utf-8")
         assert active_citizens(root) == []
 
 
@@ -297,10 +332,10 @@ class TestDiscoverJobs:
         branch_dir = src / "testbranch"
         daemon_dir = branch_dir / ".daemon"
         daemon_dir.mkdir(parents=True)
-        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule))
+        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule), encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
@@ -320,10 +355,10 @@ class TestDiscoverJobs:
         unregistered = src / "unknown_branch"
         daemon_dir = unregistered / ".daemon"
         daemon_dir.mkdir(parents=True)
-        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule))
+        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule), encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
@@ -339,10 +374,10 @@ class TestDiscoverJobs:
         for name in ["__pycache__", ".hidden", "compass"]:
             d = src / name / ".daemon"
             d.mkdir(parents=True)
-            (d / "schedule.json").write_text('{"jobs":[]}')
+            (d / "schedule.json").write_text('{"jobs":[]}', encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
@@ -359,10 +394,10 @@ class TestDiscoverJobs:
         daemon_dir = branch_dir / ".daemon"
         daemon_dir.mkdir(parents=True)
         bad_data = {"version": 1, "jobs": [{"id": "no-schedule"}]}
-        (daemon_dir / "schedule.json").write_text(json.dumps(bad_data))
+        (daemon_dir / "schedule.json").write_text(json.dumps(bad_data), encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
@@ -388,10 +423,10 @@ class TestDiscoverJobs:
                 }
             ],
         }
-        (daemon_dir / "schedule.json").write_text(json.dumps(data))
+        (daemon_dir / "schedule.json").write_text(json.dumps(data), encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
@@ -416,10 +451,10 @@ class TestDiscoverJobs:
                 {"id": "tend", "schedule": {"type": "daily", "time": "04:00"}, "prompt": "Tend."},
             ],
         }
-        (daemon_dir / "schedule.json").write_text(json.dumps(data))
+        (daemon_dir / "schedule.json").write_text(json.dumps(data), encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch(f"{DISCOVERY}._REPO_ROOT", root),
@@ -450,10 +485,10 @@ class TestDiscoverJobs:
             "version": 1,
             "jobs": [{"id": "off", "enabled": False, "schedule": {"type": "daily", "time": "04:00"}, "prompt": "x"}],
         }
-        (daemon_dir / "schedule.json").write_text(json.dumps(data))
+        (daemon_dir / "schedule.json").write_text(json.dumps(data), encoding="utf-8")
 
         reg_file = root / "AIPASS_REGISTRY.json"
-        reg_file.write_text(json.dumps(sample_registry))
+        reg_file.write_text(json.dumps(sample_registry), encoding="utf-8")
 
         with (
             patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", root),
@@ -478,7 +513,7 @@ def projects_tree(temp_src_aipass, sample_registry):
     a project path repo-first silently picks the wrong directory.
     """
     root, src = temp_src_aipass
-    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
     (src / "testbranch").mkdir()
 
     decoy = root / "src" / "proj" / "proj"
@@ -489,7 +524,8 @@ def projects_tree(temp_src_aipass, sample_registry):
     citizen.mkdir(parents=True)
     write_passport(citizen, residency=RESIDENCY_RESIDENT)
     (project_root / "PROJ_REGISTRY.json").write_text(
-        json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": "src/proj/proj", "status": "active"}]})
+        json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": "src/proj/proj", "status": "active"}]}),
+        encoding="utf-8",
     )
     return root, src, citizen, decoy
 
@@ -531,7 +567,7 @@ class TestProjectCitizens:
         root, src, citizen, _decoy = projects_tree
         daemon_dir = citizen / ".daemon"
         daemon_dir.mkdir()
-        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule))
+        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule), encoding="utf-8")
 
         with patched_roots(root, src):
             jobs = discover_jobs()
@@ -540,7 +576,7 @@ class TestProjectCitizens:
 
     def test_missing_projects_dir_is_not_an_error(self, temp_src_aipass, sample_registry):
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         with patched_roots(root, src):
             citizens = active_citizens()
@@ -552,7 +588,7 @@ class TestProjectCitizens:
         (dupe_root / "src" / "testbranch").mkdir(parents=True)
         write_passport(dupe_root / "src" / "testbranch", residency=RESIDENCY_RESIDENT)
         dupe_entry = {"name": "TESTBRANCH", "email": "@testbranch", "path": "src/testbranch", "status": "active"}
-        (dupe_root / "DUPE_REGISTRY.json").write_text(json.dumps({"branches": [dupe_entry]}))
+        (dupe_root / "DUPE_REGISTRY.json").write_text(json.dumps({"branches": [dupe_entry]}), encoding="utf-8")
 
         with patched_roots(root, src):
             citizens = active_citizens()
@@ -580,7 +616,8 @@ class TestProjectCitizens:
                         {"name": "TESTBRANCH", "email": "@testbranch", "path": "src/testbranch", "status": "active"}
                     ]
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         with patched_roots(root, src), patch(f"{DISCOVERY}.logger") as log:
@@ -595,7 +632,7 @@ class TestCitizenClass:
     def test_reads_class_from_passport(self, tmp_path):
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text(json.dumps({"identity": {"citizen_class": "manager"}}))
+        (trinity / "passport.json").write_text(json.dumps({"identity": {"citizen_class": "manager"}}), encoding="utf-8")
         assert citizen_class_for(tmp_path) == "manager"
 
     def test_missing_passport_returns_empty(self, tmp_path):
@@ -604,13 +641,13 @@ class TestCitizenClass:
     def test_malformed_passport_returns_empty(self, tmp_path):
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text("{not json")
+        (trinity / "passport.json").write_text("{not json", encoding="utf-8")
         assert citizen_class_for(tmp_path) == ""
 
     def test_non_dict_passport_returns_empty(self, tmp_path):
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
-        (trinity / "passport.json").write_text("[]")
+        (trinity / "passport.json").write_text("[]", encoding="utf-8")
         assert citizen_class_for(tmp_path) == ""
 
 
@@ -623,7 +660,7 @@ class TestCitizenClass:
 # the parked projects are refused by every layer at once and each one looks
 # unnecessary until the others are removed.
 
-REAL_REPO_ROOT = discovery._REPO_ROOT
+REAL_REPO_ROOT = framework_root().parents[1]  # <repo>/src/aipass -> <repo>
 
 live_fleet = pytest.mark.skipif(
     os.environ.get("GITHUB_ACTIONS") == "true" or not (REAL_REPO_ROOT / "projects").is_dir(),
@@ -637,14 +674,14 @@ def write_passport(branch_dir: Path, residency=None, citizen_class=None, raw=Non
     trinity.mkdir(parents=True, exist_ok=True)
     passport = trinity / "passport.json"
     if raw is not None:
-        passport.write_text(raw)
+        passport.write_text(raw, encoding="utf-8")
         return passport
     doc = {}
     if residency is not None:
         doc["citizenship"] = {"residency": residency}
     if citizen_class is not None:
         doc["identity"] = {"citizen_class": citizen_class}
-    passport.write_text(json.dumps(doc))
+    passport.write_text(json.dumps(doc), encoding="utf-8")
     return passport
 
 
@@ -666,7 +703,7 @@ def make_project(root: Path, project: str, branch: str = "proj", email=None, sta
         "path": f"src/{branch}",
         "status": status,
     }
-    (project_root / f"{project.upper()}_REGISTRY.json").write_text(json.dumps({"branches": [entry]}))
+    (project_root / f"{project.upper()}_REGISTRY.json").write_text(json.dumps({"branches": [entry]}), encoding="utf-8")
     return branch_dir
 
 
@@ -674,7 +711,7 @@ def make_project(root: Path, project: str, branch: str = "proj", email=None, sta
 def core_only(temp_src_aipass, sample_registry):
     """A repo with one core citizen and an empty projects/ tree."""
     root, src = temp_src_aipass
-    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+    (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
     (src / "testbranch").mkdir()
     write_passport(src / "testbranch", residency=RESIDENCY_CORE)
     (root / "projects").mkdir()
@@ -769,7 +806,8 @@ class TestRegistryLedDiscovery:
         branch_dir.mkdir(parents=True)
         write_passport(branch_dir, residency=RESIDENCY_RESIDENT)
         (nested / "DEEP_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": "DEEP", "email": "@deep", "path": "src/deep", "status": "active"}]})
+            json.dumps({"branches": [{"name": "DEEP", "email": "@deep", "path": "src/deep", "status": "active"}]}),
+            encoding="utf-8",
         )
         with patched_roots(root, src):
             assert [c["email"] for c in active_citizens()] == ["@testbranch"]
@@ -780,7 +818,7 @@ class TestRegistryLedDiscovery:
         CI runs on exactly that tree — projects/ is gitignored.
         """
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         with patched_roots(root, src):
             assert [c["email"] for c in active_citizens()] == ["@testbranch"]
@@ -799,7 +837,8 @@ class TestRegistryLedDiscovery:
         backup.mkdir(parents=True)
         write_passport(backup, residency=RESIDENCY_RESIDENT)
         (backup / "PROJ_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": ".", "status": "active"}]})
+            json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": ".", "status": "active"}]}),
+            encoding="utf-8",
         )
 
         with patched_roots(root, src):
@@ -870,7 +909,8 @@ class TestTwoKeyRule:
         project_root = root / "projects" / "proj"
         project_root.mkdir(parents=True)
         (project_root / "PROJ_REGISTRY.json").write_text(
-            json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": "src/gone", "status": "active"}]})
+            json.dumps({"branches": [{"name": "PROJ", "email": "@proj", "path": "src/gone", "status": "active"}]}),
+            encoding="utf-8",
         )
         with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
@@ -890,7 +930,7 @@ class TestTwoKeyRule:
         agent could stop its own jobs firing by deleting one line of its own file.
         """
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         with patched_roots(root, src):
             emails = [c["email"] for c in active_citizens()]
@@ -898,7 +938,7 @@ class TestTwoKeyRule:
 
     def test_core_citizen_declaring_resident_is_kept(self, temp_src_aipass, sample_registry):
         root, src = temp_src_aipass
-        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry))
+        (root / "AIPASS_REGISTRY.json").write_text(json.dumps(sample_registry), encoding="utf-8")
         (src / "testbranch").mkdir()
         write_passport(src / "testbranch", residency=RESIDENCY_RESIDENT)
         with patched_roots(root, src):
@@ -929,7 +969,7 @@ class TestParkedProjectPolicyChange:
         branch_dir = make_project(root, "marketstand", branch="marketstand", residency=None)
         daemon_dir = branch_dir / ".daemon"
         daemon_dir.mkdir()
-        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule))
+        (daemon_dir / "schedule.json").write_text(json.dumps(sample_schedule), encoding="utf-8")
         with patched_roots(root, src):
             jobs = discover_jobs()
         assert jobs == []
@@ -958,7 +998,7 @@ class TestLiveFleet:
         # claimed by the passport. Six live external citizens across four repos
         # carry no residency field, and requiring one would have made a
         # six-owner schema campaign the price of the feature.
-        citizens = [c for c in active_citizens() if c["source"].startswith(_PROJECTS_DIR_NAME + "/")]
+        citizens = [c for c in active_citizens() if c["source"].startswith("projects/")]
         assert citizens, "no projects/ citizen on this machine - the pin proved nothing"
         for citizen in citizens:
             assert declared_residency(citizen["path"]) == RESIDENCY_RESIDENT, citizen

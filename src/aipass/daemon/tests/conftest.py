@@ -1,11 +1,14 @@
 # ===================AIPASS====================
 # META DATA HEADER
 # Name: tests/conftest.py
-# Date: 2025-11-08
-# Version: 1.0.0
+# Description: Shared pytest fixtures for daemon tests - host-state seals, sentinels, console pin
+# Version: 1.1.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: daemon/tests
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.1.0 (2026-09-27): Console width pin + command-state reset (item 20); catches log; unused fixtures removed
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 #
 # CODE STANDARDS:
@@ -17,6 +20,7 @@
 """Shared pytest fixtures for daemon tests"""
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -33,11 +37,15 @@ from pathlib import Path
 from typing import Generator
 from unittest.mock import MagicMock, patch
 
+from aipass.cli.apps.modules import console, err_console, reset_command_state
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.modules import timer_install
 from aipass.daemon.apps.handlers.schedule import command_job as command_job_mod
 from aipass.daemon.apps.handlers.schedule import recovery as recovery_mod
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
+from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, discover_jobs
+
+logger = logging.getLogger(__name__)
 
 # The two units the scheduler runs on. Named here because both the seal and the
 # host-state snapshot need them and a second spelling is a second thing to drift.
@@ -87,9 +95,12 @@ def _systemctl(*args: str) -> tuple:
     very different facts and only one of them is worth restoring.
     """
     try:
-        result = subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True, timeout=15)
+        result = subprocess.run(
+            ["systemctl", "--user", *args], capture_output=True, text=True, encoding="utf-8", timeout=15
+        )
         return True, result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.info("systemd --user unreachable for %s: %s", args, e)
         return False, ""
 
 
@@ -172,7 +183,8 @@ def _live_job_keys(path):
         return None
     try:
         return set(json.loads(path.read_text(encoding="utf-8")).get("jobs", {}))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("live runstate %s unreadable, sentinel stands down: %s", path, e)
         return None
 
 
@@ -231,17 +243,17 @@ def _live_wake_prompts() -> dict:
     """Every citizen's live wake transcript, keyed by path. Missing files are None."""
     prompts = {}
     try:
-        from aipass.daemon.apps.handlers.schedule.discovery import active_citizens
-
         citizens = active_citizens()
-    except (ImportError, OSError):
+    except OSError as e:
+        logger.warning("cannot list citizens for the wake-prompt sentinel: %s", e)
         return prompts
 
     for citizen in citizens:
         f = Path(citizen["path"]) / ".daemon" / WAKE_PROMPT_FILE
         try:
             prompts[str(f)] = f.read_text(encoding="utf-8") if f.exists() else None
-        except OSError:
+        except OSError as e:
+            logger.warning("cannot read live wake prompt %s: %s", f, e)
             prompts[str(f)] = None
     return prompts
 
@@ -271,7 +283,8 @@ def _branch_wake_prompt_sentinel():
     live_copy = runstate_mod.RUNSTATE_FILE.parent / WAKE_PROMPT_FILE
     try:
         daemons_own = live_copy.read_text(encoding="utf-8") if live_copy.exists() else None
-    except OSError:
+    except OSError as e:
+        logger.warning("cannot read daemon's own wake prompt %s: %s", live_copy, e)
         daemons_own = None
 
     escaped = [path for path, text in after.items() if before.get(path) != text and text != daemons_own]
@@ -315,10 +328,9 @@ def _runstate_sentinel():
         return
 
     try:
-        from aipass.daemon.apps.handlers.schedule.discovery import discover_jobs
-
         real = {runstate_mod.job_key(j["owner"], j["id"]) for j in discover_jobs()}
-    except (ImportError, OSError):
+    except OSError as e:
+        logger.warning("cannot ask the fleet for its jobs, holding the pre-suite roster: %s", e)
         real = before  # cannot ask the fleet; hold the pre-suite roster as truth
 
     invented = after - before - real
@@ -370,48 +382,25 @@ def _host_state_sentinel():
     )
 
 
-@pytest.fixture
-def timer_host_state():
-    """Snapshot/restore for a test that DELIBERATELY reaches the live timer.
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Pin the product's consoles to one width for the whole run.
 
-    Opt-in, and the only sanctioned way to write such a test. Records the state
-    before, hands the snapshot to the test, and in a finally puts back exactly
-    what it recorded — then asserts the restore actually matched, because a
-    restore nobody checked is a hope.
-
-    Idempotent by construction: it restores TO A RECORDED STATE rather than
-    toggling, so running it twice leaves the host the same as running it once.
-    Yields None where systemd is unreachable, so a test can skip itself.
-
-    No test in this suite needs it today — the router pins run sealed instead.
-    It lands as the contract for the next test that genuinely must exercise the
-    real verb, so that test has somewhere safe to stand.
+    Every daemon module prints through aipass.cli.apps.modules' console (and
+    error() through err_console). Rich sizes an unpinned console on every print:
+    80 columns on POSIX and 79 on Windows under pytest's capture, the terminal's
+    width under -s, COLUMNS when exported. A line that wraps on one OS and not
+    another turns a substring assertion into a coin toss (test template v1 item 20).
     """
-    before = _host_timer_snapshot()
-    if not before.get("available"):
-        yield None
-        return
-    try:
-        yield before
-    finally:
-        for name in _TIMER_UNITS:
-            live = _LIVE_UNIT_DIR / name
-            should_exist = name in before["files"]
-            if should_exist and not live.exists():
-                shutil.copy2(Path(timer_install._DAEMON_ROOT) / name, live)
-            elif not should_exist and live.exists():
-                live.unlink()
-        _systemctl("daemon-reload")
-        if before["enabled"] == "enabled":
-            _systemctl("enable", "daemon-tick.timer")
-        else:
-            _systemctl("disable", "daemon-tick.timer")
-        if before["active"] == "active":
-            _systemctl("start", "daemon-tick.timer")
-        else:
-            _systemctl("stop", "daemon-tick.timer")
-        restored = _host_timer_snapshot()
-        assert restored == before, f"timer_host_state failed to restore: {before} -> {restored}"
+    for product_console in (console, err_console):
+        product_console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    reset_command_state()
 
 
 @pytest.fixture(autouse=True)
@@ -454,20 +443,3 @@ def sample_test_data() -> dict:
     Customize this fixture for your module's needs
     """
     return {"test_key": "test_value", "sample_data": "example"}
-
-
-@pytest.fixture()
-def mock_json_handler() -> MagicMock:
-    """Standalone mock json_handler for isolation tests."""
-    handler = MagicMock()
-    handler.load_json = MagicMock(return_value={})
-    handler.save_json = MagicMock(return_value=True)
-    handler.ensure_json_exists = MagicMock(return_value=True)
-    handler.ensure_module_jsons = MagicMock(return_value=True)
-    # gettempdir(), not a literal /tmp: this stand-in is only ever compared
-    # against, never opened, but a POSIX literal is still a POSIX literal and
-    # the fleet runs a Windows job.
-    handler.get_json_path = MagicMock(return_value=Path(tempfile.gettempdir()) / "mock.json")
-    handler.validate_json_structure = MagicMock(return_value=True)
-    handler.log_operation = MagicMock(return_value=True)
-    return handler

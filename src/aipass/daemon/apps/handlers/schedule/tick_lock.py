@@ -3,7 +3,7 @@
 # Description: Single-instance lock for the scheduler tick
 # Version: 1.0.0
 # Created: 2026-09-08
-# Modified: 2026-09-08
+# Modified: 2026-09-27
 # =============================================
 
 """One tick at a time: the advisory lock the scheduler runs under.
@@ -28,6 +28,7 @@ answers False and the caller runs unlocked rather than refusing to tick at all �
 stated in the log, never silent.
 """
 
+import errno
 from typing import Optional
 
 from aipass.prax import logger
@@ -38,6 +39,10 @@ try:
 except ImportError:
     fcntl = None  # type: ignore[assignment]
     logger.info("[tick_lock] fcntl unavailable (Windows) — ticks run unlocked")
+
+# The errnos a non-blocking flock raises when ANOTHER holder has the lock. Only
+# these mean "a tick is already running"; any other OSError is a broken lock.
+_CONTENDED = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
 
 
 def available() -> bool:
@@ -55,6 +60,10 @@ def acquire(lock_path) -> Optional[object]:
 
     None is the ordinary answer, not an error: the previous tick is still
     working, and this one simply steps aside until the next timer fire.
+
+    Raises OSError when flock fails for any reason OTHER than contention
+    (EAGAIN/EWOULDBLOCK/EACCES) — e.g. ENOLCK or EBADF. Answering None there
+    would report "another tick is running" on every fire while no tick ever ran.
     """
     if fcntl is None:
         return None
@@ -63,8 +72,11 @@ def acquire(lock_path) -> Optional[object]:
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
-        logger.info("[tick_lock] Lock acquisition failed (another instance running): %s", e)
         handle.close()
+        if e.errno not in _CONTENDED:
+            logger.error("[tick_lock] Lock acquisition failed, not contention: %s", e)
+            raise
+        logger.info("[tick_lock] Lock acquisition failed (another instance running): %s", e)
         return None
 
     json_handler.log_operation("tick_lock_acquired", {"path": str(lock_path)})

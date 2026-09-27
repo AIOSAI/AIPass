@@ -3,10 +3,14 @@
 # Description: Tests for the timer_install module (systemd user timer installer)
 # Version: 1.0.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the timer_install module (systemd user timer installer)."""
+"""Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — shutil.copy2's metadata copy; the copied files are asserted on disk, not their mode bits
+# seedgo: no-test-needed(ruff) — that timer_install.py parses and imports; every test here imports it first
 
 import subprocess
 
@@ -19,9 +23,21 @@ from aipass.daemon.apps.modules.timer_install import (
     handle_command,
     HANDLED_COMMANDS,
     _run_systemctl,
-    _install,
-    _uninstall,
 )
+
+# install and uninstall are reached the way a user reaches them: through
+# handle_command, inside conftest's session-wide seal on _run_systemctl,
+# _UNIT_DIR and _STATE_DIR. A failed install is sys.exit(1) at the router.
+TI = "aipass.daemon.apps.modules.timer_install"
+
+
+def _units(directory: Path) -> tuple:
+    """Write the two unit files the installer copies, and return them."""
+    service = directory / "daemon-tick.service"
+    timer = directory / "daemon-tick.timer"
+    service.write_text("[Unit]\nDescription=tick service\n", encoding="utf-8")
+    timer.write_text("[Unit]\nDescription=tick timer\n", encoding="utf-8")
+    return service, timer
 
 
 class TestHandleCommand:
@@ -75,17 +91,25 @@ class TestRunSystemctl:
         assert _run_systemctl("start", "daemon-tick.timer") is False
 
     @patch("subprocess.run", side_effect=FileNotFoundError)
-    def test_systemctl_not_found(self, mock_run):
-        """Missing systemctl returns False."""
+    def test_systemctl_not_found(self, mock_run, capsys):
+        """Missing systemctl returns False and says systemd is not there."""
         assert _run_systemctl("status", "daemon-tick.timer") is False
+        said = "".join(capsys.readouterr())
+        assert "systemctl not found — systemd not available" in said, said
 
     @patch(
         "subprocess.run",
         side_effect=subprocess.TimeoutExpired(cmd="systemctl", timeout=15),
     )
-    def test_timeout(self, mock_run):
-        """Timed-out systemctl returns False."""
+    def test_timeout(self, mock_run, capsys):
+        """Timed-out systemctl returns False and names the timeout, not a missing systemd.
+
+        Mutant killed: the TimeoutExpired branch printing the not-found message.
+        """
         assert _run_systemctl("status", "daemon-tick.timer") is False
+        said = "".join(capsys.readouterr())
+        assert "systemctl timed out" in said, said
+        assert "not found" not in said, f"a timeout reported as a missing systemctl: {said}"
 
 
 class TestInstall:
@@ -109,80 +133,93 @@ class TestInstall:
 
     """Tests for the install flow."""
 
-    def test_install_missing_unit_file(self):
-        """Returns 1 when unit files are missing."""
-        with patch(
-            "aipass.daemon.apps.modules.timer_install._DAEMON_ROOT",
-            Path("/nonexistent"),
+    def test_install_missing_unit_file(self, tmp_path):
+        """install-timer exits 1 when the unit files are missing, and copies nothing."""
+        install_dir = tmp_path / "systemd"
+        with (
+            patch(f"{TI}._DAEMON_ROOT", tmp_path / "no_unit_files"),
+            patch(f"{TI}._UNIT_DIR", install_dir),
+            pytest.raises(SystemExit) as stopped,
         ):
-            result = _install()
-            assert result == 1
+            handle_command("install-timer", [])
+        assert stopped.value.code == 1
+        assert not install_dir.exists(), "a refused install must not create the unit directory"
 
-    @patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True)
-    @patch("shutil.copy2")
-    def test_install_success(self, mock_copy, mock_systemctl, tmp_path):
-        """Successful install copies files and calls systemctl 3 times."""
-        service = tmp_path / "daemon-tick.service"
-        timer = tmp_path / "daemon-tick.timer"
-        service.write_text("[Unit]\n")
-        timer.write_text("[Unit]\n")
+    @patch(f"{TI}._run_systemctl", return_value=True)
+    def test_install_success(self, mock_systemctl, tmp_path):
+        """A good install copies both units into the unit dir and runs reload, enable, start.
 
+        Mutant killed: the shutil.copy2 line in _install dropped (the copy was
+        mocked before, so nothing looked at the files).
+        """
+        service, timer = _units(tmp_path)
         install_dir = tmp_path / "systemd"
         install_dir.mkdir()
 
         with (
-            patch("aipass.daemon.apps.modules.timer_install._DAEMON_ROOT", tmp_path),
-            patch("aipass.daemon.apps.modules.timer_install._UNIT_DIR", install_dir),
+            patch(f"{TI}._DAEMON_ROOT", tmp_path),
+            patch(f"{TI}._UNIT_DIR", install_dir),
         ):
-            result = _install()
-            assert result == 0
-            assert mock_systemctl.call_count == 3
+            assert handle_command("install-timer", []) is True
+        for unit in (service, timer):
+            copied = install_dir / unit.name
+            assert copied.read_text(encoding="utf-8") == unit.read_text(encoding="utf-8"), unit.name
+        assert [c.args for c in mock_systemctl.call_args_list] == [
+            ("daemon-reload",),
+            ("enable", "daemon-tick.timer"),
+            ("start", "daemon-tick.timer"),
+        ]
 
-    @patch("aipass.daemon.apps.modules.timer_install._run_systemctl")
-    @patch("shutil.copy2")
-    def test_install_systemctl_fails(self, mock_copy, mock_systemctl, tmp_path):
-        """Returns 1 when systemctl fails."""
-        service = tmp_path / "daemon-tick.service"
-        timer = tmp_path / "daemon-tick.timer"
-        service.write_text("[Unit]\n")
-        timer.write_text("[Unit]\n")
+    @patch(f"{TI}._run_systemctl", return_value=False)
+    def test_install_systemctl_fails(self, mock_systemctl, tmp_path):
+        """install-timer exits 1 when systemctl fails, and stops at the first refusal.
 
+        Mutant killed: _install ignoring a failed daemon-reload and going on to enable.
+        """
+        _units(tmp_path)
         install_dir = tmp_path / "systemd"
         install_dir.mkdir()
 
-        mock_systemctl.return_value = False
-
         with (
-            patch("aipass.daemon.apps.modules.timer_install._DAEMON_ROOT", tmp_path),
-            patch("aipass.daemon.apps.modules.timer_install._UNIT_DIR", install_dir),
+            patch(f"{TI}._DAEMON_ROOT", tmp_path),
+            patch(f"{TI}._UNIT_DIR", install_dir),
+            pytest.raises(SystemExit) as stopped,
         ):
-            result = _install()
-            assert result == 1
+            handle_command("install-timer", [])
+        assert stopped.value.code == 1
+        mock_systemctl.assert_called_once_with("daemon-reload")
 
 
 class TestUninstall:
     """Tests for the uninstall flow."""
 
-    @patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True)
+    @patch(f"{TI}._run_systemctl", return_value=True)
     def test_uninstall_files_not_present(self, mock_systemctl, tmp_path):
-        """Returns 0 even when unit files are already absent."""
-        with patch("aipass.daemon.apps.modules.timer_install._UNIT_DIR", tmp_path):
-            result = _uninstall()
-            assert result == 0
+        """uninstall-timer succeeds even when the unit files are already absent, and still stops the timer.
 
-    @patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True)
+        Mutant killed: _uninstall's stop call dropped.
+        """
+        unit_dir = tmp_path / "units"
+        unit_dir.mkdir()
+        with patch(f"{TI}._UNIT_DIR", unit_dir):
+            assert handle_command("uninstall-timer", []) is True
+        # Nothing to remove is not a reason to leave the timer running.
+        assert [c.args for c in mock_systemctl.call_args_list] == [
+            ("stop", "daemon-tick.timer"),
+            ("disable", "daemon-tick.timer"),
+            ("daemon-reload",),
+        ]
+        assert list(unit_dir.iterdir()) == [], "an uninstall with nothing to remove must create nothing"
+
+    @patch(f"{TI}._run_systemctl", return_value=True)
     def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
-        """Removes unit files from the target directory."""
-        service = tmp_path / "daemon-tick.service"
-        timer = tmp_path / "daemon-tick.timer"
-        service.write_text("[Unit]\n")
-        timer.write_text("[Unit]\n")
+        """uninstall-timer removes both unit files from the unit directory."""
+        service, timer = _units(tmp_path)
 
-        with patch("aipass.daemon.apps.modules.timer_install._UNIT_DIR", tmp_path):
-            result = _uninstall()
-            assert result == 0
-            assert not service.exists()
-            assert not timer.exists()
+        with patch(f"{TI}._UNIT_DIR", tmp_path):
+            assert handle_command("uninstall-timer", []) is True
+        assert not service.exists()
+        assert not timer.exists()
 
 
 class TestNoRealHomeWrites:
@@ -215,23 +252,19 @@ class TestNoRealHomeWrites:
             if event == "os.mkdir" and args:
                 recorded.append(str(args[0]))
 
-        service = tmp_path / "daemon-tick.service"
-        timer = tmp_path / "daemon-tick.timer"
-        service.write_text("[Unit]\n")
-        timer.write_text("[Unit]\n")
+        _units(tmp_path)
         install_dir = tmp_path / "systemd"
         install_dir.mkdir()
         state_dir = tmp_path / "state"
 
         sys.addaudithook(watch)
         with (
-            patch("aipass.daemon.apps.modules.timer_install._DAEMON_ROOT", tmp_path),
-            patch("aipass.daemon.apps.modules.timer_install._UNIT_DIR", install_dir),
-            patch("aipass.daemon.apps.modules.timer_install._STATE_DIR", state_dir),
-            patch("aipass.daemon.apps.modules.timer_install._run_systemctl", return_value=True),
-            patch("shutil.copy2"),
+            patch(f"{TI}._DAEMON_ROOT", tmp_path),
+            patch(f"{TI}._UNIT_DIR", install_dir),
+            patch(f"{TI}._STATE_DIR", state_dir),
+            patch(f"{TI}._run_systemctl", return_value=True),
         ):
-            assert _install() == 0
+            assert handle_command("install-timer", []) is True
 
         # Scoped to the user's HOME STATE, deliberately, and not to "anything
         # outside tmp_path". A broader assertion also catches the prax/trigger/

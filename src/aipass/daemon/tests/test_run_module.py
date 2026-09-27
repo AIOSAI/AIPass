@@ -3,31 +3,38 @@
 # Description: Tests for the drone @daemon run module
 # Version: 1.2.0
 # Created: 2026-06-15
-# Modified: 2026-09-11
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the drone @daemon run module (decentralized scheduler tick)."""
+"""Tests for apps/modules/run.py — the decentralized scheduler tick behind drone @daemon run."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — fcntl's exclusive lock under tick_lock; its use is pinned in the blocked contract
+# seedgo: no-test-needed(ruff) — that run.py parses and imports; every test here imports it first
+
+import errno
 import json
 import os
+import re
+import select
 import signal
 import sys
-import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
+from contextlib import ExitStack
 from unittest.mock import patch
 
 import pytest
 
+import aipass.daemon as daemon_package
 from aipass.daemon.apps.handlers.schedule import command_job
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
-from aipass.daemon.apps.modules import run as run_mod
 from aipass.daemon.apps.modules.run import (
     run_tick,
     handle_command,
     OUTCOME_FAILED,
     OUTCOME_FIRED,
-    _fire_job,
     HANDLED_COMMANDS,
 )
 
@@ -128,6 +135,7 @@ class TestRunTick:
     @patch("aipass.daemon.apps.modules.run.discover_jobs")
     @patch("aipass.daemon.apps.modules.run.load_runstate", return_value={"jobs": {}})
     def test_failed_fire_counted(self, mock_rs, mock_discover, mock_fire, mock_save):
+        """Mutant killed: record_job_failure's call dropped from _tick_body's failed branch."""
         mock_discover.return_value = [
             {
                 "owner": "@commons",
@@ -141,6 +149,12 @@ class TestRunTick:
         results = run_tick()
         assert results["failed"] == 1
         assert results["fired"] == 0
+        # The failure is written, not just counted: the save carries the row
+        # with the fire's own error. Without the record the count holds and the row is gone.
+        saved = mock_save.call_args.args[0]
+        row = saved["jobs"]["@commons/test"]
+        assert row["last_status"] == "failed", row
+        assert row["last_error"] == "wake failed", row
 
 
 # ── orphan prune persistence (DPLAN-0287 piece 3) ────
@@ -244,7 +258,21 @@ class TestPrunePersistence:
 
 
 class TestRotationDelegation:
-    def test_rotation_job_goes_to_the_rotation_module(self):
+    """Through the tick: a due job is fired by run_tick, the way drone @daemon run fires it."""
+
+    def _tick(self, job, runstate, *seams):
+        with ExitStack() as stack:
+            stack.enter_context(patch(f"{RUN}.discover_jobs", return_value=[job]))
+            stack.enter_context(patch(f"{RUN}.load_runstate", return_value=runstate))
+            stack.enter_context(patch(f"{RUN}.is_job_due", return_value=True))
+            stack.enter_context(patch(f"{RUN}.missed_window", return_value=False))
+            stack.enter_context(patch(f"{RUN}.save_runstate", return_value=True))
+            for seam in seams:
+                stack.enter_context(seam)
+            return run_tick()
+
+    def test_rotation_job_goes_to_the_rotation_module(self, caplog):
+        """Mutants killed: _fire_job mapping rotation's ok=True onto OUTCOME_FAILED; header= not passed on."""
         job = {
             "owner": "@daemon",
             "id": "rounds",
@@ -254,21 +282,32 @@ class TestRotationDelegation:
             "prompt": "ROUNDS for {branch}.",
         }
         runstate = {"jobs": {}}
-        # fire_rotation keeps its own (ok, detail) answer; _fire_job maps it onto
-        # the three-state outcome the tick loop now reads.
-        with patch(f"{RUN}.fire_rotation", return_value=(True, "woke @backup")) as mock_rotation:
-            outcome, detail = _fire_job(job, runstate)
-        assert outcome == OUTCOME_FIRED
-        assert detail == "woke @backup"
-        mock_rotation.assert_called_once_with(job, runstate, header="")
-
-    def test_ordinary_job_never_touches_the_rotation(self):
+        # fire_rotation keeps its own (ok, detail) answer; the tick maps it onto
+        # the three-state outcome and counts a fire.
         with (
-            patch(f"{RUN}.fire_rotation") as mock_rotation,
-            patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("no wake")),
+            patch(f"{RUN}.fire_rotation", return_value=(True, "woke @backup")) as mock_rotation,
+            caplog.at_level("INFO"),
         ):
-            outcome, _detail = _fire_job(live_job(), {"jobs": {}})
-        assert outcome == OUTCOME_FAILED
+            results = self._tick(job, runstate)
+        assert (results["fired"], results["failed"], results["blocked"]) == (1, 0, 0)
+        assert "[run] Fired @daemon/rounds: woke @backup" in caplog.text
+        mock_rotation.assert_called_once()
+        assert mock_rotation.call_args.args == (job, runstate)
+        # The never-run row reads "Last run never": the header is the tick's scheduled_header, handed on whole.
+        assert mock_rotation.call_args.kwargs["header"].startswith("Scheduled wake: rounds, window 05:00, fired ")
+        assert "Last run never" in mock_rotation.call_args.kwargs["header"]
+        assert runstate["jobs"]["@daemon/rounds"]["last_status"] == "success"
+
+    def test_ordinary_job_never_touches_the_rotation(self, telegram):
+        runstate = {"jobs": {}}
+        with patch(f"{RUN}.fire_rotation") as mock_rotation:
+            results = self._tick(
+                live_job(),
+                runstate,
+                patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("no wake")),
+            )
+        assert (results["fired"], results["failed"]) == (0, 1)
+        assert runstate["jobs"]["@commons/live"]["last_error"] == "no wake"
         mock_rotation.assert_not_called()
 
 
@@ -566,25 +605,46 @@ def command_job_dict(branch_dir, command="drone @daemon --help", **extra) -> dic
 
 
 def pid_gone(pid: int, within: float = 5.0) -> bool:
-    """True once *pid* is dead. A zombie waiting for its new parent to reap it counts as dead.
+    """True once *pid* has exited (a zombie waiting for its new parent to reap it counts).
 
-    POSIX only, and its one caller is skipped elsewhere: signal 0 probes a process
-    on POSIX, but on Windows os.kill TERMINATES it, so the probe is guarded.
+    Waits on the exit itself, not on a clock: a pidfd (Linux) or a kqueue NOTE_EXIT
+    (BSD, macOS) turns readable the moment the process ends, and the wait gives up
+    at *within*. Linux and macOS only (its one caller is skipped elsewhere); any
+    other platform raises rather than answering from a guess.
     """
-    deadline = time.monotonic() + within
-    while time.monotonic() < deadline:
-        if os.name == "posix":
+    if sys.platform == "linux":
+        try:
+            fd = os.pidfd_open(pid)
+        except ProcessLookupError:
+            return True
+        try:
+            ready, _, _ = select.select([fd], [], [], within)
+            return bool(ready)
+        finally:
+            os.close(fd)
+    if sys.platform == "darwin":
+        queue = select.kqueue()
+        try:
+            watch = select.kevent(
+                pid,
+                filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ONESHOT,
+                fflags=select.KQ_NOTE_EXIT,
+            )
             try:
-                os.kill(pid, 0)
+                events = queue.control([watch], 1, within)
             except ProcessLookupError:
                 return True
-        stat = f"/proc/{pid}/stat"
-        if os.path.exists(stat):
-            with open(stat, encoding="utf-8") as f:
-                if f.read().rsplit(")", 1)[-1].split()[0] == "Z":
+            # A registration error comes back as an EV_ERROR event, not a raise:
+            # ESRCH means the process was already gone; anything else is a real error.
+            if events and events[0].flags & select.KQ_EV_ERROR:
+                if events[0].data == errno.ESRCH:
                     return True
-        time.sleep(0.1)
-    return False
+                raise OSError(events[0].data, "kevent registration failed")
+            return bool(events)
+        finally:
+            queue.close()
+    raise RuntimeError(f"pid_gone has no exit notifier on {sys.platform}")
 
 
 def kill_quietly(pid: int) -> None:
@@ -696,7 +756,7 @@ class TestRunCommand:
         launcher, _ = fake_drone(tmp_path, program)
         monkeypatch.setattr(command_job, "LAUNCHER", launcher)
         result = command_job.run_command("drone @daemon --help", tmp_path, 1)
-        grandchild = int(pidfile.read_text())
+        grandchild = int(pidfile.read_text(encoding="utf-8"))
         try:
             assert result.timed_out is True
             assert pid_gone(grandchild), f"grandchild {grandchild} outlived the timeout"
@@ -715,7 +775,7 @@ class TestRunCommand:
         launcher, _ = fake_drone(tmp_path, program)
         monkeypatch.setattr(command_job, "LAUNCHER", launcher)
         result = command_job.run_command("drone @daemon --help", tmp_path, 10)
-        background = int(pidfile.read_text())
+        background = int(pidfile.read_text(encoding="utf-8"))
         try:
             assert result.ok, f"exit 0 reported as {result}"
             assert result.duration < 5, f"returned after {result.duration:.1f}s — it waited on the background child"
@@ -770,12 +830,24 @@ class TestRunCommand:
 
 class TestCommandJobFire:
     def _fire(self, tmp_path, monkeypatch, program, mail_exit=0, **extra):
+        """Fire one command job through run_tick. Mutant killed: a failure's detail replaced in _fire_command_job."""
         launcher, journal = fake_drone(tmp_path, program, mail_exit=mail_exit)
         monkeypatch.setattr(command_job, "LAUNCHER", launcher)
         branch = tmp_path / "branch"
         branch.mkdir()
         job = command_job_dict(branch, **extra)
-        outcome, detail = _fire_job(job, {"jobs": {}}, header="Scheduled wake: sweep")
+        # Through the tick, the way drone @daemon run fires it. The outcome is
+        # the tick's own count; a failure's detail is the error the row keeps.
+        runstate = {"jobs": {}}
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[job]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}.save_runstate", return_value=True),
+        ):
+            results = run_tick()
+        outcome = {(1, 0): OUTCOME_FIRED, (0, 1): OUTCOME_FAILED}.get((results["fired"], results["failed"]))
+        detail = runstate["jobs"]["@commons/sweep"].get("last_error")
         return outcome, detail, launches(journal), branch
 
     def test_exit_zero_is_fired_and_nobody_is_woken(
@@ -784,8 +856,8 @@ class TestCommandJobFire:
         with caplog.at_level("INFO"):
             outcome, detail, runs, _ = self._fire(tmp_path, monkeypatch, "print('4 files deleted')\n")
         assert outcome == OUTCOME_FIRED
-        assert detail.startswith("exit 0, ")
-        assert detail.endswith("— 4 files deleted")
+        assert detail is None, f"a pass keeps no error: {detail!r}"
+        assert re.search(r"\[run\] DONE @commons/sweep exit 0, \S+ — 4 files deleted", caplog.text), caplog.text
         no_wake.assert_not_called()
         assert [entry["argv"] for entry in runs] == [["@daemon", "--help"]]
         assert not (_seal_branch_wake_prompt / "last_wake_prompt.txt").exists(), "a command job files no wake prompt"
@@ -822,9 +894,12 @@ class TestCommandJobFire:
         no_wake.assert_not_called()
 
     def test_telegram_pings_on_start_and_on_finish(self, tmp_path, monkeypatch, telegram, no_wake):
-        _, detail, _, _ = self._fire(tmp_path, monkeypatch, "print('ok')\n")
+        self._fire(tmp_path, monkeypatch, "print('ok')\n")
         telegram["triggered"].assert_called_once_with("@commons", "sweep")
-        telegram["complete"].assert_called_once_with("@commons", "sweep", detail)
+        telegram["complete"].assert_called_once()
+        owner, job_id, done = telegram["complete"].call_args.args
+        assert (owner, job_id) == ("@commons", "sweep")
+        assert done.startswith("exit 0, ") and done.endswith("— ok"), done
         telegram["error"].assert_not_called()
 
     def test_telegram_names_a_failure(self, tmp_path, monkeypatch, telegram, no_wake):
@@ -839,6 +914,7 @@ class TestCommandJobFire:
             seam.assert_not_called()
 
     def test_notify_email_mails_start_and_finish_signed_daemon(self, tmp_path, monkeypatch, telegram, no_wake):
+        """Mutant killed: run.py's _DAEMON_ROOT one level short (parents[1])."""
         notify = {"email": "@devpulse"}
         outcome, _, runs, branch = self._fire(tmp_path, monkeypatch, "print('4 deleted')\n", notify=notify)
         assert outcome == OUTCOME_FIRED
@@ -860,8 +936,11 @@ class TestCommandJobFire:
         assert finish_body.endswith("Output tail:\n4 deleted")
 
         # cwd is identity: the mails are signed @daemon, the command runs as its owner.
-        assert same_dir(runs[0]["cwd"], run_mod._DAEMON_ROOT)
-        assert same_dir(runs[2]["cwd"], run_mod._DAEMON_ROOT)
+        # The daemon's directory is read off the package, not off run.py's own
+        # constant, so a wrong root in run.py cannot agree with itself here.
+        daemon_dir = Path(daemon_package.__file__).parent
+        assert same_dir(runs[0]["cwd"], daemon_dir)
+        assert same_dir(runs[2]["cwd"], daemon_dir)
         assert same_dir(runs[1]["cwd"], branch)
         # A notify BLOCK is not a no: telegram keeps pinging under the same rule.
         telegram["triggered"].assert_called_once()
@@ -996,11 +1075,11 @@ _DUE_CASES = [
 
 class TestCatchUpUntouched:
     @pytest.mark.parametrize("schedule,row,now,due", _DUE_CASES)
-    def test_a_command_job_is_due_exactly_when_a_wake_job_is(self, schedule, row, now, due):
+    def test_a_command_job_is_due_exactly_when_a_wake_job_is(self, schedule, row, now, due, tmp_path):
         at = datetime.fromisoformat(now)
         runstate = {"jobs": {"@commons/live": dict(row)}}
         wake_job = {**live_job(), "schedule": schedule}
-        cmd_job = command_job_dict("/unused", id="live", schedule=schedule)
+        cmd_job = command_job_dict(tmp_path, id="live", schedule=schedule)
         assert runstate_mod.is_job_due(wake_job, runstate, at) is due
         assert runstate_mod.is_job_due(cmd_job, runstate, at) is due
         assert runstate_mod.is_catch_up_fire(cmd_job, runstate, at) == runstate_mod.is_catch_up_fire(
@@ -1012,9 +1091,9 @@ class TestCatchUpUntouched:
         verdicts = [case[3] for case in _DUE_CASES]
         assert verdicts.count(True) >= 4 and verdicts.count(False) >= 4, verdicts
 
-    def test_an_interval_command_job_is_slot_seeded_like_any_other(self):
+    def test_an_interval_command_job_is_slot_seeded_like_any_other(self, tmp_path):
         schedule = {"type": "interval", "interval_minutes": 10080, "slot": "2026-09-14T04:00:00"}
-        cmd_job = command_job_dict("/unused", schedule=schedule)
+        cmd_job = command_job_dict(tmp_path, schedule=schedule)
         runstate = {"jobs": {}}
         assert runstate_mod.needs_slot_seed(cmd_job, runstate) is True
         assert runstate_mod.seed_interval_slot(runstate, cmd_job, datetime(2026, 9, 11, 13, 0)) is not None

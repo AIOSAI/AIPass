@@ -1,19 +1,26 @@
 # =================== AIPass ====================
 # Name: test_scheduler_bot.py
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-06-25
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for TDPLAN-0008 Phase 1: status capture, queue view, lifecycle notifications, archive."""
+"""Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
 
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/queue.py, apps/modules/run.py and telegram_notifier.py parse
+# seedgo: no-test-needed(generated) — _print_rich_table's column layout; only the --json contract is frozen
+
+import importlib.util
+import json
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 
+from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
 from aipass.daemon.apps.handlers.schedule.runstate import (
     update_job_runstate,
     record_job_failure,
@@ -23,12 +30,11 @@ from aipass.daemon.apps.handlers.schedule.telegram_notifier import (
     notify_complete,
     notify_error,
 )
-from aipass.daemon.apps.modules.queue import (
-    _build_queue,
-    _build_json_output,
-    _schedule_human,
-    handle_command,
-)
+from aipass.daemon.apps.modules import queue as queue_mod
+from aipass.daemon.apps.modules.actions import handle_command as act_cmd
+from aipass.daemon.apps.modules.queue import handle_command
+from aipass.daemon.apps.modules.run import OUTCOME_FIRED, run_tick
+from aipass.daemon.apps.modules.schedule import handle_command as sched_cmd
 
 
 # ── Fixtures ──────────────────────────────────────────
@@ -60,6 +66,15 @@ def interval_job():
     }
 
 
+def _queue_json(monkeypatch, capsys, jobs, runstate):
+    """What `drone @daemon queue --json` prints for these jobs and this runstate, parsed."""
+    monkeypatch.setattr(queue_mod, "discover_jobs", lambda: jobs)
+    monkeypatch.setattr(queue_mod, "load_runstate", lambda: runstate)
+    capsys.readouterr()
+    assert handle_command("queue", ["--json"]) is True
+    return json.loads(capsys.readouterr().out)
+
+
 # ── Test 1: once job fires on due_date, then marks completed ───
 
 
@@ -76,8 +91,8 @@ class TestOnceJobLifecycle:
         assert entry["last_success_at"] is not None
         assert entry["last_error"] is None
 
-    def test_completed_once_excluded_from_queue(self, once_job):
-        """Completed once jobs are filtered out of the queue view."""
+    def test_completed_once_excluded_from_queue(self, once_job, monkeypatch, capsys):
+        """Completed once jobs are filtered out of the queue view. Mutant killed: the completed skip removed."""
         runstate = {
             "jobs": {
                 "@api/data-check": {
@@ -86,8 +101,7 @@ class TestOnceJobLifecycle:
                 }
             }
         }
-        entries = _build_queue([once_job], runstate)
-        assert len(entries) == 0
+        assert _queue_json(monkeypatch, capsys, [once_job], runstate)["jobs"] == []
 
 
 # ── Test 2: fire emits notify_triggered then notify_complete; failed emits notify_error ──
@@ -173,21 +187,17 @@ class TestRunstateStatusCapture:
 class TestQueueJsonSchema:
     """Verify queue --json output matches the frozen contract."""
 
-    def test_schema_structure(self, interval_job):
-        """JSON output has generated_at, count, jobs array."""
-        runstate = {"jobs": {}}
-        entries = _build_queue([interval_job], runstate)
-        output = _build_json_output(entries)
+    def test_schema_structure(self, interval_job, monkeypatch, capsys):
+        """JSON output has generated_at, count, jobs array. Mutant killed: count pinned to 0."""
+        output = _queue_json(monkeypatch, capsys, [interval_job], {"jobs": {}})
         assert "generated_at" in output
         assert "count" in output
         assert isinstance(output["jobs"], list)
         assert output["count"] == len(output["jobs"])
 
-    def test_job_fields(self, interval_job):
+    def test_job_fields(self, interval_job, monkeypatch, capsys):
         """Each job in output has all frozen-schema fields."""
-        runstate = {"jobs": {}}
-        entries = _build_queue([interval_job], runstate)
-        job_out = entries[0]
+        job_out = _queue_json(monkeypatch, capsys, [interval_job], {"jobs": {}})["jobs"][0]
         required_fields = [
             "owner",
             "id",
@@ -208,29 +218,40 @@ class TestQueueJsonSchema:
         for field in required_fields:
             assert field in job_out, f"Missing field: {field}"
 
-    def test_a_command_job_previews_its_command_in_the_same_schema(self, interval_job):
+    def test_a_command_job_previews_its_command_in_the_same_schema(self, interval_job, monkeypatch, capsys):
         """DPLAN-0338: a command job has no prompt, so the preview names what it runs. Keys unchanged."""
         command = {key: value for key, value in interval_job.items() if key != "prompt"}
         command.update(id="sweep", command="drone rm --stale 10d ../..", branch_path="unused", wake={})
-        wake_entry, command_entry = _build_queue([interval_job, command], {"jobs": {}})
+        wake_entry, command_entry = _queue_json(monkeypatch, capsys, [interval_job, command], {"jobs": {}})["jobs"]
         assert command_entry["prompt_preview"] == "command: drone rm --stale 10d ../.."
         assert set(command_entry) == set(wake_entry), "a command job may not change the frozen schema's keys"
 
-    def test_type_values(self, once_job, interval_job):
-        """Type field matches schedule type."""
-        runstate = {"jobs": {}}
-        once_entries = _build_queue([once_job], runstate)
-        assert once_entries[0]["type"] == "once"
-        interval_entries = _build_queue([interval_job], runstate)
-        assert interval_entries[0]["type"] == "interval"
+    def test_type_values(self, once_job, interval_job, monkeypatch, capsys):
+        """Type field matches schedule type. Mutant killed: type pinned to "interval"."""
+        once_entry, interval_entry = _queue_json(monkeypatch, capsys, [once_job, interval_job], {"jobs": {}})["jobs"]
+        assert once_entry["type"] == "once"
+        assert interval_entry["type"] == "interval"
 
-    def test_schedule_human_formats(self):
-        """schedule_human renders each type correctly."""
-        assert _schedule_human({"schedule": {"type": "once", "due_date": "2026-07-02"}}) == "2026-07-02"
-        assert _schedule_human({"schedule": {"type": "daily", "time": "04:00"}}) == "daily @ 04:00"
-        assert _schedule_human({"schedule": {"type": "hourly", "time": "30"}}) == "hourly @ :30"
-        assert _schedule_human({"schedule": {"type": "interval", "interval_minutes": 120}}) == "every 2h"
-        assert _schedule_human({"schedule": {"type": "interval", "interval_minutes": 30}}) == "every 30m"
+    def test_schedule_human_formats(self, interval_job, monkeypatch, capsys):
+        """schedule_human renders each type correctly. Mutant killed: hourly drops its colon."""
+        schedules = {
+            "once": {"type": "once", "due_date": "2026-07-02"},
+            "daily": {"type": "daily", "time": "04:00"},
+            "hourly": {"type": "hourly", "time": "30"},
+            "two-hours": {"type": "interval", "interval_minutes": 120},
+            "half-hour": {"type": "interval", "interval_minutes": 30},
+        }
+        jobs = [dict(interval_job, id=job_id, schedule=schedule) for job_id, schedule in schedules.items()]
+        rendered = {
+            row["id"]: row["schedule_human"] for row in _queue_json(monkeypatch, capsys, jobs, {"jobs": {}})["jobs"]
+        }
+        assert rendered == {
+            "once": "2026-07-02",
+            "daily": "daily @ 04:00",
+            "hourly": "hourly @ :30",
+            "two-hours": "every 2h",
+            "half-hour": "every 30m",
+        }
 
 
 # ── Test 5: empty tick emits ZERO telegram calls ──
@@ -243,8 +264,6 @@ class TestEmptyTickNoNotify:
     @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
     def test_no_jobs_no_send(self, mock_send, mock_discover):
         """Empty tick with no discovered jobs makes zero telegram calls."""
-        from aipass.daemon.apps.modules.run import run_tick
-
         run_tick(dry_run=True)
         mock_send.assert_not_called()
 
@@ -253,8 +272,6 @@ class TestEmptyTickNoNotify:
     @patch("aipass.daemon.apps.handlers.schedule.telegram_notifier._send")
     def test_no_due_jobs_no_send(self, mock_send, mock_rs, mock_discover):
         """Tick with jobs but none due makes zero telegram calls."""
-        from aipass.daemon.apps.modules.run import run_tick
-
         mock_discover.return_value = [
             {
                 "owner": "@commons",
@@ -289,11 +306,9 @@ class TestFailSoft:
         side_effect=Exception("connection refused"),
     )
     def test_exception_caught(self, mock_notifier):
-        """Exception in send_telegram_notification is caught, returns False."""
-        from aipass.daemon.apps.handlers.schedule.telegram_notifier import _send
-
-        result = _send("test message")
-        assert result is False
+        """Exception in send_telegram_notification is caught, returns False. Mutant killed: _send re-raises."""
+        assert notify_triggered("@x", "y") is False
+        mock_notifier.assert_called_once()
 
     @patch("aipass.daemon.apps.modules.run.save_runstate")
     @patch("aipass.daemon.apps.modules.run.record_job_failure")
@@ -301,26 +316,26 @@ class TestFailSoft:
     @patch("aipass.daemon.apps.modules.run.discover_jobs")
     @patch("aipass.daemon.apps.modules.run.load_runstate", return_value={"jobs": {}})
     def test_fire_continues_when_notify_fails(self, mock_rs, mock_discover, mock_update, mock_fail, mock_save):
-        """Job fires and records status even when telegram is down."""
-        from aipass.daemon.apps.modules.run import run_tick
-
+        """Job fires and records status even when telegram is down. Mutant killed: owner and id swapped."""
+        schedule = {"type": "interval", "interval_minutes": 1}
         mock_discover.return_value = [
             {
                 "owner": "@commons",
                 "id": "test",
                 "enabled": True,
-                "schedule": {"type": "interval", "interval_minutes": 1},
+                "schedule": schedule,
                 "wake": {"fresh": True},
                 "prompt": "test",
                 "notify": True,
             }
         ]
 
-        from aipass.daemon.apps.modules.run import OUTCOME_FIRED
-
         with patch("aipass.daemon.apps.modules.run._fire_job", return_value=(OUTCOME_FIRED, "")):
             results = run_tick()
             assert results["fired"] == 1
+        mock_update.assert_called_once_with(ANY, "@commons", "test", schedule, caught_up=ANY)
+        mock_fail.assert_not_called()
+        mock_save.assert_called()
 
 
 # ── Test 7: dormant registries archived ──
@@ -337,13 +352,11 @@ class TestDormantArchived:
 
     def test_task_registry_not_importable(self):
         """task_registry handler is gone from the live import path."""
-        with pytest.raises(ImportError):
-            from aipass.daemon.apps.handlers.schedule.task_registry import load_tasks  # type: ignore[import-not-found] # noqa: F401
+        assert importlib.util.find_spec("aipass.daemon.apps.handlers.schedule.task_registry") is None
 
     def test_actions_registry_not_importable(self):
         """actions_registry handler is gone from the live import path."""
-        with pytest.raises(ImportError):
-            from aipass.daemon.apps.handlers.actions.actions_registry import load_registry  # type: ignore[import-not-found] # noqa: F401
+        assert importlib.util.find_spec("aipass.daemon.apps.handlers.actions.actions_registry") is None
 
     def test_schedule_module_retired(self):
         """Bare `schedule` shows the migration notice; a retired subcommand refuses.
@@ -352,11 +365,6 @@ class TestDormantArchived:
         create test` did not create anything, and exiting 0 told the caller's
         `&&` that it had (FPLAN-0492 wave 2b).
         """
-        import pytest
-
-        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
-        from aipass.daemon.apps.modules.schedule import handle_command as sched_cmd
-
         assert sched_cmd("schedule", []) is True
         with pytest.raises(UnknownArgument) as exc:
             sched_cmd("schedule", ["create", "test"])
@@ -364,11 +372,6 @@ class TestDormantArchived:
 
     def test_actions_module_retired(self):
         """Bare `actions` shows the migration notice; a retired subcommand refuses."""
-        import pytest
-
-        from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
-        from aipass.daemon.apps.modules.actions import handle_command as act_cmd
-
         assert act_cmd("actions", []) is True
         with pytest.raises(UnknownArgument) as exc:
             act_cmd("actions", ["list"])

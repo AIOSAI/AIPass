@@ -1,15 +1,21 @@
 # =================== AIPass ====================
 # Name: test_rotation.py
 # Description: Tests for the steward rotation handler and module
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2026-08-12
-# Modified: 2026-09-19
+# Modified: 2026-09-27
 # =============================================
 
-"""Tests for the nightly rounds (DPLAN-0287, switched on by DPLAN-0337 R2)."""
+"""Tests for apps/modules/rotation.py and handlers/schedule/rotation.py — the nightly rounds (DPLAN-0287)."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(external) — wake_branch's own spawn and the scheduled lane itself; @ai_mail's dispatch tests
+# seedgo: no-test-needed(constant) — print_introspection()'s panel text; only the help's usage line is pinned here
 
 import inspect
 import json
+import shutil
+from contextlib import ExitStack
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -33,7 +39,8 @@ from aipass.daemon.apps.handlers.schedule.rotation import (
     render_prompt,
 )
 from aipass.daemon.apps.handlers.schedule import runstate as runstate_mod
-from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, framework_root
+from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
+from aipass.daemon.apps.handlers.schedule.discovery import active_citizens, discover_jobs, framework_root
 from aipass.daemon.apps.modules import rotation as rotation_module
 from aipass.daemon.apps.modules import run as run_module
 
@@ -127,6 +134,24 @@ class FakeStatus:
 
     def __init__(self, summary: str):
         self.summary = summary
+
+
+def rotation_json(capsys, roster, jobs=(), runstate=None, lane=True, real_blocklist=False) -> dict:
+    """The payload `drone @daemon rotation --json` prints for this roster, jobs and runstate.
+
+    lane=None leaves ai_mail's live signature probe unpatched; real_blocklist
+    leaves the live wake blocklist filter in place.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(patch(f"{MODULE}.find_rotation_jobs", return_value=list(jobs)))
+        stack.enter_context(patch(f"{MODULE}.load_runstate", return_value=runstate or {}))
+        stack.enter_context(patch(f"{MODULE}.build_roster", return_value=roster))
+        if not real_blocklist:
+            stack.enter_context(patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r))
+        if lane is not None:
+            stack.enter_context(patch(f"{MODULE}._scheduled_lane_available", return_value=lane))
+        assert rotation_module.handle_command("rotation", ["--json"]) is True
+    return json.loads(capsys.readouterr().out)
 
 
 # ── build_roster ──────────────────────────────────────
@@ -368,32 +393,44 @@ class TestFireRotation:
 
 
 class TestManagerLane:
+    @staticmethod
+    def _fire(target, runstate, **wake):
+        """One rounds night for a one-entry roster, ai_mail's wake_branch replaced by `wake`."""
+        with (
+            patch(f"{MODULE}.build_roster", return_value=[target]),
+            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
+            patch(f"{MODULE}._scheduled_lane_available", return_value=True),
+            patch(WAKE_SEAM, **wake) as mock_wake,
+        ):
+            ok, detail = rotation_module.fire_rotation(rotation_job(), runstate)
+        return ok, detail, mock_wake
+
     def test_manager_target_asks_for_the_scheduled_lane(self):
+        """Mutant killed: _wake_steward never sets scheduled=True."""
+        runstate = {}
         target = {"email": "@baud", "citizen_class": "manager"}
-        fake = FakeStatus("woken")
-        with patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", return_value=(fake, True)) as mock_wake:
-            ok, _detail, errored = rotation_module._wake_steward(target, "prompt", "sonnet", True)
-        assert ok is True
-        assert errored is False
+        ok, detail, mock_wake = self._fire(target, runstate, return_value=(FakeStatus("woken"), True))
+        assert (ok, detail) == (True, "woken")
+        assert get_rotation_state(runstate, "@daemon/rounds")["history"][0]["outcome"] == OUTCOME_WOKEN
         assert mock_wake.call_args.kwargs["scheduled"] is True
         assert mock_wake.call_args.kwargs["wake_back"] is False, "the manager lane declines the wake-back too"
 
     def test_non_manager_target_uses_the_ordinary_path(self):
+        """Mutant killed: _wake_steward asks for the scheduled lane for every target."""
         target = {"email": "@commons", "citizen_class": "aipass_framework"}
-        fake = FakeStatus("woken")
-        with patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", return_value=(fake, True)) as mock_wake:
-            rotation_module._wake_steward(target, "prompt", "sonnet", True)
+        _ok, _detail, mock_wake = self._fire(target, {}, return_value=(FakeStatus("woken"), True))
+        assert mock_wake.call_args.args == ("@commons",)
         assert "scheduled" not in mock_wake.call_args.kwargs
 
     def test_wake_exception_is_reported_not_raised(self):
+        """Mutant killed: _wake_steward reports a wake exception as errored=False (a miss)."""
+        runstate = {}
         target = {"email": "@commons", "citizen_class": "aipass_framework"}
-        with patch("aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch", side_effect=RuntimeError("boom")):
-            ok, detail, errored = rotation_module._wake_steward(target, "prompt", "sonnet", True)
-        assert ok is False
-        assert errored is True
-        assert "boom" in detail
+        ok, detail, _mock = self._fire(target, runstate, side_effect=RuntimeError("boom"))
+        assert (ok, detail) == (False, "wake error for @commons: boom")
+        assert get_rotation_state(runstate, "@daemon/rounds")["history"][0]["outcome"] == OUTCOME_FAILED
 
-    def test_lane_probe_reads_the_live_signature(self):
+    def test_lane_probe_reads_the_live_signature(self, capsys):
         """The probe answers True because ai_mail's wake_branch really takes `scheduled`.
 
         Was `in (True, False)` — true of every bool, so it survived any
@@ -401,12 +438,11 @@ class TestManagerLane:
         ai_mail's lane appears or disappears, so it pins the live answer and the
         parameter that produces it. If wake_branch loses `scheduled`, rotation
         starts skipping every manager steward by name (rotation.py line 203) and
-        both halves of this go red together.
+        both halves of this go red together. Read through `rotation --json`.
+        Mutant killed: _scheduled_lane_available probes a parameter name wake_branch lacks.
         """
-        from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-
         assert "scheduled" in inspect.signature(wake_branch).parameters
-        assert rotation_module._scheduled_lane_available() is True
+        assert rotation_json(capsys, [], lane=None)["manager_lane_available"] is True
 
     def test_wake_back_is_a_live_keyword_of_wake_branch(self):
         """Our wake_back=False is only safe while ai_mail's wake_branch takes it.
@@ -415,8 +451,6 @@ class TestManagerLane:
         _wake_steward and recorded as a failed turn at 05:00. This pin makes the
         suite say so first. Keyword-only with a True default is FPLAN-0541's shape.
         """
-        from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-
         param = inspect.signature(wake_branch).parameters["wake_back"]
         assert param.kind is inspect.Parameter.KEYWORD_ONLY
         assert param.default is True
@@ -432,29 +466,25 @@ class TestRotationCommand:
     def test_rejects_unknown(self):
         assert rotation_module.handle_command("unknown", []) is False
 
-    def test_help_flag(self):
-        assert rotation_module.handle_command("rotation", ["--help"]) is True
+    def test_help_flag(self, capsys):
+        """Mutant killed: --help prints and then falls through to the status view."""
+        with patch(f"{MODULE}.find_rotation_jobs") as find:
+            assert rotation_module.handle_command("rotation", ["--help"]) is True
+        assert "drone @daemon rotation --json" in capsys.readouterr().out
+        find.assert_not_called()
 
-    def test_status_reports_next_target(self, roster):
+    def test_status_reports_next_target(self, roster, capsys):
+        """Mutant killed: _build_status ignores the runstate's last_target."""
         runstate = {ROTATION_STATE_KEY: {"@daemon/rounds": {"last_target": "@backup", "history": []}}}
-        with (
-            patch(f"{MODULE}.build_roster", return_value=roster),
-            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
-            patch(f"{MODULE}._scheduled_lane_available", return_value=False),
-        ):
-            status = rotation_module._build_status(rotation_job(), runstate)
+        status = rotation_json(capsys, roster, jobs=[rotation_job()], runstate=runstate, lane=False)
         assert status["next_target"] == "@commons"
         assert status["last_target"] == "@backup"
         assert status["roster_size"] == 2
         assert status["manager_lane_available"] is False
 
-    def test_status_without_a_rotation_job(self, roster):
-        with (
-            patch(f"{MODULE}.build_roster", return_value=roster),
-            patch(f"{MODULE}._apply_wake_blocklist", side_effect=lambda r: r),
-            patch(f"{MODULE}._scheduled_lane_available", return_value=True),
-        ):
-            status = rotation_module._build_status(None, {})
+    def test_status_without_a_rotation_job(self, roster, capsys):
+        """Mutant killed: _build_status reports enabled=True with no job."""
+        status = rotation_json(capsys, roster, jobs=[])
         assert status["job_id"] is None
         assert status["enabled"] is False
         assert status["next_target"] == "@backup"
@@ -474,10 +504,11 @@ class TestRotationCommand:
         assert payload["job_id"] == "rounds"
         assert payload["next_target"] == "@backup"
 
-    def test_blocklist_filter_drops_blocked_branches(self, roster):
+    def test_blocklist_filter_drops_blocked_branches(self, roster, capsys):
+        """Mutant killed: _apply_wake_blocklist keeps a blocked entry."""
         with patch("aipass.ai_mail.apps.handlers.dispatch.wake.is_wake_blocked", side_effect=lambda e: e == "@backup"):
-            kept = rotation_module._apply_wake_blocklist(roster)
-        assert [c["email"] for c in kept] == ["@commons"]
+            status = rotation_json(capsys, roster, jobs=[rotation_job()], real_blocklist=True)
+        assert [c["email"] for c in status["roster"]] == ["@commons"]
 
     def test_find_rotation_jobs_filters_by_type(self):
         jobs = [rotation_job(), {"id": "x", "owner": "@a", "schedule": {"type": "daily"}, "prompt": "p"}]
@@ -524,10 +555,18 @@ class TestShippedRoundsJob:
         assert job["wake"] == {"fresh": True, "model": "opus"}
         assert job["config"] == {"include_managers": False}
 
-    def test_the_job_passes_discovery_validation(self):
-        from aipass.daemon.apps.handlers.schedule.discovery import _validate_job
-
-        assert _validate_job(shipped_rounds_job(), SCHEDULE_FILE) is True
+    def test_the_job_passes_discovery_validation(self, tmp_path):
+        # A temp tree holding only @daemon, its .daemon/ a copy of the shipped file.
+        daemon_dir = tmp_path / "src" / "aipass" / "daemon" / ".daemon"
+        daemon_dir.mkdir(parents=True)
+        shutil.copy(SCHEDULE_FILE, daemon_dir / "schedule.json")
+        registry = {
+            "branches": [{"name": "DAEMON", "email": "@daemon", "path": "src/aipass/daemon", "status": "active"}]
+        }
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        with patch("aipass.daemon.apps.handlers.schedule.discovery._REPO_ROOT", tmp_path):
+            discovered = {job["id"]: job for job in discover_jobs()}
+        assert discovered["rounds"]["schedule"] == shipped_rounds_job()["schedule"]
 
     @pytest.mark.parametrize("source", ["shipped stanza", "fallback template"])
     def test_the_prompt_carries_the_budget(self, source):
@@ -725,7 +764,7 @@ class TestRoundsScope:
             patch(f"{MODULE}._scheduled_lane_available", return_value=True),
         ):
             rotation_module.handle_command("rotation", [])
-            status = rotation_module._build_status(rotation_job(), {})
         assert f"Scope:    {ROSTER_SCOPE}" in capsys.readouterr().out
+        status = rotation_json(capsys, roster, jobs=[rotation_job()])
         assert status["scope"] == ROSTER_SCOPE
         assert "projects and externals excluded by ruling" in ROSTER_SCOPE

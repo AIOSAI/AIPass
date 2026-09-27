@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_health.py
 # Description: Branch Memory Health Checker
-# Version: 0.2.0
+# Version: 0.2.1
 # Created: 2026-01-30
-# Modified: 2026-08-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -53,7 +53,7 @@ TRINITY_CONTAINERS: Dict[str, Sequence[str]] = {
 }
 
 
-def check_memory_files_exist(branch_path: str, branch_name: str) -> Dict[str, Any]:
+def check_memory_files_exist(branch_path: str) -> Dict[str, Any]:
     """
     Check if required memory files exist for a branch.
 
@@ -67,7 +67,6 @@ def check_memory_files_exist(branch_path: str, branch_name: str) -> Dict[str, An
 
     Args:
         branch_path: Absolute path to the branch directory.
-        branch_name: Name of the branch (uppercase, e.g., "DRONE").
 
     Returns:
         Dict with structure:
@@ -328,7 +327,7 @@ def get_memory_health_status(branch_path: str, branch_name: str) -> Dict[str, An
     issues: List[str] = []
 
     # Step 1: Check file existence
-    file_check = check_memory_files_exist(branch_path, branch_name)
+    file_check = check_memory_files_exist(branch_path)
 
     if not file_check["all_required_present"]:
         for missing in file_check["missing_required"]:
@@ -414,7 +413,7 @@ if __name__ == "__main__":
     print(f"\nChecking {test_name} at {test_path}")
 
     # Test file existence
-    existence = check_memory_files_exist(test_path, test_name)
+    existence = check_memory_files_exist(test_path)
     print(f"  Required files present: {existence['all_required_present']}")
     print(f"  Missing required: {existence['missing_required']}")
     print(f"  Missing optional: {existence['missing_optional']}")

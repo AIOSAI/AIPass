@@ -1,28 +1,16 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for DAEMON
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-28
-# Modified: 2026-03-28
+# Modified: 2026-09-27
 # =============================================
 
-"""
-CLI Routing Tests for DAEMON branch.
+"""Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
 
-Tests daemon.py routing: help flags, introspection, unknown commands,
-no-args behavior, and output capture.
-
-Covers 9 tests:
-  - help_flag (--help)
-  - short_help (-h)
-  - help_word ("help")
-  - no_args (no arguments)
-  - unknown_command
-  - print_help
-  - print_introspection
-  - output_capture
-  - version_flag (bonus)
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/daemon.py parses and imports
+# seedgo: no-test-needed(constant) — the version literal main() prints for --version
 
 import sys
 from pathlib import Path
@@ -278,7 +266,9 @@ class TestUnknownArgumentIsRefused:
             assert _daemon_mod.main() == 0
 
     @pytest.mark.parametrize("verb", ["install-timer", "uninstall-timer"])
-    def test_the_timer_verbs_cannot_reach_live_systemd_without_the_gate(self, verb, _seal_timer_host_state) -> None:
+    def test_the_timer_verbs_cannot_reach_live_systemd_without_the_gate(
+        self, verb, _seal_timer_host_state, tmp_path
+    ) -> None:
         """The two rows that took the scheduler down on 2026-09-07, run in the world that did it.
 
         The gate is patched to a no-op here — the exact mutation world, and the
@@ -307,12 +297,11 @@ class TestUnknownArgumentIsRefused:
 
         # Where the file operations actually landed. install-timer copies both
         # units in, uninstall-timer unlinks whatever is there — against the
-        # SEALED directory. The seam is a module constant, so the same code
-        # would perform the same operations on whatever it points at; this is
+        # SEALED directory, which conftest's _seal_timer_host_state points the
+        # unit-dir seam at under this test's own tmp_path. Units found THERE are
         # what makes the live-dir assertion below a consequence of the seal
         # rather than a coincidence.
-        sealed_dir = _daemon_mod.timer_install._UNIT_DIR
-        assert sealed_dir != live_dir, "the seal is not in place — _UNIT_DIR is the live directory"
+        sealed_dir = tmp_path / "_sealed_unit_dir"
         if verb == "install-timer":
             assert sorted(p.name for p in sealed_dir.iterdir()) == sorted(units), (
                 f"install-timer did not write the units into the sealed dir: {list(sealed_dir.iterdir())}"
