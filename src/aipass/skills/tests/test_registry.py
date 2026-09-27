@@ -1,12 +1,17 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: test_registry.py - Unit tests for skills registry
-# Date: 2026-03-10
+# Name: test_registry.py
+# Description: Unit tests for skills registry
 # Version: 1.0.0
+# Created: 2026-03-10
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills registry handler."""
+"""Tests for apps/handlers/registry.py and its skill registry helpers."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that registry.py parses and imports
+# seedgo: no-test-needed(constant) — the "registry_built" log-operation name json_handler records
 
 import tempfile
 from pathlib import Path

@@ -1,20 +1,16 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: conftest.py - Skills test configuration
-# Date: 2026-03-07
-# Version: 3.0.0
+# Name: conftest.py
+# Description: Skills test configuration
+# Version: 3.1.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 #
 # CHANGELOG (Max 5 entries):
-#   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam -
-#     the fleet service resolves its directory per call, so there is no module
-#     attribute left to patch and no handler to re-import (DPLAN-0325)
-#   - v2.1.0 (2026-07-22): mock_infrastructure re-resolves json_handler via
-#     import_module at fixture-setup time instead of patching the stale
-#     module captured at conftest load — fixes real-file leaks (t_config.json
-#     etc.) when a combined multi-branch run pops sys.modules mid-session
-#   - v2.0.0 (2026-03-28): Added temp_dir, sample_data, mock_infrastructure,
-#     mock_logger, mock_json_handler fixtures for test quality compliance
+#   - v3.1.0 (2026-09-27): C1 console width pin, C2 command-state reset; unused temp_dir, mock_logger removed
+#   - v3.0.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam - no attribute to patch (DPLAN-0325)
+#   - v2.1.0 (2026-07-22): mock_infrastructure re-resolves json_handler at setup - fixed real-file leaks
+#   - v2.0.0 (2026-03-28): Added sample_data, mock_infrastructure, mock_json_handler fixtures
 #   - v1.0.0 (2026-03-07): Initial implementation
 #
 # CODE STANDARDS:
@@ -39,13 +35,14 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import logging
 from pathlib import Path
-from typing import Generator, List, Tuple
+from typing import Generator
 
 import pytest
 
 # aipass is an installed package (pip install -e), so nothing here hacks
 # sys.path to reach it — a conftest that prepends src/ hides a broken install
 # and shadows the wheel the e2e job measures.
+from aipass.cli.apps.modules import display
 from aipass.skills.apps.handlers.json import json_handler
 
 BRANCH_MODULE = "aipass.skills"
@@ -59,17 +56,6 @@ collect_ignore_glob = [".archive/*", "**/.archive/*"]
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def temp_dir(tmp_path: Path) -> Generator[Path, None, None]:
-    """Creates temporary directory for testing, cleans up after."""
-    test_dir = tmp_path / "test_workspace"
-    test_dir.mkdir(parents=True, exist_ok=True)
-    yield test_dir
-    for child in test_dir.iterdir():
-        if child.is_file():
-            child.unlink()
 
 
 @pytest.fixture()
@@ -128,29 +114,16 @@ def mock_infrastructure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return sandbox
 
 
-@pytest.fixture()
-def mock_logger(monkeypatch: pytest.MonkeyPatch) -> List[Tuple[str, tuple]]:
-    """Capture calls made to the entry point's logger.
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
 
-    Returns:
-        A list that fills with (level, args) tuples as the code under test logs.
-    """
-    captured: List[Tuple[str, tuple]] = []
 
-    class _CapturingLogger:
-        def debug(self, *args: object, **kwargs: object) -> None:
-            captured.append(("debug", args))
-
-        def info(self, *args: object, **kwargs: object) -> None:
-            captured.append(("info", args))
-
-        def warning(self, *args: object, **kwargs: object) -> None:
-            captured.append(("warning", args))
-
-        def error(self, *args: object, **kwargs: object) -> None:
-            captured.append(("error", args))
-
-    from aipass.skills.apps import skills as branch_entry
-
-    monkeypatch.setattr(branch_entry, "logger", _CapturingLogger())
-    return captured
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next."""
+    yield
+    display.reset_command_state()

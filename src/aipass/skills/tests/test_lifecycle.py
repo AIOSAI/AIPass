@@ -1,12 +1,16 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: test_lifecycle.py - Integration test for full skill lifecycle
-# Date: 2026-03-07
+# Name: test_lifecycle.py
+# Description: Integration test for full skill lifecycle
 # Version: 1.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Integration tests for the full skill lifecycle: create -> discover -> load -> run."""
+"""Tests for apps/modules/creator.py, discovery.py and runner.py: create -> discover -> load -> run."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that every file under apps/modules and apps/handlers parses and imports
 
 import shutil
 import tempfile

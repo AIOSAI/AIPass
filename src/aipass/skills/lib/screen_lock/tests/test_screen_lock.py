@@ -3,7 +3,7 @@
 # Description: Tests for the screen_lock skill — lock paths, the lock-state read, honest failure, doctrine
 # Version: 1.1.0
 # Created: 2026-08-14
-# Modified: 2026-09-13
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -394,6 +394,20 @@ class TestLockStateCannotTell:
                 f"logind lists no active graphical session of this user. {dbus_sentence}"
             ),
         }
+
+    def test_a_cannot_tell_is_logged_as_an_answer_not_a_warning(self, monkeypatch):
+        """Pins the shipped defect: a 5s poller turned every cannot-tell into a WARNING for 280h."""
+        levels = []
+        recorder = MagicMock()
+        recorder.info.side_effect = lambda msg, *a, **k: levels.append(("info", msg))
+        recorder.warning.side_effect = lambda msg, *a, **k: levels.append(("warning", msg))
+        monkeypatch.setattr(screen_lock, "logger", recorder)
+        with patch("subprocess.run", side_effect=_state_stub(sessions="", active_error=FileNotFoundError())):
+            result = screen_lock.lock_state()
+
+        assert result["reason"] == "no_session"
+        assert ("info", "lock_state cannot tell (%s): %s") in levels
+        assert [level for level, _ in levels if level == "warning"] == []
 
     def test_both_readers_missing_is_no_reader(self):
         stub = _state_stub(list_error=FileNotFoundError(), active_error=FileNotFoundError())

@@ -1,12 +1,17 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: test_runner_handler.py - Unit tests for runner_handler (empty body, etc.)
-# Date: 2026-03-10
+# Name: test_runner_handler.py
+# Description: Unit tests for runner_handler (empty body, etc.)
 # Version: 1.0.0
+# Created: 2026-03-10
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills runner handler, focusing on run_markdown edge cases."""
+"""Tests for apps/handlers/runner_handler.py: run_markdown and run_handler."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that runner_handler.py parses and imports
+# seedgo: no-test-needed(constant) — the "handler_executed" log-operation name json_handler records
 
 from aipass.skills.apps.handlers.runner_handler import run_markdown, run_handler
 

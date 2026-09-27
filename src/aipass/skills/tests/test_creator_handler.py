@@ -3,15 +3,13 @@
 # Description: Tests for skill creation handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-26
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for creator_handler.py — skill name validation and create_skill logic.
+"""Tests for apps/handlers/creator_handler.py: is_valid_name and create_skill."""
 
-Covers: is_valid_name, create_skill (success paths, validation failures,
-template failures, target_dir default, json logging).
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — how shutil.copytree() copies a template tree
 
 import sys
 from pathlib import Path
@@ -29,7 +27,7 @@ class TestIsValidName:
     """Tests for is_valid_name — skill name validation rules."""
 
     def test_simple_lowercase_name(self):
-        assert is_valid_name("my-skill") is True
+        assert is_valid_name("myskill") is True
 
     def test_single_letter(self):
         assert is_valid_name("a") is True
@@ -41,6 +39,7 @@ class TestIsValidName:
         assert is_valid_name("my_skill") is True
 
     def test_hyphens_allowed(self):
+        # Mutant killed 2026-09-27: "-" dropped from is_valid_name's "-_".
         assert is_valid_name("my-skill") is True
 
     def test_mixed_separators(self):
@@ -101,10 +100,15 @@ class TestCreateSkill:
         assert (Path(result["path"]) / "apps").is_dir()
 
     def test_returns_created_files_list(self, tmp_path):
-        result = create_skill("test-files", template_type="markdown_only", target_dir=tmp_path)
-        assert isinstance(result["files"], list)
-        assert len(result["files"]) > 0
-        assert "SKILL.md" in result["files"]
+        # Mutant killed 2026-09-27: copy_template appends before its is_file() filter, listing directories.
+        result = create_skill("test-files", template_type="full", target_dir=tmp_path)
+        assert sorted(Path(name) for name in result["files"]) == [
+            Path("SKILL.md"),
+            Path("apps/__init__.py"),
+            Path("apps/handlers/__init__.py"),
+            Path("apps/modules/__init__.py"),
+            Path("handler.py"),
+        ]
 
     def test_empty_name_fails(self):
         result = create_skill("", template_type="markdown_only")

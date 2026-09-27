@@ -3,16 +3,14 @@
 # Description: Tests for creator module orchestration layer
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-26
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Tests for modules/creator.py — thin orchestration layer.
+"""Tests for apps/modules/creator.py — routing, the create_skill wrapper and introspection."""
 
-Covers: handle_command (routing, introspection, --help), create_skill
-(delegation to handler, Rich output, trigger firing, json logging),
-print_introspection.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/modules/creator.py parses and carries no unused import
+# seedgo: no-test-needed(constant) — print_introspection's prose beyond the module and handler names pinned below
 
 from unittest.mock import MagicMock, patch
 
@@ -39,10 +37,13 @@ class TestHandleCommand:
         output = capsys.readouterr().out
         assert "creator Module" in output
 
-    def test_create_with_valid_name(self, tmp_path, monkeypatch):
+    def test_create_with_valid_name(self, tmp_path, monkeypatch, capsys):
+        # Mutant killed: the create branch returns True without calling create_skill.
         monkeypatch.chdir(tmp_path)
         result = handle_command("create", ["test-skill"])
         assert result is True
+        assert (tmp_path / ".aipass" / "skills" / "test-skill" / "SKILL.md").is_file()
+        assert "Created skill 'test-skill'" in capsys.readouterr().out
 
     def test_create_with_handler_flag(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

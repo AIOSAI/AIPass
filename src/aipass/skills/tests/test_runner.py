@@ -1,12 +1,16 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: test_runner.py - Unit tests for skills runner
-# Date: 2026-03-07
+# Name: test_runner.py
+# Description: Unit tests for skills runner
 # Version: 1.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills runner module."""
+"""Tests for apps/modules/runner.py and the system_status skill it runs."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that runner.py and runner_handler.py parse and import
 
 import builtins
 import os
@@ -17,15 +21,16 @@ from collections import namedtuple
 import pytest
 
 from aipass.skills.apps.modules.loader import load_skill
-from aipass.skills.apps.modules.runner import run_skill
+from aipass.skills.apps.modules.runner import handle_command, run_skill
 
 
 class TestRunSkillHandler:
-    def test_run_system_status_disk(self):
-        result = run_skill("system_status", action="disk")
-        assert result["success"] is True
-        assert "Disk Usage" in result["output"]
-        assert result["error"] is None
+    def test_the_run_command_prints_the_disk_report_to_stdout(self, capsys):
+        # Mutant killed 2026-09-27: handle_command's console.print loop removed.
+        assert handle_command("run", ["system_status", "disk"]) is True
+        out, err = capsys.readouterr()
+        assert "  Disk Usage (/)" in out
+        assert err == ""
 
     # No platform guards below this line. Until 2026-09-12 these four carried
     # skipif(win32) because the skill read /proc; the guard named Windows and
@@ -255,13 +260,8 @@ class TestTheDarwinWorldIsLive:
     def test_the_host_has_no_proc(self, darwin_host):
         assert sys.platform == "darwin"
         assert os.path.exists(PROC_MEMINFO) is False
-        try:
+        with pytest.raises(FileNotFoundError):
             open(PROC_MEMINFO, encoding="utf-8").close()
-        except FileNotFoundError:
-            refused = True
-        else:
-            refused = False
-        assert refused is True
 
     def test_the_denial_can_still_say_yes(self, darwin_host, tmp_path):
         """Control on the control: a path outside /proc still opens."""
@@ -272,13 +272,8 @@ class TestTheDarwinWorldIsLive:
             assert handle.read() == "alive"
 
     def test_the_process_table_is_gone_too(self, darwin_host):
-        try:
+        with pytest.raises(FileNotFoundError):
             os.listdir(PROC_ROOT)
-        except FileNotFoundError:
-            refused = True
-        else:
-            refused = False
-        assert refused is True
 
 
 class TestSystemStatusOffLinux:

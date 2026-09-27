@@ -1,12 +1,19 @@
 # ===================AIPASS====================
-# META DATA HEADER
-# Name: test_loader.py - Unit tests for skills loader
-# Date: 2026-03-07
+# Name: test_loader.py
+# Description: Unit tests for skills loader
 # Version: 1.0.0
+# Created: 2026-03-07
+# Modified: 2026-09-27
 # Category: skills/tests
 # =============================================
 
-"""Tests for the skills loader module."""
+"""Tests for apps/modules/loader.py and the skill loading it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that loader.py and loader_handler.py parse and import
+# seedgo: no-test-needed(constant) — the "skill_loaded" log-operation name json_handler records
+
+import sys
 
 from aipass.skills.apps.modules.loader import load_skill
 
@@ -75,3 +82,24 @@ class TestLoadSkill:
         actions = handler.get_actions()
         assert isinstance(actions, list)
         assert len(actions) > 0
+
+
+class TestBrokenHandler:
+    def test_a_handler_that_raises_on_import_fails_the_load_and_names_the_error(self, tmp_path, monkeypatch):
+        """Pins the shipped defect: an import-time crash loaded as success with handler None."""
+        skill_dir = tmp_path / ".aipass" / "skills" / "broken_handler_probe"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: broken_handler_probe\ndescription: probe\nhas_handler: true\n---\n\n# Probe\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "handler.py").write_text('raise RuntimeError("probe import crash")\n', encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = load_skill("broken_handler_probe")
+
+        assert result["success"] is False
+        assert result["handler"] is None
+        assert "RuntimeError: probe import crash" in result["error"]
+        assert "handler.py" in result["error"]
+        assert "skills_handler_broken_handler_probe" not in sys.modules
