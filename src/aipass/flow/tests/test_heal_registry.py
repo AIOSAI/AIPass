@@ -69,6 +69,41 @@ def quiet_cross_prefix():
         yield mock
 
 
+def _heal(root, store, types, seats=None):
+    """Run the PUBLIC doctrine heal against a tmp_path world; return its heal actions.
+
+    The world is sealed on every side the heal reads or writes: plan files are
+    walked under ``root`` (a tmp_path), every registry read and write goes to the
+    in-memory ``store`` (injected, never flow_json/), the plan-type table is
+    handed in, and the citizen seat index — which would read the live ecosystem
+    registry — is handed in too.
+    """
+    with (
+        patch.object(mod, "_load_template_registry", return_value={"types": types}),
+        patch.object(mod, "_citizen_seat_index", return_value=seats or {}),
+    ):
+        return mod.heal_registry_doctrine_impl(root, store.load, store.save)["healed"]
+
+
+def _heal_orphans(root, store, seats):
+    """The doctrine heal over one FPLAN type with a handed-in seat index: (heals, quarantined)."""
+    with (
+        patch.object(mod, "_load_template_registry", return_value={"types": {"flow_plans": {"prefix": "FPLAN"}}}),
+        patch.object(mod, "_citizen_seat_index", return_value=seats),
+    ):
+        result = mod.heal_registry_doctrine_impl(root, store.load, store.save)
+    return result["healed"], result["quarantined"]
+
+
+def _is_orphan_through_heal(root, location, seats):
+    """Did the public heal treat a lone closed row at *location* as an orphan (heal or quarantine)?"""
+    store = FakeRegistryStore(
+        {"fplan_registry.json": {"plans": {"0001": {"status": "closed", "location": str(location)}}}}
+    )
+    actions, quarantined = _heal_orphans(root, store, seats)
+    return bool(actions or quarantined)
+
+
 # ═══════════════════════════════════════════════════════════
 # 1. _build_plan_file_index
 # ═══════════════════════════════════════════════════════════
@@ -82,13 +117,13 @@ class TestBuildPlanFileIndex:
         _make_plan_file(tmp_path, "DPLAN-0011_alpha_2026-01-01.md")
         _make_plan_file(tmp_path / "sub", "TDPLAN-0011_beta_2026-01-02.md")
         _make_plan_file(tmp_path, "PPLAN-0011.md")
+        types = {"d": {"prefix": "DPLAN"}, "td": {"prefix": "TDPLAN"}, "p": {"prefix": "PPLAN"}}
 
-        index = mod._build_plan_file_index(tmp_path)
+        actions = _heal(tmp_path, FakeRegistryStore(), types)
 
-        assert ("DPLAN", "0011") in index
-        assert ("TDPLAN", "0011") in index
-        assert ("PPLAN", "0011") in index
-        assert len(index) == 3
+        # Mutant: `key = (match.group(1), match.group(2))` -> `key = ("", match.group(2))` reddens this.
+        registered = {(a["prefix"], a["number"]) for a in actions if a["action"] == "registered_unregistered_file"}
+        assert registered == {("DPLAN", "0011"), ("TDPLAN", "0011"), ("PPLAN", "0011")}
 
     def test_skips_ignored_folders_and_non_plan_files(self, tmp_path):
         """IGNORE_FOLDERS pruning and PLAN_PATTERN filtering both apply."""
@@ -98,13 +133,16 @@ class TestBuildPlanFileIndex:
         (tmp_path / "README.md").write_text("not a plan", encoding="utf-8")
         (tmp_path / "FPLAN-ABC.md").write_text("bad number", encoding="utf-8")
 
-        index = mod._build_plan_file_index(tmp_path)
+        actions = _heal(tmp_path, FakeRegistryStore(), {"f": {"prefix": "FPLAN"}})
 
-        assert index == {("FPLAN", "0003"): tmp_path / "FPLAN-0003.md"}
+        # Mutant: `if d not in IGNORE_FOLDERS` -> `if d` reddens this.
+        assert [(a["action"], a["file"]) for a in actions] == [
+            ("registered_unregistered_file", str(tmp_path / "FPLAN-0003.md"))
+        ]
 
     def test_missing_root_is_tolerated(self, tmp_path):
-        """A nonexistent root yields an empty index, not an exception."""
-        assert mod._build_plan_file_index(tmp_path / "nope") == {}
+        """A nonexistent root yields no heals, not an exception."""
+        assert _heal(tmp_path / "nope", FakeRegistryStore(), {"f": {"prefix": "FPLAN"}}) == []
 
 
 # ═══════════════════════════════════════════════════════════
@@ -120,13 +158,7 @@ class TestUnregisteredFile:
         plan_file = _make_plan_file(tmp_path, "DPLAN-0042_new_thing_2026-07-01.md")
         store = FakeRegistryStore({"dplan_registry.json": {"plans": {}, "next_number": 40}})
 
-        actions = mod._heal_type_registry(
-            "DPLAN",
-            "dplan_registry.json",
-            {("DPLAN", "0042"): plan_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
 
         assert len(actions) == 1
         assert actions[0]["action"] == "registered_unregistered_file"
@@ -141,17 +173,12 @@ class TestUnregisteredFile:
 
     def test_other_type_files_are_ignored(self, tmp_path, quiet_cross_prefix):
         """Only files whose prefix matches this registry are considered."""
-        tdplan_file = _make_plan_file(tmp_path, "TDPLAN-0007.md")
+        _make_plan_file(tmp_path, "TDPLAN-0007.md")
         store = FakeRegistryStore({"dplan_registry.json": {"plans": {}, "next_number": 1}})
 
-        actions = mod._heal_type_registry(
-            "DPLAN",
-            "dplan_registry.json",
-            {("TDPLAN", "0007"): tdplan_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"d": {"prefix": "DPLAN"}})
 
+        # Mutant: `if pfx == prefix` -> `if True` reddens this.
         assert actions == []
         assert store.saves == []
 
@@ -167,13 +194,7 @@ class TestUnregisteredFile:
             }
         )
 
-        actions = mod._heal_type_registry(
-            "FPLAN",
-            "fplan_registry.json",
-            {("FPLAN", "0100"): plan_file},
-            store.load,
-            store.save,
-        )
+        actions = _heal(tmp_path, store, {"f": {"prefix": "FPLAN"}})
 
         assert actions == []
         assert store.saves == []
@@ -376,7 +397,7 @@ class TestMissingFileOrphan:
             {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead_path}}, "next_number": 16}}
         )
 
-        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        actions = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert len(actions) == 1
         assert actions[0] == {
@@ -398,11 +419,13 @@ class TestMissingFileOrphan:
             {"tdplan_registry.json": {"plans": {"0015": {"status": "open", "file_path": dead_path}}, "next_number": 16}}
         )
 
-        first = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
-        second = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        first = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
+        second = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert len(first) == 1
         assert second == []
+        # Mutant: `if closed_count == 0: return []` -> `if False: ...` reddens this.
+        assert store.saves == ["tdplan_registry.json"], "the no-op re-scan still wrote the registry"
 
     def test_row_whose_file_still_exists_is_left_alone(self, tmp_path, quiet_cross_prefix):
         """A live file_path is not this doctrine case -- nothing changes."""
@@ -416,7 +439,7 @@ class TestMissingFileOrphan:
             }
         )
 
-        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        actions = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert actions == []
         assert store.saves == []
@@ -439,7 +462,7 @@ class TestMissingFileOrphan:
             }
         )
 
-        actions = mod._heal_missing_file_plans("TDPLAN", "tdplan_registry.json", store.load, store.save)
+        actions = _heal(tmp_path, store, {"td": {"prefix": "TDPLAN"}})
 
         assert actions == []
         assert store.saves == []
@@ -748,13 +771,15 @@ class TestNeverTouchesPlanFiles:
             }
         )
 
-        with (
-            patch.object(mod, "_load_template_registry", return_value={"types": TYPES}),
-            patch.object(Path, "rename", side_effect=AssertionError("plan files must never be renamed")),
-            patch.object(Path, "unlink", side_effect=AssertionError("plan files must never be deleted")),
-            patch.object(Path, "write_text", side_effect=AssertionError("plan files must never be rewritten")),
-        ):
+        # The guarantee is read off the disk itself, not by patching pathlib:
+        # every file under the root, by path and content, before and after.
+        tree_before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+        with patch.object(mod, "_load_template_registry", return_value={"types": TYPES}):
             result = mod.heal_registry_doctrine_impl(tmp_path, store.load, store.save)
+
+        # Mutant: `index[key] = file_path` -> `index[key] = file_path.rename(...) or file_path` reddens this.
+        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == tree_before
 
         # 3 heals: the dead-path ghost row closes (case 4) *and* the real
         # file squatting on its number still gets its own registration
@@ -804,10 +829,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert len(actions) == 1
         assert quarantined == []
@@ -828,10 +850,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"baud": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"baud": [seat]})
 
         assert len(actions) == 1
         assert store.registries["fplan_registry.json"]["plans"]["0001"]["location"] == str(seat)
@@ -850,10 +869,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert actions == []
         assert len(quarantined) == 1
@@ -877,10 +893,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"flow": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"flow": [seat]})
 
         assert actions == []
         assert len(quarantined) == 1
@@ -899,10 +912,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"twin": [seat_a, seat_b]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"twin": [seat_a, seat_b]})
 
         assert actions == []
         assert len(quarantined) == 1
@@ -928,8 +938,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+        _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         row = store.registries["fplan_registry.json"]["plans"]["0001"]
         assert row["location"] == str(seat)
@@ -947,10 +956,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert actions == []
         assert quarantined == []
@@ -969,10 +975,9 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={"commons": [seat]}):
-            first, _ = mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
-            writes_after_first = len(store.saves)
-            second, _ = mod._heal_orphan_locations({"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save)
+        first, _ = _heal_orphans(tmp_path, store, {"commons": [seat]})
+        writes_after_first = len(store.saves)
+        second, _ = _heal_orphans(tmp_path, store, {"commons": [seat]})
 
         assert len(first) == 1
         assert second == []
@@ -987,10 +992,7 @@ class TestHealOrphanLocations:
                 }
             }
         )
-        with patch.object(mod, "_citizen_seat_index", return_value={}):
-            actions, quarantined = mod._heal_orphan_locations(
-                {"flow_plans": {"prefix": "FPLAN"}}, store.load, store.save
-            )
+        actions, quarantined = _heal_orphans(tmp_path, store, {})
 
         assert actions == []
         assert len(quarantined) == 1
@@ -1030,7 +1032,8 @@ class TestOrphanDetectionIsNotOverBroad:
             "beta": [_seat(tmp_path, "src/beta")],
         }
 
-        assert mod._is_orphan_location(tmp_path, seats) is False
+        # Mutant: `return len(_seats_beneath(location, seats)) == 1` -> `... >= 1` reddens this.
+        assert _is_orphan_through_heal(tmp_path, tmp_path, seats) is False
 
     def test_subdirectory_inside_a_citizen_is_left_alone(self, tmp_path):
         """A plan filed in devpulse/docs.local is a filing, not debris."""
@@ -1039,20 +1042,26 @@ class TestOrphanDetectionIsNotOverBroad:
         subdir = seat / "docs.local"
         subdir.mkdir()
 
-        assert mod._is_orphan_location(subdir, {"devpulse": [seat]}) is False
+        assert _is_orphan_through_heal(tmp_path, subdir, {"devpulse": [seat]}) is False
 
     def test_a_gone_path_is_still_an_orphan(self, tmp_path):
-        assert mod._is_orphan_location(tmp_path / "vanished", {}) is True
+        # Mutant: `if not location.exists(): return True` -> `... return False` reddens this.
+        assert _is_orphan_through_heal(tmp_path, tmp_path / "vanished", {}) is True
 
     def test_root_holding_exactly_one_seat_is_a_misfile(self, tmp_path):
         (tmp_path / ".git").mkdir()
         seat = _seat(tmp_path, "projects/baud/src/baud/baud")
 
-        assert mod._is_orphan_location(tmp_path / "projects" / "baud", {"baud": [seat]}) is True
+        assert _is_orphan_through_heal(tmp_path, tmp_path / "projects" / "baud", {"baud": [seat]}) is True
 
     def test_a_live_seat_is_never_an_orphan(self, tmp_path):
+        """Even a seat holding one other seat beneath it is a seat, not a misfiled root.
+
+        Mutant: `if _is_citizen_seat(location): return False` -> `if False: ...` reddens this.
+        """
         seat = _seat(tmp_path, "src/aipass/flow")
-        assert mod._is_orphan_location(seat, {"flow": [seat]}) is False
+        inner = _seat(tmp_path, "src/aipass/flow/inner")
+        assert _is_orphan_through_heal(tmp_path, seat, {"flow": [seat], "inner": [inner]}) is False
 
     def test_containment_beats_a_name_that_does_not_match(self, tmp_path):
         """The baud root is not named 'baud/src/baud/baud' — containment carries it."""
@@ -1060,9 +1069,14 @@ class TestOrphanDetectionIsNotOverBroad:
         seat = _seat(tmp_path, "projects/thing/src/inner/seatname")
         root = tmp_path / "projects" / "thing"
 
-        attributed, reason = mod._attribute_orphan(root, {"seatname": [seat]})
-        assert attributed == seat
-        assert reason == ""
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0001": {"status": "closed", "location": str(root)}}}}
+        )
+        actions, quarantined = _heal_orphans(tmp_path, store, {"seatname": [seat]})
+
+        # Mutant: `if len(enclosed) == 1: return enclosed[0], ""` -> `if False: ...` reddens this.
+        assert quarantined == []
+        assert [a["to"] for a in actions] == [str(seat)]
 
 
 class TestFindQuarantinedLocations:

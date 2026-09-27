@@ -197,25 +197,6 @@ def mock_json_handler(request):
         yield mock_log_op
 
 
-@pytest.fixture(autouse=True)
-def mock_console():
-    """Mock CLI console to prevent real console output."""
-    with (
-        patch("aipass.cli.apps.modules.console") as console_mock,
-        patch("aipass.cli.apps.modules.error") as error_mock,
-        patch("aipass.cli.apps.modules.warning") as warning_mock,
-        patch("aipass.cli.apps.modules.success") as success_mock,
-        patch("aipass.cli.apps.modules.header") as header_mock,
-    ):
-        yield {
-            "console": console_mock,
-            "error": error_mock,
-            "warning": warning_mock,
-            "success": success_mock,
-            "header": header_mock,
-        }
-
-
 @pytest.fixture
 def sample_test_data() -> dict:
     """Reusable sample data shaped like a valid 'data' JSON document.

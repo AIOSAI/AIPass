@@ -14,6 +14,9 @@
 
 from unittest.mock import patch
 
+import pytest
+
+from aipass.cli.apps.modules import command_failed, reset_command_state
 from aipass.flow.apps.modules.create_plan import handle_command
 
 # ─── Patch targets ───────────────────────────────────────
@@ -150,12 +153,30 @@ class TestValidArgs:
 
 
 class TestInvalidPlanType:
+    @patch(f"{_MOD}.create_plan")
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "bad_type"))
     @patch(f"{_MOD}.get_plan_type", side_effect=ValueError("Unknown plan type 'bad_type'"))
-    def test_invalid_type_returns_true(self, mock_get_type, mock_parse):
-        """Invalid plan type is an error but command was still handled."""
+    def test_invalid_type_returns_true(
+        self, mock_get_type, mock_parse, mock_create, capsys: pytest.CaptureFixture[str]
+    ):
+        """Invalid plan type is an error but command was still handled.
+
+        Handled, and handled as a FAILURE: the reason reaches stderr through cli's
+        error(), which marks the process failed so flow's entry point exits 2
+        (compass 451), and no plan is created. create_plan is patched so that a
+        router which ran on past the refusal is caught here, not in a real registry.
+        Mutant: `cli_error(str(exc))` -> `console.print(str(exc))` reddens this.
+        """
+        reset_command_state()
         result = handle_command("create", [".", "My Plan", "bad_type"])
+
+        out, err = capsys.readouterr()
         assert result is True
+        assert "Unknown plan type 'bad_type'" in err
+        assert "Registered types: drone @flow templates" in out
+        assert command_failed() is True
+        mock_create.assert_not_called()
+        reset_command_state()
 
     @patch(f"{_MOD}.cli_error")
     @patch(f"{_MOD}.parse_create_plan_args", return_value=(".", "My Plan", "bad_type"))

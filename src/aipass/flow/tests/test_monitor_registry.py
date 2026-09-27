@@ -11,10 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that monitor_ops.py and registry_monitor.py parse and import
 
-import builtins
 import os
-import types
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -38,10 +35,13 @@ def _make_plan_file(directory: Path, number: str) -> Path:
 class TestHandleWalkError:
     """Tests for the handle_walk_error inner function in scan_plan_files_impl."""
 
-    def test_permission_error_is_silenced(self, tmp_path):
-        """PermissionError should not trigger a warning log."""
+    def test_permission_error_is_silenced(self, tmp_path, mock_logger):
+        """PermissionError should not trigger a warning log.
+
+        Mutant: if not isinstance(error, PermissionError): -> if isinstance(error, OSError): reddens this.
+        """
         mod = monitor_ops
-        with patch.object(mod, "_fire_event", return_value=False):
+        with patch.object(mod, "_fire_event", return_value=True):
             restricted = tmp_path / "restricted"
             restricted.mkdir()
             _make_plan_file(tmp_path, "0001")
@@ -52,8 +52,11 @@ class TestHandleWalkError:
                     ecosystem_root=tmp_path,
                     load_registry=lambda: {"plans": {}},
                 )
-                assert isinstance(result, dict)
-                assert "total_plans" in result
+                # The scan still finds the readable plan, and says nothing
+                # about the directory it was refused.
+                assert result["added"] == ["0001"]
+                warned = [str(c) for c in mock_logger.warning.call_args_list]
+                assert not any("Error during scan" in w for w in warned), warned
             finally:
                 os.chmod(str(restricted), 0o755)
 
@@ -422,20 +425,8 @@ class TestFireEvent:
     def test_fire_event_import_error(self, mock_logger):
         """ImportError should return False and log warning."""
         mod = monitor_ops
-        real_import = builtins.__import__
-
-        def _failing_import(
-            name: str,
-            globals: Mapping[str, object] | None = None,
-            locals: Mapping[str, object] | None = None,
-            fromlist: Sequence[str] = (),
-            level: int = 0,
-        ) -> types.ModuleType:
-            if name == "aipass.trigger.apps.modules.core":
-                raise ImportError("trigger not installed")
-            return real_import(name, globals, locals, fromlist, level)
-
-        with patch.object(builtins, "__import__", side_effect=_failing_import):
+        # A None entry in sys.modules makes the import raise ImportError.
+        with patch.dict("sys.modules", {"aipass.trigger.apps.modules.core": None}):
             result = mod._fire_event("test_event")
         assert result is False
 

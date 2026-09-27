@@ -11,6 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module parses and imports
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -118,12 +119,13 @@ class TestRestoreSuccess:
         }
         deps = _make_deps(load_registry=MagicMock(return_value=registry))
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
         assert result["plan_key"] == "0001"
         assert result["restored_location"] == str(tmp_path)
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
     def test_registry_saved_after_restore(self, tmp_path):
         fn = restore_plan_impl
@@ -146,7 +148,7 @@ class TestRestoreSuccess:
         save_mock = MagicMock()
         deps = _make_deps(load_registry=MagicMock(return_value=registry), save_registry=save_mock)
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
         save_mock.assert_called_once()
@@ -155,8 +157,10 @@ class TestRestoreSuccess:
         assert "closed" not in saved["plans"]["0001"]
         assert "closed_reason" not in saved["plans"]["0001"]
         assert "memory_created" not in saved["plans"]["0001"]
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
     def test_scan_plan_files_called(self, tmp_path):
+        """Mutant: scan_plan_files() -> scan_plan_files(plan_num) reddens this."""
         fn = restore_plan_impl
         plan_file = tmp_path / "FPLAN-0001.md"
         plan_file.write_text("# Plan", encoding="utf-8")
@@ -175,10 +179,12 @@ class TestRestoreSuccess:
         scan_mock = MagicMock()
         deps = _make_deps(load_registry=MagicMock(return_value=registry), scan_plan_files=scan_mock)
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             fn(plan_num="1", **deps)
 
-        scan_mock.assert_called_once()
+        # The auto-heal scan runs exactly once, argument-free, and the restore then completes.
+        scan_mock.assert_called_once_with()
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
     def test_messages_contain_header_and_success(self, tmp_path):
         fn = restore_plan_impl
@@ -198,12 +204,13 @@ class TestRestoreSuccess:
         }
         deps = _make_deps(load_registry=MagicMock(return_value=registry))
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         types = [m["type"] for m in result["messages"]]
         assert "restore_header" in types
         assert "restore_success" in types
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -293,11 +300,12 @@ class TestRestoreNotFound:
                 "aipass.flow.apps.handlers.plan.registry_routing._load_template_registry",
                 return_value={"types": {"flow_plans": {"prefix": "FPLAN"}}},
             ),
-            patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
         ):
             result = fn(plan_num="9999", **deps)
 
         assert result["success"] is True
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="9999", location=str(tmp_path))
         assert any(m.get("type") == "success" for m in result["messages"])
 
 
@@ -398,10 +406,11 @@ class TestRestoreDashboardFailures:
             push_to_plans_central=MagicMock(return_value=False),
         )
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
     def test_central_failure_does_not_block_success(self, tmp_path):
         fn = restore_plan_impl
@@ -424,10 +433,11 @@ class TestRestoreDashboardFailures:
             push_to_plans_central=MagicMock(return_value=False),
         )
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             result = fn(plan_num="1", **deps)
 
         assert result["success"] is True
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -472,6 +482,7 @@ class TestRestoreCrossTypeCollision:
         return fplan_registry, pplan_registry
 
     def test_explicit_prefix_restores_correct_type(self, tmp_path):
+        """Mutant: trigger.fire(..., plan_number=plan_key) -> plan_number=plan_num reddens this."""
         fn = restore_plan_impl
         fplan_registry, pplan_registry = self._registries(tmp_path)
         registries = {"fplan_registry.json": fplan_registry, "pplan_registry.json": pplan_registry}
@@ -485,13 +496,14 @@ class TestRestoreCrossTypeCollision:
             save_registry=save_mock,
         )
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             result = fn(plan_num="PPLAN-0011", **deps)
 
         assert result["success"] is True
         assert result["plan_key"] == "0011"
         # Never touched the unrelated FPLAN-0011 entry
         assert fplan_registry["plans"]["0011"]["status"] == "open"
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0011", location=str(tmp_path))
         save_mock.assert_called_once()
         saved_registry = save_mock.call_args[0][0]
         assert save_mock.call_args[1].get("registry_file") == "pplan_registry.json"
@@ -533,13 +545,14 @@ class TestRestoreCrossTypeCollision:
             save_registry=MagicMock(),
         )
 
-        with patch("aipass.flow.apps.handlers.plan.restore_ops.trigger", create=True):
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
             result = fn(plan_num="PPLAN-0011", **deps)
 
         header = next(m for m in result["messages"] if m["type"] == "restore_header")
         success = next(m for m in result["messages"] if m["type"] == "restore_success")
         assert header["prefix"] == "PPLAN"
         assert success["prefix"] == "PPLAN"
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0011", location=str(tmp_path))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -696,6 +709,7 @@ class TestRecoverPlanFromBackup:
         assert save.call_args[0][0]["plans"]["0077"]["location"] == str(flow_root)
 
     def test_picks_newest_variant(self, tmp_path):
+        """Mutant: variants.sort(..., reverse=True) -> reverse=False reddens this."""
         fn = recover_plan_from_backup
 
         backup_dir = tmp_path / "processed_plans"
@@ -704,10 +718,8 @@ class TestRecoverPlanFromBackup:
         # Create two variants - older FPLAN, newer DPLAN
         old_file = backup_dir / "FPLAN-0005.md"
         old_file.write_text("# Old\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
-
-        import time
-
-        time.sleep(0.05)
+        aged = old_file.stat().st_mtime - 100
+        os.utime(old_file, (aged, aged))
 
         new_file = backup_dir / "DPLAN-0005.md"
         new_file.write_text("# New\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
@@ -764,10 +776,8 @@ class TestRecoverPlanFromBackup:
         # Older FPLAN backup, requested explicitly
         fplan_backup = backup_dir / "FPLAN-0011.md"
         fplan_backup.write_text("# FPLAN\n**Location**: " + str(tmp_path) + "\n", encoding="utf-8")
-
-        import time
-
-        time.sleep(0.05)
+        aged = fplan_backup.stat().st_mtime - 100
+        os.utime(fplan_backup, (aged, aged))
 
         # Newer PPLAN backup with the SAME number -- must be ignored
         pplan_backup = backup_dir / "PPLAN-0011.md"

@@ -233,16 +233,18 @@ class TestAcquireLock:
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
 
     def test_fails_when_stale_lock_unlink_fails(self, tmp_path):
-        """Should return False when stale lock can't be removed."""
+        """Should return False when stale lock can't be removed.
+
+        The lock path is a real directory: the exclusive create meets it, it reads
+        as unreadable (stale), and unlinking a directory raises OSError on disk.
+        Mutant: return False after the failed stale unlink -> return True reddens this.
+        """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
-        lock.write_text("999999999", encoding="utf-8")
-        with (
-            patch(f"{_MOD}._pid_alive", return_value=False),
-            patch.object(Path, "unlink", side_effect=OSError("permission denied")),
-        ):
-            result = mod.acquire_lock(lock)
+        lock.mkdir()
+        result = mod.acquire_lock(lock)
         assert result is False
+        assert lock.is_dir()
 
     def test_logs_json_operation_on_fresh_acquire(self, tmp_path, mock_json_handler):
         """Should log lock_acquired via json_handler on fresh lock."""
@@ -339,12 +341,16 @@ class TestReleaseLock:
         assert not lock.exists()
 
     def test_logs_warning_on_os_error(self, tmp_path, mock_logger):
-        """Should log warning when lock removal fails."""
+        """Should log warning when lock removal fails.
+
+        Mutant: except OSError as exc: logger.warning(...release...) -> except OSError: pass reddens this.
+        """
         mod = lock_ops
+        # A directory at the lock path: unlink raises a real OSError on disk.
         lock = tmp_path / ".test.lock"
-        lock.write_text("12345", encoding="utf-8")
-        with patch.object(Path, "unlink", side_effect=OSError("disk error")):
-            assert mod.release_lock(lock) is None
+        lock.mkdir()
+        assert mod.release_lock(lock) is None
+        assert lock.is_dir()
 
         # THE WARNING IS THE SUBJECT, and it was never read. This unit takes
         # mock_logger, states "should log warning" in its docstring and then
@@ -355,4 +361,4 @@ class TestReleaseLock:
         args = mock_logger.warning.call_args.args
         assert "Failed to release lock file" in args[0]
         assert lock in args
-        assert any("disk error" in str(arg) for arg in args)
+        assert any(isinstance(arg, OSError) for arg in args)

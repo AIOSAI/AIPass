@@ -297,15 +297,19 @@ class TestTheRegisterGlobIsNotCaseFolded:
 
         monkeypatch.setattr(Path, "glob", folded_glob)
 
-        assert project_scope._holds_register(sub) is False, (
+        # Through the public resolver: sub must resolve to the real project above it.
+        assert project_scope.find_project_root(sub) == (tmp_path / "proj").resolve(), (
             "a lowercase *_registry.json was accepted as a project register — "
             "on Windows this makes any directory holding one its own project root"
         )
 
     def test_the_exact_case_register_is_still_found(self, tmp_path):
-        """Negative control: the narrowing must not refuse the real thing."""
+        """Negative control: the narrowing must not refuse the real thing.
+
+        Mutant: if isinstance(data, dict) and REGISTER_KEY in data: -> if False: reddens this.
+        """
         root = self._project_dir(tmp_path)
-        assert project_scope._holds_register(root) is True
+        assert project_scope.find_project_root(root) == root.resolve()
 
     def test_the_emulation_actually_widens_the_listing(self, tmp_path, monkeypatch):
         """Control for the control: a folded glob that matches nothing proves nothing."""

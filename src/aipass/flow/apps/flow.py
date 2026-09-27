@@ -3,7 +3,7 @@
 # Description: Entry point CLI for drone @flow — plan lifecycle management
 # Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -49,7 +49,7 @@ if hasattr(signal, "SIGPIPE"):
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 # CLI services for formatted output
-from aipass.cli.apps.modules import console, header, error
+from aipass.cli.apps.modules import console, header, error, reset_command_state, resolve_exit
 
 # =============================================================================
 # MODULE DISCOVERY
@@ -137,7 +137,16 @@ def main():
 
 
 def _main_impl():
-    """Internal implementation of main — separated for catch-all handler."""
+    """Internal implementation of main — separated for catch-all handler.
+
+    The exit seam (compass 451, the shape @backup's main() already has): cli's
+    error() marks the process failed, but that flag reaches an exit code only if
+    somebody reads it. reset_command_state() clears it on entry so a process that
+    calls main() more than once cannot inherit an earlier command's failure, and a
+    routed command returns resolve_exit(True) -- 0 when nothing errored, 2 when
+    the handler reported an error and used to exit 0 anyway.
+    """
+    reset_command_state()
 
     # Discover available modules
     modules = discover_modules()
@@ -173,7 +182,7 @@ def _main_impl():
 
     # Route to modules (modules handle their own --help internally)
     if route_command(command, remaining_args, modules):
-        return 0
+        return resolve_exit(True)
 
     # Fallback: try module-specific help if command wasn't handled
     if remaining_args and remaining_args[0] in ["--help", "-h"]:

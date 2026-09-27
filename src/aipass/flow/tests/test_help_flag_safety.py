@@ -12,12 +12,12 @@
 # seedgo: no-test-needed(ruff) — that help_flags.py and the command modules parse and import
 # seedgo: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
 
+import re
 from unittest.mock import patch
 
 import pytest
 
 from aipass.flow.apps.handlers.cli.help_flags import wants_help
-from aipass.flow.apps.handlers.runner import lock_ops
 from aipass.flow.apps.modules import (
     aggregate_central,
     close_plan,
@@ -302,6 +302,7 @@ class TestUnflaggedModulesHelpSafety:
     def test_post_lock_denial_reports_an_error_not_already_running(self, tmp_path, mock_logger):
         """A lock that can never be created is reported as an error, not a crash
         and not "Another instance is already running".
+        Mutant: for attempt in range(_CREATE_RETRIES): -> for attempt in range(_CREATE_RETRIES - 1): reddens this.
 
         Windows answers a create against a lock still being removed with
         PermissionError; try_create_lock retries that on a short budget and then
@@ -342,7 +343,11 @@ class TestUnflaggedModulesHelpSafety:
         error_fn.assert_called_once()
         assert str(lock) in error_fn.call_args.args[0]
         mock_logger.error.assert_called()
-        assert len(attempts) == lock_ops._CREATE_RETRIES
+        # The budget as the error reports it; the attempts made must match it.
+        reported = re.search(r"still denied after (\d+) attempts", error_fn.call_args.args[0])
+        assert reported, error_fn.call_args.args[0]
+        assert int(reported.group(1)) > 1
+        assert len(attempts) == int(reported.group(1))
 
     def test_normal_registry_status_still_works(self):
         with patch(f"{_REG}.print_help") as help_fn:

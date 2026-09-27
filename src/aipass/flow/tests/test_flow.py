@@ -12,13 +12,13 @@
 # seedgo: no-test-needed(ruff) — that flow.py parses and imports
 # seedgo: no-test-needed(stdlib) — the `if __name__ == "__main__":` guard's sys.exit() and os._exit() calls
 
-import sys
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.cli.apps.modules import reset_command_state
 from aipass.flow.apps.flow import (
     discover_modules,
     main,
@@ -48,15 +48,6 @@ def _make_module(
     if has_handle:
         mod.handle_command = MagicMock(return_value=False)  # type: ignore[attr-defined]
     return mod
-
-
-def _printed(mock_console) -> str:
-    """Everything a patched console was asked to print, joined into one string.
-
-    Shared by the print_* units below so each one's oracle is the claim in its
-    own docstring rather than a re-derivation of how Rich is called.
-    """
-    return " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
 
 
 def _make_handling_module(name: str, doc: str | None = "Handles things") -> ModuleType:
@@ -199,12 +190,20 @@ class TestRouteCommand:
         assert result is False
 
     def test_handles_broken_pipe_error(self) -> None:
-        """Catches BrokenPipeError and returns True."""
+        """Catches BrokenPipeError, returns True, and offers the command to no one else.
+
+        A broken pipe means the claiming module was already writing its answer, so the
+        command is handled: the next module must not be asked to run it a second time.
+        Mutant: the BrokenPipeError branch's `return True` -> `continue` reddens this.
+        """
         mod = _make_module("list_plans")
         mod.handle_command.side_effect = BrokenPipeError  # type: ignore[union-attr]
+        later = _make_handling_module("list_other")
 
-        result = route_command("list", [], [mod])
+        result = route_command("list", [], [mod, later])
         assert result is True
+        mod.handle_command.assert_called_once_with("list", [])
+        later.handle_command.assert_not_called()
 
     def test_handles_generic_exception(self) -> None:
         """Catches generic exceptions, logs, and continues to next module."""
@@ -252,7 +251,7 @@ class TestMain:
         """Returns 1 and prints error when no modules discovered."""
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[]),
-            patch.object(sys, "argv", ["flow"]),
+            patch("sys.argv", ["flow"]),
         ):
             result = main()
         assert result == 1
@@ -264,7 +263,7 @@ class TestMain:
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
             patch(f"{_FLOW}.print_introspection") as mock_intro,
-            patch.object(sys, "argv", ["flow"]),
+            patch("sys.argv", ["flow"]),
         ):
             result = main()
 
@@ -277,7 +276,7 @@ class TestMain:
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch.object(sys, "argv", ["flow", "--version"]),
+            patch("sys.argv", ["flow", "--version"]),
         ):
             result = main()
         assert result == 0
@@ -288,7 +287,7 @@ class TestMain:
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch.object(sys, "argv", ["flow", "-V"]),
+            patch("sys.argv", ["flow", "-V"]),
         ):
             result = main()
         assert result == 0
@@ -300,7 +299,7 @@ class TestMain:
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
             patch(f"{_FLOW}.print_help") as mock_help,
-            patch.object(sys, "argv", ["flow", "--help"]),
+            patch("sys.argv", ["flow", "--help"]),
         ):
             result = main()
 
@@ -314,7 +313,7 @@ class TestMain:
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
             patch(f"{_FLOW}.print_help") as mock_help,
-            patch.object(sys, "argv", ["flow", "-h"]),
+            patch("sys.argv", ["flow", "-h"]),
         ):
             result = main()
 
@@ -328,7 +327,7 @@ class TestMain:
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
             patch(f"{_FLOW}.print_help") as mock_help,
-            patch.object(sys, "argv", ["flow", "help"]),
+            patch("sys.argv", ["flow", "help"]),
         ):
             result = main()
 
@@ -341,7 +340,7 @@ class TestMain:
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch.object(sys, "argv", ["flow", "create", ".", "subject"]),
+            patch("sys.argv", ["flow", "create", ".", "subject"]),
         ):
             result = main()
 
@@ -354,7 +353,7 @@ class TestMain:
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch.object(sys, "argv", ["flow", "bogus"]),
+            patch("sys.argv", ["flow", "bogus"]),
         ):
             result = main()
 
@@ -367,7 +366,7 @@ class TestMain:
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
             patch(f"{_FLOW}.print_module_help") as mock_mod_help,
-            patch.object(sys, "argv", ["flow", "bogus", "--help"]),
+            patch("sys.argv", ["flow", "bogus", "--help"]),
         ):
             result = main()
 
@@ -381,7 +380,7 @@ class TestMain:
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
             patch(f"{_FLOW}.print_module_help") as mock_mod_help,
-            patch.object(sys, "argv", ["flow", "bogus", "-h"]),
+            patch("sys.argv", ["flow", "bogus", "-h"]),
         ):
             result = main()
 
@@ -394,7 +393,7 @@ class TestMain:
 
         with (
             patch(f"{_FLOW}.discover_modules", return_value=[mod]),
-            patch.object(sys, "argv", ["flow", "list"]),
+            patch("sys.argv", ["flow", "list"]),
         ):
             result = main()
 
@@ -404,7 +403,7 @@ class TestMain:
     def test_main_catches_unhandled_exception(self) -> None:
         """main() catches unexpected exceptions from _main_impl and returns 1."""
         with patch(f"{_FLOW}.discover_modules", side_effect=RuntimeError("boom")):
-            with patch.object(sys, "argv", ["flow"]):
+            with patch("sys.argv", ["flow"]):
                 result = main()
         assert result == 1
 
@@ -417,37 +416,34 @@ class TestMain:
 class TestPrintIntrospection:
     """Tests for print_introspection()."""
 
-    def test_with_modules(self) -> None:
+    def test_with_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Displays module names and descriptions."""
         mod = _make_module("create_plan", doc="Create a new plan")
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_introspection([mod])
+        print_introspection([mod])
 
-        printed = _printed(mock_console)
-        assert "create_plan" in printed
-        assert "Create a new plan" in printed
+        out, _err = capsys.readouterr()
+        assert "create_plan" in out
+        assert "Create a new plan" in out
 
-    def test_with_empty_modules(self) -> None:
+    def test_with_empty_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Displays fallback text when no modules discovered."""
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_introspection([])
+        print_introspection([])
 
-        printed = _printed(mock_console)
-        assert "No modules discovered" in printed
-        assert "Discovered Modules:" in printed
+        out, _err = capsys.readouterr()
+        assert "No modules discovered" in out
+        assert "Discovered Modules: 0" in out
 
-    def test_module_without_docstring(self) -> None:
+    def test_module_without_docstring(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Uses 'No description' when module has no docstring."""
         mod = _make_module("bare_mod", doc=None)
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_introspection([mod])
+        print_introspection([mod])
 
-        printed = _printed(mock_console)
-        assert "bare_mod" in printed
-        assert "No description" in printed
+        out, _err = capsys.readouterr()
+        assert "bare_mod" in out
+        assert "No description" in out
 
     @pytest.mark.parametrize("names", [("alpha",), ("alpha", "beta")])
-    def test_every_discovered_module_is_named(self, names) -> None:
+    def test_every_discovered_module_is_named(self, names, capsys: pytest.CaptureFixture[str]) -> None:
         """One module or several, each one appears in the listing.
 
         MERGED (DPLAN-0323 contested band, 2026-09-07) with the former
@@ -472,15 +468,19 @@ class TestPrintIntrospection:
         flow.py:210 left all five rows of this class green. The descriptions
         are name-free now and asserted beside the names, so each column has to
         carry its own value.
+
+        The non-empty floor is now the count the listing prints, read off the
+        real channel: a listing that printed nothing, or miscounted, fails
+        before the loop is reached.
+        Mutant: `{len(modules)}` -> `{len(modules) - 1}` in print_introspection reddens this.
         """
         assert len(names) >= 1
         docs = {name: f"purpose text {index}" for index, name in enumerate(names)}
 
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_introspection([_make_module(name, doc=docs[name]) for name in names])
+        print_introspection([_make_module(name, doc=docs[name]) for name in names])
 
-        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
-        assert printed
+        printed, _err = capsys.readouterr()
+        assert f"Discovered Modules: {len(names)}" in printed
         for name in names:
             assert name in printed
             assert docs[name] in printed
@@ -494,32 +494,32 @@ class TestPrintIntrospection:
 class TestPrintHelp:
     """Tests for print_help()."""
 
-    def test_with_modules(self) -> None:
+    def test_with_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows formatted help with module listing."""
         mod = _make_module("create_plan", doc="Create a new plan")
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_help([mod])
+        print_help([mod])
 
-        printed = _printed(mock_console)
-        assert "USAGE:" in printed
-        assert "AVAILABLE COMMANDS:" in printed
-        assert "create" in printed
-        assert "Create a new plan" in printed
+        out, _err = capsys.readouterr()
+        assert "USAGE:" in out
+        assert "AVAILABLE COMMANDS:" in out
+        assert "create" in out
+        assert "Create a new plan" in out
 
-    def test_with_empty_modules(self) -> None:
+    def test_with_empty_modules(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows help even when no modules are discovered."""
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_help([])
+        print_help([])
 
-        printed = _printed(mock_console)
-        assert "USAGE:" in printed
-        assert "No modules discovered" in printed
+        out, _err = capsys.readouterr()
+        assert "USAGE:" in out
+        assert "No modules discovered" in out
 
     @pytest.mark.parametrize(
         ("module_name", "expected_verb"),
         [("create_plan", "create"), ("templates", "templates")],
     )
-    def test_the_help_table_prints_the_verb_that_executes(self, module_name, expected_verb) -> None:
+    def test_the_help_table_prints_the_verb_that_executes(
+        self, module_name, expected_verb, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         """Only the verb the dispatcher accepts is printed, never the filename.
 
         REWRITTEN 2026-09-15 (FPLAN-0612). The old rows asserted the table
@@ -529,15 +529,14 @@ class TestPrintHelp:
         lie rather than catching it. The contract now is the measured one -
         the table prints what executes and nothing else.
         """
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_help([_make_module(module_name, doc="Any description")])
+        print_help([_make_module(module_name, doc="Any description")])
 
-        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        printed, _err = capsys.readouterr()
         assert expected_verb in printed
         if module_name != expected_verb:
             assert module_name not in printed
 
-    def test_a_module_owning_several_verbs_declares_them(self) -> None:
+    def test_a_module_owning_several_verbs_declares_them(self, capsys: pytest.CaptureFixture[str]) -> None:
         """COMMAND_VERBS wins over the filename-derived short name.
 
         template_manager owns templates/register/unregister/scan and answers to
@@ -545,23 +544,21 @@ class TestPrintHelp:
         published as a command until 2026-09-15.
         """
         mod = _make_module("template_manager", doc="Template Manager Module")
-        mod.COMMAND_VERBS = ("templates", "register", "unregister", "scan")
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_help([mod])
+        mod.__dict__["COMMAND_VERBS"] = ("templates", "register", "unregister", "scan")
+        print_help([mod])
 
-        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        printed, _err = capsys.readouterr()
         assert "templates, register, unregister, scan" in printed
         assert "template_manager" not in printed
 
-    def test_module_without_docstring(self) -> None:
+    def test_module_without_docstring(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Uses 'No description' for undocumented modules."""
         mod = _make_module("mystery", doc=None)
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_help([mod])
+        print_help([mod])
 
-        printed = _printed(mock_console)
-        assert "mystery" in printed
-        assert "No description" in printed
+        out, _err = capsys.readouterr()
+        assert "mystery" in out
+        assert "No description" in out
 
 
 # ===========================================================================
@@ -572,40 +569,40 @@ class TestPrintHelp:
 class TestPrintModuleHelp:
     """Tests for print_module_help()."""
 
-    def test_exact_match(self) -> None:
+    def test_exact_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Finds module by exact name match."""
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_module_help("create_plan", [mod])
+        print_module_help("create_plan", [mod])
 
-        printed = _printed(mock_console)
-        assert "Create plans" in printed
-        assert "Unknown command" not in printed
+        out, err = capsys.readouterr()
+        assert "Create plans" in out
+        assert "Unknown command" not in out + err
 
-    def test_no_match(self) -> None:
+    def test_no_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows error for unknown command.
 
-        The diagnostic leaves through cli's error(), not through console, so
-        BOTH are patched and both are read - asserting only on console would
-        have missed the whole message.
+        The diagnostic leaves through cli's error() on stderr, the pointer through
+        console on stdout, so BOTH channels are read - asserting only on stdout
+        would have missed the whole message.
+        Mutant: the `error(...)` call in print_module_help's no-match branch removed reddens this.
         """
         mod = _make_module("create_plan")
-        with patch(f"{_FLOW}.console") as mock_console, patch(f"{_FLOW}.error") as mock_error:
-            print_module_help("nonexistent", [mod])
+        print_module_help("nonexistent", [mod])
 
-        mock_error.assert_called_once()
-        assert "Unknown command: nonexistent" in str(mock_error.call_args.args[0])
-        assert "Run" in _printed(mock_console)
+        out, err = capsys.readouterr()
+        assert "Unknown command: nonexistent" in err
+        assert "Run drone @flow --help for available commands" in out
+        reset_command_state()
 
-    def test_module_without_docstring(self) -> None:
+    def test_module_without_docstring(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows 'No documentation available' for undocumented module."""
         mod = _make_module("bare_mod", doc=None)
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_module_help("bare_mod", [mod])
+        print_module_help("bare_mod", [mod])
 
-        assert "No documentation available" in _printed(mock_console)
+        out, _err = capsys.readouterr()
+        assert "No documentation available" in out
 
-    def test_a_multiline_docstring_is_shown_whole_and_stripped(self) -> None:
+    def test_a_multiline_docstring_is_shown_whole_and_stripped(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Every line reaches the reader, without the leading/trailing blanks.
 
         KEPT rather than merged into ``test_exact_match`` (DPLAN-0323 contested
@@ -620,10 +617,9 @@ class TestPrintModuleHelp:
             "list_plans",
             doc="\nList plans\n\nShows all plans in the registry.\n",
         )
-        with patch(f"{_FLOW}.console") as mock_console:
-            print_module_help("list_plans", [mod])
+        print_module_help("list_plans", [mod])
 
-        printed = " ".join(str(call.args[0]) for call in mock_console.print.call_args_list if call.args)
+        printed, _err = capsys.readouterr()
         assert "List plans" in printed
         assert "Shows all plans in the registry." in printed
         assert not printed.strip().endswith("\\n")

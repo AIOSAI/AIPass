@@ -13,6 +13,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -207,7 +208,10 @@ class TestLoadRegistry:
         assert "flow_plans" in result["types"]
 
     def test_non_dict_recreates(self, setup_flow_root):
-        """Non-dict JSON (e.g. a list) triggers recreation."""
+        """Non-dict JSON (e.g. a list) triggers recreation.
+
+        Mutant: if changed or seeded: -> if changed: reddens this.
+        """
         mod = registry_ops
         reg_path = setup_flow_root / "flow_json" / "template_registry.json"
         reg_path.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
@@ -216,8 +220,9 @@ class TestLoadRegistry:
 
         result = mod.load_registry()
 
-        assert isinstance(result, dict)
-        assert "types" in result
+        # Recreated with the default types, and the list on disk is replaced by it.
+        assert set(result["types"]) == {"flow_plans", "dev_plans"}
+        assert json.loads(reg_path.read_text(encoding="utf-8")) == result
 
     def test_heals_missing_types_key(self, setup_flow_root):
         """Auto-heals missing 'types' key by injecting defaults."""
@@ -253,7 +258,10 @@ class TestLoadRegistry:
         assert "type_count" in result["metadata"]
 
     def test_calls_prune_and_auto_register(self, setup_flow_root):
-        """load_registry invokes prune and auto-register."""
+        """load_registry invokes prune and auto-register.
+
+        Mutant: changed = _prune_orphaned_types(data) -> changed = _prune_orphaned_types({}) reddens this.
+        """
         mod = registry_ops
         data = _valid_registry()
         _write_registry(setup_flow_root, data)
@@ -264,9 +272,10 @@ class TestLoadRegistry:
             patch(f"{_MOD}._prune_orphaned_types", return_value=False) as mock_prune,
             patch(f"{_MOD}._auto_register_new_types", return_value=False) as mock_auto,
         ):
-            mod.load_registry()
-            mock_prune.assert_called_once()
-            mock_auto.assert_called_once()
+            result = mod.load_registry()
+            # Both passes run over the very registry load_registry returns.
+            mock_prune.assert_called_once_with(result)
+            mock_auto.assert_called_once_with(result)
 
 
 # =============================================================================
@@ -335,13 +344,20 @@ class TestSaveRegistry:
         assert result is False
 
     def test_logs_via_json_handler(self, setup_flow_root, mock_json_handler):
-        """Calls json_handler.log_operation on successful save."""
+        """Calls json_handler.log_operation on successful save.
+
+        Mutant: {"type_count": data["metadata"]["type_count"]} -> {"type_count": 0} reddens this.
+        """
         mod = registry_ops
         data = _valid_registry()
 
         mod.save_registry(data)
 
-        mock_json_handler.assert_called()
+        mock_json_handler.assert_called_once_with(
+            "save_template_registry",
+            {"type_count": 2},
+            module_name="registry_ops",
+        )
 
     def test_plan_registry_save_retries_a_delete_pending_denial(self, tmp_path, monkeypatch):
         """handlers/registry/save_registry.py: a Windows delete-pending denial on
@@ -372,6 +388,7 @@ class TestSaveRegistry:
         """handlers/registry/save_registry.py: a denial that never clears fails
         after exactly the budget, the caller returns False and logs the denial,
         and the helper's PermissionError is chained to the last denial.
+        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
         """
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
         target = tmp_path / "fplan_registry.json"
@@ -387,13 +404,18 @@ class TestSaveRegistry:
             result = plan_reg.save_registry({"plans": {"1": {}}, "next_number": 2}, registry_file=target.name)
 
         assert result is False
-        assert len(attempts) == plan_reg._LOCK_RETRIES
         assert json.loads(target.read_text(encoding="utf-8")) == before
         # The logged arguments themselves, never str(call): a call's repr doubles
         # every backslash, so a Windows path is never a substring of it.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
-        assert f"{plan_reg._LOCK_RETRIES} attempts" in logged
+        # The budget as the product reports it to the operator; the attempts
+        # actually made must match it exactly.
+        reported = re.search(r"still denied after (\d+) attempts", logged)
+        assert reported, logged
+        budget = int(reported.group(1))
+        assert budget > 1
+        assert len(attempts) == budget
 
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
         with (
@@ -404,7 +426,7 @@ class TestSaveRegistry:
             plan_reg._acquire_lock(lock)
 
         assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == plan_reg._LOCK_RETRIES
+        assert len(attempts) == budget
 
 
 # =============================================================================

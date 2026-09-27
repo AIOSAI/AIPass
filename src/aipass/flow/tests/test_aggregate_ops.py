@@ -14,6 +14,7 @@
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -201,6 +202,7 @@ class TestSaveBranchRegistry:
     def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
         """A denial past the budget: exactly the budget of attempts, the caller
         returns False and logs the chained PermissionError, nothing is written.
+        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
         """
         reg_file = tmp_path / "registry.json"
         before = {"plans": {}, "next_number": 1}
@@ -212,13 +214,17 @@ class TestSaveBranchRegistry:
             result = mod.save_branch_registry(reg_file, {"plans": {"1": {}}})
 
         assert result is False
-        assert len(attempts) == mod._LOCK_RETRIES
         assert json.loads(reg_file.read_text(encoding="utf-8")) == before
         logged = [arg for c in mock_logger.error.call_args_list for arg in c.args]
         denial = next((arg for arg in logged if isinstance(arg, PermissionError)), None)
         assert denial is not None, logged
         assert str(lock) in str(denial)
         assert denial.__cause__ is raised[-1]
+        # The budget as the denial reports it; the attempts made must match it.
+        reported = re.search(r"still denied after (\d+) attempts", str(denial))
+        assert reported, str(denial)
+        assert int(reported.group(1)) > 1
+        assert len(attempts) == int(reported.group(1))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -486,6 +492,7 @@ class TestSaveCentral:
     def test_denial_that_never_clears_fails_at_the_budget(self, tmp_path, mock_logger):
         """A denial past the budget: exactly the budget of attempts, save_central
         returns False and logs the denial, and the old file is untouched.
+        Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
         """
         central_dir = tmp_path / ".ai_central"
         central_dir.mkdir()
@@ -499,13 +506,16 @@ class TestSaveCentral:
             result = mod.save_central(central_file, central_dir, {"active_plans": [{}], "branches": {}})
 
         assert result is False
-        assert len(attempts) == mod._LOCK_RETRIES
         assert json.loads(central_file.read_text(encoding="utf-8")) == before
         # The logged arguments themselves, never str(call): a call's repr doubles
         # every backslash, so a Windows path is never a substring of it.
         logged = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
         assert str(lock) in logged
-        assert f"{mod._LOCK_RETRIES} attempts" in logged
+        # The budget as the product reports it; the attempts made must match it.
+        reported = re.search(r"still denied after (\d+) attempts", logged)
+        assert reported, logged
+        assert int(reported.group(1)) > 1
+        assert len(attempts) == int(reported.group(1))
 
 
 # ═══════════════════════════════════════════════════════════

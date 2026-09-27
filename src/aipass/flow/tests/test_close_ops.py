@@ -14,7 +14,7 @@
 import json
 import os
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
@@ -315,7 +315,7 @@ class TestClosePlanImplSuccess:
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
     @patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess")
     def test_successful_close(self, mock_subprocess, _mock_find, _mock_resolve, tmp_path):
-
+        """Mutant: `if spawn_background:` -> `if False:` reddens this."""
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
         plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
 
@@ -335,13 +335,18 @@ class TestClosePlanImplSuccess:
 
         with (
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="1", **deps)
 
         assert result["success"] is True
         assert result["plan_key"] == "1"
         assert result["cancelled"] is False
+        # The CLOSED_PLANS entry lands beside the plan; the detached runner is spawned.
+        mock_append.assert_called_once_with("1", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
         # Registry was saved (at least for marking closed)
         deps["save_registry"].assert_called()
         # Dashboard updates were called
@@ -479,6 +484,7 @@ class TestTemplateDetectionNeverDeletes:
         # Full pipeline parity: dashboards + CLOSED_PLANS append still ran.
         deps["update_dashboard_local"].assert_called_once()
         mock_append.assert_called_once()
+        mock_subprocess.Popen.assert_called_once()
         assert any("empty template" in m.get("text", "").lower() for m in result["messages"])
 
 
@@ -506,10 +512,13 @@ class TestSpawnBackgroundBehavior:
         deps["validate_plan_exists"].return_value = (True, None)
         with (
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="1", spawn_background=True, **deps)
         assert result["success"] is True
+        mock_append.assert_called_once_with("1", ANY, tmp_path)
         mock_runner.assert_called_once()
         assert any("background" in m.get("text", "").lower() for m in result["messages"])
 
@@ -517,6 +526,7 @@ class TestSpawnBackgroundBehavior:
     @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
     def test_spawn_background_false_skips_background_runner(self, _mock_find, _mock_resolve, mock_runner, tmp_path):
+        """Mutant: append_to_closed_plans(..., plan_file.parent) -> (..., plan_file) reddens this."""
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
         plan_file.write_text("# Real content\nNotes here.", encoding="utf-8")
         registry = {
@@ -534,10 +544,13 @@ class TestSpawnBackgroundBehavior:
         deps["validate_plan_exists"].return_value = (True, None)
         with (
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="1", spawn_background=False, **deps)
         assert result["success"] is True
+        mock_append.assert_called_once_with("1", ANY, tmp_path)  # the append is not tied to the spawn
         mock_runner.assert_not_called()
 
 
@@ -683,6 +696,7 @@ class TestCloseAllPartialFailure:
         assert result["success"] is True  # At least one succeeded
         assert result["success_count"] == 1
         assert result["failure_count"] == 1
+        mock_bg.assert_called_once()
 
 
 class TestCloseAllBoolFallback:
@@ -701,6 +715,7 @@ class TestCloseAllBoolFallback:
         result = close_all(**_scope(tmp_path), get_open_plans=mock_get, close_plan_fn=mock_close)
         assert result["success"] is True
         assert result["success_count"] == 1
+        mock_bg.assert_called_once()
 
 
 class TestCloseAllException:
@@ -972,12 +987,17 @@ class TestClosePlanImplSelfHeal:
                 ),
             ) as mock_heal,
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="DPLAN-0176", **deps)
 
         mock_heal.assert_called_once()
         assert result["success"] is True
+        # The healed row is closed under its healed key, through the whole pipeline.
+        mock_append.assert_called_once_with("0176", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value="fplan_registry.json")
     @patch("aipass.flow.apps.handlers.plan.close_ops._find_unregistered_plan_file", return_value=None)
@@ -1031,12 +1051,16 @@ class TestSelfHealVerifyBlock:
                 processed_dir,
             ),
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             plan_file.unlink()
             result = close_plan_impl(plan_num="FPLAN-0042", **deps)
 
         assert result["success"] is True
+        mock_append.assert_called_once_with("42", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
         verify_msgs = [
             m
             for m in result["messages"]
@@ -1078,11 +1102,15 @@ class TestSelfHealVerifyBlock:
                 processed_dir,
             ),
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="FPLAN-0055", **deps)
 
         assert result["success"] is True
+        mock_append.assert_called_once_with("55", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
         fail_msgs = [m for m in result["messages"] if "[FAIL]" in m.get("text", "")]
         assert len(fail_msgs) >= 1
         assert any("NOT found in processed_plans" in m.get("text", "") for m in fail_msgs)
@@ -1120,11 +1148,15 @@ class TestSelfHealVerifyBlock:
                 processed_dir,
             ),
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="FPLAN-0060", **deps)
 
         assert result["success"] is True
+        mock_append.assert_called_once_with("60", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
         fail_msgs = [m for m in result["messages"] if "[FAIL]" in m.get("text", "")]
         assert any("Source file still exists" in m.get("text", "") for m in fail_msgs)
 
@@ -1152,13 +1184,17 @@ class TestSelfHealVerifyBlock:
         with (
             patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None),
             patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None),
-            patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess"),
+            patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess") as mock_subprocess,
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
-            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True),
+            patch(
+                "aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans", create=True
+            ) as mock_append,
         ):
             result = close_plan_impl(plan_num="70", **deps)
 
         assert result["success"] is True
+        mock_append.assert_called_once_with("70", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
         verify_msgs = [m for m in result["messages"] if "[VERIFY]" in m.get("text", "")]
         assert len(verify_msgs) == 0
 
@@ -1208,7 +1244,7 @@ class TestCloseAllPassesTypedId:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_dplan_row_closes_dplan_not_fplan(self, _mock_jh, _mock_bg, tmp_path):
+    def test_dplan_row_closes_dplan_not_fplan(self, _mock_jh, mock_bg, tmp_path):
         """The live defect: key 0300 closed FPLAN-0300 while DPLAN-0300 stayed open."""
         close_all = close_all_plans_impl
         open_plans = [
@@ -1218,10 +1254,12 @@ class TestCloseAllPassesTypedId:
 
         close_all(**_scope(tmp_path), get_open_plans=MagicMock(return_value=open_plans), close_plan_fn=mock_close)
         assert _closed_ids(mock_close) == ["DPLAN-0300"]
+        mock_bg.assert_called_once_with()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_mixed_types_each_keep_their_own_prefix(self, _mock_jh, _mock_bg, tmp_path):
+    def test_mixed_types_each_keep_their_own_prefix(self, _mock_jh, mock_bg, tmp_path):
+        """Mutant: deleting close_all's single _spawn_background_runner() call reddens this."""
         close_all = close_all_plans_impl
         open_plans = [
             ("0001", {"subject": "audit", "location": "/a", "file_path": "/a/APLAN-0001_branch_audit.md"}),
@@ -1232,6 +1270,7 @@ class TestCloseAllPassesTypedId:
 
         close_all(**_scope(tmp_path), get_open_plans=MagicMock(return_value=open_plans), close_plan_fn=mock_close)
         assert _closed_ids(mock_close) == ["APLAN-0001", "FPLAN-0001", "DPLAN-0115"]
+        mock_bg.assert_called_once_with()  # ONE spawn for the whole batch, never one per plan
 
 
 class TestCloseAllRefusesUnresolvableRow:
@@ -1239,7 +1278,8 @@ class TestCloseAllRefusesUnresolvableRow:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_row_without_file_path_is_not_closed(self, _mock_jh, _mock_bg, tmp_path):
+    def test_row_without_file_path_is_not_closed(self, _mock_jh, mock_bg, tmp_path):
+        """Mutant: `if success_count > 0:` -> `if True:` reddens this."""
         close_all = close_all_plans_impl
         open_plans = [("0042", {"subject": "orphan row", "location": "/a", "file_path": ""})]
         mock_close = MagicMock(return_value={"success": True, "messages": []})
@@ -1250,10 +1290,11 @@ class TestCloseAllRefusesUnresolvableRow:
         mock_close.assert_not_called()
         assert result["failure_count"] == 1
         assert result["success_count"] == 0
+        mock_bg.assert_not_called()  # nothing closed, so no post-close work spawned
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_refusal_names_the_row(self, _mock_jh, _mock_bg, tmp_path):
+    def test_refusal_names_the_row(self, _mock_jh, mock_bg, tmp_path):
         """A count alone is the defect we are removing -- the row must be named."""
         close_all = close_all_plans_impl
         open_plans = [("0042", {"subject": "orphan row", "location": "/a", "file_path": ""})]
@@ -1273,10 +1314,11 @@ class TestCloseAllRefusesUnresolvableRow:
         assert "REFUSED 0042" in blob
         assert "no typed file_path" in blob
         assert "Refusing to guess." in blob
+        mock_bg.assert_not_called()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_resolvable_siblings_still_close(self, _mock_jh, _mock_bg, tmp_path):
+    def test_resolvable_siblings_still_close(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         open_plans = [
             ("0042", {"subject": "orphan", "location": "/a", "file_path": ""}),
@@ -1290,6 +1332,7 @@ class TestCloseAllRefusesUnresolvableRow:
         assert _closed_ids(mock_close) == ["DPLAN-0300"]
         assert result["success_count"] == 1
         assert result["failure_count"] == 1
+        mock_bg.assert_called_once_with()
 
 
 class TestDryRunEqualsRun:
@@ -1302,7 +1345,7 @@ class TestDryRunEqualsRun:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_dry_run_ids_equal_executed_ids(self, _mock_jh, _mock_bg, tmp_path):
+    def test_dry_run_ids_equal_executed_ids(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         open_plans = [
             ("0001", {"subject": "audit", "location": "/a", "file_path": "/a/APLAN-0001_audit.md"}),
@@ -1320,10 +1363,11 @@ class TestDryRunEqualsRun:
 
         assert preview["plan_ids"] == _closed_ids(mock_close)
         assert preview["plan_ids"] == ["APLAN-0001", "DPLAN-0300", "FPLAN-0451"]
+        mock_bg.assert_called_once_with()  # the run spawns; the preview never does
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_dry_run_refusals_equal_run_refusals(self, _mock_jh, _mock_bg, tmp_path):
+    def test_dry_run_refusals_equal_run_refusals(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         open_plans = [
             ("0042", {"subject": "orphan", "location": "/a", "file_path": ""}),
@@ -1341,10 +1385,11 @@ class TestDryRunEqualsRun:
         assert preview["refused"] == ["0042"]
         assert run["failure_count"] == len(preview["refused"])
         assert preview["plan_ids"] == _closed_ids(mock_close)
+        mock_bg.assert_called_once_with()  # the run spawns; the preview never does
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_dry_run_row_carries_structured_id(self, _mock_jh, _mock_bg, tmp_path):
+    def test_dry_run_row_carries_structured_id(self, _mock_jh, mock_bg, tmp_path):
         """Preview rows expose plan_id as data, so the renderer cannot re-derive it differently."""
         close_all = close_all_plans_impl
         open_plans = [("0300", {"subject": "baud", "location": "/b", "file_path": "/b/DPLAN-0300_baud.md"})]
@@ -1357,6 +1402,7 @@ class TestDryRunEqualsRun:
         rows = [m for m in result["messages"] if m.get("type") == "dry_run_row"]
         assert len(rows) == 1
         assert rows[0]["plan_id"] == "DPLAN-0300"
+        mock_bg.assert_not_called()  # a preview closes nothing, so it spawns nothing
 
 
 # ═══════════════════════════════════════════════════════════
@@ -1378,7 +1424,7 @@ class TestExcludeTypeHoldsTypeBack:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_aplan_row_is_not_closed_when_aplan_excluded(self, _mock_jh, _mock_bg, tmp_path):
+    def test_aplan_row_is_not_closed_when_aplan_excluded(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         open_plans = [
             ("0004", {"subject": "branch audit", "location": "/proj/f", "file_path": "/proj/f/APLAN-0004_audit.md"}),
@@ -1398,10 +1444,11 @@ class TestExcludeTypeHoldsTypeBack:
         assert _held_ids(result) == ["APLAN-0004"]
         assert "APLAN-0004" not in _closed_ids(mock_close)
         assert result["failure_count"] == 0
+        mock_bg.assert_called_once_with()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_exclusion_is_general_not_an_aplan_special_case(self, _mock_jh, _mock_bg, tmp_path):
+    def test_exclusion_is_general_not_an_aplan_special_case(self, _mock_jh, mock_bg, tmp_path):
         """Any registered type can be fenced -- no hardcoded APLAN check."""
         close_all = close_all_plans_impl
         open_plans = [
@@ -1419,10 +1466,11 @@ class TestExcludeTypeHoldsTypeBack:
         )
         assert _closed_ids(mock_close) == ["FPLAN-0003"]
         assert sorted(_held_ids(result)) == ["PPLAN-0001", "RPLAN-0002"]
+        mock_bg.assert_called_once_with()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_no_exclusion_closes_the_aplan_too(self, _mock_jh, _mock_bg, tmp_path):
+    def test_no_exclusion_closes_the_aplan_too(self, _mock_jh, mock_bg, tmp_path):
         """Control: without the flag the APLAN IS swept. The fence must be the flag's doing."""
         close_all = close_all_plans_impl
         open_plans = [
@@ -1432,6 +1480,7 @@ class TestExcludeTypeHoldsTypeBack:
 
         close_all(**_scope(tmp_path), get_open_plans=MagicMock(return_value=open_plans), close_plan_fn=mock_close)
         assert _closed_ids(mock_close) == ["APLAN-0004"]
+        mock_bg.assert_called_once_with()
 
 
 class TestProjectScopeFence:
@@ -1439,7 +1488,7 @@ class TestProjectScopeFence:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_foreign_row_is_not_closed(self, _mock_jh, _mock_bg, tmp_path):
+    def test_foreign_row_is_not_closed(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         aipass, baud = tmp_path / "aipass", tmp_path / "aipass" / "projects" / "baud"
 
@@ -1477,10 +1526,11 @@ class TestProjectScopeFence:
         # OUTCOME: the nested foreign row was held, not closed, not a failure.
         assert _held_ids(result) == ["DPLAN-0101"]
         assert result["failure_count"] == 0
+        mock_bg.assert_called_once_with()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_row_with_no_project_is_held_and_named_distinctly(self, _mock_jh, _mock_bg, tmp_path):
+    def test_row_with_no_project_is_held_and_named_distinctly(self, _mock_jh, mock_bg, tmp_path):
         """Unattributable is not the same as foreign, and the reason must say so."""
         close_all = close_all_plans_impl
         aipass = tmp_path / "aipass"
@@ -1515,10 +1565,11 @@ class TestProjectScopeFence:
         summary = next(m for m in result["messages"] if m.get("type") == "close_all_scope")
         assert summary["held_out_of_scope"] == 1
         assert summary["refused"] == 0
+        mock_bg.assert_called_once_with()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_dry_run_names_the_reason_for_each_held_row(self, _mock_jh, _mock_bg, tmp_path):
+    def test_dry_run_names_the_reason_for_each_held_row(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         aipass, baud = tmp_path / "aipass", tmp_path / "aipass" / "projects" / "baud"
         elsewhere = tmp_path / "elsewhere" / "loose"
@@ -1547,6 +1598,7 @@ class TestProjectScopeFence:
         reasons = {m["plan_id"]: m["reason"] for m in result["messages"] if m.get("type") == "held_row"}
         assert reasons["DPLAN-0101"] == "belongs to baud"
         assert "no project register" in reasons["DPLAN-0102"]
+        mock_bg.assert_not_called()  # a preview closes nothing, so it spawns nothing
 
     def test_caller_outside_any_project_refuses_the_whole_run(self):
         """No register above the caller means 'all' has no boundary. Refuse."""
@@ -1572,7 +1624,7 @@ class TestDryRunEqualsRunUnderFences:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_preview_equals_run_with_exclusion_and_foreign_rows(self, _mock_jh, _mock_bg, tmp_path):
+    def test_preview_equals_run_with_exclusion_and_foreign_rows(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         aipass, baud = tmp_path / "aipass", tmp_path / "aipass" / "projects" / "baud"
         elsewhere = tmp_path / "elsewhere" / "x"
@@ -1622,10 +1674,11 @@ class TestDryRunEqualsRunUnderFences:
         assert preview["held_ids"] == run["held_ids"] == ["APLAN-0004", "DPLAN-0101", "FPLAN-0102"]
         assert preview["refused"] == ["0999"]
         assert run["failed_ids"] == ["0999"]
+        mock_bg.assert_called_once_with()  # the run spawns; the preview never does
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_the_plan_tracking_this_work_is_visible_not_exempt(self, _mock_jh, _mock_bg, tmp_path):
+    def test_the_plan_tracking_this_work_is_visible_not_exempt(self, _mock_jh, mock_bg, tmp_path):
         """DPLAN-0316 documents this command. A sweep closes it, and says so."""
         close_all = close_all_plans_impl
         open_plans = [
@@ -1640,10 +1693,11 @@ class TestDryRunEqualsRunUnderFences:
         rows = [m for m in preview["messages"] if m.get("type") == "dry_run_row"]
         assert [r["plan_id"] for r in rows] == ["DPLAN-0316"]
         assert preview["plan_ids"] == ["DPLAN-0316"]
+        mock_bg.assert_not_called()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_scope_summary_counts_match_the_buckets(self, _mock_jh, _mock_bg, tmp_path):
+    def test_scope_summary_counts_match_the_buckets(self, _mock_jh, mock_bg, tmp_path):
         close_all = close_all_plans_impl
         aipass = tmp_path / "aipass"
         elsewhere = tmp_path / "elsewhere" / "x"
@@ -1676,6 +1730,7 @@ class TestDryRunEqualsRunUnderFences:
         assert summary["held_out_of_scope"] == 1
         assert summary["refused"] == 0
         assert summary["in_scope"] == len(preview["plan_ids"])
+        mock_bg.assert_not_called()  # a preview closes nothing, so it spawns nothing
 
 
 class TestTheScopeComparisonIsPlatformNeutral:
@@ -1755,7 +1810,7 @@ class TestTheFenceUnderWindowsPathSemantics:
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_the_three_buckets_survive_windows_separators(self, _mock_jh, _mock_bg):
+    def test_the_three_buckets_survive_windows_separators(self, _mock_jh, mock_bg):
         close_all = close_all_plans_impl
 
         aipass, baud = PureWindowsPath("/aipass"), PureWindowsPath("/aipass/projects/baud")
@@ -1773,10 +1828,11 @@ class TestTheFenceUnderWindowsPathSemantics:
         # the exact split that collapsed to "everything is unattributable".
         assert _closed_ids(mock_close) == ["DPLAN-0100"]
         assert sorted(_held_ids(result)) == ["DPLAN-0101", "DPLAN-0102"]
+        mock_bg.assert_called_once_with()
 
     @patch("aipass.flow.apps.handlers.plan.close_ops._spawn_background_runner")
     @patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True)
-    def test_the_held_reasons_still_tell_foreign_from_unattributable(self, _mock_jh, _mock_bg):
+    def test_the_held_reasons_still_tell_foreign_from_unattributable(self, _mock_jh, mock_bg):
         """The load-bearing half: a held row must still say WHY it was held."""
         close_all = close_all_plans_impl
 
@@ -1794,3 +1850,4 @@ class TestTheFenceUnderWindowsPathSemantics:
         reasons = {m["plan_id"]: m["reason"] for m in result["messages"] if m.get("type") == "held_row"}
         assert reasons["DPLAN-0101"] == "belongs to baud"
         assert "no project register" in reasons["DPLAN-0102"]
+        mock_bg.assert_not_called()

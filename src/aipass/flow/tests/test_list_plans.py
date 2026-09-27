@@ -79,7 +79,7 @@ class TestHandleCommandRouting:
             mock_lp.assert_called_once_with("all")
             assert result is True
 
-    def test_unknown_filter_is_refused_by_name_and_exits_non_zero(self):
+    def test_unknown_filter_is_refused_by_name_and_exits_non_zero(self, capsys: pytest.CaptureFixture[str]):
         """An unknown filter FAILS — it does not quietly become 'open'.
 
         Was pinned the other way ("defaults to open with a warning") until the
@@ -87,11 +87,11 @@ class TestHandleCommandRouting:
         "closed" answers a question nobody asked, and exit 0 tells a script it
         got what it asked for. The listing must NOT run — that assertion is
         what catches a silent return of the default.
+        Mutant: error(exc.message, suggestion=exc.usage) -> print(exc.message) reddens this.
         """
         with (
             patch(f"{_MOD}.list_plans") as mock_lp,
             patch(f"{_MOD}.error") as mock_error,
-            patch(f"{_MOD}.console"),
             pytest.raises(SystemExit) as exit_info,
         ):
             handle_command("list", ["garbage"])
@@ -100,13 +100,17 @@ class TestHandleCommandRouting:
         mock_error.assert_called_once()
         assert "garbage" in mock_error.call_args[0][0]
         mock_lp.assert_not_called()
+        # The refusal is the error line alone: nothing reaches stdout.
+        assert capsys.readouterr().out == ""
 
-    def test_a_trailing_argument_after_a_valid_filter_is_refused(self):
-        """`list open <typo>` reads nothing after the filter, so it refuses too."""
+    def test_a_trailing_argument_after_a_valid_filter_is_refused(self, capsys: pytest.CaptureFixture[str]):
+        """`list open <typo>` reads nothing after the filter, so it refuses too.
+
+        Mutant: error(exc.message, suggestion=exc.usage) -> print(exc.message) reddens this.
+        """
         with (
             patch(f"{_MOD}.list_plans") as mock_lp,
             patch(f"{_MOD}.error") as mock_error,
-            patch(f"{_MOD}.console"),
             pytest.raises(SystemExit) as exit_info,
         ):
             handle_command("list", ["open", "stray_token"])
@@ -114,6 +118,7 @@ class TestHandleCommandRouting:
         assert exit_info.value.code == 1
         assert "stray_token" in mock_error.call_args[0][0]
         mock_lp.assert_not_called()
+        assert capsys.readouterr().out == ""
 
     def test_json_handler_called_on_filter_commands(self):
         """json_handler.log_operation should be called for filter commands."""
@@ -135,8 +140,11 @@ class TestHandleCommandRouting:
 class TestListPlansOrchestrator:
     """Verify list_plans delegates to list_plans_impl and displays results."""
 
-    def test_success_displays_formatted_output(self):
-        """Successful impl result should display formatted_list and formatted_stats."""
+    def test_success_displays_formatted_output(self, capsys: pytest.CaptureFixture[str]):
+        """Successful impl result should display formatted_list and formatted_stats.
+
+        Mutant: console.print(result["formatted_stats"]) -> pass reddens this.
+        """
         mock_result = {
             "success": True,
             "empty": False,
@@ -145,18 +153,14 @@ class TestListPlansOrchestrator:
             "filter_type": "open",
         }
 
-        with (
-            patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl,
-            patch(f"{_MOD}.console") as mock_console,
-        ):
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result) as mock_impl:
             result = list_plans("open")
 
             assert result is True
             mock_impl.assert_called_once()
-            # Verify both formatted outputs are printed
-            calls = mock_console.print.call_args_list
-            assert any("[bold]Plan list output[/bold]" in str(c) for c in calls)
-            assert any("[dim]3 plans total[/dim]" in str(c) for c in calls)
+        # Both formatted outputs reach stdout, list first, markup rendered away.
+        out, _err = capsys.readouterr()
+        assert out == "Plan list output\n3 plans total\n"
 
     def test_empty_result_shows_warning(self):
         """Empty + success result should display a warning."""
@@ -235,22 +239,33 @@ class TestListPlansOrchestrator:
                 format_statistics_summary=mock_fss,
             )
 
-    def test_broken_pipe_during_display_does_not_crash(self):
-        """BrokenPipeError during console.print should be caught gracefully."""
+    def test_broken_pipe_during_display_does_not_crash(self, capsys: pytest.CaptureFixture[str]):
+        """BrokenPipeError during console.print should be caught gracefully.
+
+        The real console raises it while rendering the list, as it would on a
+        closed pipe. Mutant: except BrokenPipeError: -> except KeyError: (the
+        display one) reddens this.
+        """
+
+        class _ClosedPipeRenderable:
+            def __rich__(self):
+                raise BrokenPipeError("pipe closed")
+
         mock_result = {
             "success": True,
             "empty": False,
-            "formatted_list": "output",
+            "formatted_list": _ClosedPipeRenderable(),
             "formatted_stats": "stats",
             "filter_type": "open",
         }
 
-        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result), patch(f"{_MOD}.console") as mock_console:
-            mock_console.print.side_effect = BrokenPipeError("pipe closed")
-
+        with patch(f"{_MOD}.list_plans_impl", return_value=mock_result):
             # Should not raise
             result = list_plans("open")
             assert result is True
+        # The pipe broke on the first line, so the stats line is never attempted.
+        out, _err = capsys.readouterr()
+        assert out == ""
 
     def test_broken_pipe_during_error_display_does_not_crash(self):
         """BrokenPipeError during error display should be caught."""

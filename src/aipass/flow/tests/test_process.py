@@ -675,7 +675,10 @@ class TestProcessClosedPlansAdditional:
         assert "processed" not in registry["plans"]["70"]
 
     def test_logs_json_operation_after_processing(self, tmp_path, mock_json_handler):
-        """json_handler.log_operation is called after processing plans."""
+        """json_handler.log_operation is called after processing plans.
+
+        Mutant: save_flow_registry(registry, registry_file=reg_file) -> save_flow_registry(registry) reddens this.
+        """
         plan_file = tmp_path / "FPLAN-0080.md"
         plan_file.write_text("content", encoding="utf-8")
 
@@ -699,7 +702,7 @@ class TestProcessClosedPlansAdditional:
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", return_value=True),
             patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry"),
+            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry") as mock_save,
             patch(
                 "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
                 return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
@@ -708,6 +711,9 @@ class TestProcessClosedPlansAdditional:
         ):
             process_closed_plans()
 
+        # The processed flag is written back to the plan's OWN registry, once.
+        mock_save.assert_called_once_with(registry, registry_file="fplan_registry.json")
+        assert registry["plans"]["80"]["processed"] is True
         mock_json_handler.assert_called_once_with(
             "closed_plans_processed",
             {
@@ -719,7 +725,10 @@ class TestProcessClosedPlansAdditional:
         )
 
     def test_multiple_plans_mixed_results(self, tmp_path):
-        """Process two plans: one succeeds, one fails."""
+        """Process two plans: one succeeds, one fails.
+
+        Mutant: `if archive_success:` (processed flag) -> `if True:` reddens this.
+        """
         plan_ok = tmp_path / "FPLAN-0090.md"
         plan_ok.write_text("ok", encoding="utf-8")
         plan_bad = tmp_path / "FPLAN-0091.md"
@@ -754,7 +763,7 @@ class TestProcessClosedPlansAdditional:
             patch("aipass.flow.apps.handlers.mbank.process.get_closed_plans", return_value=closed_plans),
             patch("aipass.flow.apps.handlers.mbank.process.archive_plan", side_effect=archive_results),
             patch("aipass.flow.apps.handlers.mbank.process.load_flow_registry", return_value=registry),
-            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry"),
+            patch("aipass.flow.apps.handlers.mbank.process.save_flow_registry") as mock_save,
             patch(
                 "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
                 return_value={"files_found": 0, "files_deleted": 0, "failed_deletes": 0, "details": []},
@@ -769,3 +778,7 @@ class TestProcessClosedPlansAdditional:
         statuses = [r["status"] for r in result["results"]]
         assert "archived" in statuses
         assert "archive_failed" in statuses
+        # Both rows are written back (the failure records cleanup_completed=False); only the success is processed.
+        assert mock_save.call_count == 2
+        assert registry["plans"]["90"].get("processed") is True
+        assert "processed" not in registry["plans"]["91"]

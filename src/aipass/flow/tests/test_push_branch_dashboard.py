@@ -839,12 +839,16 @@ class TestBuildSectionDataOpenRecent:
 
         assert result["open_recent"] == [{"plan_id": "FPLAN-0001", "subject": "Plan 1", "created": "2026-08-01 09:00"}]
 
-    def test_capped_at_five(self):
-        """22 open plans publish 5 entries — the bounded-context guarantee."""
+    def test_capped_at_five_and_nothing_dropped_below_the_cap(self):
+        """22 open plans publish 5 entries — the bounded-context guarantee.
+        Under the cap the window is every open plan, none dropped.
+        Mutant: newest_first[:OPEN_RECENT_LIMIT] -> newest_first[1:OPEN_RECENT_LIMIT + 1] reddens this."""
         mod = push_branch_dashboard
         result = mod._build_section_data(self._active(22), [], 22)
+        below = mod._build_section_data(self._active(3), [], 3)
 
         assert len(result["open_recent"]) == 5
+        assert [e["plan_id"] for e in below["open_recent"]] == ["FPLAN-0003", "FPLAN-0002", "FPLAN-0001"]
 
     def test_newest_first_by_created(self):
         """The 5 published are the NEWEST by created date, newest first."""

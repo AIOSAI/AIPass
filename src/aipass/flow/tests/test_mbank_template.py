@@ -247,14 +247,23 @@ class TestGetClosedPlans:
         assert len(result) == 0
 
     def test_calls_verify_and_heal(self, tmp_path):
-        """get_closed_plans calls verify_and_heal_orphaned_plans internally."""
-        registry = {"plans": {}}
-        reg_file = tmp_path / "fplan_registry.json"
-        reg_file.write_text(json.dumps(registry), encoding="utf-8")
+        """get_closed_plans calls verify_and_heal_orphaned_plans internally, BEFORE it
+        reads the registries -- so a row the heal repairs is returned on this same call.
 
-        mock_heal = MagicMock(
-            return_value={"orphans_found": 0, "successfully_healed": 0, "failed_to_heal": 0, "orphans": []}
-        )
+        Mutant: moving verify_and_heal_orphaned_plans() after the registry loop reddens this.
+        """
+        healed_file = tmp_path / "FPLAN-0007.md"
+        healed_file.write_text("closed plan", encoding="utf-8")
+        row = {"status": "closed", "file_path": str(tmp_path / "gone" / "FPLAN-0007.md")}
+        reg_file = tmp_path / "fplan_registry.json"
+        reg_file.write_text(json.dumps({"plans": {"7": row}}), encoding="utf-8")
+
+        def heal() -> dict:
+            """Stand-in heal: repoint the orphaned row at the file that exists."""
+            reg_file.write_text(json.dumps({"plans": {"7": {**row, "file_path": str(healed_file)}}}), encoding="utf-8")
+            return {"orphans_found": 1, "successfully_healed": 1, "failed_to_heal": 0, "orphans": []}
+
+        mock_heal = MagicMock(side_effect=heal)
 
         with (
             patch("aipass.flow.apps.handlers.mbank.process.FLOW_JSON_DIR", tmp_path),
@@ -268,9 +277,10 @@ class TestGetClosedPlans:
                 mock_heal,
             ),
         ):
-            get_closed_plans()
+            result = get_closed_plans()
 
-        mock_heal.assert_called_once()
+        mock_heal.assert_called_once_with()
+        assert [(p["number"], p["path"]) for p in result] == [("7", healed_file)]
 
 
 # ===================================================================
@@ -569,7 +579,10 @@ class TestProcessClosedPlans:
         assert registry["plans"]["42"]["processed"] is True
 
     def test_process_plan_archive_failure(self, tmp_path):
-        """When archive_plan returns False, plan is counted as error."""
+        """When archive_plan returns False, plan is counted as error.
+
+        Mutant: cleanup_completed = archive_success -> = True reddens this.
+        """
         plan_file = tmp_path / "FPLAN-0055.md"
         plan_file.write_text("content", encoding="utf-8")
 
@@ -607,7 +620,7 @@ class TestProcessClosedPlans:
             ),
             patch(
                 "aipass.flow.apps.handlers.mbank.process.save_flow_registry",
-            ),
+            ) as mock_save,
             patch(
                 "aipass.flow.apps.handlers.mbank.process.cleanup_temp_files",
                 return_value={
@@ -628,6 +641,10 @@ class TestProcessClosedPlans:
         assert result["processed"] == 0
         assert result["errors"] == 1
         assert result["results"][0]["status"] == "archive_failed"
+        # The failed archive is still recorded (cleanup_completed=False), never marked processed.
+        mock_save.assert_called_once_with(registry, registry_file="fplan_registry.json")
+        assert registry["plans"]["55"]["cleanup_completed"] is False
+        assert "processed" not in registry["plans"]["55"]
 
     def test_process_handles_exception(self, tmp_path):
         """Top-level exception produces success=False response."""
@@ -817,7 +834,7 @@ class TestGetTemplate:
 
 
 class TestDiscoverPlanTypes:
-    def test_discovers_plan_types_from_filesystem(self, tmp_path):
+    def test_discovers_plan_types_from_filesystem(self, tmp_path, monkeypatch):
         """Discover plan types from subdirectories with .md files."""
         templates_dir = tmp_path / "templates"
         flow_dir = templates_dir / "flow_plans"
@@ -842,7 +859,7 @@ class TestDiscoverPlanTypes:
             ),
         ):
             # Reset cache to force fresh scan
-            loader._plan_type_cache = None
+            monkeypatch.setattr(loader, "_plan_type_cache", None)
 
             result = discover_plan_types()
 
@@ -854,7 +871,7 @@ class TestDiscoverPlanTypes:
         assert "master" in result["flow_plans"]["available_templates"]
         assert result["flow_plans"]["registry_file"] == "fplan_registry.json"
 
-    def test_skips_hidden_directories(self, tmp_path):
+    def test_skips_hidden_directories(self, tmp_path, monkeypatch):
         """Directories starting with . or _ are skipped."""
         templates_dir = tmp_path / "templates"
         hidden = templates_dir / ".hidden"
@@ -875,14 +892,14 @@ class TestDiscoverPlanTypes:
                 return_value={},
             ),
         ):
-            loader._plan_type_cache = None
+            monkeypatch.setattr(loader, "_plan_type_cache", None)
 
             result = discover_plan_types()
 
         assert ".hidden" not in result
         assert "_internal" not in result
 
-    def test_skips_dirs_without_md_files(self, tmp_path):
+    def test_skips_dirs_without_md_files(self, tmp_path, monkeypatch):
         """Directories with no .md files are skipped."""
         templates_dir = tmp_path / "templates"
         empty_type = templates_dir / "empty_plans"
@@ -899,13 +916,13 @@ class TestDiscoverPlanTypes:
                 return_value={"empty_plans": "EPLAN"},
             ),
         ):
-            loader._plan_type_cache = None
+            monkeypatch.setattr(loader, "_plan_type_cache", None)
 
             result = discover_plan_types()
 
         assert "empty_plans" not in result
 
-    def test_skips_dirs_without_prefix_mapping(self, tmp_path):
+    def test_skips_dirs_without_prefix_mapping(self, tmp_path, monkeypatch):
         """Directories not in PREFIX_MAP are skipped with a warning."""
         templates_dir = tmp_path / "templates"
         unknown = templates_dir / "unknown_plans"
@@ -922,19 +939,19 @@ class TestDiscoverPlanTypes:
                 return_value={},
             ),
         ):
-            loader._plan_type_cache = None
+            monkeypatch.setattr(loader, "_plan_type_cache", None)
 
             result = discover_plan_types()
 
         assert "unknown_plans" not in result
 
-    def test_returns_empty_when_no_templates_dir(self, tmp_path):
+    def test_returns_empty_when_no_templates_dir(self, tmp_path, monkeypatch):
         """Return empty dict when templates directory does not exist."""
         with patch(
             "aipass.flow.apps.handlers.template.plan_type_loader.PLAN_TYPES_DIR",
             tmp_path / "nonexistent",
         ):
-            loader._plan_type_cache = None
+            monkeypatch.setattr(loader, "_plan_type_cache", None)
 
             result = discover_plan_types()
 

@@ -96,11 +96,12 @@ class TestRunCommand:
         assert result is False
 
     @patch(f"{_MOD}.aggregate_central", return_value=True)
-    def test_heal_flag_explicit(self, mock_aggregate):
-        """Explicit --heal flag should still pass heal=True."""
-        result = handle_command("aggregate", ["--heal"])
+    def test_no_heal_wins_over_an_explicit_heal(self, mock_aggregate):
+        """Heal auto-closes rows in branch registries, so asking for both runs the safe one.
+        Mutant: if "--no-heal" in args: -> if "--no-heal" in args and "--heal" not in args: reddens this."""
+        result = handle_command("aggregate", ["--heal", "--no-heal"])
         assert result is True
-        mock_aggregate.assert_called_once_with(heal=True)
+        mock_aggregate.assert_called_once_with(heal=False)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -115,11 +116,15 @@ class TestNoHealFlag:
         assert result is True
         mock_aggregate.assert_called_once_with(heal=False)
 
+    @patch(f"{_MOD}.push_flow_to_all_branch_dashboards", return_value={"pushed": 1, "skipped": 0, "failed": 0})
     @patch(f"{_MOD}.aggregate_central", return_value=True)
-    def test_no_heal_with_run(self, mock_aggregate):
-        result = handle_command("aggregate", ["--no-heal"])
+    def test_no_heal_holds_when_the_card_sweep_rides_along(self, mock_aggregate, sweep):
+        """The sweep flag must not reset the heal choice; the sweep is stubbed, it writes every card.
+        Mutant: heal = False -> heal = "--sweep-cards" in args reddens this."""
+        result = handle_command("aggregate", ["--sweep-cards", "--no-heal"])
         assert result is True
         mock_aggregate.assert_called_once_with(heal=False)
+        sweep.assert_called_once_with()
 
 
 # ═══════════════════════════════════════════════════════════

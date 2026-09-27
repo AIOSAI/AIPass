@@ -20,6 +20,91 @@ from aipass.flow.apps.handlers import repo_root
 from aipass.flow.apps.handlers.repo_root import find_repo_root
 
 _MOD = "aipass.flow.apps.handlers.dashboard.push_central"
+_DISCOVER = "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types"
+
+
+def _row(prefix, number, branch, status="open", **extra):
+    """One registry row on disk, keyed as the real registries key it (bare number)."""
+    row = {
+        "subject": f"{prefix}-{number:04d}",
+        "status": status,
+        "created": "2026-04-20",
+        "file_path": f"/repo/src/aipass/{branch}/{prefix}-{number:04d}_x.md",
+        "location": f"/repo/src/aipass/{branch}",
+    }
+    row.update(extra)
+    return row
+
+
+def _push(tmp_path, registries=None, plan_types=None, central=None):
+    """Run the PUBLIC push against a tmp_path world; return what it wrote.
+
+    Every path the push touches is redirected before it runs: FLOW_JSON_DIR (the
+    registries it reads), AI_CENTRAL_DIR and CENTRAL_FILE (the file it writes).
+    ``aggregate_central_impl`` stays patched — with heal=True it auto-closes rows
+    in live branch registries — and is asserted, never discarded.
+
+    Args:
+        registries: filename -> dict (written as JSON) or str/bytes (written raw).
+        plan_types: what discover_plan_types answers; an Exception is raised
+            instead. Defaults to one type per registry written.
+        central: an existing PLANS.central.json, dict or raw bytes.
+
+    Returns:
+        (push result, parsed PLANS.central.json)
+    """
+    registries = registries or {}
+    flow_json = tmp_path / "flow_json"
+    flow_json.mkdir(exist_ok=True)
+    for name, data in registries.items():
+        raw = data if isinstance(data, (str, bytes)) else json.dumps(data)
+        (flow_json / name).write_bytes(raw.encode("utf-8") if isinstance(raw, str) else raw)
+    ai_central = tmp_path / ".ai_central"
+    central_file = ai_central / "PLANS.central.json"
+    if central is not None:
+        ai_central.mkdir()
+        central_file.write_bytes(central if isinstance(central, bytes) else json.dumps(central).encode("utf-8"))
+    if plan_types is None:
+        plan_types = {name: {"registry_file": name} for name in registries}
+    discover = (
+        patch(_DISCOVER, side_effect=plan_types)
+        if isinstance(plan_types, Exception)
+        else patch(_DISCOVER, return_value=plan_types)
+    )
+    with (
+        patch.object(mod, "FLOW_JSON_DIR", flow_json),
+        patch.object(mod, "AI_CENTRAL_DIR", ai_central),
+        patch.object(mod, "CENTRAL_FILE", central_file),
+        discover,
+        patch.object(mod, "aggregate_central_impl") as mock_agg,
+    ):
+        result = mod.push_to_plans_central()
+    mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
+    return result, json.loads(central_file.read_text(encoding="utf-8"))
+
+
+def _branches(tmp_path, registry):
+    """Push a merged-shape registry ({"FPLAN-0001": row}) and return the written branches.
+
+    Each composite key is split back to how it lives on disk — ``fplan_registry.json``
+    keyed ``"0001"`` — so the push reads it through its own loader.
+    """
+    on_disk = {}
+    for key, row in registry.get("plans", {}).items():
+        prefix, number = key.rsplit("-", 1)
+        on_disk.setdefault(f"{prefix.lower()}_registry.json", {"plans": {}})["plans"][number] = row
+    result, written = _push(tmp_path, on_disk)
+    assert result is True
+    return written["branches"]
+
+
+def _plan_ids(written):
+    """Every plan id the push wrote, active and recently closed, across branches."""
+    return {
+        plan["plan_id"]
+        for section in written["branches"].values()
+        for plan in section["active_plans"] + section["recently_closed"]
+    }
 
 
 # =============================================
@@ -48,8 +133,15 @@ class TestFindRepoRoot:
     """
 
     def test_delegates_to_the_one_implementation(self):
-        """The private copy is gone: this must BE the shared answer."""
-        assert mod._find_repo_root() == repo_root.find_repo_root()
+        """The private copy is gone: the central file must sit under the shared answer.
+
+        Read through what the delegation builds at import — the public
+        ``AI_CENTRAL_DIR`` / ``CENTRAL_FILE`` the push writes — not the helper.
+        Mutant: find_repo_root(caller="push_central") -> Path("/elsewhere") reddens this.
+        """
+        root = repo_root.find_repo_root()
+        assert mod.AI_CENTRAL_DIR == root / ".ai_central"
+        assert mod.CENTRAL_FILE == root / ".ai_central" / "PLANS.central.json"
 
     def test_returns_dir_containing_registry(self, tmp_path):
         """Returns the directory containing AIPASS_REGISTRY.json."""
@@ -84,7 +176,9 @@ class TestFindRepoRoot:
 
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
-        monkeypatch.setattr(Path, "cwd", staticmethod(lambda: elsewhere))
+        # A real chdir, not a patch over pathlib: the process directory really
+        # is ``elsewhere`` for the call, and monkeypatch restores it after.
+        monkeypatch.chdir(elsewhere)
 
         result = repo_root.find_repo_root(sub)
 
@@ -92,12 +186,20 @@ class TestFindRepoRoot:
         assert result != elsewhere, "the walk is still answering with the process directory"
 
     def test_the_cwd_stand_in_is_live(self, tmp_path, monkeypatch):
-        """Control: a patch that never bites would make the test above vacuous."""
+        """Control: a process directory that HOLDS the marker still steers nothing.
+
+        The test above would pass vacuously if the walk consulted the cwd only
+        when a marker sits there; here one does, and the answer must not move.
+        """
+        sub = tmp_path / "sub"
+        sub.mkdir()
         elsewhere = tmp_path / "elsewhere"
         elsewhere.mkdir()
-        monkeypatch.setattr(Path, "cwd", staticmethod(lambda: elsewhere))
-
+        (elsewhere / repo_root.CORE_REGISTRY).write_text("{}", encoding="utf-8")
+        monkeypatch.chdir(elsewhere)
         assert Path.cwd() == elsewhere
+
+        assert repo_root.find_repo_root(sub) == repo_root.SOURCE_ROOT
 
 
 class TestTheBareWorldIsStatedNotInherited:
@@ -120,7 +222,14 @@ class TestTheBareWorldIsStatedNotInherited:
 
     def test_no_marker_means_source_root_and_a_logged_fallback(self, monkeypatch):
         """Marker absent → SOURCE_ROOT, said out loud, never the process cwd."""
-        monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
+        asked = []
+
+        def deny_marker(path):
+            """Deny only the marker; answer every other name truthfully."""
+            asked.append(Path(path).name)
+            return Path(path).name != repo_root.CORE_REGISTRY and Path(path).exists()
+
+        monkeypatch.setattr(repo_root, "exists_exactly", deny_marker)
         logged = []
         monkeypatch.setattr(
             repo_root,
@@ -131,6 +240,7 @@ class TestTheBareWorldIsStatedNotInherited:
         result = repo_root.find_repo_root(caller="push_central")
 
         assert result == repo_root.SOURCE_ROOT
+        assert asked and set(asked) == {repo_root.CORE_REGISTRY}, "the walk never asked for the marker"
         assert logged == [("push_central", repo_root.CORE_REGISTRY)], (
             "the fallback did not announce itself — a fallback nobody can see is how the next one survives"
         )
@@ -141,10 +251,12 @@ class TestTheBareWorldIsStatedNotInherited:
         marker.write_text("{}", encoding="utf-8")
         assert repo_root.find_repo_root(tmp_path) == tmp_path
 
-        monkeypatch.setattr(repo_root, "exists_exactly", lambda path: False)
+        monkeypatch.setattr(
+            repo_root, "exists_exactly", lambda path: Path(path).name != repo_root.CORE_REGISTRY and Path(path).exists()
+        )
         assert repo_root.find_repo_root(tmp_path) == repo_root.SOURCE_ROOT
 
-    def test_the_fallback_records_without_ever_raising(self, tmp_path, mock_json_handler):
+    def test_the_fallback_records_without_ever_raising(self, tmp_path, mock_json_handler, monkeypatch):
         """Six callers reach _record_fallback at IMPORT time.
 
         A diagnostic write that fails in a bare world must not become the import
@@ -164,15 +276,20 @@ class TestTheBareWorldIsStatedNotInherited:
             raise OSError("no writable tree")
 
         mock_json_handler.side_effect = explode
+        # The walk is reached through its public door with the marker denied,
+        # so the REAL recorder runs on the fallback branch it guards.
+        monkeypatch.setattr(
+            repo_root, "exists_exactly", lambda path: Path(path).name != repo_root.CORE_REGISTRY and Path(path).exists()
+        )
 
         # MUST NOT RAISE, and that is now stated rather than merely survived:
-        # _record_fallback returns None, and the exploding handler must
-        # actually have been REACHED. Without the second assertion a
-        # _record_fallback that returned early - never touching the diagnostic
-        # write at all - passed this test while proving nothing about the bare
-        # world it exists for.
-        assert repo_root._record_fallback("push_central", repo_root.CORE_REGISTRY, tmp_path / "nowhere") is None
-        assert mock_json_handler.called
+        # the walk still answers, and the exploding handler must actually have
+        # been REACHED. Without the second assertion a recorder that returned
+        # early - never touching the diagnostic write at all - passed this test
+        # while proving nothing about the bare world it exists for.
+        # Mutant: the recorder's `except Exception` -> `except ImportError` reddens this.
+        assert repo_root.find_repo_root(tmp_path / "nowhere", caller="push_central") == repo_root.SOURCE_ROOT
+        assert mock_json_handler.call_args[0][0] == "repo_root_fallback"
 
 
 # =============================================
@@ -183,23 +300,27 @@ class TestTheBareWorldIsStatedNotInherited:
 class TestGetAllRegistryFiles:
     """Tests for _get_all_registry_files."""
 
-    def test_returns_discovered_registry_files(self):
-        """Returns registry filenames from discovered plan types."""
+    def test_returns_discovered_registry_files(self, tmp_path):
+        """Every discovered type's registry is read — and nothing undiscovered is.
+
+        Mutant: `files.append(rf)` -> `files[:] = [rf]` reddens this.
+        """
         mock_types = {
             "flow_plans": {"registry_file": "fplan_registry.json"},
             "dev_plans": {"registry_file": "dplan_registry.json"},
         }
-        with patch(f"{_MOD}.discover_plan_types", mock_types, create=True):
-            # The function does a dynamic import; patch the import target
-            with patch(
-                "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
-                return_value=mock_types,
-            ):
-                result = mod._get_all_registry_files()
+        result, written = _push(
+            tmp_path,
+            {
+                "fplan_registry.json": {"plans": {"1": _row("FPLAN", 1, "flow")}},
+                "dplan_registry.json": {"plans": {"2": _row("DPLAN", 2, "devpulse")}},
+                "xplan_registry.json": {"plans": {"3": _row("XPLAN", 3, "stray")}},
+            },
+            plan_types=mock_types,
+        )
 
-        assert "fplan_registry.json" in result
-        assert "dplan_registry.json" in result
-        assert len(result) == 2
+        assert result is True
+        assert _plan_ids(written) == {"FPLAN-0001", "DPLAN-0002"}
 
     def test_deduplicates_registry_files(self):
         """Does not duplicate registry filenames when multiple types share the same file."""
@@ -215,44 +336,56 @@ class TestGetAllRegistryFiles:
 
         assert result.count("fplan_registry.json") == 1
 
-    def test_falls_back_on_discovery_exception(self):
-        """Falls back to REGISTRY_FILE.name when discover_plan_types raises."""
-        with patch(
-            "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
-            side_effect=RuntimeError("boom"),
-        ):
-            result = mod._get_all_registry_files()
+    def test_falls_back_on_discovery_exception(self, tmp_path):
+        """Falls back to REGISTRY_FILE.name when discover_plan_types raises.
 
-        assert result == [mod.REGISTRY_FILE.name]
+        Mutant: `return [REGISTRY_FILE.name]` -> `return []` reddens this.
+        """
+        result, written = _push(
+            tmp_path,
+            {
+                mod.REGISTRY_FILE.name: {"plans": {"1": _row("FPLAN", 1, "flow")}},
+                "dplan_registry.json": {"plans": {"2": _row("DPLAN", 2, "devpulse")}},
+            },
+            plan_types=RuntimeError("boom"),
+        )
 
-    def test_falls_back_when_no_registry_file_key(self):
+        assert result is True
+        assert _plan_ids(written) == {"FPLAN-0001"}
+
+    def test_falls_back_when_no_registry_file_key(self, tmp_path):
         """Falls back to default when config dicts lack registry_file key."""
         mock_types = {
             "flow_plans": {"prefix": "FPLAN"},
             "dev_plans": {"prefix": "DPLAN"},
         }
-        with patch(
-            "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
-            return_value=mock_types,
-        ):
-            result = mod._get_all_registry_files()
+        result, written = _push(
+            tmp_path,
+            {
+                mod.REGISTRY_FILE.name: {"plans": {"1": _row("FPLAN", 1, "flow")}},
+                "dplan_registry.json": {"plans": {"2": _row("DPLAN", 2, "devpulse")}},
+            },
+            plan_types=mock_types,
+        )
 
         # No registry_file keys, so files list is empty -> fallback
-        assert result == [mod.REGISTRY_FILE.name]
+        assert result is True
+        assert _plan_ids(written) == {"FPLAN-0001"}
 
-    def test_skips_none_registry_file(self):
-        """Skips entries where registry_file is None."""
+    def test_skips_none_registry_file(self, tmp_path):
+        """Skips entries where registry_file is None — the push does not die on it."""
         mock_types = {
             "flow_plans": {"registry_file": "fplan_registry.json"},
             "special": {"registry_file": None},
         }
-        with patch(
-            "aipass.flow.apps.handlers.template.plan_type_loader.discover_plan_types",
-            return_value=mock_types,
-        ):
-            result = mod._get_all_registry_files()
+        result, written = _push(
+            tmp_path,
+            {"fplan_registry.json": {"plans": {"1": _row("FPLAN", 1, "flow")}}},
+            plan_types=mock_types,
+        )
 
-        assert result == ["fplan_registry.json"]
+        assert result is True
+        assert _plan_ids(written) == {"FPLAN-0001"}
 
 
 # =============================================
@@ -264,41 +397,35 @@ class TestLoadRegistry:
     """Tests for _load_registry."""
 
     def test_merges_multiple_registries(self, tmp_path):
-        """Merges plans from multiple registry files using composite keys."""
-        fplan_reg = {
-            "plans": {"1": {"subject": "fplan one", "file_path": "/p/FPLAN-0001_test.md"}},
-            "next_number": 5,
-        }
-        dplan_reg = {
-            "plans": {"2": {"subject": "dplan one", "file_path": "/p/DPLAN-0002_test.md"}},
-            "next_number": 10,
-        }
-        (tmp_path / "fplan_registry.json").write_text(json.dumps(fplan_reg), encoding="utf-8")
-        (tmp_path / "dplan_registry.json").write_text(json.dumps(dplan_reg), encoding="utf-8")
+        """Merges plans from multiple registry files using composite keys.
 
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(
-                mod,
-                "_get_all_registry_files",
-                return_value=["fplan_registry.json", "dplan_registry.json"],
-            ),
-        ):
-            result = mod._load_registry()
+        Two registries sharing plan number 1 must stay two plans (the collision
+        the composite key exists for). Mutant: `f"{prefix}-{plan_num.zfill(4)}"`
+        -> `plan_num` reddens this.
+        """
+        result, written = _push(
+            tmp_path,
+            {
+                "fplan_registry.json": {"plans": {"1": _row("FPLAN", 1, "flow")}, "next_number": 5},
+                "dplan_registry.json": {"plans": {"1": _row("DPLAN", 1, "flow")}, "next_number": 10},
+            },
+        )
 
-        assert "FPLAN-0001" in result["plans"]
-        assert "DPLAN-0002" in result["plans"]
-        assert result["next_number"] == 10
+        assert result is True
+        assert _plan_ids(written) == {"FPLAN-0001", "DPLAN-0001"}
 
-    def test_handles_missing_registry(self, tmp_path):
-        """Gracefully handles a missing registry file."""
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(mod, "_get_all_registry_files", return_value=["nonexistent_registry.json"]),
-        ):
-            result = mod._load_registry()
-        assert result["plans"] == {}
-        assert result["next_number"] == 1
+    def test_handles_missing_registry(self, tmp_path, mock_logger):
+        """Gracefully handles a missing registry file — silently, not as a failure.
+
+        Without the exists() guard the open raises, is caught and the push still
+        succeeds, so the absent warning is what tells the two apart.
+        Mutant: `if not target.exists():` -> `if False:` reddens this.
+        """
+        result, written = _push(tmp_path, plan_types={"x": {"registry_file": "nonexistent_registry.json"}})
+
+        assert result is True
+        assert written["branches"] == {}
+        mock_logger.warning.assert_not_called()
 
     def test_keeps_highest_next_number(self, tmp_path):
         """Keeps the highest next_number across registries."""
@@ -322,89 +449,61 @@ class TestLoadRegistry:
 
     def test_handles_corrupt_registry_gracefully(self, tmp_path):
         """Skips a corrupt registry file and continues with others."""
-        (tmp_path / "bad_registry.json").write_text("not json!", encoding="utf-8")
-        good_reg = {
-            "plans": {"1": {"subject": "good", "file_path": "/p/GOOD-0001_test.md"}},
-            "next_number": 5,
-        }
-        (tmp_path / "good_registry.json").write_text(json.dumps(good_reg), encoding="utf-8")
+        result, written = _push(
+            tmp_path,
+            {
+                "bad_registry.json": "not json!",
+                "good_registry.json": {"plans": {"1": _row("GOOD", 1, "flow")}, "next_number": 5},
+            },
+        )
 
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(
-                mod,
-                "_get_all_registry_files",
-                return_value=["bad_registry.json", "good_registry.json"],
-            ),
-        ):
-            result = mod._load_registry()
-
-        assert "GOOD-0001" in result["plans"]
-        assert result["next_number"] == 5
+        # Mutant: the per-file `except Exception` -> `except KeyError` reddens this.
+        assert result is True
+        assert _plan_ids(written) == {"GOOD-0001"}
 
     def test_uses_prefix_from_filename(self, tmp_path):
-        """Extracts prefix from plan file_path filename."""
-        reg = {
-            "plans": {"7": {"subject": "test", "file_path": "/x/XPLAN-0007_test.md"}},
-            "next_number": 8,
-        }
-        (tmp_path / "xplan_registry.json").write_text(json.dumps(reg), encoding="utf-8")
+        """Extracts prefix from plan file_path filename, not the registry's name."""
+        result, written = _push(
+            tmp_path,
+            {
+                "other_registry.json": {
+                    "plans": {"7": _row("XPLAN", 7, "flow", file_path=str(tmp_path / "XPLAN-0007_test.md"))}
+                }
+            },
+        )
 
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(mod, "_get_all_registry_files", return_value=["xplan_registry.json"]),
-        ):
-            result = mod._load_registry()
-
-        assert "XPLAN-0007" in result["plans"]
+        assert _plan_ids(written) == {"XPLAN-0007"}
 
     def test_fallback_prefix_from_registry_filename(self, tmp_path):
         """Uses registry filename prefix when file_path has no recognizable prefix."""
-        reg = {
-            "plans": {"3": {"subject": "no prefix", "file_path": "/x/some_file.md"}},
-            "next_number": 4,
-        }
-        (tmp_path / "custom_registry.json").write_text(json.dumps(reg), encoding="utf-8")
-
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(mod, "_get_all_registry_files", return_value=["custom_registry.json"]),
-        ):
-            result = mod._load_registry()
+        result, written = _push(
+            tmp_path,
+            {
+                "custom_registry.json": {
+                    "plans": {"3": _row("CUSTOM", 3, "flow", file_path=str(tmp_path / "some_file.md"))}
+                }
+            },
+        )
 
         # Falls back to CUSTOM (from custom_registry.json -> custom -> CUSTOM)
-        assert "CUSTOM-0003" in result["plans"]
+        assert _plan_ids(written) == {"CUSTOM-0003"}
 
     def test_empty_registry_plans(self, tmp_path):
         """Handles registry file with empty plans dict."""
-        reg = {"plans": {}, "next_number": 1}
-        (tmp_path / "fplan_registry.json").write_text(json.dumps(reg), encoding="utf-8")
+        result, written = _push(tmp_path, {"fplan_registry.json": {"plans": {}, "next_number": 1}})
 
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(mod, "_get_all_registry_files", return_value=["fplan_registry.json"]),
-        ):
-            result = mod._load_registry()
-
-        assert result["plans"] == {}
-        assert result["next_number"] == 1
+        assert result is True
+        assert written["branches"] == {}
 
     def test_plan_with_empty_file_path(self, tmp_path):
         """Handles plan with empty file_path string."""
-        reg = {
-            "plans": {"1": {"subject": "no path", "file_path": ""}},
-            "next_number": 2,
-        }
-        (tmp_path / "fplan_registry.json").write_text(json.dumps(reg), encoding="utf-8")
-
-        with (
-            patch.object(mod, "FLOW_JSON_DIR", tmp_path),
-            patch.object(mod, "_get_all_registry_files", return_value=["fplan_registry.json"]),
-        ):
-            result = mod._load_registry()
+        result, written = _push(
+            tmp_path,
+            {"fplan_registry.json": {"plans": {"1": _row("FPLAN", 1, "flow", file_path="")}, "next_number": 2}},
+        )
 
         # Falls back to FPLAN prefix from registry filename
-        assert "FPLAN-0001" in result["plans"]
+        assert _plan_ids(written) == {"FPLAN-0001"}
 
 
 # =============================================
@@ -415,7 +514,7 @@ class TestLoadRegistry:
 class TestExtractPlansByBranch:
     """Tests for _extract_plans_by_branch."""
 
-    def test_groups_plans_by_branch(self):
+    def test_groups_plans_by_branch(self, tmp_path):
         """Groups plans into per-branch sections by location path name."""
         registry = {
             "plans": {
@@ -435,13 +534,13 @@ class TestExtractPlansByBranch:
                 },
             }
         }
-        result = mod._extract_plans_by_branch(registry)
+        result = _branches(tmp_path, registry)
         assert "flow" in result
         assert "devpulse" in result
         assert result["flow"]["statistics"]["active_count"] == 1
         assert result["devpulse"]["statistics"]["active_count"] == 1
 
-    def test_extracts_active_and_closed(self):
+    def test_extracts_active_and_closed(self, tmp_path):
         """Separates active and closed plans within a branch."""
         registry = {
             "plans": {
@@ -463,7 +562,7 @@ class TestExtractPlansByBranch:
                 },
             }
         }
-        result = mod._extract_plans_by_branch(registry)
+        result = _branches(tmp_path, registry)
         flow = result["flow"]
         assert flow["statistics"]["active_count"] == 1
         assert flow["statistics"]["total_closed"] == 1
@@ -471,7 +570,7 @@ class TestExtractPlansByBranch:
         assert len(flow["recently_closed"]) == 1
         assert flow["recently_closed"][0]["closed"] == "2026-04-18"
 
-    def test_sorts_active_newest_first(self):
+    def test_sorts_active_newest_first(self, tmp_path):
         """Active plans sorted by created date, newest first."""
         registry = {
             "plans": {
@@ -491,12 +590,12 @@ class TestExtractPlansByBranch:
                 },
             }
         }
-        result = mod._extract_plans_by_branch(registry)
+        result = _branches(tmp_path, registry)
         active = result["flow"]["active_plans"]
         assert active[0]["subject"] == "Newest"
         assert active[1]["subject"] == "Oldest"
 
-    def test_closed_limited_to_5(self):
+    def test_closed_limited_to_5(self, tmp_path):
         """Recently closed plans limited to 5 per branch."""
         plans = {}
         for i in range(1, 9):
@@ -508,20 +607,27 @@ class TestExtractPlansByBranch:
                 "file_path": f"/p/FPLAN-{str(i).zfill(4)}.md",
                 "location": "/repo/src/aipass/flow",
             }
-        result = mod._extract_plans_by_branch({"plans": plans})
+        result = _branches(tmp_path, {"plans": plans})
+        # Mutant: `closed[:5]` -> `closed[:6]` reddens this.
         assert len(result["flow"]["recently_closed"]) == 5
+        assert result["flow"]["statistics"]["total_closed"] == 8
 
-    def test_empty_registry(self):
+    def test_empty_registry(self, tmp_path):
         """Returns empty dict for empty registry."""
-        result = mod._extract_plans_by_branch({"plans": {}})
+        result = _branches(tmp_path, {"plans": {}})
         assert result == {}
 
-    def test_missing_plans_key(self):
-        """Returns empty dict when registry has no plans key."""
-        result = mod._extract_plans_by_branch({})
-        assert result == {}
+    def test_missing_plans_key(self, tmp_path, mock_logger):
+        """Returns empty dict when registry has no plans key — as a normal registry, not a failure.
 
-    def test_skips_plans_without_location(self):
+        Mutant: `data.get("plans", {})` -> `data["plans"]` reddens this.
+        """
+        ok, written = _push(tmp_path, {"fplan_registry.json": {"next_number": 3}})
+        assert ok is True
+        assert written["branches"] == {}
+        mock_logger.warning.assert_not_called()
+
+    def test_skips_plans_without_location(self, tmp_path):
         """Plans with empty location are skipped."""
         registry = {
             "plans": {
@@ -534,10 +640,10 @@ class TestExtractPlansByBranch:
                 },
             }
         }
-        result = mod._extract_plans_by_branch(registry)
+        result = _branches(tmp_path, registry)
         assert result == {}
 
-    def test_branch_section_structure(self):
+    def test_branch_section_structure(self, tmp_path):
         """Each branch section has required keys."""
         registry = {
             "plans": {
@@ -551,7 +657,7 @@ class TestExtractPlansByBranch:
                 },
             }
         }
-        result = mod._extract_plans_by_branch(registry)
+        result = _branches(tmp_path, registry)
         section = result["flow"]
         assert section["branch_name"] == "FLOW"
         assert section["branch_path"] == "/repo/src/aipass/flow"
@@ -563,7 +669,7 @@ class TestExtractPlansByBranch:
         assert "subject" in entry
         assert "branch" in entry
 
-    def test_plan_entries_have_branch_field(self):
+    def test_plan_entries_have_branch_field(self, tmp_path):
         """Each plan entry includes the branch field."""
         registry = {
             "plans": {
@@ -576,7 +682,7 @@ class TestExtractPlansByBranch:
                 },
             }
         }
-        result = mod._extract_plans_by_branch(registry)
+        result = _branches(tmp_path, registry)
         assert result["devpulse"]["active_plans"][0]["branch"] == "devpulse"
 
 
@@ -588,57 +694,56 @@ class TestExtractPlansByBranch:
 class TestLoadCentral:
     """Tests for _load_central."""
 
-    def test_returns_empty_structure_when_file_missing(self, tmp_path):
-        """Returns empty structure when PLANS.central.json does not exist."""
-        with patch.object(mod, "CENTRAL_FILE", tmp_path / "nonexistent.json"):
-            result = mod._load_central()
+    def test_returns_empty_structure_when_file_missing(self, tmp_path, mock_logger):
+        """A missing PLANS.central.json is started from the empty structure — silently.
 
-        assert result["generated_at"] == ""
-        assert result["branches"] == {}
-        assert result["global_statistics"]["total_active"] == 0
-        assert result["global_statistics"]["total_closed"] == 0
-        assert result["global_statistics"]["branches_reporting"] == 0
+        Mutant: `if not CENTRAL_FILE.exists():` -> `if False:` reddens this.
+        """
+        result, written = _push(tmp_path)
+
+        assert result is True
+        mock_logger.warning.assert_not_called()
+        assert set(written) == {"generated_at", "branches", "global_statistics"}
+        assert written["branches"] == {}
+        assert written["global_statistics"] == {"total_active": 0, "total_closed": 0, "branches_reporting": 0}
 
     def test_loads_existing_central_file(self, tmp_path):
-        """Loads and returns existing PLANS.central.json data."""
+        """An existing PLANS.central.json is loaded, and what the push does not own survives.
+
+        Mutant: `return json.load(f)` -> `return {}` reddens this.
+        """
         central_data = {
             "generated_at": "2026-04-20T00:00:00Z",
             "branches": {"flow": {"branch_name": "FLOW"}},
             "global_statistics": {"total_active": 5, "total_closed": 10, "branches_reporting": 2},
+            "active_plans": ["kept by aggregate"],
         }
-        central_file = tmp_path / "PLANS.central.json"
-        central_file.write_text(json.dumps(central_data), encoding="utf-8")
 
-        with patch.object(mod, "CENTRAL_FILE", central_file):
-            result = mod._load_central()
+        result, written = _push(tmp_path, central=central_data)
 
-        assert result["generated_at"] == "2026-04-20T00:00:00Z"
-        assert result["branches"]["flow"]["branch_name"] == "FLOW"
-        assert result["global_statistics"]["total_active"] == 5
+        assert result is True
+        assert written["active_plans"] == ["kept by aggregate"]
+        assert written["generated_at"] != "2026-04-20T00:00:00Z"
+        assert written["branches"] == {}
 
     def test_returns_empty_structure_on_corrupt_json(self, tmp_path):
-        """Returns empty structure when PLANS.central.json contains invalid JSON."""
-        central_file = tmp_path / "PLANS.central.json"
-        central_file.write_text("not valid json!!!", encoding="utf-8")
+        """A corrupt PLANS.central.json is replaced, not fatal."""
+        result, written = _push(tmp_path, central=b"not valid json!!!")
 
-        with patch.object(mod, "CENTRAL_FILE", central_file):
-            result = mod._load_central()
-
-        assert result["generated_at"] == ""
-        assert result["branches"] == {}
+        assert result is True
+        assert set(written) == {"generated_at", "branches", "global_statistics"}
 
     def test_returns_empty_structure_on_read_exception(self, tmp_path):
-        """Returns empty structure when file read raises an exception."""
-        central_file = tmp_path / "PLANS.central.json"
-        central_file.write_text("{}", encoding="utf-8")
+        """A central file that cannot even be DECODED is replaced, not fatal.
 
-        with (
-            patch.object(mod, "CENTRAL_FILE", central_file),
-            patch("builtins.open", side_effect=PermissionError("denied")),
-        ):
-            result = mod._load_central()
+        The unreadable file is real bytes on disk (invalid UTF-8), so the read
+        raises in the product itself — no patch over ``open``.
+        Mutant: the load's `except Exception` -> `except json.JSONDecodeError` reddens this.
+        """
+        result, written = _push(tmp_path, central=b"\xff\xfe\x00 not utf-8")
 
-        assert result["branches"] == {}
+        assert result is True
+        assert set(written) == {"generated_at", "branches", "global_statistics"}
 
 
 # =============================================
@@ -649,33 +754,35 @@ class TestLoadCentral:
 class TestCalculateGlobalStatistics:
     """Tests for _calculate_global_statistics."""
 
-    def test_sums_across_branches(self):
-        """Sums active and closed counts across all branches."""
-        central_data = {
-            "branches": {
-                "flow": {"statistics": {"active_count": 3, "total_closed": 5}},
-                "drone": {"statistics": {"active_count": 2, "total_closed": 8}},
-                "prax": {"statistics": {"active_count": 1, "total_closed": 2}},
-            }
-        }
-        result = mod._calculate_global_statistics(central_data)
-        assert result["total_active"] == 6
-        assert result["total_closed"] == 15
-        assert result["branches_reporting"] == 3
+    def test_sums_across_branches(self, tmp_path):
+        """Sums active and closed counts across all branches.
 
-    def test_empty_branches(self):
-        """Returns zeros for empty branches dict."""
-        result = mod._calculate_global_statistics({"branches": {}})
-        assert result["total_active"] == 0
-        assert result["total_closed"] == 0
-        assert result["branches_reporting"] == 0
+        Mutant: `total_closed += ...` -> `total_closed = ...` reddens this.
+        """
+        plans = {}
+        n = 0
+        for branch, active, closed in (("flow", 3, 5), ("drone", 2, 8), ("prax", 1, 2)):
+            for status, count in (("open", active), ("closed", closed)):
+                for _ in range(count):
+                    n += 1
+                    plans[str(n)] = _row("FPLAN", n, branch, status=status)
+        result, written = _push(tmp_path, {"fplan_registry.json": {"plans": plans}})
 
-    def test_no_branches_key(self):
-        """Returns zeros when branches key is missing."""
-        result = mod._calculate_global_statistics({})
-        assert result["total_active"] == 0
-        assert result["total_closed"] == 0
-        assert result["branches_reporting"] == 0
+        stats = written["global_statistics"]
+        assert stats["total_active"] == 6
+        assert stats["total_closed"] == 15
+        assert stats["branches_reporting"] == 3
+
+    def test_empty_branches(self, tmp_path):
+        """Returns zeros for empty branches dict — stale totals do not survive."""
+        stale = {"branches": {}, "global_statistics": {"total_active": 9, "total_closed": 9, "branches_reporting": 9}}
+        result, written = _push(tmp_path, {"fplan_registry.json": {"plans": {}}}, central=stale)
+        assert written["global_statistics"] == {"total_active": 0, "total_closed": 0, "branches_reporting": 0}
+
+    def test_no_branches_key(self, tmp_path):
+        """Returns zeros when the existing central file has no branches key."""
+        result, written = _push(tmp_path, central={"generated_at": ""})
+        assert written["global_statistics"] == {"total_active": 0, "total_closed": 0, "branches_reporting": 0}
 
     def test_branch_missing_statistics(self):
         """Handles branches without statistics key."""
@@ -690,17 +797,14 @@ class TestCalculateGlobalStatistics:
         assert result["total_closed"] == 5
         assert result["branches_reporting"] == 2
 
-    def test_single_branch(self):
+    def test_single_branch(self, tmp_path):
         """Handles a single branch correctly."""
-        central_data = {
-            "branches": {
-                "flow": {"statistics": {"active_count": 7, "total_closed": 12}},
-            }
-        }
-        result = mod._calculate_global_statistics(central_data)
-        assert result["total_active"] == 7
-        assert result["total_closed"] == 12
-        assert result["branches_reporting"] == 1
+        plans = {str(n): _row("FPLAN", n, "flow", status="open" if n <= 7 else "closed") for n in range(1, 20)}
+        result, written = _push(tmp_path, {"fplan_registry.json": {"plans": plans}})
+        stats = written["global_statistics"]
+        assert stats["total_active"] == 7
+        assert stats["total_closed"] == 12
+        assert stats["branches_reporting"] == 1
 
 
 # =============================================
@@ -767,10 +871,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "CENTRAL_FILE", central_file),
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             result = mod.push_to_plans_central()
 
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         assert central_file.exists()
         written = json.loads(central_file.read_text(encoding="utf-8"))
@@ -813,10 +919,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_extract_plans_by_branch", return_value=mock_branches),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             result = mod.push_to_plans_central()
 
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
         assert "flow" in written["branches"]
@@ -839,10 +947,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "CENTRAL_FILE", central_file),
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             result = mod.push_to_plans_central()
 
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         assert ai_central.exists()
 
@@ -886,10 +996,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_extract_plans_by_branch", return_value=mock_branches),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             result = mod.push_to_plans_central()
 
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
         flow = written["branches"]["flow"]
@@ -931,10 +1043,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_extract_plans_by_branch", return_value=mock_branches),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             result = mod.push_to_plans_central()
 
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
         stats = written["global_statistics"]
@@ -969,9 +1083,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_extract_plans_by_branch", return_value=mock_branches),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             mod.push_to_plans_central()
+
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
 
         call_args = mock_json_handler.call_args
         log_data = call_args[0][1]
@@ -1013,10 +1130,12 @@ class TestPushToPlansCentral:
             patch.object(mod, "CENTRAL_FILE", central_file),
             patch.object(mod, "_load_registry", return_value=mock_registry),
             patch.object(mod, "_load_central", return_value=mock_central),
-            patch.object(mod, "aggregate_central_impl"),
+            patch.object(mod, "aggregate_central_impl") as mock_agg,
         ):
             result = mod.push_to_plans_central()
 
+        # Stays patched: with heal=True it auto-closes rows in live branch registries.
+        mock_agg.assert_called_once_with(heal=True, central_file=central_file, central_dir=ai_central)
         assert result is True
         written = json.loads(central_file.read_text(encoding="utf-8"))
         assert "devpulse" in written["branches"]

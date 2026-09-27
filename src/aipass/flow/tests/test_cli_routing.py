@@ -11,10 +11,9 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/flow.py parses and imports
 
-import sys
-
 import pytest
 
+from aipass.cli.apps.modules import error, mark_command_failed, reset_command_state
 from aipass.flow.apps import flow as branch_entry
 
 
@@ -43,7 +42,7 @@ def stub_module(monkeypatch):
 
 def _run(monkeypatch, argv):
     """Invoke main() with a synthetic argv."""
-    monkeypatch.setattr(sys, "argv", ["flow", *argv])
+    monkeypatch.setattr("sys.argv", ["flow", *argv])
     return branch_entry.main()
 
 
@@ -151,6 +150,55 @@ def test_route_command_survives_a_raising_module(mock_logger):
 
 def test_known_command_exits_zero(monkeypatch, stub_module):
     """A routed command reports success."""
+    assert _run(monkeypatch, ["probe"]) == 0
+    assert stub_module.calls == [("probe", [])]
+
+
+class _ErroringModule:
+    """A handler that reports a failure through cli's error() and still claims the command."""
+
+    __name__ = "aipass.flow.apps.modules.erroring"
+    __doc__ = "Erroring stub for exit-code tests."
+
+    def handle_command(self, command, args):
+        if command != "probe":
+            return False
+        error("probe failed")
+        return True
+
+
+@pytest.fixture
+def clean_exit_flag():
+    """Leave cli's process-wide failure flag cleared after the test, whatever main() did."""
+    yield
+    reset_command_state()
+
+
+def test_handled_command_that_reported_an_error_exits_two(monkeypatch, capsys, clean_exit_flag):
+    """A handler that calls error() and returns True is a failed command: exit 2, not 0.
+
+    Compass 451. Before the entry point read resolve_exit, main() returned 0 after
+    any handled route, so `drone @flow close X` that printed an error still told
+    its caller it succeeded.
+    Mutant: return resolve_exit(True) -> return 0 reddens this.
+    """
+    monkeypatch.setattr(branch_entry, "discover_modules", lambda: [_ErroringModule()])
+
+    result = _run(monkeypatch, ["probe"])
+
+    assert result == 2
+    assert "probe failed" in capsys.readouterr().err
+
+
+def test_good_command_exits_zero_after_an_earlier_failure(monkeypatch, stub_module, clean_exit_flag):
+    """main() clears the failure flag on entry, so a previous command's error does not leak.
+
+    A long-lived process (drone's in-process adapter, a test run) calls main() more
+    than once; the second, clean command must not inherit the first one's exit 2.
+    Mutant: reset_command_state() removed from _main_impl reddens this.
+    """
+    mark_command_failed()
+
     assert _run(monkeypatch, ["probe"]) == 0
     assert stub_module.calls == [("probe", [])]
 
