@@ -215,8 +215,8 @@ class TestResilience:
         assert len(records) == 1
 
     def test_digest_memory_is_bounded(self, feed_file, cursor):
-        """Bounded at the feed's own maximum, so a digest never ages out early."""
-        _write(feed_file, [_event(minute=i % 60) + f'{{"n":{i}}}' for i in range(500)])
+        """Bounded at the feed's own maximum, so a digest never ages out early; mutant 'seen untrimmed' reddens it."""
+        _write(feed_file, [_event(minute=i % 60, title=f"@canary completed run {i}") for i in range(500)])
 
         _, state = feed.drain_feed(cursor, feed_file_path=feed_file)
 
