@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_help_flag_safety.py
 # Description: A help flag anywhere in args must explain, never execute (DPLAN-0291 rule E)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-13
 # Modified: 2026-09-27
 # =============================================
@@ -69,17 +69,24 @@ def test_feedback_trailing_help_never_executes(capsys):
 
 
 @pytest.mark.parametrize(
-    ("mod", "cmd", "args"),
+    ("mod", "cmd", "args", "handler"),
     [
-        (wd_mod, "watchdog", ["agent", "@target", "-h"]),
-        (compass_mod, "compass", ["add", "ctx", "decision", "-h"]),
+        (wd_mod, "watchdog", ["agent", "@target", "-h"], "_handle_agent"),
+        (compass_mod, "compass", ["add", "ctx", "decision", "-h"], "_handle_add"),
     ],
 )
-def test_short_help_flag_mid_args_never_executes(mod, cmd, args, capsys):
-    """-h anywhere is the same contract as --help anywhere."""
-    with patch.object(mod, "_guard_caller", return_value=True, create=True):
+def test_short_help_flag_mid_args_never_executes(mod, cmd, args, handler, capsys):
+    """-h anywhere is the same contract as --help anywhere.
+
+    The handler the command would reach is the canary: help outranks the caller
+    gate in watchdog and compass has no gate, so no guard is patched here (the
+    old create=True patch made a _guard_caller on compass that nothing read).
+    Mutant: `_wants_help` answering False in either module -> red.
+    """
+    with patch.object(mod, handler) as canary:
         result = mod.handle_command(cmd, args)
     assert result is True
+    canary.assert_not_called()
     out = _output(capsys).lower()
     assert "usage:" in out
 
