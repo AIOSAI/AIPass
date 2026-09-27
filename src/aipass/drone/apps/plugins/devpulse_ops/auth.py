@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-30
 # Modified: 2026-09-27
 # =============================================
@@ -273,6 +273,12 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
         # send someone hunting a registry entry that is in fact present and fine.
         logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
         raise
+    except RuntimeError as exc:
+        # Python 3.12 answers a symlink loop in a non-strict resolve with
+        # RuntimeError, not OSError. Raised as OSError so the owner gate's refusal
+        # catches it: a loop is a refusal, never a traceback out of the gate.
+        logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
+        raise OSError(f"symlink loop: {exc}") from exc
 
 
 def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:

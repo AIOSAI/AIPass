@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_caller_identity_provenance.py
 # Description: Caller identity ships with the evidence it came from
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-21
 # Modified: 2026-09-27
 # =============================================
@@ -319,8 +319,8 @@ class TestRoutingWithoutACwdOnEveryOS:
     WINDOWS_CWD_REASON in conftest), so on Windows they are skipped and this is
     the only cover routing's cwd guards have there.
 
-    Supplied state, not produced: ``Path.cwd`` raises the ENOENT it raises for
-    real. The fourth claim of that class — that the handlers package IMPORTS at
+    Supplied state, not produced: the cwd read beneath ``caller_cwd`` raises the
+    ENOENT ``Path.cwd`` raises for real. The fourth claim of that class — that the handlers package IMPORTS at
     all from a dead directory — has no portable sibling and is not given a fake
     one. Its own docstring says why: the import-time walk reaches ``os.getcwd``
     inside C via ``Path.resolve()``, where patching ``Path.cwd`` reproduces
@@ -330,10 +330,12 @@ class TestRoutingWithoutACwdOnEveryOS:
 
     @pytest.fixture()
     def no_cwd(self, monkeypatch):
+        """The raw read raises ENOENT beneath caller_cwd, so every guard above it runs."""
+
         def gone():
             raise FileNotFoundError(2, "No such file or directory")
 
-        monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+        monkeypatch.setattr(router_handler, "_working_directory", gone)
         yield
 
     @staticmethod

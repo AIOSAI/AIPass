@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -105,6 +105,18 @@ _REGISTRY_SUFFIX = "_REGISTRY.json"
 _REGISTRY_GLOB = f"*{_REGISTRY_SUFFIX}"
 
 
+def _registry_candidates(directory: Path) -> List[Path]:
+    """What the FILESYSTEM answers for ``*_REGISTRY.json`` in *directory* — untrusted.
+
+    The half of the lookup that varies by host: case-sensitive on Linux, folded
+    on Windows and default macOS. It is its own name because it is a different
+    kind of answer from the one ``registries_in`` returns — the host's opinion,
+    not yet a registry — and so the name check in Python can be exercised
+    against a folding listing on a host whose filesystem does not fold.
+    """
+    return list(directory.glob(_REGISTRY_GLOB))
+
+
 def registries_in(directory: Path) -> List[Path]:
     """Every ``*_REGISTRY.json`` in *directory*, exact-case, sorted.
 
@@ -128,7 +140,7 @@ def registries_in(directory: Path) -> List[Path]:
     One reader, called from every walk in this tree — the tenth private copy of
     ``glob("*_REGISTRY.json")`` is how a fix lands on some of N identical paths.
     """
-    return sorted(p for p in directory.glob(_REGISTRY_GLOB) if p.name.endswith(_REGISTRY_SUFFIX))
+    return sorted(p for p in _registry_candidates(directory) if p.name.endswith(_REGISTRY_SUFFIX))
 
 
 def _project_name_from_registry(reg_file: Path) -> str | None:
@@ -167,6 +179,18 @@ def _project_name_from_registry(reg_file: Path) -> str | None:
     return derived
 
 
+def _working_directory() -> Path:
+    """The one raw read of where this process stands. Raises ENOENT when that is gone.
+
+    Unguarded on purpose: the guard is ``caller_cwd`` and every location site
+    goes through it (test_no_cwd_sweep bans any other ``Path.cwd()``). The read
+    is its own name because a deleted working directory is a state Windows will
+    not let a process reach, so this is where that state is supplied portably —
+    beneath the guard, so the guard itself always runs.
+    """
+    return Path.cwd()
+
+
 def caller_cwd() -> Path | None:
     """The caller's working directory, or None when the process has none.
 
@@ -185,7 +209,7 @@ def caller_cwd() -> Path | None:
     second copy, which is the direction the dependency already runs.
     """
     try:
-        return Path.cwd()
+        return _working_directory()
     except OSError as exc:
         logger.info("No current directory — it was deleted out from under this process (%s)", exc)
         return None

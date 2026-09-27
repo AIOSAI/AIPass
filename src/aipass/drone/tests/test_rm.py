@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-06-02
 # Modified: 2026-09-27
 # =============================================
@@ -26,6 +26,7 @@ from unittest.mock import patch
 import pytest
 
 from aipass.drone.apps import drone as drone_cli
+from aipass.drone.apps.handlers import rm_handler
 from aipass.drone.apps.handlers.rm_handler import (
     check_carveouts,
     check_containment,
@@ -595,7 +596,9 @@ class TestTemplateSkeletonIsNotACitizen:
         assert blocked is False, f"spawn refused inside its own tree: {reason}"
 
     def test_standing_in_a_template_is_standing_in_the_citizen(self, project_with_template, monkeypatch):
-        """Mutant killed: _find_branch_root keeping the innermost .trinity (the caller read as the skeleton)."""
+        """CWD detection uses the same walk — it has to agree with the guard.
+
+        Mutant killed: _find_branch_root keeping the innermost .trinity (the caller read as the skeleton)."""
         spawn = project_with_template / "src" / "aipass" / "spawn"
         monkeypatch.chdir(spawn / "templates" / "aipass_framework")
         outside_the_skeleton = spawn / "build"
@@ -603,7 +606,9 @@ class TestTemplateSkeletonIsNotACitizen:
         assert blocked is False, f"a caller standing in spawn's template was refused spawn's own tree: {reason}"
 
     def test_ordinary_branch_path_is_unchanged(self, project_with_template, monkeypatch):
-        """Mutant killed: _find_branch_root answering None (a normal branch stopped mapping to itself)."""
+        """The fix must not over-reach: a normal branch still maps to itself.
+
+        Mutant killed: _find_branch_root answering None (a normal branch stopped mapping to itself)."""
         monkeypatch.chdir(project_with_template / "src" / "aipass" / "spawn")
         target = project_with_template / "src" / "aipass" / "drone" / "build"
         blocked, reason = check_carveouts(target.resolve(), project_with_template.resolve())
@@ -726,21 +731,20 @@ class TestContainedCitizens:
         host's own and carries the way out of it, the ledger says failed, and
         the tree is still standing. It models the refusal only; a real rmtree
         empties what it can reach before raising.
+        Mutant killed: the `_standing_inside` suffix dropped from the failure message.
         """
-        real_rmtree = shutil.rmtree
 
-        def windows_rmtree(path, *args, **kwargs):
+        def windows_remove_tree(path: Path) -> None:
             here = Path.cwd()
-            target = Path(path)
-            if here == target or target in here.parents:
+            if here == path or path in here.parents:
                 raise PermissionError(
                     errno.EACCES,
                     "[WinError 32] The process cannot access the file because it is being used by another process",
-                    str(target),
+                    str(path),
                 )
-            real_rmtree(path, *args, **kwargs)
+            shutil.rmtree(path)
 
-        monkeypatch.setattr(shutil, "rmtree", windows_rmtree)
+        monkeypatch.setattr(rm_handler, "_remove_tree", windows_remove_tree)
 
         ((_path, ok, message),) = safe_delete([".."])
 

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_executor.py
 # Description: Subprocess executor - capture, stream, timeout and kill paths
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-14
 # Modified: 2026-09-27
 # =============================================
@@ -16,7 +16,6 @@ import sys
 import textwrap
 import time
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -304,6 +303,7 @@ class TestKeyboardInterrupt:
         """Ctrl+C during the wait loop must not leave the child running.
 
         The executor now owns the process object, so it also owns the orphan.
+        Mutants: the interrupt handler's _stop_process removed; the loop pausing via time.sleep.
         """
         spawned = []
         spawn = subprocess.Popen
@@ -313,20 +313,11 @@ class TestKeyboardInterrupt:
             spawned.append(proc)
             return proc
 
-        # Interrupt the FIRST sleep only. `executor.time` is the shared time
-        # module, so a blanket side_effect would also interrupt the sleeps
-        # inside Popen.wait() — the very reaping under test.
-        real_sleep = time.sleep
-        fired: list[float] = []
-
-        def _interrupt_once(seconds: float):
-            if not fired:
-                fired.append(seconds)
-                raise KeyboardInterrupt
-            return real_sleep(seconds)
-
+        # Ctrl+C lands in the poll loop's own pause. That pause is the executor's
+        # seam, not time.sleep, so the sleeps inside Popen.wait() — the very
+        # reaping under test — run for real.
         with patch("aipass.drone.apps.handlers.executor.subprocess.Popen", side_effect=_spy):
-            with patch("aipass.drone.apps.handlers.executor.time.sleep", side_effect=_interrupt_once):
+            with patch("aipass.drone.apps.handlers.executor._poll_pause", side_effect=KeyboardInterrupt):
                 with pytest.raises(KeyboardInterrupt):
                     execute_command(
                         sys.executable,
@@ -983,13 +974,23 @@ class _FakeProc:
     something behind.
     """
 
-    def __init__(self, *, dies_on_terminate: bool, dies_on_kill: bool = True):
+    def __init__(self, *, dies_on_terminate: bool, dies_on_kill: bool = True, unsignalable: bool = False):
         self.pid = 4242
+        self.stdout = None
+        self.stderr = None
+        self.returncode = None
         self._dies_on_terminate = dies_on_terminate
         self._dies_on_kill = dies_on_kill
+        self._unsignalable = unsignalable
         self.calls: list[str] = []
 
+    def poll(self) -> None:
+        """Still running at every check, so only the hang guard can end it."""
+        return None
+
     def terminate(self) -> None:
+        if self._unsignalable:
+            raise ProcessLookupError
         self.calls.append("terminate")
 
     def kill(self) -> None:
@@ -1006,44 +1007,46 @@ class _FakeProc:
         raise subprocess.TimeoutExpired(cmd="fake", timeout=timeout or 0)
 
 
-def _as_popen(proc: _FakeProc) -> "subprocess.Popen[bytes]":
-    """Hand the scripted stand-in to code typed for a real Popen.
-
-    A cast, not a lie: _stop_process touches only terminate/kill/wait/pid, and
-    the point of the fake is to script responses a real child cannot give.
-    """
-    return cast("subprocess.Popen[bytes]", proc)
+def _time_out(proc: _FakeProc, cwd: Path) -> None:
+    """Run execute_command on the scripted child with a zero cap, so the hang guard stops it."""
+    with (
+        patch("aipass.drone.apps.handlers.executor.subprocess.Popen", return_value=proc),
+        pytest.raises(CommandExecutionError, match="timed out"),
+    ):
+        execute_command("fake", [], cwd=str(cwd), timeout=0, extend_on_output=False)
 
 
 class TestStopLadder:
-    """SIGTERM first, SIGKILL only if needed, reaped either way."""
+    """SIGTERM first, SIGKILL only if needed, reaped either way — through execute_command's timeout."""
 
-    def test_a_child_that_dies_on_terminate_is_never_killed(self):
+    def test_a_child_that_dies_on_terminate_is_never_killed(self, tmp_path: Path):
+        """Mutant: the return after the terminate wait removed."""
         proc = _FakeProc(dies_on_terminate=True)
-        executor._stop_process(_as_popen(proc))
+        _time_out(proc, tmp_path)
         assert proc.calls == ["terminate", "wait"]
 
-    def test_a_stubborn_child_is_escalated_to_kill_and_reaped(self):
+    def test_a_stubborn_child_is_escalated_to_kill_and_reaped(self, tmp_path: Path):
+        """Mutant: proc.kill() skipped."""
         proc = _FakeProc(dies_on_terminate=False)
-        executor._stop_process(_as_popen(proc))
+        _time_out(proc, tmp_path)
         assert proc.calls == ["terminate", "wait", "kill", "wait"]
 
-    def test_an_unsignalable_child_stops_the_ladder_immediately(self):
-        """terminate() raising means there is nothing left to stop."""
-        proc = _FakeProc(dies_on_terminate=True)
-        proc.terminate = lambda: (_ for _ in ()).throw(ProcessLookupError())  # type: ignore[method-assign]
-        executor._stop_process(_as_popen(proc))
+    def test_an_unsignalable_child_stops_the_ladder_immediately(self, tmp_path: Path):
+        """terminate() raising means there is nothing left to stop (mutant: its return removed)."""
+        proc = _FakeProc(dies_on_terminate=True, unsignalable=True)
+        _time_out(proc, tmp_path)
         assert proc.calls == []
 
-    def test_an_unreaped_child_is_reported_not_swallowed(self, caplog):
-        """A zombie is invisible unless the guard says so."""
+    def test_an_unreaped_child_is_reported_not_swallowed(self, caplog, tmp_path: Path):
+        """A zombie is invisible unless the guard says so (mutant: the zombie line logged at debug)."""
         proc = _FakeProc(dies_on_terminate=False, dies_on_kill=False)
         with caplog.at_level("WARNING"):
-            executor._stop_process(_as_popen(proc))
+            _time_out(proc, tmp_path)
         assert any("zombie" in record.getMessage() for record in caplog.records)
 
-    def test_a_cleanly_reaped_child_produces_no_warning(self, caplog):
+    def test_a_cleanly_reaped_child_produces_no_warning(self, caplog, tmp_path: Path):
+        """Mutant: a warning logged on the clean terminate path."""
         proc = _FakeProc(dies_on_terminate=True)
         with caplog.at_level("WARNING"):
-            executor._stop_process(_as_popen(proc))
+            _time_out(proc, tmp_path)
         assert not [r for r in caplog.records if r.levelname == "WARNING"]

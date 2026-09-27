@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access, new handlers, and PR deprecation
-# Version: 1.1.3
+# Version: 1.1.5
 # Created: 2026-05-12
 # Modified: 2026-09-27
 # =============================================
@@ -372,8 +372,15 @@ class TestOwnerTierIsEarnedPerRepo:
         with pytest.raises(PermissionError, match="outside its recorded home"):
             verify_git_access("commit")
 
-    def test_recorded_home_that_cannot_resolve_is_named(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mutant: _recorded_home's except returns None — an unresolvable path is refused as "records no path"."""
+    @pytest.mark.parametrize("failure", [OSError, RuntimeError])
+    def test_recorded_home_that_cannot_resolve_is_named(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+    ) -> None:
+        """Mutant: _recorded_home's except returns None — an unresolvable path is refused as "records no path".
+
+        RuntimeError is Python 3.12's answer to a symlink loop in a non-strict resolve; mutant: the except
+        narrowed back to OSError, and the loop escapes the owner gate as a traceback.
+        """
         marker = tmp_path / "unresolvable_home"
         make_owner_project(tmp_path)
         monkeypatch.chdir(tmp_path)
@@ -387,7 +394,7 @@ class TestOwnerTierIsEarnedPerRepo:
 
         def resolve(self: Path, strict: bool = False) -> Path:
             if self == marker:
-                raise OSError("simulated resolve failure")
+                raise failure("simulated resolve failure")
             return real_resolve(self, strict=strict)
 
         monkeypatch.setattr(Path, "resolve", resolve)
@@ -1245,7 +1252,10 @@ class TestCommitSubjectCap:
         assert mock_run.call_count == 0, "no ruff, no pytest, no git add"
 
     def test_refusal_precedes_repo_resolution(self, repo_dir: Path) -> None:
-        """Nothing is touched. Mutant: a `git status` run ahead of the refusal — git is reached."""
+        """Nothing is touched — not even the repo the commit would have landed in.
+
+        Mutant: a `git status` run ahead of the refusal — git is reached.
+        """
         essay = "feat(drone): " + "x" * commit_handler.SUBJECT_CAP
 
         with (
@@ -1425,7 +1435,10 @@ class TestNewCommandRouting:
 
     @patch("aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access", return_value="test_branch")
     def test_log_unknown_arg_still_warns(self, _mock_auth: MagicMock, repo_dir: Path) -> None:
-        """Unparseable args still warn, by name. Mutant: the warning drops the '%s' argument."""
+        """Unparseable args still warn, by name — the fix narrows the noise, it doesn't silence it.
+
+        Mutant: the warning drops the '%s' argument.
+        """
         mock_result = MagicMock(returncode=0, stdout="abc123 test\n", stderr="")
         with (
             patch("aipass.drone.apps.handlers.git.log_handler.subprocess.run", return_value=mock_result),

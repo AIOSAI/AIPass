@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_module_route_no_detour.py
 # Description: A module target is routed as a module — never via a failed branch lookup
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-21
 # Modified: 2026-09-27
 # =============================================
@@ -79,6 +79,7 @@ class TestModuleTargetNeverDetours:
 
     def test_non_interactive_module_command_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`drone @git diff` pays no registry read (mutant: branch_exists evaluated first)."""
+        # `drone @git diff` was always silent: the fast path stays exactly as it was.
         with (
             patch(f"{_DRONE}.is_module", return_value=True),
             patch(f"{_DRONE}.branch_exists") as mock_exists,

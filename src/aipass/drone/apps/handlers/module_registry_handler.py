@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_registry_handler.py
 # Description: Handler for internal module registry operations
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-03-09
-# Modified: 2026-03-29
+# Modified: 2026-09-27
 # =============================================
 
 """Handler for internal module registry operations.
@@ -163,11 +163,15 @@ def route_module_command(name: str, command: str, args: list[str] | None = None)
     return result
 
 
-def get_module_help(name: str, command: str | None = None) -> str:
+def get_module_help(name: str, command: str | None = None) -> str | None:
     """Get help text from a module.
 
     For external modules: captures branch's own --help output via
     generic_adapter. For internal modules: calls get_help() directly.
+
+    Returns "" when the module has no help to give, and None when an internal
+    module's adapter cannot be imported or read, so a caller can tell a broken
+    module from a quiet one.
     """
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
@@ -188,15 +192,19 @@ def get_module_help(name: str, command: str | None = None) -> str:
         return help_fn(command)
     except (ImportError, AttributeError) as exc:
         logger.warning("get_module_help: failed for module '%s': %s", name, exc)
-        return ""
+        return None
 
 
-def get_module_introspective(name: str) -> str:
+def get_module_introspective(name: str) -> str | None:
     """Get introspective view from a module.
 
     For external modules: captures branch's own no-args output via
     generic_adapter.  For internal modules: calls get_introspective()
     or falls back to get_help().
+
+    Returns "" when the module has nothing to show, and None when an internal
+    module's adapter cannot be imported or read, so a caller can tell a broken
+    module from a quiet one.
     """
     ext = _EXTERNAL_MODULES.get(name)
     if ext is not None:
@@ -217,4 +225,4 @@ def get_module_introspective(name: str) -> str:
         return ""
     except (ImportError, AttributeError) as exc:
         logger.warning("get_module_introspective: failed for module '%s': %s", name, exc)
-        return ""
+        return None

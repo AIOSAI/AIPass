@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-05
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -379,7 +379,14 @@ def _handle_custom_command(args: list[str]) -> int:
     """
     from aipass.drone.apps.modules.commands import match
 
-    matched = match(args)
+    # A command registry that cannot load (its heal failed) is a failure to
+    # name, never "no match" and never a traceback for whoever typed the word.
+    try:
+        matched = match(args)
+    except Exception as exc:
+        logger.error("[drone] command registry could not load: %s", exc)
+        err_console.print(f"drone: command registry could not load: {exc}")
+        return 1
     if matched is None:
         return -1  # Signal: not a custom command
 

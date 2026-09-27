@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — lock, status, sync, PR, and routing
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-04-21
 # Modified: 2026-09-27
 # =============================================
@@ -52,6 +52,9 @@ from .conftest import make_owner_project
 # ===========================================================================
 
 
+_CREATE_EXCLUSIVE = "aipass.drone.apps.handlers.git.lock_handler._create_exclusive"
+
+
 @pytest.fixture()
 def lock_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Set up a temporary directory with AIPASS_REGISTRY.json for lock tests."""
@@ -93,18 +96,15 @@ class TestLockAcquire:
 
     @staticmethod
     def _deny_lock_create(attempts: list[str]):
-        """os.open that answers the lock's exclusive create the way Windows does
-        for a lock another process is mid-removing (delete pending): ACCESS
-        DENIED, not FILE EXISTS. Every other open goes to the real os.open."""
-        real_open = os.open
+        """A lock_handler._create_exclusive that answers the way Windows does for
+        a lock another process is mid-removing (delete pending): ACCESS DENIED,
+        not FILE EXISTS. Only the lock's own create is replaced — no os.open."""
 
-        def fake_open(path, flags, mode=0o777, **kwargs):
-            if Path(path).name == ".git_pr.lock":
-                attempts.append(path)
-                raise PermissionError(13, "Permission denied", path)
-            return real_open(path, flags, mode, **kwargs)
+        def fake_create(path: str) -> int:
+            attempts.append(path)
+            raise PermissionError(13, "Permission denied", path)
 
-        return fake_open
+        return fake_create
 
     def test_a_create_denied_mid_release_answers_blocked_not_an_exception(self, lock_dir: Path) -> None:
         """The Windows race: a release in flight denies the acquire's create.
@@ -113,9 +113,12 @@ class TestLockAcquire:
         door every PR crosses. It answers blocked instead, once — the door never
         waits — and names the denial, so a repo root that is truly unwritable
         still surfaces rather than passing for a busy lock.
+
+        Mutant (runner): acquire_lock calls os.open directly instead of the
+        _create_exclusive seam — the real create succeeds, the test sees success.
         """
         attempts: list[str] = []
-        with patch("aipass.drone.apps.handlers.git.lock_handler.os.open", new=self._deny_lock_create(attempts)):
+        with patch(_CREATE_EXCLUSIVE, new=self._deny_lock_create(attempts)):
             result = acquire_lock("@memory")
 
         assert result["success"] is False
@@ -127,10 +130,14 @@ class TestLockAcquire:
 
     def test_a_create_denied_names_the_holder_when_the_lock_still_reads(self, lock_dir: Path) -> None:
         """A denied create against a lock file that still reads is that holder's
-        lock: the same blocked answer the FileExistsError arm gives."""
+        lock: the same blocked answer the FileExistsError arm gives.
+
+        Mutant (runner): acquire_lock calls os.open directly instead of the
+        _create_exclusive seam — the create is never the one denied (attempts == 0).
+        """
         (lock_dir / ".git_pr.lock").write_text(json.dumps({"branch": "@api", "pid": 1}), encoding="utf-8")
         attempts: list[str] = []
-        with patch("aipass.drone.apps.handlers.git.lock_handler.os.open", new=self._deny_lock_create(attempts)):
+        with patch(_CREATE_EXCLUSIVE, new=self._deny_lock_create(attempts)):
             result = acquire_lock("@memory")
 
         assert result == {"success": False, "message": "Lock blocked: already held by @api"}
@@ -714,9 +721,14 @@ class TestPRHandler:
         release_mock.assert_called_once_with(force=True)
 
     def test_commit_uses_pathspec_not_whole_index(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """FPLAN-0190. Mutant: pathspec `str(rel_dir) + "/.."` at pr_handler.py:211 — the commit escapes branch_dir."""
-        # Concurrent drone @git pr calls could contaminate each other's commits,
-        # because git commit with no pathspec commits the entire index.
+        """Commit is scoped to branch_dir — pre-staged files outside it are excluded.
+
+        Regression test for FPLAN-0190: concurrent drone @git pr calls could contaminate
+        each other's commits, because git commit with no pathspec commits the entire
+        shared index, not just the files staged in this invocation.
+
+        Mutant: pathspec `str(rel_dir) + "/.."` at pr_handler.py:211 — the commit escapes branch_dir.
+        """
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
@@ -874,7 +886,10 @@ class TestDiagnosePushFailure:
         assert msg.startswith(_AUTH_ERROR)
 
     def test_diagnose_permission_denied(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mutant: the message names `branch` as "" — the refused branch is not named."""
+        """Permission denied is diagnosed as a repo access issue, naming the refused branch.
+
+        Mutant: the message names `branch` as "" — the refused branch is not named.
+        """
         msg, feature_branch = _pr_push_failure(
             tmp_path, monkeypatch, "Permission denied to AIOSAI/repo", _done("store\n")
         )
@@ -1114,7 +1129,10 @@ class TestDetectBranchDir:
         assert "passport.json" in document["message"]
 
     def test_detects_non_aipass_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mutant: only the passport's identity.name is read — a branch_info-only passport is missed."""
+        """Branches outside src/aipass/ (e.g. commons, skills) are detected too.
+
+        Mutant: only the passport's identity.name is read — a branch_info-only passport is missed.
+        """
         branch_dir = tmp_path / "src" / "commons"
         (branch_dir / ".trinity").mkdir(parents=True)
         (branch_dir / ".trinity" / "passport.json").write_text(
@@ -1829,7 +1847,10 @@ class TestIssueViewRewrite:
     """
 
     def test_bare_view_pins_json_fields(self) -> None:
-        """Mutant: the passthrough skips _rewrite_issue_view — a plain view spawns bare."""
+        """A plain view <n> gains --json/--template and keeps the issue number.
+
+        Mutant: the passthrough skips _rewrite_issue_view — a plain view spawns bare.
+        """
         rewritten = _spawned_issue_args(["view", "728"])
 
         assert rewritten[:2] == ["view", "728"]
@@ -1863,14 +1884,20 @@ class TestIssueViewRewrite:
 
     @pytest.mark.parametrize("flag", ["--json", "--jq", "-q", "--template", "-t", "--web", "-w"])
     def test_callers_own_rendering_untouched(self, flag: str) -> None:
-        """Mutant: the render-flag check removed — a caller's own rendering gets ours appended."""
+        """A caller who picked a rendering keeps it — ours would conflict.
+
+        Mutant: the render-flag check removed — a caller's own rendering gets ours appended.
+        """
         args = ["view", "728", flag, "x"]
 
         assert _spawned_issue_args(args) == args
 
     @pytest.mark.parametrize("args", [["list"], ["create", "--title", "x"], ["close", "728"], []])
     def test_other_issue_subcommands_untouched(self, args: list[str]) -> None:
-        """Mutant: the `args[0] != "view"` test dropped — list/create/close get view's fields."""
+        """Only view requests projectCards — everything else passes through.
+
+        Mutant: the `args[0] != "view"` test dropped — list/create/close get view's fields.
+        """
         spawned = _spawned_issue_args(args)
         assert spawned == args
         assert "--template" not in spawned

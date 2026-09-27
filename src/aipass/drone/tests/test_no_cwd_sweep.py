@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-31
 # Modified: 2026-09-27
 # =============================================
@@ -9,7 +9,7 @@
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the import-time half of a dead cwd, pinned in tests/test_import_dead_cwd.py
+# seedgo: no-test-needed(covered_elsewhere) — the import-time half of a dead cwd, in tests/test_import_dead_cwd.py
 
 import ast
 import os
@@ -24,7 +24,7 @@ import pytest
 
 import aipass.drone.apps as drone_apps
 from aipass.drone.apps import drone
-from aipass.drone.apps.handlers import rm_handler
+from aipass.drone.apps.handlers import rm_handler, router_handler
 from aipass.drone.apps.handlers.broker import daemon
 from aipass.drone.apps.handlers.git import lock_handler
 from aipass.drone.apps.modules import git_module
@@ -63,15 +63,17 @@ from aipass.drone.tests import conftest as drone_conftest
 def no_cwd(monkeypatch):
     """The process has no working directory — the state, not a mock of a guard.
 
-    Patches ``Path.cwd`` rather than ``caller_cwd`` on purpose: before the
-    sweep, nine sites never went through ``caller_cwd`` at all, so patching the
-    guard would have made this file green against unfixed code.
+    Patches the raw read BENEATH ``caller_cwd`` rather than ``caller_cwd`` on
+    purpose: before the sweep, nine sites never went through ``caller_cwd`` at
+    all, so patching the guard would have made this file green against unfixed
+    code. A site that bypasses the guard with its own ``Path.cwd()`` is caught
+    by TestTheSweepIsComplete below, which bans the bare read.
     """
 
     def gone():
         raise FileNotFoundError(2, "No such file or directory")
 
-    monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+    monkeypatch.setattr(router_handler, "_working_directory", gone)
     yield
 
 
@@ -92,7 +94,10 @@ def home_root(tmp_path, monkeypatch):
 
 class TestDroneEntryPointSurvives:
     def test_registry_presence_check_falls_through_to_aipass_home(self, no_cwd, home_root, monkeypatch, capsys):
-        """Mutant killed: _cwd_has_registry dropping its AIPASS_HOME fallback (systems saw no registry)."""
+        """The cwd walk is skipped; the source that never needed a location answers.
+
+        Mutant killed: _cwd_has_registry dropping its AIPASS_HOME fallback (systems saw no registry).
+        """
         monkeypatch.setattr("sys.argv", ["drone", "systems"])
         assert drone.main() == 0
         assert "No registry found" not in capsys.readouterr().out
@@ -104,9 +109,33 @@ class TestDroneEntryPointSurvives:
         assert drone.main() == 0
         assert "No registry found in current directory tree." in capsys.readouterr().out
 
-    def test_the_seat_inbox_is_unknown_not_a_crash(self, no_cwd):
-        """A seat is inferred from where you stand. Standing nowhere means no seat."""
-        assert drone._find_seat_inbox() is None
+    def test_the_seat_inbox_is_unknown_not_a_crash(self, no_cwd, tmp_path, monkeypatch):
+        """A seat is inferred from where you stand. Standing nowhere means no seat.
+
+        Through `drone @ai_mail view 1`: with no seat the index is handed on as
+        typed. The seat built under the chdir would turn 1 into "oldest" for a
+        site that read the cwd past the guard. Mutant killed (runner):
+        _find_seat_inbox's no-cwd return removed (a traceback, not a token).
+        """
+        (tmp_path / ".trinity").mkdir()
+        (tmp_path / ".trinity" / "passport.json").write_text("{}", encoding="utf-8")
+        (tmp_path / ".ai_mail.local").mkdir()
+        (tmp_path / ".ai_mail.local" / "inbox.json").write_text(
+            '{"messages": [{"id": "newest"}, {"id": "oldest"}]}', encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
+        routed = []
+        monkeypatch.setattr(drone, "is_module", lambda name: name != "ai_mail")
+        monkeypatch.setattr(drone, "branch_exists", lambda target: target == "@ai_mail")
+        monkeypatch.setattr(
+            drone,
+            "route_command",
+            lambda *a, **kw: routed.append(kw["args"]) or SimpleNamespace(stdout="", stderr="", exit_code=0),
+        )
+        monkeypatch.setattr("sys.argv", ["drone", "@ai_mail", "view", "1"])
+
+        assert drone.main() == 0
+        assert routed == [["1"]]
 
 
 # ---------------------------------------------------------------------------
@@ -229,14 +258,8 @@ class TestTheGitLaneSurvives:
         directory happens to hold a registry is a fact about the checkout, not
         about the function.
         """
-        real_glob = Path.glob
-
-        def no_registries(self, pattern, *args, **kwargs):
-            if pattern == "*_REGISTRY.json":
-                return iter(())
-            return real_glob(self, pattern, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "glob", no_registries)
+        # Switched off at registries_in's one listing, the read every registry walk shares.
+        monkeypatch.setattr(router_handler, "_registry_candidates", lambda directory: [])
         monkeypatch.delenv("AIPASS_HOME", raising=False)
 
         root = lock_handler.find_repo_root()

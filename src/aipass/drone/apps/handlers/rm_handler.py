@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.4.0
+# Version: 1.4.1
 # Created: 2026-06-02
-# Modified: 2026-09-11
+# Modified: 2026-09-27
 # =============================================
 
 """Contained safe-delete handler.
@@ -292,6 +292,17 @@ def _standing_inside(resolved: Path, cwd: Path | None) -> str:
     return f" — this process is standing in {cwd}; run drone rm from outside {resolved}"
 
 
+def _remove_tree(path: Path) -> None:
+    """Remove a directory tree — the one step of a delete the host decides.
+
+    Every guard before this is drone's own verdict; this is where the operating
+    system answers, and it can refuse on its own terms (Windows' WinError 32 on
+    a tree the process stands in). Kept as its own door so that refusal has one
+    place to arrive, and _safe_delete_direct reports it as the host's, not ours.
+    """
+    shutil.rmtree(path)
+
+
 def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
     """Delete paths directly (unsandboxed mode — current behavior)."""
     roots = get_allowed_roots()
@@ -390,7 +401,7 @@ def _safe_delete_direct(paths: list[str]) -> list[tuple[str, bool, str]]:
             if absolute.is_symlink():
                 absolute.unlink()
             elif resolved.is_dir():
-                shutil.rmtree(resolved)
+                _remove_tree(resolved)
             else:
                 resolved.unlink()
             message = f"Deleted: {resolved}"

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_external_roots.py
 # Description: Declared roots are the third resolution source
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-30
 # Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/registry_handler.py's declared-roots tier: external citizens resolve, never at a local one's expense."""
+"""Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that the module under test parses and imports
@@ -175,7 +175,7 @@ class TestNothingMovesUntilTheOwnerBlesses:
     """
 
     def test_a_project_with_no_declared_roots_sees_no_externals(self, local_world):
-        """Mutant killed: an empty declaration answered with a fallback citizen."""
+        """The empty state is legal and silent — not an error, not a fallback (mutant killed: a fallback citizen)."""
         with patch.object(registry_handler, "logger") as log:
             names = {b["name"] for b in registry_handler.get_all_branches()}
 
@@ -308,6 +308,7 @@ class TestPrecedence:
         with patch.object(fleet, "external_branches", return_value=[first, second]):
             branch = registry_handler.get_branch_by_name("shared")
 
+        assert branch is not None, "a declared citizen did not resolve at all"
         assert Path(branch["path"]) == Path(first["path"]), "the earlier declared root must win"
 
     def test_a_local_external_collision_is_logged_on_both_sides(self, local_world):
@@ -520,6 +521,7 @@ class TestTheHomeFallbackDoesNotSwallowTheThirdSource:
         with patch.object(fleet, "external_branches", return_value=[_external("shared", "alpha")]):
             branch = registry_handler.get_branch_by_name("shared")
 
+        assert branch is not None, "no source answered for a name two sources declare"
         assert Path(branch["path"]) == (home / "src" / "home" / "shared").resolve(), (
             "AIPass home outranks a declared root"
         )
@@ -593,17 +595,17 @@ class TestTheGatewaysImportCannotTakeDroneDown:
         assert "imported registry_handler" in result.stdout
 
     def test_a_gateway_that_will_not_import_is_contained_and_loud(self, local_world):
-        """The tier is lost, resolution is not; mutant killed: the lost-tier error line removed."""
-        import builtins
+        """The tier is lost, resolution is not; mutant killed: the lost-tier error line removed.
 
-        real_import = builtins.__import__
+        The refusal is supplied at registry_handler's one import door for the
+        gateway, not by replacing ``builtins.__import__`` for the whole process.
+        Mutant killed (runner): the gateway imported inline, past the door.
+        """
 
-        def refuse_memory(name, *args, **kwargs):
-            if name.startswith("aipass.memory"):
-                raise ImportError("simulated bare-world crash inside @memory")
-            return real_import(name, *args, **kwargs)
+        def refuse_memory():
+            raise ImportError("simulated bare-world crash inside @memory")
 
-        with patch.object(builtins, "__import__", refuse_memory):
+        with patch.object(registry_handler, "_fleet_gateway", refuse_memory):
             with patch.object(registry_handler, "logger") as log:
                 names = {b["name"] for b in registry_handler.get_all_branches()}
 

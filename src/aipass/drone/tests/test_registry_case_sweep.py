@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: A case-insensitive filesystem must not widen what counts as a registry
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-31
 # Modified: 2026-09-27
 # =============================================
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.drone.apps.handlers import registry_handler
+from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.router_handler import registries_in
 import aipass.drone.apps as drone_apps
 
@@ -60,28 +60,25 @@ REGISTRY_SUFFIX = "_REGISTRY.json"
 
 @pytest.fixture()
 def case_insensitive_filesystem(monkeypatch):
-    """``Path.glob`` folds case, the way NTFS and default APFS do.
+    """The filesystem's answer folds case, the way NTFS and default APFS do.
 
-    Only single-level patterns are folded — everything with a separator or a
-    ``**`` is handed back to the real implementation untouched, because this
-    fixture is modelling one filesystem property and not reimplementing glob.
+    Supplied at ``_registry_candidates`` — the host's untrusted listing — so
+    the name check in ``registries_in`` above it runs unpatched, and nothing
+    else in the process sees a changed ``Path.glob``.
 
     Real ``Path.glob`` swallows an unreadable directory; this deliberately does
     not. A walk that cannot read a directory it passes is something a test
     should be told about, not something an instrument should hide.
     """
-    real_glob = Path.glob
+    matcher = re.compile(fnmatch.translate(f"*{REGISTRY_SUFFIX}"), re.IGNORECASE)
 
-    def folding_glob(self, pattern, *args, **kwargs):
-        if "/" in pattern or "\\" in pattern or "**" in pattern:
-            return real_glob(self, pattern, *args, **kwargs)
-        if not self.is_dir():
-            return iter(())
-        matcher = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
-        return iter([p for p in sorted(self.iterdir()) if matcher.match(p.name)])
+    def folding_listing(directory):
+        if not directory.is_dir():
+            return []
+        return [p for p in sorted(directory.iterdir()) if matcher.match(p.name)]
 
-    monkeypatch.setattr(Path, "glob", folding_glob)
-    return folding_glob
+    monkeypatch.setattr(router_handler, "_registry_candidates", folding_listing)
+    return folding_listing
 
 
 @pytest.fixture()
@@ -91,7 +88,7 @@ def no_cwd(monkeypatch):
     def gone():
         raise FileNotFoundError(2, "No such file or directory")
 
-    monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+    monkeypatch.setattr(router_handler, "_working_directory", gone)
     yield
 
 
@@ -167,7 +164,13 @@ class TestTheWindowsRedIsReproduced:
     """
 
     def test_find_registry_never_returns_a_wrong_case_name(self, no_cwd, case_insensitive_filesystem, monkeypatch):
+        """Mutant killed (runner): registries_in's name check removed.
+
+        AIPASS_HOME is unset as on the CI runner: with it set, the home registry
+        answers before the package walk ever passes the decoy.
+        """
         monkeypatch.delenv("AIPASS_REGISTRY", raising=False)
+        monkeypatch.delenv("AIPASS_HOME", raising=False)
         registry_handler.reset_registry_path()
         try:
             found = registry_handler.find_registry()

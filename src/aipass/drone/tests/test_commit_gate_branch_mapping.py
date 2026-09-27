@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_commit_gate_branch_mapping.py
 # Description: Commit gate maps changed files to real citizens, never template trees
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-13
 # Modified: 2026-09-27
 # =============================================
@@ -61,7 +61,10 @@ def _pytest_dirs(calls: list[list[str]]) -> list[str]:
 
 
 def test_template_file_maps_to_owning_branch(tmp_path: Path) -> None:
-    """Mutant: _find_branch_for_path returns the first .trinity/ hit — the gate tests the template."""
+    """A change inside a template tree belongs to spawn, not the template.
+
+    Mutant: _find_branch_for_path returns the first .trinity/ hit — the gate tests the template.
+    """
     spawn = _mk_branch(tmp_path, "src/aipass/spawn")
     template = _mk_branch(tmp_path, "src/aipass/spawn/templates/aipass_framework")
     (template / ".spawn").mkdir()

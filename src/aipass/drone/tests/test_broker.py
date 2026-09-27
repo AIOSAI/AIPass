@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.3
+# Version: 2.0.4
 # Created: 2026-06-09
 # Modified: 2026-09-27
 # =============================================
@@ -11,6 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — rm's direct (non-broker) delete lane, pinned in tests/test_rm.py
 # seedgo: no-test-needed(external) — the kernel's openat2 RESOLVE_BENEATH itself; the resolver's use of it is pinned
+# seedgo: no-test-needed(external) — _fd_path's off-Linux refusal; only the Linux-gated openat2 lane calls it
 
 from __future__ import annotations
 
@@ -274,19 +275,19 @@ class TestPathResolver:
         on every call: the fallback asked /proc for the fd's own path, and /proc
         is Linux furniture. A walk that reaches for it at all fails here.
         """
-        real_readlink = os.readlink
 
-        def no_proc(path, *args, **kwargs):
-            if str(path).startswith("/proc"):
-                raise FileNotFoundError(2, "No such file or directory", str(path))
-            return real_readlink(path, *args, **kwargs)
+        def no_proc(fd: int) -> Path:
+            raise FileNotFoundError(2, "No such file or directory", f"/proc/self/fd/{fd}")
 
         asked = _no_openat2(monkeypatch)
-        monkeypatch.setattr(os, "readlink", no_proc)
+        monkeypatch.setattr(path_resolver, "_fd_path", no_proc)
         return asked
 
     def test_walk_resolves_with_no_proc(self, repo_root: Path, walk_host: list[bool]) -> None:
-        """Mutant killed: resolve_beneath never asking _openat2_available (the walk lane unproven)."""
+        """The fallback resolves a nested path on a host without /proc.
+
+        Mutant killed: resolve_beneath never asking _openat2_available (the walk lane unproven).
+        Mutant killed: the walk answering through _fd_path (the pre-fix /proc read)."""
         base = repo_root / "src" / "aipass" / "testbranch"
         result = resolve_beneath(base, "subdir/nested.txt")
         assert walk_host == [False], (
@@ -348,12 +349,8 @@ class TestPathResolver:
         decoy = tmp_path / "decoy"
         (decoy / "subdir").mkdir(parents=True)
         (decoy / "subdir" / "nested.txt").write_text("not the verified file", encoding="utf-8")
-        real_realpath = os.path.realpath
-        monkeypatch.setattr(
-            os.path,
-            "realpath",
-            lambda p, **kw: str(decoy) if str(p) == str(base) else real_realpath(p, **kw),
-        )
+        # Mutant killed: the (st_dev, st_ino) comparison in _verify_leaf made `if False`.
+        monkeypatch.setattr(path_resolver, "_real_base", lambda _base: decoy)
         with pytest.raises(OSError, match="changed under the walk"):
             resolve_beneath(base, "subdir/nested.txt")
 
@@ -364,14 +361,11 @@ class TestPathResolver:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Verification that cannot lstat the answer is a refusal too."""
+        """Verification that cannot lstat the answer is a refusal too.
+
+        Mutant killed: _verify_leaf's `except OSError` narrowed to KeyError (the raw lstat error escapes)."""
         base = repo_root / "src" / "aipass" / "testbranch"
-        real_realpath = os.path.realpath
-        monkeypatch.setattr(
-            os.path,
-            "realpath",
-            lambda p, **kw: str(tmp_path / "gone") if str(p) == str(base) else real_realpath(p, **kw),
-        )
+        monkeypatch.setattr(path_resolver, "_real_base", lambda _base: tmp_path / "gone")
         with pytest.raises(OSError, match="went away mid-walk"):
             resolve_beneath(base, "subdir/nested.txt")
 

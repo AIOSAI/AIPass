@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: registry_handler.py
 # Description: Handler for registry file operations
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -376,6 +376,20 @@ def load_registry() -> Dict[str, Any]:
     return data
 
 
+def _fleet_gateway() -> Any:
+    """@memory's fleet gateway module, imported at CALL time and never at module level.
+
+    A failure anywhere in @memory's import chain must cost the external tier,
+    not every import of drone (see _external_branches, which calls this inside
+    its guard). The import is its own name so that failure has one door: a
+    module that will not import is supplied here, not by replacing the
+    interpreter's __import__ for the whole process.
+    """
+    from aipass.memory.apps.modules import fleet
+
+    return fleet
+
+
 def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]:
     """Citizens in declared roots, in DECLARATION ORDER, as registry entries.
 
@@ -425,9 +439,7 @@ def _external_branches(repo_root: Optional[Path] = None) -> List[Dict[str, Any]]
     # suite patches with patch.object(fleet, ...) — a call-time import is not a
     # fresh one.
     try:
-        from aipass.memory.apps.modules import fleet
-
-        records = fleet.external_branches(repo_root, name_from="registry")
+        records = _fleet_gateway().external_branches(repo_root, name_from="registry")
     except Exception as exc:
         logger.error(
             "External tier unavailable — @memory's fleet gateway raised: %s. "

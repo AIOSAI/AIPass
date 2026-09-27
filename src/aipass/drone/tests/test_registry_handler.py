@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_registry_handler.py
 # Description: Registry loading, lookup and credential verification
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-14
 # Modified: 2026-09-27
 # =============================================
@@ -21,9 +21,8 @@ from unittest.mock import patch
 
 import pytest
 
-from aipass.drone.apps.handlers import registry_handler
+from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.registry_handler import (
-    _registry_matches_credential,
     find_registry,
     get_all_branches,
     get_registry_path,
@@ -496,31 +495,55 @@ class TestCredentialCheckWithNoCurrentDirectory:
 
     @staticmethod
     def _no_cwd(monkeypatch):
+        """The working directory is gone: supplied beneath caller_cwd, so its guard still runs."""
+
         def _raise():
             raise FileNotFoundError(2, "No such file or directory")
 
-        monkeypatch.setattr(Path, "cwd", staticmethod(_raise))
+        monkeypatch.setattr(router_handler, "_working_directory", _raise)
+
+    @staticmethod
+    def _cwd_vanishes_after_the_walk_starts(directory: Path, monkeypatch):
+        """find_registry reads the cwd, then the directory is deleted before the credential check reads it.
+
+        The check's own no-location arm is reachable through find_registry only
+        this way: find_registry skips its walk when it starts with no cwd.
+        """
+        reads = []
+
+        def _then_gone():
+            reads.append(directory)
+            if len(reads) > 1:
+                raise FileNotFoundError(2, "No such file or directory")
+            return directory
+
+        monkeypatch.setattr(router_handler, "_working_directory", _then_gone)
 
     def test_a_deleted_cwd_is_not_reported_as_a_failed_check(self, registry_dir: Path, monkeypatch):
+        """The registry is kept, no pre-check failure logged; mutant killed: the check's no-location arm removed."""
         path = _write_registry(registry_dir, _minimal_registry(metadata_id="some-id"))
-        self._no_cwd(monkeypatch)
+        self._cwd_vanishes_after_the_walk_starts(registry_dir, monkeypatch)
 
         with patch.object(registry_handler, "logger") as log:
-            result = _registry_matches_credential(path)
+            result = find_registry()
 
-        assert result is True
+        assert result == path
         failures = [c for c in log.warning.call_args_list if "pre-check failed" in str(c).lower()]
         assert not failures, f"an absent location was reported as a failed check: {failures}"
 
     def test_the_absent_location_is_said_out_loud(self, registry_dir: Path, monkeypatch):
-        """Silence would make it indistinguishable from a walk that found nothing."""
+        """Silence would make it indistinguishable from a walk that found nothing.
+
+        Mutant killed (runner): the check's no-location arm removed.
+        """
         path = _write_registry(registry_dir, _minimal_registry(metadata_id="some-id"))
-        self._no_cwd(monkeypatch)
+        self._cwd_vanishes_after_the_walk_starts(registry_dir, monkeypatch)
 
         with patch.object(registry_handler, "logger") as log:
-            _registry_matches_credential(path)
+            find_registry()
 
         assert log.info.called, "no line records that the check had no location to stand in"
+        assert log.info.call_args[0][1] == path
 
     def test_an_unreadable_registry_is_still_a_warning(self, registry_dir: Path, monkeypatch):
         """The broad except keeps its job; mutant killed: the pre-check failure warning removed."""
@@ -583,14 +606,14 @@ class TestVerifyRegistryCredential:
         assert list(self._load(registry_dir, monkeypatch)["branches"]) == ["alpha"]
 
     def test_passes_when_registry_id_missing(self, registry_dir: Path, monkeypatch):
-        """A registry with no metadata.id loads; mutant killed: the missing-registry-id pass removed."""
+        """No metadata.id loads (migration period); mutant killed: the missing-registry-id pass removed."""
         _write_registry(registry_dir, _minimal_registry())
         _write_passport(registry_dir, {"citizenship": {"registry_id": "some-id"}})
 
         assert list(self._load(registry_dir, monkeypatch)["branches"]) == ["alpha"]
 
     def test_passes_when_passport_id_missing(self, registry_dir: Path, monkeypatch):
-        """A passport with no registry_id loads; mutant killed: the missing-passport-id pass removed."""
+        """No passport registry_id loads (migration period); mutant killed: the missing-passport-id pass removed."""
         _write_registry(registry_dir, _minimal_registry(metadata_id="reg-xyz-789"))
         _write_passport(registry_dir, {"citizenship": {}})
 
@@ -615,7 +638,7 @@ class TestVerifyRegistryCredential:
             self._load(registry_dir, monkeypatch)
 
     def test_mismatch_error_contains_both_ids(self, registry_dir: Path, monkeypatch):
-        """The error names both ids; mutant killed: the mismatch check disabled."""
+        """The error names both ids, for debugging; mutant killed: the mismatch check disabled."""
         reg_id = "registry-PROD"
         passport_id = "registry-DEV"
         _write_registry(registry_dir, _minimal_registry(metadata_id=reg_id))
@@ -724,7 +747,7 @@ class TestValidateBranchPath:
         assert self._loaded_names(registry_dir, monkeypatch, "trigger", "src/aipass/trigger") == ["trigger"]
 
     def test_path_traversal_blocked(self, registry_dir: Path, monkeypatch):
-        """A path that climbs out through a subdirectory is dropped; mutant killed: the containment check removed."""
+        """A ../ path escaping the project root is dropped; mutant killed: the containment check removed."""
         assert self._loaded_names(registry_dir, monkeypatch, "evil", "src/../../evil") == []
 
     def test_absolute_path_outside_root_blocked(self, registry_dir: Path, tmp_path: Path, monkeypatch):

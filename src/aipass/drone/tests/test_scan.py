@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_scan.py
 # Description: Tests for branch command scanning
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-17
 # Modified: 2026-09-27
 # =============================================
@@ -82,33 +82,35 @@ class TestScanHelpOutput:
         result = scan_help_output(str(temp_test_dir), "nonexistent")
         assert result == []
 
-    def test_returns_empty_on_timeout(self, temp_test_dir: Path) -> None:
-        """Should return empty list when subprocess times out."""
+    def test_a_timeout_raises_instead_of_reading_as_no_commands(self, temp_test_dir: Path) -> None:
+        """A hung entry point is a failure, not an empty command list (mutant: the timeout caught, returns [])."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir(parents=True)
         (apps_dir / "slow.py").write_text("# entry", encoding="utf-8")
 
-        with patch(
-            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="test", timeout=10),
+        with (
+            patch(
+                "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="test", timeout=10),
+            ),
+            pytest.raises(subprocess.TimeoutExpired),
         ):
-            result = scan_help_output(str(temp_test_dir), "slow")
+            scan_help_output(str(temp_test_dir), "slow")
 
-        assert result == []
-
-    def test_returns_empty_on_oserror(self, temp_test_dir: Path) -> None:
-        """Should return empty list on OSError."""
+    def test_an_oserror_raises_instead_of_reading_as_no_commands(self, temp_test_dir: Path) -> None:
+        """An entry point that cannot start is a failure, not an empty list (mutant: the OSError caught, returns [])."""
         apps_dir = temp_test_dir / "apps"
         apps_dir.mkdir(parents=True)
         (apps_dir / "broken.py").write_text("# entry", encoding="utf-8")
 
-        with patch(
-            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
-            side_effect=OSError("No such file"),
+        with (
+            patch(
+                "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+                side_effect=OSError("No such file"),
+            ),
+            pytest.raises(OSError, match="No such file"),
         ):
-            result = scan_help_output(str(temp_test_dir), "broken")
-
-        assert result == []
+            scan_help_output(str(temp_test_dir), "broken")
 
     def test_falls_back_to_stderr(self, temp_test_dir: Path) -> None:
         """Should parse stderr when stdout is empty."""
@@ -293,6 +295,27 @@ class TestScanBranch:
         audit_cmds = [c for c in result if c["name"] == "audit"]
         assert len(audit_cmds) == 1
         assert audit_cmds[0]["source"] == "help"
+
+    def test_a_failed_help_scan_keeps_module_commands_and_names_the_failure(
+        self, temp_test_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The module-file results survive and the log names the failed --help scan (mutant: the warning removed)."""
+        apps_dir = temp_test_dir / "apps"
+        (apps_dir / "modules").mkdir(parents=True)
+        (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
+        (apps_dir / "modules" / "extra.py").write_text(
+            '"""Extra module."""\ndef handle_command(): pass\n',
+            encoding="utf-8",
+        )
+
+        with patch(
+            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="test", timeout=10),
+        ):
+            result = scan_branch(str(temp_test_dir), "mybranch")
+
+        assert [c["name"] for c in result] == ["extra"]
+        assert "@mybranch: the --help scan failed" in caplog.text
 
     def test_returns_empty_when_nothing_found(self, temp_test_dir: Path) -> None:
         """Should return empty list when no commands found anywhere."""

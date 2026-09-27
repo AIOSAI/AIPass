@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-27
 # Modified: 2026-09-27
 # =============================================
@@ -15,7 +15,8 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import call, patch
+from typing import Any
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -370,6 +371,23 @@ class TestMainCustomCommand:
             result = main()
         assert result == 1
 
+    def test_a_command_registry_that_cannot_load_exits_1_naming_it(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A failed command-registry heal is a named failure, not a traceback; mutant: the router's catch removed."""
+
+        def unreadable() -> dict:
+            raise OSError("registry unreadable")
+
+        with (
+            patch("sys.argv", ["drone", "audit", "aipass"]),
+            patch(f"{_DRONE}._discover_modules", return_value=[]),
+            patch("aipass.drone.apps.handlers.command_registry.lookup.load_registry", unreadable),
+        ):
+            result = main()
+        _out, err = capsys.readouterr()
+        assert result == 1
+        assert "command registry" in err
+        assert "registry unreadable" in err
+
 
 class TestMainUnknownCommand:
     """drone unknown command handling with branch hint."""
@@ -461,7 +479,7 @@ class TestHandleModule:
     """`drone @<module>` introspection, help, and command routing, through main()."""
 
     @staticmethod
-    def _run(argv: list[str], **patches: object) -> tuple[int, object]:
+    def _run(argv: list[str], **patches: Any) -> tuple[int, MagicMock]:
         """Run main() on a module target with every branch and module edge stubbed."""
         with (
             patch("sys.argv", ["drone", *argv]),
@@ -525,7 +543,7 @@ class TestHandleTarget:
     """`drone @branch ...` routing, through main(); every branch and module edge is a recording stub."""
 
     @staticmethod
-    def _run(argv: list[str], is_module: bool, result: CommandResult | None = None) -> tuple[int, object, object]:
+    def _run(argv: list[str], is_module: bool, result: CommandResult | None = None) -> tuple[int, MagicMock, MagicMock]:
         with (
             patch("sys.argv", ["drone", *argv]),
             patch(f"{_DRONE}.is_module", return_value=is_module),
@@ -582,6 +600,8 @@ class TestHandleTarget:
 
     def test_help_for_a_module_that_is_not_a_local_branch(self) -> None:
         """@seedgo --help where seedgo is a module and no branch goes to the module (mutant: lane `if False`)."""
+        # Once pinned via the exception fallback (route_command raised, the handler re-routed);
+        # the lane is now DECIDED before any branch call, not discovered by failing one (DPLAN-0315 item 1).
         rc, mock_route, mock_hm = self._run(["@seedgo", "--help"], is_module=True)
         assert rc == 0
         mock_hm.assert_called_once_with("seedgo", ["--help"])
@@ -834,7 +854,7 @@ class TestAipassIntercept:
 # ---------------------------------------------------------------------------
 
 
-def _route(argv: list[str], *, is_module: bool = False, branch_exists: bool = True) -> tuple[int, object, object]:
+def _route(argv: list[str], *, is_module: bool = False, branch_exists: bool = True) -> tuple[int, MagicMock, MagicMock]:
     """Run main() on argv with the branch and module edges as recording stubs."""
     with (
         patch("sys.argv", ["drone", *argv]),
@@ -937,6 +957,7 @@ class TestInertTimeoutIsReported:
 
     def test_an_interactive_route_reports_before_running(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The interactive lane reports the dropped cap (mutant: its report call removed)."""
+        # End to end through _handle_target: this is the lane that was silent.
         _, mock_route, _ = _route(["@seedgo", "audit", "aipass", "--drone-timeout", "5"])
         assert "--drone-timeout 5 not applied" in capsys.readouterr().err
         assert mock_route.call_args.kwargs["interactive"] is True
@@ -949,6 +970,8 @@ class TestInertTimeoutIsReported:
 
     def test_a_module_route_reports_before_running(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The module lane reports too, and the flag never reaches the module (mutant: its report call removed)."""
+        # Separate from the interactive case on purpose: the two lanes are different branches
+        # of _handle_target, and a mutation proved one test cannot pin both.
         rc, mock_route, mock_module = _route(
             ["@git", "status", "--drone-timeout", "5"], is_module=True, branch_exists=False
         )
