@@ -36,6 +36,8 @@ def cfg() -> Dict[str, Any]:
         "error_threshold": 3,
         "window_minutes": 60,
         "cooldown_minutes": 60,
+        "warning_age_hours": 24,
+        "rollup_hours": 24,
         "sample_lines": 3,
         "max_signatures": 500,
         "escalate_suppressed": False,
@@ -57,6 +59,10 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cfg: Dict[str, Any]):
     monkeypatch.setattr(escalation, "logger", trail_logger(tmp_path / "escalation.jsonl"))
     monkeypatch.setattr(escalation, "get_config", lambda: cfg)
     monkeypatch.setattr(escalation, "_send_email", None)
+    # The aged lane opens a registry row. Left real, that wrote into the LIVE
+    # trigger_json/error_registry.json on every run: by 2026-09-24 two test
+    # messages sat there at count 151 and 51. Tests that care patch over this.
+    monkeypatch.setattr(escalation, "_registry_report", lambda **kwargs: {})
     escalation._config_cache = (0.0, None)
     # Reset on the way OUT too: a test that points BRANCH_REGISTRY_FILE at a tmp
     # registry leaves the compiled pattern behind, and monkeypatch restores the
@@ -230,6 +236,20 @@ def _age_occurrences(lane, signature: str, seconds: float) -> None:
     entry = state["signatures"][signature]
     entry["occurrences"] = [ts - seconds for ts in entry["occurrences"]]
     _write_state(lane, state)
+
+
+def _age_first_seen(lane, signature: str, hours: float) -> None:
+    """Backdate when a signature was first seen, so the aged-warning lane opens."""
+    state = _read_state(lane)
+    state["signatures"][signature]["first_seen"] = (datetime.now() - timedelta(hours=hours)).isoformat()
+    _write_state(lane, state)
+
+
+def _fire_aged_warning(lane, hours: float = 25, **overrides: Any) -> Any:
+    """Seed a signature, backdate it past the age limit, then cross the threshold."""
+    signature = _fire_warning(lane, times=1, **overrides)["signature"]
+    _age_first_seen(lane, signature, hours)
+    return _fire_warning(lane, times=2, **overrides)
 
 
 def _age_last_digest(lane, signature: str, minutes: float) -> None:
@@ -779,6 +799,31 @@ class TestConfigGates:
         assert decision["outcome"] == "counted"
         assert lane.STATE_FILE.exists()
 
+    def test_warning_age_hours_zero_keeps_every_repeat_on_the_manager_digest(
+        self, monkeypatch, lane, outbox, cfg
+    ) -> None:
+        """The aged lane is an operator setting, and 0 is the old behaviour intact."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        cfg["warning_age_hours"] = 0
+
+        decision = _fire_aged_warning(lane)
+
+        assert decision["outcome"] == "sent"
+        assert [mail["to_branch"] for mail in outbox] == [cfg["digest_recipient"]]
+
+    def test_an_unreadable_first_seen_keeps_the_manager_digest(self, monkeypatch, lane, outbox, cfg) -> None:
+        """A stamp this lane cannot read must not silently retire the signal."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        signature = _fire_warning(lane, times=1)["signature"]
+        state = _read_state(lane)
+        state["signatures"][signature]["first_seen"] = "not a timestamp"
+        _write_state(lane, state)
+
+        decision = _fire_warning(lane, times=2)
+
+        assert decision["outcome"] == "sent"
+        assert [mail["to_branch"] for mail in outbox] == [cfg["digest_recipient"]]
+
     def test_ignored_branch_records_nothing(self, lane, outbox, cfg) -> None:
         """A deliberately ignored branch is silent, count and all."""
         cfg["ignore_branches"] = ["flow"]
@@ -976,6 +1021,100 @@ class TestDigestEmail:
         assert "trigger.config.json" in body
         assert "warning_threshold" in body
 
+    def test_a_warning_past_the_age_limit_goes_to_the_branch_that_logged_it(
+        self, monkeypatch, lane, outbox, cfg
+    ) -> None:
+        """24h of repetition into a manager's inbox is a pile. The owner gets it instead."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+
+        decision = _fire_aged_warning(lane)
+
+        assert decision["outcome"] == "aged_owner_mail"
+        assert len(outbox) == 2, "one notice to the owner, one roll-up to the manager"
+        notice = outbox[0]
+        assert notice["to_branch"] == "@flow"
+        assert notice["auto_execute"] is False
+        assert notice["upsert_key"] == "escalation:WARNING:flow:watcher"
+        assert cfg["digest_recipient"] not in [mail["to_branch"] for mail in outbox[:1]]
+
+    def test_the_aged_notice_opens_a_registry_row_at_warning_level(self, monkeypatch, lane, outbox) -> None:
+        """The row is what gives a repeat a lifecycle: suppress, resolve, a count."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        rows: List[Dict[str, Any]] = []
+
+        def _report(**kwargs: Any) -> Dict[str, Any]:
+            rows.append(kwargs)
+            return {"fingerprint": "abcdef0123456789", "is_new": True}
+
+        monkeypatch.setattr(lane, "_registry_report", _report)
+
+        signature = _fire_aged_warning(lane)["signature"]
+
+        assert len(rows) == 1
+        assert rows[0]["error_type"] == "WARNING"
+        assert rows[0]["component"] == "FLOW"
+        assert rows[0]["message"] == WARNING_EVENT["message"]
+        assert _entry(lane, signature)["registry_fingerprint"] == "abcdef0123456789"
+
+    def test_an_unregistered_logging_branch_keeps_the_manager_digest(self, monkeypatch, lane, outbox, cfg) -> None:
+        """Never drop the signal: with nobody to mail, the manager keeps hearing it."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: False)
+
+        decision = _fire_aged_warning(lane)
+
+        assert decision["outcome"] == "sent"
+        assert [mail["to_branch"] for mail in outbox] == [cfg["digest_recipient"]]
+
+    def test_an_aged_error_is_not_touched_by_the_warning_lane(self, monkeypatch, lane, outbox, cfg, medic) -> None:
+        """Errors have medic. This lane is only for warnings, which have nothing."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        medic.state.get_muted_branches = lambda: ["flow"]
+
+        signature = _fire_error(lane, times=1)["signature"]
+        _age_first_seen(lane, signature, 48)
+        decision = _fire_error(lane, times=2)
+
+        assert decision["outcome"] == "sent"
+        assert [mail["to_branch"] for mail in outbox] == [cfg["digest_recipient"]]
+
+    def test_every_rollup_lands_on_one_manager_thread(self, monkeypatch, lane, outbox, cfg) -> None:
+        """The daily roll-up replaces the repeat digests — it must not become them."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+
+        _fire_aged_warning(lane)
+        _fire_aged_warning(lane, message="a second aged condition")
+
+        rollups = [mail for mail in outbox if mail["to_branch"] == cfg["digest_recipient"]]
+        assert {mail["upsert_key"] for mail in rollups} == {"escalation:rollup"}
+        assert all(mail["auto_execute"] is False for mail in rollups)
+
+    def test_an_unchanged_row_list_is_not_rolled_up_again_inside_the_window(
+        self, monkeypatch, lane, outbox, cfg
+    ) -> None:
+        """Cadence paces the repeats; only a list that GREW is worth a rewrite."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        signature = _fire_aged_warning(lane)["signature"]
+        before = len([mail for mail in outbox if mail["to_branch"] == cfg["digest_recipient"]])
+
+        _age_last_digest(lane, signature, 400)
+        _fire_warning(lane, times=3)
+
+        after = [mail for mail in outbox if mail["to_branch"] == cfg["digest_recipient"]]
+        assert before == 1
+        assert len(after) == 1, "the same row rolled up twice inside the window"
+
+    def test_the_rollup_names_every_open_aged_row(self, monkeypatch, lane, outbox, cfg) -> None:
+        """One line per open row is the whole point: the manager sees the shape of it."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+
+        first = _fire_aged_warning(lane)["signature"]
+        second = _fire_aged_warning(lane, message="a second aged condition")["signature"]
+
+        body = [mail for mail in outbox if mail["to_branch"] == cfg["digest_recipient"]][-1]["message"]
+        assert first in body
+        assert second in body
+        assert "@flow/watcher" in body
+
     def test_a_second_signature_in_the_module_names_the_first(self, lane, outbox) -> None:
         """The lane hands the digest its siblings; the thread body must not forget them."""
         first = _fire_warning(lane, times=3)["signature"]
@@ -1092,6 +1231,16 @@ class TestPruning:
 
 class TestReporting:
     """What the CLI and an operator get to see."""
+
+    def test_stats_count_the_rows_the_aged_lane_has_opened(self, monkeypatch, lane, outbox, cfg) -> None:
+        """An operator must be able to see how many repeats went to their owners."""
+        monkeypatch.setattr(lane, "_has_registered_owner", lambda _branch: True)
+        _fire_aged_warning(lane)
+
+        stats = lane.get_stats()
+
+        assert stats["aged_signatures"] == 1
+        assert stats["warning_age_hours"] == cfg["warning_age_hours"]
 
     def test_signatures_are_returned_most_recent_first(self, lane) -> None:
         """Ordering is by last_seen, newest first."""
@@ -1425,6 +1574,17 @@ class TestDigestBody:
         _subject, body = lane.build_digest("sig", entry, 5, 3600, "no registered owner", "@devpulse")
 
         assert "(no samples captured)" in body
+
+    def test_the_aged_notice_tells_the_owner_what_it_is_and_how_to_end_it(self, lane) -> None:
+        """The owner needs the age, the registry id and both ways out, from the mail alone."""
+        entry = {**self._entry(), "level": "WARNING"}
+
+        subject, body = lane.build_aged_notice("abc123def456", entry, 9, 3600, "@backup", [], 26.0, "ff0011223344")
+
+        assert subject == "[REPEAT 26h] WARNING x9 @backup / drive"
+        for expected in ("abc123def456", "ff0011223344", "26", "drone @trigger errors suppress", "@backup"):
+            assert expected in body, f"aged notice lost {expected!r}"
+        assert "EMAIL, not a dispatch" in body
 
     def test_sibling_signatures_ride_in_the_thread(self, lane) -> None:
         """One thread per subject: the other signatures under it are named in the body."""

@@ -55,6 +55,13 @@ def _mock_infrastructure(monkeypatch):
     mock_config.atomic_write_json = atomic_write_json
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
 
+    # -- error registry: an ERROR line is reported through a lazy import. Left
+    # real, test_reads_new_content wrote a TEST row into the LIVE registry on
+    # every run (found 2026-09-24, first written 2026-05-22).
+    mock_registry = MagicMock()
+    mock_registry.report = MagicMock(return_value={})
+    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
+
     # -- trigger core (trigger.fire) ----------------------------------------
     mock_trigger_obj = MagicMock()
     mock_core = MagicMock()

@@ -66,6 +66,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "window_minutes": 60,
         # Per-signature silence after a digest fires, minutes.
         "cooldown_minutes": 360,
+        # A WARNING still repeating this many hours after it was FIRST seen
+        # stops mailing the manager: it opens a registry row and one upserted
+        # mail goes to the branch that logged it. 0 disables the aged lane.
+        "warning_age_hours": 24,
+        # How often the manager gets one roll-up of every open aged row, hours.
+        "rollup_hours": 24,
         # Sample log lines carried in the digest body.
         "sample_lines": 3,
         # Cap on tracked signatures — least-recently-seen are pruned first.

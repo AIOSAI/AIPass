@@ -1,26 +1,30 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_startup_handler.py
 # Description: Tests for startup event handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-09-12
+# Modified: 2026-09-24
 # =============================================
 
-"""Tests for startup event handler."""
+"""Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
 
-import pytest
-from unittest.mock import MagicMock
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — how get_entry and report store a row, in error_registry
+# seedgo: no-test-needed(covered_elsewhere) — what handle_error_detected does with the fired payload
+# seedgo: no-test-needed(stdlib) — datetime.fromisoformat parsing the persisted cursor
+
+import sys
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock heavy infrastructure imports before importing the handler module."""
-    import sys
-
-    from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
-
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
@@ -38,6 +42,17 @@ def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
         "aipass.trigger.apps.handlers.json.json_handler",
         mock_json_handler,
     )
+
+    # The catch-up looks rows up and reports untracked ones. Unstubbed, that
+    # reached the LIVE registry: one run on 2026-09-24 wrote 52 FLOW rows into
+    # trigger_json/error_registry.json. Every test starts with an empty registry
+    # that stores nothing; the registry-linkage tests patch the seams on top.
+    mock_registry = MagicMock()
+    mock_registry.compute_fingerprint = MagicMock(return_value="")
+    mock_registry.normalize_message = MagicMock(side_effect=lambda m: m)
+    mock_registry.get_entry = MagicMock(return_value=None)
+    mock_registry.report = MagicMock(return_value={})
+    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
 
     monkeypatch.delitem(
         sys.modules,
@@ -80,9 +95,10 @@ class TestHandleStartup:
         mod = _import_startup()
         mod._run_error_catchup = MagicMock()
 
-        mod.handle_startup(fire_event=MagicMock(), extra_arg="ignored", count=42)
+        fire_event = MagicMock()
+        mod.handle_startup(fire_event=fire_event, extra_arg="ignored", count=42)
 
-        mod._run_error_catchup.assert_called_once()  # type: ignore[union-attr]
+        mod._run_error_catchup.assert_called_once_with(fire_event)  # type: ignore[union-attr]
 
 
 class TestCatchupStateMigration:
@@ -239,9 +255,104 @@ class TestCatchupOccurrenceCounting:
         errors: list = []
         ok = mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), set(), errors, time.monotonic(), {})
 
-        assert ok is not None, "the limit must still stop the scan"
-        assert "MAX_ERRORS_PER_SCAN" in ok, "the reason has to name the limit that stopped it"
+        assert "MAX_ERRORS_PER_SCAN" in (ok or ""), "the limit must stop the scan, and the reason must name it"
         assert len(errors) == limit
+
+
+class TestCatchupNamesTheRegistryRow:
+    """A catch-up dispatch has to name a row the registry verbs accept, and must not
+    replay a line the watcher already registered.
+
+    @hooks, 2026-09-24: "drone @trigger errors detail 5a2ac45a answers 'Error not
+    found'... The entry it actually refers to is 6fd3636e", and three entries "came
+    back two days later with a last_seen that had not moved (registry last_seen
+    2026-09-22T04:53:31; your dispatch fired 2026-09-24 22:22:04)". The catch-up
+    fired with no fingerprint at all, which drops the handler to its v1 arm.
+    """
+
+    @staticmethod
+    def _log(tmp_path: Path, ts: str = "2026-09-24 10:00:00") -> Path:
+        log = tmp_path / "hooks_ops.log"
+        log.write_text(f"{ts} | hooks.engine | ERROR | cadence fire failed\n", encoding="utf-8")
+        return log
+
+    @staticmethod
+    def _scan(mod, log: Path) -> list:
+        import time
+
+        errors: list = []
+        mod._scan_single_log_file(log, datetime(2026, 9, 24, 0, 0, 0), set(), errors, time.monotonic(), {})
+        return errors
+
+    def test_an_already_registered_line_is_not_replayed(self, tmp_path: Path, monkeypatch) -> None:
+        """A line no newer than the row's last_seen was already handled — a service
+        restart must not mail it out again with the registry stamp unmoved."""
+        mod = _import_startup()
+        monkeypatch.setattr(mod, "_registry_fingerprint", lambda *a: "f" * 40)
+        monkeypatch.setattr(
+            mod, "_registry_get_entry", lambda fp: {"id": "6fd3636e", "last_seen": "2026-09-24T11:00:00"}
+        )
+        monkeypatch.setattr(mod, "_registry_report", lambda **kw: pytest.fail("must not report a known row"))
+
+        assert self._scan(mod, self._log(tmp_path)) == []
+
+    def test_a_newer_line_fires_and_carries_the_row_it_belongs_to(self, tmp_path: Path, monkeypatch) -> None:
+        """A genuine new occurrence still fires, and names the existing row."""
+        mod = _import_startup()
+        monkeypatch.setattr(mod, "_registry_fingerprint", lambda *a: "f" * 40)
+        monkeypatch.setattr(
+            mod, "_registry_get_entry", lambda fp: {"id": "6fd3636e", "last_seen": "2026-09-24T09:00:00"}
+        )
+
+        errors = self._scan(mod, self._log(tmp_path))
+
+        assert len(errors) == 1
+        assert errors[0]["registry_id"] == "6fd3636e"
+        assert errors[0]["fingerprint"] == "f" * 40
+
+    def test_an_untracked_error_gets_a_row_so_the_dispatch_can_be_closed(self, tmp_path: Path, monkeypatch) -> None:
+        """No row yet means the responder has nothing to resolve — mint one, as the
+        watcher does, rather than mailing an ID no verb accepts."""
+        mod = _import_startup()
+        reported: list = []
+        monkeypatch.setattr(mod, "_registry_fingerprint", lambda *a: "f" * 40)
+        monkeypatch.setattr(mod, "_registry_get_entry", lambda fp: None)
+
+        def _report(**kwargs):
+            reported.append(kwargs)
+            return {"id": "ab12cd34", "fingerprint": "f" * 40}
+
+        monkeypatch.setattr(mod, "_registry_report", _report)
+
+        errors = self._scan(mod, self._log(tmp_path))
+
+        assert reported and reported[0]["component"] == "HOOKS"
+        assert reported[0]["error_type"] == "ERROR", "the row's error_type is uppercase — match it, don't mint a twin"
+        assert errors[0]["registry_id"] == "ab12cd34"
+
+    def test_the_lookup_uses_the_level_stored_rows_carry(self, tmp_path: Path) -> None:
+        """Stored rows say error_type "ERROR"; a lower-cased lookup finds nothing and mints a twin."""
+        mod = _import_startup()
+        registry = sys.modules["aipass.trigger.apps.handlers.error_registry"]
+
+        self._scan(mod, self._log(tmp_path))
+
+        level, _, component = registry.compute_fingerprint.call_args.args
+        assert (level, component) == ("ERROR", "HOOKS")
+
+    def test_the_payload_names_the_log_under_the_key_the_handler_reads(self, tmp_path: Path, monkeypatch) -> None:
+        """handle_error_detected takes log_path; log_file lands in **kwargs and the
+        mail then says 'Log file: unknown' — which is what @hooks received."""
+        mod = _import_startup()
+        monkeypatch.setattr(mod, "_registry_fingerprint", lambda *a: "f" * 40)
+        monkeypatch.setattr(mod, "_registry_get_entry", lambda fp: None)
+        monkeypatch.setattr(mod, "_registry_report", lambda **kw: {"id": "ab12cd34", "fingerprint": "f" * 40})
+        log = self._log(tmp_path)
+
+        errors = self._scan(mod, log)
+
+        assert errors[0]["log_path"] == str(log)
+        assert "log_file" not in errors[0], "two names for one fact is how the wrong one gets fired"
 
 
 class TestRowTwelveTimestampGate:
@@ -377,7 +488,7 @@ class TestRowTwelveTimestampGate:
 
         mod._run_error_catchup(None)
 
-        op, payload = mod.json_handler.log_operation.call_args[0]
+        op, payload = mod.json_handler.log_operation.call_args[0]  # type: ignore[attr-defined]
         assert op == "startup_catchup"
         assert payload["completed"] is False
         assert payload["reason"] == "MAX_ERRORS_PER_SCAN (50) reached"

@@ -1,12 +1,19 @@
-# =================== AIPass ====================
+# =================== META ====================
 # Name: test_error_detected.py
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-08-08
+# Modified: 2026-09-24
 # =============================================
 
-"""Tests for error_detected event handler: set_send_email_callback, handle_error_detected, and fallback stubs."""
+"""Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(covered_elsewhere) — what should_dispatch and is_suppressed decide, in error_registry
+# seedgo: no-test-needed(covered_elsewhere) — the digest body and the aged lane, in test_escalation.py
+# seedgo: no-test-needed(covered_elsewhere) — the two producers of this event, log_watcher and the catch-up scan
+# seedgo: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
+# seedgo: no-test-needed(constant) — the fixed prose of the investigation steps and the decision tree
 
 import json
 import sys
@@ -17,7 +24,10 @@ from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
-from aipass.trigger.apps.config import trail_logger
+import aipass.trigger.apps.handlers as handlers_pkg
+from aipass.trigger.apps.config import atomic_write_json, migrate_json_file, trail_logger
+from aipass.trigger.apps.handlers import escalation
+from aipass.trigger.apps.handlers.error_registry import normalize_message
 
 
 # ---------------------------------------------------------------------------
@@ -30,9 +40,6 @@ from aipass.trigger.apps.config import trail_logger
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Mock config, json_handler, error_registry, and wake_branch before import."""
-    from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
-    from aipass.trigger.apps.handlers.error_registry import normalize_message
-
     mock_config = MagicMock()
     mock_config.TRIGGER_ROOT = tmp_path
     mock_config.atomic_write_json = atomic_write_json
@@ -173,14 +180,21 @@ class TestHandleErrorDetectedGates:
         send.assert_not_called()
 
     def test_returns_early_medic_disabled(self) -> None:
-        """Does not dispatch when medic is disabled."""
+        """Medic off returns before the registry is consulted — an off switch that still
+        burns backoff budget would silently re-arm the moment medic came back on."""
         mod = _import_module()
         send = _setup_happy_path(mod)
+        breaker = MagicMock(return_value=True)
+        recorded = MagicMock()
         mod._is_medic_enabled = MagicMock(return_value=False)  # type: ignore[attr-defined]
+        mod.circuit_breaker_allows = breaker  # type: ignore[attr-defined]
+        mod.registry_record_dispatch = recorded  # type: ignore[attr-defined]
 
         mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         send.assert_not_called()
+        breaker.assert_not_called()
+        recorded.assert_not_called()
 
     def test_returns_early_branch_muted(self) -> None:
         """Does not dispatch when branch is muted."""
@@ -193,13 +207,22 @@ class TestHandleErrorDetectedGates:
         send.assert_not_called()
 
     def test_returns_early_count_below_threshold(self) -> None:
-        """Does not dispatch on first occurrence (count=1)."""
+        """A first occurrence returns before the registry is consulted — a one-off that
+        spent the fingerprint's backoff would mute the real repeat that follows it."""
         mod = _import_module()
         send = _setup_happy_path(mod)
+        breaker = MagicMock(return_value=True)
+        recorded = MagicMock()
+        mod.circuit_breaker_allows = breaker  # type: ignore[attr-defined]
+        mod.registry_record_dispatch = recorded  # type: ignore[attr-defined]
 
-        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=1)
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="h1", count=1, fingerprint="fp1"
+        )
 
         send.assert_not_called()
+        breaker.assert_not_called()
+        recorded.assert_not_called()
 
     def test_returns_early_devpulse_recipient(self) -> None:
         """Does not dispatch to @devpulse (protected branch)."""
@@ -481,11 +504,6 @@ class TestFallbackStubs:
         assert mod.registry_record_dispatch("any-fingerprint") is None
         assert mod._REGISTRY_DISPATCH_AVAILABLE is False
 
-    def test_circuit_breaker_allows_returns_true(self) -> None:
-        """Fallback circuit breaker always allows."""
-        mod = _import_module()
-        assert mod.circuit_breaker_allows() is True
-
     def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self) -> None:
         """The fallback breaker records nothing and says nothing.
 
@@ -498,11 +516,6 @@ class TestFallbackStubs:
 
         assert mod.circuit_breaker_record_error() is None
         assert mod.circuit_breaker_allows() is True
-
-    def test_registry_dispatch_available_is_false(self) -> None:
-        """Module reports registry dispatch as unavailable."""
-        mod = _import_module()
-        assert mod._REGISTRY_DISPATCH_AVAILABLE is False
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +558,7 @@ class TestMedicEnabledTTL:
         )
 
         send.assert_called_once()
+        assert send.call_args.kwargs["to_branch"] == "@flow"
 
     def test_medic_enabled_ttl_active(self) -> None:
         """medic_enabled=False with future TTL -> medic still disabled, dispatch suppressed."""
@@ -655,6 +669,7 @@ class TestBranchMutedFormats:
         )
 
         send.assert_called_once()
+        assert send.call_args.kwargs["to_branch"] == "@api"
 
     def test_branch_muted_plain_string_backcompat(self) -> None:
         """Plain string entry in muted_branches -> branch IS muted (permanent)."""
@@ -809,6 +824,59 @@ class TestOccurrencesReportsTrueCount:
         assert "Last seen: 2026-08-04T18:27:38" in body
 
 
+class TestNotificationNamesTheRegistryRow:
+    """The responder must be able to look the error up and close it.
+
+    @hooks, 2026-09-24: the mail said "Error ID: 5a2ac45a", which no registry
+    verb accepts — the row was 6fd3636e — and nothing in the instructions named
+    the closing verb, so three cured entries sat at status new and re-dispatched
+    two days later.
+    """
+
+    def test_registry_id_is_the_id_the_verbs_take(self) -> None:
+        """The ID printed at the top is the one errors detail/resolve accept."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow",
+            module="cfg",
+            message="err",
+            error_hash="legacy01",
+            count=2,
+            fingerprint="67b396e47ba3616ad99178b2216a54cc",
+            registry_id="6fd3636e",
+        )
+
+        body = send.call_args.kwargs["message"]
+        assert "Error ID: 6fd3636e" in body
+        assert "Error ID: legacy01" not in body
+
+    def test_a_dispatch_with_no_registry_row_says_so(self) -> None:
+        """Never print a hash as if a verb would take it — say it is not tracked."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="legacy01", count=2)
+
+        body = send.call_args.kwargs["message"]
+        assert "not tracked in the registry" in body
+        assert "Error ID: legacy01" not in body
+
+    def test_the_closing_verb_is_in_the_instructions(self) -> None:
+        """A dispatch that never names its closing verb is a loop nobody closes."""
+        mod = _import_module()
+        send = _setup_happy_path(mod)
+
+        mod.handle_error_detected(
+            branch="flow", module="cfg", message="err", error_hash="x", count=2, registry_id="6fd3636e"
+        )
+
+        body = send.call_args.kwargs["message"]
+        assert "drone @trigger errors resolve 6fd3636e" in body
+        assert "drone @trigger errors suppress 6fd3636e" in body
+
+
 # ---------------------------------------------------------------------------
 # Escalation lane recording (DPLAN-0283 WS-A)
 # ---------------------------------------------------------------------------
@@ -822,9 +890,6 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     the config and the digest callback are all pinned here — the operator's
     config never decides a test outcome, and no digest can leave the process.
     """
-    import aipass.trigger.apps.handlers as handlers_pkg
-    from aipass.trigger.apps.handlers import escalation
-
     config: Dict[str, Any] = {
         "enabled": True,
         "digest_recipient": "@digest-inbox",
@@ -994,10 +1059,11 @@ class TestEscalationRecording:
         assert len(rows) == 1
         assert rows[0]["total_count"] == 2
 
-    def test_recorded_entry_carries_the_event_context(self, lane) -> None:
+    def test_recorded_entry_carries_the_event_context(self, lane, tmp_path: Path) -> None:
         """Log path, fingerprint and raw line travel into the lane for the digest."""
         mod = _import_module()
         _setup_happy_path(mod)
+        log_path = tmp_path / "logs" / "flow.log"
 
         mod.handle_error_detected(
             branch="flow",
@@ -1006,13 +1072,13 @@ class TestEscalationRecording:
             error_hash="h1",
             count=2,
             fingerprint="fp-abc",
-            log_path="/logs/flow.log",
+            log_path=str(log_path),
             raw_line="2026-08-08 | cfg | ERROR | err",
         )
 
         row = lane.mod.get_signatures()[0]
         assert row["level"] == "ERROR"
-        assert row["log_file"] == "/logs/flow.log"
+        assert row["log_file"] == str(log_path)
         assert row["fingerprint"] == "fp-abc"
         assert row["samples"] == ["2026-08-08 | cfg | ERROR | err"]
 

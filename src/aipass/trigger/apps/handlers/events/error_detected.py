@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.6.0
+# Version: 2.7.0
 # Created: 2026-02-10
-# Modified: 2026-08-09
+# Modified: 2026-09-24
 # =============================================
 
 """
@@ -338,18 +338,33 @@ Log context (surrounding lines):
 
     # Registry tracking info (Medic v2)
     registry_block = ""
-    if fingerprint or registry_id:
-        display_fp = fingerprint[:12] if fingerprint else "n/a"
-        display_id = registry_id if registry_id else "n/a"
+    if fingerprint:
         registry_block = f"""
 Registry tracking:
-  Fingerprint: {display_fp}
-  Registry ID: {display_id}
+  Fingerprint: {fingerprint[:12]}
 """
+
+    # The ID the responder is told to investigate has to be the one the registry
+    # verbs accept. @hooks, 2026-09-24: this slot printed the legacy error_hash,
+    # so `errors detail <that>` answered "Error not found" while the real row sat
+    # under a different string. And with no closing verb named anywhere, three
+    # cured entries stayed at status new and re-dispatched two days later.
+    if registry_id:
+        identity_line = f"Error ID: {registry_id}"
+        closing_block = f"""CLOSE IT - a dispatch nobody closes comes back:
+  drone @trigger errors resolve {registry_id}            once the fix is verified
+  drone @trigger errors suppress {registry_id} "reason"  when it is known and not worth fixing
+"""
+    else:
+        identity_line = f"Reference: {error_hash} (not tracked in the registry - errors detail cannot find it)"
+        closing_block = """CLOSE IT: this occurrence has no registry entry, so there is nothing to resolve.
+Say so to @devpulse - a dispatch with no row is a defect in the lane that fired it.
+"""
+    report_ref = registry_id or error_hash
 
     return f"""Error detected - investigate and respond.
 
-Error ID: {error_hash}
+{identity_line}
 Module: {module}
 Timestamp: {timestamp}
 Log file: {log_path}
@@ -378,8 +393,9 @@ SEEDGO STANDARDS REMINDER:
 - After fixing, run: drone @seedgo checklist <modified_file>
 - Fixes scoring below 80% on Seedgo audit should NOT be shipped - clean up first
 
+{closing_block}
 REPORT TO @devpulse:
-  ai_mail email @devpulse "ERROR {error_hash} - [STATUS]" "Findings..."
+  ai_mail email @devpulse "ERROR {report_ref} - [STATUS]" "Findings..."
 
   Include: Error ID, severity (low/medium/high/critical), what you found, action taken or recommended.
 """

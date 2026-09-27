@@ -12,6 +12,8 @@ import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
+from aipass.trigger.apps.handlers.medic_state import parse_duration
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -63,7 +65,9 @@ def _mock_infrastructure(monkeypatch):
             "last_rate_limited": "never",
         }
     )
-    medic_state_mod.parse_duration = MagicMock(return_value=None)
+    # The real parser: it is pure. A stub answering None made every --for fall
+    # back to the default, so no test could pin the flag (seedgo flag_never_passed).
+    medic_state_mod.parse_duration = parse_duration
     medic_state_mod.DEFAULT_MUTE_SECONDS = 86400
     medic_state_mod.DEFAULT_OFF_SECONDS = 86400
     monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.medic_state", medic_state_mod)
@@ -347,6 +351,15 @@ def test_handle_command_mute_branch():
     assert result is True
     state = _get_medic_state()
     state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=86400.0)
+
+
+def test_handle_command_mute_for_sets_the_asked_duration_not_the_default():
+    """--for 2h reaches mute_branch as 7200s; the parse was unpinned (seedgo flag_never_passed)."""
+    medic = _import_medic()
+    medic.handle_command("mute", ["@speakeasy", "--for", "2h"])
+
+    state = _get_medic_state()
+    state.mute_branch.assert_called_once_with("speakeasy", duration_seconds=7200.0)
 
 
 def test_handle_command_mute_branch_without_at():

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.3.0
+# Version: 1.4.0
 # Created: 2025-12-04
-# Modified: 2026-09-12
+# Modified: 2026-09-24
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -245,6 +245,65 @@ def _detect_branch_from_log(log_file: str) -> str:
         return "UNKNOWN"
 
 
+def _registry_fingerprint(level: str, message: str, component: str) -> str:
+    """The fingerprint the registry would store for this line, computed, not minted.
+
+    The level goes in as the log wrote it: the watcher passes parsed["level"]
+    straight through as error_type, so stored rows carry "ERROR", and a
+    lower-cased level here would compute a twin of a row that already exists.
+    """
+    try:
+        from aipass.trigger.apps.handlers.error_registry import compute_fingerprint, normalize_message
+
+        return compute_fingerprint(level, normalize_message(message), component)
+    except Exception as exc:
+        logger.warning(f"registry fingerprint failed: {exc}")
+        return ""
+
+
+def _registry_get_entry(fingerprint: str) -> Optional[Dict[str, Any]]:
+    """The registry row for a fingerprint, or None. An unreadable registry is not fatal."""
+    try:
+        from aipass.trigger.apps.handlers.error_registry import get_entry
+
+        return get_entry(fingerprint)
+    except Exception as exc:
+        logger.warning(f"registry get_entry failed: {exc}")
+        return None
+
+
+def _registry_report(**kwargs: Any) -> Dict[str, Any]:
+    """Register an error the watcher never saw, so the dispatch has a row to close."""
+    try:
+        from aipass.trigger.apps.handlers.error_registry import report
+
+        return report(**kwargs)
+    except Exception as exc:
+        logger.warning(f"registry report failed: {exc}")
+        return {}
+
+
+def _registry_identity(level: str, message: str, branch: str, log_path: str, line_iso: str) -> Optional[Dict[str, str]]:
+    """{fingerprint, registry_id} for a scanned line, or None when it is a replay.
+
+    Lookup first: a row that exists is named, never bumped — reporting it would
+    move last_seen to now for a line read off disk. A line no newer than the
+    row's last_seen is one the watcher already registered; a restart re-reads
+    the same window, so firing it re-dispatches with the stamp unmoved, a loop
+    nobody closes (@hooks, 2026-09-24). Only an untracked error is reported,
+    as the watcher does, so the responder has a row to resolve.
+    """
+    fingerprint = _registry_fingerprint(level, message, branch)
+    known = _registry_get_entry(fingerprint) if fingerprint else None
+    if known:
+        last_seen = known.get("last_seen", "")
+        if last_seen and line_iso <= last_seen:
+            return None
+        return {"fingerprint": fingerprint, "registry_id": known.get("id", "")}
+    row = _registry_report(error_type=level, message=message, component=branch, log_path=log_path)
+    return {"fingerprint": row.get("fingerprint", fingerprint), "registry_id": row.get("id", "")}
+
+
 def _count_repeat(entry: Optional[Dict[str, Any]], line_iso: str) -> None:
     """Fold one more sighting into an entry already collected this scan.
 
@@ -315,12 +374,21 @@ def _scan_single_log_file(
                 continue
 
             branch = _detect_branch_from_log(str(log_file))
+            identity = _registry_identity(parsed["level"], message, branch, str(log_file), line_iso)
+            if identity is None:
+                # Not added to processed_hashes: a newer line of the same error
+                # later in this file is a real occurrence and must still fire.
+                continue
             entry = {
                 "branch": branch,
                 "module": module,
                 "message": message,
-                "log_file": str(log_file),
+                # log_path, not log_file: it is the key handle_error_detected
+                # reads. log_file fell into **kwargs and the mail said "unknown".
+                "log_path": str(log_file),
                 "error_hash": error_hash,
+                "fingerprint": identity["fingerprint"],
+                "registry_id": identity["registry_id"],
                 "timestamp": line_iso,
                 "level": parsed["level"].lower(),
                 # Occurrence facts. `count` is what gate 3 reads; first/last_seen
