@@ -2,7 +2,7 @@
 # Name: test_handler_guard.py
 # Description: The cross-branch handler import guard — refusal, allowance, debug trace
 # Version: 1.1.0
-# Created: 2026-08-18
+# Created: 2026-05-12
 # Modified: 2026-09-27
 # =============================================
 

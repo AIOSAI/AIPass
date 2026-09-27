@@ -11,8 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(documentation) — that route_command and print_help in apps/cli.py carry docstrings
 
-import sys
-
 import pytest
 
 from aipass.cli.apps import cli as branch_entry
@@ -65,7 +63,7 @@ def stub_module(monkeypatch):
 
 def _run(monkeypatch, argv):
     """Invoke main() with a synthetic argv."""
-    monkeypatch.setattr(sys, "argv", ["cli", *argv])
+    monkeypatch.setattr("sys.argv", ["cli", *argv])
     return branch_entry.main()
 
 
@@ -288,7 +286,7 @@ def test_run_cli_maps_an_unhandled_crash_to_one(monkeypatch, mock_logger, capsys
 
 def test_run_cli_passes_a_clean_run_through(monkeypatch, stub_module):
     """No interrupt, no crash: run_cli() hands main()'s code straight back."""
-    monkeypatch.setattr(sys, "argv", ["cli", "probe"])
+    monkeypatch.setattr("sys.argv", ["cli", "probe"])
 
     assert branch_entry.run_cli() == 0
     assert stub_module.calls == [("probe", [])]

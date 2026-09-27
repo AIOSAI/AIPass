@@ -2,7 +2,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for CLI branch tests
 # Version: 4.1.0
-# Created: 2026-03-07
+# Created: 2026-03-05
 # Modified: 2026-09-27
 # =============================================
 

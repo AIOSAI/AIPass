@@ -1,4 +1,4 @@
-# ===================AIPASS====================
+# =================== AIPass ====================
 # META DATA HEADER
 # Name: test_import_dead_cwd.py - cli imports without a readable cwd
 # Description: Every cli module imports, and its call-time sites run, with the cwd deleted
