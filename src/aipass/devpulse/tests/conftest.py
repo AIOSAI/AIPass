@@ -76,13 +76,6 @@ def mock_logger():
         yield mock_log
 
 
-@pytest.fixture
-def mock_json_handler():
-    """Mock json_handler to prevent filesystem writes during tests."""
-    with patch("aipass.devpulse.apps.handlers.json.json_handler.log_operation") as mock_json:
-        yield mock_json
-
-
 @pytest.fixture(autouse=True)
 def mock_infrastructure(tmp_path, monkeypatch) -> Path:
     """Redirect this branch's json writes into a per-test sandbox.

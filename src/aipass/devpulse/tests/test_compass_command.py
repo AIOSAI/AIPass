@@ -141,6 +141,46 @@ def test_add_persists_to_store(capsys, db):
     assert "1 result(s)" in out
 
 
+def test_add_tags_are_stored_and_searchable(capsys, db):
+    """--tags reaches the store: a query on a word found only in the tags finds the decision.
+
+    Mutant killed: _handle_add passing tags=None to add_decision.
+    """
+    capsys.readouterr()
+    compass_cmd.handle_command(
+        "compass",
+        ["add", "tag ctx", "tag decision", "--rating", "good", "--tags", "fleet,quetzal", "--db", db],
+    )
+    assert "tags: fleet,quetzal" in _output(capsys)
+
+    out = _query_out(capsys, db, "quetzal")
+    assert "1 result(s)" in out
+    assert "tag decision" in out
+
+
+def test_add_source_is_stored_as_given(capsys, db):
+    """--source user is stored as user; without the flag the entry reads source=devpulse.
+
+    Mutant killed: _handle_add passing source="devpulse" whatever the flag says.
+    """
+    _add(capsys, db, "owner ctx", "owner said so", "good", "--source", "user")
+    _add(capsys, db, "seat ctx", "seat decided", "good")
+
+    assert "source=user" in _query_out(capsys, db, "owner")
+    assert "source=devpulse" in _query_out(capsys, db, "seat")
+
+
+def test_add_unknown_source_errors_no_write(capsys, db):
+    """--source outside devpulse and user is refused by name and writes nothing."""
+    capsys.readouterr()
+    compass_cmd.handle_command(
+        "compass",
+        ["add", "ctx", "dec", "--rating", "good", "--source", "stranger", "--db", db],
+    )
+    assert "'stranger'" in _output(capsys)
+    assert "total decisions: 0" in _stats_out(capsys, db).lower()
+
+
 # ---------------------------------------------------------------------------
 # stats
 # ---------------------------------------------------------------------------

@@ -3,15 +3,14 @@
 # Description: Tests for the birth-cert admin grant handler (FPLAN-0401)
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-27
 # =============================================
 
-"""
-Admin grant contract tests — keygen, mint, and the 5-leg verify.
+"""Tests for apps/handlers/owner/admin_grant.py: keygen, mint, and every named refusal of the 5-leg verify."""
 
-Every leg must fail closed with a NAMED refusal; the tamper case is the
-canary the whole design exists for.
-"""
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(constant) — the text of ADMIN_HOLDER
+# seedgo: no-test-needed(stdlib) — hmac's digest arithmetic and secrets.token_hex's randomness
 
 import json
 import os
@@ -120,9 +119,13 @@ def test_keygen_refuses_overwrite_without_force(world):
 
 
 def test_mint_requires_key(world):
+    """Mutant: the refusal names DEFAULT_KEY_PATH instead of the key it looked for."""
+    before = world["cert"].read_text(encoding="utf-8")
     ok, msg = admin_grant.mint_grant(cert_path=world["cert"], key_path=world["key"])
     assert not ok
     assert "keygen" in msg
+    assert msg == f"no signing key at {world['key']} — run keygen first"
+    assert world["cert"].read_text(encoding="utf-8") == before
 
 
 def test_mint_signs_and_preserves_existing_fields(world):
@@ -138,6 +141,7 @@ def test_mint_signs_and_preserves_existing_fields(world):
 
 
 def test_mint_refuses_foreign_cert(world):
+    """Mutant: mint writes the cert before its owner check refuses."""
     admin_grant.generate_key(key_path=world["key"])
     cert = json.loads(world["cert"].read_text(encoding="utf-8"))
     cert["owner"] = "prax"
@@ -145,6 +149,7 @@ def test_mint_refuses_foreign_cert(world):
     ok, msg = admin_grant.mint_grant(cert_path=world["cert"], key_path=world["key"])
     assert not ok
     assert "refusing to mint" in msg
+    assert json.loads(world["cert"].read_text(encoding="utf-8")) == cert
 
 
 # =============================================================================
