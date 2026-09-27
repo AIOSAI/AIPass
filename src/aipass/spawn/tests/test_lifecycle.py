@@ -210,6 +210,30 @@ class TestDeleteBranch:
         assert result["success"] is False
         assert mock_branch.exists()
 
+    @pytest.mark.parametrize("where", ["outside", "root"])
+    def test_delete_refuses_a_row_that_escapes_the_project(self, tmp_path, repo_root, mock_registry, where):
+        """A row resolving outside the project, or to the root itself, is refused before any archive or rmtree."""
+        from aipass.spawn.apps.handlers.delete_ops import delete_branch
+
+        victim = tmp_path / "outside_project" if where == "outside" else repo_root
+        victim.mkdir(exist_ok=True)
+        (victim / "keep.txt").write_text("survives\n", encoding="utf-8")
+        reg = json.loads(mock_registry.read_text(encoding="utf-8"))
+        reg["branches"].append(
+            {"name": "ESCAPEE", "path": str(victim) if where == "outside" else ".", "status": "active"}
+        )
+        mock_registry.write_text(json.dumps(reg, indent=2), encoding="utf-8")
+
+        with patch("aipass.spawn.apps.handlers.delete_ops.find_registry", return_value=mock_registry):
+            result = delete_branch("escapee", confirm=False)
+
+        assert result["success"] is False
+        assert "outside the project" in result["error"]
+        assert (victim / "keep.txt").read_text(encoding="utf-8") == "survives\n"
+        assert not (repo_root / ".archive").exists()
+        names = [b["name"] for b in json.loads(mock_registry.read_text(encoding="utf-8"))["branches"]]
+        assert "ESCAPEE" in names
+
     def test_handle_delete_no_args(self):
         """handle_delete with no args should show usage."""
         from aipass.spawn.apps.modules.delete import handle_delete
