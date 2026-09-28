@@ -197,6 +197,17 @@ def clean_command_state() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def header_fires_nowhere(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """header() fires cli_header_displayed on the live trigger bus through the
+    trigger object display caches in _TRIGGER; a test that prints through the real console must
+    never reach that bus (fleet green leg 2 bus probe: 10 fires)."""
+    recorder = MagicMock()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
+
+
+@pytest.fixture(autouse=True)
 def _no_fleet_cache_between_tests() -> Generator[None, None, None]:
     """
     Clear the fleet snapshot cache around every test (DPLAN-0305).

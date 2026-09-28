@@ -453,6 +453,7 @@ class TestStatusTellsTheTruthAboutAServerItDidNotStart:
 
         record = host_lifetime.running()
 
+        assert record is not None
         assert record["pid"] == supervised
         assert record["owner"] == host_lifetime.OWNER_SUPERVISOR
 
@@ -461,14 +462,21 @@ class TestStatusTellsTheTruthAboutAServerItDidNotStart:
         host_lifetime.record_path().write_text(
             json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}), encoding="utf-8"
         )
-        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: pid == 321)
 
         record = host_lifetime.running()
 
+        assert record is not None
         assert record["owner"] == host_lifetime.OWNER_DETACHED
+        assert record["pid"] == 321
 
-    def test_no_supervisor_and_no_record_is_still_none(self, runtime: Path) -> None:
+    def test_no_supervisor_and_no_record_is_still_none(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The supervisor is ASKED first, and its "nothing" leads to the record path."""
+        asked = MagicMock(return_value=0)
+        monkeypatch.setattr(host_autostart, "supervised_pid", asked)
+
         assert host_lifetime.running() is None
+        asked.assert_called_once_with()
 
 
 class TestStoppingASupervisedServerIsNotATrap:
@@ -496,16 +504,18 @@ class TestStoppingASupervisedServerIsNotATrap:
         with patch.object(host_lifetime.os, "kill") as kill:
             record = host_lifetime.stop()
 
+        assert record is not None
         assert record["owner"] == host_lifetime.OWNER_SUPERVISOR
         kill.assert_not_called()
 
     def test_a_refused_stop_is_reported_rather_than_forced(
         self, runtime: Path, supervised: int, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(host_autostart, "stop_unit", lambda: False)
+        monkeypatch.setattr(host_autostart, "stop_unit", refused := MagicMock(return_value=False))
 
         with pytest.raises(host_lifetime.LifetimeError, match="would not stop"):
             host_lifetime.stop()
+        refused.assert_called_once_with()
 
     def test_an_accepted_stop_whose_process_stays_is_not_reported_as_success(
         self, runtime: Path, supervised: int, monkeypatch: pytest.MonkeyPatch
@@ -516,11 +526,12 @@ class TestStoppingASupervisedServerIsNotATrap:
         implies the second — os.kill(pid, 0) answering yes to an unreaped
         corpse, found by running the thing for real rather than by a mock.
         """
-        monkeypatch.setattr(host_autostart, "stop_unit", lambda: True)
+        monkeypatch.setattr(host_autostart, "stop_unit", accepted := MagicMock(return_value=True))
         monkeypatch.setattr(host_autostart, "STOP_TIMEOUT_SECONDS", 0.0)
 
         with pytest.raises(host_lifetime.LifetimeError, match="still running"):
             host_lifetime.stop()
+        accepted.assert_called_once_with()
 
     def test_a_detached_server_is_still_stopped_by_signal(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """No regression: the hand-started path did not change."""
@@ -536,6 +547,7 @@ class TestStoppingASupervisedServerIsNotATrap:
         with patch.object(host_lifetime.os, "kill", side_effect=signalled) as kill:
             record = host_lifetime.stop()
 
+        assert record is not None
         assert record["owner"] == host_lifetime.OWNER_DETACHED
         kill.assert_called_once_with(321, signal.SIGTERM)
 
@@ -551,27 +563,30 @@ class TestTheUnitIsWrittenOnlyForAnAddressThatCleared:
     def test_a_refused_bind_writes_nothing(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(host_config, "load_config", lambda: {"host": "0.0.0.0", "port": 8787})
         monkeypatch.setattr(host_config, "validate_bind", MagicMock(side_effect=host_config.BindRefused("wildcard")))
-        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(host_autostart, "is_supported", gate := MagicMock(return_value=True))
 
         with pytest.raises(host_config.BindRefused):
             host_lifetime.write_unit()
+        gate.assert_called_once_with()
 
         assert not host_lifetime.unit_path().exists()
 
     def test_a_platform_without_systemd_writes_nothing(self, runtime: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(host_autostart, "is_supported", lambda: False)
+        monkeypatch.setattr(host_autostart, "is_supported", gate := MagicMock(return_value=False))
 
         with pytest.raises(host_autostart.AutostartUnsupported):
             host_lifetime.write_unit()
+        gate.assert_called_once_with()
 
         assert not host_lifetime.unit_path().exists()
 
     def test_the_written_unit_carries_the_cleared_address(
         self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+        monkeypatch.setattr(host_autostart, "is_supported", gate := MagicMock(return_value=True))
 
         written = host_lifetime.write_unit()
+        gate.assert_called_once_with()
 
         assert "--host 127.0.0.1 --port 8790" in written.read_text(encoding="utf-8")
 
@@ -681,11 +696,13 @@ class TestAnUnreachableSupervisorIsNeverReportedAsAnEmptyOne:
             json.dumps({"pid": 321, "host": "127.0.0.1", "port": 8787}), encoding="utf-8"
         )
         monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
-        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: pid == 321)
 
         record = host_lifetime.running()
 
+        assert record is not None
         assert record["owner"] == host_lifetime.OWNER_DETACHED
+        assert record["pid"] == 321
 
 
 class TestTheStatusLaneGetsAThirdAnswer:
@@ -733,10 +750,22 @@ class TestTheInstallReportNamesAConflictItCanSee:
     def test_a_detached_server_on_the_port_is_reported(
         self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
+        supported = MagicMock(return_value=True)
+        monkeypatch.setattr(host_autostart, "is_supported", supported)
         monkeypatch.setattr(host_autostart, "supervised_pid", lambda: 0)
-        monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
-        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: True)
+        monkeypatch.setattr(host_lifetime, "_alive", lambda pid: pid == 4242)
+        # linger_enabled runs for real; only loginctl itself is answered, by a
+        # recording stub that refuses every other command.
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setattr(host_autostart.shutil, "which", lambda name: f"/bin/{name}" if name == "loginctl" else None)
+        asked: list = []
+
+        def loginctl(argv: list, **kwargs: Any) -> Any:
+            asked.append(argv)
+            assert argv[0] == "loginctl"
+            return subprocess.CompletedProcess(argv, 0, stdout="yes\n", stderr="")
+
+        monkeypatch.setattr(host_autostart.subprocess, "run", loginctl)
         host_lifetime.record_path().write_text(
             json.dumps({"pid": 4242, "host": "127.0.0.1", "port": 8790}), encoding="utf-8"
         )
@@ -744,6 +773,9 @@ class TestTheInstallReportNamesAConflictItCanSee:
         report = host_lifetime.autostart_report()
 
         assert report["conflict"]["pid"] == 4242
+        assert report["linger"] is True
+        assert asked == [["loginctl", "show-user", Path.home().name, "-p", "Linger", "--value"]]
+        supported.assert_called_once_with()
 
     def test_a_supervised_server_is_not_a_conflict(
         self, runtime: Path, bind_ok: None, supervised: int, monkeypatch: pytest.MonkeyPatch
@@ -752,12 +784,15 @@ class TestTheInstallReportNamesAConflictItCanSee:
         Reinstalling over a unit that is already running is normal — the
         supervisor restarts it. Only a HAND-started server is in the way.
         """
-        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
-        monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
+        supported = MagicMock(return_value=True)
+        monkeypatch.setattr(host_autostart, "is_supported", supported)
+        monkeypatch.setattr(host_autostart, "linger_enabled", MagicMock(return_value=True))
 
         report = host_lifetime.autostart_report()
 
         assert report["conflict"] is None
+        assert report["linger"] is True
+        supported.assert_called_once_with()
 
     def test_an_unreachable_supervisor_never_retracts_a_written_unit(
         self, runtime: Path, bind_ok: None, monkeypatch: pytest.MonkeyPatch
@@ -767,8 +802,9 @@ class TestTheInstallReportNamesAConflictItCanSee:
         raise would hand the operator a rendered unit plus an error saying it
         did not happen.
         """
-        monkeypatch.setattr(host_autostart, "is_supported", lambda: True)
-        monkeypatch.setattr(host_autostart, "linger_enabled", lambda: True)
+        supported = MagicMock(return_value=True)
+        monkeypatch.setattr(host_autostart, "is_supported", supported)
+        monkeypatch.setattr(host_autostart, "linger_enabled", MagicMock(return_value=True))
 
         def unreachable() -> int:
             raise host_autostart.SupervisorUnreachable("systemctl did not answer")
@@ -779,3 +815,4 @@ class TestTheInstallReportNamesAConflictItCanSee:
 
         assert report["conflict"] is None
         assert host_lifetime.unit_path().exists()
+        supported.assert_called_once_with()

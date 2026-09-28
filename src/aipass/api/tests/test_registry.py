@@ -13,12 +13,9 @@
 # seedgo: no-test-needed(stdlib) — importlib.util.spec_from_file_location's own loading of a file as a module
 
 import sys
-from unittest.mock import patch
-
-import pytest
 
 from aipass.api.apps.modules.bridge import clear, resolve
-from aipass.api.apps.modules.registry import _import_driver, handle_command, load_drivers, print_introspection
+from aipass.api.apps.modules.registry import handle_command, load_drivers, print_introspection
 
 
 class TestLoadDrivers:
@@ -97,7 +94,7 @@ class TestLoadDrivers:
 
 
 class TestImportDriver:
-    """Tests for _import_driver() — single driver import and registration."""
+    """Single driver import and registration, reached through load_drivers()."""
 
     def test_import_valid_driver(self, tmp_path):
         """
@@ -108,15 +105,15 @@ class TestImportDriver:
         hook is the entire point of a driver: without it the module is loaded
         and registers nothing, which looks identical from the outside.
         """
-        project = tmp_path / "proj"
-        project.mkdir()
+        project = tmp_path / "integrations" / "proj"
+        project.mkdir(parents=True)
         driver = project / "driver.py"
         driver.write_text(
             "LOADED = True\nREGISTERED = False\ndef register():\n    global REGISTERED\n    REGISTERED = True\n",
             encoding="utf-8",
         )
 
-        _import_driver(driver, "proj")
+        assert load_drivers(tmp_path / "integrations") == 1
 
         # The namespaced key is the contract: two projects named driver.py
         # must not overwrite each other in sys.modules.
@@ -132,22 +129,22 @@ class TestImportDriver:
         hook does not abort the import partway: a driver may register at
         module level instead, so its top-level code has to have run.
         """
-        project = tmp_path / "proj2"
-        project.mkdir()
+        project = tmp_path / "integrations" / "proj2"
+        project.mkdir(parents=True)
         driver = project / "driver.py"
         driver.write_text("LOADED = True\n", encoding="utf-8")
 
-        _import_driver(driver, "proj2")
+        assert load_drivers(tmp_path / "integrations") == 1
 
         assert sys.modules["_aipass_integration_proj2"].LOADED is True, (
             "a driver with no register() hook was not executed"
         )
 
-    def test_invalid_spec_raises(self, tmp_path):
-        """Nonexistent driver path raises ImportError or FileNotFoundError."""
-        fake_path = tmp_path / "nonexistent.py"
-        with pytest.raises((ImportError, FileNotFoundError)):
-            _import_driver(fake_path, "fake")
+    def test_unloadable_driver_is_skipped_not_counted(self, tmp_path):
+        """A driver.py that cannot be loaded (here a directory) is skipped and not counted."""
+        (tmp_path / "integrations" / "fake" / "driver.py").mkdir(parents=True)
+
+        assert load_drivers(tmp_path / "integrations") == 0
 
 
 class TestRegistryHandleCommand:
@@ -175,9 +172,7 @@ class TestRegistryHandleCommand:
 class TestPrintIntrospection:
     """Tests for print_introspection() — registry status display."""
 
-    @patch("aipass.api.apps.modules.registry.console")
-    @patch("aipass.api.apps.modules.registry.header")
-    def test_introspection_reports_where_it_looks_for_drivers(self, _mock_header, mock_console):
+    def test_introspection_reports_where_it_looks_for_drivers(self, capsys):
         """
         The self-map names the directory it scans and whether it has loaded.
 
@@ -188,7 +183,7 @@ class TestPrintIntrospection:
         """
         print_introspection()
 
-        printed = " ".join(str(call) for call in mock_console.print.call_args_list)
+        printed = capsys.readouterr().out
 
         assert "integrations" in printed, "the self-map no longer says where it scans for drivers"
         assert "Loaded:" in printed, "the self-map no longer says whether discovery has run"

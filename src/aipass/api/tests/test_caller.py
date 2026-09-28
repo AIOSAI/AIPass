@@ -64,7 +64,7 @@ class TestDetectCallerCategory:
         path = tmp_path / "prax" / "other_module" / "script.py"
         assert detect_caller_category(path) == "prax"
 
-    def test_root_path_returns_unknown(self, tmp_path):
+    def test_a_path_with_no_branch_directory_returns_unknown(self, tmp_path):
         """A path with no branch directory in it should return 'unknown'."""
         path = tmp_path / "somefile.py"
         assert detect_caller_category(path) == "unknown"

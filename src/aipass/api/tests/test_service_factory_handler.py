@@ -100,7 +100,7 @@ class TestBuildService:
         result = build_service("drive", "v3")
 
         assert result is None
-        _mock_logger.error.assert_called_once()
+        _mock_logger.error.assert_called_once_with("Failed to build Google drive service: build failed")
 
 
 # =============================================

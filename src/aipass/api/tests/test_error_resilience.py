@@ -19,8 +19,6 @@
 
 import importlib
 import json
-import sys
-import types
 from pathlib import Path
 
 import pytest
@@ -28,15 +26,10 @@ import pytest
 
 BRANCH_MODULE = "api"
 
-_HANDLER_PKG = f"aipass.{BRANCH_MODULE}.apps.handlers"
 _JSON_MOD_PATH = f"aipass.{BRANCH_MODULE}.apps.handlers.json.json_handler"
 
-if _HANDLER_PKG not in sys.modules:
-    _stub = types.ModuleType(_HANDLER_PKG)
-    _handlers_dir = Path(__file__).resolve().parents[3] / "aipass" / BRANCH_MODULE / "apps" / "handlers"
-    _stub.__path__ = [str(_handlers_dir)]
-    sys.modules[_HANDLER_PKG] = _stub
-
+# No sys.modules stub here: a file under api/ passes the handlers package's
+# branch guard, and conftest has already settled the package before collection.
 _mod = importlib.import_module(_JSON_MOD_PATH)
 JSON_HANDLER = _mod
 

@@ -34,6 +34,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import stat
 import tempfile
@@ -44,6 +45,10 @@ from typing import Any, Dict, List
 import pytest
 
 from aipass.api.apps.handlers.host import settings as host_settings
+
+# The capability probe records what the host answered, so a runner's verdicts
+# can be traced back to the world it measured.
+logger = logging.getLogger(__name__)
 
 CORPUS = Path(__file__).parent / "conformance" / "settings"
 MANIFEST = CORPUS / "manifest.json"
@@ -123,7 +128,8 @@ def platform_capabilities() -> frozenset:
             denied.chmod(0o000)
             try:
                 denied.read_bytes()
-            except OSError:
+            except OSError as e:
+                logger.debug("probe: a mode-000 file is unreadable here: %s", e)
                 found.add(UNREADABLE_FILES)
         finally:
             denied.chmod(0o600)
@@ -138,11 +144,12 @@ def platform_capabilities() -> frozenset:
         blocker.write_text("a file standing where a directory belongs", encoding="utf-8")
         try:
             (blocker / "child.json").read_bytes()
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             # The OS reports the broken tree as a missing file, so no rule that
             # reads missing-as-blank can tell the two apart.
-            pass
-        except OSError:
+            logger.debug("probe: a file-as-parent reads as missing here: %s", e)
+        except OSError as e:
+            logger.debug("probe: a file-as-parent is its own fault here: %s", e)
             found.add(PARENT_IS_A_FILE_IS_DISTINGUISHABLE)
 
     return frozenset(found)
@@ -213,7 +220,7 @@ class TestTheCorpusItself:
         # is asserted once, here, where the first of them runs (seedgo
         # unentered_assert, 2026-09-07). A corpus that failed to load and a
         # corpus where every case is correct look identical without it.
-        assert CASES, "the shared corpus is empty — nothing was checked against the doors"
+        assert len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — not every case was checked"
 
         for entry in CASES:
             assert RUNTIME in entry["runtimes"], entry["id"]
@@ -253,7 +260,7 @@ class TestTheCorpusItself:
         not survive. Without this, the fix for one case would leave the next
         one to be found by CI on a platform nobody runs locally.
         """
-        assert CASES, "the shared corpus is empty — no mode-carrying case could be found"
+        assert len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a mode case could be missed"
 
         mode_carrying = 0
 
@@ -274,7 +281,7 @@ class TestTheCorpusItself:
         # `mode` is the expectation this guard exists for. A corpus that stopped
         # carrying it anywhere would leave the loop above entering nothing and
         # this test green — an absence wearing a pass's clothes.
-        assert mode_carrying, "no case expects a file mode, so this guard measured nothing"
+        assert mode_carrying >= 1, "no case expects a file mode, so this guard measured nothing"
 
     def test_a_case_that_cannot_be_built_here_is_skipped_and_never_passed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -335,14 +342,14 @@ class TestTheCorpusItself:
         Both directions are checked: what a case REQUIRES and what it declares
         an expectation for.
         """
-        assert CASES, "the shared corpus is empty — no capability name was checked"
+        assert len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a capability went unchecked"
 
         for entry in CASES:
             platform = _platform_block(entry)
             named = set(platform.get("requires", [])) | set(platform.get("expect_without", {}))
 
             unknown = named - set(CAPABILITY_MEANINGS)
-            assert not unknown, f"{entry['id']} names capabilities nobody measures: {sorted(unknown)}"
+            assert unknown == set(), f"{entry['id']} names capabilities nobody measures: {sorted(unknown)}"
 
 
 def _build(root: Path, given: Dict[str, Any]) -> Path:

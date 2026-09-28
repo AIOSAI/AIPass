@@ -31,6 +31,7 @@
 # seedgo: no-test-needed(through_the_command) — the real drone.route_command dispatch, stubbed here; @memory's suite
 # seedgo: no-test-needed(duplicate_test) — issue_token() and verify_token() themselves, tests/test_host_api.py
 
+import importlib.util
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -41,12 +42,9 @@ from aipass.api.apps.handlers.host import server as host_server
 from aipass.api.apps.handlers.host import tokens as host_tokens
 
 
-try:
-    import fastapi  # noqa: F401
-
-    FASTAPI_AVAILABLE = True
-except ImportError:
-    FASTAPI_AVAILABLE = False
+# Asked, not attempted: whether the [host] extra is installed is a question,
+# and find_spec answers it without an import to catch.
+FASTAPI_AVAILABLE = importlib.util.find_spec("fastapi") is not None
 
 fastapi_required = pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="the [host] extra is not installed")
 
@@ -149,7 +147,8 @@ def quiet(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the handler's own logging and trail out of the branch files."""
     monkeypatch.setattr(host_memory_config.logger, "info", lambda *a, **k: None)
     monkeypatch.setattr(host_memory_config.logger, "error", lambda *a, **k: None)
-    monkeypatch.setattr(host_memory_config.json_handler, "log_operation", lambda *a, **k: True)
+    # A sink, not a predicate: the handler never reads what the trail returns.
+    monkeypatch.setattr(host_memory_config.json_handler, "log_operation", lambda *a, **k: None)
 
 
 class TestTheExitCodeIsNeverTheVerdict:
@@ -905,13 +904,15 @@ class TestARefusalIsOneShapeWhereverItHappens:
                 json={"branch": "nosuchbranch", "type": "sessions", "count": 5},
                 headers=operate_auth,
             )
-        with patch.object(host_memory_config.drone, "route_command"):
+        with patch.object(host_memory_config.drone, "route_command") as never_routed:
             before = client.post(
                 "/v1/memory-config/set",
                 json={"branch": "api", "type": "sessions", "count": 0},
                 headers=operate_auth,
             )
 
+        # "A count of 0 never leaves this server" — measured, not assumed.
+        never_routed.assert_not_called()
         assert after.status_code == before.status_code == 400
         assert after.json()["error"]["code"] == before.json()["error"]["code"]
 

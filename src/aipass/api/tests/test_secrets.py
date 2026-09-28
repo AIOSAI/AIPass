@@ -84,6 +84,7 @@ PATCH_CMD_ERROR = "aipass.api.apps.modules.api_key.error"
 PATCH_CMD_SUCCESS = "aipass.api.apps.modules.api_key.success"
 PATCH_CMD_CONSOLE = "aipass.api.apps.modules.api_key.console"
 PATCH_CMD_JSON_HANDLER = "aipass.api.apps.modules.api_key.json_handler"
+GET_SECRET_USAGE = "Usage: drone @api get-secret <provider/slug> [--out FILE] [--json] [--list]"
 
 PATCH_MOD_HANDLER = "aipass.api.apps.modules.secrets._handler"
 PATCH_MOD_JSON_HANDLER = "aipass.api.apps.modules.secrets.json_handler"
@@ -173,7 +174,10 @@ class TestGetSecret:
             result = get_secret("telegram", "bot")
 
         assert result is None
-        mock_logger.warning.assert_called()
+        warnings = [c.args[0] for c in mock_logger.warning.call_args_list]
+        assert len(warnings) == 2
+        assert warnings[0].startswith(f"Error reading secret file {provider_dir / 'bot.json'}: ")
+        assert warnings[1] == "Secret not found: telegram/bot"
 
     @pytest.mark.skipif(
         sys.platform == "win32",
@@ -456,8 +460,7 @@ class TestGetSecretCmd:
         """Empty args list calls error() with usage message."""
         get_secret_cmd([])
 
-        mock_error.assert_called_once()
-        assert "Usage" in mock_error.call_args[0][0]
+        mock_error.assert_called_once_with(GET_SECRET_USAGE)
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -465,7 +468,7 @@ class TestGetSecretCmd:
         """Single provider name without --list flag calls error() with format message."""
         get_secret_cmd(["telegram"])
 
-        mock_error.assert_called_once()
+        mock_error.assert_called_once_with("Expected format: <provider>/<slug>  (e.g. telegram/bot)")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -473,8 +476,7 @@ class TestGetSecretCmd:
         """Only flags (no positional args after stripping) calls error()."""
         get_secret_cmd(["--json"])
 
-        mock_error.assert_called_once()
-        assert "Usage" in mock_error.call_args[0][0]
+        mock_error.assert_called_once_with(GET_SECRET_USAGE)
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)
@@ -485,8 +487,7 @@ class TestGetSecretCmd:
 
         get_secret_cmd(["telegram/bot"])
 
-        mock_error.assert_called_once()
-        assert "not found" in mock_error.call_args[0][0].lower()
+        mock_error.assert_called_once_with("Secret not found: telegram/bot")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_ERROR)
@@ -494,8 +495,7 @@ class TestGetSecretCmd:
         """--out without a file path argument calls error()."""
         get_secret_cmd(["telegram/bot", "--out"])
 
-        mock_error.assert_called_once()
-        assert "--out" in mock_error.call_args[0][0]
+        mock_error.assert_called_once_with("--out requires a file path argument")
 
     @patch(PATCH_CMD_JSON_HANDLER)
     @patch(PATCH_CMD_SECRETS)

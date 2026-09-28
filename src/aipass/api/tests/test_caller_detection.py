@@ -276,4 +276,4 @@ class TestGetCallerInfo:
         result = get_caller_info()
 
         assert result is None
-        mock_logger.error.assert_called_once()
+        mock_logger.error.assert_called_once_with("Caller detection failed: stack failed")

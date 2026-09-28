@@ -707,6 +707,13 @@ class TestNoMechanismIsReimplementedHere:
         assert "import subprocess" not in source
         assert "Popen" not in source
         assert "os.system" not in source
+        # The other doors a program can be run through, which the terminal-lane
+        # pin below does not watch: the exec and spawn families, and the
+        # from-import spelling that dodges "import subprocess".
+        assert "from subprocess" not in source
+        assert "os.exec" not in source
+        assert "os.spawn" not in source
+        assert "os.popen" not in source
 
     def test_the_verb_lane_still_executes_nothing_after_the_terminal_lane(self) -> None:
         """
@@ -768,12 +775,21 @@ def client(tmp_path: Path):
     from fastapi.testclient import TestClient
 
     store = tmp_path / "secrets"
-    with patch(PATCH_SECRETS_BASE, store), patch(PATCH_SECRETS_JSON), patch(PATCH_SECRETS_LOGGER):
-        with patch(PATCH_TOKENS_JSON), patch(PATCH_TOKENS_LOGGER), patch(PATCH_SERVER_LOGGER):
-            with patch(PATCH_SERVER_JSON), patch(PATCH_FACE_JSON), patch(PATCH_FACE_LOGGER):
-                with patch(PATCH_VERBS_JSON), patch(PATCH_VERBS_LOGGER):
-                    with patch(PATCH_SEATED, return_value=PROJECT):
-                        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
+    with (
+        patch(PATCH_SECRETS_BASE, store),
+        patch(PATCH_SECRETS_JSON),
+        patch(PATCH_SECRETS_LOGGER),
+        patch(PATCH_TOKENS_JSON),
+        patch(PATCH_TOKENS_LOGGER),
+        patch(PATCH_SERVER_LOGGER),
+        patch(PATCH_SERVER_JSON),
+        patch(PATCH_FACE_JSON),
+        patch(PATCH_FACE_LOGGER),
+        patch(PATCH_VERBS_JSON),
+        patch(PATCH_VERBS_LOGGER),
+        patch(PATCH_SEATED, return_value=PROJECT),
+    ):
+        yield TestClient(host_server.create_app(), raise_server_exceptions=False)
 
 
 def _body(**extra: Any) -> dict:

@@ -22,8 +22,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 from aipass.api.apps.modules.bridge import (
@@ -112,24 +110,28 @@ class TestClear:
 class TestPrintIntrospection:
     """Verifies introspection output for empty and populated registries."""
 
-    @patch("aipass.api.apps.modules.bridge.console")
-    @patch("aipass.api.apps.modules.bridge.header")
-    def test_with_contracts(self, mock_header: object, mock_console: object) -> None:
+    def test_with_contracts(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Introspection prints registered contract names."""
         register("search", lambda: None)
         register("memory", lambda: None)
 
         print_introspection()
 
-        mock_header.assert_called_once()  # type: ignore[union-attr]
+        out = capsys.readouterr().out
+        assert "Bridge — Contract Registry" in out
+        assert "Registered contracts:" in out
+        assert "• memory" in out
+        assert "• search" in out
+        assert "No contracts registered." not in out
 
-    @patch("aipass.api.apps.modules.bridge.console")
-    @patch("aipass.api.apps.modules.bridge.header")
-    def test_without_contracts(self, mock_header: object, mock_console: object) -> None:
-        """Introspection on empty registry still runs without error."""
+    def test_without_contracts(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Introspection on empty registry says it holds no contracts."""
         print_introspection()
 
-        mock_header.assert_called_once()  # type: ignore[union-attr]
+        out = capsys.readouterr().out
+        assert "Bridge — Contract Registry" in out
+        assert "No contracts registered." in out
+        assert "Registered contracts:" not in out
 
 
 # =============================================
@@ -160,11 +162,10 @@ class TestHandleCommand:
 
         assert capsys.readouterr().out == ""  # type: ignore[union-attr]
 
-    def test_returns_false_help_flag(self) -> None:
-        """--help arg returns False."""
-        with patch("aipass.api.apps.modules.bridge.console"):
-            with patch("aipass.api.apps.modules.bridge.header"):
-                assert handle_command("bridge", ["--help"]) is False
+    def test_returns_false_help_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--help arg returns False and prints nothing."""
+        assert handle_command("bridge", ["--help"]) is False
+        assert capsys.readouterr().out == ""
 
     def test_returns_false_arbitrary_args(self) -> None:
         """Arbitrary arguments return False."""

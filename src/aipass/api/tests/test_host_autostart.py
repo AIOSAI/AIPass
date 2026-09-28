@@ -283,10 +283,11 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
         gets the truth instead of an exception it would have to translate back
         into the same truth.
         """
-        with patch.object(host_autostart, "is_supported", lambda: False):
+        with patch.object(host_autostart, "is_supported", return_value=False) as gate:
             with patch.object(host_autostart.subprocess, "run") as run:
                 assert host_autostart.supervised_pid() == 0
                 run.assert_not_called()
+        gate.assert_called_once_with()
 
     def test_a_platform_without_systemd_never_shells_out(self, quiet: None) -> None:
         """

@@ -467,7 +467,7 @@ class TestWhereImagesLand:
         with patch.dict(os.environ, {"XDG_PICTURES_DIR": str(tmp_path / "Bilder")}, clear=False):
             assert host_uploads.upload_root() == tmp_path / "Bilder" / "BAUD"
 
-    def test_a_relocated_pictures_directory_is_honoured(self, tmp_path: Path) -> None:
+    def test_a_relocated_pictures_directory_is_honoured(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         Read from the XDG config the way Tauri's picture_dir() does, so a
         machine with a relocated or non-English Pictures folder does not end up
@@ -477,22 +477,24 @@ class TestWhereImagesLand:
         config.mkdir()
         (config / "user-dirs.dirs").write_text('XDG_PICTURES_DIR="$HOME/Billeder"\n', encoding="utf-8")
 
-        env = {"HOME": str(tmp_path)}
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop("XDG_PICTURES_DIR", None)
-            with patch.object(Path, "home", lambda: tmp_path):
-                assert host_uploads.upload_root() == tmp_path / "Billeder" / "BAUD"
+        # A home of our own, the way the host names one: HOME on POSIX,
+        # USERPROFILE on Windows. Nothing in pathlib is replaced.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
 
-    def test_the_fallback_needs_no_platform_branch(self, tmp_path: Path) -> None:
+        assert host_uploads.upload_root() == tmp_path / "Billeder" / "BAUD"
+
+    def test_the_fallback_needs_no_platform_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         ~/Pictures is also the right answer on Windows and macOS, which is why
         there is no platform check here to get wrong.
         """
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("XDG_PICTURES_DIR", None)
-            with patch.object(Path, "home", lambda: tmp_path):
-                with patch.object(host_uploads, "_pictures_from_user_dirs", lambda: None):
-                    assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
+
+        assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
 
     def test_reading_the_root_creates_nothing(self, tmp_path: Path) -> None:
         """
@@ -504,14 +506,23 @@ class TestWhereImagesLand:
 
         assert not root.exists()
 
-    def test_an_unreadable_xdg_config_falls_back_rather_than_raising(self, tmp_path: Path) -> None:
+    def test_an_unreadable_xdg_config_falls_back_rather_than_raising(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """
         Most machines have no such file. That is the normal case, not an error,
         and an upload lane that refused to work without one would be broken on
         every fresh install.
         """
-        with patch.object(Path, "home", lambda: tmp_path / "nowhere"):
-            assert host_uploads._pictures_from_user_dirs() is None
+        config = tmp_path / ".config"
+        config.mkdir()
+        # Not text at all: the read fails on every host the same way.
+        (config / "user-dirs.dirs").write_bytes(b"\xff\xfe\xfa not utf-8")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
+        monkeypatch.delenv("XDG_PICTURES_DIR", raising=False)
+
+        assert host_uploads.upload_root() == tmp_path / "Pictures" / "BAUD"
 
 
 # ==============================================

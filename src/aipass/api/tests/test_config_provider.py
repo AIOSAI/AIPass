@@ -182,7 +182,7 @@ class TestGetValidationRulesConfigProvider:
         """Unknown provider should log an info message."""
         config_provider.get_validation_rules("nonexistent")
 
-        mock_logger.info.assert_called_once()
+        mock_logger.info.assert_called_once_with("No validation rules found for provider: nonexistent")
         assert "nonexistent" in mock_logger.info.call_args[0][0]
 
     @patch("aipass.api.apps.handlers.config.provider.logger", autospec=True)

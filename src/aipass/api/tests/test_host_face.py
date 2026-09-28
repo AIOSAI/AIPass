@@ -302,20 +302,26 @@ class TestServingTheFace:
         public bundle that renders a token door and nothing else.
         """
         response = client.get("/")
+        # The same tokenless client IS walled off from the API, so the root's
+        # 200 is a deliberate exemption and not an auth gate that is simply off.
+        gated = client.get("/v1/whoami")
 
         assert response.status_code == 200
+        assert gated.status_code == 401
 
-    def test_assets_are_served_from_the_same_origin(self, client) -> None:
+    def test_assets_are_served_from_the_same_origin(self, client, built_face: Path) -> None:
         """The bundle references /assets/... absolutely; the mount must answer."""
         response = client.get("/assets/phone.js")
 
         assert response.status_code == 200
+        assert response.text == (built_face / "assets" / "phone.js").read_text(encoding="utf-8")
 
     def test_manifest_is_served(self, client) -> None:
         """Without it, 'add to home screen' silently degrades."""
         response = client.get("/manifest.webmanifest")
 
         assert response.status_code == 200
+        assert response.json() == {"name": "BAUD"}
 
 
 @fastapi_required

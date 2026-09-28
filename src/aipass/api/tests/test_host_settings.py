@@ -567,13 +567,10 @@ class TestTheCorpusForcedTwoFixes:
         blocking.write_text("I am a file, not a directory", encoding="utf-8")
         target = blocking / "settings.local.json"
 
-        try:
+        # The blocking file must block; WHICH error it blocks with is the probe.
+        with pytest.raises(OSError) as blocked:
             target.read_bytes()
-            pytest.fail("the blocking file did not block — this fixture is broken")
-        except FileNotFoundError:
-            world_distinguishes_the_fault = False
-        except OSError:
-            world_distinguishes_the_fault = True
+        world_distinguishes_the_fault = not isinstance(blocked.value, FileNotFoundError)
 
         if world_distinguishes_the_fault:
             with pytest.raises(host_settings.SettingsUnavailable):

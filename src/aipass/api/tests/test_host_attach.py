@@ -578,8 +578,8 @@ class TestThePumpMovesRealBytes:
         # returned nothing passed this (seedgo assertion_shape, 2026-09-07). The
         # loop above already waits for data, so an empty read here is a real
         # failure and is asserted as one.
-        assert data, "the pump returned nothing within five seconds"
         assert isinstance(data, bytes), f"the pump decoded to text: {type(data).__name__}"
+        assert data.startswith(b"x"), f"the pump did not hand back what cat echoed: {data!r}"
 
     def test_a_closed_pty_reads_empty_rather_than_raising(self, quiet: Any, tmux_preflight: Any) -> None:
         """
@@ -635,9 +635,14 @@ class TestTheRoomCanActuallyHearAResize:
         try:
             packed = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
             rows, cols, _, _ = struct.unpack("HHHH", packed)
+            # The published door itself, on the same real PTY: a later stamp
+            # lands in the kernel rows-first, never transposed.
+            host_attach.set_winsize(session.descriptor, 132, 50)
+            restamped = host_attach.fcntl.ioctl(session.descriptor, host_attach.termios.TIOCGWINSZ, b"\0" * 8)
         finally:
             session.hangup()
 
+        assert struct.unpack("HHHH", restamped)[:2] == (50, 132)
         assert (cols, rows) == (host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)
         assert (cols, rows) != (0, 0)
 
@@ -799,9 +804,13 @@ class TestTheRoomCanActuallyHearAResize:
         monkeypatch.setattr(os, "getpgid", macos_getpgid)
 
         try:
-            time.sleep(0.3)
-            foreground = os.tcgetpgrp(session.descriptor)
             child_group = os.getpgid(session.process.pid)
+            # Polled on the real condition: the child's exec claims the
+            # terminal, and until it has the foreground is still ours.
+            deadline = time.monotonic() + 5
+            foreground = os.tcgetpgrp(session.descriptor)
+            while foreground != child_group and time.monotonic() < deadline:
+                foreground = os.tcgetpgrp(session.descriptor)
         finally:
             session.hangup()
 
@@ -944,11 +953,13 @@ class TestOpeningAnAttach:
         a shell has no branch, and an empty label in the logs is a session
         nobody can point at.
         """
-        with patch.object(host_attach, "client_command", lambda room: ["cat"]):
+        attached_to = []
+        with patch.object(host_attach, "client_command", lambda room: attached_to.append(room) or ["cat"]):
             session = host_attach.open_attach("", cwd=tmp_path, room="baud-shell-aipass")
 
         try:
-            assert session.room == "baud-shell-aipass"
+            # What the product DID with the room: the client it built targets it.
+            assert attached_to == ["baud-shell-aipass"]
             assert session.branch == "baud-shell-aipass"
         finally:
             session.hangup()
@@ -1164,9 +1175,9 @@ class TestTheBearerRidesTheSubprotocolAndNeverTheUrl:
         Protocol order is the client's to choose, and a 401 that depends on it
         would be unexplainable from the phone end.
         """
-        _, raw = host_tokens.issue_token("pixel-8", scope="operate")
+        record, raw = host_tokens.issue_token("pixel-8", scope="operate")
 
-        assert host_server.socket_bearer(self._socket(f"{raw}, aipass.bearer")) is not None
+        assert host_server.socket_bearer(self._socket(f"{raw}, aipass.bearer"))["id"] == record["id"]
 
     def test_an_unknown_token_is_refused(self, store: Any) -> None:
         """Same wall as the HTTP lane, same store, same compare."""
@@ -1865,7 +1876,7 @@ class TestAWatchIsNotAnchorTooling:
 
         assert "@prax monitors the seat, not" not in source
 
-    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any, seated: Any) -> None:
+    def test_an_external_project_watch_opens_instead_of_refusing(self, store: Any, seated: Any, tmp_path: Path) -> None:
         """
         The parked refusal, through the real socket.
 
@@ -1882,7 +1893,7 @@ class TestAWatchIsNotAnchorTooling:
         # check. What is under test is that no project fence stands in front of
         # the spawn; the gate itself has its own tests next door.
         with patch(PATCH_SERVER_LOGGER), patch(PATCH_SERVER_JSON):
-            with patch.object(host_verbs, "citizen_address", return_value="@vera"):
+            with patch.object(host_verbs.host_reads, "resolve_branch_root", return_value=tmp_path / "vera") as gate:
                 with patch.object(host_attach, "open_monitor") as spawn:
                     spawn.side_effect = host_attach.AttachUnavailable("stop here, the fence is what is under test")
                     client = TestClient(host_server.create_app())
@@ -1895,7 +1906,10 @@ class TestAWatchIsNotAnchorTooling:
 
         # Reaching the spawn AT ALL is the assertion: before this, the route
         # refused on the project and open_monitor was never called.
-        spawn.assert_called_once()
+        assert spawn.call_count == 1
+        assert spawn.call_args.args[0] == "vera"
+        # The REAL citizen_address ran: it asked the gate with the project.
+        gate.assert_called_once_with("vera", "VERA-STUDIO")
         assert "anchor tooling" not in closed["reason"]
 
     def test_no_allowlist_of_watchable_projects_is_built_here(self) -> None:
@@ -1937,10 +1951,8 @@ class TestOneRoomHonoursAnOutsideSeat:
         registry, so without this every case here fails on 'demo' not existing
         — which measures the registry, not the room resolution under test.
         """
-        with (
-            patch.object(host_server.host_verbs, "citizen_address", return_value="@demo"),
-            patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path),
-        ):
+        # Only the registry is stubbed: the real citizen_address runs on top.
+        with patch.object(host_server.host_reads, "resolve_branch_root", return_value=tmp_path):
             yield
 
     def test_an_outside_room_is_attached_and_never_created(self) -> None:
@@ -1957,6 +1969,7 @@ class TestOneRoomHonoursAnOutsideSeat:
 
         assert room == "aipass-42", "the snapshot's own name must be used verbatim"
         assert attach_only is True
+        assert target == "@demo", "the citizen address the real gate composed"
 
     def test_the_attach_only_flag_actually_reaches_the_spawned_argv(self, monkeypatch) -> None:
         """
@@ -2555,18 +2568,20 @@ class TestTypingIntoAWatchLeavesARecord:
         _, raw = host_tokens.issue_token("pixel-8", scope="operate")
         session = RefusingSession()
 
-        with patch(PATCH_SERVER_LOGGER), patch(PATCH_PUMP_LOGGER), patch(PATCH_SERVER_JSON):
-            with patch(PATCH_PUMP_JSON) as audit:
-                with patch.object(host_attach, "open_attach", return_value=session):
-                    client = TestClient(host_server.create_app())
-                    with client.websocket_connect(
-                        "/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]
-                    ) as socket:
-                        socket.send_bytes(b"rm -rf /")
+        with (
+            patch(PATCH_SERVER_LOGGER),
+            patch(PATCH_PUMP_LOGGER),
+            patch(PATCH_SERVER_JSON),
+            patch(PATCH_PUMP_JSON) as audit,
+            patch.object(host_attach, "open_attach", return_value=session),
+        ):
+            client = TestClient(host_server.create_app())
+            with client.websocket_connect("/v1/room/attach?branch=api", subprotocols=["aipass.bearer", raw]) as socket:
+                socket.send_bytes(b"rm -rf /")
 
-                        deadline = time.monotonic() + 10
-                        while session.hangups == 0 and time.monotonic() < deadline:
-                            time.sleep(0.01)
+                deadline = time.monotonic() + 10
+                while session.hangups == 0 and time.monotonic() < deadline:
+                    time.sleep(0.01)
 
         recorded = [call for call in audit.log_operation.call_args_list if call.args[0] == "host_api_input_refused"]
 
