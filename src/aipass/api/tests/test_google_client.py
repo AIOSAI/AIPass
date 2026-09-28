@@ -3,7 +3,7 @@
 # Description: Tests for Google API client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -44,7 +44,6 @@ _MOD = "aipass.api.apps.modules.google_client"
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -53,13 +52,13 @@ _MOD = "aipass.api.apps.modules.google_client"
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_returns_false_no_args(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console):
+def test_handle_command_returns_false_no_args(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, capsys):
     """handle_command returns False when args=[] and command != 'google'."""
     result = google_client.handle_command("validate", [])
     assert result is False
+    assert capsys.readouterr().out == ""
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -69,14 +68,14 @@ def test_handle_command_returns_false_no_args(_warn, _err, _succ, _hdr, _json, _
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
 def test_handle_command_returns_false_non_google_provider(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console
+    _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, capsys
 ):
     """handle_command returns False when provider is not 'google'."""
     result = google_client.handle_command("validate", ["openrouter"])
     assert result is False
+    assert capsys.readouterr().out == ""
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -85,9 +84,7 @@ def test_handle_command_returns_false_non_google_provider(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_routes_validate_google(
-    _warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
-):
+def test_handle_command_routes_validate_google(_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
     """handle_command routes 'validate' with ['google'] to _cmd_validate."""
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
@@ -99,7 +96,6 @@ def test_handle_command_routes_validate_google(
     mock_auth.validate_credentials.assert_called_once()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -109,7 +105,7 @@ def test_handle_command_routes_validate_google(
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
 def test_handle_command_routes_reauth_google(
-    mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console
+    mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, capsys
 ):
     """handle_command routes 'reauth' with ['google'] to _cmd_reauth."""
     mock_auth.is_available.return_value = True
@@ -120,9 +116,9 @@ def test_handle_command_routes_reauth_google(
 
     assert result is True
     mock_auth.reauth.assert_called_once()
+    assert "A browser window may open for Google consent." in capsys.readouterr().out
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -131,16 +127,17 @@ def test_handle_command_routes_reauth_google(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, mock_console):
+def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, capsys):
     """handle_command prints help when args=['google', '--help'] and returns True."""
     result = google_client.handle_command("validate", ["google", "--help"])
 
     assert result is True
-    # print_help calls console.print with the argparse output
-    mock_console.print.assert_called()
+    out = capsys.readouterr().out
+    assert "GOOGLE_CLIENT — Google API authentication and service access" in out
+    assert "reauth google" in out
+    mock_auth.validate_credentials.assert_not_called()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -149,9 +146,7 @@ def test_handle_command_help_gate(_warn, _err, _succ, _hdr, _json, _retry, _fact
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_google_introspection(
-    _warn, _err, _succ, mock_hdr, _json, _retry, _factory, mock_auth, mock_console
-):
+def test_handle_command_google_introspection(_warn, _err, _succ, mock_hdr, _json, _retry, _factory, mock_auth, capsys):
     """handle_command prints introspection when command='google' and args=[]."""
     mock_auth.is_available.return_value = True
     mock_auth.CREDS_PATH.exists.return_value = True
@@ -161,9 +156,12 @@ def test_handle_command_google_introspection(
 
     assert result is True
     mock_hdr.assert_called_once_with("Google Client Module Introspection")
+    out = capsys.readouterr().out
+    assert "Google Libraries: installed" in out
+    assert "Credentials: found" in out
+    assert "Client Secret: found" in out
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -172,12 +170,11 @@ def test_handle_command_google_introspection(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_unknown_command_returns_false(
-    _warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, _console
-):
+def test_handle_command_unknown_command_returns_false(_warn, _err, _succ, _hdr, _json, _retry, _factory, _auth, capsys):
     """handle_command returns False for unknown commands with 'google' arg."""
     result = google_client.handle_command("deploy", ["google"])
     assert result is False
+    assert capsys.readouterr().out == ""
 
 
 # =============================================
@@ -185,7 +182,6 @@ def test_handle_command_unknown_command_returns_false(
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -194,7 +190,7 @@ def test_handle_command_unknown_command_returns_false(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
+def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth):
     """get_drive_service() delegates to get_google_service('drive', 'v3')."""
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
@@ -211,7 +207,6 @@ def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mo
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -220,7 +215,7 @@ def test_get_drive_service_delegates(_warn, _err, _succ, _hdr, _json, _retry, mo
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
+def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth):
     """get_google_service() returns service via build_service when is_available=True."""
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
@@ -232,7 +227,6 @@ def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mo
     assert result is mock_service
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -241,7 +235,7 @@ def test_get_google_service_standard(_warn, _err, _succ, _hdr, _json, _retry, mo
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
+def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth):
     """get_google_service(thread_safe=True) calls build_thread_safe_service."""
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
@@ -253,7 +247,6 @@ def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry,
     assert result is mock_service
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -262,7 +255,7 @@ def test_get_google_service_thread_safe(_warn, _err, _succ, _hdr, _json, _retry,
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """get_google_service() raises RuntimeError when libraries are not installed."""
     mock_auth.is_available.return_value = False
 
@@ -270,7 +263,6 @@ def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, 
         google_client.get_google_service()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -279,7 +271,7 @@ def test_get_google_service_libs_not_available(_warn, _err, _succ, _hdr, _json, 
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console):
+def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth):
     """get_google_service() raises RuntimeError when build_service returns None."""
     mock_auth.is_available.return_value = True
     mock_factory.build_service.return_value = None
@@ -288,7 +280,6 @@ def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry
         google_client.get_google_service("drive", "v3")
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -297,9 +288,7 @@ def test_get_google_service_auth_failure(_warn, _err, _succ, _hdr, _json, _retry
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_get_google_service_with_custom_scopes(
-    _warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth, _console
-):
+def test_get_google_service_with_custom_scopes(_warn, _err, _succ, _hdr, _json, _retry, mock_factory, mock_auth):
     """get_google_service() passes custom scopes through to build_service."""
     mock_auth.is_available.return_value = True
     mock_service = MagicMock()
@@ -317,7 +306,6 @@ def test_get_google_service_with_custom_scopes(
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -326,7 +314,7 @@ def test_get_google_service_with_custom_scopes(
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """validate_google() returns True when credentials are valid."""
     mock_auth.validate_credentials.return_value = True
 
@@ -336,7 +324,6 @@ def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory,
     mock_auth.validate_credentials.assert_called_once_with(scopes=None)
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -345,7 +332,7 @@ def test_validate_google_true(_warn, _err, _succ, _hdr, _json, _retry, _factory,
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """validate_google() returns False when no valid credentials exist."""
     mock_auth.validate_credentials.return_value = False
 
@@ -354,7 +341,6 @@ def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory
     assert result is False
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -363,7 +349,7 @@ def test_validate_google_false(_warn, _err, _succ, _hdr, _json, _retry, _factory
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """validate_google() passes scopes to validate_credentials."""
     mock_auth.validate_credentials.return_value = True
     scopes = ["https://www.googleapis.com/auth/calendar"]
@@ -379,7 +365,6 @@ def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _f
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -388,7 +373,7 @@ def test_validate_google_with_scopes(_warn, _err, _succ, _hdr, _json, _retry, _f
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """authenticate_google() returns True when authenticate returns credentials."""
     mock_auth.authenticate.return_value = MagicMock()
 
@@ -398,7 +383,6 @@ def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _f
     mock_auth.authenticate.assert_called_once_with(scopes=None)
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -407,7 +391,7 @@ def test_authenticate_google_success(_warn, _err, _succ, _hdr, _json, _retry, _f
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """authenticate_google() returns False when authenticate returns None."""
     mock_auth.authenticate.return_value = None
 
@@ -421,7 +405,6 @@ def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _f
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -430,7 +413,7 @@ def test_authenticate_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _f
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """reauth_google() returns True when reauth returns credentials."""
     mock_auth.reauth.return_value = MagicMock()
 
@@ -440,7 +423,6 @@ def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory
     mock_auth.reauth.assert_called_once_with(scopes=None)
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -449,7 +431,7 @@ def test_reauth_google_success(_warn, _err, _succ, _hdr, _json, _retry, _factory
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """reauth_google() returns False when reauth returns None."""
     mock_auth.reauth.return_value = None
 
@@ -463,7 +445,6 @@ def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -472,7 +453,7 @@ def test_reauth_google_failure(_warn, _err, _succ, _hdr, _json, _retry, _factory
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console):
+def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth):
     """
     api_call_with_retry() delegates to google_retry.api_call_with_retry.
 
@@ -498,7 +479,6 @@ def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_ret
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -507,7 +487,7 @@ def test_api_call_with_retry_delegates(_warn, _err, _succ, _hdr, _json, mock_ret
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth, _console):
+def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _factory, _auth):
     """is_ssl_error() delegates to google_retry.is_ssl_error."""
     test_error = Exception("SSL handshake failed")
     mock_retry.is_ssl_error.return_value = True
@@ -523,7 +503,6 @@ def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _fa
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -532,17 +511,21 @@ def test_is_ssl_error_delegates(_warn, _err, _succ, _hdr, _json, mock_retry, _fa
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
-    """_cmd_validate shows error when Google libs are not installed."""
+def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, mock_hdr, mock_json, _retry, _factory, mock_auth):
+    """validate google shows error when Google libs are not installed."""
     mock_auth.is_available.return_value = False
 
-    google_client._cmd_validate()
+    assert google_client.handle_command("validate", ["google"]) is True
 
-    mock_err.assert_called_once()
-    assert "not installed" in mock_err.call_args[0][0]
+    mock_hdr.assert_called_once_with("Validate Google Credentials")
+    mock_err.assert_called_once_with(
+        "Google auth libraries not installed",
+        suggestion="pip install google-auth google-auth-oauthlib google-api-python-client",
+    )
+    mock_auth.validate_credentials.assert_not_called()
+    mock_json.log_operation.assert_not_called()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -551,18 +534,21 @@ def test_cmd_validate_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _r
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
-    """_cmd_validate shows error when client secret file is missing."""
+def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
+    """validate google shows error when client secret file is missing."""
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = False
 
-    google_client._cmd_validate()
+    assert google_client.handle_command("validate", ["google"]) is True
 
-    mock_err.assert_called_once()
-    assert "Client secret not found" in mock_err.call_args[0][0]
+    mock_err.assert_called_once_with(
+        "Client secret not found",
+        suggestion=f"Save OAuth client secret to: {mock_auth.CLIENT_SECRET_PATH}",
+    )
+    mock_auth.validate_credentials.assert_not_called()
+    mock_json.log_operation.assert_not_called()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -571,20 +557,19 @@ def test_cmd_validate_no_client_secret(_warn, mock_err, _succ, _hdr, _json, _ret
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
-    """_cmd_validate shows success when credentials are valid."""
+def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth):
+    """validate google shows success when credentials are valid."""
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.validate_credentials.return_value = True
 
-    google_client._cmd_validate()
+    assert google_client.handle_command("validate", ["google"]) is True
 
     mock_succ.assert_called_once_with("Google credentials are valid")
     mock_json.log_operation.assert_called_once_with("google_validate", {"status": "valid"})
     _err.assert_not_called()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -593,15 +578,16 @@ def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retr
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, mock_console):
-    """_cmd_validate shows warning when credentials are invalid."""
+def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, capsys):
+    """validate google shows warning and the reauth hint when credentials are invalid."""
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.validate_credentials.return_value = False
 
-    google_client._cmd_validate()
+    assert google_client.handle_command("validate", ["google"]) is True
 
     mock_warn.assert_called_once_with("No valid Google credentials found")
+    assert "Run 'drone @api reauth google' to authenticate" in capsys.readouterr().out
     mock_json.log_operation.assert_called_once_with("google_validate", {"status": "invalid"})
     _succ.assert_not_called()
 
@@ -611,7 +597,6 @@ def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _re
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -620,17 +605,21 @@ def test_cmd_validate_invalid_creds(mock_warn, _err, _succ, _hdr, mock_json, _re
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
-    """_cmd_reauth shows error when Google libs are not installed."""
+def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, mock_hdr, mock_json, _retry, _factory, mock_auth):
+    """reauth google shows error when Google libs are not installed."""
     mock_auth.is_available.return_value = False
 
-    google_client._cmd_reauth()
+    assert google_client.handle_command("reauth", ["google"]) is True
 
-    mock_err.assert_called_once()
-    assert "not installed" in mock_err.call_args[0][0]
+    mock_hdr.assert_called_once_with("Google Re-Authentication")
+    mock_err.assert_called_once_with(
+        "Google auth libraries not installed",
+        suggestion="pip install google-auth google-auth-oauthlib google-api-python-client",
+    )
+    mock_auth.reauth.assert_not_called()
+    mock_json.log_operation.assert_not_called()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -639,20 +628,21 @@ def test_cmd_reauth_libs_not_available(_warn, mock_err, _succ, _hdr, _json, _ret
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_reauth_success(_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
-    """_cmd_reauth shows success when reauth returns credentials."""
+def test_cmd_reauth_success(mock_warn, _err, mock_succ, _hdr, mock_json, _retry, _factory, mock_auth, capsys):
+    """reauth google shows success when reauth returns credentials."""
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.reauth.return_value = MagicMock()
 
-    google_client._cmd_reauth()
+    assert google_client.handle_command("reauth", ["google"]) is True
 
+    mock_warn.assert_called_once_with("Starting OAuth2 flow...")
     mock_succ.assert_called_once_with("Google re-authentication successful")
+    assert f"Credentials saved to: {mock_auth.CREDS_PATH}" in capsys.readouterr().out
     mock_json.log_operation.assert_called_once_with("google_reauth", {"status": "success"})
     _err.assert_not_called()
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -661,13 +651,13 @@ def test_cmd_reauth_success(_warn, _err, mock_succ, _hdr, mock_json, _retry, _fa
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth, _console):
-    """_cmd_reauth shows error when reauth returns None."""
+def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
+    """reauth google shows error when reauth returns None."""
     mock_auth.is_available.return_value = True
     mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
     mock_auth.reauth.return_value = None
 
-    google_client._cmd_reauth()
+    assert google_client.handle_command("reauth", ["google"]) is True
 
     mock_err.assert_called_once_with("Google re-authentication failed")
     mock_json.log_operation.assert_called_once_with("google_reauth", {"status": "failed"})
@@ -679,7 +669,6 @@ def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _fa
 # =============================================
 
 
-@patch(f"{_MOD}.console")
 @patch(f"{_MOD}.google_auth", autospec=True)
 @patch(f"{_MOD}.google_factory", autospec=True)
 @patch(f"{_MOD}.google_retry", autospec=True)
@@ -688,7 +677,7 @@ def test_cmd_reauth_failure(_warn, mock_err, _succ, _hdr, mock_json, _retry, _fa
 @patch(f"{_MOD}.success")
 @patch(f"{_MOD}.error")
 @patch(f"{_MOD}.warning")
-def test_handle_command_propagates_exception(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth, _console):
+def test_handle_command_propagates_exception(_warn, _err, _succ, _hdr, _json, _retry, _factory, mock_auth):
     """handle_command re-raises exceptions from downstream handlers."""
     mock_auth.is_available.side_effect = RuntimeError("handler failed")
 
@@ -742,12 +731,16 @@ def test_load_credentials_custom_scopes(mock_creds_path, mock_creds_cls, mock_js
     )
 
 
+@patch(f"{_AUTH}.Credentials")
+@patch(f"{_AUTH}.CREDS_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
-def test_load_credentials_libs_unavailable():
-    """load_credentials() returns None when Google libs are not installed."""
+def test_load_credentials_libs_unavailable(mock_creds_path, mock_creds_cls):
+    """load_credentials() returns None without touching the token file when Google libs are not installed."""
     result = load_credentials()
 
     assert result is None
+    mock_creds_path.exists.assert_not_called()
+    mock_creds_cls.from_authorized_user_file.assert_not_called()
 
 
 @patch(f"{_AUTH}.CREDS_PATH")
@@ -908,12 +901,18 @@ def test_run_oauth_flow_custom_params(mock_secret_path, mock_flow_cls, mock_save
     mock_flow.run_local_server.assert_called_once_with(port=8085, open_browser=False)
 
 
+@patch(f"{_AUTH}._save_credentials")
+@patch(f"{_AUTH}.InstalledAppFlow")
+@patch(f"{_AUTH}.CLIENT_SECRET_PATH")
 @patch(f"{_AUTH}.GOOGLE_AUTH_AVAILABLE", False)
-def test_run_oauth_flow_libs_unavailable():
-    """run_oauth_flow() returns None when Google libs are not installed."""
+def test_run_oauth_flow_libs_unavailable(mock_secret_path, mock_flow_cls, mock_save):
+    """run_oauth_flow() returns None without touching the client secret when Google libs are not installed."""
     result = run_oauth_flow()
 
     assert result is None
+    mock_secret_path.exists.assert_not_called()
+    mock_flow_cls.from_client_secrets_file.assert_not_called()
+    mock_save.assert_not_called()
 
 
 @patch(f"{_AUTH}.CLIENT_SECRET_PATH")

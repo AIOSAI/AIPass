@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: openrouter_client.py
 # Description: OpenRouter Client Module
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-09-28
 # =============================================
 # pyright: reportMissingImports=false
 
@@ -164,12 +164,14 @@ def test_connection():
         return
 
     # Real API ping — hit /models endpoint
-    model_list = models.fetch_models_from_api(api_key)
+    try:
+        model_list = models.fetch_models_from_api(api_key)
+    except models.ModelsUnavailable as e:
+        # The reason travels with the failure; an empty list is an answer (api, fleet green leg 3).
+        error(f"Connection failed — {e}")
+        return
 
-    if model_list:
-        success(f"Connection successful — {len(model_list)} models available")
-    else:
-        error("Connection failed — could not reach OpenRouter API")
+    success(f"Connection successful — {len(model_list)} models available")
 
 
 def make_call(args: List[str]):
@@ -233,10 +235,10 @@ def list_models(args: List[str] | None = None):
     console.print("[dim]Fetching available models...[/dim]")
 
     # Call handler to fetch models
-    model_list = models.fetch_models_from_api(api_key)
-
-    if not model_list:
-        error("Failed to fetch models")
+    try:
+        model_list = models.fetch_models_from_api(api_key)
+    except models.ModelsUnavailable as e:
+        error(f"Failed to fetch models — {e}")
         return
 
     success(f"Found {len(model_list)} models")

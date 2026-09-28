@@ -3,7 +3,7 @@
 # Description: Tests for the host API read lane — feed cursor, file fence, diff
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/host/feed.py, reads.py and git_reads.py, and their /v1 routes."""
@@ -2660,6 +2660,33 @@ class TestPerFileDiff:
                 host_git.read_diff("demo", path="src/aipass/demo/big.txt")
 
         assert str(host_git.MAX_DIFF_BYTES) in str(caught.value)
+
+    def test_a_file_block_is_copied_once_not_once_per_line(self, fake_repo: dict, monkeypatch: Any) -> None:
+        """
+        The per-file split pins its COST, never a clock: growing a block by one
+        line per pass copied it once per line, so a diff at the size limit took
+        85s alone (api, fleet green leg 3). One join per block, whatever its length.
+        Mutant that reddens it: a join per line (the quadratic shape with the seam kept).
+        """
+        joins = []
+
+        def counted(lines: Any) -> str:
+            joins.append(len(lines))
+            return "".join(lines)
+
+        monkeypatch.setattr(host_git, "_BLOCK_JOIN", counted)
+        body = "@@ -1 +1 @@\n" + "+x\n" * 500
+        patch_text = "".join(
+            f"diff --git a/src/aipass/demo/{name} b/src/aipass/demo/{name}\n"
+            f"--- a/src/aipass/demo/{name}\n+++ b/src/aipass/demo/{name}\n" + body
+            for name in ("one.txt", "two.txt")
+        )
+
+        with patch.object(subprocess, "run", return_value=self._completed(patch_text)):
+            answer = host_git.read_diff("demo", path="src/aipass/demo/two.txt")
+
+        assert joins == [504, 504], "one join per file block, each over the whole block"
+        assert answer["diff"].count("+x\n") == 500
 
     def test_removed_content_that_looks_like_a_header_is_not_read_as_one(self, fake_repo: dict) -> None:
         """

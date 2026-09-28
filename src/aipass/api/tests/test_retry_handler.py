@@ -3,7 +3,7 @@
 # Description: Tests for Google API retry handler with SSL error detection
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/google/retry.py, the SSL retry logic."""
@@ -146,3 +146,5 @@ class TestApiCallWithRetry:
 
         assert result == {"ok": True}
         assert rebuild_fn.call_count == 2
+        # api, fleet green leg 3: all three queued answers are consumed.
+        assert request.execute.call_count == 3

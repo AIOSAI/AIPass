@@ -3,7 +3,7 @@
 # Description: Tests for usage aggregation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/usage/aggregation.py, the usage aggregation handler."""
@@ -105,13 +105,13 @@ class TestGetOverallStats:
         assert result["callers"] == 2
         assert result["models_used"] == ["claude-3", "gpt-4"]
 
-    def test_exception_handling(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Returns empty dict when JSON is malformed."""
+    def test_a_store_that_does_not_parse_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """A malformed store raises: {} is the no-data answer, so a failure may not wear it (api, fleet green leg 3)."""
         monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
         file_path = tmp_path / "usage_tracker_data.json"
         file_path.write_text("not valid json", encoding="utf-8")
-        result = get_overall_stats()
-        assert result == {}
+        with pytest.raises(ValueError):
+            get_overall_stats()
 
 
 # =============================================
@@ -162,13 +162,13 @@ class TestGetCallerUsage:
         assert result["total_tokens"] == 10000
         assert result["models_used"] == ["claude-3"]
 
-    def test_exception_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Returns empty dict when JSON is malformed."""
+    def test_a_store_that_does_not_parse_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """A malformed store raises rather than answering 'no such caller' (api, fleet green leg 3)."""
         monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
         file_path = tmp_path / "usage_tracker_data.json"
         file_path.write_text("{invalid", encoding="utf-8")
-        result = get_caller_usage("any")
-        assert result == {}
+        with pytest.raises(ValueError):
+            get_caller_usage("any")
 
 
 # =============================================
@@ -210,20 +210,10 @@ class TestGetSessionSummary:
         assert result["total_cost"] == pytest.approx(0.85)
         assert result["total_tokens"] == 8000
 
-    def test_session_id_param_accepted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Accepts optional session_id parameter without error."""
-        monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
-        session_data = {"total_requests": 5}
-        _write_usage_file(tmp_path, {"data": {"current_session": session_data}})
-
-        result = get_session_summary(session_id="sess-abc")
-
-        assert result["total_requests"] == 5
-
-    def test_exception_returns_empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """Returns empty dict when JSON is malformed."""
+    def test_a_store_that_does_not_parse_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """A malformed store raises rather than answering 'no session yet' (api, fleet green leg 3)."""
         monkeypatch.setattr(f"{_AGG_MOD}.API_JSON_DIR", tmp_path)
         file_path = tmp_path / "usage_tracker_data.json"
         file_path.write_text("broken json!", encoding="utf-8")
-        result = get_session_summary()
-        assert result == {}
+        with pytest.raises(ValueError):
+            get_session_summary()

@@ -3,7 +3,7 @@
 # Description: Tests for the host API attach lane — a real PTY running a tmux client
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/host/attach.py and the WS /v1/room/attach route in apps/handlers/host/server.py."""
@@ -961,6 +961,9 @@ class TestOpeningAnAttach:
             # What the product DID with the room: the client it built targets it.
             assert attached_to == ["baud-shell-aipass"]
             assert session.branch == "baud-shell-aipass"
+            # The session answers for the room it attached, not another (api, fleet green leg 3).
+            # Mutant: AttachSession handed a room other than the one client_command got.
+            assert session.room == attached_to[0]
         finally:
             session.hangup()
 

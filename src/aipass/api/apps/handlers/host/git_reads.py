@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_reads.py
 # Description: Host API Git Read Handler — the patch, the change list, the log, one commit
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-17
-# Modified: 2026-09-20
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -163,6 +163,8 @@ ALL_FLAG = "--all"
 # Unified-diff structure. These are the machine framing, not prose, and they are
 # the only things the per-file split and the +/- count are keyed on.
 FILE_HEADER = "diff --git "
+# One copy per file block, never one per line: a block grown by += was quadratic (api, fleet green leg 3).
+_BLOCK_JOIN = "".join
 OLD_FILE_MARKER = "--- "
 NEW_FILE_MARKER = "+++ "
 HUNK_MARKER = "@@"
@@ -880,10 +882,8 @@ def read_commit(branch: str, ref: str, project: str = "") -> Dict[str, Any]:
     root = resolve_branch_root(branch, project)
 
     # MEASURED, 2026-08-18: this door's --json is an ENVELOPE, not a structured
-    # commit. Its `content` is git show's own text — header, then patch — so
-    # the parsing below stays exactly as it was and only the FAILURE detection
-    # moved. Saying so here is cheaper than a later reader assuming the flag
-    # bought more than it did.
+    # commit. Its `content` is git show's own text (header, then patch), so the
+    # parsing stays as it was; only the FAILURE detection moved, not more.
     shown = str(_document(["drone", "@git", "show", ref], root, "commit").get(CONTENT_KEY) or "")
     facts = _commit_facts(shown)
     files = []
@@ -1002,11 +1002,11 @@ def _per_file_blocks(patch: str) -> Any:
 
     for line in patch.splitlines(keepends=True):
         if line.startswith(FILE_HEADER):
-            blocks.append(line)
+            blocks.append([line])
         elif blocks:
-            blocks[-1] += line
+            blocks[-1].append(line)
 
-    return blocks
+    return [_BLOCK_JOIN(block) for block in blocks]
 
 
 def _one_files_patch(patch: str, path: str) -> str:

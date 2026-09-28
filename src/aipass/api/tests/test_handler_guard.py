@@ -3,7 +3,7 @@
 # Description: Tests for cross-branch import protection guard
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/__init__.py -- cross-branch import protection."""
@@ -97,10 +97,16 @@ class TestFindRealCaller:
     """Verifies the stack-walking caller-detection helper."""
 
     def test_returns_tuple(self) -> None:
-        """Result must be a two-element tuple."""
+        """Result must be a two-element tuple: the caller's file and its source line.
+
+        api, fleet green leg 3: the tuple's two slots are pinned to their values -
+        this file, resolved, and the very line that made the call.
+        """
         result = _find_real_caller()
         assert isinstance(result, tuple)
-        assert len(result) == 2
+        filepath, import_line = result
+        assert Path(filepath) == Path(__file__).resolve()
+        assert import_line == "result = _find_real_caller()"
 
     def test_the_caller_it_finds_from_here_is_this_file(self) -> None:
         """
@@ -175,9 +181,11 @@ class TestGuardBranchAccess:
             "_find_real_caller",
             return_value=(None, None),
         ):
-            with patch("inspect.stack", return_value=[]):
-                # An unresolvable caller is ALLOWED, deliberately: refusing what
-                # cannot be identified would break every legitimate entry the
-                # frame walk cannot see. Asserted rather than left implicit, so
-                # the day that policy flips this test says so.
-                assert _guard_branch_access() is None
+            # An unresolvable caller is ALLOWED, deliberately: refusing what
+            # cannot be identified would break every legitimate entry the
+            # frame walk cannot see. Asserted rather than left implicit, so
+            # the day that policy flips this test says so.
+            # api, fleet green leg 3: the inspect.stack patch that sat here is
+            # gone - the guard walks sys._getframe and never calls inspect.stack,
+            # so the patch bit nothing.
+            assert _guard_branch_access() is None

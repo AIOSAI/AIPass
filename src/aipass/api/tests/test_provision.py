@@ -3,7 +3,7 @@
 # Description: Tests for caller auto-provisioning handler
 # Version: 1.0.0
 # Created: 2026-03-20
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/openrouter/provision.py, caller auto-provisioning."""
@@ -23,6 +23,8 @@
 import json
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 
 from aipass.api.apps.handlers.openrouter.provision import (
@@ -172,6 +174,39 @@ def test_ensure_caller_config_returns_existing(mock_detect, tmp_path: Path):
     # Second call — should return existing (modified) config, not overwrite
     second_result = ensure_caller_config("test_caller")
     assert second_result["config"]["ai_model"] == "test/modified-model"
+
+
+@patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")
+def test_a_config_that_cannot_be_read_is_never_regenerated_over(mock_detect, tmp_path: Path):
+    """A read error that is not a parse error used to read as 'corrupted, regenerating'.
+    Mutant that reddens it: read_json answering None for every error again (api, fleet green leg 3)."""
+    json_folder = tmp_path / "caller_json"
+    config_path = json_folder / "openrouter_config.json"
+    config_path.mkdir(parents=True)
+    mock_detect.return_value = ("test_caller", json_folder)
+    # The platform names its own error for opening a directory; ask it rather than assume one.
+    with pytest.raises(OSError) as platform:
+        config_path.open(encoding="utf-8")
+
+    with pytest.raises(type(platform.value)):
+        read_json(config_path)
+    assert ensure_caller_config("test_caller") == {}
+    assert not (json_folder / "openrouter_data.json").exists(), "an unreadable config must not trigger regeneration"
+    assert config_path.is_dir()
+
+
+@patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")
+def test_a_config_that_does_not_parse_is_regenerated(mock_detect, tmp_path: Path):
+    """Corrupt is the caller's word: a parse error still regenerates. Mutant: the caller's ValueError catch removed."""
+    json_folder = tmp_path / "caller_json"
+    json_folder.mkdir()
+    (json_folder / "openrouter_config.json").write_text("{not json", encoding="utf-8")
+    mock_detect.return_value = ("test_caller", json_folder)
+
+    result = ensure_caller_config("test_caller")
+
+    assert result.get("module_name") == "openrouter", "a corrupt config must be regenerated, not refused"
+    assert (json_folder / "openrouter_config.json").read_text(encoding="utf-8") != "{not json"
 
 
 @patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: aggregation.py
 # Description: Usage Aggregation Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-15
-# Modified: 2025-11-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -19,7 +19,7 @@ Functions: get_caller_usage(), get_session_summary()
 """
 
 # Standard library imports
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 # Standard library for JSON operations
 import json
@@ -56,6 +56,10 @@ def get_overall_stats() -> Dict[str, Any]:
         Dict with total_requests, total_cost, total_tokens, callers (count),
         models_used (set of model names).
         Returns empty dict {} if no data found.
+
+    Raises:
+        ValueError or OSError when the store exists but cannot be read or
+        parsed; {} is the no-data answer, never a failure's (api, fleet green leg 3).
     """
     try:
         data_path = API_JSON_DIR / DATA_FILE
@@ -102,7 +106,7 @@ def get_overall_stats() -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to get overall stats: {e}")
-        return {}
+        raise
 
 
 def get_caller_usage(caller: str) -> Dict[str, Any]:
@@ -115,6 +119,9 @@ def get_caller_usage(caller: str) -> Dict[str, Any]:
     Returns:
         Dict with requests, total_cost, total_tokens, models_used, last_request
         Returns empty dict {} if no data found
+
+    Raises:
+        ValueError or OSError when the store cannot be read or parsed (api, fleet green leg 3).
     """
     try:
         # Load usage data from JSON
@@ -144,19 +151,22 @@ def get_caller_usage(caller: str) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to get caller usage for {caller}: {e}")
-        return {}
+        raise
 
 
-def get_session_summary(session_id: Optional[str] = None) -> Dict[str, Any]:
+def get_session_summary() -> Dict[str, Any]:
     """
     Aggregate current session usage totals
 
-    Args:
-        session_id: Optional session identifier (unused, for future support)
+    Takes no session id: the store holds one current session, and an argument
+    nothing read was dropped (api, fleet green leg 3).
 
     Returns:
         Dict with start_time, total_requests, total_cost, total_tokens
         Returns empty dict {} if no session data found
+
+    Raises:
+        ValueError or OSError when the store cannot be read or parsed (api, fleet green leg 3).
     """
     try:
         # Load usage data from JSON
@@ -184,4 +194,4 @@ def get_session_summary(session_id: Optional[str] = None) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"[{MODULE_NAME}] Failed to get session summary: {e}")
-        return {}
+        raise

@@ -3,7 +3,7 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
@@ -87,12 +87,20 @@ class TestCreateEnvTemplate:
         assert dir_mode == 0o700
 
     def test_handles_write_failure(self, tmp_path: Path) -> None:
-        """OSError during write returns False."""
-        target = tmp_path / "secrets" / ".env"
-        with patch("builtins.open", side_effect=OSError("disk full")):
-            result = create_env_template(provider="openrouter", target_path=target)
+        """A write the platform refuses returns False.
+
+        api, fleet green leg 3: the failure is real, not a patched builtins.open -
+        the parent of the target is a regular file, so the platform itself
+        refuses to build the directory the template would land in.
+        """
+        blocker = tmp_path / "secrets"
+        blocker.write_text("not a directory\n", encoding="utf-8")
+        target = blocker / ".env"
+
+        result = create_env_template(provider="openrouter", target_path=target)
 
         assert result is False
+        assert blocker.read_text(encoding="utf-8") == "not a directory\n"
 
 
 class TestDiagnoseKeySuggestsRealCommand:

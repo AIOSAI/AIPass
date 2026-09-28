@@ -3,7 +3,7 @@
 # Description: Tests for the supervisor seam — a server that comes back on its own
 # Version: 1.0.0
 # Created: 2026-08-27
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/host/autostart.py and the host-api autostart verb that drives it."""
@@ -221,15 +221,18 @@ class TestTheProbeAnswersAbsenceAndFailureDifferently:
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("4242\n")):
             assert host_autostart.supervised_pid() == 4242
 
-    def test_an_unreadable_pid_is_zero_and_never_raises(self, has_systemd: None) -> None:
+    def test_an_unreadable_pid_refuses_rather_than_reading_as_unsupervised(self, has_systemd: None) -> None:
         """
-        Garbage from a probe is a not-supervised answer, not a traceback.
+        Garbage from a probe is the absence of a measurement, so it refuses.
 
-        status is the command an operator runs when things are already strange;
-        it does not get to be the second strange thing.
+        Zero would say "no unit holds the server" and send running() to a record
+        the unit never writes. Every caller of running() already turns this
+        refusal into a status line, so no traceback reaches an operator
+        (api, fleet green leg 3).
         """
         with patch.object(host_autostart.subprocess, "run", return_value=_completed("banana")):
-            assert host_autostart.supervised_pid() == 0
+            with pytest.raises(host_autostart.SupervisorUnreachable):
+                host_autostart.supervised_pid()
 
     def test_a_negative_pid_is_zero_because_the_contract_says_zero(self, has_systemd: None) -> None:
         """

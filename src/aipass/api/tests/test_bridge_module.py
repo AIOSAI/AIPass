@@ -3,7 +3,7 @@
 # Description: Tests for bridge contract registry module
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/bridge.py, the contract registry."""
@@ -21,6 +21,8 @@
 # seedgo: no-test-needed(help_flag_safety) — drone's --help routing to this module, owned by that standard
 
 from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
@@ -110,25 +112,29 @@ class TestClear:
 class TestPrintIntrospection:
     """Verifies introspection output for empty and populated registries."""
 
-    def test_with_contracts(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Introspection prints registered contract names."""
+    def test_with_contracts(self, capsys: pytest.CaptureFixture[str], header_fires_nowhere: Any) -> None:
+        """Introspection prints registered contract names.
+        The title goes through cli's header, which alone fires cli_header_displayed (api, fleet green leg 3).
+        Mutant that reddens it: header replaced by a plain print of the same title."""
         register("search", lambda: None)
         register("memory", lambda: None)
 
         print_introspection()
 
         out = capsys.readouterr().out
+        header_fires_nowhere.fire.assert_called_once_with("cli_header_displayed", title="Bridge — Contract Registry")
         assert "Bridge — Contract Registry" in out
         assert "Registered contracts:" in out
         assert "• memory" in out
         assert "• search" in out
         assert "No contracts registered." not in out
 
-    def test_without_contracts(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_without_contracts(self, capsys: pytest.CaptureFixture[str], header_fires_nowhere: Any) -> None:
         """Introspection on empty registry says it holds no contracts."""
         print_introspection()
 
         out = capsys.readouterr().out
+        header_fires_nowhere.fire.assert_called_once_with("cli_header_displayed", title="Bridge — Contract Registry")
         assert "Bridge — Contract Registry" in out
         assert "No contracts registered." in out
         assert "Registered contracts:" not in out

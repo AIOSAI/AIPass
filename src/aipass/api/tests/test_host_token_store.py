@@ -3,7 +3,7 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -723,14 +723,23 @@ class TestTheListingSaysWhatTheStoreNowKnows:
         showing nothing is how it stays wrong.
         """
         host_tokens.issue_token("hand-edited", scope="read")
+        host_tokens.issue_token("never-presented", scope="read")
+        host_tokens.issue_token("presented", scope="read")
         records = host_tokens.load_tokens()
+        stamps = {"hand-edited": "not-a-time", "never-presented": None, "presented": "2026-09-28T05:41:07.123456"}
         for stored in records:
             stored["minted_by"] = ""
-            stored["last_used"] = "not-a-time"
+            stored["last_used"] = stamps[stored["label"]]
         host_tokens.save_tokens(records)
         capsys.readouterr()
 
-        assert "minted by unknown · last used not-a-time" in self._listing(capsys)
+        # Pinned exactly, line by line (api, fleet green leg 3): a substring passed a
+        # provenance line with anything around it. Mutants: the unknown-minter word,
+        # 'never used', and the stamp format each changed.
+        lines = {line.strip() for line in self._listing(capsys).splitlines()}
+        assert "minted by unknown · last used not-a-time" in lines
+        assert "minted by unknown · never used" in lines
+        assert "minted by unknown · last used 2026-09-28 05:41" in lines
 
 
 def test_the_reserved_comment_is_gone(store: Any) -> None:

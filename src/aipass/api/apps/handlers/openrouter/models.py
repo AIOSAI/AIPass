@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: models.py
 # Description: OpenRouter Model Management
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -36,6 +36,14 @@ DEFAULT_TIMEOUT = 10
 MODULE_NAME = "openrouter.models"
 
 
+class ModelsUnavailable(Exception):
+    """The models endpoint could not be read; the message says why.
+
+    Raised rather than returning [], which a reachable endpoint with no models
+    also answers (api, fleet green leg 3).
+    """
+
+
 # =============================================
 # CORE FUNCTIONS
 # =============================================
@@ -52,56 +60,41 @@ def fetch_models_from_api(api_key: str) -> List[Dict]:
         api_key: Valid OpenRouter API key
 
     Returns:
-        List of model dictionaries, empty list on failure
+        List of model dictionaries; [] only when the endpoint lists no models
 
     Raises:
-        No exceptions raised - returns empty list on all errors
+        ModelsUnavailable: the endpoint did not answer, answered non-200, or
+            answered something that is not a model list (api, fleet green leg 3).
     """
-    try:
-        # Prepare request headers
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-        # Make API request
-        logger.info(f"[{MODULE_NAME}] Requesting models from OpenRouter API")
+    logger.info(f"[{MODULE_NAME}] Requesting models from OpenRouter API")
+    try:
         response = requests.get(  # type: ignore[attr-defined]
             OPENROUTER_API_URL, headers=headers, timeout=DEFAULT_TIMEOUT
         )
-
-        # Check response status
-        if response.status_code != 200:
-            logger.info(f"[{MODULE_NAME}] API request failed with status {response.status_code}")
-            logger.error(f"OpenRouter API error: {response.status_code}")
-            return []
-
-        # Parse JSON response
-        data = response.json()
-
-        # Extract models from response
-        if "data" in data and isinstance(data["data"], list):
-            models = data["data"]
-            logger.info(f"[{MODULE_NAME}] Successfully parsed {len(models)} models")
-            json_handler.log_operation("models_fetched", {"count": len(models)})
-            return models
-        else:
-            logger.info(f"[{MODULE_NAME}] Invalid response format - no 'data' field")
-            return []
-
-    except requests.exceptions.Timeout:
-        logger.info(f"[{MODULE_NAME}] API request timeout after {DEFAULT_TIMEOUT}s")
-        logger.error("Request timeout - OpenRouter API not responding")
-        return []
-
+    except requests.exceptions.Timeout as e:
+        logger.error(f"[{MODULE_NAME}] Request timeout - OpenRouter API not responding")
+        raise ModelsUnavailable(f"no answer within {DEFAULT_TIMEOUT}s") from e
     except requests.exceptions.RequestException as e:
-        logger.info(f"[{MODULE_NAME}] Network error: {e}")
-        logger.error(f"Network error: {e}")
-        return []
+        logger.error(f"[{MODULE_NAME}] Network error: {e}")
+        raise ModelsUnavailable(f"network error: {e}") from e
 
+    if response.status_code != 200:
+        logger.error(f"[{MODULE_NAME}] OpenRouter API error: {response.status_code}")
+        raise ModelsUnavailable(f"status {response.status_code}")
+
+    try:
+        data = response.json()
     except ValueError as e:
-        logger.info(f"[{MODULE_NAME}] JSON parse error: {e}")
-        logger.error("Invalid JSON response from API")
-        return []
+        logger.error(f"[{MODULE_NAME}] Invalid JSON response from API")
+        raise ModelsUnavailable("the answer is not JSON") from e
 
-    except Exception as e:
-        logger.info(f"[{MODULE_NAME}] Unexpected error fetching models: {e}")
-        logger.error(f"Error: {e}")
-        return []
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        logger.error(f"[{MODULE_NAME}] Invalid response format - no 'data' list")
+        raise ModelsUnavailable("the answer holds no 'data' list")
+
+    models = data["data"]
+    logger.info(f"[{MODULE_NAME}] Successfully parsed {len(models)} models")
+    json_handler.log_operation("models_fetched", {"count": len(models)})
+    return models

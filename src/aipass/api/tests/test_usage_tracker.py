@@ -3,7 +3,7 @@
 # Description: Tests for usage tracker module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/usage_tracker.py, API usage monitoring orchestration."""
@@ -155,11 +155,23 @@ def test_handle_command_track_no_args_executes(mock_jh, mock_header, mock_error)
 
 @patch(f"{PATCH_ROOT}.header")
 @patch(f"{PATCH_ROOT}.json_handler", autospec=True)
-def test_handle_command_logs_operation(mock_jh, mock_header):
+def test_handle_command_logs_operation(mock_jh, mock_header, tmp_path, monkeypatch, capsys):
     """handle_command should call json_handler.log_operation for valid commands."""
+    # stats reads the usage store; hand it one under tmp_path, never the real api_json (api, fleet green leg 3).
+    # Aggregation's own json_handler is stubbed too, so nothing real is written either.
+    store = '{"data": {"usage_by_caller": {"tmp_caller": {"requests": 7, "total_tokens": 4321}}}}'
+    (tmp_path / usage_tracker.aggregation.DATA_FILE).write_text(store, encoding="utf-8")
+    monkeypatch.setattr(usage_tracker.aggregation, "API_JSON_DIR", tmp_path)
+    agg_jh = MagicMock()
+    monkeypatch.setattr(usage_tracker.aggregation, "json_handler", agg_jh)
+
     usage_tracker.handle_command("stats", [])
 
     mock_jh.log_operation.assert_called_once_with("usage_stats", {"command": "stats"})
+    agg_jh.log_operation.assert_called_once_with("get_overall_stats", {"total_requests": 7})
+    out = capsys.readouterr().out
+    assert "Total Requests: 7" in out, "stats read the tmp_path store, not the real one"
+    assert "Total Tokens: 4321" in out
 
 
 # =============================================
@@ -201,7 +213,9 @@ def test_show_stats_no_data(mock_agg, mock_header, mock_warning, capsys):
 
     mock_warning.assert_called_once_with("No usage data available")
     # Verify no stat data was printed to console
-    assert "Total Requests" not in capsys.readouterr().out, "No stat rows should be printed when data is empty"
+    # Header and warning are stand-ins, so only the spacer after the header reaches stdout (api, fleet green leg 3).
+    # Mutant that reddens it: any row printed on the no-data path.
+    assert capsys.readouterr() == ("\n", ""), "No stat rows should be printed when data is empty"
 
 
 # =============================================
@@ -240,7 +254,7 @@ def test_show_session_no_data(mock_agg, mock_header, mock_warning, capsys):
 
     mock_warning.assert_called_once_with("No session data available")
     # Verify no session stat data was printed to console
-    assert "Requests" not in capsys.readouterr().out, "No session rows should be printed when data is empty"
+    assert capsys.readouterr() == ("\n", ""), "No session rows should be printed when data is empty"
 
 
 # =============================================
@@ -280,7 +294,7 @@ def test_show_caller_usage_no_data(mock_agg, mock_header, mock_warning, capsys):
 
     mock_warning.assert_called_once_with("No usage data found for caller: ghost_caller")
     # Verify no usage data rows were printed to console
-    assert "Requests" not in capsys.readouterr().out, "No usage rows should be printed when data is empty"
+    assert capsys.readouterr() == ("\n", ""), "No usage rows should be printed when data is empty"
 
 
 @patch(f"{PATCH_ROOT}.error")

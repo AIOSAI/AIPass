@@ -3,7 +3,7 @@
 # Description: Tests for registry driver auto-discovery
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/registry.py, driver auto-discovery for integrations."""
@@ -140,11 +140,15 @@ class TestImportDriver:
             "a driver with no register() hook was not executed"
         )
 
-    def test_unloadable_driver_is_skipped_not_counted(self, tmp_path):
+    def test_unloadable_driver_is_skipped_not_counted(self, tmp_path, monkeypatch):
         """A driver.py that cannot be loaded (here a directory) is skipped and not counted."""
         (tmp_path / "integrations" / "fake" / "driver.py").mkdir(parents=True)
+        # The failed load leaves its half-built module in sys.modules; the name is
+        # entered through monkeypatch so teardown removes it (api, fleet green leg 3).
+        monkeypatch.setitem(sys.modules, "_aipass_integration_fake", None)
 
         assert load_drivers(tmp_path / "integrations") == 0
+        assert sys.modules["_aipass_integration_fake"] is not None, "the load was attempted, not skipped by name"
 
 
 class TestRegistryHandleCommand:

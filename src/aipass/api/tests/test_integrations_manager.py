@@ -3,7 +3,7 @@
 # Description: Tests for integrations_manager command handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/integrations_manager.py, the integrations command handler."""
@@ -146,6 +146,11 @@ class TestRunList:
         """Empty contracts list prints 'No integrations configured.'."""
         result = _run_list()
         assert result == 0
+        # The docstring's line is read, not only the exit code (api, fleet green leg 3).
+        # Mutant that reddens it: the empty-list line dropped or reworded.
+        out = capsys.readouterr().out
+        assert "No integrations configured." in out
+        assert "apps/integrations/{project}/driver.py" in out
 
     @patch(f"{_IM}.header", new_callable=MagicMock)
     @patch(
@@ -207,6 +212,8 @@ class TestRunCall:
 
         result = _run_call("mycontract", ["arg1"])
         assert result == 0
+        # The driver's result is what the caller sees (api, fleet green leg 3).
+        assert capsys.readouterr().out == "done\n"
 
     @patch(f"{_IM}.error", new_callable=MagicMock)
     @patch(

@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests (adapted for API module structure)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/api_key.py's command routing, help and introspection."""
@@ -25,6 +25,7 @@ from unittest.mock import patch
 
 
 from aipass.api.apps.modules import api_key
+from aipass.cli.apps.modules import display
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +151,10 @@ def test_print_help_produces_output(capsys):
     printed = capsys.readouterr().out
     assert "get-key" in printed
     # Rich consumed the markup: a bare print() would leave the tags in the text.
-    assert "[cyan]" not in printed, "the help text no longer goes through the shared console"
+    assert "[cyan]" not in printed, "the help text no longer goes through a Rich console"
+    # The console it printed through is @cli's shared one, not a Console of its own.
+    # Mutant that reddens it: api_key binding a Console() of its own (api, fleet green leg 3).
+    assert api_key.console is display.CONSOLE, "the help text no longer goes through the shared console"
 
 
 def test_print_introspection_produces_output(capsys):
@@ -166,5 +170,6 @@ def test_print_introspection_produces_output(capsys):
 
     printed = capsys.readouterr().out
     assert "API Key Module Introspection" in printed
-    assert "[cyan]" not in printed, "the self-map no longer goes through the shared console"
+    assert "[cyan]" not in printed, "the self-map no longer goes through a Rich console"
+    assert api_key.console is display.CONSOLE, "the self-map no longer goes through the shared console"
     assert "handlers.auth.keys" in printed, "the self-map stopped naming the handler it reads keys through"

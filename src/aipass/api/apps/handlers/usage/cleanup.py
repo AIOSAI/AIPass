@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cleanup.py
 # Description: Usage data retention and cleanup
-# Version: 0.1.0
+# Version: 0.1.1
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -32,27 +32,26 @@ DEFAULT_RETENTION_DAYS = 30
 
 
 def _read_json(file_path: Path) -> Optional[Dict]:
-    """Read JSON file with error handling."""
-    try:
-        if not file_path.exists():
-            return None
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Failed to read JSON from {file_path}: {e}")
+    """Read a JSON file; None only when it is absent.
+
+    A read or parse error raises: None means 'no store', so a failure may not
+    wear it and have cleanup report nothing to clean (api, fleet green leg 3).
+    """
+    if not file_path.exists():
         return None
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _write_json(file_path: Path, data: Dict) -> bool:
-    """Write JSON file with error handling."""
-    try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        logger.error(f"Failed to write JSON to {file_path}: {e}")
-        return False
+    """Write a JSON file, creating its parent; True once written.
+
+    A failed write raises, so no caller counts a cleanup that never landed (api, fleet green leg 3).
+    """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return True
 
 
 def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTION_DAYS) -> int:
@@ -64,7 +63,10 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
         retention_days: Number of days to retain data (default: 30)
 
     Returns:
-        int: Number of generation entries cleaned up
+        int: Number of generation entries cleaned up; 0 only when there was nothing to clean
+
+    Raises:
+        ValueError or OSError when the store cannot be read, parsed or written (api, fleet green leg 3).
     """
     try:
         cutoff_date = datetime.now() - timedelta(days=retention_days)
@@ -100,7 +102,7 @@ def cleanup_old_data(data_file_path: Path, retention_days: int = DEFAULT_RETENTI
 
     except Exception as e:
         logger.error(f"Cleanup failed: {e}")
-        return 0
+        raise
 
 
 def _identify_old_generations(generation_tracking: Dict, cutoff_date: datetime) -> List[str]:

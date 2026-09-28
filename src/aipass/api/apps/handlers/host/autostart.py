@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: autostart.py
 # Description: Host API Autostart Handler — the supervisor seam, so the server survives a reboot
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-08-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -238,7 +238,8 @@ def supervised_pid() -> int:
         platform that has no systemd at all.
 
     Raises:
-        SupervisorUnreachable: There is a systemctl here and it did not answer.
+        SupervisorUnreachable: There is a systemctl here and it did not answer,
+            or answered a MainPID that is not a number.
 
     Note:
         THE RULING, asked for by @devpulse 2026-08-27 and split in two because
@@ -266,12 +267,6 @@ def supervised_pid() -> int:
         of those cases and reserves a non-zero exit for a real failure to run.
         A probe whose absence-answer and error-answer look different is worth
         the extra parsing.
-        `show -p MainPID` rather than `is-active`. is-active EXITS NON-ZERO for
-        an unknown or inactive unit, so a caller has to read an exit code to
-        tell "no" from "could not ask"; show answers 0 with MainPID=0 in both
-        of those cases and reserves a non-zero exit for a real failure to run.
-        A probe whose absence-answer and error-answer look different is worth
-        the extra parsing.
     """
     result = _systemctl(["show", UNIT_NAME, "-p", "MainPID", "--value"], PROBE_TIMEOUT_SECONDS)
 
@@ -282,9 +277,10 @@ def supervised_pid() -> int:
 
     try:
         pid = int(raw)
-    except ValueError:
-        logger.warning("[host_api] the supervisor reported an unreadable MainPID: %r", raw)
-        return 0
+    except ValueError as e:
+        # An unreadable MainPID is no measurement, so it refuses like a probe that
+        # did not answer; zero would claim no unit holds the server (api, fleet green leg 3).
+        raise SupervisorUnreachable(f"the supervisor reported an unreadable MainPID: {raw!r}") from e
 
     return pid if pid > 0 else 0
 

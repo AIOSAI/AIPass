@@ -3,7 +3,7 @@
 # Description: Tests for API Key Management Module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/api_key.py, the API key management module."""
@@ -30,7 +30,40 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from aipass.api.apps.api import discover_modules, route_command
+from aipass.api.apps.handlers.auth import env as env_handler
+from aipass.api.apps.handlers.auth import keys as keys_handler
+from aipass.api.apps.handlers.auth import secrets as secrets_handler
 from aipass.api.apps.modules import api_key
+
+
+@pytest.fixture(autouse=True)
+def key_source_stub(monkeypatch):
+    """
+    Replace every key source for every test in this file, so no test can read a real key.
+
+    Decision (api, fleet green leg 3): the secrets-file read in keys.py, the template
+    writer in env.py and the provider-store reads in secrets.py are recording stubs at
+    their home modules. A test that also patches api_key.keys/env sits on top of this.
+    """
+    stubs = {
+        "read_key": MagicMock(name="_read_key_from_secrets", return_value=None),
+        "create_env": MagicMock(name="create_env_template", return_value=False),
+        "get_secret": MagicMock(name="get_secret", return_value=None),
+        "list_secrets": MagicMock(name="list_secrets", return_value=[]),
+    }
+    monkeypatch.setattr(keys_handler, "_read_key_from_secrets", stubs["read_key"])
+    monkeypatch.setattr(env_handler, "create_env_template", stubs["create_env"])
+    monkeypatch.setattr(secrets_handler, "get_secret", stubs["get_secret"])
+    monkeypatch.setattr(secrets_handler, "list_secrets", stubs["list_secrets"])
+    return stubs
+
+
+@pytest.fixture
+def fake_home(monkeypatch, tmp_path):
+    """Point Path.home() at tmp_path through the environment, so init_env never sees a real home."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    return tmp_path
 
 
 # =============================================
@@ -115,28 +148,19 @@ def test_handle_command_routes_list_providers(mock_jh, mock_header, mock_console
 @patch(PATCH_ERROR)
 @patch(PATCH_JSON_HANDLER)
 @patch(PATCH_ENV)
-def test_handle_command_routes_init(mock_env, mock_jh, mock_error, mock_success, mock_header, mock_console):
-    """init command should route to init_env."""
-    with patch("aipass.api.apps.modules.api_key.Path") as mock_path_cls:
-        mock_env_path = MagicMock()
-        mock_env_path.exists.return_value = True
-        mock_path_cls.home.return_value.__truediv__ = MagicMock(return_value=mock_env_path)
-        # Simpler: just mock the whole Path.home() chain
-        mock_path_cls.home.return_value = MagicMock()
-        mock_path_cls.home.return_value.__truediv__ = MagicMock()
-        mock_home = MagicMock()
-        mock_secrets = MagicMock()
-        mock_aipass = MagicMock()
-        mock_env_path = MagicMock()
-        mock_env_path.exists.return_value = True
-        mock_home.__truediv__ = MagicMock(return_value=mock_secrets)
-        mock_secrets.__truediv__ = MagicMock(return_value=mock_aipass)
-        mock_aipass.__truediv__ = MagicMock(return_value=mock_env_path)
-        mock_path_cls.home.return_value = mock_home
+def test_handle_command_routes_init(mock_env, mock_jh, mock_error, mock_success, mock_header, mock_console, fake_home):
+    """init command should route to init_env, which finds the existing env file and creates nothing."""
+    env_path = fake_home / ".secrets" / "aipass" / ".env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text("", encoding="utf-8")
 
-        result = api_key.handle_command("init", [])
+    result = api_key.handle_command("init", [])
 
     assert result is True
+    mock_header.assert_called_once_with("Initialize API Configuration")
+    mock_success.assert_called_once_with(f"Environment file already exists at {env_path}")
+    mock_env.create_env_template.assert_not_called()
+    mock_error.assert_not_called()
 
 
 # =============================================
@@ -337,24 +361,15 @@ def test_validate_key_invalid(mock_keys, mock_error, mock_success, mock_header, 
 @patch(PATCH_SUCCESS)
 @patch(PATCH_ERROR)
 @patch(PATCH_ENV)
-def test_init_env_already_exists(mock_env, mock_error, mock_success, mock_header, mock_console):
+def test_init_env_already_exists(mock_env, mock_error, mock_success, mock_header, mock_console, fake_home):
     """Existing env file should call success() and skip creation."""
-    with patch("aipass.api.apps.modules.api_key.Path") as mock_path_cls:
-        mock_env_path = MagicMock()
-        mock_env_path.exists.return_value = True
+    env_path = fake_home / ".secrets" / "aipass" / ".env"
+    env_path.parent.mkdir(parents=True)
+    env_path.write_text("", encoding="utf-8")
 
-        mock_home = MagicMock()
-        mock_secrets = MagicMock()
-        mock_aipass_dir = MagicMock()
-        mock_home.__truediv__ = MagicMock(return_value=mock_secrets)
-        mock_secrets.__truediv__ = MagicMock(return_value=mock_aipass_dir)
-        mock_aipass_dir.__truediv__ = MagicMock(return_value=mock_env_path)
-        mock_path_cls.home.return_value = mock_home
+    api_key.init_env()
 
-        api_key.init_env()
-
-    mock_success.assert_called_once()
-    assert "already exists" in mock_success.call_args[0][0]
+    mock_success.assert_called_once_with(f"Environment file already exists at {env_path}")
     mock_env.create_env_template.assert_not_called()
     mock_error.assert_not_called()
 
@@ -364,28 +379,17 @@ def test_init_env_already_exists(mock_env, mock_error, mock_success, mock_header
 @patch(PATCH_SUCCESS)
 @patch(PATCH_ERROR)
 @patch(PATCH_ENV)
-def test_init_env_creates_template(mock_env, mock_error, mock_success, mock_header, mock_console):
+def test_init_env_creates_template(mock_env, mock_error, mock_success, mock_header, mock_console, fake_home):
     """Missing env file should call create_env_template and success() on True."""
     mock_env.create_env_template.return_value = True
+    env_path = fake_home / ".secrets" / "aipass" / ".env"
 
-    with patch("aipass.api.apps.modules.api_key.Path") as mock_path_cls:
-        mock_env_path = MagicMock()
-        mock_env_path.exists.return_value = False
+    api_key.init_env()
 
-        mock_home = MagicMock()
-        mock_secrets = MagicMock()
-        mock_aipass_dir = MagicMock()
-        mock_home.__truediv__ = MagicMock(return_value=mock_secrets)
-        mock_secrets.__truediv__ = MagicMock(return_value=mock_aipass_dir)
-        mock_aipass_dir.__truediv__ = MagicMock(return_value=mock_env_path)
-        mock_path_cls.home.return_value = mock_home
-
-        api_key.init_env()
-
-    mock_env.create_env_template.assert_called_once()
-    mock_success.assert_called_once()
-    assert "template created" in mock_success.call_args[0][0]
+    mock_env.create_env_template.assert_called_once_with()
+    mock_success.assert_called_once_with(f"Environment template created at {env_path}")
     mock_error.assert_not_called()
+    assert not env_path.exists()
 
 
 @patch(PATCH_CONSOLE)
@@ -393,23 +397,11 @@ def test_init_env_creates_template(mock_env, mock_error, mock_success, mock_head
 @patch(PATCH_SUCCESS)
 @patch(PATCH_ERROR)
 @patch(PATCH_ENV)
-def test_init_env_create_failure(mock_env, mock_error, mock_success, mock_header, mock_console):
+def test_init_env_create_failure(mock_env, mock_error, mock_success, mock_header, mock_console, fake_home):
     """Failed template creation should call error()."""
     mock_env.create_env_template.return_value = False
 
-    with patch("aipass.api.apps.modules.api_key.Path") as mock_path_cls:
-        mock_env_path = MagicMock()
-        mock_env_path.exists.return_value = False
-
-        mock_home = MagicMock()
-        mock_secrets = MagicMock()
-        mock_aipass_dir = MagicMock()
-        mock_home.__truediv__ = MagicMock(return_value=mock_secrets)
-        mock_secrets.__truediv__ = MagicMock(return_value=mock_aipass_dir)
-        mock_aipass_dir.__truediv__ = MagicMock(return_value=mock_env_path)
-        mock_path_cls.home.return_value = mock_home
-
-        api_key.init_env()
+    api_key.init_env()
 
     mock_env.create_env_template.assert_called_once()
     mock_error.assert_called_once_with("Failed to create environment template")

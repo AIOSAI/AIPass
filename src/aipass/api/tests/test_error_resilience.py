@@ -3,7 +3,7 @@
 # Description: Error Resilience Tests (from seedgo template)
 # Version: 1.0.0
 # Created: 2026-03-27
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/json/json_handler.py under missing, corrupt and empty files."""
@@ -73,13 +73,14 @@ def test_missing_file(tmp_path: Path) -> None:
     target = json_dir / "ghost_config.json"
     assert not target.exists()
 
-    try:
-        result = JSON_HANDLER.load_json("ghost", "config")
-    except FileNotFoundError:
-        return
+    # api, fleet green leg 3: no FileNotFoundError escape hatch - load_json
+    # creates the missing document, so the test pins that and nothing else.
+    result = JSON_HANDLER.load_json("ghost", "config")
 
-    assert result is not None
     assert isinstance(result, dict)
+    assert result["module_name"] == "ghost"
+    assert target.exists()
+    assert json.loads(target.read_text(encoding="utf-8")) == result
 
 
 def test_corrupt_json(tmp_path: Path) -> None:
@@ -129,9 +130,9 @@ def test_nonexistent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     json_dir = _json_dir_as_path(tmp_path)
     assert not json_dir.exists()
 
-    try:
-        result = JSON_HANDLER.ensure_json_exists("nodir", "config")
-        assert json_dir.exists()
-        assert result is True
-    except (FileNotFoundError, OSError):
-        pass
+    # api, fleet green leg 3: no OSError escape hatch - the handler builds the
+    # whole chain, so a raise here is a failure, not a pass.
+    result = JSON_HANDLER.ensure_json_exists("nodir", "config")
+    assert result is True
+    assert json_dir.exists()
+    assert (json_dir / "nodir_config.json").exists()

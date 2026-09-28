@@ -3,7 +3,7 @@
 # Description: Tests for usage data cleanup handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/usage/cleanup.py, the usage data retention handler."""
@@ -23,7 +23,7 @@
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+import pytest
 
 from aipass.api.apps.handlers.usage.cleanup import (  # seedgo test_coverage detection
     _read_json,
@@ -63,13 +63,12 @@ class TestReadJson:
         assert result is None
 
     def test_invalid_json(self, tmp_path: Path):
-        """Returns None when file contains invalid JSON."""
+        """Raises when the file does not parse: None is the absent file's answer (api, fleet green leg 3)."""
         file_path = tmp_path / "bad.json"
         file_path.write_text("not valid json {{{", encoding="utf-8")
 
-        result = _read_json(file_path)
-
-        assert result is None
+        with pytest.raises(ValueError):
+            _read_json(file_path)
 
 
 # =============================================
@@ -106,13 +105,17 @@ class TestWriteJson:
         assert loaded == data
 
     def test_write_failure(self, tmp_path: Path):
-        """Returns False when write operation fails."""
+        """Raises when the write fails, so no caller reports a cleanup that never landed (api, fleet green leg 3).
+
+        The target is a directory; the platform is asked which error that write raises.
+        """
         file_path = tmp_path / "fail.json"
+        file_path.mkdir()
+        with pytest.raises(OSError) as platform:
+            file_path.open("w", encoding="utf-8")
 
-        with patch("builtins.open", side_effect=OSError("disk full")):
-            result = _write_json(file_path, {"data": True})
-
-        assert result is False
+        with pytest.raises(type(platform.value)):
+            _write_json(file_path, {"data": True})
 
 
 # =============================================
@@ -130,6 +133,16 @@ class TestCleanupOldData:
         result = cleanup_old_data(file_path)
 
         assert result == 0
+
+    def test_a_store_that_does_not_parse_raises_and_is_left_alone(self, tmp_path: Path):
+        """0 means 'nothing to clean', so a store that does not parse raises instead (api, fleet green leg 3)."""
+        file_path = tmp_path / "usage.json"
+        file_path.write_text("{truncated", encoding="utf-8")
+
+        with pytest.raises(ValueError):
+            cleanup_old_data(file_path)
+
+        assert file_path.read_text(encoding="utf-8") == "{truncated"
 
     def test_no_old_entries(self, tmp_path: Path):
         """Returns 0 when all generation entries are within retention period."""

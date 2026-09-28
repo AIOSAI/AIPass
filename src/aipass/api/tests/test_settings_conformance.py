@@ -3,7 +3,7 @@
 # Description: The settings conformance corpus, python side — shared goldens both runtimes must satisfy
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/host/settings.py's read and write doors against the shared conformance corpus."""
@@ -220,7 +220,7 @@ class TestTheCorpusItself:
         # is asserted once, here, where the first of them runs (seedgo
         # unentered_assert, 2026-09-07). A corpus that failed to load and a
         # corpus where every case is correct look identical without it.
-        assert len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — not every case was checked"
+        assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — not every case was checked"
 
         for entry in CASES:
             assert RUNTIME in entry["runtimes"], entry["id"]
@@ -260,7 +260,7 @@ class TestTheCorpusItself:
         not survive. Without this, the fix for one case would leave the next
         one to be found by CI on a platform nobody runs locally.
         """
-        assert len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a mode case could be missed"
+        assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a mode case could be missed"
 
         mode_carrying = 0
 
@@ -342,7 +342,7 @@ class TestTheCorpusItself:
         Both directions are checked: what a case REQUIRES and what it declares
         an expectation for.
         """
-        assert len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a capability went unchecked"
+        assert 0 < len(CASES) == _load_manifest()["case_count"], "the corpus loaded short — a capability went unchecked"
 
         for entry in CASES:
             platform = _platform_block(entry)
