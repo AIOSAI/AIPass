@@ -3,7 +3,7 @@
 # Description: Pins hooks imports against a dead working directory (two worlds)
 # Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/__init__.py's guard: every hooks module imports without a readable cwd."""
@@ -126,7 +126,17 @@ except FileNotFoundError:
 """
 
 
-def _module_names() -> list[str]:
+# Directories the module walk never enters. dropbox and .archive: the ruling of
+# the owner of the project, 2026-09-27 20:42, in @devpulse's paraphrase - "a
+# dropbox is ignored by all, nothing looks into it and no process runs out of
+# it, it is a sandbox like .archive". __pycache__: hooks' decision (fleet green
+# leg 3) - bytecode caches hold no source module to import. Compared on the
+# parts of the path BELOW the root of the walk, never the whole path, so a root
+# that itself stands inside a directory of one of these names is still walked.
+_NEVER_WALKED = ("dropbox", ".archive", "__pycache__")
+
+
+def _module_names(root: Path = BRANCH_ROOT / "apps", base: Path = BRANCH_ROOT.parents[1]) -> list[str]:
     """Every importable module under this branch's apps/ tree.
 
     Discovered, never listed: a hand-written list silently stops covering the
@@ -141,12 +151,18 @@ def _module_names() -> list[str]:
     visible at all: a discovery sweep that silently stops covering anything is
     the exact failure this file exists to prevent.
 
+    Args:
+        root: The root of the walk (this branch's apps/ by default).
+        base: The directory the dotted names are made relative to.
+
     Returns:
         Dotted module names, sorted.
     """
     names = set()
-    for path in (BRANCH_ROOT / "apps").rglob("*.py"):
-        relative = path.relative_to(BRANCH_ROOT.parents[1]).with_suffix("")
+    for path in root.rglob("*.py"):
+        if any(part in _NEVER_WALKED for part in path.relative_to(root).parts):
+            continue
+        relative = path.relative_to(base).with_suffix("")
         parts = list(relative.parts)
         if any(part.startswith(".") for part in parts):
             continue
@@ -233,6 +249,25 @@ class TestEveryModuleImportsWithoutACwd:
         assert len(names) > 40, f"module discovery found only {len(names)}: {names}"
         assert "aipass.hooks.apps.modules.engine" in names
         assert "aipass.hooks.apps.handlers.security.edit_gate" in names
+
+    def test_the_walk_skips_sandboxes_and_bytecode(self, tmp_path):
+        """A dropbox, an .archive and a __pycache__ under the root are never
+        walked; the live file beside them is, so an empty walk cannot pass."""
+        root = tmp_path / "apps"
+        root.mkdir()
+        (root / "live.py").write_text("", encoding="utf-8")
+        for skipped in ("dropbox", ".archive", "__pycache__"):
+            (root / skipped).mkdir()
+            (root / skipped / "inside.py").write_text("", encoding="utf-8")
+        assert _module_names(root, tmp_path) == ["apps.live"]
+
+    def test_a_root_inside_a_dropbox_is_still_walked(self, tmp_path):
+        """The skip compares the parts BELOW the root of the walk, never the
+        whole path: a root that stands inside a dropbox keeps its files."""
+        root = tmp_path / "dropbox" / "apps"
+        root.mkdir(parents=True)
+        (root / "live.py").write_text("", encoding="utf-8")
+        assert _module_names(root, tmp_path) == ["dropbox.apps.live"]
 
     def test_the_worlds_are_not_the_same_world(self):
         """World B must deny realpath OUTRIGHT; world A must deny getcwd. If a

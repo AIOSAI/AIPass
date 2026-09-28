@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-18
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/prompt/feedback_pulse.py and apps/modules/feedback.py."""
@@ -290,13 +290,17 @@ class TestFeedbackToggleModule:
 
         assert not sentinel.exists()
 
-    def test_handle_command_feedback_on_no_sentinel(self, tmp_path):
+    def test_handle_command_feedback_on_no_sentinel(self, tmp_path, capsys):
         sentinel = tmp_path / "feedback_off"
         with patch(
             "aipass.hooks.apps.modules.feedback._sentinel",
             return_value=sentinel,
         ):
             assert handle_command("feedback", ["on"]) is True
+
+        # The effect: already-enabled reports ENABLED and creates no sentinel.
+        assert "Feedback pulse ENABLED" in capsys.readouterr().err
+        assert not sentinel.exists()
 
     def test_handle_command_feedback_help(self, capsys):
         assert handle_command("feedback", ["--help"]) is True

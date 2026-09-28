@@ -633,6 +633,64 @@ class TestNamingAPathIsNotWritingIt:
         assert _blocked(_run(project["seat"], command=command))
 
     @pytest.mark.parametrize(
+        ("interpreter", "name", "body"),
+        [
+            *[
+                ("python3", name, "import os\nos.{name}('touch', ['touch', '{path}'])")
+                for name in ("execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe")
+            ],
+            *[
+                ("python3", name, "import os\nos.{name}(1, 'touch', ['touch', '{path}'])")
+                for name in ("spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe")
+            ],
+            ("python3", "posix_spawn", "import os\nos.{name}('touch', ['touch', '{path}'], {{}})"),
+            ("python3", "posix_spawnp", "import os\nos.{name}('touch', ['touch', '{path}'], {{}})"),
+            ("python3", "startfile", "import os\nos.{name}('{path}')"),
+            ("python3", "create_subprocess_exec", "import asyncio\nasyncio.{name}('touch', '{path}')"),
+            ("python3", "create_subprocess_shell", "import asyncio\nasyncio.{name}('touch {path}')"),
+            ("python3", "Popen", "{name}(['touch', '{path}'])"),
+            ("python3", "popen2", "import os\nos.{name}('touch {path}')"),
+            ("python3", "popen3", "import os\nos.{name}('touch {path}')"),
+            *[
+                ("node", name, "const cp = require('child_' + 'process')\ncp.{name}('touch', ['{path}'])")
+                for name in ("execFile", "execFileSync", "spawnSync")
+            ],
+            *[("php", name, "<?php {name}('touch {path}');") for name in ("shell_exec", "passthru", "proc_open")],
+            *[("ruby", name, "require 'open3'\nOpen3.{name}('touch', '{path}')") for name in ("capture2", "capture3")],
+        ],
+    )
+    def test_each_name_added_by_compass_480_is_refused_as_a_call(self, project, interpreter, name, body):
+        """One refusal pin per name devpulse added under reading 1 alone (leg 3, compass 480),
+        each body carrying no word of the older list, so dropping one name turns exactly its pin
+        red. The program is handed to the gate in a heredoc and only read: nothing runs it."""
+        _policy(project)
+        program = body.format(name=name, path=Path(project["new_test"]).as_posix())
+        assert _blocked(_run(project["seat"], command=f"{interpreter} - <<'EOF'\n{program}\nEOF"))
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "execvp",
+            "spawnvp",
+            "posix_spawn",
+            "startfile",
+            "create_subprocess_exec",
+            "Popen",
+            "popen2",
+            "execFileSync",
+            "shell_exec",
+            "capture3",
+        ],
+    )
+    def test_a_name_added_by_compass_480_inside_a_named_path_is_not_code(self, project, name):
+        """One let-through pin per family: the new names stand under reading 1 alone, so a path
+        that holds one and no call bracket is still only named (compass 480, condition 1)."""
+        _policy(project)
+        named = Path(project["new_test"]).as_posix()
+        program = f"print('{named}', 'notes/{name}/x.md', 'notes/{name}-gw0')"
+        assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{program}\nEOF"))
+
+    @pytest.mark.parametrize(
         ("interpreter", "verb", "body"),
         [
             pytest.param("python3", "system", "from os import *\n0-{verb}('touch {path}')", id="a-hyphen-call"),
@@ -697,6 +755,59 @@ class TestNamingAPathIsNotWritingIt:
                 "const p = require.resolve('cross-{verb}')\nrequire(p)('touch', ['{path}'])",
                 id="v4-require-resolve",
             ),
+            pytest.param("node", "spawn", "import 'cross-{verb}'\nconsole.log('{path}')", id="k2-bare-import"),
+            pytest.param(
+                "node", "spawn", "require(`cross-{verb}`)('touch', ['{path}'])", id="t1-require-template-string"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const cs = await import(`cross-{verb}`)\ncs.sync('touch', ['{path}'])",
+                id="t2-import-template-string",
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "import {{ createRequire }} from 'module'\nconst r = createRequire(import.meta.url)\n"
+                "r('cross-{verb}')('touch', ['{path}'])",
+                id="c1-create-require",
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const m = 'cross-{verb}'\nconst {{ createRequire }} = require('module')\n"
+                "createRequire(__filename)(m)('touch', ['{path}'])",
+                id="c2-create-require-name-first",
+            ),
+            pytest.param("node", "spawn", "require(\"x`y-{verb}\")('touch', ['{path}'])", id="g1-grave-in-double"),
+            pytest.param(
+                "node", "spawn", "require('./a`b/cross-{verb}')('touch', ['{path}'])", id="g2-grave-in-single"
+            ),
+            pytest.param(
+                "node",
+                "exec",
+                "const m = await import(\"pkg`s/{verb}-sh\")\nm('touch', ['{path}'])",
+                id="g3-grave-in-import",
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "require(require.resolve('a`b/cross-{verb}'))('touch', ['{path}'])",
+                id="g4-grave-in-resolve",
+            ),
+            pytest.param(
+                "node", "spawn", "require(\"a'b/cross-{verb}\")('touch', ['{path}'])", id="q1-apostrophe-in-double"
+            ),
+            pytest.param("node", "spawn", "require('a\"b-{verb}')('touch', ['{path}'])", id="q2-double-in-single"),
+            pytest.param(
+                "node", "spawn", "require(`a'b/cross-{verb}`)('touch', ['{path}'])", id="q3-plain-quote-in-template"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "require(`a${{\"b\"}}c/cross-{verb}`)('touch', ['{path}'])",
+                id="t3-quoted-part-in-template",
+            ),
         ],
     )
     def test_a_shelling_word_beside_a_path_character_in_code_is_refused(self, project, interpreter, verb, body):
@@ -714,6 +825,25 @@ class TestNamingAPathIsNotWritingIt:
         _policy(project)
         named = Path(project["new_test"]).as_posix()
         program = f"import u from './notes/util.js'\nconsole.log('{named}', 'src/aipass/spawn/x.md')"
+        assert not _blocked(_run(project["seat"], command=f"node - <<'EOF'\n{program}\nEOF"))
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param("require('./lib/a.js')('notes/x-spawn/y.md')", id="a1-word-path-later"),
+            pytest.param("require(\"./a.js\")('it`s', 'notes/spawn/x.md')", id="a2-other-quote-later"),
+            pytest.param("require(`./lib/a.js`)('notes/exec-notes.md')", id="a3-template-local"),
+            pytest.param("import('./a.js').then(m=>m.log('d/x-spawn', '{path}'))", id="a4-import-local"),
+            pytest.param("require('./a');console.log('n/spawn/x');require(\"./b\")", id="a5-two-loaders"),
+        ],
+    )
+    def test_a_loader_of_a_local_file_beside_a_word_path_is_allowed(self, project, body):
+        """The loader reading ends a name at the quote that opened it (leg 3b): a local module
+        named without a word of the list stays a name, and a path holding one in a later string
+        is only named. Each program also names the new test file, so the stand-down answers."""
+        _policy(project)
+        named = Path(project["new_test"]).as_posix()
+        program = body.format(path=named) + f"\nconsole.log('{named}')"
         assert not _blocked(_run(project["seat"], command=f"node - <<'EOF'\n{program}\nEOF"))
 
     def test_a_shell_program_is_read_in_shell_grammar(self, project):

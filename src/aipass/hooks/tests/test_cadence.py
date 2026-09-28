@@ -57,6 +57,20 @@ def _kept_redirect() -> dict[str, str]:
 MODULE = "aipass.hooks.apps.modules.cadence"
 
 
+@pytest.fixture(autouse=True)
+def _restore_cadence_globals(monkeypatch):
+    """Hand cadence's module caches back as they were found, whatever a test wrote.
+
+    _reset_module_globals below writes them directly, mid-test, to model a new
+    process; monkeypatch records the originals here first and restores them at
+    teardown, so no cached turn or config leaks into the next test file.
+    """
+    monkeypatch.setattr(cadence, "_turn", None)
+    monkeypatch.setattr(cadence, "_config", None)
+    monkeypatch.setattr(cadence, "_turn_degraded", None)
+    yield
+
+
 def _reset_module_globals():
     """Reset module-level caches between tests (also = simulate a new process)."""
     cadence._turn = None
@@ -68,7 +82,7 @@ def _write_state(tmp_path, turn, token=-1, session="test-session", aged=True):
     """Write a cadence state file. aged=True backdates mtime past the debounce
     window so it reads as a PREVIOUS turn; aged=False = sibling in same turn."""
     state_file = tmp_path / f"aipass-cadence-{session}.json"
-    state_file.write_text(json.dumps({"turn": turn, "token": token}))
+    state_file.write_text(json.dumps({"turn": turn, "token": token}), encoding="utf-8")
     if aged:
         old = time.time() - 10
         os.utime(state_file, (old, old))
@@ -94,7 +108,7 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            assert json.loads(state_file.read_text())["turn"] == 0
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 0
 
     def test_turn_0_fires_all_loaders(self, tmp_path):
         with (
@@ -119,7 +133,9 @@ class TestShouldFire:
         _write_state(tmp_path, turn=3)
 
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 4}}}))
+        config.write_text(
+            json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 4}}}), encoding="utf-8"
+        )
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -130,10 +146,10 @@ class TestShouldFire:
 
     def test_cadence_disabled_always_fires(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 1}))
+        state_file.write_text(json.dumps({"turn": 1}), encoding="utf-8")
 
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": False}))
+        config.write_text(json.dumps({"enabled": False}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -172,7 +188,7 @@ class TestShouldFire:
             for _ in range(4):  # 4 more siblings, each a fresh process
                 _reset_module_globals()
                 should_fire("branch")
-            data = json.loads(state_file.read_text())
+            data = json.loads(state_file.read_text(encoding="utf-8"))
             assert data["turn"] == 4
 
     def test_sibling_processes_agree_on_turn_no_leapfrog(self, tmp_path):
@@ -194,7 +210,7 @@ class TestShouldFire:
         """Even past the debounce window, an unchanged transcript token means
         no new turn happened — the counter must not advance."""
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 100)
+        transcript.write_text("x" * 100, encoding="utf-8")
         state_file = _write_state(tmp_path, turn=3, token=100)
 
         with (
@@ -203,7 +219,7 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             should_fire("global", {"transcript_path": str(transcript)})
-            assert json.loads(state_file.read_text())["turn"] == 3
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 3
 
     def test_reset_special_case_survives_debounce(self, tmp_path):
         """turn < 0 (post-compact reset) must ALWAYS increment to 0, even when
@@ -216,14 +232,14 @@ class TestShouldFire:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            assert json.loads(state_file.read_text())["turn"] == 0
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 0
 
     def test_period_zero_always_fires(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 2}))
+        state_file.write_text(json.dumps({"turn": 2}), encoding="utf-8")
 
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": True, "period": 0}))
+        config.write_text(json.dumps({"enabled": True, "period": 0}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -235,7 +251,8 @@ class TestShouldFire:
     def test_stagger_offsets(self, tmp_path):
         config = tmp_path / "cadence.json"
         config.write_text(
-            json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 0}, "branch": {"offset": 2}}})
+            json.dumps({"enabled": True, "period": 5, "loaders": {"global": {"offset": 0}, "branch": {"offset": 2}}}),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=4)
@@ -292,9 +309,9 @@ class TestShouldFire:
         must still count.
         """
         transcript = tmp_path / "transcript.jsonl"
-        transcript.write_text("x" * 500)
+        transcript.write_text("x" * 500, encoding="utf-8")
         state_file = _write_state(tmp_path, turn=3, token=100)
-        before = (state_file.read_text(), state_file.stat().st_mtime)
+        before = (state_file.read_text(encoding="utf-8"), state_file.stat().st_mtime)
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -308,11 +325,11 @@ class TestShouldFire:
             # Mail is the sibling that still reads the counter on a wake, so it is the one that could write it.
             _reset_module_globals()
             cadence.should_fire_mail(1, wake)
-            assert (state_file.read_text(), state_file.stat().st_mtime) == before
+            assert (state_file.read_text(encoding="utf-8"), state_file.stat().st_mtime) == before
 
             _reset_module_globals()
             should_fire("tier0", {"transcript_path": str(transcript), "prompt": "a human turn"})
-            assert json.loads(state_file.read_text()) == {"turn": 4, "token": 500}
+            assert json.loads(state_file.read_text(encoding="utf-8")) == {"turn": 4, "token": 500}
 
     def test_an_automated_prompt_after_a_compaction_fires_no_grounding(self, tmp_path):
         """The 09:30 row: turn 0 on a harness wake delivered 20,310 chars to nobody.
@@ -328,11 +345,11 @@ class TestShouldFire:
         ):
             cadence.reset_counter()
             state_file = tmp_path / "aipass-cadence-test-session.json"
-            armed = json.loads(state_file.read_text())
+            armed = json.loads(state_file.read_text(encoding="utf-8"))
             for loader in ("tier0", "navmap", "identity", "branch"):
                 _reset_module_globals()
                 assert cadence.should_fire(loader, {"prompt": _NOTIFICATION}) is False, loader
-            assert json.loads(state_file.read_text()) == armed
+            assert json.loads(state_file.read_text(encoding="utf-8")) == armed
 
             for loader in ("tier0", "navmap", "identity", "branch"):
                 _reset_module_globals()
@@ -355,7 +372,7 @@ class TestShouldFire:
                 assert cadence.should_fire("alert", notification) is False, stored
             _reset_module_globals()
             assert cadence.should_fire_mail(2, notification) is True
-            assert json.loads(state_file.read_text())["turn"] == 5
+            assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == 5
 
 
 class TestResetCounter:
@@ -364,7 +381,7 @@ class TestResetCounter:
 
     def test_reset_writes_minus_one(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 7}))
+        state_file.write_text(json.dumps({"turn": 7}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -372,12 +389,12 @@ class TestResetCounter:
         ):
             reset_counter()
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
     def test_reset_then_next_turn_is_zero(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 7}))
+        state_file.write_text(json.dumps({"turn": 7}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -394,7 +411,7 @@ class TestResetCounter:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            data = json.loads(state_file.read_text())
+            data = json.loads(state_file.read_text(encoding="utf-8"))
             assert data["turn"] == 0
 
     def test_reset_no_session_id_is_noop(self, tmp_path):
@@ -415,7 +432,7 @@ class TestResetCounter:
 
         state_file = tmp_path / "aipass-cadence-test-session.json"
         assert state_file.exists()
-        assert json.loads(state_file.read_text())["turn"] == -1
+        assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == -1
 
 
 class TestConsumeRegroupPending:
@@ -524,7 +541,7 @@ class TestRegroupPartQueue:
             reset_counter()
             queue_regroup_parts(2)
             pop_regroup_part()
-        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text(encoding="utf-8"))
         assert "regroup_next" not in state
         assert "regroup_total" not in state
 
@@ -543,7 +560,7 @@ class TestRegroupPartQueue:
             assert consume_regroup_pending() is True
             queue_regroup_parts(3)
             assert consume_regroup_pending() is False
-        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+        state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text(encoding="utf-8"))
         assert state["turn"] == -1
 
     def test_a_real_prompt_cancels_the_remaining_parts(self, tmp_path):
@@ -647,7 +664,7 @@ class TestConfig:
 
     def test_config_deep_merges_over_defaults(self, tmp_path):
         config_file = tmp_path / "cadence.json"
-        config_file.write_text(json.dumps({"period": 10, "loaders": {"global": {"offset": 3}}}))
+        config_file.write_text(json.dumps({"period": 10, "loaders": {"global": {"offset": 3}}}), encoding="utf-8")
 
         with patch(f"{MODULE}._CONFIG_PATH", config_file):
             config = _load_config()
@@ -659,7 +676,7 @@ class TestConfig:
 
     def test_bad_config_falls_back_to_defaults(self, tmp_path):
         config_file = tmp_path / "cadence.json"
-        config_file.write_text("not valid json{{{")
+        config_file.write_text("not valid json{{{", encoding="utf-8")
 
         with patch(f"{MODULE}._CONFIG_PATH", config_file):
             config = _load_config()
@@ -697,7 +714,7 @@ class TestPerSessionIsolation:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             should_fire("global")
-            data_a = json.loads(state_a.read_text())
+            data_a = json.loads(state_a.read_text(encoding="utf-8"))
             assert data_a["turn"] == 5
 
         _reset_module_globals()
@@ -711,7 +728,7 @@ class TestPerSessionIsolation:
             patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
         ):
             assert should_fire("global") is True
-            data_b = json.loads(state_b.read_text())
+            data_b = json.loads(state_b.read_text(encoding="utf-8"))
             assert data_b["turn"] == 0
 
 
@@ -720,8 +737,10 @@ class TestModuleInterface:
         _reset_module_globals()
 
     def test_handle_command_cadence_returns_true(self):
-        with patch(f"{MODULE}.print_introspection"):
+        """`cadence` with no args routes to print_introspection; proven by a mutant deleting the call."""
+        with patch(f"{MODULE}.print_introspection") as mock_intro:
             assert handle_command("cadence", []) is True
+        mock_intro.assert_called_once_with()
 
     def test_handle_command_unknown_returns_false(self):
         assert handle_command("other", []) is False
@@ -756,7 +775,7 @@ class TestCompactIntegration:
 
     def test_compact_handler_resets_cadence(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text(json.dumps({"turn": 7}))
+        state_file.write_text(json.dumps({"turn": 7}), encoding="utf-8")
 
         with (
             patch.object(cadence, "_GUARD_DIR", tmp_path),
@@ -764,7 +783,7 @@ class TestCompactIntegration:
         ):
             cadence.reset_counter()
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
 
@@ -782,7 +801,8 @@ class TestLoaderCadenceGuard:
                     "period": 5,
                     "loaders": {"tier0": {"period": 1}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -852,7 +872,7 @@ class TestResetCounterObservability:
 
     def test_reset_fallback_to_hook_data_session_id(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-fallback-id.json"
-        state_file.write_text(json.dumps({"turn": 5}))
+        state_file.write_text(json.dumps({"turn": 5}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -862,7 +882,7 @@ class TestResetCounterObservability:
             with patch.dict("os.environ", {**_kept_redirect(), **env}, clear=True):
                 reset_counter(hook_data={"session_id": "fallback-id"})
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
     def test_reset_fallback_creates_file_if_missing(self, tmp_path):
@@ -876,14 +896,14 @@ class TestResetCounterObservability:
 
         state_file = tmp_path / "aipass-cadence-new-fallback.json"
         assert state_file.exists()
-        assert json.loads(state_file.read_text())["turn"] == -1
+        assert json.loads(state_file.read_text(encoding="utf-8"))["turn"] == -1
 
     def test_reset_env_takes_priority_over_hook_data(self, tmp_path):
         env_file = tmp_path / "aipass-cadence-env-session.json"
-        env_file.write_text(json.dumps({"turn": 9}))
+        env_file.write_text(json.dumps({"turn": 9}), encoding="utf-8")
 
         hook_file = tmp_path / "aipass-cadence-hook-session.json"
-        hook_file.write_text(json.dumps({"turn": 3}))
+        hook_file.write_text(json.dumps({"turn": 3}), encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -891,8 +911,8 @@ class TestResetCounterObservability:
         ):
             reset_counter(hook_data={"session_id": "hook-session"})
 
-        assert json.loads(env_file.read_text())["turn"] == -1
-        assert json.loads(hook_file.read_text())["turn"] == 3
+        assert json.loads(env_file.read_text(encoding="utf-8"))["turn"] == -1
+        assert json.loads(hook_file.read_text(encoding="utf-8"))["turn"] == 3
 
     def test_reset_hook_data_empty_session_id_logs_skip(self, tmp_path):
         with (
@@ -909,7 +929,7 @@ class TestResetCounterObservability:
 
     def test_reset_prev_turn_from_corrupt_file(self, tmp_path):
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        state_file.write_text("not valid json{{{")
+        state_file.write_text("not valid json{{{", encoding="utf-8")
 
         with (
             patch(f"{MODULE}._GUARD_DIR", tmp_path),
@@ -917,7 +937,7 @@ class TestResetCounterObservability:
         ):
             reset_counter()
 
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
 
@@ -940,7 +960,8 @@ class TestPostCompactDeterminism:
                         "branch": {"offset": 0},
                     },
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=11)
@@ -985,22 +1006,34 @@ class TestPostCompactDeterminism:
                 patch(f"{MODULE}._CONFIG_PATH", tmp_path / "cadence.json"),
             ):
                 result = should_fire("navmap")
-                state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text())
+                state = json.loads((tmp_path / "aipass-cadence-test-session.json").read_text(encoding="utf-8"))
                 assert state["turn"] == 0, f"Expected turn 0 after reset from {prev_turn}"
                 assert result is True, f"navmap should fire after reset from turn {prev_turn}"
 
-    def test_compact_handler_calls_reset_with_hook_data(self):
-        import tempfile
+    def test_compact_handler_calls_reset_with_hook_data(self, tmp_path):
+        """compact resets the cadence counter and files the git answer under ## Git.
 
-        hook_data = {"cwd": tempfile.gettempdir() + "/fake", "session_id": "test-123"}
+        _get_git_info is stood in by a recorder so no real git process starts; the
+        ## Git assert is proven by a mutant on compact.handle (see the fleet green report).
+        """
+        hook_data = {"cwd": str(tmp_path / "fake"), "session_id": "test-123"}
+        git_answer = "Git branch: recorded-branch\nUncommitted changes: 3 files"
 
+        # The recorder is entered first: patch() resolves its target through
+        # importlib.import_module, which the second patch replaces.
         with (
+            patch(
+                "aipass.hooks.apps.handlers.lifecycle.compact._get_git_info",
+                return_value=git_answer,
+            ) as git_recorder,
             patch("importlib.import_module") as mock_import,
         ):
             mock_cadence = mock_import.return_value
             result = _compact_handle(hook_data)
 
         mock_cadence.reset_counter.assert_called_once_with(hook_data=hook_data, caller="compact")
+        git_recorder.assert_called_once_with()
+        assert f"## Git\n{git_answer}" in result["stdout"].split("\n\n")
         assert result["exit_code"] == 0
 
     def test_double_reset_is_idempotent(self, tmp_path):
@@ -1015,7 +1048,7 @@ class TestPostCompactDeterminism:
             reset_counter()
 
         state_file = tmp_path / "aipass-cadence-test-session.json"
-        data = json.loads(state_file.read_text())
+        data = json.loads(state_file.read_text(encoding="utf-8"))
         assert data["turn"] == -1
 
 
@@ -1033,7 +1066,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"tier0": {"period": 1}, "global": {"offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1056,7 +1090,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"global": {"offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1077,7 +1112,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"tier0": {"period": 1}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         # The turns spelled out, not range(1, 8): "every turn" is the whole
@@ -1106,7 +1142,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"navmap": {"period": 5, "offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1127,7 +1164,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"navmap": {"period": 5, "offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         with (
@@ -1146,7 +1184,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"navmap": {"period": 5, "offset": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=7)
@@ -1176,7 +1215,8 @@ class TestPerLoaderPeriod:
                     "period": 5,
                     "loaders": {"always": {"period": 0}},
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         _write_state(tmp_path, turn=2)
@@ -1192,7 +1232,7 @@ class TestPerLoaderPeriod:
 def _write_mail_state(tmp_path, last_fired, session="test-session"):
     """Write the mail-loop state file (last turn the banner fired)."""
     state_file = tmp_path / f"aipass-mailcadence-{session}.json"
-    state_file.write_text(json.dumps({"last_fired_turn": last_fired}))
+    state_file.write_text(json.dumps({"last_fired_turn": last_fired}), encoding="utf-8")
     return state_file
 
 
@@ -1215,7 +1255,9 @@ class TestShouldFireMail:
 
     def _config(self, tmp_path, period=5, enabled=True):
         config = tmp_path / "cadence.json"
-        config.write_text(json.dumps({"enabled": enabled, "period": 5, "loaders": {"email": {"period": period}}}))
+        config.write_text(
+            json.dumps({"enabled": enabled, "period": 5, "loaders": {"email": {"period": period}}}), encoding="utf-8"
+        )
         return config
 
     def test_zero_mail_is_silent(self, tmp_path):
@@ -1314,7 +1356,7 @@ class TestShouldFireMail:
 
     def test_corrupt_mail_state_treated_as_never_fired(self, tmp_path):
         config = self._config(tmp_path)
-        (tmp_path / "aipass-mailcadence-test-session.json").write_text("{not json")
+        (tmp_path / "aipass-mailcadence-test-session.json").write_text("{not json", encoding="utf-8")
         _write_state(tmp_path, turn=3)
         with _mail_env(tmp_path, config):
             assert should_fire_mail(1, {}) is True

@@ -30,7 +30,6 @@ import pytest
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.lifecycle.auto_fix import (
     PYTHON_PATTERNS,
-    _check_emoji_list,
     _check_line_pattern,
     _check_patterns,
     _check_ruff_format,
@@ -209,8 +208,6 @@ class TestAutoFixStateFile:
 
 class TestAutoFixJson:
     def test_json_valid(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import handle
-
         json_file = tmp_path / "good.json"
         json_file.write_text('{"key": "value"}', encoding="utf-8")
 
@@ -220,8 +217,6 @@ class TestAutoFixJson:
         assert "sound" not in result
 
     def test_json_invalid_syntax(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import handle
-
         json_file = tmp_path / "bad.json"
         json_file.write_text('{"key": }', encoding="utf-8")
 
@@ -231,8 +226,6 @@ class TestAutoFixJson:
         assert result.get("sound") == "auto fix diagnostics"
 
     def test_json_corruption_detected(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import handle
-
         json_file = tmp_path / "corrupt.json"
         json_file.write_text('{"data": "\x00bad"}', encoding="utf-8")
 
@@ -463,13 +456,27 @@ class TestAutoFixPatterns:
     def test_check_line_pattern_skips_strings(self):
         assert _check_line_pattern('    msg = "logger.debug(test)"', "logger.debug(") is False
 
-    def test_check_emoji_list_clean(self):
-        assert _check_emoji_list(["hello", "world"], "emojis") is None
+    def test_check_emoji_list_clean(self, tmp_path):
+        """Reached through handle on a .json edit: a clean emoji list reports ok."""
+        json_file = tmp_path / "emojis.json"
+        json_file.write_text(json.dumps({"emojis": ["hello", "world"]}), encoding="utf-8")
 
-    def test_check_emoji_list_suspicious(self):
-        result = _check_emoji_list(["a"], "emojis")
-        assert result is not None
-        assert "EMOJI CORRUPTION" in result
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(json_file)}})
+        assert json.loads(result["stdout"])["systemMessage"] == "[diagnostics] ok"
+        assert "sound" not in result
+
+    def test_check_emoji_list_suspicious(self, tmp_path):
+        """An ASCII single char in an emoji list is named, with its key, in the advisory.
+
+        Green from its first run; its proof is a mutant on the finding's text.
+        """
+        json_file = tmp_path / "emojis.json"
+        json_file.write_text(json.dumps({"emojis": ["a"]}), encoding="utf-8")
+
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(json_file)}})
+        context = json.loads(result["stdout"]).get("hookSpecificOutput", {}).get("additionalContext", "")
+        assert "  - EMOJI CORRUPTION: Suspicious char 'a' in emojis\n" in context
+        assert result.get("sound") == "auto fix diagnostics"
 
 
 class TestOpenPatternWordBoundary:
@@ -488,8 +495,6 @@ class TestOpenPatternWordBoundary:
     """
 
     def test_popen_alone_does_not_fire(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
-
         target = tmp_path / "executor_like.py"
         target.write_text(
             "import subprocess\n"
@@ -502,8 +507,6 @@ class TestOpenPatternWordBoundary:
 
     def test_other_open_suffixed_calls_do_not_fire(self, tmp_path):
         """fdopen, os.popen and reopen are all longer names, not open()."""
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
-
         target = tmp_path / "suffixed.py"
         target.write_text(
             "import os\ndef f(fd):\n    a = os.fdopen(fd)\n    b = os.popen('ls')\n    return a, b\n",
@@ -513,8 +516,6 @@ class TestOpenPatternWordBoundary:
 
     def test_real_open_without_encoding_still_fires(self, tmp_path):
         """The rule must keep working — this is the case it exists for."""
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
-
         target = tmp_path / "bare_open.py"
         target.write_text("def f(p):\n    return open(p).read()\n", encoding="utf-8")
         errors = _check_patterns(str(target))
@@ -522,16 +523,12 @@ class TestOpenPatternWordBoundary:
 
     def test_attribute_open_without_encoding_still_fires(self, tmp_path):
         """io.open( / os.open( are real open calls — the dot is a boundary."""
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
-
         target = tmp_path / "attr_open.py"
         target.write_text("import io\ndef f(p):\n    return io.open(p).read()\n", encoding="utf-8")
         errors = _check_patterns(str(target))
         assert any("encoding" in e for e in errors)
 
     def test_open_with_encoding_does_not_fire(self, tmp_path):
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
-
         target = tmp_path / "good_open.py"
         target.write_text("def f(p):\n    return open(p, encoding='utf-8').read()\n", encoding="utf-8")
         assert _check_patterns(str(target)) == []
@@ -542,10 +539,6 @@ class TestOpenPatternWordBoundary:
         Skips rather than fails if the file moves — a cross-branch path is
         evidence, not a dependency this suite may hold hostage.
         """
-        import pytest
-
-        from aipass.hooks.apps.handlers.lifecycle.auto_fix import _check_patterns
-
         executor = Path(__file__).resolve().parents[2] / "drone" / "apps" / "handlers" / "executor.py"
         if not executor.is_file():
             pytest.skip("drone/apps/handlers/executor.py not present")

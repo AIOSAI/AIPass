@@ -341,9 +341,11 @@ class TestNeverEnrolledBanner:
             patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
             patch.object(loader, "_GUARD_DIR", tmp_path),
         ):
-            never_enrolled_banner("session-one")
+            first_session = never_enrolled_banner("session-one")
             second_session = never_enrolled_banner("session-two")
-        assert second_session is not None
+        assert first_session is not None
+        assert "HOOKS ARE OFF" in first_session
+        assert second_session == first_session
 
     def test_enrolled_project_never_nudged(self, temp_test_dir, mock_logger, tmp_path):
         reg_path = temp_test_dir / "registry.json"
@@ -390,8 +392,12 @@ class TestNeverEnrolledBanner:
             patch("aipass.hooks.apps.handlers.config.loader.Path.cwd", return_value=project),
             patch.object(loader, "_GUARD_DIR", tmp_path),
         ):
-            assert never_enrolled_banner("") is not None
-            assert never_enrolled_banner("") is not None
+            first = never_enrolled_banner("")
+            second = never_enrolled_banner("")
+        assert first is not None
+        assert "HOOKS ARE OFF" in first
+        assert second == first
+        assert list(tmp_path.glob("aipass-never-enrolled-*")) == []
 
 
 class TestTrustBreakBanner:

@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.7.1
+# Version: 1.8.0
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
@@ -117,13 +117,30 @@ _SOURCE_WRITE_SHAPES = (
         r"|copyFileSync|file_put_contents|fwrite|fputs|fopen)\s*\("
     ),
     # Shelling out. The write verb is then inside a string this parser does not
-    # read as code, so the invocation itself has to count as the evidence. Three
-    # readings, the first two before the third:
+    # read as code, so the invocation itself has to count as the evidence. Four
+    # readings, the first three before the fourth:
     #  1. a word followed by a call bracket (white space or a line continuation
-    #     between) is a call, whatever touches its front: `0-system(`, `1/popen(`;
+    #     between) is a call, whatever touches its front: `0-system(`, `1/popen(`.
+    #     Reading 1 alone also holds the names of compass 480 (devpulse, leg 3): the
+    #     exec and spawn families of python's os, posix_spawn(p), startfile, asyncio's
+    #     create_subprocess_exec/_shell, Popen, popen2/3, node's execFile(Sync) and
+    #     spawnSync, php's shell_exec, passthru and proc_open, ruby's capture2/3. They
+    #     never enter the path reading, so no path is newly refused. Left out: fork and
+    #     pty.fork (a fork alone runs no new program), and open with a pipe mode, qx,
+    #     %x and the grave accent of perl and ruby (no word stands before a bracket);
     #  2. a word inside the quoted module name handed to a loader is a module:
-    #     require('cross-spawn'), require.resolve(...), import(...), and the ES
-    #     keywords `from '...'` / `import '...'`;
+    #     require('cross-spawn'), require.resolve(...), import(...), each also with
+    #     the template quote (require(`cross-spawn`)), and the ES keywords
+    #     `from '...'` / `import '...'`. The name ends at the quote that opened it:
+    #     another quote inside it (require("x`y-spawn"), require('a"b-spawn'))
+    #     does not end it;
+    #  2b. a program that names createRequire makes a loader under a name of its
+    #     choice, which no reading of a quoted name can follow, so there every whole
+    #     word counts, as the pattern read before compass 460. A regex cannot tell
+    #     which quote opens a string, so "inside a quoted string" would be "after
+    #     some quote" anyway; the whole word is the honest rule. It errs toward
+    #     refusing a createRequire program that also names such a path, the right
+    #     side; hooks' choice, leg 3, compass 479;
     #  3. otherwise the word is a NAME in a path, not code, only where a separator
     #     (slash, hyphen, backslash single or doubled) joins it to a path character
     #     (a word character or a dot) on the separator's far side: `x/spawn`,
@@ -138,14 +155,26 @@ _SOURCE_WRITE_SHAPES = (
     # out of a path-shaped string (`'a/system'[2:]`, `'./system'.strip('./')`). Each
     # is path-shaped text no pattern over the text can tell from a path that is only
     # named, and each takes deliberate disguise; the edit gate keeps its full breadth.
-    # That residue is the decision of devpulse, leg 2d, compass 478.
+    # That residue is the decision of devpulse, leg 2d, compass 478. A third family,
+    # disguise too: require assigned to another name and called under it
+    # (`const r=require;r('cross-spawn')`), and a comment between the bracket and the
+    # quoted name (`require(/**/'cross-spawn')`); the decision of devpulse, leg 3,
+    # compass 479.
     # Compass 460 (2026-09-27); readings 1 and 2 are the decision of hooks, leg 2b; the
-    # narrowing of reading 3 is hooks', leg 2c; the widening of reading 2 hooks', leg 2d.
+    # narrowing of reading 3 is hooks', leg 2c; the widening of reading 2 hooks', leg 2d;
+    # the template quote and reading 2b hooks', leg 3; the closing quote hooks', leg 3b.
     re.compile(
-        r"\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b(?=[\s\\]*\()"
-        r"""|(?:require(?:\s*\.\s*resolve)?|import)\s*\(\s*['"][^'"]*\b"""
+        r"\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess"
+        r"|execl|execle|execlp|execlpe|execv|execve|execvp|execvpe"
+        r"|spawnl|spawnle|spawnlp|spawnlpe|spawnv|spawnve|spawnvp|spawnvpe"
+        r"|posix_spawn|posix_spawnp|startfile|create_subprocess_exec|create_subprocess_shell|Popen|popen2|popen3"
+        r"|execFile|execFileSync|spawnSync|shell_exec|passthru|proc_open|capture2|capture3)\b(?=[\s\\]*\()"
+        r"""|(?:require(?:\s*\.\s*resolve)?|import)\s*\(\s*(?:'[^']*|"[^"]*|`[^`]*)\b"""
         r"(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"
         r"""|\b(?:from|import)\s*['"][^'"]*\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"""
+        r"|\bcreateRequire\b[\s\S]*?\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"
+        r"|\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"
+        r"(?=[\s\S]*?\bcreateRequire\b)"
         r"|(?<![\w.][/\\-])(?<![\w.]\\\\)(?<!\w)"
         r"(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b(?!(?:[/-]|\\{1,2})[\w.])"
     ),

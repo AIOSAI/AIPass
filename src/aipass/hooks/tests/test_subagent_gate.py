@@ -272,3 +272,8 @@ class TestSubagentGateBudget:
         reason = json.loads(result["stdout"])["reason"]
         assert "bad.py" in reason
         assert "slow.py" in reason
+        assert mock_seedgo.call_count == 2
+        assert [c.args[:2] for c in mock_seedgo.call_args_list] == [
+            (str(apps / "slow.py"), repo),
+            (str(apps / "bad.py"), repo),
+        ]

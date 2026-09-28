@@ -244,7 +244,7 @@ class TestSessionGuard:
                 with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
                     handle({})
 
-        mock_mark.assert_called_once()
+        mock_mark.assert_called_once_with()
 
     def test_marks_session_when_a_run_is_already_live(self):
         """A refusal still means the work is happening — do not re-kick every prompt."""
@@ -255,7 +255,7 @@ class TestSessionGuard:
                 with patch(f"{MODULE}.importlib.import_module", return_value=mock_module):
                     handle({})
 
-        mock_mark.assert_called_once()
+        mock_mark.assert_called_once_with()
 
     def test_does_not_mark_session_on_spawn_failure(self):
         """A failed kick must stay retryable on the next prompt."""
@@ -352,7 +352,8 @@ class TestProbeSuppression:
         with patch("importlib.import_module", return_value=mock_module):
             auto_process.handle({})
 
-        mock_module.spawn_background.assert_called_once()
+        mock_module.spawn_background.assert_called_once_with()
+        assert (tmp_path / "aipass-auto-process-probe-suppression-off").exists()
 
     def test_probe_run_leaves_the_session_guard_unmarked(self, monkeypatch, tmp_path):
         """A suppressed kick is not a kick — the next real prompt must still run."""

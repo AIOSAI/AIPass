@@ -4,7 +4,7 @@
 # Description: Tests for the CC-native session file reader
 # Branch: hooks
 # Created: 2026-07-01
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/cc_sessions.py, the CC-native session file reader."""
@@ -311,6 +311,7 @@ class TestFindOccupant:
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             result = cc_sessions.find_occupant(str(tmp_path / "hooks"))
         assert result is not None
+        assert result["sessionId"] == "any"
 
     def test_reused_pid_never_reported_as_occupant(self, tmp_path):
         my_pid = os.getpid()
@@ -340,8 +341,9 @@ class TestReclaim:
             patch.object(cc_sessions, "_stop_session", return_value="stopped") as mock_stop,
         ):
             actions = cc_sessions.reclaim()
-        assert len(actions) == 1
+        assert actions == ["stopped"]
         mock_stop.assert_called_once()
+        assert mock_stop.call_args.args[0]["sessionId"] == "a"
 
     def test_reclaim_filters_by_branch(self, tmp_path):
         my_pid = os.getpid()
@@ -396,24 +398,33 @@ class TestIntrospection:
         assert err.startswith("sessions — CC session listing & reclaim")
         assert "No CC session files found" in err
 
-    def test_handle_command_sessions(self, tmp_path):
+    def test_handle_command_sessions(self, tmp_path, capsys):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions.handle_command("sessions", []) is True
+        assert "No CC session files found" in capsys.readouterr().err
 
-    def test_handle_command_cc_sessions_legacy(self, tmp_path):
+    def test_handle_command_cc_sessions_legacy(self, tmp_path, capsys):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions.handle_command("cc_sessions", []) is True
+        assert "No CC session files found" in capsys.readouterr().err
 
-    def test_handle_command_sessions_reclaim(self, tmp_path):
+    def test_handle_command_sessions_reclaim(self, tmp_path, capsys):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions.handle_command("sessions", ["reclaim"]) is True
+        err = capsys.readouterr().err
+        assert err.startswith("sessions reclaim\n")
+        assert "No live sessions to reclaim" in err
 
-    def test_handle_command_sessions_reclaim_branch(self, tmp_path):
+    def test_handle_command_sessions_reclaim_branch(self, tmp_path, capsys):
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
             assert cc_sessions.handle_command("sessions", ["reclaim", "@hooks"]) is True
+        err = capsys.readouterr().err
+        assert err.startswith("sessions reclaim @hooks\n")
+        assert "No live sessions to reclaim" in err
 
-    def test_handle_command_help(self):
+    def test_handle_command_help(self, capsys):
         assert cc_sessions.handle_command("--help", []) is True
+        assert "drone @hooks sessions reclaim @branch  Stop sessions for a branch" in capsys.readouterr().err
 
     def test_handle_command_unknown(self):
         assert cc_sessions.handle_command("unknown", []) is False
@@ -508,7 +519,8 @@ class TestSessionStart:
         assert cc_sessions.session_start({"startedAt": 1_000_000_000_000}) == 1_000_000_000.0
 
     def test_iso_string(self):
-        assert cc_sessions.session_start({"startedAt": "2026-08-18T12:00:00Z"}) is not None
+        # 2026-08-18T12:00:00Z in epoch seconds, measured once with a UTC datetime.
+        assert cc_sessions.session_start({"startedAt": "2026-08-18T12:00:00Z"}) == 1_787_054_400.0
 
     def test_missing_is_none_not_zero(self):
         assert cc_sessions.session_start({}) is None

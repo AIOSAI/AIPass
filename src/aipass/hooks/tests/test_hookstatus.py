@@ -4,7 +4,7 @@
 # Description: Tests for hookstatus module (drone @hooks status)
 # Branch: hooks
 # Created: 2026-05-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/hookstatus.py — read-only hook config viewer."""
@@ -50,8 +50,8 @@ class TestHandleCommand:
 
         assert handle_command("unknown", []) is False
 
-    def test_routes_status_command(self):
-        """Status command is handled and returns True."""
+    def test_routes_status_command(self, capsys):
+        """Status command is handled: the config it found is rendered."""
 
         with patch(
             "aipass.hooks.apps.modules.hookstatus.find_project_config",
@@ -59,27 +59,32 @@ class TestHandleCommand:
         ):
             assert handle_command("status", []) is True
 
-    def test_help_flag(self):
-        """--help flag is handled."""
+        assert "3 enabled / 5 total" in capsys.readouterr().err
+
+    def test_help_flag(self, capsys):
+        """--help flag is handled: the help screen prints."""
 
         assert handle_command("status", ["--help"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
-    def test_help_short_flag(self):
-        """-h flag is handled."""
+    def test_help_short_flag(self, capsys):
+        """-h flag is handled: the help screen prints."""
 
         assert handle_command("status", ["-h"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
-    def test_help_word(self):
-        """help subcommand is handled."""
+    def test_help_word(self, capsys):
+        """help subcommand is handled: the help screen prints."""
 
         assert handle_command("status", ["help"]) is True
+        assert "drone @hooks status --help    Show this help" in capsys.readouterr().err
 
 
 class TestConfigPresent:
     """Tests with a valid config file found."""
 
-    def test_shows_enabled_and_disabled_hooks(self):
-        """Verify mixed enabled/disabled hooks render without error."""
+    def test_shows_enabled_and_disabled_hooks(self, capsys):
+        """Verify mixed enabled/disabled hooks both render."""
 
         with patch(
             "aipass.hooks.apps.modules.hookstatus.find_project_config",
@@ -88,6 +93,9 @@ class TestConfigPresent:
             result = handle_command("status", [])
 
         assert result is True
+        err = capsys.readouterr().err
+        assert "identity_injector" in err
+        assert "branch_prompt" in err
 
     def test_counts_enabled_total(self):
         """Verify footer shows correct enabled/total counts."""

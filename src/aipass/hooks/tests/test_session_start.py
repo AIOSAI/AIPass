@@ -4,7 +4,7 @@
 # Description: Tests for SessionStart cadence reset handler
 # Branch: hooks
 # Created: 2026-07-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/lifecycle/session_start.py."""
@@ -18,6 +18,8 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
+
 import aipass.hooks.apps.modules.cadence as cadence_mod
 from aipass.hooks.apps.handlers.lifecycle.session_start import handle
 from aipass.hooks.apps.modules.cadence import should_fire
@@ -25,9 +27,15 @@ from aipass.hooks.apps.modules.cadence import should_fire
 CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 
-def _reset_cadence_globals():
-    cadence_mod._turn = None
-    cadence_mod._config = None
+def _reset_cadence_globals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Model a fresh process; monkeypatch puts the module's own values back at teardown."""
+    monkeypatch.setattr(cadence_mod, "_turn", None)
+    monkeypatch.setattr(cadence_mod, "_config", None)
+
+
+@pytest.fixture
+def _fresh_cadence(monkeypatch):
+    _reset_cadence_globals(monkeypatch)
 
 
 def _write_state(tmp_path, turn, session="test-session"):
@@ -40,10 +48,8 @@ def _write_state(tmp_path, turn, session="test-session"):
     return state_file
 
 
+@pytest.mark.usefixtures("_fresh_cadence")
 class TestSessionStartHandler:
-    def setup_method(self):
-        _reset_cadence_globals()
-
     def test_startup_resets_cadence(self, tmp_path):
         state_file = _write_state(tmp_path, turn=7)
 
@@ -126,13 +132,11 @@ class TestSessionStartHandler:
         assert result["exit_code"] == 0
 
 
+@pytest.mark.usefixtures("_fresh_cadence")
 class TestSessionStartCadenceIntegration:
     """End-to-end: SessionStart reset -> next turn fires all loaders."""
 
-    def setup_method(self):
-        _reset_cadence_globals()
-
-    def test_clear_then_all_loaders_fire(self, tmp_path):
+    def test_clear_then_all_loaders_fire(self, tmp_path, monkeypatch):
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -171,7 +175,7 @@ class TestSessionStartCadenceIntegration:
         ):
             handle({"source": "clear", "session_id": "test-session"})
 
-        _reset_cadence_globals()
+        _reset_cadence_globals(monkeypatch)
 
         with (
             patch(f"{CADENCE_MODULE}._GUARD_DIR", tmp_path),
@@ -179,12 +183,12 @@ class TestSessionStartCadenceIntegration:
             patch(f"{CADENCE_MODULE}._CONFIG_PATH", config),
         ):
             assert should_fire("tier0", turn_data) is True
-            _reset_cadence_globals()
+            _reset_cadence_globals(monkeypatch)
             assert should_fire("navmap", turn_data) is True
-            _reset_cadence_globals()
+            _reset_cadence_globals(monkeypatch)
             assert should_fire("branch", turn_data) is True
 
-    def test_resume_does_not_reset_counter_continues(self, tmp_path):
+    def test_resume_does_not_reset_counter_continues(self, tmp_path, monkeypatch):
         config = tmp_path / "cadence.json"
         config.write_text(
             json.dumps(
@@ -209,7 +213,7 @@ class TestSessionStartCadenceIntegration:
         ):
             handle({"source": "resume", "session_id": "test-session"})
 
-        _reset_cadence_globals()
+        _reset_cadence_globals(monkeypatch)
 
         with (
             patch(f"{CADENCE_MODULE}._GUARD_DIR", tmp_path),
@@ -217,5 +221,5 @@ class TestSessionStartCadenceIntegration:
             patch(f"{CADENCE_MODULE}._CONFIG_PATH", config),
         ):
             assert should_fire("tier0") is False
-            _reset_cadence_globals()
+            _reset_cadence_globals(monkeypatch)
             assert should_fire("navmap") is False

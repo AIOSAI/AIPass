@@ -4,7 +4,7 @@
 # Description: Tests for hooksound module (drone @hooks hooksound)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/hooksound.py."""
@@ -27,8 +27,17 @@ class TestHandleCommand:
         assert handle_command("unknown", []) is False
 
     def test_routes_hooksound_command(self):
-        with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=False):
+        """No args routes to introspection - and touches the flag in neither direction."""
+        with (
+            patch("aipass.hooks.apps.modules.hooksound.print_introspection") as mock_intro,
+            patch("aipass.hooks.apps.modules.hooksound.mute") as mock_mute,
+            patch("aipass.hooks.apps.modules.hooksound.unmute") as mock_unmute,
+        ):
             assert handle_command("hooksound", []) is True
+
+        mock_intro.assert_called_once_with()
+        mock_mute.assert_not_called()
+        mock_unmute.assert_not_called()
 
     def test_off_mutes_through_sound_module(self):
         """The flag has ONE writer — this module asks sound.py, it does not touch it."""
@@ -53,19 +62,31 @@ class TestHandleCommand:
 
         assert mock_unmute.call_count == 2
 
-    def test_status_shows_muted(self):
+    def test_status_shows_muted(self, capsys):
         with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=True):
             assert handle_command("hooksound", []) is True
 
-    def test_status_shows_active(self):
+        assert "hooksound — Hook sound control (MUTED)" in capsys.readouterr().err
+
+    def test_status_shows_active(self, capsys):
         with patch("aipass.hooks.apps.modules.hooksound.is_muted", return_value=False):
             assert handle_command("hooksound", []) is True
 
-    def test_help_flag(self):
-        assert handle_command("hooksound", ["--help"]) is True
+        assert "hooksound — Hook sound control (ACTIVE)" in capsys.readouterr().err
 
-    def test_help_word(self):
-        assert handle_command("hooksound", ["help"]) is True
+    def test_help_flag(self, capsys):
+        with patch("aipass.hooks.apps.modules.hooksound.mute") as mock_mute:
+            assert handle_command("hooksound", ["--help"]) is True
+
+        assert "hooksound — Mute/unmute all hook audio" in capsys.readouterr().err
+        mock_mute.assert_not_called()
+
+    def test_help_word(self, capsys):
+        with patch("aipass.hooks.apps.modules.hooksound.unmute") as mock_unmute:
+            assert handle_command("hooksound", ["help"]) is True
+
+        assert "hooksound — Mute/unmute all hook audio" in capsys.readouterr().err
+        mock_unmute.assert_not_called()
 
 
 class TestPrintIntrospection:

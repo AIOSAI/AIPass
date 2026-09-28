@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate .trinity char-limit + rollover-budget checks (FPLAN-0270 Phase 4)
 # Branch: hooks
 # Created: 2026-06-13
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py's .trinity character-limit check (Write/Edit/MultiEdit)."""
@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.hooks.apps.handlers.security import edit_gate
+from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits, handle
 from aipass.hooks.apps.modules import cadence
 
 
@@ -205,8 +206,6 @@ class TestTrinityWriteClean:
 
     def test_clean_write_local_json(self, tmp_path):
         """All entries under cap in local.json -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps(
@@ -225,8 +224,6 @@ class TestTrinityWriteClean:
 
     def test_clean_write_observations_json(self, tmp_path):
         """All entries under cap in observations.json -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "short observation"}]})
@@ -243,8 +240,6 @@ class TestTrinityWriteOverLimitEnforced:
 
     def test_block_over_limit_key_learning(self, tmp_path):
         """key_learning value 201 chars vs 200 cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"learn_1": "x" * 201}})
@@ -261,8 +256,6 @@ class TestTrinityWriteOverLimitEnforced:
 
     def test_block_over_limit_session_summary(self, tmp_path):
         """Session summary 301 chars vs 300 cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "x" * 301}]})
@@ -277,8 +270,6 @@ class TestTrinityWriteOverLimitEnforced:
 
     def test_block_over_limit_todo(self, tmp_path):
         """Todo task 201 chars vs 200 cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": "x" * 201}]})
@@ -293,8 +284,6 @@ class TestTrinityWriteOverLimitEnforced:
 
     def test_block_over_limit_observation(self, tmp_path):
         """Observation note 601 chars vs 600 cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "x" * 601}]})
@@ -309,8 +298,6 @@ class TestTrinityWriteOverLimitEnforced:
 
     def test_block_reason_includes_over_by(self, tmp_path):
         """Block reason includes the +over_by amount."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 210}})
@@ -333,8 +320,6 @@ class TestRejectionNamesTheCutPoint:
     """
 
     def _reason(self, tmp_path, content: dict) -> str:
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
@@ -370,10 +355,6 @@ class TestRejectionNamesTheCutPoint:
 
     def test_a_record_that_disagrees_with_the_document_draws_no_cut(self):
         """A cut on text the record did not measure would point at the wrong characters."""
-        from unittest.mock import MagicMock
-
-        from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits
-
         el = MagicMock()
         el.changed_entries.return_value = [
             {"entry_type": "sessions", "container": "sessions", "key": "0", "length": 999, "cap": 300, "over_by": 699}
@@ -385,8 +366,6 @@ class TestRejectionNamesTheCutPoint:
         assert "kept:" not in reason
 
     def test_warn_mode_logs_the_same_cut(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 200 + "past"}})
@@ -701,8 +680,6 @@ class TestTrinityWriteOverLimitWarnOnly:
 
     def test_allow_over_limit_warn_only(self, tmp_path):
         """Over-limit with enforce=False -> exit_code 0, empty stdout."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"learn_1": "x" * 250}})
@@ -715,8 +692,6 @@ class TestTrinityWriteOverLimitWarnOnly:
 
     def test_warn_logs_over_limit_entries(self, tmp_path, caplog):
         """Over-limit with enforce=False -> warning logged with warn-only message."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 250}})
@@ -733,8 +708,6 @@ class TestTrinityWriteNonTrinity:
 
     def test_non_trinity_py_passthrough(self):
         """Write to a .py file -> no .trinity check, passes to diagnostics gate."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Write",
@@ -749,8 +722,6 @@ class TestTrinityWriteNonTrinity:
 
     def test_non_trinity_json_passthrough(self):
         """Write to a non-.trinity .json file -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         result = handle(
             {
                 "tool_name": "Write",
@@ -765,8 +736,6 @@ class TestTrinityWriteNonTrinity:
 
     def test_trinity_passport_passthrough(self, tmp_path):
         """passport.json is in .trinity but NOT in _TRINITY_MEMORY_FILES."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         trinity_dir = tmp_path / "src" / "aipass" / "hooks" / ".trinity"
         trinity_dir.mkdir(parents=True, exist_ok=True)
         file_path = str(trinity_dir / "passport.json")
@@ -795,8 +764,6 @@ class TestTrinityWriteFailOpen:
 
     def test_invalid_json_content(self, tmp_path):
         """Non-JSON content is refused with the parse error, before any cap is measured."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -809,8 +776,6 @@ class TestTrinityWriteFailOpen:
 
     def test_empty_content(self, tmp_path):
         """An empty Write would blank the seat's memory: refused like any other unparseable result."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -821,8 +786,6 @@ class TestTrinityWriteFailOpen:
 
     def test_import_failure_fail_open(self, tmp_path):
         """importlib.import_module raises ImportError -> caught, fail-open."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 500}})
@@ -838,8 +801,6 @@ class TestTrinityWriteCharNotByte:
 
     def test_em_dash_at_cap_allowed(self, tmp_path):
         """200 em-dashes = 200 chars (600 bytes) = exactly at cap -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "—" * 200}})
@@ -851,8 +812,6 @@ class TestTrinityWriteCharNotByte:
 
     def test_em_dash_over_cap_blocked(self, tmp_path):
         """201 em-dashes = 201 chars (603 bytes) = over cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "—" * 201}})
@@ -870,8 +829,6 @@ class TestTrinityEditClean:
 
     def test_edit_clean_entry(self, tmp_path):
         """Edit changes a key_learning to a short value -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "old value"}}
@@ -897,8 +854,6 @@ class TestTrinityEditOverLimit:
 
     def test_edit_over_limit_enforce_blocks(self, tmp_path):
         """Edit pushes key_learning over 200 cap, enforce=True -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "short"}}
@@ -922,8 +877,6 @@ class TestTrinityEditOverLimit:
 
     def test_edit_over_limit_warn_allows(self, tmp_path, caplog):
         """Edit pushes key_learning over cap, enforce=False -> allowed + warn."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "short"}}
@@ -945,8 +898,6 @@ class TestTrinityEditOverLimit:
 
     def test_edit_modifies_entry_to_exceed_cap(self, tmp_path):
         """Edit modifies existing entry from under cap to over cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "a" * 100}}
@@ -973,8 +924,6 @@ class TestTrinityEditFailOpen:
 
     def test_edit_old_string_not_found_fail_open(self, tmp_path):
         """old_string absent from file -> _resolve_after_text returns None -> allow."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "hello"}}
@@ -995,8 +944,6 @@ class TestTrinityEditFailOpen:
 
     def test_edit_producing_invalid_json_is_refused(self, tmp_path):
         """Edit breaks JSON structure -> refused, the file on disk stays whole."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "hello"}}
@@ -1018,8 +965,6 @@ class TestTrinityEditFailOpen:
 
     def test_an_edit_that_repairs_an_already_broken_file_is_allowed(self, tmp_path):
         """The measured 18:40 shape, second half: the next Edit is the fix, and it must land."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         Path(file_path).write_text('{"key_learnings": {"k1": "hello}}', encoding="utf-8")
@@ -1033,8 +978,6 @@ class TestTrinityEditFailOpen:
 
     def test_edit_nonexistent_file_allows(self, tmp_path):
         """Edit to a .trinity file that doesn't exist yet -> allow."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -1057,8 +1000,6 @@ class TestTrinityEditReplaceAll:
 
     def test_replace_all_true(self, tmp_path):
         """replace_all=True replaces all occurrences -> checks result."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "aaa", "k2": "aaa"}}
@@ -1082,8 +1023,6 @@ class TestTrinityEditReplaceAll:
 
     def test_replace_all_false_single(self, tmp_path):
         """replace_all=False replaces first occurrence only -> one entry over."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "aaa", "k2": "bbb"}}
@@ -1109,8 +1048,6 @@ class TestTrinityEditCharNotByte:
 
     def test_em_dash_edit_at_cap_allowed(self, tmp_path):
         """Edit producing 200 em-dashes (200 chars, 600 bytes) -> at cap -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "short"}}
@@ -1131,8 +1068,6 @@ class TestTrinityEditCharNotByte:
 
     def test_em_dash_edit_over_cap_blocked(self, tmp_path):
         """Edit producing 201 em-dashes (201 chars, 603 bytes) -> over cap -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "short"}}
@@ -1157,8 +1092,6 @@ class TestTrinityMultiEdit:
 
     def test_multiedit_clean(self, tmp_path):
         """MultiEdit with both edits under cap -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "aaa", "k2": "bbb"}}
@@ -1181,8 +1114,6 @@ class TestTrinityMultiEdit:
 
     def test_multiedit_over_limit_blocked(self, tmp_path):
         """MultiEdit where second edit produces over-limit entry -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "aaa", "k2": "bbb"}}
@@ -1207,8 +1138,6 @@ class TestTrinityMultiEdit:
 
     def test_multiedit_ordering_dependent(self, tmp_path):
         """MultiEdit where edit 2 depends on edit 1's output -> applied sequentially."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "alpha"}}
@@ -1231,8 +1160,6 @@ class TestTrinityMultiEdit:
 
     def test_multiedit_old_string_not_found_fail_open(self, tmp_path):
         """MultiEdit where an old_string is missing -> fail-open."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "hello"}}
@@ -1255,8 +1182,6 @@ class TestTrinityMultiEdit:
 
     def test_multiedit_replace_all_in_edit(self, tmp_path):
         """MultiEdit with replace_all=True in one edit -> replaces all occurrences."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": {"k1": "zzz", "k2": "zzz"}}
@@ -1298,8 +1223,6 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
 
     def test_unrelated_edit_on_fat_file_is_allowed(self, tmp_path):
         """Fat legacy sessions + key_learnings, edit touches only a todo -> ALLOWED."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -1328,8 +1251,6 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
 
     def test_unrelated_edit_plus_new_over_limit_blocked(self, tmp_path):
         """Fat file, but Edit ALSO adds a new over-limit entry -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -1366,8 +1287,6 @@ class TestTrinityEditUnchangedLegacy:
 
     def test_edit_unchanged_over_limit_is_allowed(self, tmp_path):
         """Over-limit key_learning untouched by the Edit -> carried, allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {
@@ -1395,8 +1314,6 @@ class TestTrinityWriteDisabled:
 
     def test_disabled_allows_over_limit(self, tmp_path):
         """enabled=False -> size check skipped, over-limit entry allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 500}})
@@ -1420,8 +1337,6 @@ class TestTrinityWriteUnchangedLegacy:
 
     def test_unchanged_over_limit_is_allowed(self, tmp_path):
         """Over-limit entry identical in before/after -> carried, allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -1438,8 +1353,6 @@ class TestTrinityWriteUnchangedLegacy:
 
     def test_changed_legacy_blocked(self, tmp_path):
         """Legacy entry modified (text changed, still over-limit) -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
@@ -1462,8 +1375,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_over_limit_advisory_write(self, tmp_path):
         """Write with 11 todos (limit 10) -> exit_code 0 + advisory stdout."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(11)]})
@@ -1477,8 +1388,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_under_limit_no_advisory(self, tmp_path):
         """Write with 5 todos (limit 10) -> exit_code 0, empty stdout."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(5)]})
@@ -1491,8 +1400,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_at_limit_no_advisory(self, tmp_path):
         """Write with exactly 10 todos (limit 10) -> no advisory."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(10)]})
@@ -1505,8 +1412,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_advisory_via_edit(self, tmp_path):
         """Edit that adds a todo pushing count over limit -> advisory."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"todos": [{"task": f"todo {i}"} for i in range(10)]}
@@ -1533,8 +1438,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_advisory_never_blocks(self, tmp_path):
         """Even with enforce=True, todos count advisory has exit_code 0."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(15)]})
@@ -1551,8 +1454,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_advisory_observations_json_skip(self, tmp_path):
         """observations.json never triggers todos advisory."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps(
@@ -1573,8 +1474,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_advisory_config_loader_failure_silent(self, tmp_path):
         """config_loader import fails -> no advisory, no crash, save allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(15)]})
@@ -1600,8 +1499,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_char_limit_blocks_before_advisory(self, tmp_path):
         """Char-limit block takes priority over todos advisory."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps(
@@ -1623,8 +1520,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_advisory_logs_warning(self, tmp_path, caplog):
         """Advisory emits a logger.warning with the over-limit message."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(12)]})
@@ -1641,8 +1536,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_todos_advisory_per_branch_override(self, tmp_path):
         """per_branch override sets limit to 5 for hooks -> 6 todos triggers advisory."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(6)]})
@@ -1665,8 +1558,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_the_advisory_names_the_roll_and_the_backlog(self, tmp_path):
         """DPLAN-0345: over the pad is legal on disk; the oldest roll off, and it says where."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(13)]})
@@ -1690,8 +1581,6 @@ class TestTrinityTodosCountAdvisory:
         the per_branch block and a hardcoded 10, so with a default of 8 it stayed
         silent at 9 while memory's roll moved one.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(9)]})
@@ -1713,8 +1602,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_no_usable_count_promises_no_roll(self, tmp_path):
         """No usable count: memory rolls nothing, so the fallback 10 must not claim a roll."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(11)]})
@@ -1732,8 +1619,6 @@ class TestTrinityTodosCountAdvisory:
 
     def test_no_todos_container_no_advisory(self, tmp_path):
         """local.json with no todos key -> no advisory."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "short"}})
@@ -1753,8 +1638,6 @@ class TestTrinityNewestFirst:
 
     def test_clean_prepend_allowed(self, tmp_path):
         """New session inserted at index 0 with number = max+1 -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 5, "summary": "old"}]}
@@ -1771,8 +1654,6 @@ class TestTrinityNewestFirst:
 
     def test_tail_append_blocked(self, tmp_path):
         """New session appended after the existing tail entry -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 5, "summary": "old"}]}
@@ -1791,8 +1672,6 @@ class TestTrinityNewestFirst:
 
     def test_number_not_greater_than_max_blocked(self, tmp_path):
         """New entry prepended at index 0 but number <= max existing -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 5, "summary": "old"}]}
@@ -1811,8 +1690,6 @@ class TestTrinityNewestFirst:
 
     def test_key_learnings_tail_append_blocked(self, tmp_path):
         """key_learnings appended after the tail -> blocked."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": [{"number": 10, "key": "old", "value": "v"}]}
@@ -1835,8 +1712,6 @@ class TestTrinityNewestFirst:
 
     def test_first_write_no_before_file_skips_check(self, tmp_path):
         """No existing file (first write) -> nothing to compare against, allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"number": 1, "summary": "first"}]})
@@ -1848,8 +1723,6 @@ class TestTrinityNewestFirst:
 
     def test_shrinking_array_skips_check(self, tmp_path):
         """Rollover-style shrink (fewer entries after) -> not treated as an append, allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 6, "summary": "keep"}, {"number": 5, "summary": "drop"}]}
@@ -1865,8 +1738,6 @@ class TestTrinityNewestFirst:
 
     def test_newest_first_checked_even_when_limits_disabled(self, tmp_path):
         """Tail-append still blocked even with enabled=False (independent gate)."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 5, "summary": "old"}]}
@@ -1882,8 +1753,6 @@ class TestTrinityNewestFirst:
 
     def test_unrelated_field_edit_no_new_entries_allowed(self, tmp_path):
         """Edit that doesn't add any new numbered entries -> newest-first check no-ops."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 5, "summary": "old"}], "todos": [{"task": "old todo"}]}
@@ -1910,8 +1779,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_legacy_session_number_prepend_allowed(self, tmp_path):
         """Legacy schema, correct newest-first prepend -> allowed (was hard-blocked)."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
@@ -1933,8 +1800,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_legacy_session_number_tail_append_blocked(self, tmp_path):
         """The ordering check is schema-independent — legacy tail append still blocks."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
@@ -1956,8 +1821,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_legacy_number_not_greater_than_max_blocked(self, tmp_path):
         """Monotonicity is enforced within the legacy schema too, not just skipped."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
@@ -1979,8 +1842,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_number_key_wins_over_session_number(self, tmp_path):
         """When both keys are present, 'number' is authoritative — session_number is ignored."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         # session_number 100 would block a new entry numbered 6; number 5 must win.
@@ -2002,8 +1863,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_cross_schema_migration_allowed(self, tmp_path):
         """Legacy existing entries, modern 'number' on the new one -> allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"session_number": 5, "summary": "old"}]}
@@ -2019,8 +1878,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_wholly_unnumbered_array_passes_through(self, tmp_path):
         """No recognized ordinal anywhere -> monotonicity can't be judged, so don't block."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"summary": "old"}]}
@@ -2036,8 +1893,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_unnumbered_array_still_ordering_checked(self, tmp_path):
         """Pass-through covers the number check only — tail appends still block."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"summary": "old"}]}
@@ -2055,8 +1910,6 @@ class TestTrinityLegacyNumberSchema:
     def test_unnumbered_new_entry_against_numbered_existing_blocked(self, tmp_path):
         """Dropping the ordinal when the file has one is a real violation — block, and
         name the accepted keys so there is a path to comply."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"sessions": [{"number": 5, "summary": "old"}]}
@@ -2075,8 +1928,6 @@ class TestTrinityLegacyNumberSchema:
 
     def test_key_learnings_legacy_schema_prepend_allowed(self, tmp_path):
         """The alias applies to every newest-first array, not just sessions."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         existing = {"key_learnings": [{"session_number": 5, "value": "old"}]}
@@ -2110,8 +1961,6 @@ class TestOverBudgetSeverity:
         return [r for r in caplog.records if "over the rollover budget" in r.getMessage()]
 
     def test_over_budget_logs_at_info_not_warning(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(21)]})
@@ -2128,8 +1977,6 @@ class TestOverBudgetSeverity:
 
     def test_auto_compact_snapshot_class_also_logs_at_info(self, tmp_path, caplog):
         """All three call sites are one class — a fix that misses one keeps 1/3 of the lane."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(10) + _snapshot_sessions(5)})
@@ -2146,8 +1993,6 @@ class TestOverBudgetSeverity:
         assert all(r.levelno == logging.INFO for r in records)
 
     def test_generic_section_class_also_logs_at_info(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "n"} for _ in range(16)]})
@@ -2162,8 +2007,6 @@ class TestOverBudgetSeverity:
 
     def test_the_emitter_is_not_named_after_the_severity_it_no_longer_uses(self):
         """The function name is a severity claim in prose: leaving it invites a re-raise."""
-        from aipass.hooks.apps.handlers.security import edit_gate
-
         assert hasattr(edit_gate, "_note_over_budget")
         assert not hasattr(edit_gate, "_warn_over_budget")
 
@@ -2174,8 +2017,6 @@ class TestOverBudgetSeverity:
         it names a cap the author must act on, and nothing archives it for them.
         It stays WARNING. If a future edit mutes this file wholesale, this fails.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "x" * 5000}]})
@@ -2194,8 +2035,6 @@ class TestSectionCountGuard:
 
     def test_sessions_over_count_warns(self, tmp_path, caplog):
         """21 sessions vs 20 cap -> warning logged, write still allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(21)]})
@@ -2208,8 +2047,6 @@ class TestSectionCountGuard:
 
     def test_key_learnings_over_count_warns(self, tmp_path, caplog):
         """26 key_learnings vs 25 cap -> warning logged."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"value": "v"} for _ in range(26)]})
@@ -2222,8 +2059,6 @@ class TestSectionCountGuard:
 
     def test_observations_over_count_warns(self, tmp_path, caplog):
         """16 observations vs 15 cap -> warning logged."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "observations.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "n"} for _ in range(16)]})
@@ -2239,8 +2074,6 @@ class TestSectionCountGuard:
 
     def test_under_count_no_warning(self, tmp_path, caplog):
         """10 sessions vs 20 cap -> no warning."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(10)]})
@@ -2253,8 +2086,6 @@ class TestSectionCountGuard:
 
     def test_at_count_no_warning(self, tmp_path, caplog):
         """Exactly 20 sessions vs 20 cap -> no warning (only > triggers)."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(20)]})
@@ -2267,8 +2098,6 @@ class TestSectionCountGuard:
 
     def test_count_guard_never_blocks(self, tmp_path):
         """Even with enforce=True char limits, count guard only warns — exit_code always 0."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(30)]})
@@ -2280,8 +2109,6 @@ class TestSectionCountGuard:
 
     def test_per_branch_count_override(self, tmp_path, caplog):
         """per_branch overrides default count -> 6 sessions vs 5 cap warns."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(6)]})
@@ -2301,8 +2128,6 @@ class TestSectionCountGuard:
 
     def test_config_loader_import_failure_silent(self, tmp_path, caplog):
         """config_loader import always fails -> no count warning, no crash, write allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(30)]})
@@ -2351,8 +2176,6 @@ class TestSessionSnapshotBudget:
 
         This is the exact state that emailed devpulse ten digests an hour.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(14) + _snapshot_sessions(2)})
@@ -2368,8 +2191,6 @@ class TestSessionSnapshotBudget:
 
     def test_regular_sessions_over_budget_still_warns(self, tmp_path, caplog):
         """17 regular + 2 snapshots -> one warning about the 17, snapshots untouched."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(17) + _snapshot_sessions(2)})
@@ -2386,8 +2207,6 @@ class TestSessionSnapshotBudget:
 
     def test_snapshots_over_their_own_budget_warns(self, tmp_path, caplog):
         """Snapshots have a budget too — 5 against a cap of 3 is genuinely over."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(10) + _snapshot_sessions(5)})
@@ -2403,8 +2222,6 @@ class TestSessionSnapshotBudget:
 
     def test_both_over_warn_separately(self, tmp_path, caplog):
         """Two independent budgets means two distinct lines, not one blurred count."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(20) + _snapshot_sessions(6)})
@@ -2426,8 +2243,6 @@ class TestSessionSnapshotBudget:
         status == "auto-compact" as a regular entry. Splitting differently would
         put the two back out of step in a subtler way.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         sessions = _regular_sessions(14) + _snapshot_sessions(2) + ["a bare string", None]
@@ -2448,8 +2263,6 @@ class TestSessionSnapshotBudget:
         The extractor's regular filter is unconditional. A config carrying only
         `count` must not resurrect the combined-array count.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(14) + _snapshot_sessions(2)})
@@ -2472,8 +2285,6 @@ class TestSessionSnapshotBudget:
 
         The extractor does not split key_learnings, so neither may this guard.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         learnings = [{"value": f"v{i}"} for i in range(15)] + [{"value": "odd one", "status": "auto-compact"}]
@@ -2494,8 +2305,6 @@ class TestSectionCountWording:
 
     def test_warning_names_the_branch_and_file(self, tmp_path, caplog):
         """The module tag is always captured_edit_gate — the line itself must say whose memory it is."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "devpulse", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "devpulse")
         content = json.dumps({"sessions": _regular_sessions(17)})
@@ -2511,8 +2320,6 @@ class TestSectionCountWording:
 
     def test_warning_promises_only_what_rollover_does(self, tmp_path, caplog):
         """Names the actor, the count it archives, and where the entries go."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(18)})
@@ -2534,8 +2341,6 @@ class TestSectionCountWording:
         the claim is true, so the note is logged, but the vector clause ("recall
         them with drone @memory search") would be the false one for todos.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"t{i}"} for i in range(11)]})
@@ -2619,8 +2424,6 @@ class TestThrottleScopeGuard:
     def test_entry_limit_block_is_not_throttled(self, tmp_path):
         """A block that goes quiet on the second edit would let over-cap
         entries through — the opposite of what the ruling asked for."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": "x" * 500}]})
@@ -2687,8 +2490,6 @@ class TestRenamedFieldDodge:
         This is B3 exactly as it shipped — the species this branch's own
         local.json carries.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "learning": "x" * 500}]})
@@ -2704,8 +2505,6 @@ class TestRenamedFieldDodge:
 
     def test_missing_field_is_blocked(self, tmp_path):
         """Canonical field absent with no replacement at all — same refusal."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"number": 9, "date": "2026-08-25"}]})
@@ -2724,8 +2523,6 @@ class TestRenamedFieldDodge:
         letting it through because it happens to be small is how the shape
         spreads.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "short"}]})
@@ -2737,8 +2534,6 @@ class TestRenamedFieldDodge:
 
     def test_canonical_field_still_passes(self, tmp_path):
         """Guard against over-refusal: the correct shape must stay allowed."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "value": "fine"}]})
@@ -2750,8 +2545,6 @@ class TestRenamedFieldDodge:
 
     def test_empty_string_is_not_a_missing_field(self, tmp_path):
         """`""` means there is no text — compliant. Only an ABSENT key refuses."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "value": ""}]})
@@ -2775,8 +2568,6 @@ class TestRenamedFieldLegacyAsymmetry:
         refused for what it AUTHORS, never for what it CARRIES — the NEW
         canonical entry on top is judged; the untouched legacy one is not.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
@@ -2792,8 +2583,6 @@ class TestRenamedFieldLegacyAsymmetry:
 
     def test_editing_a_legacy_entry_refuses_it(self, tmp_path):
         """Touch the drifted entry and you own its shape."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
@@ -2808,8 +2597,6 @@ class TestRenamedFieldLegacyAsymmetry:
 
     def test_new_legacy_shaped_entry_is_refused(self, tmp_path):
         """Carrying one legacy entry must not license adding ten more."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
@@ -2827,8 +2614,6 @@ class TestUnreadableFieldWarnMode:
     """enforce=False keeps the refusal advisory, and says why in the log."""
 
     def test_warn_mode_allows_but_logs_field_name(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "x" * 500}]})
@@ -2849,8 +2634,6 @@ class TestUnmeasurableReasonIsRendered:
     """
 
     def test_non_string_field_reason_reaches_the_agent(self, tmp_path):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"number": 1, "summary": [{"title": "a", "detail": "b"}]}]})
@@ -2880,8 +2663,6 @@ class TestNoDuplicateViolationLines:
     """
 
     def test_missing_field_reported_once(self, tmp_path):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "x" * 500}]})
@@ -2895,8 +2676,6 @@ class TestNoDuplicateViolationLines:
 
     def test_distinct_entries_both_survive_dedupe(self, tmp_path):
         """Dedupe must key on container too — two types can share key '0'."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps(
@@ -2915,8 +2694,6 @@ class TestNoDuplicateViolationLines:
 
     def test_over_cap_and_missing_field_both_reported(self, tmp_path):
         """Different species on different entries must both reach the agent."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 2, "value": "x" * 201}, {"number": 1, "learning": "short"}]})
@@ -2991,8 +2768,6 @@ class TestCarriedDriftIsNotRefused:
         is drone @memory lint's job, and it is the only component that can
         actually see drift that arrived through Bash.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         legacy = {"number": 1, "date": "2026-08-01", "learning": "x" * 500}
@@ -3015,8 +2790,6 @@ class TestCarriedDriftIsNotRefused:
         reshape them on their own schedule. Blocking every write until they do
         would make the exemption brick the branch it protects.
         """
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         drifted_todo = {"priority": "medium", "status": "open", "chore": "reshape me"}
@@ -3036,8 +2809,6 @@ class TestCarriedDriftIsNotRefused:
 
     def test_new_drifted_todo_still_refused(self, tmp_path):
         """The exemption covers what is ALREADY ON DISK, never a fresh one."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         drifted_todo = {"priority": "medium", "status": "open", "chore": "reshape me"}
@@ -3052,8 +2823,6 @@ class TestCarriedDriftIsNotRefused:
 
     def test_editing_a_drifted_todo_refuses_it(self, tmp_path):
         """Touch it and you own its shape — same rule as everywhere else."""
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         _write_before(file_path, {"todos": [{"priority": "medium", "status": "open", "chore": "old text"}]})
@@ -3177,8 +2946,6 @@ class TestMemorysNewRefusalReasonsRender:
     """
 
     def _refuse(self, tmp_path, entry):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [entry]})
@@ -3221,8 +2988,6 @@ class TestPassportFileBudget:
     """
 
     def _write(self, tmp_path, doc, limits=_TEST_LIMITS_ENFORCE):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "passport.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         with patch("importlib.import_module", side_effect=_mock_importlib_modules(limits)):
@@ -3264,8 +3029,6 @@ class TestTrinityRefusalsAreLogged:
     """
 
     def test_enforced_cap_refusal_is_logged(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "k" * 301}]})
@@ -3276,8 +3039,6 @@ class TestTrinityRefusalsAreLogged:
         assert "Unwritable .trinity entries" in caplog.text
 
     def test_newest_first_refusal_is_logged(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         Path(file_path).write_text(json.dumps({"sessions": [{"number": 5, "summary": "old"}]}), encoding="utf-8")
@@ -3289,8 +3050,6 @@ class TestTrinityRefusalsAreLogged:
         assert "newest-first" in caplog.text
 
     def test_unparseable_refusal_is_logged(self, tmp_path, caplog):
-        from aipass.hooks.apps.handlers.security.edit_gate import handle
-
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         Path(file_path).write_text(json.dumps({"sessions": []}), encoding="utf-8")

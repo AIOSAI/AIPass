@@ -427,13 +427,19 @@ class TestBuildPolicy:
 class TestHandleCommand:
     """Drone routing for sandbox module."""
 
-    def test_sandbox_no_args_calls_introspection(self):
+    def test_sandbox_no_args_calls_introspection(self, capsys):
         result = handle_command("sandbox", [])
         assert result is True
+        err = capsys.readouterr().err
+        assert "Phase 1: wrapper module only" in err
+        assert "sandbox_launch()" in err
 
-    def test_sandbox_help(self):
+    def test_sandbox_help(self, capsys):
         result = handle_command("sandbox", ["--help"])
         assert result is True
+        err = capsys.readouterr().err
+        assert "drone @hooks sandbox" in err
+        assert "Phase 1" not in err
 
     def test_unknown_command_returns_false(self):
         result = handle_command("other", [])

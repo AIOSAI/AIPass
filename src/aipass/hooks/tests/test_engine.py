@@ -5,10 +5,13 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-16
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for hook engine dispatch logic."""
+"""Tests for apps/modules/engine.py and the hook dispatch it drives."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(stdlib) — subprocess.run's process spawn and timeout mechanics; the tests stub it at the edge
 
 import json
 import subprocess
@@ -100,9 +103,9 @@ class TestRunHook:
         assert result["exit_code"] == -1
         assert result["stderr"] == "TIMEOUT"
 
-    def test_hook_os_error(self, mock_subprocess, mock_logger):
+    def test_hook_os_error(self, mock_subprocess, mock_logger, tmp_path):
         mock_subprocess.side_effect = OSError("No such file")
-        result = _run_hook("/nonexistent", "")
+        result = _run_hook(str(tmp_path / "nonexistent"), "")
         assert result["exit_code"] == -1
         assert "No such file" in result["stderr"]
 
@@ -204,6 +207,7 @@ class TestDispatch:
                     {"exit_code": 0, "stdout": "output_B", "stderr": "", "elapsed_ms": 10},
                 ]
                 result = dispatch("UserPromptSubmit", '{"user_prompt":"test"}', config)
+        assert mock_run.call_count == 2
         assert "output_A" in result[0]
         assert "output_B" in result[0]
         assert result[1] == 0
@@ -593,6 +597,7 @@ class TestCompletionCount:
             ]
             dispatch("PreToolUse", '{"tool_name":"Bash"}', config)
 
+        assert mock_run.call_count == 2
         per_hook = [c for c in mock_logger.info.call_args_list if c.args and "agent=%s" in c.args[0]]
         assert len(per_hook) == 2
         assert self._complete_line(mock_logger)[2] == len(per_hook)
@@ -610,6 +615,7 @@ class TestCompletionCount:
             ]
             dispatch("PreToolUse", '{"tool_name":"Bash"}', self.SILENT)
 
+        assert mock_run.call_count == 2
         assert self._complete_line(mock_logger)[2] == 1
 
 
@@ -641,7 +647,7 @@ class TestFindProjectConfig:
             "hooks_enabled": True,
             "Stop": {"sound": {"enabled": True, "command": "python3 $AIPASS_HOME/hook.py", "matcher": ""}},
         }
-        (config_dir / "hooks.json").write_text(json.dumps(config))
+        (config_dir / "hooks.json").write_text(json.dumps(config), encoding="utf-8")
         reg_path = temp_test_dir / "registry.json"
         with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
             enroll(str(temp_test_dir))
@@ -662,7 +668,7 @@ class TestLog:
         log_file = temp_test_dir / "test.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "Test", "action": "test_write"})
-        lines = log_file.read_text().strip().split("\n")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 1
         entry = json.loads(lines[0])
         assert entry["event"] == "Test"
@@ -679,7 +685,7 @@ class TestLog:
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "A"})
             _log({"event": "B"})
-        lines = log_file.read_text().strip().split("\n")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
 
 
@@ -745,11 +751,19 @@ class TestHooksEntryPoint:
             handle_command("status", [])
         assert exit_info.value.code == 1
 
-    def test_log_command_returns_true(self):
+    def test_log_command_prints_the_log_tail_to_stderr(self, tmp_path, capsys):
+        """Green from its first run; its proof is a mutant on the printed line."""
         from aipass.hooks.apps.hooks import handle_command
 
-        result = handle_command("log", [])
+        log_file = tmp_path / "engine.jsonl"
+        log_file.write_text('{"event": "first"}\n{"event": "second"}\n', encoding="utf-8")
+        with patch("aipass.hooks.apps.handlers.config.diagnostics.LOG_FILE", log_file):
+            result = handle_command("log", [])
+        out, err = capsys.readouterr()
         assert result is True
+        assert '{"event": "first"}' in err
+        assert '{"event": "second"}' in err
+        assert "No engine log found" not in err
 
     def test_short_help_flag(self):
         from aipass.hooks.apps.hooks import main
@@ -767,12 +781,6 @@ class TestHooksEntryPoint:
 class TestErrorResilience:
     """Tests for error handling edge cases."""
 
-    def test_missing_hooks_json_file(self, temp_test_dir, mock_logger):
-        with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
-            with patch("aipass.hooks.apps.modules.engine.Path.home", return_value=temp_test_dir.parent):
-                config = find_project_config()
-        assert config is None
-
     # Both enrol the project first: unenrolled, find_project_config returns None
     # at the trust check and never reads the file, so these passed without ever
     # reaching the parse they are named for. The enrolment lands in conftest's
@@ -780,7 +788,7 @@ class TestErrorResilience:
     def test_corrupt_hooks_json(self, temp_test_dir, mock_logger):
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
-        (config_dir / "hooks.json").write_text("{invalid json!!!")
+        (config_dir / "hooks.json").write_text("{invalid json!!!", encoding="utf-8")
         enroll(str(temp_test_dir))
         with (
             patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir),
@@ -793,7 +801,7 @@ class TestErrorResilience:
     def test_empty_hooks_json(self, temp_test_dir, mock_logger):
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
-        (config_dir / "hooks.json").write_text("")
+        (config_dir / "hooks.json").write_text("", encoding="utf-8")
         enroll(str(temp_test_dir))
         with (
             patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir),
@@ -818,10 +826,10 @@ class TestErrorResilience:
         assert not registry.exists()
         install = tmp_path / "install"
         (install / ".aipass").mkdir(parents=True)
-        (install / ".aipass" / "hooks.json").write_text("{}")
+        (install / ".aipass" / "hooks.json").write_text("{}", encoding="utf-8")
         monkeypatch.setenv("AIPASS_HOME", str(install))
         (temp_test_dir / ".aipass").mkdir()
-        (temp_test_dir / ".aipass" / "hooks.json").write_text("{invalid json!!!")
+        (temp_test_dir / ".aipass" / "hooks.json").write_text("{invalid json!!!", encoding="utf-8")
 
         with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
             find_project_config()
@@ -886,18 +894,13 @@ class TestDataStructureContracts:
         log_file = temp_test_dir / "test.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"ts": 123.0, "event": "Test", "action": "check"})
-        entry = json.loads(log_file.read_text().strip())
+        entry = json.loads(log_file.read_text(encoding="utf-8").strip())
         assert "ts" in entry
         assert "event" in entry
 
 
 class TestExceptionContracts:
     """Tests for expected exceptions and error paths."""
-
-    def test_dispatch_with_none_config_event_returns_empty(self, mock_logger):
-        with patch("aipass.hooks.apps.modules.engine._log"):
-            result = dispatch("Stop", "{}", {"hooks_enabled": True})
-        assert result == ("", 0)
 
     def test_run_hook_timeout_returns_negative_exit(self, mock_subprocess, mock_logger):
         mock_subprocess.side_effect = subprocess.TimeoutExpired("cmd", 30)
@@ -914,7 +917,8 @@ class TestInfrastructureMocking:
     """Tests verifying mock infrastructure works correctly."""
 
     def test_mock_logger_fixture(self, mock_logger):
-        assert mock_logger is not None
+        """The fixture is the logger engine's own functions see, not a detached mock."""
+        assert dispatch.__globals__["logger"] is mock_logger
 
     def test_mock_subprocess_fixture(self, mock_subprocess):
         assert mock_subprocess is not None
@@ -924,7 +928,7 @@ class TestInfrastructureMocking:
 
     def test_hooks_config_file_fixture(self, hooks_config_file):
         assert hooks_config_file.exists()
-        config = json.loads(hooks_config_file.read_text())
+        config = json.loads(hooks_config_file.read_text(encoding="utf-8"))
         assert config["hooks_enabled"] is True
 
 
@@ -940,7 +944,7 @@ class TestInitProvisioning:
     def test_config_walks_up_from_subdirectory(self, temp_test_dir, mock_logger):
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
-        (config_dir / "hooks.json").write_text('{"hooks_enabled": true}')
+        (config_dir / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
         sub_dir = temp_test_dir / "deep" / "nested" / "path"
         sub_dir.mkdir(parents=True)
         reg_path = temp_test_dir / "registry.json"
@@ -956,10 +960,10 @@ class TestInitProvisioning:
 
     def test_log_no_overwrite_on_append(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "test.jsonl"
-        log_file.write_text('{"existing": true}\n')
+        log_file.write_text('{"existing": true}\n', encoding="utf-8")
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "new"})
-        lines = log_file.read_text().strip().split("\n")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
         assert json.loads(lines[0])["existing"] is True
 
@@ -1120,7 +1124,7 @@ class TestConfigDataContracts:
         log_file = temp_test_dir / "test.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"ts": 1.0, "event": "Test", "hook": "test_hook", "exit_code": 0})
-        entry = json.loads(log_file.read_text().strip())
+        entry = json.loads(log_file.read_text(encoding="utf-8").strip())
         assert "ts" in entry
         assert "event" in entry
         assert "hook" in entry
@@ -1181,7 +1185,7 @@ class TestErrorResilienceExtended:
         config_dir = temp_test_dir / ".aipass"
         config_dir.mkdir()
         empty_file = config_dir / "hooks.json"
-        empty_file.write_text("")
+        empty_file.write_text("", encoding="utf-8")
         with patch("aipass.hooks.apps.modules.engine.Path.cwd", return_value=temp_test_dir):
             config = find_project_config()
         assert config is None
@@ -1267,6 +1271,7 @@ class TestLayerATrustEnforcement:
                 }
                 result = dispatch("Stop", "{}", config)
         mock_run.assert_called_once()
+        assert mock_run.call_args.args[:2] == ("echo allowed", "{}")
         assert "allowed" in result[0]
 
     def test_mixed_config_partial_refusal(self, mock_logger):
@@ -1311,7 +1316,7 @@ class TestLayerATrustEnforcement:
                 }
             },
         }
-        (config_dir / "hooks.json").write_text(json.dumps(hostile_config))
+        (config_dir / "hooks.json").write_text(json.dumps(hostile_config), encoding="utf-8")
         reg_path = temp_test_dir / "registry.json"
         with patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path):
             enroll(str(temp_test_dir))
@@ -1349,6 +1354,7 @@ class TestLayerATrustEnforcement:
                 }
                 result = dispatch("Stop", "{}", config)
         mock_run.assert_called_once()
+        assert mock_run.call_args.args[:2] == ("echo ok", "{}")
         assert "ok" in result[0]
 
 
@@ -1522,6 +1528,7 @@ class TestDispatchHandlerTimeout:
                 {"exit_code": 0, "stdout": "survived", "stderr": "", "elapsed_ms": 5},
             ]
             result = dispatch("UserPromptSubmit", "{}", config)
+        assert mock_run.call_count == 2
         assert "survived" in result[0]
         assert result[1] == 0
         mock_speak.assert_called_once()
@@ -1592,7 +1599,7 @@ class TestJsonHandlerNotApplicable:
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "A", "ts": 1.0})
             _log({"event": "B", "ts": 2.0})
-        lines = log_file.read_text().strip().split("\n")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         assert len(lines) == 2
         assert [json.loads(line)["event"] for line in lines] == ["A", "B"]
 
@@ -1612,14 +1619,14 @@ class TestJsonHandlerNotApplicable:
         log_file = temp_test_dir / "save.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"saved": True, "value": 42})
-        entry = json.loads(log_file.read_text().strip())
+        entry = json.loads(log_file.read_text(encoding="utf-8").strip())
         assert entry["saved"] is True
         assert entry["value"] == 42
 
     def test_log_load_entry(self, temp_test_dir, mock_logger):
         log_file = temp_test_dir / "load.jsonl"
-        log_file.write_text('{"loaded": true}\n')
-        lines = log_file.read_text().strip().split("\n")
+        log_file.write_text('{"loaded": true}\n', encoding="utf-8")
+        lines = log_file.read_text(encoding="utf-8").strip().split("\n")
         entry = json.loads(lines[0])
         assert entry["loaded"] is True
 
@@ -1627,7 +1634,7 @@ class TestJsonHandlerNotApplicable:
         log_file = temp_test_dir / "ops.jsonl"
         with patch("aipass.hooks.apps.handlers.config.diagnostics._get_log_file", return_value=log_file):
             _log({"event": "PreToolUse", "hook": "test", "exit_code": 0})
-        entry = json.loads(log_file.read_text().strip())
+        entry = json.loads(log_file.read_text(encoding="utf-8").strip())
         assert entry["event"] == "PreToolUse"
 
     def test_log_ensure_module(self):

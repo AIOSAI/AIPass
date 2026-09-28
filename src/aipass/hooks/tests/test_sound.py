@@ -4,7 +4,7 @@
 # Description: Tests for shared sound module
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/sound.py."""
@@ -59,8 +59,18 @@ class TestSpeak:
 
             speak("test text")
 
-        mock_sub.run.assert_called_once()
-        mock_sub.Popen.assert_called_once()
+        wav = str(tmp_path / "test.wav")
+        mock_sub.run.assert_called_once_with(
+            [str(mock_bin), "-m", str(mock_voice), "-f", wav],
+            input="test text",
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        assert mock_sub.Popen.call_count == 1
+        (play_cmd,), play_kwargs = mock_sub.Popen.call_args
+        assert play_cmd[-1] == wav
+        assert play_kwargs == {"stdout": mock_sub.DEVNULL, "stderr": mock_sub.DEVNULL}
 
     def test_speak_skips_when_muted(self):
         with (
@@ -148,7 +158,10 @@ class TestPlay:
 
             play(mock_path)
 
-        mock_sub.Popen.assert_called_once()
+        assert mock_sub.Popen.call_count == 1
+        (play_cmd,), play_kwargs = mock_sub.Popen.call_args
+        assert play_cmd[-1] == str(mock_path)
+        assert play_kwargs == {"stdout": mock_sub.DEVNULL, "stderr": mock_sub.DEVNULL}
 
     def test_play_skips_when_muted(self, tmp_path):
         with (

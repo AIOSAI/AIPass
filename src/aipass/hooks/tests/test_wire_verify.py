@@ -4,7 +4,7 @@
 # Description: Tests for wire_verify module — provider ↔ project hook wiring checker
 # Branch: hooks
 # Created: 2026-07-09
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/wire_verify.py."""
@@ -352,16 +352,26 @@ class TestHandleCommand:
     def test_returns_false_for_non_verify(self):
         assert wire_verify.handle_command("status", []) is False
 
-    def test_routes_verify(self):
+    def test_routes_verify(self, capsys):
         mock_result = {"ok": True, "errors": [], "warnings": [], "info": []}
-        with patch.object(wire_verify, "verify_wiring", return_value=mock_result):
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
+        mock_verify.assert_called_once_with()
+        err = capsys.readouterr().err
+        assert "Wire check passed" in err
+        assert "0 errors, 0 warnings" in err
 
-    def test_help_flag(self):
-        assert wire_verify.handle_command("verify", ["--help"]) is True
+    def test_help_flag(self, capsys):
+        with patch.object(wire_verify, "verify_wiring") as mock_verify:
+            assert wire_verify.handle_command("verify", ["--help"]) is True
+        mock_verify.assert_not_called()
+        assert "Exits non-zero on any ERROR finding." in capsys.readouterr().err
 
-    def test_help_word(self):
-        assert wire_verify.handle_command("verify", ["help"]) is True
+    def test_help_word(self, capsys):
+        with patch.object(wire_verify, "verify_wiring") as mock_verify:
+            assert wire_verify.handle_command("verify", ["help"]) is True
+        mock_verify.assert_not_called()
+        assert "Exits non-zero on any ERROR finding." in capsys.readouterr().err
 
     def test_error_findings_exit_non_zero(self):
         """Its own --help promises 'Exits non-zero on any ERROR finding' — keep that promise.
@@ -378,11 +388,16 @@ class TestHandleCommand:
                 wire_verify.handle_command("verify", [])
         assert exc.value.code != 0
 
-    def test_clean_run_does_not_exit(self):
+    def test_clean_run_does_not_exit(self, capsys):
         """The passing path must stay a normal return — only ERROR findings exit."""
         mock_result = {"ok": True, "errors": [], "warnings": ["cosmetic"], "info": []}
-        with patch.object(wire_verify, "verify_wiring", return_value=mock_result):
+        with patch.object(wire_verify, "verify_wiring", return_value=mock_result) as mock_verify:
             assert wire_verify.handle_command("verify", []) is True
+        mock_verify.assert_called_once_with()
+        err = capsys.readouterr().err
+        assert "Wire check passed" in err
+        assert "cosmetic" in err
+        assert "0 errors, 1 warnings" in err
 
 
 class TestRenderResults:

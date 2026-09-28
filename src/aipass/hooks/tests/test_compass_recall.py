@@ -4,7 +4,7 @@
 # Description: Tests for compass recall prompt handler
 # Branch: hooks
 # Created: 2026-07-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/prompt/compass_recall.py."""
@@ -26,7 +26,6 @@ from aipass.hooks.apps.handlers.lifecycle.compact import handle as pre_compact
 from aipass.hooks.apps.handlers.prompt.compass_recall import _governance_config, handle
 from aipass.hooks.apps.modules.cadence import reset_counter
 from aipass.hooks.apps.modules.engine import (
-    _budget_state_path,
     _check_budget,
     _load_budget_state,
     _save_budget_state,
@@ -88,14 +87,17 @@ CANDIDATE_LOW_RELEVANCE = {
     "relevance": 0.1,
 }
 
-REAL_PAYLOAD = {
-    "session_id": "abc-123-def",
-    "transcript_path": str(Path(tempfile.gettempdir()) / "transcript.jsonl"),
-    "cwd": str(Path.home() / "project"),
-    "permission_mode": "default",
-    "hook_event_name": "UserPromptSubmit",
-    "prompt": "How should we handle prompt config?",
-}
+
+def _real_payload(root: Path) -> dict:
+    """The official Claude Code hook keys, with every path under the test's own root."""
+    return {
+        "session_id": "abc-123-def",
+        "transcript_path": str(root / "transcript.jsonl"),
+        "cwd": str(root / "project"),
+        "permission_mode": "default",
+        "hook_event_name": "UserPromptSubmit",
+        "prompt": "How should we handle prompt config?",
+    }
 
 
 def _payload(prompt, session_id="test-session"):
@@ -384,11 +386,10 @@ class TestCompassRecallHandler:
             assert result["exit_code"] == 0
             assert result["stdout"] == ""
 
-    def test_no_session_id_degrades_safe(self):
+    def test_no_session_id_degrades_safe(self, monkeypatch):
         """No session_id in payload or env = no injection, no crash."""
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("CLAUDE_CODE_SESSION_ID", None)
-            result = handle({"prompt": "How should we handle prompt config?"})
+        monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+        result = handle({"prompt": "How should we handle prompt config?"})
 
         assert result["exit_code"] == 0
         assert result["stdout"] == ""
@@ -426,7 +427,7 @@ class TestCompassRecallHandler:
                 side_effect=lambda s: {**s, "messages_since_last": s.get("messages_since_last", 0) + 1},
             ),
         ):
-            result = handle(REAL_PAYLOAD)
+            result = handle(_real_payload(tmp_path))
 
             assert result["exit_code"] == 0
             assert "[GOOD] #56:" in result["stdout"]
@@ -653,6 +654,10 @@ class TestEngineBudget:
 
         with (
             patch(
+                "aipass.hooks.apps.modules.engine._budget_state_path",
+                side_effect=lambda sid="": tmp_path / f"budget-{sid}.json",
+            ),
+            patch(
                 "aipass.hooks.apps.modules.engine._run_handler",
                 return_value={"exit_code": 0, "stdout": "output", "stderr": "", "elapsed_ms": 1.0},
             ),
@@ -663,9 +668,11 @@ class TestEngineBudget:
                 config,
             )
 
-            path = _budget_state_path("payload-sid")
-            assert path is not None
-            assert "payload-sid" in str(path)
+        # The fire lands in the payload's file; the conftest env id gets none.
+        written = sorted(p.name for p in tmp_path.glob("budget-*.json"))
+        assert written == ["budget-payload-sid.json"]
+        state = json.loads((tmp_path / "budget-payload-sid.json").read_text(encoding="utf-8"))
+        assert state["test_hook"]["fire_count"] == 1
 
     def test_dispatch_reopens_the_budget_when_a_new_window_opens(self, tmp_path, monkeypatch):
         """The engine counts compass_recall's fires against the same max_per_session.

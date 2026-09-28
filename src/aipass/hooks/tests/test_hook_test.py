@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/hook_test.py."""
@@ -114,7 +114,7 @@ class TestPrintResults:
     def test_error_result_prints(self):
         with patch.object(hook_test.CONSOLE, "print") as mock_print:
             hook_test.print_results({"error": "No config found"})
-        mock_print.assert_called_once()
+        mock_print.assert_called_once_with("[red]No config found[/red]")
 
     def test_normal_results_print_summary(self):
         results = {
@@ -145,12 +145,14 @@ class TestHandleCommand:
     def test_runs_test_with_run_arg(self):
         with (
             patch.object(hook_test, "run_test", return_value={}) as mock_run,
-            patch.object(hook_test, "print_results"),
-            patch.object(hook_test.CONSOLE, "print"),
+            patch.object(hook_test, "print_results") as mock_results,
+            patch.object(hook_test.CONSOLE, "print") as mock_print,
         ):
             result = hook_test.handle_command("test", ["run"])
         assert result is True
-        mock_run.assert_called_once()
+        mock_run.assert_called_once_with(verbose=False)
+        mock_results.assert_called_once_with({}, verbose=False)
+        mock_print.assert_any_call("[bold cyan]HOOKS Test Runner[/bold cyan]")
 
 
 class TestProbeIsolation:

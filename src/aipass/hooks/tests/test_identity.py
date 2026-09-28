@@ -4,7 +4,7 @@
 # Description: Tests for identity prompt handler (cadence-gated 1.1.0, char budget enforced 1.2.0)
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/prompt/identity.py."""
@@ -32,8 +32,11 @@ _CADENCE_MODULE = "aipass.hooks.apps.modules.cadence"
 
 @pytest.fixture(autouse=True)
 def _cadence_fires(monkeypatch):
-    """Hold the cadence gate open so render tests never depend on the live turn counter."""
-    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: True)
+    """Hold the cadence gate open so render tests never depend on the live turn counter.
+
+    Open for the identity loader only: a handler that asked under another name would render nothing.
+    """
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "identity")
 
 
 class TestCadenceGate:

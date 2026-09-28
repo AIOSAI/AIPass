@@ -4,7 +4,7 @@
 # Description: Tests for post_compact_regrounding lifecycle handler (DPLAN-0276)
 # Branch: hooks
 # Created: 2026-08-01
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/lifecycle/post_compact_regrounding.py."""
@@ -151,10 +151,9 @@ class TestPostCompactRegrounding:
         (the actual incident pattern), then the next tool call must reground
         exactly once and stay silent after that."""
 
-        cadence._turn = None
-        cadence._config = None
-
         with (
+            patch.object(cadence, "_turn", None),
+            patch.object(cadence, "_config", None),
             patch("aipass.hooks.apps.modules.cadence._GUARD_DIR", tmp_path),
             patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": "incident-session"}),
             patch("aipass.hooks.apps.modules.grounding_content.load_kernel", return_value="KERNEL"),
@@ -272,9 +271,9 @@ def _seat(tmp_path, sizes=None, fresh_bytes=None):
     transcript.write_text("", encoding="utf-8")
     config = tmp_path / "cadence.json"
     config.write_text(json.dumps({} if fresh_bytes is None else {"regroup_fresh_bytes": fresh_bytes}), encoding="utf-8")
-    cadence._turn = None
-    cadence._config = None
     with (
+        patch.object(cadence, "_turn", None),
+        patch.object(cadence, "_config", None),
         patch.object(cadence, "_GUARD_DIR", tmp_path),
         patch.object(cadence, "_CONFIG_PATH", config),
         patch.dict("os.environ", {"CLAUDE_CODE_SESSION_ID": _SEAT}),
@@ -285,8 +284,6 @@ def _seat(tmp_path, sizes=None, fresh_bytes=None):
         patch(f"{_RN}.build_notice", return_value=""),
     ):
         yield cadence, transcript
-    cadence._turn = None
-    cadence._config = None
 
 
 def _grow(transcript, size):
@@ -316,8 +313,8 @@ def _prompt(cadence, transcript, text="the owner types"):
 
 def _sibling(cadence, loader, transcript, text="the owner types"):
     """One loader's process for the prompt already in *transcript*: a fresh turn memo, the same token."""
-    cadence._turn = None
-    return cadence.should_fire(loader, {"prompt": text, "transcript_path": str(transcript)})
+    with patch.object(cadence, "_turn", None):
+        return cadence.should_fire(loader, {"prompt": text, "transcript_path": str(transcript)})
 
 
 class TestActiveStartupInstruction:
@@ -679,8 +676,8 @@ class TestRegroupBudget752:
         Returns the additionalContext of every non-silent fire, in order."""
 
         sizes = sizes or TODAYS_SIZES
-        cadence._turn = None
         with (
+            patch.object(cadence, "_turn", None),
             patch(f"{_GC}.load_branch", return_value=_section("BRANCH", sizes["branch"])),
             patch(f"{_GC}.load_identity", return_value=_section("IDENTITY", sizes["identity"])),
             patch(f"{_GC}.load_kernel", return_value=_section("KERNEL", sizes["kernel"])),

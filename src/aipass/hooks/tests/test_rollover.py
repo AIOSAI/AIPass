@@ -4,7 +4,7 @@
 # Description: Tests for rollover lifecycle handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/lifecycle/rollover.py."""
@@ -84,42 +84,46 @@ class TestRolloverHandler:
         with patch("subprocess.run", return_value=mock_result):
             has_overdue, summary = _run_check(MagicMock(), None)
 
-        assert has_overdue
-        assert "ready for rollover" in summary.lower()
+        assert has_overdue is True
+        assert summary == CHECK_OVERDUE_OUTPUT.strip()
 
     def test_run_check_parses_clean(self):
         mock_result = _mock_run(stdout=CHECK_CLEAN_OUTPUT)
         with patch("subprocess.run", return_value=mock_result):
-            has_overdue, _ = _run_check(MagicMock(), None)
+            has_overdue, summary = _run_check(MagicMock(), None)
 
-        assert not has_overdue
+        assert has_overdue is False
+        assert summary == CHECK_CLEAN_OUTPUT.strip()
 
     def test_run_check_timeout_returns_false(self):
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 30)):
-            has_overdue, _ = _run_check(MagicMock(), None)
+            has_overdue, summary = _run_check(MagicMock(), None)
 
-        assert not has_overdue
+        assert has_overdue is False
+        assert summary == "check timed out"
 
     def test_run_rollover_success(self):
         mock_result = _mock_run(stdout="done", returncode=0)
         with patch("subprocess.run", return_value=mock_result):
-            success, _ = _run_rollover(MagicMock(), None)
+            success, output = _run_rollover(MagicMock(), None)
 
-        assert success
+        assert success is True
+        assert output == "done"
 
     def test_run_rollover_failure(self):
         mock_result = _mock_run(stdout="error", returncode=1)
         with patch("subprocess.run", return_value=mock_result):
-            success, _ = _run_rollover(MagicMock(), None)
+            success, output = _run_rollover(MagicMock(), None)
 
-        assert not success
+        assert success is False
+        assert output == "error"
 
     def test_run_rollover_timeout(self):
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 110)):
             success, msg = _run_rollover(MagicMock(), None)
 
-        assert not success
-        assert "timed out" in msg
+        assert success is False
+        assert msg == "Rollover timed out (110s)"
 
 
 class TestTheCompactingBranchIsNamed:
@@ -189,8 +193,9 @@ class TestTheCompactingBranchIsNamed:
             "(oldest by number -> .backup/todo/hooks/backlog.json)"
         )
         rollover, _ = self._spy(monkeypatch, check_stdout=todos_line)
-        has_overdue, _ = rollover._run_check(tmp_path, "hooks")
-        assert has_overdue
+        has_overdue, summary = rollover._run_check(tmp_path, "hooks")
+        assert has_overdue is True
+        assert summary == todos_line
 
 
 class TestFindRepoRootFailLoud:

@@ -4,7 +4,7 @@
 # Description: Tests for rm_gate security handler
 # Branch: hooks
 # Created: 2026-06-02
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/security/rm_gate.py."""
@@ -174,7 +174,7 @@ class TestClauseHasRawRecursiveRm:
 
 
 class TestHandle:
-    CWD = "/home/patrick/Projects/AIPass/src/aipass/hooks"
+    CWD = str(_BRANCH)
 
     def _bash(self, command: str) -> dict:
         return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": self.CWD})
@@ -247,7 +247,7 @@ class TestDeletionRecord:
     silently today. This is a RECORD, not a gate - nothing new is blocked.
     """
 
-    CWD = "/home/patrick/Projects/AIPass/src/aipass/hooks"
+    CWD = str(_BRANCH)
 
     def _bash(self, command: str, cwd: str | None = None) -> dict:
         return handle({"tool_name": "Bash", "tool_input": {"command": command}, "cwd": cwd or self.CWD})
@@ -378,7 +378,7 @@ class TestDeletionRecord:
             self._bash('rm "my notes.txt"')
 
         records = self._audit_records(caplog)
-        assert records
+        assert len(records) == 1
         assert 'rm "my notes.txt"' in records[0].getMessage()
 
 
@@ -422,7 +422,7 @@ class TestAllowDenyUnchanged:
                 {
                     "tool_name": "Bash",
                     "tool_input": {"command": command},
-                    "cwd": "/home/patrick/Projects/AIPass/src/aipass/hooks",
+                    "cwd": str(_BRANCH),
                 }
             )
             assert result["exit_code"] == expected, f"decision changed for: {command!r}"

@@ -4,7 +4,7 @@
 # Description: Tests for persistent_alert handler and alert_dismiss module (cadence-gated since 1.1.0)
 # Branch: hooks
 # Created: 2026-07-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/prompt/persistent_alert.py and apps/modules/alert_dismiss.py."""
@@ -41,7 +41,8 @@ def _isolated_guards_and_open_beat(tmp_path, monkeypatch):
     guards = tmp_path / "alert-guards"
     guards.mkdir()
     monkeypatch.setattr(f"{_MODULE}._GUARD_DIR", guards)
-    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: True)
+    # Open only for the alert loader's own beat: a handler asking the wrong loader stays shut.
+    monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name == "alert")
 
 
 def _make_alert(
@@ -472,7 +473,7 @@ class TestAlertCadence:
     def test_arrival_announces_even_when_the_beat_says_skip(self, tmp_path, monkeypatch):
 
         aipass_dir = self._seat(tmp_path)
-        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda *_a, **_k: False)
+        monkeypatch.setattr(f"{_CADENCE_MODULE}.should_fire", lambda loader_name, *_a, **_k: loader_name != "alert")
         with patch.object(persistent_alert, "_find_aipass_dir", return_value=aipass_dir):
             result = persistent_alert.handle({"session_id": "s-arrival"})
 
@@ -606,6 +607,10 @@ class TestAlertDismiss:
 
         assert handle_command("status", []) is False
 
-    def test_handle_command_help(self):
+    def test_handle_command_help(self, capsys):
+        """--help prints the help screen and dismisses nothing - not even an id named --help."""
+        with patch("aipass.hooks.apps.modules.alert_dismiss._dismiss_alert") as mock_dismiss:
+            assert handle_command("dismiss", ["--help"]) is True
 
-        assert handle_command("dismiss", ["--help"]) is True
+        assert "dismiss — Remove an alert" in capsys.readouterr().err
+        mock_dismiss.assert_not_called()

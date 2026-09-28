@@ -4,7 +4,7 @@
 # Description: Tests for git_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/security/git_gate.py."""
@@ -27,8 +27,12 @@ _REPO = Path(__file__).resolve().parents[4]
 
 CWD = str(_REPO / "src" / "aipass" / "api")
 DEVPULSE_CWD = str(_REPO / "src" / "aipass" / "devpulse")
-PROVIDER_SETTINGS = str(Path.home() / ".claude" / "settings.json")
 PROJECT_HOOK = str(_REPO / ".claude" / "hooks" / "some_hook.py")
+
+
+def _provider_settings() -> str:
+    """The provider's settings path, read at call time, never at import."""
+    return str(Path.home() / ".claude" / "settings.json")
 
 
 def _bash(cmd: str) -> dict:
@@ -385,7 +389,7 @@ class TestGitGateEditProtection:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "tool_input": {"file_path": _provider_settings()},
                 "cwd": CWD,
             }
         )
@@ -395,7 +399,7 @@ class TestGitGateEditProtection:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "tool_input": {"file_path": _provider_settings()},
                 "cwd": DEVPULSE_CWD,
             }
         )
@@ -478,7 +482,7 @@ class TestGitGateMisc:
         result = handle(
             {
                 "tool_name": "Edit",
-                "tool_input": {"file_path": PROVIDER_SETTINGS},
+                "tool_input": {"file_path": _provider_settings()},
                 "cwd": CWD,
             }
         )
