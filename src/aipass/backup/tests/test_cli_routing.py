@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_cli_routing.py
 # Description: Tests for apps/backup.py's command routing and the help gate every apps/modules/ verb carries
-# Version: 2.0.4
+# Version: 2.0.5
 # Created: 2026-06-12
 # Modified: 2026-09-27
 # =============================================
@@ -242,12 +242,17 @@ class TestPrintHelp:
     """The entry point's curated command reference, read on the channel a user reads."""
 
     def test_print_help_lists_every_verb_in_commands_and_every_flag_in_options(
-        self, capsys: pytest.CaptureFixture[str]
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """print_help lists every verb as a COMMANDS row and every flag as an OPTIONS row."""
         assert callable(entry.print_help)
+        # header() fires @cli's event bus; replaced where the entry point binds it, so nothing fires.
+        titles: list[str] = []
+        monkeypatch.setattr(entry, "header", lambda title, *args, **kwargs: titles.append(title))
 
         entry.print_help()
+
+        assert titles == ["BACKUP — project backup & drive sync"]
 
         out, err = capsys.readouterr()
         assert err == "", f"the help page wrote to stderr: {err!r}"

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.2
+# Version: 3.0.3
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -28,7 +28,7 @@ from aipass.backup.apps.handlers.drive import test as drive_test
 from aipass.backup.apps.handlers.drive import tracker as drive_tracker
 from aipass.backup.apps.handlers.drive import upload as drive_upload
 from aipass.backup.apps.handlers.path import builder as path_builder
-from aipass.backup.apps.modules import drive_check, drive_clear, drive_stats, drive_sync
+from aipass.backup.apps.modules import display, drive_check, drive_clear, drive_stats, drive_sync
 
 # The product is imported for real, not stubbed into sys.modules. The upload path
 # publishes to a REAL Google account; conftest's autouse ``sealed_google_edge``
@@ -255,6 +255,22 @@ class TestDriveClient:
         assert client.get_or_create_backup_folder() is None
         assert client.backup_folder_id is None
         drive_api.assert_not_called()
+
+    def test_an_outage_never_creates_a_second_root_or_resets_the_tracker(self, drive_api: MagicMock) -> None:
+        """Mutant: the search's no-answer falls through to the create, as an empty search does."""
+        service = MagicMock(name="drive_service")
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        client.backup_folder_id = "cached_root"
+        client.file_tracker = {"kept.txt": {"drive_id": "abc"}}
+        # Verify and search both get no answer; the last two are what a fall-through would consume.
+        drive_api.side_effect = [None, None, {"id": "second_root"}, {"id": "second_root", "trashed": False}]
+
+        assert client.get_or_create_backup_folder() is None
+        service.files.return_value.create.assert_not_called()
+        assert client.file_tracker == {"kept.txt": {"drive_id": "abc"}}
+        assert client.last_error == "Backup folder search got no answer - not creating a second root"
+        assert drive_api.call_count == 2
 
     def test_project_folder_found_is_returned_and_cached_by_project_name(self, drive_api: MagicMock) -> None:
         """A found project folder is returned and cached under its project name."""
@@ -710,12 +726,14 @@ class TestDriveTest:
             "get_drive_service",
             MagicMock(return_value=MagicMock(name="drive_service")),
         )
-        drive_api.return_value = None
+        # The search answers empty and the create gets no answer: nothing sets last_error, so the fallback speaks.
+        drive_api.side_effect = [{"files": []}, None]
 
         result = drive_test.test_connectivity(drive_client.DriveClient())
 
         assert result["success"] is False
         assert result["error"] == "Failed to access backup folder"
+        assert drive_api.call_count == 2
         assert result["folder_id"] is None
 
 
@@ -906,10 +924,14 @@ class TestDriveSync:
             return {"success": True, "uploaded": len(files), "failed": 0, "bytes_uploaded": 0}
 
         monkeypatch.setattr(drive_upload, "upload_batch", _record)
+        # header() fires @cli's event bus; replaced where display binds it, so nothing fires.
+        titles: list[str] = []
+        monkeypatch.setattr(display, "header", lambda title, *args, **kwargs: titles.append(title))
 
         flagged_args = [str(flagged), "--project", "renamed", "--note", "nightly"]
         assert drive_sync.handle_command("drive_sync", flagged_args) is True
         assert drive_sync.handle_command("drive_sync", [str(plain)]) is True
+        assert titles == ["Backup — Drive sync", "Backup — Drive sync"]
 
         # The flagged row carries the values the flags spelled; the plain row
         # carries the fallbacks (the directory's own name, and no note). Delete

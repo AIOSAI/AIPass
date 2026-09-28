@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-20
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
@@ -18,10 +18,13 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from aipass.backup.apps.handlers.path.builder import build_snapshot_path, build_versioned_store
 from aipass.backup.apps.handlers.scan import ceiling
 from aipass.backup.apps.handlers.scan.ceiling import DEFAULT_MAX_FILES, check_ceiling
 from aipass.backup.apps.modules import all as all_mod
+from aipass.backup.apps.modules import display
 from aipass.backup.apps.modules.all import handle_command
 from aipass.backup.apps.modules.snapshot import run_snapshot
 from aipass.backup.apps.modules.versioned import run_versioned
@@ -303,7 +306,9 @@ class TestRunRefusal:
 class TestSharedScanSeeding:
     """The 'all' shared scan must run against a seeded .backupignore."""
 
-    def test_first_run_seeds_ignore_before_the_shared_scan(self, tmp_path: Path) -> None:
+    def test_first_run_seeds_ignore_before_the_shared_scan(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A project's FIRST 'all' run keeps seed-excluded artifacts out of the versioned store."""
 
         root = tmp_path / "rustproj"
@@ -313,10 +318,15 @@ class TestSharedScanSeeding:
         (root / "src" / "main.rs").write_text("fn main() {}", encoding="utf-8")
 
         assert not (root / ".backupignore").exists()
+        # header() fires @cli's event bus; replaced where display binds it, so nothing fires.
+        titles: list[str] = []
+        monkeypatch.setattr(display, "header", lambda title, *args, **kwargs: titles.append(title))
         # Under the ceiling, 'all' goes on to run_drive_sync — keep the suite off the network.
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 
+        # A subset, not a count: --quiet does not reach the two modes yet (all.py passes no show_panels).
+        assert set(titles) <= {"Backup — Snapshot", "Backup — Versioned"}
         store = build_versioned_store(str(root))
         leaked = list(store.rglob("*rcgu*")) if store.exists() else []
         assert leaked == [], f"seed-excluded artifacts reached the versioned store: {leaked}"

@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
-# Version: 1.3.4
+# Version: 1.3.5
 # Created: 2026-06-12
 # Modified: 2026-09-27
 # =============================================
@@ -30,6 +30,7 @@ from aipass.backup.apps.handlers.project import setup
 from aipass.backup.apps.handlers.project.setup import create_backup_dir
 from aipass.backup.apps.handlers.report.result import BackupResult
 from aipass.backup.apps.handlers.scan.filter import filter_paths
+from aipass.backup.apps.modules import display
 from aipass.backup.apps.modules.all import handle_command
 from aipass.backup.apps.modules.snapshot import run_snapshot
 from aipass.backup.apps.modules.versioned import run_versioned
@@ -434,13 +435,19 @@ class TestBuiltinTmpFloor:
         # baseline; rglob('*.tmp') catches the folder and both copies.
         assert list(store.rglob("*.tmp")) == []
 
-    def test_all_lane_skips_temps_in_both_stores(self, tmp_path):
+    def test_all_lane_skips_temps_in_both_stores(self, tmp_path, monkeypatch):
         """'all' shares one scan between both stores; neither gets a temp."""
         root = tmp_path / "proj"
         real = _json_folder_with_temps(root)
+        # header() fires @cli's event bus; replaced where display binds it, so nothing fires.
+        titles: list[str] = []
+        monkeypatch.setattr(display, "header", lambda title, *args, **kwargs: titles.append(title))
         # Under the ceiling, 'all' reaches run_drive_sync -- keep the suite off the network.
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
+
+        # A subset, not a count: --quiet does not reach the two modes yet (all.py passes no show_panels).
+        assert set(titles) <= {"Backup — Snapshot", "Backup — Versioned"}
 
         dest = build_snapshot_path(str(root))
         store = build_versioned_store(str(root))

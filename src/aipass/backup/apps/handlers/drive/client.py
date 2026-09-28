@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.0.0
+# Version: 2.0.1
 # Created: 2026-04-16
-# Modified: 2026-06-12
+# Modified: 2026-09-27
 # =============================================
 
 """Google Drive client.
@@ -171,7 +171,12 @@ class DriveClient:
                 fields="files(id,name)",
             )
             result = self._api_call(request)
-            if result and result.get("files"):
+            if result is None:
+                # No answer is not an empty search: a create here makes a second root and resets the tracker.
+                self.last_error = "Backup folder search got no answer - not creating a second root"
+                logger.warning(self.last_error)
+                return None
+            if result.get("files"):
                 self.backup_folder_id = result["files"][0]["id"]
                 trail.log_operation(
                     "get_backup_folder",

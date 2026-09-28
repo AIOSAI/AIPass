@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_error_resilience.py
 # Description: Tests for error resilience in snapshot.py, versioned.py, the document handlers and audit trail
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-06-12
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for error resilience in apps/modules/snapshot.py, versioned.py, the document handlers and audit trail."""
@@ -24,7 +24,7 @@ from aipass.backup.apps.handlers.drive.tracker import load_tracker
 from aipass.backup.apps.handlers.json import json_handler
 from aipass.backup.apps.handlers.project import config, registry, setup
 from aipass.backup.apps.handlers.project.config import DEFAULTS, load_project_config
-from aipass.backup.apps.handlers.state import timestamps
+from aipass.backup.apps.handlers.state import backup_timestamps, timestamps
 from aipass.backup.apps.handlers.state.timestamps import load_timestamps
 from aipass.backup.apps.modules import snapshot
 from aipass.backup.apps.modules.snapshot import run_snapshot
@@ -527,3 +527,17 @@ class TestAuditLog:
             "save_timestamps",
         ], "a refused append stopped the run's later audit calls"
         assert warned.count("Failed to write operation log: audit stream unwritable") == len(attempted)
+
+
+class TestBackupTimestampsSeam:
+    """The last-run timestamps map follows the test seam, so a test run never names the branch's live file."""
+
+    def test_the_timestamps_map_is_written_under_the_seam_never_the_branch(self, mock_infrastructure: Path) -> None:
+        """Mutant: timestamps_path() ignores AIPASS_TEST_LOG_DIR and answers backup_json/ under the branch."""
+        # The path is asserted before the write: a product naming the live file fails here and never writes it.
+        assert backup_timestamps.timestamps_path() == mock_infrastructure / "backup_timestamps.json"
+
+        backup_timestamps.update_timestamp("snapshot")
+
+        stored = json.loads((mock_infrastructure / "backup_timestamps.json").read_text(encoding="utf-8"))
+        assert set(stored) == {"snapshot"}
