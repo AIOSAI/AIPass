@@ -13,6 +13,7 @@
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -35,6 +36,32 @@ _PROC = "aipass.flow.apps.handlers.mbank.process"
 
 # Captured before any test patches os.open: the stand-in below delegates here.
 _REAL_OS_OPEN = os.open
+
+
+def _move_answer(source: Path, destination: Path) -> OSError | None:
+    """Move ``source`` with the test's own hands and keep what the platform answers.
+
+    Returns:
+        The OSError the move raised, or None when the move succeeded.
+    """
+    try:
+        shutil.move(str(source), str(destination))
+    except OSError as exc:
+        return exc
+    return None
+
+
+def _mkdir_answer(path: Path) -> OSError | None:
+    """Make ``path`` a directory the way the heal does and keep the platform's answer.
+
+    Returns:
+        The OSError the mkdir raised, or None when the directory was made.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return exc
+    return None
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None):
@@ -275,19 +302,25 @@ class TestArchivePlan:
         assert processed_dir.exists()
         assert (processed_dir / "FPLAN-0300.md").exists()
 
-    def test_archive_returns_false_on_move_failure(self, tmp_path):
-        """Return False when shutil.move raises an exception."""
-        plan_file = tmp_path / "FPLAN-0400.md"
-        plan_file.write_text("content", encoding="utf-8")
-        processed_dir = tmp_path / "processed"
+    def test_archive_returns_false_on_move_failure(self, tmp_path, mock_logger):
+        """Return False when the move itself raises.
 
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir),
-            patch("aipass.flow.apps.handlers.mbank.process.shutil.move", side_effect=OSError("disk full")),
-        ):
+        The failure is a real one on disk: the plan file was never written, so
+        the move has no source. The test makes the same move on a missing twin
+        first and asserts only that the platform refused it.
+        Mutant: the except's `return False` -> `return True` reddens this.
+        """
+        plan_file = tmp_path / "FPLAN-0400.md"
+        processed_dir = tmp_path / "processed"
+        answer = _move_answer(tmp_path / "twin-FPLAN-0400.md", tmp_path / "twin-dest.md")
+        assert isinstance(answer, OSError), "premise: this platform moved a file that does not exist"
+
+        with patch("aipass.flow.apps.handlers.mbank.process.PROCESSED_PLANS_DIR", processed_dir):
             result = archive_plan(plan_file)
 
         assert result is False
+        assert list(processed_dir.iterdir()) == []
+        assert mock_logger.error.call_args.args[1] == plan_file
 
     def test_archive_returns_false_when_dest_not_verified(self, tmp_path):
         """Return False when destination file does not exist after move."""
@@ -368,11 +401,13 @@ class TestSaveFlowRegistryAdditional:
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
             patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}.time.sleep"),
+            patch(f"{_PROC}._sleep") as sleep,
         ):
             save_flow_registry(data, registry_file=reg_file.name)
 
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
         assert saved["plans"]["1"]["processed"] is True
         assert not lock.exists()
@@ -392,26 +427,37 @@ class TestSaveFlowRegistryAdditional:
         with (
             patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
             patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}.time.sleep"),
+            patch(f"{_PROC}._sleep") as sleep,
             pytest.raises(Exception) as excinfo,
         ):
             proc.save_flow_registry({"next_number": 2, "plans": {}}, registry_file=reg_file.name)
 
-        assert len(attempts) == proc._LOCK_RETRIES
+        # The count the message states is the count of creates made, read off
+        # the attempts rather than the private budget constant.
+        budget = len(attempts)
+        assert budget > 1
         assert str(lock) in str(excinfo.value)
-        assert f"{proc._LOCK_RETRIES} attempts" in str(excinfo.value)
+        assert f"{budget} attempts" in str(excinfo.value)
         assert json.loads(reg_file.read_text(encoding="utf-8")) == before
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
         with (
             patch(f"{_PROC}.os.open", side_effect=fake_open),
-            patch(f"{_PROC}.time.sleep"),
+            patch(f"{_PROC}._sleep"),
             pytest.raises(PermissionError) as helper_exc,
         ):
             proc._acquire_lock(lock)
 
         assert helper_exc.value.__cause__ is raised[-1]
-        assert len(attempts) == proc._LOCK_RETRIES
+        assert len(attempts) == budget
 
     def test_lock_create_error_is_reported_as_itself(self, tmp_path, mock_logger, platform_create_answer):
         """A lock create that fails with neither contention nor denial names its own cause.
@@ -536,10 +582,22 @@ class TestVerifyAndHealOrphanedPlansAdditional:
     """Additional edge cases for verify_and_heal_orphaned_plans."""
 
     def test_handles_rename_exception(self, tmp_path):
-        """When rename raises, report failed_to_heal."""
+        """When the heal's move raises, report failed_to_heal.
+
+        The failure is a real one on disk: the processed path is a file, so
+        the directory the heal makes before its rename cannot be made. The test
+        asks the platform the same question on a twin first.
+        Mutants: the except's `failed_to_heal += 1` -> `+= 0`, and its
+        `"status": "heal_failed"` -> `"healed"`, each redden this.
+        """
         plan_file = tmp_path / "FPLAN-0030.md"
         plan_file.write_text("orphan", encoding="utf-8")
         processed_dir = tmp_path / "processed"
+        processed_dir.write_text("a file where the directory goes", encoding="utf-8")
+        twin = tmp_path / "twin-processed"
+        twin.write_text("", encoding="utf-8")
+        answer = _mkdir_answer(twin)
+        assert isinstance(answer, OSError), "premise: this platform made a directory over a file"
 
         registry = {
             "plans": {
@@ -557,13 +615,13 @@ class TestVerifyAndHealOrphanedPlansAdditional:
                 "aipass.flow.apps.handlers.mbank.process._get_all_registry_files",
                 return_value=["fplan_registry.json"],
             ),
-            patch.object(Path, "rename", side_effect=OSError("cross-device")),
         ):
             result = verify_and_heal_orphaned_plans()
 
         assert result["orphans_found"] == 1
         assert result["failed_to_heal"] == 1
         assert result["orphans"][0]["status"] == "heal_failed"
+        assert plan_file.read_text(encoding="utf-8") == "orphan"
 
     def test_skips_registries_that_fail_to_load(self):
         """When a registry fails to load during healing, skip it."""

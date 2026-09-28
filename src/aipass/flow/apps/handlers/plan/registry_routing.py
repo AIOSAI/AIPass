@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: registry_routing.py
 # Description: Plan-type Registry Routing Helpers
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-07-28
 # Modified: 2026-09-28
 # =============================================

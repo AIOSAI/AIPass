@@ -20,9 +20,12 @@ import aipass.flow.apps as flow_apps
 import aipass.prax.apps.modules.logger as prax_logger
 import aipass.flow.apps.handlers.registry.load_registry as load_registry_module
 
-# Directories the apps/ walk below never enters. The source is the ruling of
-# 2026-09-27: a dropbox is ignored by all, and a sandbox like .archive is too.
-# Written here as literals on purpose, not imported from seedgo's skip_dirs.py.
+# Directories the apps/ walk below never enters. That nothing looks into a
+# dropbox or an .archive follows the project owner's ruling of 2026-09-27 20:42
+# (as paraphrased: nothing looks into a dropbox and nothing runs out of one, a
+# sandbox like .archive). That __pycache__ is skipped too, and that the skip is
+# these three literal names, compared relative to the walk's root, is flow's
+# decision (leg 3), not imported from seedgo's skip_dirs.py.
 _WALK_IGNORED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -69,9 +72,10 @@ class TestMockLoggerReachesTheConsumersBinding:
         assert missed == [], f"modules still holding a live logger: {missed}"
 
     def test_the_source_attribute_is_patched_too(self, mock_logger):
-        """A module imported LATER in a test must bind the mock, not the real one.
+        """The source attribute is patched as well: code binding system_logger after the fixture ran gets the mock.
 
-        prax_logger is imported at the top; the attribute is still read here, at call time.
+        prax_logger is imported at the top of this file, before any fixture; what
+        this reads is its attribute, at call time, inside the fixture's window.
         """
         assert prax_logger.system_logger is mock_logger
 
@@ -166,9 +170,18 @@ class TestThePreImportListIsComplete:
         )
 
     def test_the_caller_detector_never_enters_a_dropbox(self, tmp_path):
-        """A dropbox and an .archive are ignored by all (ruling of 2026-09-27); only real.py counts."""
-        root = tmp_path / "apps"
-        for folder in (root, root / "dropbox", root / ".archive"):
+        """Only real.py, the live control, counts: a dropbox, an .archive and a __pycache__ are skipped.
+
+        The root stands inside a directory named dropbox, so a skip that read the
+        whole path rather than the parts below the root would drop real.py too.
+        The first two skips follow the project owner's ruling of 2026-09-27;
+        __pycache__ is flow's decision (leg 3). The walk is test-module code the
+        mutant runner cannot serve and this pin was green from its first run; its
+        proof is two hand mutants of leg 4 (__pycache__ dropped from the set; the
+        skip read on the whole path), each of which reddens it.
+        """
+        root = tmp_path / "dropbox" / "apps"
+        for folder in (root, root / "dropbox", root / ".archive", root / "__pycache__"):
             folder.mkdir(parents=True)
             (folder / "caller.py").write_text("ROOT = find_repo_root()\n", encoding="utf-8")
         (root / "caller.py").rename(root / "real.py")

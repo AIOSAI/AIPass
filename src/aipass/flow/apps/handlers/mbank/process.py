@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: process.py
 # Description: Memory Processing Handler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2025-11-25
 # Modified: 2026-09-28
 # =============================================
@@ -50,6 +50,15 @@ _LOCK_RETRIES = 10
 _LOCK_BACKOFF_BASE = 0.05
 
 
+def _sleep(seconds: float) -> None:
+    """time.sleep(seconds), the lock backoff's wait.
+
+    The reason is the tests alone: they patch this name so the backoff neither
+    waits nor replaces time.sleep for the whole process (flow's decision, leg 4).
+    """
+    time.sleep(seconds)
+
+
 def _acquire_lock(lock_path: Path) -> bool:
     """Atomically acquire a lockfile via O_CREAT|O_EXCL with retry+backoff.
 
@@ -86,7 +95,7 @@ def _acquire_lock(lock_path: Path) -> bool:
             logger.warning("[%s] Lock creation failed for %s: %s", MODULE_NAME, lock_path, exc)
             raise
         delay = _LOCK_BACKOFF_BASE * (2**attempt)
-        time.sleep(delay)
+        _sleep(delay)
         waited += delay
     if denial is not None:
         raise PermissionError(

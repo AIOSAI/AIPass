@@ -79,7 +79,7 @@ class TestDelegation:
     def test_returns_none_when_flow_has_no_dashboard(self, flow_root):
         """No dashboard file means no branch to write to — refuse, never create.
 
-        None, not False: False is kept for a push that failed (leg 3 decision).
+        None, not False: False is kept for a push that failed (flow's decision, leg 3).
         Mutant: return result -> return bool(result) reddens this.
         """
         assert update_local.update_dashboard_local() is None

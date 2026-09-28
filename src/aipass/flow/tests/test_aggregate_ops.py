@@ -194,11 +194,13 @@ class TestSaveBranchRegistry:
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
         data = {"plans": {"3": {"status": "closed"}}, "next_number": 4}
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = save_branch_registry(reg_file, data)
 
         assert result is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         saved = json.loads(reg_file.read_text(encoding="utf-8"))
         assert saved["plans"]["3"]["status"] == "closed"
         assert not lock.exists()
@@ -214,7 +216,7 @@ class TestSaveBranchRegistry:
         lock = reg_file.with_suffix(".lock")
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.save_branch_registry(reg_file, {"plans": {"1": {}}})
 
         assert result is False
@@ -223,6 +225,14 @@ class TestSaveBranchRegistry:
         denial = next((arg for arg in logged if isinstance(arg, PermissionError)), None)
         assert denial is not None, logged
         assert str(lock) in str(denial)
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in str(denial)
         assert denial.__cause__ is raised[-1]
         # The budget as the denial reports it; the attempts made must match it.
         reported = re.search(r"still denied after (\d+) attempts", str(denial))
@@ -513,11 +523,13 @@ class TestSaveCentral:
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
         data = {"active_plans": [{"plan_id": "FPLAN-0001"}], "branches": {}}
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = save_central(central_file, central_dir, data)
 
         assert result is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         assert json.loads(central_file.read_text(encoding="utf-8")) == data
         assert not lock.exists()
 
@@ -534,7 +546,7 @@ class TestSaveCentral:
         lock = central_file.with_suffix(".lock")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}.time.sleep"):
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.save_central(central_file, central_dir, {"active_plans": [{}], "branches": {}})
 
         assert result is False
@@ -548,6 +560,12 @@ class TestSaveCentral:
         assert reported, logged
         assert int(reported.group(1)) > 1
         assert len(attempts) == int(reported.group(1))
+        # What each wait was given, as above.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in logged
 
 
 # ═══════════════════════════════════════════════════════════

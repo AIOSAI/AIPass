@@ -375,12 +375,14 @@ class TestSaveRegistry:
 
         with (
             patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+            patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
         ):
             result = plan_reg.save_registry(data, registry_file="fplan_registry.json")
 
         assert result is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         saved = json.loads(target.read_text(encoding="utf-8"))
         assert saved["plans"]["7"]["subject"] == "landed"
         assert not lock.exists()
@@ -401,7 +403,7 @@ class TestSaveRegistry:
 
         with (
             patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}.time.sleep"),
+            patch(f"{_PLAN_REG_MOD}._sleep") as sleep,
         ):
             result = plan_reg.save_registry({"plans": {"1": {}}, "next_number": 2}, registry_file=target.name)
 
@@ -418,6 +420,14 @@ class TestSaveRegistry:
         budget = int(reported.group(1))
         assert budget > 1
         assert len(attempts) == budget
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == budget
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in logged
         # The cause chain, read through the public door: save_registry logs the
         # exception itself, so the operator's log carries the last denial.
         logged_errors = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]

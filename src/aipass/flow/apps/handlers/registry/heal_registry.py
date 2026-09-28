@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: heal_registry.py
 # Description: Registry Doctrine Self-Heal Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-07-29
 # Modified: 2026-09-28
 # =============================================

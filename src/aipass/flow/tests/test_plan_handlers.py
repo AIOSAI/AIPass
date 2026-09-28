@@ -695,7 +695,12 @@ class TestCreatePlanImpl:
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_no_branch_dashboard_is_said_as_such(self, mock_jh, bus):
-        """The push's None: no dashboard there, so no branch is tracking the plan."""
+        """The push's None: no dashboard there, so no branch is tracking the plan.
+
+        A guard: the product before leg 3 said the same for its False, so this
+        does not tell old from new; its proof is its mutant.
+        Mutant: `if branch_dashboard_success is None:` -> `if branch_dashboard_success is False:` reddens this.
+        """
         deps = self._make_deps(push_flow_to_branch_dashboard=MagicMock(return_value=None))
 
         success, _, _, _, _, msgs = create_plan_impl(subject="test", **deps)
@@ -703,6 +708,22 @@ class TestCreatePlanImpl:
         assert success is True
         dims = [m["text"] for m in msgs if m.get("type") == "dim"]
         assert any("No branch dashboard" in t and "no branch is tracking this plan" in t for t in dims)
+
+    @pytest.mark.parametrize("answer, failed", [(None, False), (False, True)])
+    @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
+    def test_no_local_dashboard_is_not_logged_as_a_failure(self, mock_jh, answer, failed, bus, mock_logger):
+        """update_dashboard_local's None means flow has no dashboard, not a failure; its False warns.
+
+        Mutant: `if dashboard_success is False:` -> `if not dashboard_success:` reddens the None case.
+        """
+        deps = self._make_deps(update_dashboard_local=MagicMock(return_value=answer))
+
+        success, _, _, _, _, _ = create_plan_impl(subject="test", **deps)
+
+        assert success is True
+        deps["update_dashboard_local"].assert_called_once_with()
+        warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
+        assert any("Failed to update DASHBOARD.local.json" in w for w in warned) is failed
 
     @patch("aipass.flow.apps.handlers.plan.create_ops.json_handler", spec=True)
     def test_empty_subject_produces_filename_without_slug(self, mock_jh, bus):

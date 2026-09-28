@@ -13,6 +13,8 @@
 # seedgo: no-test-needed(constant) — each module's print_help() and print_introspection() literal text
 
 import re
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -36,6 +38,19 @@ from aipass.flow.apps.modules import (
 #
 # Free-text safety is asserted alongside it: a plan subject containing the word
 # "help" must stay a subject.
+
+
+def _read_answer(path: Path) -> OSError | None:
+    """Read ``path`` with the test's own hands and keep what the platform answers.
+
+    Returns:
+        The OSError the read raised, or None when the read succeeded.
+    """
+    try:
+        path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return exc
+    return None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -342,7 +357,10 @@ class TestUnflaggedModulesHelpSafety:
         warning_fn.assert_not_called()
         error_fn.assert_called_once()
         assert str(lock) in error_fn.call_args.args[0]
-        mock_logger.error.assert_called()
+        logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
+        assert len(logged) == 1
+        assert logged[0].args[2] == lock
+        assert isinstance(logged[0].args[3], PermissionError)  # raised by lock_ops past its budget
         # The budget as the error reports it; the attempts made must match it.
         reported = re.search(r"still denied after (\d+) attempts", error_fn.call_args.args[0])
         assert reported, error_fn.call_args.args[0]
@@ -358,10 +376,19 @@ class TestUnflaggedModulesHelpSafety:
         come back as False - "Another instance is already running" - so the runner
         exited quietly forever. It is now reported as an error, with no processing.
         The argument gate is patched open for the reason the test above gives.
-        Mutant: except OSError as e: -> except PermissionError as e: reddens this.
+        What reading a directory raises is the platform's choice (IsADirectoryError
+        on Linux and macOS, PermissionError on Windows), so the test reads it with
+        its own hands first and asserts the product logged that same error.
+        Mutant: except OSError as e: -> except PermissionError as e: reddens this
+        where the platform's answer is not a PermissionError; on Windows it is
+        one, and there this mutant survives.
         """
         lock = tmp_path / ".post_close_runner.lock"
         lock.mkdir()
+        answer = _read_answer(lock)
+        assert isinstance(answer, OSError) and not isinstance(answer, FileNotFoundError), (
+            f"{sys.platform} answered {answer!r} to reading a directory: the premise of this test is gone"
+        )
 
         with (
             patch(f"{_POST}.LOCK_FILE", lock),
@@ -371,7 +398,10 @@ class TestUnflaggedModulesHelpSafety:
             patch(f"{_POST}.error") as error_fn,
             patch(f"{_POST}.warning") as warning_fn,
         ):
-            handled = post_close_runner.handle_command("post", ["run"])
+            try:
+                handled = post_close_runner.handle_command("post", ["run"])
+            except OSError as exc:
+                pytest.fail(f"handle_command let {exc!r} escape: a traceback, no error reported")
 
         assert handled is True
         target.assert_not_called()
@@ -379,7 +409,11 @@ class TestUnflaggedModulesHelpSafety:
         warning_fn.assert_not_called()
         error_fn.assert_called_once()
         assert "Could not create lock" in error_fn.call_args.args[0]
-        mock_logger.error.assert_called()
+        logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
+        assert len(logged) == 1
+        assert logged[0].args[2] == lock
+        assert type(logged[0].args[3]) is type(answer)
+        assert logged[0].args[3].errno == answer.errno
         assert lock.is_dir()
 
     def test_detached_run_with_an_unreadable_lock_logs_and_exits_1(self, tmp_path, mock_logger):

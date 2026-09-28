@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from aipass.flow.apps.handlers.plan.restore_ops import (
     find_backup_copy,
     recover_plan_from_backup,
@@ -384,6 +386,39 @@ class TestRestoreGenericException:
 
 
 class TestRestoreDashboardFailures:
+    @pytest.mark.parametrize("answer, failed", [(None, False), (False, True)])
+    def test_no_local_dashboard_is_not_logged_as_a_failure(self, tmp_path, mock_logger, answer, failed):
+        """update_dashboard_local's None means flow has no dashboard, not a failure; its False warns.
+
+        Mutant: `if dashboard_success is False:` -> `if not dashboard_success:` reddens the None case.
+        """
+        plan_file = tmp_path / "FPLAN-0001.md"
+        plan_file.write_text("# Plan", encoding="utf-8")
+        registry = {
+            "plans": {
+                "0001": {
+                    "status": "closed",
+                    "file_path": str(plan_file),
+                    "location": str(tmp_path),
+                    "relative_path": "flow",
+                    "subject": "Test",
+                },
+            }
+        }
+        deps = _make_deps(
+            load_registry=MagicMock(return_value=registry),
+            update_dashboard_local=MagicMock(return_value=answer),
+        )
+
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+            result = restore_plan_impl(plan_num="1", **deps)
+
+        assert result["success"] is True
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0001", location=str(tmp_path))
+        deps["update_dashboard_local"].assert_called_once_with()
+        warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
+        assert any("Failed to update DASHBOARD.local.json" in w for w in warned) is failed
+
     def test_dashboard_failure_does_not_block_success(self, tmp_path):
         fn = restore_plan_impl
         plan_file = tmp_path / "FPLAN-0001.md"

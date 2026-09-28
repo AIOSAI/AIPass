@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: close_helpers.py
 # Description: Plan Closure Helper Functions
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-05-16
 # Modified: 2026-09-28
 # =============================================
@@ -103,7 +103,9 @@ def _find_unregistered_plan_file(prefix: str, plan_key: str) -> Path | None:
     skip_parts = {".backup", ".archive", "dropbox", "__pycache__", ".git", "processed_plans"}
 
     for match in aipass_root.rglob(pattern):
-        if any(part in skip_parts for part in match.parts):
+        # Parts below the scan root only: a checkout that itself lives under a
+        # directory named dropbox or .backup must still find its plans (leg 4).
+        if any(part in skip_parts for part in match.relative_to(aipass_root).parts):
             continue
         return match
 

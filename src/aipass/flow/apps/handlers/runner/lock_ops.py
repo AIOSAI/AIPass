@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lock_ops.py
 # Description: Process lock file operations handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-04-22
 # Modified: 2026-09-28
 # =============================================

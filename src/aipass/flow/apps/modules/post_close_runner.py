@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: post_close_runner.py
 # Description: Background post-close processing
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-02-14
 # Modified: 2026-09-28
 # =============================================

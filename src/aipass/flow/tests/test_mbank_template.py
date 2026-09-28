@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py and template handler functions
 # Version: 1.0.0
 # Created: 2026-09-20
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for mbank/process.py and template handler functions."""
@@ -33,6 +33,19 @@ from aipass.flow.apps.handlers.template.get_template import (
 )
 from aipass.flow.apps.handlers.template.plan_type_loader import discover_plan_types
 from aipass.flow.apps.handlers.template.registry_ops import get_prefix_map
+
+
+def _unlink_answer(path: Path) -> OSError | None:
+    """Unlink ``path`` with the test's own hands and keep what the platform answers.
+
+    Returns:
+        The OSError the unlink raised, or None when the platform refused nothing.
+    """
+    try:
+        path.unlink()
+    except OSError as exc:
+        return exc
+    return None
 
 
 # ===================================================================
@@ -329,21 +342,34 @@ class TestCleanupTempFiles:
         assert result["files_deleted"] == 0
 
     def test_reports_failed_deletes(self, tmp_path):
-        """Report failed_deletes when unlink raises."""
+        """Report failed_deletes when unlink raises.
+
+        The refusal is a real one on disk: the TEMP-shaped name is a directory,
+        and a file unlink of a directory fails on every platform. Which error it
+        is (IsADirectoryError, PermissionError) is the platform's answer, so the
+        test makes the same unlink on a twin first and asserts only that one
+        was refused.
+        Mutant: the except's `"status": "delete_failed"` -> `"deleted"` reddens this.
+        """
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
         temp_file = memory_dir / "broken-TEMP-20260301.md"
-        temp_file.write_text("t", encoding="utf-8")
+        temp_file.mkdir()
+        (temp_file / "inside.txt").write_text("t", encoding="utf-8")
+        twin = tmp_path / "twin-TEMP-20260301.md"
+        twin.mkdir()
+        answer = _unlink_answer(twin)
+        assert isinstance(answer, OSError), "premise: this platform unlinked a directory as a file"
 
-        with (
-            patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir),
-            patch.object(Path, "unlink", side_effect=PermissionError("denied")),
-        ):
+        with patch("aipass.flow.apps.handlers.mbank.process.MEMORY_PATH", memory_dir):
             result = cleanup_temp_files()
 
         assert result["files_found"] == 1
+        assert result["files_deleted"] == 0
         assert result["failed_deletes"] == 1
         assert result["details"][0]["status"] == "delete_failed"
+        assert result["details"][0]["error"]
+        assert temp_file.is_dir()
 
 
 # ===================================================================

@@ -212,9 +212,12 @@ print("STACK_DIES: " + _ns["out"])
 """
 
 
-# Directories no walk in this file enters. The source is the ruling of
-# 2026-09-27: a dropbox is ignored by all, and a sandbox like .archive is too.
-# Written here as literals on purpose, not imported from seedgo's skip_dirs.py.
+# Directories no walk in this file enters. That nothing looks into a dropbox or
+# an .archive follows the project owner's ruling of 2026-09-27 20:42 (as
+# paraphrased: nothing looks into a dropbox and nothing runs out of one, a
+# sandbox like .archive). That __pycache__ is skipped too, and that the skip is
+# these three literal names, compared relative to the walk's root, is flow's
+# decision (leg 3), not imported from seedgo's skip_dirs.py.
 _WALK_IGNORED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 
@@ -312,19 +315,34 @@ def flow_modules() -> list[str]:
 
 
 def _tree_with_a_dropbox_and_an_archive(tmp_path: Path) -> Path:
-    """An apps/ stand-in: one real module, plus a dropbox and an .archive holding packages."""
-    root = tmp_path / "apps"
-    for package in (root, root / "dropbox", root / ".archive"):
+    """An apps/ stand-in: real.py (the live control), beside a dropbox, an .archive
+    and a __pycache__ each holding a package.
+
+    The root itself stands inside a directory named dropbox: a skip that read
+    the parts of the whole path, not the parts below the root, would drop
+    real.py too.
+    """
+    root = tmp_path / "dropbox" / "apps"
+    for package in (root, root / "dropbox", root / ".archive", root / "__pycache__"):
         package.mkdir(parents=True)
         (package / "__init__.py").write_text("", encoding="utf-8")
     (root / "real.py").write_text("", encoding="utf-8")
     (root / "dropbox" / "stray.py").write_text("", encoding="utf-8")
     (root / ".archive" / "old.py").write_text("", encoding="utf-8")
+    (root / "__pycache__" / "cached.py").write_text("", encoding="utf-8")
     return root
 
 
 class TestTheWalksNeverEnterADropbox:
-    """Every walk in this file skips dropbox/, .archive/ and __pycache__/ (ruling of 2026-09-27)."""
+    """Every walk in this file skips dropbox/, .archive/ and __pycache__/.
+
+    The first two follow the project owner's ruling of 2026-09-27 (as
+    paraphrased above _WALK_IGNORED_DIRS); __pycache__ and the literal names are
+    flow's decision (leg 3). The walks are test-module code the mutant runner
+    cannot serve, and these pins were green from their first run; their proof
+    is two hand mutants of leg 4 (__pycache__ dropped from the set; the skip read
+    on the whole path instead of below the root), each of which reddens them.
+    """
 
     def test_the_filesystem_walk_skips_a_dropbox(self, tmp_path):
         assert _flow_modules(_tree_with_a_dropbox_and_an_archive(tmp_path)) == [
@@ -333,6 +351,13 @@ class TestTheWalksNeverEnterADropbox:
         ]
 
     def test_the_finder_walk_skips_a_dropbox(self, tmp_path):
+        """dropbox/ and __pycache__/ are proved here; .archive/ is not.
+
+        pkgutil passes over a directory whose name holds a dot by itself (it is
+        no identifier), so this pin stays green with ".archive" dropped from the
+        skip. The .archive half of the skip is proved by the filesystem walk's
+        pin above, not by this one.
+        """
         assert _flow_modules_by_import_machinery(_tree_with_a_dropbox_and_an_archive(tmp_path)) == [
             "aipass.flow.apps",
             "aipass.flow.apps.real",

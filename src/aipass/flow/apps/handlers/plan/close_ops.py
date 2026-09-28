@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: close_ops.py
 # Description: Plan Closure Implementation Handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-08
 # Modified: 2026-09-28
 # =============================================
@@ -405,8 +405,9 @@ def close_plan_impl(
             dashboard_success = update_dashboard_local()
             central_success = push_to_plans_central()
 
-            # Log dashboard update results (3-tier: modules log, handlers don't)
-            if not dashboard_success:
+            # Log dashboard update results (3-tier: modules log, handlers don't).
+            # None is "flow has no dashboard", not a failure (flow's decision, leg 4).
+            if dashboard_success is False:
                 logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
             if not central_success:
                 logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
@@ -415,7 +416,7 @@ def close_plan_impl(
             plan_location = plan_info.get("location", "")
             if plan_location:
                 branch_dashboard_success = push_flow_to_branch_dashboard(Path(plan_location))
-                if not branch_dashboard_success:
+                if branch_dashboard_success is False:
                     logger.warning(
                         f"[{MODULE_NAME}] Failed to push flow section to branch dashboard at {plan_location}"
                     )

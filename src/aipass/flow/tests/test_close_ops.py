@@ -353,10 +353,51 @@ class TestClosePlanImplSuccess:
         deps["update_dashboard_local"].assert_called_once()
         deps["push_to_plans_central"].assert_called_once()
 
+    @pytest.mark.parametrize("answer, failed", [(None, False), (False, True)])
+    @patch("aipass.flow.apps.handlers.plan.close_ops._resolve_registry_file", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_ops._find_plan_across_registries", return_value=None)
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess")
+    def test_no_dashboard_is_not_logged_as_a_failure(
+        self, mock_subprocess, _mock_find, _mock_resolve, answer, failed, tmp_path, mock_logger
+    ):
+        """None from either dashboard writer means there is no dashboard, not a failure; False warns.
+
+        Mutants: `if dashboard_success is False:` -> `if not dashboard_success:`, and
+        `if branch_dashboard_success is False:` -> `if not branch_dashboard_success:`,
+        each redden the None case.
+        """
+        plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
+        plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
+        registry = {
+            "plans": {
+                "1": {"status": "open", "subject": "Test plan", "location": str(tmp_path), "file_path": str(plan_file)}
+            }
+        }
+        deps = _make_deps(
+            update_dashboard_local=MagicMock(return_value=answer),
+            push_flow_to_branch_dashboard=MagicMock(return_value=answer),
+        )
+        deps["load_registry"].return_value = registry
+
+        with (
+            patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
+            patch("aipass.flow.apps.handlers.plan.append_closed_plan.append_to_closed_plans") as mock_append,
+        ):
+            result = close_plan_impl(plan_num="1", **deps)
+
+        assert result["success"] is True
+        mock_append.assert_called_once_with("1", ANY, tmp_path)
+        mock_subprocess.Popen.assert_called_once()
+        deps["push_flow_to_branch_dashboard"].assert_called_once_with(tmp_path)
+        warned = [str(c.args[0]) for c in mock_logger.warning.call_args_list]
+        assert any("Failed to update DASHBOARD.local.json" in w for w in warned) is failed
+        assert any("Failed to push flow section to branch dashboard" in w for w in warned) is failed
+
     @staticmethod
-    def _close_with_real_append(tmp_path, fake_open):
-        """Close FPLAN-0001 in tmp_path with the REAL CLOSED_PLANS append and a
-        stand-in os.open; returns close_plan_impl's result.
+    def _close_with_real_append(tmp_path, fake_open, sleep):
+        """Close FPLAN-0001 in tmp_path with the REAL CLOSED_PLANS append, a
+        stand-in os.open and ``sleep`` recording the backoff's waits; returns
+        close_plan_impl's result.
         """
         plan_file = tmp_path / "FPLAN-0001_test_2026-03-20.md"
         plan_file.write_text("# Real content\nSome actual plan notes.", encoding="utf-8")
@@ -380,7 +421,7 @@ class TestClosePlanImplSuccess:
             patch("aipass.flow.apps.handlers.plan.close_helpers.subprocess"),
             patch("aipass.flow.apps.handlers.plan.close_ops.json_handler", spec=True),
             patch(f"{_APPEND}.os.open", side_effect=fake_open),
-            patch(f"{_APPEND}.time.sleep"),
+            patch(f"{_APPEND}._sleep", sleep),
         ):
             return close_plan_impl(plan_num="1", **deps)
 
@@ -394,11 +435,14 @@ class TestClosePlanImplSuccess:
         closed_plans = tmp_path / "CLOSED_PLANS.local.json"
         lock = closed_plans.with_suffix(".lock")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
+        sleep = MagicMock()
 
-        result = self._close_with_real_append(tmp_path, fake_open)
+        result = self._close_with_real_append(tmp_path, fake_open, sleep)
 
         assert result["success"] is True
         assert len(attempts) == 2
+        sleep.assert_called_once()
+        assert sleep.call_args.args[0] > 0
         entries = json.loads(closed_plans.read_text(encoding="utf-8"))["closed_plans"]
         assert [e["plan_id"] for e in entries] == ["FPLAN-1"]
         assert not any("CLOSED_PLANS" in m.get("text", "") for m in result["messages"])
@@ -413,29 +457,41 @@ class TestClosePlanImplSuccess:
         closed_plans = tmp_path / "CLOSED_PLANS.local.json"
         lock = closed_plans.with_suffix(".lock")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+        sleep = MagicMock()
 
-        result = self._close_with_real_append(tmp_path, fake_open)
+        result = self._close_with_real_append(tmp_path, fake_open, sleep)
 
         assert result["success"] is True
-        assert len(attempts) == append_closed_plan._LOCK_RETRIES
+        # The count the warning states is the count of creates made, read off
+        # the attempts rather than the private budget constant.
+        budget = len(attempts)
+        assert budget > 1
         assert not closed_plans.exists()
         assert any("CLOSED_PLANS append failed" in m.get("text", "") for m in result["messages"])
         # The logged arguments themselves, never str(call): a call's repr doubles
         # every backslash, so a Windows path is never a substring of it.
         warned = " ".join(str(arg) for c in mock_logger.warning.call_args_list for arg in c.args)
         assert str(lock) in warned
-        assert f"{append_closed_plan._LOCK_RETRIES} attempts" in warned
+        assert f"{budget} attempts" in warned
+        # What each wait was given: positive, doubling, summed into the message.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert len(delays) == len(attempts)
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in warned
 
         fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
         with (
             patch(f"{_APPEND}.os.open", side_effect=fake_open),
-            patch(f"{_APPEND}.time.sleep"),
+            patch(f"{_APPEND}._sleep"),
             pytest.raises(PermissionError) as excinfo,
         ):
             append_closed_plan._acquire_append_lock(lock)
 
         assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == append_closed_plan._LOCK_RETRIES
+        assert len(attempts) == budget
 
 
 class TestTemplateDetectionNeverDeletes:
@@ -783,6 +839,25 @@ class TestFindUnregisteredPlanFile:
         (dropbox_dir / "DPLAN-0335_handed_over_2026-09-27.md").write_text("# Copy", encoding="utf-8")
 
         assert _find_unregistered_plan_file("DPLAN", "0335") is None
+
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
+    def test_a_checkout_inside_a_dropbox_still_finds_its_plans(self, mock_flow_root, tmp_path):
+        """The skip reads the parts below the scan root, never the whole path.
+
+        A checkout that itself lives under a directory named dropbox (or .backup)
+        must still find its plans; a copy in a dropbox inside the tree must not be.
+        Mutant: `match.relative_to(aipass_root).parts` -> `match.parts` reddens this.
+        """
+        aipass_root = tmp_path / "dropbox" / "aipass"
+        mock_flow_root.parent = aipass_root
+        (aipass_root / "somebranch" / "dropbox").mkdir(parents=True)
+        plan = aipass_root / "somebranch" / "DPLAN-0336_live_2026-09-28.md"
+        plan.write_text("# Plan", encoding="utf-8")
+        copy = aipass_root / "somebranch" / "dropbox" / "DPLAN-0337_copy_2026-09-28.md"
+        copy.write_text("# Copy", encoding="utf-8")
+
+        assert _find_unregistered_plan_file("DPLAN", "0336") == plan
+        assert _find_unregistered_plan_file("DPLAN", "0337") is None
 
     @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_processed_plans_directory(self, mock_flow_root, tmp_path):

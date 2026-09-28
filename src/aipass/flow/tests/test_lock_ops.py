@@ -152,6 +152,14 @@ class TestTryCreateLock:
         assert mod._CREATE_RETRIES > 1
         assert f"{mod._CREATE_RETRIES} attempts" in str(excinfo.value)
         assert not lock.exists()
+        # What each wait was given, not only how many: a positive first delay,
+        # doubling after every denial, and the sum is the waited figure reported.
+        # Mutants: `_sleep(delay)` -> `_sleep(0.0)` and the delay without its
+        # `(2**attempt)` growth each redden this.
+        delays = [c.args[0] for c in sleep.call_args_list]
+        assert delays[0] > 0
+        assert all(later == 2 * earlier for earlier, later in zip(delays, delays[1:]))
+        assert f"({sum(delays):.2f}s waited)" in str(excinfo.value)
 
     def test_file_exists_still_returns_false_at_once(self, tmp_path):
         """FileExistsError is NOT retried: acquire_lock's stale check reads the holder next."""
@@ -235,7 +243,13 @@ class TestIsLockStale:
         assert mod.is_lock_stale(lock) is False
 
     def test_vanished_lock_is_stale(self, tmp_path):
-        """A lock gone before it could be read was released: the caller may take over."""
+        """A lock gone before it could be read was released: the caller may take over.
+
+        A guard: the product before leg 3 answered True here too (its read caught
+        every OSError as stale), so this does not tell old from new; its proof
+        is its mutant. Mutant: the `return True` after "Lock released before it
+        could be read" -> `return False` reddens this.
+        """
         mod = lock_ops
         lock = tmp_path / ".gone.lock"
         assert mod.is_lock_stale(lock) is True
@@ -336,6 +350,32 @@ class TestAcquireLock:
                     assert lock.read_text(encoding="utf-8") == str(os.getpid())
         finally:
             home.chmod(0o755)
+
+    def test_lock_released_between_the_read_and_the_unlink_is_taken(self, tmp_path):
+        """The holder lets go after the stale check read its lock and before the unlink.
+
+        A stand-in for the stale check removes the file as it answers "stale",
+        so the unlink meets nothing. That is a released lock, not an error: it
+        is taken, with no error.
+        Mutant: `lock_file.unlink(missing_ok=True)` -> `lock_file.unlink()` reddens this.
+        """
+        mod = lock_ops
+        lock = tmp_path / ".test.lock"
+        lock.write_text("999999999", encoding="utf-8")
+
+        def stale_then_released(path: Path) -> bool:
+            path.unlink()
+            return True
+
+        with patch(f"{_MOD}.is_lock_stale", side_effect=stale_then_released) as stale_check:
+            try:
+                acquired = mod.acquire_lock(lock)
+            except OSError as exc:
+                pytest.fail(f"acquire_lock raised {exc!r} for a lock released before its unlink")
+
+        stale_check.assert_called_once_with(lock)
+        assert acquired is True
+        assert lock.read_text(encoding="utf-8") == str(os.getpid())
 
     def test_fresh_empty_lock_is_not_unlinked(self, tmp_path):
         """A holder between O_EXCL and its pid write keeps its lock: acquire says held.

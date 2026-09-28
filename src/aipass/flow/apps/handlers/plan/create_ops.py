@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: create_ops.py
 # Description: Plan Creation Implementation Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
 # Modified: 2026-09-28
 # =============================================
@@ -236,8 +236,9 @@ def create_plan_impl(
         dashboard_success = update_dashboard_local()
         central_success = push_to_plans_central()
 
-        # Log dashboard update results
-        if not dashboard_success:
+        # Log dashboard update results. None is "flow has no dashboard", not a
+        # failure (flow's decision, leg 4).
+        if dashboard_success is False:
             logger.warning(f"[{MODULE_NAME}] Failed to update DASHBOARD.local.json")
         if not central_success:
             logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")

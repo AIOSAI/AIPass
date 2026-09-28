@@ -949,7 +949,7 @@ class TestPushFlowToBranchDashboard:
         """Returns None when DASHBOARD.local.json does not exist.
 
         None, not False: False is kept for a push that failed, so a caller can
-        tell 'no branch here' from 'the push broke' (leg 3 decision).
+        tell 'no branch here' from 'the push broke' (flow's decision, leg 3).
         Mutant: return None -> return False reddens this.
         """
         mod = push_branch_dashboard
