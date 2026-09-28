@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade_ops.py
 # Description: Trading & Ephemeral Item Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -157,9 +157,12 @@ def gift_artifact(args: List[str]) -> dict:
     if not recipient:
         return {"success": False, "error": f"Branch '{args[1]}' not found in BRANCH_REGISTRY"}
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -241,9 +244,12 @@ def trade_artifact(args: List[str]) -> dict:
     if not partner:
         return {"success": False, "error": f"Branch '{args[2]}' not found in BRANCH_REGISTRY"}
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -349,9 +355,12 @@ def drop_item(args: List[str]) -> dict:
         else:
             i += 1
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -411,8 +420,14 @@ def find_item(args: List[str]) -> dict:
 
     Usage: commons find <artifact_id>
 
+    The expired-item sweep runs first. When it fails (sweep_expired answers -1) the find still runs,
+    because the find checks the item's own expires_at, and the success answer carries
+    sweep_failed True so the command can say so (commons' decision, DPLAN-0354 leg 3: the sweep's
+    failure used to be dropped here, so expired drops piled up with nobody told). A refusal
+    answer does not carry it: the refusal is already the loud line, and the sweep failure is logged.
+
     Returns:
-        Dict with success, artifact details, finder
+        Dict with success, artifact details, finder, sweep_failed
     """
     if not args:
         return {"success": False, "error": "Usage: commons find <artifact_id>"}
@@ -423,11 +438,14 @@ def find_item(args: List[str]) -> dict:
         logger.warning("[trade_ops] Non-numeric artifact ID provided for find")
         return {"success": False, "error": "Artifact ID must be a number"}
 
-    sweep_expired()
+    sweep_failed = sweep_expired() == -1
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch."}
 
@@ -488,6 +506,7 @@ def find_item(args: List[str]) -> dict:
             "room_found": artifact["room_found"] or "unknown",
             "creator": artifact["creator"],
             "finder": finder,
+            "sweep_failed": sweep_failed,
         }
 
     except Exception as e:

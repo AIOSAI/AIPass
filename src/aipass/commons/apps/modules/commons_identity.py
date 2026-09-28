@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: commons_identity.py
 # Description: Branch identity detection module
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -34,6 +34,7 @@ except (ImportError, OSError):
 
 # Re-export all public functions for backward compatibility
 from aipass.commons.apps.handlers.identity.identity_ops import (
+    CallerLookupFailed,
     find_branch_root,
     get_branch_info_from_registry,
     get_branch_info_by_name,
@@ -44,6 +45,7 @@ from aipass.commons.apps.handlers.identity.identity_ops import (
 from aipass.commons.apps.handlers.json import json_handler
 
 __all__ = [
+    "CallerLookupFailed",
     "find_branch_root",
     "get_branch_info_from_registry",
     "get_branch_info_by_name",

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_module_root.py
 # Description: Pins the guarded __file__ resolver
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/module_root.py: module_file() returns the RIGHT file when resolve() cannot be asked."""
@@ -27,7 +27,7 @@ _DEAD_CWD = FileNotFoundError(2, "cwd deleted", "")
 
 
 def _deny_resolve_for(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
-    """Make resolve() raise for exactly one path; everything else is untouched."""
+    """Make resolve() raise for exactly one path, as module_root sees it; everything else is untouched."""
     # Scoped to ONE path rather than to Path.resolve as a whole. The first
     # draft patched the method globally, which was green under the branch
     # pytest.ini and RecursionError under the repo-root conftest: that
@@ -35,14 +35,19 @@ def _deny_resolve_for(monkeypatch: pytest.MonkeyPatch, target: str) -> None:
     # denial sent _record_unresolved back through it forever. A global patch of
     # a stdlib method is a claim about every caller in the process, and this
     # test only has a claim about one file.
-    real_resolve = Path.resolve
+    # Bound as module_root's own Path, the name module_file looks up, so
+    # pathlib.Path stays whole for every other module in the process (commons'
+    # decision, DPLAN-0354 leg 3: no resolve seam in module_root - it would
+    # exist for this test alone - and the same door @daemon's module_root
+    # pins use). type(Path()) rather than Path: Path subclasses need 3.12.
 
-    def _maybe_denied(self, *args, **kwargs):
-        if str(self) == target:
-            raise _DEAD_CWD
-        return real_resolve(self, *args, **kwargs)
+    class _DeniedResolvePath(type(Path())):
+        def resolve(self, strict: bool = False):
+            if str(self) == target:
+                raise _DEAD_CWD
+            return super().resolve(strict=strict)
 
-    monkeypatch.setattr(Path, "resolve", _maybe_denied)
+    monkeypatch.setattr(module_root, "Path", _DeniedResolvePath)
 
 
 @pytest.fixture
@@ -75,6 +80,8 @@ def test_module_file_returns_the_absolute_file_when_resolve_is_denied(
     __file__ has been absolute since Python 3.9, so the fallback names the
     same file resolve() would have named - just spelled through any symlink
     rather than past it.
+    Mutants (runner, killed): fallback `return path` -> `return Path(".")`;
+    `path = Path(file)` -> `path = __import__("pathlib").Path(file)`.
     """
     _deny_resolve_for(monkeypatch, __file__)
 
@@ -94,15 +101,17 @@ def test_the_denial_instrument_denies_one_path_and_only_that_path(monkeypatch: p
     no symlink in the path).
 
     The second half is the control ON the control: the denial must be narrow,
-    or it is patching the whole process again.
+    or it is patching the whole process again - narrow to one path, and to
+    module_root's own Path binding.
     """
     _deny_resolve_for(monkeypatch, __file__)
 
     with pytest.raises(FileNotFoundError):
-        Path(__file__).resolve()
+        module_root.Path(__file__).resolve()
 
     sibling = Path(__file__).parent / "conftest.py"
-    assert sibling.resolve() == Path(sibling).absolute(), "the denial leaked past its one target path"
+    assert module_root.Path(sibling).resolve() == Path(sibling).absolute(), "the denial leaked past its one target path"
+    assert Path(__file__).resolve().is_absolute(), "the denial leaked out of module_root into pathlib.Path"
 
 
 def test_a_failing_audit_write_never_escapes(monkeypatch: pytest.MonkeyPatch):

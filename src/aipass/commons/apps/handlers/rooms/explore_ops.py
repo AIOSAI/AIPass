@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: explore_ops.py
 # Description: Secret Room Exploration Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -34,9 +34,12 @@ def explore_rooms() -> dict:
     Returns:
         Dict with success, hidden_rooms, rooms_visited, revealed room (if any)
     """
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 
@@ -98,9 +101,12 @@ def list_secrets() -> dict:
     Returns:
         Dict with success, discovered list, total_hidden count
     """
-    from aipass.commons.apps.modules.commons_identity import get_caller_branch
+    from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 

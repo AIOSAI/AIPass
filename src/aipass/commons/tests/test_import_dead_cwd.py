@@ -4,7 +4,7 @@
 # Description: Pins that commons imports with a deleted cwd, and the sys.path[0] repair in apps/commons.py
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 # =============================================
 
@@ -709,10 +709,38 @@ def _inspect_stack_call_lines(source: str, filename: str) -> list:
     return hits
 
 
-def _apps_modules() -> list:
+#: Ruling of 2026-09-27 (devpulse, via the fleet green brief): a dropbox is
+#: ignored by all, a sandbox like .archive, and a walk skips both -- along
+#: with __pycache__, which is never product. Literal names on purpose: not
+#: seedgo's skip_dirs.py, this file's own walk decides its own skip list.
+_WALK_SKIPS = {"dropbox", ".archive", "__pycache__"}
+
+
+def _apps_modules(root: Path | None = None) -> list:
     """Every production .py under apps/, excluding the parked pre-refactor tree."""
-    apps = Path(__file__).resolve().parent.parent / "apps"
-    return sorted(p for p in apps.rglob("*.py") if ".archive" not in p.parts)
+    apps = root if root is not None else Path(__file__).resolve().parent.parent / "apps"
+    return sorted(p for p in apps.rglob("*.py") if not _WALK_SKIPS & set(p.parts))
+
+
+def test_apps_modules_walk_skips_dropbox_and_pycache(tmp_path):
+    """_apps_modules ignores dropbox/, .archive/, and __pycache__ under a given root.
+
+    Ruling of 2026-09-27 (devpulse, via the fleet green brief): a dropbox is
+    ignored by all, a sandbox like .archive, and a walk skips both -- so does
+    __pycache__, which is never product. This pin runs against tmp_path via
+    _apps_modules's new optional root parameter; it is a test module the
+    mutant runner cannot serve (it writes a changed copy beside the product
+    module, not this test file), so it stands on red first alone.
+    """
+    (tmp_path / "dropbox").mkdir()
+    (tmp_path / "dropbox" / "x.py").write_text("# dropbox\n", encoding="utf-8")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "y.py").write_text("# cache\n", encoding="utf-8")
+    (tmp_path / "a.py").write_text("# real\n", encoding="utf-8")
+
+    modules = _apps_modules(tmp_path)
+
+    assert modules == [tmp_path / "a.py"]
 
 
 def test_no_inspect_stack_call_anywhere_in_apps():

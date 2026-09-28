@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -33,6 +33,7 @@ from aipass.commons.apps.handlers.welcome.welcome_handler import (
     get_onboarding_nudge,
     welcome_new_branches,
 )
+from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
 from aipass.commons.apps.handlers.engagement.engagement_ops import (
     generate_prompt,
     create_event,
@@ -188,6 +189,84 @@ def test_welcome_new_branches_welcomes_unwelcomed(
     assert "THE_COMMONS" in welcomed
     assert has_been_welcomed(initialized_db, "TEST_BRANCH") is True
     assert has_been_welcomed(initialized_db, "THE_COMMONS") is True
+
+
+def _refuse_welcome_mention_for_broken(conn: sqlite3.Connection) -> None:
+    """Seed agents 'broken' and 'good'; a trigger makes the mention insert for 'broken' raise a real sqlite3 error.
+
+    The welcome post insert for 'broken' succeeds first, so a missing rollback leaves an orphan post behind.
+    """
+    conn.execute("INSERT INTO agents (branch_name, display_name) VALUES ('broken', 'Broken')")
+    conn.execute("INSERT INTO agents (branch_name, display_name) VALUES ('good', 'Good')")
+    conn.execute(
+        "CREATE TRIGGER refuse_broken_mention BEFORE INSERT ON mentions "
+        "WHEN NEW.mentioned_agent = 'broken' BEGIN SELECT RAISE(ABORT, 'mention refused'); END"
+    )
+    conn.commit()
+
+
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
+def test_run_welcome_scan_names_a_failed_branch_and_keeps_scanning(
+    mock_get_db: MagicMock,
+    mock_close: MagicMock,
+    mock_ops_json: MagicMock,
+    mock_handler_json: MagicMock,
+    initialized_db: sqlite3.Connection,
+) -> None:
+    """A database failure welcoming one branch is named in the scan's answer; the scan still welcomes the rest.
+
+    Before the cure create_welcome_post swallowed the error and answered None, the scan skipped the branch and
+    reported success, and the half-written welcome post (no rollback) was committed by the next branch's welcome,
+    so the failed branch counted as welcomed and was never retried. commons' decision, DPLAN-0354 leg 3: a scan with
+    a failed branch answers success False, so the command refuses (exit 2) with the failed names.
+    Mutants (runner, killed): welcome_handler drop `conn.rollback()`; welcome_handler `raise` -> `return None`;
+    welcome_ops `if failed:` -> `if False:`.
+    """
+    _refuse_welcome_mention_for_broken(initialized_db)
+    mock_get_db.return_value = initialized_db
+    mock_close.side_effect = lambda c: None
+
+    result = run_welcome([])
+
+    assert result["success"] is False
+    assert result["failed"] == ["broken"]
+    assert "good" in result["welcomed"]
+    assert "broken" not in result["welcomed"]
+    assert "@broken" in result["error"]
+    assert has_been_welcomed(initialized_db, "broken") is False
+    assert has_been_welcomed(initialized_db, "good") is True
+
+
+@patch("aipass.commons.apps.handlers.welcome.welcome_handler.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.json_handler", autospec=True)
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.close_db")
+@patch("aipass.commons.apps.handlers.welcome.welcome_ops.get_db")
+def test_run_welcome_specific_names_the_database_failure(
+    mock_get_db: MagicMock,
+    mock_close: MagicMock,
+    mock_ops_json: MagicMock,
+    mock_handler_json: MagicMock,
+    initialized_db: sqlite3.Connection,
+) -> None:
+    """Welcoming one branch that hits a database error refuses with the error named and leaves no half post.
+
+    Before the cure the answer was a bare "Failed to create welcome post" with the cause only in the log, and the
+    post row written before the failing mention insert stayed in the open transaction.
+    Mutant (runner, killed): welcome_ops `database error: {e}` -> `database error`.
+    """
+    _refuse_welcome_mention_for_broken(initialized_db)
+    mock_get_db.return_value = initialized_db
+    mock_close.side_effect = lambda c: None
+
+    result = run_welcome(["broken"])
+
+    assert result["success"] is False
+    assert "@broken" in result["error"]
+    assert "mention refused" in result["error"]
+    assert has_been_welcomed(initialized_db, "broken") is False
 
 
 # =============================================================================

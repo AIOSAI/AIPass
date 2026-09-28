@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: capsule_ops.py
 # Description: Time Capsule Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -51,9 +51,12 @@ def seal_capsule(args: List[str]) -> dict:
 
     days = max(1, min(365, days))
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 
@@ -164,9 +167,12 @@ def open_capsule(args: List[str]) -> dict:
         logger.warning("[capsule_ops] Non-numeric capsule ID provided for open")
         return {"success": False, "error": "Capsule ID must be a number"}
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 

@@ -5,7 +5,7 @@
 # Date: 2026-03-24
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -27,7 +27,7 @@ import sqlite3
 from typing import Any
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from rich.panel import Panel
 
@@ -160,19 +160,17 @@ def test_mood_icon_unknown_mood_returns_dash(space_db: sqlite3.Connection, capsy
 @patch("aipass.commons.apps.handlers.rooms.room_ops.json_handler", autospec=True)
 def test_create_room_success(
     mock_json: object,
-    mock_close: object,
-    mock_get_db: object,
+    mock_close: MagicMock,
+    mock_get_db: MagicMock,
     mock_caller: object,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Creating a room with valid args should return success with room metadata."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
-    mock_close.side_effect = lambda conn: None  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
+    mock_close.side_effect = lambda conn: None
 
     # Insert the agent so the foreign key constraint is satisfied
-    import sqlite3
-
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     conn.execute(
         "INSERT OR IGNORE INTO agents (branch_name, display_name) VALUES (?, ?)",
         ("TEST_BRANCH", "Test Branch"),
@@ -210,13 +208,13 @@ def test_create_room_no_caller(mock_caller: object) -> None:
 @patch("aipass.commons.apps.handlers.rooms.room_ops.get_db")
 @patch("aipass.commons.apps.handlers.rooms.room_ops.close_db")
 def test_list_rooms_returns_seeded_rooms(
-    mock_close: object,
-    mock_get_db: object,
-    initialized_db: object,
+    mock_close: MagicMock,
+    mock_get_db: MagicMock,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """list_rooms should return the default seeded rooms from init_db."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
-    mock_close.side_effect = lambda conn: None  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
+    mock_close.side_effect = lambda conn: None
 
     result = list_rooms()
 
@@ -235,12 +233,12 @@ def test_join_room_no_args() -> None:
 
 
 @patch("aipass.commons.apps.modules.room.create_room")
-def test_room_create_help_prints_usage_without_creating(mock_create_room: object) -> None:
+def test_room_create_help_prints_usage_without_creating(mock_create_room: MagicMock) -> None:
     """'room create --help' should print usage and never reach create_room."""
     handled = room_module.handle_command("room", ["create", "--help"])
 
     assert handled is True
-    mock_create_room.assert_not_called()  # type: ignore[union-attr]
+    mock_create_room.assert_not_called()
 
 
 # =============================================================================
@@ -249,11 +247,9 @@ def test_room_create_help_prints_usage_without_creating(mock_create_room: object
 
 
 @patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
-def test_set_and_get_room_state(mock_json: object, initialized_db: object) -> None:
+def test_set_and_get_room_state(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """set_room_state should persist a key/value, and get_room_state should retrieve it."""
-    import sqlite3
-
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     ok = set_room_state(conn, "general", "decor_lamp", "A glowing desk lamp")
     assert ok is True
 
@@ -262,11 +258,9 @@ def test_set_and_get_room_state(mock_json: object, initialized_db: object) -> No
 
 
 @patch("aipass.commons.apps.handlers.rooms.room_state_ops.json_handler", autospec=True)
-def test_get_all_room_state_with_multiple_keys(mock_json: object, initialized_db: object) -> None:
+def test_get_all_room_state_with_multiple_keys(mock_json: object, initialized_db: sqlite3.Connection) -> None:
     """get_all_room_state should return all key/value pairs for a room."""
-    import sqlite3
-
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     set_room_state(conn, "general", "decor_plant", "A fern")
     set_room_state(conn, "general", "decor_poster", "AIPass launch poster")
 
@@ -276,10 +270,26 @@ def test_get_all_room_state_with_multiple_keys(mock_json: object, initialized_db
     assert state["decor_plant"] == "A fern"
 
 
-def test_get_room_state_missing_key(initialized_db: object) -> None:
+def test_get_room_state_missing_key(initialized_db: sqlite3.Connection) -> None:
     """get_room_state should return None for a key that does not exist."""
-    import sqlite3
-
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     value = get_room_state(conn, "general", "nonexistent_key")
     assert value is None
+
+
+def test_create_room_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None,
+    so the user was told to run from a branch directory. The lookup raises before
+    any database is opened.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = create_room(["pin-room", "a room"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

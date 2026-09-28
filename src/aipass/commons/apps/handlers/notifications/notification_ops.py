@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: notification_ops.py
 # Description: Notification Preference Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import get_caller_branch
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.notifications.preferences import (
     set_preference,
     get_all_preferences,
@@ -87,7 +87,10 @@ def _set_notification_level(args: List[str], level: str) -> dict:
             "error": f"Invalid target type '{target_type}'. Must be one of: {', '.join(valid_types)}",
         }
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -151,7 +154,10 @@ def show_preferences() -> dict:
     Returns:
         Dict with success, agent name, and list of preferences
     """
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,

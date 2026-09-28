@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -1046,3 +1046,33 @@ def test_run_welcome_specific_branch_not_found(
     result = run_welcome(["NONEXISTENT"])
     assert result["success"] is False
     assert "not found" in result["error"]
+
+
+def test_add_react_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = add_react(["post", "1", "thumbsup"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_explore_rooms_refuses_naming_a_failed_caller_lookup():
+    """The explore family names a broken caller lookup too (DPLAN-0354 leg 3)."""
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = explore_rooms()
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -163,13 +163,13 @@ def test_craft_artifact_success(
     mock_close: MagicMock,
     mock_get_db: MagicMock,
     mock_caller: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Crafting an artifact with valid args should return success with artifact metadata."""
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = craft_artifact(["Starforge Hammer", "A legendary smithing tool", "--rarity", "rare"])
@@ -197,13 +197,13 @@ def test_craft_artifact_success(
 def test_list_artifacts_with_data(
     mock_close: MagicMock,
     mock_get_db: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """list_artifacts with --all should return inserted artifacts."""
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     conn.execute(
@@ -277,13 +277,13 @@ def test_now_utc_returns_iso_format(
 def test_sweep_expired_removes_expired_items(
     mock_close: MagicMock,
     mock_get_db: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """sweep_expired should remove artifacts whose expires_at is in the past."""
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     past = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -353,7 +353,7 @@ def test_seal_capsule_success(
     mock_get_db.return_value = initialized_db
     mock_close.side_effect = lambda conn: None
 
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     _insert_test_agent(conn)
 
     result = seal_capsule(["Launch Day Note", "We did it!", "30"])
@@ -514,3 +514,78 @@ def test_gift_trade_mint_collab_name_an_unreadable_registry(tmp_path) -> None:
         ]
     assert [r["success"] for r in results] == [False] * 4
     assert [r["error"].startswith("Branch registry unreadable") for r in results] == [True] * 4
+
+
+def test_find_command_says_the_expired_sweep_failed_and_still_finds(
+    initialized_db: sqlite3.Connection,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """'commons find' still picks the item up when the expired-item sweep fails, and says the sweep failed.
+
+    Before the cure find_item dropped sweep_expired's -1 on the floor: the user was told nothing, and expired
+    drops piled up unseen. The find itself stays safe, since it checks the item's own expires_at.
+    sweep_expired is stubbed to answer -1; the find runs against the tmp database with a patched caller.
+    Mutants (runner, killed): trade_ops `sweep_failed = sweep_expired() == -1` -> `sweep_failed = False`;
+    trade `if result.get("sweep_failed"):` -> `if False:`.
+    """
+    _insert_test_agent(initialized_db)
+    _insert_test_agent(initialized_db, "FINDER")
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    cursor = initialized_db.execute(
+        "INSERT INTO artifacts (name, type, creator, owner, rarity, description, expires_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("Lost Coin", "found", "TEST_BRANCH", "TEST_BRANCH", "common", "Shiny", future),
+    )
+    initialized_db.commit()
+    artifact_id = str(cursor.lastrowid)
+
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.sweep_expired", return_value=-1) as sweep,
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db", return_value=initialized_db),
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.close_db") as close,
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.get_caller_branch",
+            return_value={"name": "FINDER"},
+        ),
+        patch("aipass.commons.apps.modules.trade.json_handler", autospec=True),
+    ):
+        handled = trade_module.handle_command("find", [artifact_id])
+
+    sweep.assert_called_once_with()
+    close.assert_called_once_with(initialized_db)
+    assert handled is True
+    captured = capsys.readouterr()
+    assert "Item Found!" in captured.out
+    assert "sweep of expired items failed" in " ".join(captured.err.split())
+    row = initialized_db.execute("SELECT owner FROM artifacts WHERE id = ?", (int(artifact_id),)).fetchone()
+    assert row["owner"] == "FINDER"
+
+
+def test_craft_artifact_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = craft_artifact(["Pin Relic", "made by a pin"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_seal_capsule_refuses_naming_a_failed_caller_lookup():
+    """The capsule family names a broken caller lookup too (DPLAN-0354 leg 3)."""
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = seal_capsule(["Pin", "sealed by a pin", "3"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -21,6 +21,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/notifications/ parses and imports
+# seedgo: no-test-needed(duplicate) — the notification preference primitives; tests/test_notifications.py pins them
 
 import sqlite3
 from unittest.mock import patch, MagicMock
@@ -101,10 +102,10 @@ def test_set_watch_room_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_watch should set notification level to 'watch' for a valid room."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     # 'general' room is seeded by initialized_db
@@ -134,10 +135,10 @@ def test_set_watch_post_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_watch should set notification level to 'watch' for a valid post."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=42)
@@ -170,10 +171,10 @@ def test_set_mute_room_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_mute should set notification level to 'mute' for a valid room."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -206,10 +207,10 @@ def test_set_track_thread_success(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """set_track should set notification level to 'track' for a valid thread (post)."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=10)
@@ -319,10 +320,10 @@ def test_set_watch_room_not_found(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Watching a nonexistent room should return room-not-found error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -347,10 +348,10 @@ def test_set_mute_post_not_found(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Muting a nonexistent post should return post-not-found error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -374,10 +375,10 @@ def test_set_track_thread_not_found(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Tracking a nonexistent thread should return not-found error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -402,10 +403,10 @@ def test_set_watch_post_id_not_numeric(
     mock_caller: MagicMock,
     mock_json: MagicMock,
     mock_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Watching a post with a non-numeric ID should return an error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -425,10 +426,10 @@ def test_set_track_thread_id_not_numeric(
     mock_caller: MagicMock,
     mock_json: MagicMock,
     mock_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Tracking a thread with a non-numeric ID should return an error."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -457,10 +458,10 @@ def test_set_watch_room_name_lowercased(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Room names should be lowercased before lookup and storage."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -490,10 +491,10 @@ def test_set_mute_target_type_case_insensitive(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Target type should be lowercased, so 'ROOM' works like 'room'."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -543,10 +544,10 @@ def test_show_preferences_empty(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """show_preferences with no preferences set should return empty list."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -572,10 +573,10 @@ def test_show_preferences_with_data(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """show_preferences should return all preferences for the agent."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -636,10 +637,10 @@ def test_set_watch_logs_operation(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Successful watch should call json_handler.log_operation with 'notification_set'."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -673,10 +674,10 @@ def test_set_watch_preference_fails(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """When set_preference returns False, the operation should report failure."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -705,10 +706,10 @@ def test_set_watch_extra_args_ignored(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Extra arguments beyond the first two should be ignored."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
 
@@ -738,10 +739,10 @@ def test_set_mute_post_id_normalized(
     mock_logger: MagicMock,
     mock_pref_json: MagicMock,
     mock_pref_logger: MagicMock,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """Post ID should be normalized through int conversion (e.g. '042' -> '42')."""
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
+    conn: sqlite3.Connection = initialized_db
     mock_get_db.return_value = conn
     _insert_agent(conn, "test-branch")
     _insert_post(conn, post_id=42)
@@ -749,3 +750,20 @@ def test_set_mute_post_id_normalized(
     result = set_mute(["post", "042"])
     assert result["success"] is True
     assert result["target_id"] == "42"
+
+
+def test_show_preferences_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = show_preferences()
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

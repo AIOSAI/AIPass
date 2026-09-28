@@ -3,7 +3,7 @@
 # Description: Unit tests for feed handler and feed module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/feed/feed_ops.py and apps/modules/feed.py."""
@@ -73,7 +73,7 @@ def test_format_time_ago_empty_string():
 
 def test_format_time_ago_none():
     """None input should return 'never'."""
-    assert format_time_ago(None) == "never"  # type: ignore[arg-type]
+    assert format_time_ago(None) == "never"
 
 
 def test_format_time_ago_invalid_format():

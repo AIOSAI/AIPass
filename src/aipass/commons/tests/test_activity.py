@@ -5,7 +5,7 @@
 # Date: 2026-03-28
 # Version: 1.0.0
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -310,17 +310,15 @@ def test_calculate_time_label_invalid(mock_logger: MagicMock, catchup_db: sqlite
 @patch("aipass.commons.apps.handlers.activity.activity_ops.close_db")
 @patch("aipass.commons.apps.handlers.activity.activity_ops.get_db")
 def test_run_activity_returns_formatted_activity(
-    mock_get_db: object,
-    mock_close: object,
+    mock_get_db: MagicMock,
+    mock_close: MagicMock,
     mock_json: object,
-    initialized_db: object,
+    initialized_db: sqlite3.Connection,
 ) -> None:
     """run_activity should query comments and return formatted activity dicts."""
-    import sqlite3
-
-    conn: sqlite3.Connection = initialized_db  # type: ignore[assignment]
-    mock_get_db.return_value = conn  # type: ignore[union-attr]
-    mock_close.side_effect = lambda c: None  # type: ignore[union-attr]
+    conn: sqlite3.Connection = initialized_db
+    mock_get_db.return_value = conn
+    mock_close.side_effect = lambda c: None
 
     _insert_agent(conn, "TEST_BRANCH", "Test")
     post_id = _insert_post(conn, "Test Post", "Some content", "general", "TEST_BRANCH")
@@ -347,12 +345,12 @@ def test_run_activity_returns_formatted_activity(
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_db")
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_caller_branch")
 def test_run_catchup_first_visit(
-    mock_caller: object,
-    mock_get_db: object,
-    mock_close: object,
-    mock_last_active: object,
-    mock_query: object,
-    mock_update: object,
+    mock_caller: MagicMock,
+    mock_get_db: MagicMock,
+    mock_close: MagicMock,
+    mock_last_active: MagicMock,
+    mock_query: MagicMock,
+    mock_update: MagicMock,
     mock_json: object,
 ) -> None:
     """run_catchup for a first-time visitor should set is_first_visit True.
@@ -365,11 +363,11 @@ def test_run_catchup_first_visit(
     already ran against the mocked db connection either way, and any error
     it raises is swallowed by run_catchup's own except-and-warn.
     """
-    mock_caller.return_value = {"name": "NEW_BRANCH"}  # type: ignore[union-attr]
-    mock_get_db.return_value = MagicMock()  # type: ignore[union-attr]
-    mock_close.side_effect = lambda c: None  # type: ignore[union-attr]
-    mock_last_active.return_value = None  # type: ignore[union-attr]
-    mock_query.return_value = {  # type: ignore[union-attr]
+    mock_caller.return_value = {"name": "NEW_BRANCH"}
+    mock_get_db.return_value = MagicMock()
+    mock_close.side_effect = lambda c: None
+    mock_last_active.return_value = None
+    mock_query.return_value = {
         "unread_mentions": [],
         "replies": [],
         "trending": None,
@@ -377,7 +375,7 @@ def test_run_catchup_first_visit(
         "new_comments_count": 0,
         "karma_change": 0,
     }
-    mock_update.return_value = None  # type: ignore[union-attr]
+    mock_update.return_value = None
 
     result = run_catchup()
 
@@ -387,9 +385,9 @@ def test_run_catchup_first_visit(
 
 
 @patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_caller_branch")
-def test_run_catchup_no_caller(mock_caller: object) -> None:
+def test_run_catchup_no_caller(mock_caller: MagicMock) -> None:
     """run_catchup without a detectable caller branch should fail."""
-    mock_caller.return_value = None  # type: ignore[union-attr]
+    mock_caller.return_value = None
     result = run_catchup()
     assert result["success"] is False
     assert "Could not detect" in result["error"]
@@ -479,3 +477,21 @@ def test_get_top_posts_by_engagement(digest_db: sqlite3.Connection) -> None:
     assert len(top) >= 1
     assert top[0]["title"] == "Popular Post"
     assert top[0]["comment_count"] == 2
+
+
+def test_run_catchup_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    The lookup raises before any database is opened.
+    Mutant: catchup_ops `except CallerLookupFailed as exc:` -> `except KeyError as exc:` turns this red.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    ) as lookup:
+        result = run_catchup()
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

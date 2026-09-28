@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: artifact_ops.py
 # Description: Artifact Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -149,9 +149,12 @@ def craft_artifact(args: List[str]) -> dict:
     if metadata is None:
         return {"success": False, "error": "Invalid metadata: must be valid shallow JSON (no nested objects/arrays)"}
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 
@@ -227,9 +230,12 @@ def list_artifacts(args: List[str]) -> dict:
 
     owner_filter = None
     if not show_all:
-        from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+        from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-        caller = get_caller_branch()
+        try:
+            caller = get_caller_branch()
+        except CallerLookupFailed as exc:
+            return {"success": False, "error": str(exc)}
         if not caller:
             return {"success": False, "error": "Could not detect calling branch. Use --all to see all artifacts."}
         owner_filter = caller["name"]
@@ -385,9 +391,12 @@ def collab_artifact(args: List[str]) -> dict:
     if rarity not in VALID_RARITIES:
         return {"success": False, "error": f"Invalid rarity '{rarity}'. Must be one of: {', '.join(VALID_RARITIES)}"}
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 
@@ -445,9 +454,12 @@ def sign_artifact(args: List[str]) -> dict:
         logger.warning("[artifact_ops] Non-numeric pending ID provided for sign")
         return {"success": False, "error": "Pending ID must be a number"}
 
-    from aipass.commons.apps.handlers.identity.identity_ops import get_caller_branch
+    from aipass.commons.apps.handlers.identity.identity_ops import CallerLookupFailed, get_caller_branch
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {"success": False, "error": "Could not detect calling branch. Run from a branch directory."}
 

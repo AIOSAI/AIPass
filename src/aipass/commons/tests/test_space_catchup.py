@@ -5,7 +5,7 @@
 # Date: 2026-03-29
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -24,7 +24,7 @@
 # seedgo: no-test-needed(ruff) — that every file in handlers/rooms/, search/, database/ parses and imports
 
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 from aipass.commons.apps.handlers.rooms.room_state_ops import (
@@ -70,7 +70,8 @@ def _seed_agent_and_post(conn: sqlite3.Connection) -> int:
         ("Test Post", "Some interesting content here", "general", "TEST_BRANCH"),
     )
     conn.commit()
-    return cursor.lastrowid  # type: ignore[return-value]
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
 
 
 def _seed_comment(conn: sqlite3.Connection, post_id: int, content: str = "A comment") -> int:
@@ -80,7 +81,8 @@ def _seed_comment(conn: sqlite3.Connection, post_id: int, content: str = "A comm
         (post_id, "TEST_BRANCH", content),
     )
     conn.commit()
-    return cursor.lastrowid  # type: ignore[return-value]
+    assert cursor.lastrowid is not None
+    return cursor.lastrowid
 
 
 # =============================================================================
@@ -124,13 +126,13 @@ def test_set_entrance(initialized_db: sqlite3.Connection) -> None:
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_get_room_enter_data(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
     mock_json: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """get_room_enter_data should return room info, post count, and decorations."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
     _seed_agent_and_post(initialized_db)
 
     result = get_room_enter_data("general")
@@ -145,12 +147,12 @@ def test_get_room_enter_data(
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_record_visit(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """record_visit should insert a row into room_visits."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
 
     record_visit("general", "TEST_BRANCH")
 
@@ -165,12 +167,12 @@ def test_record_visit(
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_get_room_look_data(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """get_room_look_data should return room description and recent posts."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
     _seed_agent_and_post(initialized_db)
 
     result = get_room_look_data("general")
@@ -186,14 +188,14 @@ def test_get_room_look_data(
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_place_decoration(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
     mock_json_space: object,
     mock_json_state: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """place_decoration should insert a decor_ state key for the room."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
 
     result = place_decoration("general", "potted_plant", "A leafy fern", "TEST_BRANCH")
 
@@ -205,12 +207,12 @@ def test_place_decoration(
 @patch("aipass.commons.apps.handlers.rooms.space_ops.close_db", side_effect=lambda c: None)
 @patch("aipass.commons.apps.handlers.rooms.space_ops.get_db")
 def test_get_visitors_data(
-    mock_get_db: object,
+    mock_get_db: MagicMock,
     mock_close: object,
     initialized_db: sqlite3.Connection,
 ) -> None:
     """get_visitors_data should return visitors from visits and post authors."""
-    mock_get_db.return_value = initialized_db  # type: ignore[union-attr]
+    mock_get_db.return_value = initialized_db
     _seed_agent_and_post(initialized_db)
 
     # Also record a visit

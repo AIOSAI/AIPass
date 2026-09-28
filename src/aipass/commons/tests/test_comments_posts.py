@@ -5,7 +5,7 @@
 # Date: 2026-04-03
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: commons/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -647,3 +647,92 @@ class TestDeletePost:
             (comment_id,),
         ).fetchall()
         assert len(comment_votes) == 0
+
+
+# ---------------------------------------------------------------------------
+# Failure paths named to the user (DPLAN-0354 leg 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("_mock_caller_test_branch")
+def test_create_post_still_posts_but_names_undelivered_mentions(mock_db):
+    """A failed mention lookup leaves the post made and says the mentions were lost.
+
+    Before: extract_mentions answered [] on failure, so "@drone" vanished silently;
+    with None the loop raised and the committed post was reported as a failure.
+    Mutant: post_ops `if mentions is None:` -> `if False:` turns this red.
+    """
+    with patch("aipass.commons.apps.handlers.posts.post_ops.extract_mentions", return_value=None) as lookup:
+        result = create_post(["general", "Hello", "ping @drone"])
+
+    lookup.assert_called_once_with("Hello ping @drone")
+    assert result["success"] is True
+    assert result["mentions"] == []
+    assert "mentions not delivered" in result["mentions_error"]
+    stored = mock_db.execute("SELECT title FROM posts WHERE id = ?", (result["post_id"],)).fetchone()
+    assert stored[0] == "Hello"
+
+
+@pytest.mark.usefixtures("_mock_caller_test_branch")
+def test_add_comment_still_comments_but_names_undelivered_mentions(mock_db):
+    """A failed mention lookup leaves the comment made and says the mentions were lost.
+
+    Mutant: comment_ops `if mentions is None:` -> `if False:` turns this red.
+    """
+    post_id = _insert_post(mock_db)
+    with patch("aipass.commons.apps.handlers.comments.comment_ops.extract_mentions", return_value=None) as lookup:
+        result = add_comment([str(post_id), "ping @drone"])
+
+    lookup.assert_called_once_with("ping @drone")
+    assert result["success"] is True
+    assert result["mentions"] == []
+    assert "mentions not delivered" in result["mentions_error"]
+    stored = mock_db.execute("SELECT content FROM comments WHERE id = ?", (result["comment_id"],)).fetchone()
+    assert stored[0] == "ping @drone"
+
+
+def _break_caller_lookup():
+    """Make get_caller_branch's inner lookup raise, as a dead disk or registry would."""
+    return patch(
+        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+        side_effect=OSError("registry unreadable"),
+    )
+
+
+def test_create_post_refuses_naming_a_failed_caller_lookup(mock_db):
+    """A broken caller lookup is refused by name, not as "run from a branch directory".
+
+    Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
+    """
+    with _break_caller_lookup() as lookup:
+        result = create_post(["general", "Hello", "Body"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed" in result["error"]
+    assert "registry unreadable" in result["error"]
+    assert mock_db.execute("SELECT COUNT(*) FROM posts WHERE title = 'Hello'").fetchone()[0] == 0
+
+
+def test_vote_on_content_refuses_naming_a_failed_caller_lookup(mock_db):
+    """The votes family names a broken caller lookup, and no vote is written."""
+    post_id = _insert_post(mock_db)
+    with _break_caller_lookup() as lookup:
+        result = vote_on_content(["post", str(post_id), "up"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+    assert mock_db.execute("SELECT COUNT(*) FROM votes").fetchone()[0] == 0
+
+
+def test_add_comment_refuses_naming_a_failed_caller_lookup(mock_db):
+    """A broken caller lookup is refused by name on the comment path too."""
+    post_id = _insert_post(mock_db)
+    with _break_caller_lookup() as lookup:
+        result = add_comment([str(post_id), "Hello"])
+
+    lookup.assert_called_once()
+    assert result["success"] is False
+    assert "Caller lookup failed" in result["error"]
+    assert "registry unreadable" in result["error"]

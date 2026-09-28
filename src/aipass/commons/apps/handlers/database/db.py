@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: db.py
 # Description: The Commons SQLite connection manager
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """

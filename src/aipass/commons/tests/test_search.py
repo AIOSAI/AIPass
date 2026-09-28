@@ -3,7 +3,7 @@
 # Description: Unit tests for search handler, search queries, and log export
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/search/search_ops.py, search_queries.py, and log_export.py."""
@@ -61,7 +61,7 @@ def _run_parsed(args: list) -> dict:
 # =============================================================================
 
 
-def test_parse_search_args_empty():
+def test_run_search_refuses_an_empty_query():
     """
     An empty query is refused before any database round-trip.
 

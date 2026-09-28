@@ -3,7 +3,7 @@
 # Description: Unit tests for identity module and identity_ops handler
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/commons_identity.py and apps/handlers/identity/identity_ops.py."""
@@ -155,6 +155,23 @@ def test_extract_mentions_with_underscores(initialized_db: sqlite3.Connection):
 
     result = _id_mod.extract_mentions("Asking @ai_mail for analysis")
     assert result == ["ai_mail"]
+
+
+def test_extract_mentions_answers_none_when_the_lookup_fails(initialized_db: sqlite3.Connection):
+    """A failed agents lookup answers None, never the [] of "nobody was mentioned".
+
+    Before: the except returned [], so post_ops/comment_ops reported a post that
+    named @drone as mentioning no one and the mention was lost in silence.
+    Mutant: identity_ops `return None` -> `return []` in the except turns this red.
+    """
+    with patch(
+        "aipass.commons.apps.handlers.database.db.get_db",
+        side_effect=sqlite3.OperationalError("database is locked"),
+    ) as failing_get_db:
+        result = _id_mod.extract_mentions("Hey @drone check this out")
+
+    failing_get_db.assert_called_once_with()
+    assert result is None
 
 
 # ===========================================================================
@@ -644,26 +661,25 @@ def test_branches_from_registry_malformed_json(tmp_path: Path, monkeypatch: pyte
 @pytest.fixture
 def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch):
     """
-    Emulate a case-insensitive filesystem for Path.glob.
+    Emulate a case-insensitive filesystem for the registry listing.
 
     Yields the union of the pattern's matches and the case-folded
     pattern's matches — which is what Windows hands back for a single
-    call. Wraps the real Path.glob rather than re-implementing listing,
-    so production's own call site is what gets widened.
+    call. Replaces identity_ops.list_registry_candidates (the seam whose
+    body is production's one glob) rather than Path.glob, so only the
+    registry listing is widened, never every glob in the process.
     """
-    real_glob = Path.glob
+    pattern = "*_REGISTRY.json"
 
-    def widened(self, pattern, *args, **kwargs):
+    def widened(directory: Path):
         seen = {}
-        for found in real_glob(self, pattern, *args, **kwargs):
+        for found in directory.glob(pattern):
             seen[str(found)] = found
-        folded = pattern.lower()
-        if folded != pattern:
-            for found in real_glob(self, folded, *args, **kwargs):
-                seen[str(found)] = found
+        for found in directory.glob(pattern.lower()):
+            seen[str(found)] = found
         return iter(sorted(seen.values()))
 
-    monkeypatch.setattr(Path, "glob", widened)
+    monkeypatch.setattr(_ops, "list_registry_candidates", widened)
 
 
 def _plant_case_folded_decoy(project: Path, branch_dir: Path) -> Path:
@@ -781,7 +797,7 @@ def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitiv
     branch_dir = _make_external_project(project)
     decoy = _plant_case_folded_decoy(project, branch_dir)
 
-    listed = list(project.glob("*_REGISTRY.json"))
+    listed = list(_ops.list_registry_candidates(project))
 
     assert decoy in listed, "instrument did not widen — the case-insensitive emulation is broken"
     assert project / "VERA-STUDIO_REGISTRY.json" in listed
@@ -885,3 +901,27 @@ def test_external_registries_with_lowercase_stems_still_resolve(
 
     assert result is not None, "a lowercase-stem registry was wrongly filtered out"
     assert result["email"] == "@app"
+
+
+def test_get_caller_branch_raises_a_named_failure_when_the_lookup_breaks():
+    """A broken lookup raises CallerLookupFailed; None stays "no branch detected".
+
+    Before (DPLAN-0354 leg 3): the except logged and returned None, the same answer
+    as "not run from a branch", so ~30 handlers told the user the wrong thing.
+    Mutant: identity_ops `raise CallerLookupFailed(...) from e` -> `return None` turns this red.
+    """
+    with patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")) as lookup:
+        with pytest.raises(_ops.CallerLookupFailed, match="Caller lookup failed: registry unreadable"):
+            _ops.get_caller_branch()
+
+    lookup.assert_called_once()
+
+
+def test_whoami_refuses_naming_a_failed_caller_lookup(capsys: pytest.CaptureFixture[str]):
+    """whoami names a broken lookup instead of "run from a branch directory"."""
+    with patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")):
+        assert _id_mod.handle_command("whoami", []) is True
+
+    err = " ".join(capsys.readouterr().err.split())
+    assert "Caller lookup failed: registry unreadable" in err
+    assert "Run from a branch directory" not in err

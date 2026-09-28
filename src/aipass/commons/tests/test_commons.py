@@ -3,7 +3,7 @@
 # Description: Integration tests for The Commons social network (posts, comments, votes, rooms, feeds)
 # Version: 1.0.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/database/db.py and the handlers it drives (notifications, profiles, welcome, search)."""
@@ -15,10 +15,8 @@
 # seedgo: no-test-needed(duplicate) — get_db and DB_PATH resolution; test_lifecycle.py pins db.py's live-path side
 # seedgo: no-test-needed(duplicate) — the commands' printed output; test_search.py, test_curation_explore_welcome_ops.py
 
-import functools
 import shutil
 import sqlite3
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -70,19 +68,27 @@ from aipass.commons.apps.handlers.curation.pin_queries import (
 )
 
 
-@functools.lru_cache(maxsize=1)
-def _get_template_db() -> Path:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-    path = Path(tmp.name)
-    tmp.close()
-    conn = init_db(path)
-    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    close_db(conn)
-    return path
+@pytest.fixture(autouse=True)
+def _tmp_db_paths(request, tmp_path, _template_db_path):
+    """Stash tmp_path and the session template db onto unittest.TestCase instances.
+
+    commons' decision, DPLAN-0354 leg 3: the classes below are xunit-style
+    (setup_method(self, _method)), which cannot take fixture arguments
+    directly. pytest still resolves autouse fixtures before setup_method
+    runs (confirmed against this pytest's own ordering), so setup_method
+    reads self._tmp_path / self._template_db_path instead of building its
+    own file under /tmp with tempfile.NamedTemporaryFile. request.instance
+    is None for the plain (non-class) test functions below, which build
+    their own tmp_path-backed db via init_db and don't need this.
+    """
+    if request.instance is not None:
+        request.instance._tmp_path = tmp_path
+        request.instance._template_db_path = _template_db_path
 
 
-def _fast_db(db_path):
-    shutil.copy2(str(_get_template_db()), str(db_path))
+def _fast_db(db_path: Path, template_path: Path) -> sqlite3.Connection:
+    """Copy the session template db to db_path and open a fast connection."""
+    shutil.copy2(str(template_path), str(db_path))
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -94,13 +100,13 @@ def _fast_db(db_path):
 class TestNotificationPreferences(unittest.TestCase):
     """Test notification preference CRUD and should_notify logic."""
 
+    _tmp_path: Path
+    _template_db_path: Path
+
     def setup_method(self, _method):
         """Create a fresh test database with agents."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
+        self.db_path = self._tmp_path / "notification.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["AGENT_A", "AGENT_B", "AGENT_C"]:
             self.conn.execute(
@@ -235,13 +241,13 @@ class TestNotificationPreferences(unittest.TestCase):
 class TestSocialProfiles(unittest.TestCase):
     """Test social profile columns, updates, and activity counters."""
 
+    _tmp_path: Path
+    _template_db_path: Path
+
     def setup_method(self, _method):
         """Create a fresh test database with agents."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
+        self.db_path = self._tmp_path / "profiles.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["PROFILE_A", "PROFILE_B"]:
             self.conn.execute(
@@ -392,13 +398,13 @@ class TestSocialProfiles(unittest.TestCase):
 class TestWelcomeOnboarding(unittest.TestCase):
     """Test welcome posts, duplicate prevention, and onboarding nudges."""
 
+    _tmp_path: Path
+    _template_db_path: Path
+
     def setup_method(self, _method):
         """Create a fresh test database with agents."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
+        self.db_path = self._tmp_path / "welcome.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["WELCOME_A", "WELCOME_B", "WELCOME_C"]:
             self.conn.execute(
@@ -517,13 +523,13 @@ class TestWelcomeOnboarding(unittest.TestCase):
 class TestSearchAndLogs(unittest.TestCase):
     """Test FTS5 search and log export."""
 
+    _tmp_path: Path
+    _template_db_path: Path
+
     def setup_method(self, _method):
         """Create a fresh test database with agents and sample data."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
+        self.db_path = self._tmp_path / "search.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["SEARCH_A", "SEARCH_B", "SEARCH_C"]:
             self.conn.execute(
@@ -677,13 +683,13 @@ class TestSearchAndLogs(unittest.TestCase):
 class TestReactionsAndPins(unittest.TestCase):
     """Test reactions, pins, and trending detection."""
 
+    _tmp_path: Path
+    _template_db_path: Path
+
     def setup_method(self, _method):
         """Create a fresh test database with agents, posts, and comments."""
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-        self.db_path = Path(self.temp_db.name)
-        self.temp_db.close()
-
-        self.conn = _fast_db(self.db_path)
+        self.db_path = self._tmp_path / "reactions.db"
+        self.conn = _fast_db(self.db_path, self._template_db_path)
 
         for agent in ["REACT_A", "REACT_B", "REACT_C", "AUTHOR_X"]:
             self.conn.execute(

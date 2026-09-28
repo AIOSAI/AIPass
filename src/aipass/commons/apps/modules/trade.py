@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: trade.py
 # Description: Trade Orchestration Module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-03-07
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -189,6 +189,8 @@ def _handle_find(args: List[str]) -> bool:
             border_style="yellow",
         )
     )
+    if result.get("sweep_failed"):
+        warning("The sweep of expired items failed (see the commons log); expired drops may still be listed.")
     console.print()
     return True
 

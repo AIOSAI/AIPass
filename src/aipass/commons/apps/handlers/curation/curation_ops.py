@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: curation_ops.py
 # Description: Curation Operations Handler
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -18,7 +18,7 @@ from typing import List
 from aipass.prax.apps.modules.logger import system_logger as logger
 
 from aipass.commons.apps.handlers.database.db import get_db, close_db
-from aipass.commons.apps.modules.commons_identity import get_caller_branch
+from aipass.commons.apps.modules.commons_identity import CallerLookupFailed, get_caller_branch
 from aipass.commons.apps.handlers.curation.reaction_queries import (
     add_reaction,
     remove_reaction,
@@ -74,7 +74,10 @@ def add_react(args: List[str]) -> dict:
             "error": f"Invalid reaction: {reaction}\nValid reactions: {', '.join(VALID_REACTIONS)}",
         }
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -145,7 +148,10 @@ def remove_react(args: List[str]) -> dict:
     if reaction not in VALID_REACTIONS:
         return {"success": False, "error": f"Invalid reaction: {reaction}"}
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -244,7 +250,10 @@ def pin_post_cmd(args: List[str]) -> dict:
         logger.warning("[curation_ops] Non-numeric post ID provided for pin")
         return {"success": False, "error": "Post ID must be a number"}
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
@@ -309,7 +318,10 @@ def unpin_post_cmd(args: List[str]) -> dict:
         logger.warning("[curation_ops] Non-numeric post ID provided for unpin")
         return {"success": False, "error": "Post ID must be a number"}
 
-    caller = get_caller_branch()
+    try:
+        caller = get_caller_branch()
+    except CallerLookupFailed as exc:
+        return {"success": False, "error": str(exc)}
     if not caller:
         return {
             "success": False,
