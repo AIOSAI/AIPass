@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ceiling_guard.py
 # Description: Tests for the per-run size/file-count ceiling (runaway guard)
-# Version: 1.0.5
+# Version: 1.0.6
 # Created: 2026-08-20
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/scan/ceiling.py and the per-run size/file-count ceiling."""
@@ -325,8 +325,9 @@ class TestSharedScanSeeding:
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 
-        # A subset, not a count: --quiet does not reach the two modes yet (all.py passes no show_panels).
-        assert set(titles) <= {"Backup — Snapshot", "Backup — Versioned"}
+        # What is true today: --quiet does not reach the two modes (all.py passes them no show_panels),
+        # so both headers print. The day it does, this goes red and is rewritten to [].
+        assert titles == ["Backup — Snapshot", "Backup — Versioned"]
         store = build_versioned_store(str(root))
         leaked = list(store.rglob("*rcgu*")) if store.exists() else []
         assert leaked == [], f"seed-excluded artifacts reached the versioned store: {leaked}"

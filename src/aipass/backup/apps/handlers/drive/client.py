@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: client.py
 # Description: Google Drive client — auth, folders, file lookup via @api gateway
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Google Drive client.
@@ -264,7 +264,14 @@ class DriveClient:
                     fields="files(id,name)",
                 )
                 result = self._api_call(request)
-                if result and result.get("files"):
+                if result is None:
+                    # No answer is not an empty search: a create here makes a duplicate project folder.
+                    self.last_error = (
+                        f"Project folder search for '{project_name}' got no answer - not creating a duplicate"
+                    )
+                    logger.warning(self.last_error)
+                    return None
+                if result.get("files"):
                     folder_id = result["files"][0]["id"]
                     self.project_folder_cache[project_name] = folder_id
                     return folder_id
@@ -301,7 +308,12 @@ class DriveClient:
             fields="files(id,name)",
         )
         result = self._api_call(request)
-        if result and result.get("files"):
+        if result is None:
+            # No answer is not an empty search: a create here makes a duplicate folder.
+            self.last_error = f"Folder search for '{name}' got no answer - not creating a duplicate"
+            logger.warning(self.last_error)
+            return None
+        if result.get("files"):
             return result["files"][0]["id"]
 
         metadata = {"name": name, "mimeType": FOLDER_MIME, "parents": [parent_id]}

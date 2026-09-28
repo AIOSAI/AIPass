@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_ignore_pathspec.py
 # Description: Tests for ignore/patterns.py: matching, seed template, *.tmp floor, cleanup
-# Version: 1.3.5
+# Version: 1.3.6
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for src/aipass/backup/apps/handlers/ignore/patterns.py: matching, seed template, *.tmp floor, cleanup."""
@@ -446,8 +446,9 @@ class TestBuiltinTmpFloor:
         with patch("aipass.backup.apps.modules.drive_sync.run_drive_sync", return_value={}):
             assert handle_command("all", [str(root), "--quiet"]) is True
 
-        # A subset, not a count: --quiet does not reach the two modes yet (all.py passes no show_panels).
-        assert set(titles) <= {"Backup — Snapshot", "Backup — Versioned"}
+        # What is true today: --quiet does not reach the two modes (all.py passes them no show_panels),
+        # so both headers print. The day it does, this goes red and is rewritten to [].
+        assert titles == ["Backup — Snapshot", "Backup — Versioned"]
 
         dest = build_snapshot_path(str(root))
         store = build_versioned_store(str(root))

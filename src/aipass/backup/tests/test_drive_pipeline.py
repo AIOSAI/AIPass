@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_drive_pipeline.py
 # Description: Tests for the Drive sync pipeline -- every Google edge sealed, zero live calls
-# Version: 3.0.3
+# Version: 3.0.4
 # Created: 2026-06-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/drive_sync.py and the apps/handlers/drive/ pipeline it drives."""
@@ -256,8 +256,10 @@ class TestDriveClient:
         assert client.backup_folder_id is None
         drive_api.assert_not_called()
 
-    def test_an_outage_never_creates_a_second_root_or_resets_the_tracker(self, drive_api: MagicMock) -> None:
-        """Mutant: the search's no-answer falls through to the create, as an empty search does."""
+    def test_an_outage_never_creates_a_second_root_or_resets_the_tracker(
+        self, drive_api: MagicMock, recorded_logger: MagicMock
+    ) -> None:
+        """Mutants: the search's no-answer falls through to the create, as an empty search does; the warning goes."""
         service = MagicMock(name="drive_service")
         client = drive_client.DriveClient()
         client._drive_service = service
@@ -270,7 +272,43 @@ class TestDriveClient:
         service.files.return_value.create.assert_not_called()
         assert client.file_tracker == {"kept.txt": {"drive_id": "abc"}}
         assert client.last_error == "Backup folder search got no answer - not creating a second root"
+        # Loud where the caller is: the refusal is a warning, not only a field.
+        recorded_logger.warning.assert_called_once_with(client.last_error)
         assert drive_api.call_count == 2
+
+    def test_an_outage_never_creates_a_duplicate_project_folder(
+        self, drive_api: MagicMock, recorded_logger: MagicMock
+    ) -> None:
+        """Mutants: the project search's no-answer falls through to the create; the warning goes."""
+        service = MagicMock(name="drive_service")
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        client.backup_folder_id = "root_folder"
+        # The root verifies, the project search gets no answer; the last is what a fall-through would consume.
+        drive_api.side_effect = [{"id": "root_folder", "trashed": False}, None, {"id": "duplicate_project"}]
+
+        assert client.get_or_create_project_folder("myproject") is None
+        service.files.return_value.create.assert_not_called()
+        assert "myproject" not in client.project_folder_cache
+        assert client.last_error == "Project folder search for 'myproject' got no answer - not creating a duplicate"
+        recorded_logger.warning.assert_called_once_with(client.last_error)
+        assert drive_api.call_count == 2
+
+    def test_an_outage_never_creates_a_duplicate_nested_segment(
+        self, drive_api: MagicMock, recorded_logger: MagicMock
+    ) -> None:
+        """Mutants: a segment search's no-answer falls through to the create; the warning goes."""
+        service = MagicMock(name="drive_service")
+        client = drive_client.DriveClient()
+        client._drive_service = service
+        drive_api.side_effect = [None, {"id": "duplicate_segment"}]
+
+        assert client.get_or_create_nested_folder("parent_id", "a") is None
+        service.files.return_value.create.assert_not_called()
+        assert "parent_id:a" not in client.project_folder_cache
+        assert client.last_error == "Folder search for 'a' got no answer - not creating a duplicate"
+        recorded_logger.warning.assert_called_once_with(client.last_error)
+        assert drive_api.call_count == 1
 
     def test_project_folder_found_is_returned_and_cached_by_project_name(self, drive_api: MagicMock) -> None:
         """A found project folder is returned and cached under its project name."""
