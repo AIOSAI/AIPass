@@ -3,7 +3,7 @@
 # Description: Tests for update_local handler — Flow dashboard updates
 # Version: 2.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/dashboard/update_local.py."""
@@ -76,9 +76,13 @@ class TestDelegation:
         with patch(f"{_MOD}.push_flow_to_branch_dashboard", return_value=False):
             assert update_local.update_dashboard_local() is False
 
-    def test_returns_false_when_flow_has_no_dashboard(self, flow_root):
-        """No dashboard file means no branch to write to — refuse, never create."""
-        assert update_local.update_dashboard_local() is False
+    def test_returns_none_when_flow_has_no_dashboard(self, flow_root):
+        """No dashboard file means no branch to write to — refuse, never create.
+
+        None, not False: False is kept for a push that failed (leg 3 decision).
+        Mutant: return result -> return bool(result) reddens this.
+        """
+        assert update_local.update_dashboard_local() is None
         assert not (flow_root / "DASHBOARD.local.json").exists()
 
 

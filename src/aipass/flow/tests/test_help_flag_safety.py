@@ -3,7 +3,7 @@
 # Description: Tests for apps/handlers/cli/help_flags.py -- whole-sequence help detection (DPLAN-0291 rule E)
 # Version: 1.0.0
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/cli/help_flags.py and the flow command modules that call it."""
@@ -332,7 +332,7 @@ class TestUnflaggedModulesHelpSafety:
             patch(f"{_POST}.error") as error_fn,
             patch(f"{_POST}.warning") as warning_fn,
             patch("aipass.flow.apps.handlers.runner.lock_ops.os.open", side_effect=fake_open),
-            patch("time.sleep"),
+            patch("aipass.flow.apps.handlers.runner.lock_ops._sleep") as sleep,
         ):
             handled = post_close_runner.handle_command("post", ["run"])
 
@@ -348,6 +348,69 @@ class TestUnflaggedModulesHelpSafety:
         assert reported, error_fn.call_args.args[0]
         assert int(reported.group(1)) > 1
         assert len(attempts) == int(reported.group(1))
+        # One backoff wait after every denied attempt, the last included.
+        assert sleep.call_count == len(attempts)
+
+    def test_post_unreadable_lock_reports_an_error_not_already_running(self, tmp_path, mock_logger):
+        """A lock path that exists but cannot be read is an error, not a running instance.
+
+        A directory at the lock path used to read as 'stale', fail its unlink and
+        come back as False - "Another instance is already running" - so the runner
+        exited quietly forever. It is now reported as an error, with no processing.
+        The argument gate is patched open for the reason the test above gives.
+        Mutant: except OSError as e: -> except PermissionError as e: reddens this.
+        """
+        lock = tmp_path / ".post_close_runner.lock"
+        lock.mkdir()
+
+        with (
+            patch(f"{_POST}.LOCK_FILE", lock),
+            patch(f"{_POST}.refuse_extra"),
+            patch(f"{_POST}.process_closed_plans") as target,
+            patch(f"{_POST}.release_lock") as release,
+            patch(f"{_POST}.error") as error_fn,
+            patch(f"{_POST}.warning") as warning_fn,
+        ):
+            handled = post_close_runner.handle_command("post", ["run"])
+
+        assert handled is True
+        target.assert_not_called()
+        release.assert_not_called()
+        warning_fn.assert_not_called()
+        error_fn.assert_called_once()
+        assert "Could not create lock" in error_fn.call_args.args[0]
+        mock_logger.error.assert_called()
+        assert lock.is_dir()
+
+    def test_detached_run_with_an_unreadable_lock_logs_and_exits_1(self, tmp_path, mock_logger):
+        """The detached program close_plan starts meets the same lock: logged, exit 1, no pass.
+
+        main() is the body of the __main__ guard; a lock that cannot be read
+        used to end it with a traceback and no log line. LOCK_FILE is redirected
+        so the real lock is never touched, and the pass itself is stubbed.
+        Mutant: except OSError as e: -> except PermissionError as e: (in main) reddens this.
+        """
+        lock = tmp_path / ".post_close_runner.lock"
+        lock.mkdir()
+
+        with (
+            patch(f"{_POST}.LOCK_FILE", lock),
+            patch(f"{_POST}.process_closed_plans") as target,
+            patch(f"{_POST}.release_lock") as release,
+        ):
+            try:
+                code = post_close_runner.main(["post_close_runner.py"])
+            except OSError as exc:
+                pytest.fail(f"main() let {exc!r} escape: the detached run dies with a traceback, no log line")
+
+        assert code == 1
+        target.assert_not_called()
+        release.assert_not_called()
+        logged = [c for c in mock_logger.error.call_args_list if "Could not create lock" in c.args[0]]
+        assert len(logged) == 1
+        assert logged[0].args[2] == lock
+        assert isinstance(logged[0].args[3], OSError)
+        assert lock.is_dir()
 
     def test_normal_registry_status_still_works(self):
         with patch(f"{_REG}.print_help") as help_fn:

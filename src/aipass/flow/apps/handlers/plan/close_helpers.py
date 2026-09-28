@@ -3,7 +3,7 @@
 # Description: Plan Closure Helper Functions
 # Version: 1.0.0
 # Created: 2026-05-16
-# Modified: 2026-05-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -98,7 +98,9 @@ def _find_unregistered_plan_file(prefix: str, plan_key: str) -> Path | None:
     """Search src/aipass/ for a plan file matching PREFIX-plan_key not in any registry."""
     aipass_root = FLOW_ROOT.parent
     pattern = f"{prefix}-{plan_key}*.md"
-    skip_parts = {".backup", ".archive", "__pycache__", ".git", "processed_plans"}
+    # dropbox: a sandbox like .archive, nothing looks into it (ruling of 2026-09-27);
+    # a copy there would be registered and closed by close_ops' self-heal.
+    skip_parts = {".backup", ".archive", "dropbox", "__pycache__", ".git", "processed_plans"}
 
     for match in aipass_root.rglob(pattern):
         if any(part in skip_parts for part in match.parts):

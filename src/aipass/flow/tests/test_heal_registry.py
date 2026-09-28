@@ -3,7 +3,7 @@
 # Description: Tests for heal_registry doctrine self-heal handler
 # Version: 1.0.0
 # Created: 2026-07-29
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/registry/heal_registry.py."""
@@ -688,6 +688,33 @@ class TestHealRegistryDoctrineImpl:
 
         assert result["healed"] == []
         assert result["healed_count"] == 0
+
+    def test_an_unreadable_registry_fails_the_missing_file_sweep_loudly(self, tmp_path, quiet_cross_prefix):
+        """A registry that cannot be read is a failed sweep, logged as an error by the run —
+        not an empty 'nothing to heal' answer with a warning. The other type still heals.
+
+        Mutant: the bare load -> the load wrapped in except Exception: return [] reddens this.
+        """
+        dead_path = str(tmp_path / "FPLAN-0007_gone_2026-07-02.md")
+        store = FakeRegistryStore(
+            {"fplan_registry.json": {"plans": {"0007": {"status": "open", "file_path": dead_path}}, "next_number": 8}}
+        )
+
+        def load(registry_file=None):
+            if registry_file == "tdplan_registry.json":
+                raise OSError("registry unreadable")
+            return store.load(registry_file)
+
+        with (
+            patch.object(mod, "_load_template_registry", return_value={"types": TYPES}),
+            patch.object(mod, "_citizen_seat_index", return_value={}),
+            patch.object(mod, "logger") as log,
+        ):
+            result = mod.heal_registry_doctrine_impl(tmp_path, load, store.save)
+
+        errors = [str(c.args[0]) for c in log.error.call_args_list]
+        assert any("Missing-file sweep failed for type TDPLAN" in e and "registry unreadable" in e for e in errors)
+        assert [a["number"] for a in result["healed"] if a["action"] == "auto_closed_missing_file"] == ["0007"]
 
     def test_per_type_heals_run_before_wrong_prefix_sweep(self, tmp_path, quiet_cross_prefix):
         """Case 1/2 first, then case 3 — so case 3 is left with ghost cleanup only."""

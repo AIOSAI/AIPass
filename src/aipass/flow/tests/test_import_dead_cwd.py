@@ -3,7 +3,7 @@
 # Description: Every flow module imports, and keeps logging, without a readable working directory
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for aipass/flow/apps/__init__.py and every module beneath it importing with no readable working directory."""
@@ -212,17 +212,25 @@ print("STACK_DIES: " + _ns["out"])
 """
 
 
-def _flow_modules() -> list[str]:
+# Directories no walk in this file enters. The source is the ruling of
+# 2026-09-27: a dropbox is ignored by all, and a sandbox like .archive is too.
+# Written here as literals on purpose, not imported from seedgo's skip_dirs.py.
+_WALK_IGNORED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _flow_modules(root: Path | None = None) -> list[str]:
     """Every importable module under ``aipass.flow.apps``, by walking the tree.
 
     Named from the filesystem rather than from a hand-written list: the whole
     species this file is about is a fix landing on some of N identical paths,
     and a list in a test is one more place for N to be undercounted.
+
+    ``root`` defaults to the real apps/ tree; the dropbox pin passes a tmp_path one.
     """
-    root = Path(flow_apps.__file__).parent
+    root = root or Path(flow_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
-        if "__pycache__" in source.parts or ".archive" in source.parts:
+        if _WALK_IGNORED_DIRS.intersection(source.relative_to(root).parts):
             continue
         rel = source.relative_to(root).with_suffix("")
         parts = [p for p in rel.parts if p != "__init__"]
@@ -241,7 +249,7 @@ def _run_world(world: str, control: str, body: str) -> subprocess.CompletedProce
     )
 
 
-def _flow_modules_by_import_machinery() -> list[str]:
+def _flow_modules_by_import_machinery(root: Path | None = None) -> list[str]:
     """The same set, derived through importlib's finder instead of the filesystem.
 
     A SECOND MECHANISM, on purpose. ``_flow_modules`` globs and manipulates
@@ -249,19 +257,23 @@ def _flow_modules_by_import_machinery() -> list[str]:
     that decides what a module IS — and imports nothing. Re-running the same
     rglob logic twice would be the table-written-twice failure: two copies of one
     belief agree with each other no matter how wrong they are.
+
+    ``root`` defaults to the real apps/ tree; the dropbox pin passes a tmp_path one.
     """
     import pkgutil
 
     def walk(path: Path, prefix: str) -> set[str]:
         found = set()
         for info in pkgutil.iter_modules([str(path)]):
+            if info.name in _WALK_IGNORED_DIRS:
+                continue
             name = f"{prefix}.{info.name}"
             found.add(name)
             if info.ispkg:
                 found |= walk(path / info.name, name)
         return found
 
-    root = Path(flow_apps.__file__).parent
+    root = root or Path(flow_apps.__file__).parent
     names = walk(root, "aipass.flow.apps") | {"aipass.flow.apps"}
     return sorted(name for name in names if ".archive" not in name)
 
@@ -297,6 +309,41 @@ def flow_modules() -> list[str]:
         "tree that is not there, which set equality alone cannot catch"
     )
     return modules
+
+
+def _tree_with_a_dropbox_and_an_archive(tmp_path: Path) -> Path:
+    """An apps/ stand-in: one real module, plus a dropbox and an .archive holding packages."""
+    root = tmp_path / "apps"
+    for package in (root, root / "dropbox", root / ".archive"):
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+    (root / "real.py").write_text("", encoding="utf-8")
+    (root / "dropbox" / "stray.py").write_text("", encoding="utf-8")
+    (root / ".archive" / "old.py").write_text("", encoding="utf-8")
+    return root
+
+
+class TestTheWalksNeverEnterADropbox:
+    """Every walk in this file skips dropbox/, .archive/ and __pycache__/ (ruling of 2026-09-27)."""
+
+    def test_the_filesystem_walk_skips_a_dropbox(self, tmp_path):
+        assert _flow_modules(_tree_with_a_dropbox_and_an_archive(tmp_path)) == [
+            "aipass.flow.apps",
+            "aipass.flow.apps.real",
+        ]
+
+    def test_the_finder_walk_skips_a_dropbox(self, tmp_path):
+        assert _flow_modules_by_import_machinery(_tree_with_a_dropbox_and_an_archive(tmp_path)) == [
+            "aipass.flow.apps",
+            "aipass.flow.apps.real",
+        ]
+
+    def test_the_source_sweep_skips_a_dropbox(self, tmp_path):
+        root = _tree_with_a_dropbox_and_an_archive(tmp_path)
+
+        swept = TestNoModuleLevelLocationCallSurvives._apps_sources(root)
+
+        assert [p.relative_to(root).as_posix() for p in swept] == ["__init__.py", "real.py"]
 
 
 class TestTheModuleCountIsDerivedFromTwoMechanisms:
@@ -341,6 +388,19 @@ class TestTheModuleCountIsDerivedFromTwoMechanisms:
             "then comparing a value with itself"
         )
         assert "rglob" not in finder_source, "the second derivation is globbing, which is the first mechanism"
+        # The effect the name claims, as a value: of every discovery mechanism the
+        # file knows, the second derivation calls exactly one, and it is pkgutil's.
+        mechanisms = {"pkgutil.iter_modules", "pkgutil.walk_packages", "_flow_modules", "rglob", "glob", "os.walk"}
+        called = set()
+        for statement in body:
+            for node in ast.walk(statement):
+                if isinstance(node, ast.Call):
+                    name = ast.unparse(node.func)
+                    # root.rglob / path.glob: the receiver varies, the mechanism does not.
+                    called.add(name.rsplit(".", 1)[-1] if name.endswith("glob") else name)
+        assert called & mechanisms == {"pkgutil.iter_modules"}, (
+            f"the second derivation's discovery calls are {sorted(called & mechanisms)}, not pkgutil's finder alone"
+        )
 
     def test_the_fixture_compares_one_against_the_other(self):
         """And that the fixture actually uses both, rather than one twice."""
@@ -1199,6 +1259,13 @@ print("PATHLIB_FILE_ABS_TO_POSIX:", __import__("posixpath").isabs(str(pathlib.__
             "per platform that should be impossible — unless both were refused, or both "
             f"now supply what the host already had: {verdicts}"
         )
+        # Named, not just counted: the fake of the OTHER platform is the one that
+        # must change what a probe reads on this host (the host's own fake may be
+        # ALREADY). Asserted on its verdict string, which is a value.
+        foreign = "posix" if sys.platform == "win32" else "windows"
+        assert verdicts[foreign] == "CHANGED", (
+            f"the {foreign} fake is the foreign one on this host and changed nothing: {verdicts}"
+        )
 
     @pytest.mark.parametrize("simulated_host", ["posix", "windows"])
     def test_the_runner_set_arms_on_either_kind_of_host(self, simulated_host):
@@ -1883,9 +1950,10 @@ class TestNoModuleLevelLocationCallSurvives:
     )
 
     @staticmethod
-    def _apps_sources() -> list[Path]:
-        root = Path(flow_apps.__file__).parent
-        return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts and ".archive" not in p.parts]
+    def _apps_sources(root: Path | None = None) -> list[Path]:
+        """Every .py under apps/ (or ``root``, which the dropbox pin passes), ignored dirs skipped."""
+        root = root or Path(flow_apps.__file__).parent
+        return [p for p in sorted(root.rglob("*.py")) if not _WALK_IGNORED_DIRS.intersection(p.relative_to(root).parts)]
 
     @staticmethod
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:

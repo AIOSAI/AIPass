@@ -3,7 +3,7 @@
 # Description: Tests for push_branch_dashboard handler — branch dashboard push
 # Version: 1.2.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/dashboard/push_branch_dashboard.py and aipass.prax's dashboard module."""
@@ -945,11 +945,17 @@ class TestBuildSectionDataOpenRecent:
 class TestPushFlowToBranchDashboard:
     """Tests for push_flow_to_branch_dashboard."""
 
-    def test_returns_false_if_no_dashboard_exists(self, tmp_path):
-        """Returns False when DASHBOARD.local.json does not exist."""
+    def test_returns_none_if_no_dashboard_exists(self, tmp_path):
+        """Returns None when DASHBOARD.local.json does not exist.
+
+        None, not False: False is kept for a push that failed, so a caller can
+        tell 'no branch here' from 'the push broke' (leg 3 decision).
+        Mutant: return None -> return False reddens this.
+        """
         mod = push_branch_dashboard
         result = mod.push_flow_to_branch_dashboard(tmp_path)
-        assert result is False
+        assert result is None
+        assert not (tmp_path / "DASHBOARD.local.json").exists()
 
     def test_success_calls_log_operation(self, tmp_path, mock_json_handler):
         """Logs via json_handler on successful push."""
@@ -1175,6 +1181,25 @@ class TestPushFlowToAllBranchDashboards:
         assert result["pushed"] == 1
         assert result["failed"] == 1
         assert "flow" in json.loads((b / "DASHBOARD.local.json").read_text(encoding="utf-8"))["sections"]
+
+    def test_a_dashboard_gone_mid_sweep_is_skipped_not_failed(self, tmp_path, mock_json_handler):
+        """The push's None (no dashboard) counts as skipped; only its False counts as failed.
+
+        Mutant: "skipped" if pushed is None -> "failed" if pushed is None reddens this.
+        """
+        mod = push_branch_dashboard
+        a, b = self._branch(tmp_path, "a"), self._branch(tmp_path, "b")
+
+        def answer(path):
+            return None if Path(path).name == "a" else False
+
+        with (
+            patch.object(mod, "_load_registry", return_value=self._registry(a, b)),
+            patch.object(mod, "push_flow_to_branch_dashboard", side_effect=answer),
+        ):
+            result = mod.push_flow_to_all_branch_dashboards()
+
+        assert result == {"pushed": 0, "skipped": 1, "failed": 1}
 
     def test_duplicate_locations_are_pushed_once(self, tmp_path, mock_json_handler):
         """Many plans in one branch is one push, not one per plan."""

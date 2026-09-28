@@ -3,7 +3,7 @@
 # Description: Tests for close_ops handler — plan closure business logic
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/plan/close_ops.py and its close_helpers, append_closed_plan and registry_routing modules."""
@@ -27,7 +27,7 @@ from aipass.flow.apps.handlers.plan.close_ops import (
     close_all_plans_impl,
     close_plan_impl,
 )
-from aipass.flow.apps.handlers.plan.registry_routing import _canonical_plan_id
+from aipass.flow.apps.handlers.plan.registry_routing import canonical_plan_id
 
 
 # ─── Helpers ─────────────────────────────────────────────
@@ -774,6 +774,17 @@ class TestFindUnregisteredPlanFile:
         assert result is None
 
     @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
+    def test_a_dropbox_copy_is_never_found(self, mock_flow_root, tmp_path):
+        """A dropbox is a sandbox nothing looks into; close would register and close the copy.
+        Mutant: dropping "dropbox" from skip_parts reddens this."""
+        mock_flow_root.parent = tmp_path
+        dropbox_dir = tmp_path / "hooks" / "dropbox"
+        dropbox_dir.mkdir(parents=True)
+        (dropbox_dir / "DPLAN-0335_handed_over_2026-09-27.md").write_text("# Copy", encoding="utf-8")
+
+        assert _find_unregistered_plan_file("DPLAN", "0335") is None
+
+    @patch("aipass.flow.apps.handlers.plan.close_helpers.FLOW_ROOT")
     def test_skips_processed_plans_directory(self, mock_flow_root, tmp_path):
         find_fn = _find_unregistered_plan_file
         mock_flow_root.parent = tmp_path
@@ -1217,25 +1228,25 @@ def _closed_ids(mock_close) -> list:
 
 
 class TestCanonicalPlanId:
-    """_canonical_plan_id derives the typed ID from the row's file_path."""
+    """canonical_plan_id derives the typed ID from the row's file_path."""
 
     def test_derives_prefix_from_file_path(self):
-        fn = _canonical_plan_id
+        fn = canonical_plan_id
         assert fn("0300", {"file_path": "/x/DPLAN-0300_baud_on_the_phone_2026-08-01.md"}) == "DPLAN-0300"
 
     def test_each_registered_type(self):
-        fn = _canonical_plan_id
+        fn = canonical_plan_id
         for prefix in ("FPLAN", "DPLAN", "APLAN", "PPLAN", "RPLAN", "TDPLAN", "CPLAN"):
             assert fn("0007", {"file_path": f"/x/{prefix}-0007_topic_2026-01-01.md"}) == f"{prefix}-0007"
 
     def test_returns_none_when_file_path_missing(self):
         """No file_path means no type evidence -- must refuse, never guess a prefix."""
-        fn = _canonical_plan_id
+        fn = canonical_plan_id
         assert fn("0300", {}) is None
         assert fn("0300", {"file_path": ""}) is None
 
     def test_returns_none_when_filename_carries_no_prefix(self):
-        fn = _canonical_plan_id
+        fn = canonical_plan_id
         assert fn("0300", {"file_path": "/x/notes_about_a_thing.md"}) is None
 
 

@@ -3,7 +3,7 @@
 # Description: Tests for flow.py CLI entry point
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/flow.py."""
@@ -569,14 +569,20 @@ class TestPrintHelp:
 class TestPrintModuleHelp:
     """Tests for print_module_help()."""
 
-    def test_exact_match(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """Finds module by exact name match."""
+    def test_exact_match(self, capsys: pytest.CaptureFixture[str], header_bus) -> None:
+        """Finds module by exact name match, and the header names the module found.
+
+        The header's title is read off conftest's header_bus recorder, which
+        stands where the live trigger bus would be.
+        Mutant: header(f"Flow - {module_name} Command") -> header("Flow - Command") reddens this.
+        """
         mod = _make_module("create_plan", doc="Create plans\nMore details here")
         print_module_help("create_plan", [mod])
 
         out, err = capsys.readouterr()
         assert "Create plans" in out
         assert "Unknown command" not in out + err
+        assert header_bus.calls == [("cli_header_displayed", {"title": "Flow - create_plan Command"})]
 
     def test_no_match(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Shows error for unknown command.

@@ -3,7 +3,7 @@
 # Description: Plan Creation Implementation Handler
 # Version: 1.1.0
 # Created: 2026-03-08
-# Modified: 2026-03-08
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -71,9 +71,9 @@ def create_plan_impl(
     create_plan_file: Callable[..., tuple] | None = None,
     build_plan_registry_entry: Callable[..., Dict[str, Any]] | None = None,
     display_plan_created: Callable[..., str] | None = None,
-    update_dashboard_local: Callable[..., bool] | None = None,
+    update_dashboard_local: Callable[..., bool | None] | None = None,
     push_to_plans_central: Callable[..., bool] | None = None,
-    push_flow_to_branch_dashboard: Callable[..., bool] | None = None,
+    push_flow_to_branch_dashboard: Callable[..., bool | None] | None = None,
 ) -> Tuple[bool, int, str, str, str, List[Dict[str, Any]]]:
     """
     Implement plan creation workflow
@@ -243,10 +243,18 @@ def create_plan_impl(
             logger.warning(f"[{MODULE_NAME}] Failed to update PLANS.central.json")
 
         # STEP 11b: Push flow section to branch's dashboard via write-through
+        # None: no dashboard there. False: the push failed (already logged).
         branch_dashboard_success = push_flow_to_branch_dashboard(target_dir)
-        if not branch_dashboard_success:
+        if branch_dashboard_success is None:
             messages.append(
                 {"type": "dim", "text": f"No branch dashboard at {target_dir} -- no branch is tracking this plan"}
+            )
+        elif not branch_dashboard_success:
+            messages.append(
+                {
+                    "type": "warning",
+                    "text": f"[WARNING] Failed to push flow section to branch dashboard at {target_dir} (see log)",
+                }
             )
 
         # STEP 12: Log success

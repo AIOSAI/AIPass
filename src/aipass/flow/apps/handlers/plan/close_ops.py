@@ -3,7 +3,7 @@
 # Description: Plan Closure Implementation Handler
 # Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-05-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -30,7 +30,7 @@ from aipass.flow.apps.handlers.plan.registry_routing import (
     _extract_prefix,
     _resolve_registry_file,
     _find_plan_across_registries,
-    _canonical_plan_id,
+    canonical_plan_id,
 )
 from aipass.flow.apps.handlers.plan.close_helpers import (
     PROCESSED_PLANS_DIR,
@@ -619,7 +619,7 @@ def close_all_plans_impl(
         held: List[tuple[str, str, str, Dict[str, Any]]] = []
 
         for plan_num, plan_info in open_plans:
-            plan_id = _canonical_plan_id(plan_num, plan_info)
+            plan_id = canonical_plan_id(plan_num, plan_info)
             if plan_id is None:
                 unresolved.append((plan_num, plan_info))
                 continue

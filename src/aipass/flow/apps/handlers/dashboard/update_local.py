@@ -3,7 +3,7 @@
 # Description: Update Dashboard Local Handler
 # Version: 2.0.0
 # Created: 2025-11-21
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -46,7 +46,7 @@ Usage:
     from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local
 
     success = update_dashboard_local()
-    # Returns True on success, False on failure
+    # Returns True on success, None with no dashboard, False on failure
 """
 
 from aipass.flow.apps.handlers.dashboard.push_branch_dashboard import push_flow_to_branch_dashboard
@@ -64,13 +64,15 @@ FLOW_ROOT = _PKG_ROOT / "flow"
 # =============================================
 
 
-def update_dashboard_local() -> bool:
+def update_dashboard_local() -> bool | None:
     """
     Refresh Flow's own dashboard card through the shared section writer.
 
     Returns:
-        True if the card was written, False if Flow has no dashboard file or
-        the write failed (the section writer logs the reason).
+        True if the card was written, None if Flow has no dashboard file
+        (nothing created), False if the write failed (the section writer logs
+        the reason). The writer's answer is passed through whole: flow's leg 3
+        decision keeps 'no dashboard' and 'failed' apart.
 
     Example:
         >>> from aipass.flow.apps.handlers.dashboard.update_local import update_dashboard_local

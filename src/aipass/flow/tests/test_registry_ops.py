@@ -3,7 +3,7 @@
 # Description: Tests for registry_ops handler — template registry CRUD
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/template/registry_ops.py and the plan registry save it drives."""
@@ -13,6 +13,7 @@
 
 import json
 import os
+import sys
 import re
 from pathlib import Path
 from unittest.mock import patch
@@ -389,13 +390,14 @@ class TestSaveRegistry:
         after exactly the budget, the caller returns False and logs the denial,
         and the helper's PermissionError is chained to the last denial.
         Mutant: for attempt in range(_LOCK_RETRIES): -> for attempt in range(_LOCK_RETRIES - 1): reddens this.
+        Mutant: MODULE_NAME, target, e, exc_info=True) -> MODULE_NAME, target, str(e), exc_info=True) reddens this.
         """
         monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
         target = tmp_path / "fplan_registry.json"
         before = {"plans": {}, "next_number": 1}
         target.write_text(json.dumps(before), encoding="utf-8")
         lock = target.with_suffix(".lock")
-        fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=None)
+        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
 
         with (
             patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
@@ -416,17 +418,42 @@ class TestSaveRegistry:
         budget = int(reported.group(1))
         assert budget > 1
         assert len(attempts) == budget
+        # The cause chain, read through the public door: save_registry logs the
+        # exception itself, so the operator's log carries the last denial.
+        logged_errors = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged_errors) == 1
+        assert isinstance(logged_errors[0], PermissionError)
+        assert logged_errors[0].__cause__ is raised[-1]
 
-        fake_open, attempts, raised = _deny_exclusive_creates(lock, denials=None)
-        with (
-            patch(f"{_PLAN_REG_MOD}.os.open", side_effect=fake_open),
-            patch(f"{_PLAN_REG_MOD}.time.sleep"),
-            pytest.raises(PermissionError) as excinfo,
-        ):
-            plan_reg._acquire_lock(lock)
+    def test_plan_registry_lock_create_error_is_logged_as_itself(
+        self, tmp_path, monkeypatch, mock_logger, platform_create_answer
+    ):
+        """A lock create that fails with neither contention nor denial is not "after N retries".
 
-        assert excinfo.value.__cause__ is raised[-1]
-        assert len(attempts) == budget
+        The registry name fits the filesystem; its .lock sibling is 257 bytes, so
+        the exclusive create fails on disk. _acquire_lock used to answer False for
+        that - the same answer as contention - and the caller logged a retry
+        budget that was never spent. It now propagates. Which error a 257-byte
+        name raises is the platform's choice, so the test asks the platform first.
+        Mutant: `except OSError as exc:` + `raise` -> `return False` reddens this.
+        """
+        monkeypatch.setattr(plan_reg, "FLOW_JSON_DIR", tmp_path)
+        name = "a" * 252 + ".js"
+        answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
+        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
+            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
+        )
+
+        result = plan_reg.save_registry({"plans": {}, "next_number": 1}, registry_file=name)
+
+        assert result is False
+        assert not (tmp_path / name).exists()
+        text = " ".join(str(arg) for c in mock_logger.error.call_args_list for arg in c.args)
+        assert "retries" not in text
+        logged = [arg for c in mock_logger.error.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged) == 1
+        assert type(logged[0]) is type(answer)
+        assert logged[0].errno == answer.errno
 
 
 # =============================================================================

@@ -3,7 +3,7 @@
 # Description: Tests for restore_ops handler -- plan restore business logic, and validator
 # Version: 1.0.0
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/plan/restore_ops.py and apps/handlers/plan/validator.py."""
@@ -895,6 +895,10 @@ class TestRestoreOfANormallyClosedPlan:
     """The end-to-end claim: 'every closed plan is recoverable'."""
 
     def test_closed_plan_with_an_archived_copy_restores(self, tmp_path):
+        """The bus is patched where it lives, as the other restore tests do.
+
+        Mutant: trigger.fire(..., plan_number=plan_key) -> plan_number=plan_num reddens this.
+        """
         fn = restore_plan_impl
         row, home, archive, name = _closed_plan(tmp_path)
         registry = {"plans": {"0042": row}}
@@ -905,8 +909,10 @@ class TestRestoreOfANormallyClosedPlan:
         )
         deps["restore_file_from_backup_fn"] = lambda info, key: restore_file_from_backup(info, key, backup_dir=archive)
 
-        result = fn(plan_num="FPLAN-0042", **deps)
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+            result = fn(plan_num="FPLAN-0042", **deps)
 
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0042", location=str(home))
         # REACHED: the restore ran to completion, not short-circuited earlier.
         assert result["success"] is True, result["messages"]
         # OUTCOME: file back on disk, row reopened, and the name still carries the work.
@@ -915,9 +921,12 @@ class TestRestoreOfANormallyClosedPlan:
         assert "the_real_subject" in name and "2026-08-01" in name
 
     def test_the_rows_own_metadata_survives_the_restore(self, tmp_path):
-        """recover_plan_from_backup would have overwritten subject and created."""
+        """recover_plan_from_backup would have overwritten subject and created.
+
+        Mutant: trigger.fire(..., location=restored_location) -> location="unknown" reddens this.
+        """
         fn = restore_plan_impl
-        row, _home, archive, _name = _closed_plan(tmp_path)
+        row, home, archive, _name = _closed_plan(tmp_path)
         registry = {"plans": {"0042": row}}
 
         deps = _make_deps(
@@ -926,7 +935,10 @@ class TestRestoreOfANormallyClosedPlan:
         )
         deps["restore_file_from_backup_fn"] = lambda info, key: restore_file_from_backup(info, key, backup_dir=archive)
 
-        fn(plan_num="FPLAN-0042", **deps)
+        with patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger:
+            fn(plan_num="FPLAN-0042", **deps)
+
+        mock_trigger.fire.assert_called_once_with("plan_restored", plan_number="0042", location=str(home))
 
         restored = registry["plans"]["0042"]
         assert restored["subject"] == "The real subject"

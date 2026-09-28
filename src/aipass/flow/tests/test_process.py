@@ -3,7 +3,7 @@
 # Description: Tests for mbank/process.py — additional coverage
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for mbank/process.py — archive_plan, is_template_content, and orchestration."""
@@ -13,6 +13,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -411,6 +412,37 @@ class TestSaveFlowRegistryAdditional:
 
         assert helper_exc.value.__cause__ is raised[-1]
         assert len(attempts) == proc._LOCK_RETRIES
+
+    def test_lock_create_error_is_reported_as_itself(self, tmp_path, mock_logger, platform_create_answer):
+        """A lock create that fails with neither contention nor denial names its own cause.
+
+        The registry name fits the filesystem; its .lock sibling is 257 bytes, so
+        the exclusive create fails on disk. _acquire_lock used to answer False,
+        and save_flow_registry reported "Could not acquire lock" - the contention
+        message - for it. It now propagates. Which error a 257-byte name raises
+        is the platform's choice, so the test asks the platform first.
+        Mutant: `lock_path, exc)` + `raise` -> `return False` reddens this.
+        """
+        name = "a" * 252 + ".js"
+        answer = platform_create_answer((tmp_path / name).with_suffix(".lock"))
+        assert isinstance(answer, OSError) and not isinstance(answer, (FileExistsError, PermissionError)), (
+            f"{sys.platform} answered {answer!r} to a 257-byte lock name: the premise of this test is gone"
+        )
+
+        with (
+            patch(f"{_PROC}.FLOW_JSON_DIR", tmp_path),
+            pytest.raises(Exception) as excinfo,
+        ):
+            proc.save_flow_registry({"next_number": 1, "plans": {}}, registry_file=name)
+
+        assert "Could not acquire lock" not in str(excinfo.value)
+        assert "retries" not in str(excinfo.value)
+        assert not (tmp_path / name).exists()
+        logged = [arg for c in mock_logger.warning.call_args_list for arg in c.args if isinstance(arg, OSError)]
+        assert len(logged) == 1
+        assert type(logged[0]) is type(answer)
+        assert logged[0].errno == answer.errno
+        assert excinfo.value.__context__ is logged[0]
 
 
 # ===================================================================

@@ -3,7 +3,7 @@
 # Description: Tests for lock_ops handler — atomic lock file management
 # Version: 1.0.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/runner/lock_ops.py."""
@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(ruff) — that lock_ops.py parses and imports
 
 import os
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,6 +25,19 @@ _MOD = "aipass.flow.apps.handlers.runner.lock_ops"
 
 # Captured before any test patches os.open: the stand-in below delegates here.
 _REAL_OS_OPEN = os.open
+
+
+def _unlink_answer(path: Path) -> OSError | None:
+    """Unlink ``path`` with the test's own hands and keep what the platform answers.
+
+    Returns:
+        The OSError the unlink raised, or None when the platform refused nothing.
+    """
+    try:
+        path.unlink()
+    except OSError as exc:
+        return exc
+    return None
 
 
 def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0):
@@ -54,6 +68,12 @@ def _deny_exclusive_creates(lock_path: Path, denials: int | None, after: int = 0
         return _REAL_OS_OPEN(path, flags, *args, **kwargs)
 
     return fake_open, attempts, raised
+
+
+def _age(lock: Path) -> None:
+    """Set the lock's mtime an hour back, well past any unreadable-lock grace."""
+    old = time.time() - 3600
+    os.utime(lock, (old, old))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -99,7 +119,7 @@ class TestTryCreateLock:
         lock = tmp_path / ".test.lock"
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=1)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch("time.sleep") as sleep:
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.try_create_lock(lock)
 
         assert result is True
@@ -120,7 +140,7 @@ class TestTryCreateLock:
 
         with (
             patch(f"{_MOD}.os.open", side_effect=fake_open),
-            patch("time.sleep"),
+            patch(f"{_MOD}._sleep") as sleep,
             pytest.raises(PermissionError) as excinfo,
         ):
             mod.try_create_lock(lock)
@@ -128,6 +148,7 @@ class TestTryCreateLock:
         assert str(lock) in str(excinfo.value)
         assert excinfo.value.__cause__ is raised[-1]
         assert len(attempts) == mod._CREATE_RETRIES
+        assert sleep.call_count == mod._CREATE_RETRIES
         assert mod._CREATE_RETRIES > 1
         assert f"{mod._CREATE_RETRIES} attempts" in str(excinfo.value)
         assert not lock.exists()
@@ -139,7 +160,7 @@ class TestTryCreateLock:
         lock.write_text("12345", encoding="utf-8")
         fake_open, attempts, _raised = _deny_exclusive_creates(lock, denials=0)
 
-        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch("time.sleep") as sleep:
+        with patch(f"{_MOD}.os.open", side_effect=fake_open), patch(f"{_MOD}._sleep") as sleep:
             result = mod.try_create_lock(lock)
 
         assert result is False
@@ -173,20 +194,69 @@ class TestIsLockStale:
         assert result is True
 
     def test_lock_with_invalid_content_is_stale(self, tmp_path):
-        """Lock file with non-integer content should be stale."""
+        """Lock file with non-integer content, older than the grace, should be stale."""
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("not-a-pid", encoding="utf-8")
+        _age(lock)
         result = mod.is_lock_stale(lock)
         assert result is True
 
     def test_lock_with_empty_content_is_stale(self, tmp_path):
-        """Lock file with empty content should be stale."""
+        """An empty lock older than the grace was left by a writer that died mid-create: stale."""
         mod = lock_ops
         lock = tmp_path / ".test.lock"
         lock.write_text("", encoding="utf-8")
+        _age(lock)
         result = mod.is_lock_stale(lock)
         assert result is True
+
+    def test_fresh_empty_lock_is_held(self, tmp_path):
+        """The empty-lock race: a holder has done O_EXCL but not yet written its pid.
+
+        A reader in that gap used to see "" -> ValueError -> stale, and acquire_lock
+        then unlinked the live holder's lock. A fresh empty lock is held.
+        Mutant: `if age < _UNREADABLE_LOCK_GRACE:` -> `if False:` reddens this.
+        """
+        mod = lock_ops
+        lock = tmp_path / ".test.lock"
+        lock.write_text("", encoding="utf-8")
+        assert mod.is_lock_stale(lock) is False
+        assert lock.exists()
+
+    def test_fresh_garbage_lock_is_held(self, tmp_path):
+        """Non-integer content that is still fresh is held, not taken over.
+
+        Mutant: `if age < _UNREADABLE_LOCK_GRACE:` -> `if age < 0:` reddens this.
+        """
+        mod = lock_ops
+        lock = tmp_path / ".test.lock"
+        lock.write_text("not-a-pid", encoding="utf-8")
+        assert mod.is_lock_stale(lock) is False
+
+    def test_vanished_lock_is_stale(self, tmp_path):
+        """A lock gone before it could be read was released: the caller may take over."""
+        mod = lock_ops
+        lock = tmp_path / ".gone.lock"
+        assert mod.is_lock_stale(lock) is True
+
+    def test_unreadable_lock_raises_instead_of_reading_stale(self, tmp_path):
+        """A lock that exists but cannot be read is not proof its holder is dead.
+
+        A directory at the lock path raises a real OSError on read; it used to be
+        swallowed as 'stale'. It now surfaces to the caller. Which OSError is the
+        platform's choice (IsADirectoryError on Linux and macOS, PermissionError
+        on Windows); the one answer that must not come is FileNotFoundError, the
+        answer that means stale.
+        Mutant: `except FileNotFoundError:` -> `except OSError:` reddens this.
+        """
+        mod = lock_ops
+        lock = tmp_path / ".test.lock"
+        lock.mkdir()
+        with pytest.raises(OSError) as excinfo:
+            mod.is_lock_stale(lock)
+        assert not isinstance(excinfo.value, FileNotFoundError)
+        assert lock.is_dir()
 
     def test_permission_error_treated_as_alive(self, tmp_path):
         """When _pid_alive says process exists, lock is valid (not stale)."""
@@ -232,19 +302,53 @@ class TestAcquireLock:
         assert result is True
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
 
-    def test_fails_when_stale_lock_unlink_fails(self, tmp_path):
-        """Should return False when stale lock can't be removed.
+    def test_raises_when_stale_lock_unlink_fails(self, tmp_path):
+        """A stale lock that cannot be removed raises; it is not reported as held.
 
-        The lock path is a real directory: the exclusive create meets it, it reads
-        as unreadable (stale), and unlinking a directory raises OSError on disk.
-        Mutant: return False after the failed stale unlink -> return True reddens this.
+        False means "another live process holds the lock" to every caller; a
+        dead holder's lock in a directory we cannot write is not that. The lock
+        (dead pid) sits in a directory set read-only. Whether that refuses an
+        unlink is the platform's choice (Linux and macOS as a user: refused;
+        Windows, or root: not), so the test first unlinks a probe of its own in
+        that directory and asserts the product's answer for what it saw: the
+        same error, lock untouched; or, where nothing is refused, a normal
+        takeover.
+        Mutant: `lock_file.unlink(missing_ok=True)` -> `pass` reddens this.
+        """
+        mod = lock_ops
+        home = tmp_path / "ro"
+        home.mkdir()
+        lock = home / ".test.lock"
+        lock.write_text("999999999", encoding="utf-8")
+        probe = home / "probe"
+        probe.write_text("", encoding="utf-8")
+        home.chmod(0o555)
+        try:
+            refusal = _unlink_answer(probe)
+            with patch(f"{_MOD}._pid_alive", return_value=False):
+                if refusal is not None:
+                    with pytest.raises(OSError) as excinfo:
+                        mod.acquire_lock(lock)
+                    assert type(excinfo.value) is type(refusal)
+                    assert lock.read_text(encoding="utf-8") == "999999999"
+                else:
+                    assert mod.acquire_lock(lock) is True
+                    assert lock.read_text(encoding="utf-8") == str(os.getpid())
+        finally:
+            home.chmod(0o755)
+
+    def test_fresh_empty_lock_is_not_unlinked(self, tmp_path):
+        """A holder between O_EXCL and its pid write keeps its lock: acquire says held.
+
+        Mutant: `if age < _UNREADABLE_LOCK_GRACE:` -> `if False:` reddens this.
         """
         mod = lock_ops
         lock = tmp_path / ".test.lock"
-        lock.mkdir()
-        result = mod.acquire_lock(lock)
-        assert result is False
-        assert lock.is_dir()
+        lock.write_text("", encoding="utf-8")
+        before = lock.stat().st_ino
+        assert mod.acquire_lock(lock) is False
+        assert lock.read_text(encoding="utf-8") == ""
+        assert lock.stat().st_ino == before
 
     def test_logs_json_operation_on_fresh_acquire(self, tmp_path, mock_json_handler):
         """Should log lock_acquired via json_handler on fresh lock."""
@@ -280,12 +384,13 @@ class TestAcquireLock:
         with (
             patch(f"{_MOD}._pid_alive", return_value=False),
             patch(f"{_MOD}.os.open", side_effect=fake_open),
-            patch("time.sleep"),
+            patch(f"{_MOD}._sleep") as sleep,
         ):
             result = mod.acquire_lock(lock)
 
         assert result is True
         assert len(attempts) == 3
+        sleep.assert_called_once()
         assert lock.read_text(encoding="utf-8") == str(os.getpid())
 
     def test_denial_that_never_clears_raises_instead_of_returning_false(self, tmp_path):
@@ -299,7 +404,7 @@ class TestAcquireLock:
 
         with (
             patch(f"{_MOD}.os.open", side_effect=fake_open),
-            patch("time.sleep"),
+            patch(f"{_MOD}._sleep") as sleep,
             pytest.raises(PermissionError) as excinfo,
         ):
             mod.acquire_lock(lock)
@@ -307,6 +412,7 @@ class TestAcquireLock:
         assert str(lock) in str(excinfo.value)
         assert excinfo.value.__cause__ is raised[-1]
         assert len(attempts) == mod._CREATE_RETRIES
+        assert sleep.call_count == mod._CREATE_RETRIES
 
 
 # ═══════════════════════════════════════════════════════════

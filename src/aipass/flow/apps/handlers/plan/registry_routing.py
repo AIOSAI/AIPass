@@ -3,7 +3,7 @@
 # Description: Plan-type Registry Routing Helpers
 # Version: 1.0.0
 # Created: 2026-07-28
-# Modified: 2026-07-28
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -33,10 +33,9 @@ from typing import Any, Dict
 from aipass.prax import logger
 
 from aipass.flow.apps.handlers.json import json_handler
+from aipass.flow.apps.handlers.repo_root import module_file
 
 MODULE_NAME = "registry_routing"
-
-from aipass.flow.apps.handlers.repo_root import module_file
 
 _PKG_ROOT = module_file(__file__).parents[4]
 FLOW_ROOT = _PKG_ROOT / "flow"
@@ -50,8 +49,11 @@ def _extract_prefix(plan_num_raw: str) -> str | None:
     return m.group(1).upper() if m else None
 
 
-def _canonical_plan_id(plan_num: str, plan_info: Dict[str, Any]) -> str | None:
+def canonical_plan_id(plan_num: str, plan_info: Dict[str, Any]) -> str | None:
     """Build the typed plan ID (e.g. ``"DPLAN-0300"``) for a registry row.
+
+    Public (flow's leg 3 decision): close_ops.close_all_plans_impl calls it from
+    outside this module, and shared type routing is what this module exists for.
 
     A bare registry key is NOT an identity. Every per-type registry numbers
     from 0001, so "0300" names one row in each of them; handing that key to

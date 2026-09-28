@@ -3,7 +3,7 @@
 # Description: Push flow section to branch dashboards
 # Version: 2.1.0
 # Created: 2026-03-01
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -526,21 +526,26 @@ def _build_section_data(
 # =============================================
 
 
-def push_flow_to_branch_dashboard(branch_path: Path) -> bool:
+def push_flow_to_branch_dashboard(branch_path: Path) -> bool | None:
     """
     Push flow section to a branch's DASHBOARD.local.json via write_section().
 
     Reads the flow registry, filters plans for the target branch,
     and writes the flow section to the branch's dashboard.
 
-    Dashboard write failures are silent (returns False, never raises).
+    Dashboard write failures are logged, never raised: the plan operation that
+    called this has already happened and must not be undone by a card.
 
     Args:
         branch_path: Absolute path to the branch directory
             (e.g. Path("/repo/src/aipass/devpulse"))
 
     Returns:
-        True if successfully written, False on any error
+        True if written; None if the path has no DASHBOARD.local.json (not a
+        branch, nothing to push, nothing created); False if the push failed
+        (the section write refused, or an error was raised and logged). Flow's
+        leg 3 decision: None and False were one value before, so a caller that
+        saw a failure told the user no branch was tracking the plan.
     """
     try:
         branch_path = Path(branch_path)
@@ -548,7 +553,7 @@ def push_flow_to_branch_dashboard(branch_path: Path) -> bool:
         # Guard: only push to paths that already have a dashboard (real branches)
         dashboard_file = branch_path / "DASHBOARD.local.json"
         if not dashboard_file.exists():
-            return False
+            return None
 
         # 1. Load the registry
         registry = _load_registry()
@@ -611,7 +616,9 @@ def push_flow_to_all_branch_dashboards() -> Dict[str, int]:
             counts["skipped"] += 1
             continue
         try:
-            counts["pushed" if push_flow_to_branch_dashboard(branch_path) else "failed"] += 1
+            pushed = push_flow_to_branch_dashboard(branch_path)
+            # None: the dashboard went between the check above and the push.
+            counts["skipped" if pushed is None else "pushed" if pushed else "failed"] += 1
         except Exception as exc:
             logger.error("Sweep failed for branch '%s', continuing: %s", branch_path, exc)
             counts["failed"] += 1
