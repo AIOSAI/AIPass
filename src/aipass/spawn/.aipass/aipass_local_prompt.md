@@ -93,6 +93,6 @@ tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools
  - No test touches the live `AIPASS_REGISTRY.json` — hand the product a tmp_path registry; `conftest.py`'s tripwire fails the session if the live file moves
  - `update` cannot run against spawn itself — the lane executes in this process and imports the shim at module level
  - `handlers/__init__.py` refuses cross-branch imports; other branches come through `apps/modules/`
- - `drone rm` silently refuses `__pycache__`; purge with python and verify by counting what is left
+ - After any `drone rm`, verify by counting what is left — an exit code is not a removal
  - `delete` has no force flag — clear `citizenship.registered` first, deliberately
  - A refusal must never exit 0: every routed command passes through the exit seam in `spawn.py`

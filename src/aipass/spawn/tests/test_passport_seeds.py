@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_passport_seeds.py
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from aipass.spawn.apps.handlers import seed_ops, update_ops
+from aipass.spawn.apps.handlers import seed_ops
 from aipass.spawn.apps.handlers.passport_migration import KEY_ORDER
 from aipass.spawn.apps.handlers.seed_ops import (
     MACHINE_LOCAL_CITIZENSHIP,
@@ -667,13 +667,12 @@ def _seeded_branch(tmp_path: Path, branch: str = "wanderer", mutate=None) -> Pat
 class TestMintFromSeedEndToEnd:
     """A clone's branch directory holds its soul; spawn gives it a passport."""
 
-    def test_a_seeded_directory_is_born_from_its_seed(self, tmp_path, monkeypatch):
+    def test_a_seeded_directory_is_born_from_its_seed(self, tmp_path):
         """A seed birth adopts, and adoption's template update looks the branch up by name
-        through update_ops.find_registry (CWD walk) - pointed at the tmp_path registry."""
+        in the registry the birth was handed (the tmp_path registry)."""
 
         target = _seeded_branch(tmp_path)
         reg = _registry(tmp_path)
-        monkeypatch.setattr(update_ops, "find_registry", lambda *a, **k: reg)
         result = spawn_agent(str(target), registry_path=str(reg))
 
         assert result["success"] is True
@@ -684,11 +683,10 @@ class TestMintFromSeedEndToEnd:
         assert passport["identity"] == make_passport()["identity"]
         assert passport["citizenship"][STAMP_KEY]["sha256"] == seed_fingerprint(seed_path_for(target))
 
-    def test_the_born_citizen_carries_fresh_local_ids(self, tmp_path, monkeypatch):
+    def test_the_born_citizen_carries_fresh_local_ids(self, tmp_path):
 
         target = _seeded_branch(tmp_path)
         reg = _registry(tmp_path)
-        monkeypatch.setattr(update_ops, "find_registry", lambda *a, **k: reg)
         spawn_agent(str(target), registry_path=str(reg))
 
         passport = json.loads((target / ".trinity" / "passport.json").read_text(encoding="utf-8"))

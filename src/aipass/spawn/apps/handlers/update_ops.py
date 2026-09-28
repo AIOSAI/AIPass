@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.2.0
+# Version: 2.2.1
 # Created: 2026-03-07
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -122,7 +122,12 @@ def _is_never_update(resolved_path: str) -> bool:
 # =============================================================================
 
 
-def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) -> dict:
+def update_branch(
+    branch_name: str,
+    dry_run: bool = False,
+    trace: bool = False,
+    registry_path: Path | str | None = None,
+) -> dict:
     """Update a single branch from its class template.
 
     Path-based engine: walks the template directory, resolves placeholder
@@ -132,6 +137,12 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     against a narrow allowlist only — see _PASSPORT_HEAL_ALLOWLIST. Existing
     .md files are COMPARED and reported (md_matches / md_differs / md_unreadable
     and _md_detail) and never written — see _md_state.
+
+    registry_path names the registry the branch name is looked up in. None
+    (every CLI caller) keeps the CWD walk through find_registry(). Adoption
+    hands in the registry it just registered into, so the update reaches the
+    branch of THAT project, never a same-named branch of the CWD's project
+    (spawn's decision, DPLAN-0354 leg 3).
     """
     errors: list[str] = []
     counts = {
@@ -150,7 +161,7 @@ def update_branch(branch_name: str, dry_run: bool = False, trace: bool = False) 
     ignored_detail: list[dict] = []
     md_detail: list[dict] = []
 
-    branch_dir = _resolve_branch_path(branch_name)
+    branch_dir = _resolve_branch_path(branch_name, registry_path)
     if branch_dir is None:
         return _result(branch_name, False, counts, [f"Branch '{branch_name}' not found in registry"], dry_run)
     if not branch_dir.is_dir():
@@ -427,9 +438,13 @@ def _read_citizen_class(branch_dir: Path) -> str:
         raise ValueError(f"{e} (passport: {passport_path})") from e
 
 
-def _resolve_branch_path(branch_name: str) -> Path | None:
-    """Resolve a branch name to its absolute directory path via the registry."""
-    registry_path = find_registry()
+def _resolve_branch_path(branch_name: str, registry_path: Path | str | None = None) -> Path | None:
+    """Resolve a branch name to its absolute directory path via the registry.
+
+    registry_path None walks up from the CWD (find_registry); a given path is
+    used as-is.
+    """
+    registry_path = Path(registry_path) if registry_path else find_registry()
     if registry_path is None:
         logger.info("[update] No *_REGISTRY.json found — cannot resolve a branch path without one")
         return None

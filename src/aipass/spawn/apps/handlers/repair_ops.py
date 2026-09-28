@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repair_ops.py
 # Description: Repair handler — move branches, update registry paths, clean pollution
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-05-15
-# Modified: 2026-05-15
+# Modified: 2026-09-27
 # =============================================
 
 """Repair handler implementation for project structure fixes.
@@ -20,8 +20,6 @@ from pathlib import Path
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 
-ARCHIVE_EXCLUDE = {".venv", ".git", "__pycache__", ".chroma", "node_modules", ".pytest_cache"}
-
 from aipass.spawn.apps.handlers.registry import (
     find_registry,
     is_protected,
@@ -31,12 +29,25 @@ from aipass.spawn.apps.handlers.registry import (
 )
 from aipass.spawn.apps.handlers.json import json_handler
 
+ARCHIVE_EXCLUDE = {".venv", ".git", "__pycache__", ".chroma", "node_modules", ".pytest_cache"}
+
 
 # =============================================================================
 # REGISTRY DISCOVERY
 # =============================================================================
 
 REGISTRY_SUFFIX = "_REGISTRY.json"
+
+
+def _list_registry_candidates(root):
+    """Return what the filesystem lists for ``*_REGISTRY.json`` inside ``root``.
+
+    The body is exactly the glob ``_registry_in`` made inline, same arguments.
+    It exists for the tests: they stand in for a case-insensitive volume's
+    listing here, instead of replacing ``pathlib.Path.glob`` process-wide
+    (spawn's decision, DPLAN-0354 leg 3).
+    """
+    return root.glob("*" + REGISTRY_SUFFIX)
 
 
 def _registry_in(root):
@@ -60,7 +71,7 @@ def _registry_in(root):
     they cannot drift apart, which is the only claim this extraction makes.
     """
     root = Path(root)
-    for candidate in sorted(root.glob("*" + REGISTRY_SUFFIX)):
+    for candidate in sorted(_list_registry_candidates(root)):
         if candidate.name.endswith(REGISTRY_SUFFIX):
             return candidate
     return None
@@ -143,29 +154,33 @@ def _update_passport_paths(branch_dir, new_relative_path, project_name=None):
         project_name: Project package name (for module path)
 
     Returns:
-        True if updated, False if passport missing or error.
+        True if updated, False only when there is no passport to update (a skip).
+
+    Raises:
+        ValueError: the passport exists but cannot be read as JSON.
+        OSError: the updated passport could not be written.
+        Failure raises rather than answering False, so a skip and a failure
+        can never read the same (spawn's decision, DPLAN-0354 leg 3).
     """
     passport_path = branch_dir / ".trinity" / "passport.json"
     if not passport_path.exists():
         return False
 
-    try:
-        passport = json_handler.read_json(passport_path)
-        if passport is None:
-            return False
+    passport = json_handler.read_json(passport_path)
+    if passport is None:
+        raise ValueError(f"passport at {passport_path} could not be read")
 
-        branch_info = passport.get("branch_info", {})
-        branch_info["path"] = new_relative_path
+    branch_info = passport.get("branch_info", {})
+    branch_info["path"] = new_relative_path
 
-        if project_name:
-            branch_name = branch_dir.name
-            branch_info["module"] = f"{project_name}.{branch_name}"
+    if project_name:
+        branch_name = branch_dir.name
+        branch_info["module"] = f"{project_name}.{branch_name}"
 
-        passport["branch_info"] = branch_info
-        return json_handler.write_json(passport_path, passport)
-    except Exception as e:
-        logger.error("[repair] Failed to update passport paths: %s", e)
-        return False
+    passport["branch_info"] = branch_info
+    if not json_handler.write_json(passport_path, passport):
+        raise OSError(f"passport at {passport_path} could not be written")
+    return True
 
 
 def _detect_project_package(branch_rel_path):
@@ -184,6 +199,17 @@ def _detect_project_package(branch_rel_path):
 # =============================================================================
 
 
+def _move_chroma(src, dst):
+    """Move the project-root .chroma/ to ``dst``.
+
+    The body is exactly the ``shutil.move`` call ``_relocate_chroma`` made
+    inline, same arguments. It exists for the tests: a pin makes this one move
+    fail here, instead of replacing ``shutil.move`` process-wide (spawn's
+    decision, DPLAN-0354 leg 3).
+    """
+    return shutil.move(src, dst)
+
+
 def _relocate_chroma(project_root, branch_dir, branches):
     """Move project-root .chroma/ into a branch when only one branch exists.
 
@@ -196,7 +222,13 @@ def _relocate_chroma(project_root, branch_dir, branches):
         branches: List of branch entries from registry
 
     Returns:
-        True if relocated, False otherwise.
+        True if relocated, False only when the relocation was skipped (no
+        .chroma/, not exactly one branch, or one already in the branch).
+
+    Raises:
+        OSError: the move itself failed. A failure raises rather than
+        answering False, so it never reads as a skip (spawn's decision,
+        DPLAN-0354 leg 3).
     """
     chroma_src = project_root / ".chroma"
     if not chroma_src.is_dir():
@@ -211,13 +243,9 @@ def _relocate_chroma(project_root, branch_dir, branches):
         logger.warning("[repair] .chroma already exists in branch dir, skipping relocation")
         return False
 
-    try:
-        shutil.move(str(chroma_src), str(chroma_dest))
-        logger.info("[repair] Relocated .chroma/ into %s", branch_dir.name)
-        return True
-    except Exception as e:
-        logger.error("[repair] Failed to relocate .chroma: %s", e)
-        return False
+    _move_chroma(str(chroma_src), str(chroma_dest))
+    logger.info("[repair] Relocated .chroma/ into %s", branch_dir.name)
+    return True
 
 
 # =============================================================================
@@ -327,13 +355,26 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
     reg_updated = update_registry_path(registry_path, branch_name, new_rel_path)
 
     # Update passport
+    # A helper's False is a skip; its failure raises and is named here, so the
+    # result never reads a failure as a skip (spawn's decision, DPLAN-0354 leg 3).
     project_name = _detect_project_package(new_rel_path)
-    passport_updated = _update_passport_paths(new_abs_path, new_rel_path, project_name)
+    passport_updated = False
+    passport_error = None
+    try:
+        passport_updated = _update_passport_paths(new_abs_path, new_rel_path, project_name)
+    except Exception as e:
+        logger.error("[repair] Failed to update passport paths: %s", e)
+        passport_error = str(e)
 
     # Relocate .chroma into branch if requested and conditions met
     chroma_relocated = False
+    chroma_error = None
     if relocate_artifacts:
-        chroma_relocated = _relocate_chroma(project_root, new_abs_path, branches)
+        try:
+            chroma_relocated = _relocate_chroma(project_root, new_abs_path, branches)
+        except Exception as e:
+            logger.error("[repair] Failed to relocate .chroma: %s", e)
+            chroma_error = str(e)
 
     json_handler.log_operation(
         "branch_moved",
@@ -348,7 +389,9 @@ def move_branch(branch_name, new_path, registry_path=None, dry_run=False, reloca
         "archive_path": str(archive_dir),
         "registry_updated": reg_updated,
         "passport_updated": passport_updated,
+        "passport_error": passport_error,
         "chroma_relocated": chroma_relocated,
+        "chroma_error": chroma_error,
     }
 
 

@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_citizen_classes.py
 # Description: Integration tests for citizen class system
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/class_registry.py and the citizen-class-aware create and update paths."""
@@ -242,7 +242,7 @@ class TestMintTimeClass:
 
         ``handle_create`` seeded ``citizen_class = get_default_class()`` when the
         caller typed no class, and an explicit class always wins — so the CLI, the
-        primary entry point, handed _spawn_agent an explicit "specialist" every
+        primary entry point, handed spawn_agent an explicit "specialist" every
         time and the mint-time decision could never fire. A fresh project's first
         citizen was born a specialist with no manager anywhere in it.
         """

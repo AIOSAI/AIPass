@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_conftest_fixtures.py
 # Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""
@@ -12,10 +12,14 @@
 # seedgo: no-test-needed(ruff) — that apps/handlers/file_ops.py and apps/handlers/json/json_handler.py parse and import
 # seedgo: no-test-needed(documentation) — docstrings on the conftest fixtures themselves
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
+from aipass.cli.apps.modules import display
 from aipass.spawn.apps.handlers.json import json_handler
+from aipass.trigger.apps.modules import core as trigger_core
+from aipass.spawn.tests import conftest as spawn_conftest
 
 # A fixture that mocks nothing is worse than no fixture: it passes, it looks
 # like coverage, and it lets the real object keep working — in this case
@@ -75,6 +79,54 @@ class TestMockJsonHandlerReachesItsConsumer:
 
     def test_fixture_replaces_the_call_site(self, mock_json_handler):
         assert file_ops.json_handler.log_operation is mock_json_handler
+
+
+def _plant_sandboxes(root: Path) -> None:
+    """One real file, and one inside each sandbox a walk must never enter."""
+    (root / "citizen" / "dropbox").mkdir(parents=True)
+    (root / ".archive").mkdir()
+    (root / "citizen" / "README.md").write_text("kept", encoding="utf-8")
+    (root / "citizen" / "dropbox" / "dropped.md").write_text("sandbox", encoding="utf-8")
+    (root / ".archive" / "old.md").write_text("sandbox", encoding="utf-8")
+
+
+class TestTemplateWalksSkipTheSandboxes:
+    """The shipped-template guards never walk into a dropbox or an .archive.
+
+    A dropbox is a sandbox like .archive: nothing looks into one (spawn's
+    decision, DPLAN-0354 leg 3).
+    """
+
+    def test_the_per_test_guard_walk_skips_dropbox_and_archive(self, tmp_path):
+        """Ran red before the prune named dropbox and .archive (the runner cannot serve conftest)."""
+        _plant_sandboxes(tmp_path)
+
+        assert set(spawn_conftest._template_tree_stats(tmp_path)) == {str(Path("citizen") / "README.md")}
+
+    def test_the_session_net_walk_skips_dropbox_and_archive(self, tmp_path):
+        """Ran red before the filter named dropbox and .archive (the runner cannot serve conftest)."""
+        _plant_sandboxes(tmp_path)
+
+        assert set(spawn_conftest._template_snapshot(tmp_path)) == {tmp_path / "citizen" / "README.md"}
+
+
+class TestTheHeaderNeverReachesTheRealBus:
+    """cli's header fires cli_header_displayed; under spawn's tests it lands on a recorder.
+
+    The bus probe (2026-09-27) counted 12 real fires from spawn's suite, every one
+    cli_header_displayed from display.header(). The autouse fixture closes all of
+    them at once and no test can forget it (spawn's decision, DPLAN-0354 leg 3).
+    """
+
+    def test_the_real_header_fires_into_the_recorder_only(self, cli_trigger_bus, monkeypatch):
+        """Ran red before the fixture existed (fixture not found)."""
+        real_fire = Mock()
+        monkeypatch.setattr(trigger_core.Trigger, "fire", real_fire)
+
+        display.header("Probe Title")
+
+        assert cli_trigger_bus.fired == [("cli_header_displayed", {"title": "Probe Title"})]
+        assert real_fire.call_count == 0
 
 
 class TestIsolateSpawnJsonActuallyRedirects:

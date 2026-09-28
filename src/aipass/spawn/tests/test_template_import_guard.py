@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_template_import_guard.py
 # Description: What the newborn's handler guard must survive on its very first import
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -2983,7 +2983,7 @@ class TestImportTimeRootDerivationSurvivesADeadCwd:
         wrong roots.
         """
         offenders = []
-        for path in sorted(get_template_dir("specialist").rglob("*.py")):
+        for path in _swept_py_files(get_template_dir("specialist")):
             # Render first: the template carries {{BRANCH}} placeholders that
             # are not valid Python. Skipping unparseable files instead would
             # exempt exactly the files most likely to carry the idiom.
@@ -3178,6 +3178,20 @@ def _inspect_stack_calls(source: str) -> list:
 # Every .py under these roots, excluding the retired template archive.
 _BANNED_ROOTS = (Path(__file__).resolve().parents[1] / "apps", get_template_dir("specialist"))
 
+# What the .py sweeps never enter, read relative to the swept root. dropbox and
+# .archive are sandboxes: nothing looks into one (spawn's decision, DPLAN-0354
+# leg 3). Both names are in seedgo's SOURCE_SKIP_DIRS, copied rather than
+# imported because seedgo's handlers package guards cross-branch imports.
+_SWEEP_SKIP_DIRS = frozenset({"__pycache__", ".archive", "dropbox"})
+
+
+def _swept_py_files(root: Path) -> list[Path]:
+    """Every .py under root, in order, outside the directories no sweep enters."""
+    return [
+        path for path in sorted(root.rglob("*.py")) if not _SWEEP_SKIP_DIRS.intersection(path.relative_to(root).parts)
+    ]
+
+
 # Measured 2026-08-31: 48 files across apps/ and templates/citizen/. The floor
 # exists so a walk that silently stops finding files cannot read as "clean" —
 # a blinded sweep and a cured tree produce the same empty list otherwise.
@@ -3221,9 +3235,7 @@ class TestTheStackWalkCannotComeBack:
         swept = 0
 
         for root in _BANNED_ROOTS:
-            for path in sorted(root.rglob("*.py")):
-                if ".archive" in path.parts:
-                    continue
+            for path in _swept_py_files(root):
                 swept += 1
                 offenders += [
                     f"{path.name}:{line}" for line in _inspect_stack_calls(_render(path.read_text(encoding="utf-8")))
@@ -3235,6 +3247,17 @@ class TestTheStackWalkCannotComeBack:
             "evidence of a clean tree"
         )
         assert offenders == [], f"inspect.stack() at import-capable sites: {offenders}"
+
+    def test_the_sweep_skips_dropbox_and_archive(self, tmp_path):
+        """A dropbox is a sandbox like .archive: no sweep walks into one (spawn's decision, DPLAN-0354 leg 3).
+
+        Ran red before _SWEEP_SKIP_DIRS named dropbox: the dropped file was swept.
+        """
+        for relative in ("kept.py", "dropbox/dropped.py", ".archive/old.py"):
+            (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / relative).write_text("import inspect\n", encoding="utf-8")
+
+        assert _swept_py_files(tmp_path) == [tmp_path / "kept.py"]
 
 
 class TestTheStackMatcherIsTheRealOne:

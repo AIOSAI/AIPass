@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_repair.py
 # Description: Tests for repair handler — move, registry path update, pollution cleanup
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-05-15
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py — move_branch, update_registry_path, pollution cleanup."""
@@ -238,6 +238,35 @@ class TestMoveBranch:
         assert result["success"] is False
         assert "outside project root" in result["error"]
 
+    def test_an_unreadable_passport_is_reported_as_a_failure_not_a_skip(self, tmp_path):
+        """A passport that exists but cannot be read is a failure, and says so.
+
+        False used to stand for both "no passport to update" and "the update
+        failed"; spawn's decision (DPLAN-0354 leg 3) is that a failure raises in
+        the helper and move_branch reports it under ``passport_error``.
+        Mutant: the helper answers False for an unreadable passport -> red.
+        """
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / "navigator" / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+
+        result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
+
+        assert result["success"] is True
+        assert result["passport_updated"] is False
+        assert "passport" in result["passport_error"]
+
+    def test_a_missing_passport_is_a_skip_with_no_error(self, tmp_path):
+        """No passport at all is the skip: False, and no error beside it."""
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / "navigator" / ".trinity" / "passport.json").unlink()
+
+        result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
+
+        assert result["passport_updated"] is False
+        assert result["passport_error"] is None
+
 
 # ---------------------------------------------------------------------------
 # detect_pollution
@@ -412,6 +441,63 @@ class TestRepairCLI:
         result = handle_repair([])
         assert result == 1
 
+    def test_relocate_flag_moves_the_branch(self, tmp_path, monkeypatch):
+        """--relocate, through handle_repair, moves the branch and rewrites its registry path.
+
+        The world is tmp_path: its own registry, the cwd there, repair_ops's
+        find_registry pointed at it, the operations log redirected by conftest.
+        Mutant: the --relocate check never matches (the args fall to the scan) -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        assert handle_repair(["--relocate", "@nav", "src/compass/navigator", "--apply"]) == 0
+
+        assert not (project / "navigator").exists()
+        assert (project / "src" / "compass" / "navigator").is_dir()
+        assert json.loads(reg.read_text(encoding="utf-8"))["branches"][0]["path"] == "src/compass/navigator"
+
+    def test_relocate_artifacts_flag_moves_chroma_into_the_branch(self, tmp_path, monkeypatch):
+        """--relocate-artifacts, through handle_repair, carries the root .chroma/ into the branch.
+
+        Mutant: --relocate-artifacts ignored (relocate_artifacts = False) -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / ".chroma").mkdir()
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        args = ["--relocate", "@nav", "src/compass/navigator", "--relocate-artifacts", "--apply"]
+        assert handle_repair(args) == 0
+
+        assert not (project / ".chroma").exists()
+        assert (project / "src" / "compass" / "navigator" / ".chroma").is_dir()
+
+    def test_clean_pollution_flag_archives_the_duplicate(self, tmp_path, monkeypatch):
+        """--clean-pollution, through handle_repair, archives and removes the nested duplicate.
+
+        The project carries its own empty registry, so is_protected answers from
+        tmp_path; the registry module's find_registry is pointed there too.
+        Mutant: the --clean-pollution check never matches (the args fall to the
+        read-only scan) -> red.
+        """
+        from aipass.spawn.apps.handlers import registry as registry_module
+
+        project = tmp_path / "polluted"
+        (project / "polluted").mkdir(parents=True)
+        (project / "polluted" / "junk.txt").write_text("dup", encoding="utf-8")
+        reg = _empty_registry(project)
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: reg)
+
+        assert handle_repair([str(project), "--clean-pollution", "--apply"]) == 0
+
+        assert not (project / "polluted").exists()
+        archived = list((project / ".archive" / "pollution").iterdir())
+        assert len(archived) == 1
+        assert (archived[0] / "junk.txt").read_text(encoding="utf-8") == "dup"
+
 
 # ---------------------------------------------------------------------------
 # .chroma relocation
@@ -489,6 +575,42 @@ class TestChromaRelocation:
         assert result["success"] is True
         assert result.get("chroma_relocated") is False
         assert (project / ".chroma").exists()
+
+    def test_a_failed_chroma_move_is_reported_as_a_failure_not_a_skip(self, tmp_path):
+        """A .chroma move that raises is named under chroma_error, never a bare False.
+
+        spawn's decision (DPLAN-0354 leg 3): the helper raises on failure and
+        move_branch records it; False is left meaning "skipped" only.
+        Mutant: the helper swallows the move error and answers False -> red.
+        """
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / ".chroma").mkdir()
+
+        with patch.object(repair_ops, "_move_chroma", side_effect=OSError("device is full")) as move:
+            result = move_branch("NAV", "src/compass/navigator", registry_path=reg, relocate_artifacts=True)
+
+        move.assert_called_once_with(
+            str(project / ".chroma"), str((project / "src" / "compass" / "navigator").resolve() / ".chroma")
+        )
+        assert result["success"] is True
+        assert result["chroma_relocated"] is False
+        assert result["chroma_error"] == "device is full"
+        assert (project / ".chroma").is_dir()
+
+    def test_a_skipped_chroma_move_carries_no_error(self, tmp_path):
+        """More than one branch is a skip: False, and chroma_error stays None."""
+
+        project, reg = _make_project(
+            tmp_path,
+            branches=[{"name": "NAV", "path": "navigator"}, {"name": "LOG", "path": "logger"}],
+        )
+        (project / ".chroma").mkdir()
+
+        result = move_branch("NAV", "src/compass/navigator", registry_path=reg, relocate_artifacts=True)
+
+        assert result["chroma_relocated"] is False
+        assert result["chroma_error"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -801,7 +923,7 @@ class TestTemplateFiles:
 
 
 def _case_insensitive_listing(monkeypatch):
-    """Make pathlib's glob behave the way a Windows volume does.
+    """Make repair_ops's registry listing behave the way a Windows volume does.
 
     The defect is not in the reader — it is in what the FILESYSTEM hands the
     reader back, so this supplies that listing rather than patching the code
@@ -809,20 +931,23 @@ def _case_insensitive_listing(monkeypatch):
     case-insensitive volume does, and it means these pins run RED on the Linux
     dev box instead of only on the Windows gate (@drone's construction, adopted
     here on @devpulse's relay, 2026-08-31).
+
+    It patches the listing seam ``_list_registry_candidates`` (whose body is
+    exactly the glob), not ``pathlib.Path.glob`` process-wide (spawn's decision,
+    DPLAN-0354 leg 3). Returns the list of roots the seam was asked to list.
     """
     import fnmatch
-    import pathlib
     import re
 
-    real_glob = pathlib.Path.glob
+    calls = []
+    rx = re.compile(fnmatch.translate("*" + repair_ops.REGISTRY_SUFFIX), re.IGNORECASE)
 
-    def insensitive_glob(self, pattern, *args, **kwargs):
-        if "/" in pattern or "**" in pattern:
-            return real_glob(self, pattern, *args, **kwargs)
-        rx = re.compile(fnmatch.translate(pattern), re.IGNORECASE)
-        return iter(sorted(p for p in self.iterdir() if rx.match(p.name)))
+    def insensitive_listing(root):
+        calls.append(root)
+        return iter(sorted(p for p in root.iterdir() if rx.match(p.name)))
 
-    monkeypatch.setattr(pathlib.Path, "glob", insensitive_glob)
+    monkeypatch.setattr(repair_ops, "_list_registry_candidates", insensitive_listing)
+    return calls
 
 
 class TestRegistryLookupIsCaseSensitive:
@@ -838,20 +963,29 @@ class TestRegistryLookupIsCaseSensitive:
     """
 
     def test_a_lowercase_lookalike_is_not_served_as_the_registry(self, tmp_path, monkeypatch):
+        """The lookup reads the listing seam and filters what it lists.
+
+        Mutant: _registry_in globs inline instead of calling the seam -> red.
+        """
 
         real = tmp_path / "AIPASS_REGISTRY.json"
         real.write_text(json.dumps({"branches": []}), encoding="utf-8")
         decoy = tmp_path / ".template_registry.json"
         decoy.write_text(json.dumps({"files": {}}), encoding="utf-8")
 
-        _case_insensitive_listing(monkeypatch)
+        calls = _case_insensitive_listing(monkeypatch)
 
         # The decoy sorts first, so an unfiltered first-match returns it.
-        assert sorted(p.name for p in tmp_path.glob("*_REGISTRY.json"))[0] == decoy.name
+        assert sorted(p.name for p in repair_ops._list_registry_candidates(tmp_path))[0] == decoy.name
+        calls.clear()
 
         # Reached through repair_project, the public door onto the one lookup.
         # Mutant: the lookup drops its case-sensitive suffix check -> red.
         assert repair_project(tmp_path, dry_run=True)["registry"] == real.name
+        # The lookup asked the seam (once for the scan, once for the pollution
+        # check), so the stand-in listing is what it read.
+        # Mutant: _registry_in globs inline instead of calling the seam -> red.
+        assert calls == [tmp_path.resolve(), tmp_path.resolve()]
 
     def test_repair_project_reports_the_real_registry(self, tmp_path, monkeypatch):
         """End-to-end through the call site, not just the helper."""

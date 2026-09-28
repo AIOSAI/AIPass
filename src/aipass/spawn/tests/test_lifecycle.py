@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_lifecycle.py
 # Description: Tests for spawn lifecycle commands (delete, sync-registry)
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -606,22 +606,6 @@ class TestSyncRegistryCwdAware:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def adoption_update_reads_tmp_registry(tmp_path, monkeypatch):
-    """Point adoption's template-update step at the test's own registry.
-
-    adopt_existing registers into the registry it is handed, then calls
-    update_branch(name), which resolves the name through find_registry() —
-    the registry above the CWD, i.e. the LIVE fleet registry. Every adoption
-    test writes its registry at tmp_path/TEST_REGISTRY.json, so that is where
-    the update step must look too.
-    """
-    reg = tmp_path / "TEST_REGISTRY.json"
-    monkeypatch.setattr("aipass.spawn.apps.handlers.update_ops.find_registry", lambda *a, **k: reg)
-    return reg
-
-
-@pytest.mark.usefixtures("adoption_update_reads_tmp_registry")
 class TestAdoptExisting:
     """Tests for spawn_agent adopting existing directories with passports."""
 
@@ -805,6 +789,63 @@ class TestAdoptExisting:
         # File should NOT have been rewritten (ids already match)
         assert before_mtime == after_mtime
         assert updated == ["matched_agent"]
+
+
+def _twin_project(root: Path, registered: bool) -> tuple[Path, Path]:
+    """A tmp project root holding TEST_REGISTRY.json and a passported ``twin`` branch."""
+    branch = root / "twin"
+    (branch / ".trinity").mkdir(parents=True)
+    (branch / ".trinity" / "passport.json").write_text(
+        json.dumps(
+            {
+                "branch_info": {"branch_name": "twin"},
+                "identity": {"citizen_class": "specialist", "purpose": "Twin agent"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    entries = [{"name": "TWIN", "path": "twin"}] if registered else []
+    reg = root / "TEST_REGISTRY.json"
+    reg.write_text(
+        json.dumps(
+            {
+                "metadata": {"version": "1.0.0", "last_updated": "2026-09-27", "total_branches": len(entries)},
+                "branches": entries,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return branch, reg
+
+
+def _tree_bytes(root: Path) -> dict[str, bytes]:
+    """Every file under root, relative path -> bytes."""
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_adoption_update_touches_the_branch_of_the_registry_handed_in(tmp_path, monkeypatch):
+    """Adoption's template update resolves the branch through the registry adopt was handed.
+
+    Two tmp projects, one branch name in both. The CWD sits in project B, so a
+    lookup through find_registry() from the CWD would land on B's twin. Adopting
+    A's twin must update A's twin and leave B's twin byte-equal (spawn's
+    decision, DPLAN-0354 leg 3: the registry path travels to update_branch).
+    Mutant: adopt_existing calls update_branch without registry_path -> red.
+    Mutant: update_branch drops registry_path on its _resolve_branch_path call -> red.
+    """
+    twin_a, reg_a = _twin_project(tmp_path / "proj_a", registered=False)
+    twin_b, _reg_b = _twin_project(tmp_path / "proj_b", registered=True)
+    before_a = _tree_bytes(twin_a)
+    before_b = _tree_bytes(twin_b)
+    monkeypatch.chdir(tmp_path / "proj_b")
+
+    result = spawn_agent(str(twin_a), registry_path=str(reg_a))
+
+    assert result["success"] is True
+    assert result["registry_path"] == str(reg_a)
+    assert result["files_copied"] > 0
+    assert _tree_bytes(twin_a) != before_a
+    assert _tree_bytes(twin_b) == before_b
 
 
 # ---------------------------------------------------------------------------

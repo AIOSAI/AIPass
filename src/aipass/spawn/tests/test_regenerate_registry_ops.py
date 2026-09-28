@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_regenerate_registry_ops.py
 # Description: Tests for regenerate_registry_ops handler
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
@@ -13,12 +13,12 @@
 # seedgo: no-test-needed(documentation) — docstrings on the scan/regenerate helper functions
 
 import json
-from datetime import date as calendar_date
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from aipass.spawn.apps.handlers import regenerate_registry_ops
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.handlers.regenerate_registry_ops import regenerate_template_registry
 from aipass.spawn.apps.modules import regenerate_registry as regenerate_registry_module
@@ -635,14 +635,26 @@ class TestLastUpdatedTracksContentNotTheCalendar:
     only field that moved was the one that moved for free.
     """
 
-    @staticmethod
-    def _regenerate(template: Path) -> None:
-        """Regenerate on the real clock - the calendar is moved on disk, never patched."""
-        regenerate_template_registry(template)
+    _FIXED_DAY = "2031-06-15"
+
+    @pytest.fixture(autouse=True)
+    def _fixed_clock(self, monkeypatch):
+        """Pin "today" at the product's clock seam, never at the stdlib.
+
+        These asserts used to compare the product's datetime.now() against the
+        test's own date.today(): a run that crossed midnight between the two read
+        two different days and went red. The seam (_registry_date, added by
+        spawn's decision, DPLAN-0354 leg 3) makes "today" one value both sides see.
+        """
+        monkeypatch.setattr(regenerate_registry_ops, "_registry_date", lambda: self._FIXED_DAY)
 
     @staticmethod
-    def _today() -> str:
-        return calendar_date.today().isoformat()
+    def _regenerate(template: Path) -> None:
+        """Regenerate on the seam's fixed day; the old stamp is moved on disk."""
+        regenerate_template_registry(template)
+
+    def _today(self) -> str:
+        return self._FIXED_DAY
 
     @staticmethod
     def _registry(template: Path) -> dict:
@@ -688,6 +700,7 @@ class TestLastUpdatedTracksContentNotTheCalendar:
         """The other half — preserving must never become freezing.
 
         Mutant: the existing date kept even when the content changed -> red.
+        Mutant: the date read from datetime.now() past the _registry_date seam -> red.
         """
         template = self._settled(tmp_path)
 
@@ -838,9 +851,7 @@ class TestHandleRegenerateRegistry:
         shipped = _shipped_registry_path()
         before = shipped.read_bytes()
 
-        with patch("aipass.spawn.apps.handlers.regenerate_registry_ops.datetime") as fake:
-            fake.now.return_value.strftime.return_value = "2099-12-31"
-
+        with patch.object(regenerate_registry_ops, "_registry_date", return_value="2099-12-31"):
             assert handle_regenerate_registry([]) == 0
             assert handle_regenerate_registry(["--all"]) == 0
 

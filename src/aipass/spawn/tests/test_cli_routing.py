@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: Tests for CLI routing and help output
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-27
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -18,9 +18,12 @@ from unittest.mock import patch
 import pytest
 
 from aipass.spawn.apps.handlers import update_ops
+from aipass.spawn.apps.handlers.seed_ops import canonical_text, seed_path_for
+from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main, print_help, print_introspection
+from aipass.spawn.tests.test_passport_seeds import make_passport
 
 
 class TestCliRouting:
@@ -362,6 +365,31 @@ class TestUpdateTraceFlag:
         assert "[update] Resolved probe" in caplog.text
         assert len(asked) == 2
         assert not (tmp_path / "probe" / ".trinity").exists()
+
+
+class TestExportSeedsOnlyFlag:
+    """export-seeds --only, passed through handle_export_seeds in a tmp_path world."""
+
+    def test_only_restricts_the_written_seeds_to_the_named_branch(self, tmp_path, monkeypatch):
+        """--only decides which seed is written; the other branch is left untouched.
+
+        The world is tmp_path: --root points discovery there, the cwd is there,
+        and spawn's operations log goes there through conftest's
+        AIPASS_TEST_LOG_DIR. export_seeds takes no registry, so there is no
+        find_registry to point.
+
+        Mutant: --only dropped on its way to export_seeds (only=None) -> red.
+        """
+        for branch in ("wanderer", "stranger"):
+            trinity = tmp_path / "src" / "aipass" / branch / ".trinity"
+            trinity.mkdir(parents=True)
+            (trinity / "passport.json").write_text(canonical_text(make_passport(branch)), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        assert handle_export_seeds(["--root", str(tmp_path), "--only", "@wanderer", "--confirm"]) == 0
+
+        assert seed_path_for(tmp_path / "src" / "aipass" / "wanderer").is_file()
+        assert not seed_path_for(tmp_path / "src" / "aipass" / "stranger").exists()
 
 
 def test_output_capture(capsys: pytest.CaptureFixture[str]):

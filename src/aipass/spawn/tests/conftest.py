@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared test fixtures for spawn test suite
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -18,6 +18,7 @@ if "AIPASS_TEST_LOG_DIR" not in os.environ:
 
 import pytest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import aipass.spawn.apps.handlers.file_ops as file_ops
@@ -69,12 +70,23 @@ def _live_registry_is_never_written():
 # ---------------------------------------------------------------------------
 
 
+# What the template-tree walks below never enter. dropbox and .archive are
+# sandboxes: nothing looks into one (spawn's decision, DPLAN-0354 leg 3). Both
+# names come from seedgo's SOURCE_SKIP_DIRS
+# (seedgo/apps/handlers/aipass_standards/skip_dirs.py), copied rather than
+# imported: seedgo's handlers package guards cross-branch imports at import
+# time. Not the whole list either: it also names .spawn, .trinity, docs, tools,
+# logs and artifacts, which are shipped template content these guards exist to
+# watch — .spawn/.template_registry.json above all (PR #745).
+_WALK_SKIP_DIRS = frozenset({"__pycache__", "dropbox", ".archive"})
+
+
 def _shipped_templates_root() -> Path:
     """The template tree spawn ships, as it sits in the repo."""
     return Path(__file__).resolve().parents[1] / "templates"
 
 
-def _template_tree_stats() -> dict[str, tuple[int, int]]:
+def _template_tree_stats(root: Path | None = None) -> dict[str, tuple[int, int]]:
     """(size, mtime_ns) per file under templates/ — cheap enough to run per test.
 
     stat, not bytes: the failure this guards is a WRITE, and a write that
@@ -87,18 +99,31 @@ def _template_tree_stats() -> dict[str, tuple[int, int]]:
     pathlib version cost ~17ms a call against ~3.7ms here — 26s of suite time
     for the same answer.
     """
-    root = _shipped_templates_root()
+    root = root if root is not None else _shipped_templates_root()
     if not root.is_dir():
         return {}
 
     stats: dict[str, tuple[int, int]] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name != "__pycache__"]
+        dirnames[:] = [name for name in dirnames if name not in _WALK_SKIP_DIRS]
         for filename in filenames:
             full = os.path.join(dirpath, filename)
             info = os.stat(full)
             stats[os.path.relpath(full, root)] = (info.st_size, info.st_mtime_ns)
     return stats
+
+
+def _template_snapshot(root: Path) -> dict[Path, bytes]:
+    """Bytes per file under root — what the session net puts back.
+
+    Parts are read relative to root, so a checkout that itself sits under a
+    directory named like a sandbox is still walked.
+    """
+    return {
+        path: path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file() and not _WALK_SKIP_DIRS.intersection(path.relative_to(root).parts)
+    }
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -108,10 +133,7 @@ def _restore_shipped_templates():
     The per-test guard below names the culprit; this one makes sure a suite that
     fails does not also leave the working tree dirty for the next reader.
     """
-    root = _shipped_templates_root()
-    snapshot = {
-        path: path.read_bytes() for path in root.rglob("*") if path.is_file() and "__pycache__" not in path.parts
-    }
+    snapshot = _template_snapshot(_shipped_templates_root())
 
     yield
 
@@ -148,6 +170,35 @@ def pinned_console_width() -> None:
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
+
+
+class _BusRecorder:
+    """Stands where display._TRIGGER stands: records each fire, answers like an idle bus."""
+
+    def __init__(self) -> None:
+        self.fired: list[tuple[str, dict[str, Any]]] = []
+
+    def fire(self, event: str, **data: Any) -> dict[str, Any]:
+        """Record one fire; nothing is dispatched."""
+        self.fired.append((event, data))
+        return {"event": event, "handlers": 0, "ran": 0, "failed": 0}
+
+
+@pytest.fixture(autouse=True)
+def cli_trigger_bus(monkeypatch) -> _BusRecorder:
+    """Every test's cli header fires into a recorder, never the real trigger bus.
+
+    display.header() lazy-loads the real trigger behind _TRIGGER_LOADED and
+    fires cli_header_displayed through _TRIGGER; the bus probe (2026-09-27)
+    counted 12 such fires reaching the real bus from spawn's suite. Autouse, so
+    no test can forget it, and no file of cli is touched: _TRIGGER_LOADED=True
+    stops the lazy import, _TRIGGER is the recorder (spawn's decision,
+    DPLAN-0354 leg 3). tests/test_conftest_fixtures.py pins it.
+    """
+    recorder = _BusRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
 
 
 @pytest.fixture(autouse=True)
