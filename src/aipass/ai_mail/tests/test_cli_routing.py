@@ -18,9 +18,11 @@ import sys
 
 import pytest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import aipass.ai_mail.apps.ai_mail as ai_mail_mod
+import aipass.ai_mail.apps.modules as ai_mail_modules
 from aipass.ai_mail.apps.ai_mail import (
     print_help,
     print_introspection,
@@ -158,6 +160,28 @@ def test_print_introspection_runs(_mock_infrastructure):
     printed = " ".join(str(call.args[0]) for call in _mock_infrastructure.print.call_args_list if call.args)
 
     assert "Discovered Modules:[/yellow] 0" in printed, printed
+
+
+# ---- discover_modules tests ------------------------------------------
+
+
+def test_discover_modules_finds_the_real_command_modules(monkeypatch):
+    """The real discovery returns the modules that hold handle_command.
+
+    Every other test here patches discover_modules, so its own body never ran:
+    a discovery that returned nothing passed them all. Discovery only imports;
+    no handle_command runs. MODULES_DIR is pinned to the real package directory
+    because it is derived from __file__, which moves when the module is loaded
+    from anywhere else (a mutant copy, a zipped install).
+
+    Mutant: `hasattr(module, "handle_command")` -> `hasattr(module, "handle_commandX")`
+    drops every module and is caught here.
+    """
+    monkeypatch.setattr(ai_mail_mod, "MODULES_DIR", Path(ai_mail_modules.__file__).parent)
+
+    found = {module.__name__.rsplit(".", 1)[-1] for module in ai_mail_mod.discover_modules()}
+
+    assert {"email", "dispatch"} <= found, found
 
 
 # ---- route_command tests --------------------------------------------

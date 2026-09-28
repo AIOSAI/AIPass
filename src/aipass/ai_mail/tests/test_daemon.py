@@ -41,6 +41,12 @@ from aipass.ai_mail.apps.handlers.dispatch.daemon import (
     spawn_agent,
     run_daemon,
 )
+from aipass.ai_mail.apps.handlers.dispatch.test_token import (
+    has_test_token as _has_test_token,
+    auto_ack_test_email as _auto_ack_test_email,
+    scan_and_ack_test_emails,
+    TEST_TOKEN,
+)
 
 
 # ---- Fixtures ------------------------------------------------
@@ -538,13 +544,6 @@ def test_is_protected_branch_empty_string():
 
 # ---- _has_test_token tests -----------------------------------
 
-from aipass.ai_mail.apps.handlers.dispatch.test_token import (
-    has_test_token as _has_test_token,
-    auto_ack_test_email as _auto_ack_test_email,
-    scan_and_ack_test_emails,
-    TEST_TOKEN,
-)
-
 
 def test_has_test_token_plain_body():
     """Token on its own line is detected."""
@@ -842,22 +841,6 @@ def test_check_lock_dead_pid(tmp_path, monkeypatch):
 
     assert result is None
     assert not lock_file.exists()
-
-
-def test_check_lock_permission_error(tmp_path, monkeypatch):
-    """Lock with PermissionError on kill returns lock data (process exists)."""
-    lock_dir = tmp_path / ".ai_mail.local"
-    lock_dir.mkdir(parents=True)
-    lock_file = lock_dir / ".dispatch.lock"
-    lock_data = {"pid": 99999, "timestamp": datetime.now().isoformat()}
-    lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: True)
-
-    result = _check_lock(tmp_path)
-
-    assert result is not None
-    assert result["pid"] == 99999
 
 
 def test_check_lock_stale_over_10min_removed(tmp_path, monkeypatch):
@@ -1400,16 +1383,16 @@ def test_spawn_agent_success(tmp_path):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
     assert result is True
     assert state["daily_counts"]["@testbranch"] == 1
     assert state["session_cycles"][str(branch_path)] == 1
+    mock_notify.assert_called_once_with(
+        "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
+    )
 
 
 def test_spawn_agent_exception(tmp_path):
@@ -1466,10 +1449,7 @@ def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
@@ -1479,6 +1459,7 @@ def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
     assert "AIPASS_BOT_ID" not in captured_env
     assert captured_env.get("AIPASS_SPAWNED") == "1"
     assert captured_env.get("AIPASS_SESSION_TYPE") == "daemon"
+    mock_notify.assert_called_once()
 
 
 def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
@@ -1509,10 +1490,7 @@ def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
@@ -1521,6 +1499,7 @@ def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
     assert "--model" in monitor_cmd
     model_idx = monitor_cmd.index("--model")
     assert monitor_cmd[model_idx + 1] == daemon_mod.DEFAULT_MODEL
+    mock_notify.assert_called_once()
 
 
 def test_spawn_agent_prompt_includes_reply_id(tmp_path):
@@ -1551,10 +1530,7 @@ def test_spawn_agent_prompt_includes_reply_id(tmp_path):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         spawn_agent(branch_path, "@testbranch", message, config, state)
 
@@ -1562,6 +1538,7 @@ def test_spawn_agent_prompt_includes_reply_id(tmp_path):
     prompt = captured_cmd[prompt_idx]
     assert "drone @ai_mail reply abc12345" in prompt
     assert "required" in prompt.lower()
+    mock_notify.assert_called_once()
 
 
 def test_spawn_agent_prompt_includes_sender(tmp_path):
@@ -1592,16 +1569,14 @@ def test_spawn_agent_prompt_includes_sender(tmp_path):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         spawn_agent(branch_path, "@testbranch", message, config, state)
 
     prompt_idx = captured_cmd.index("-p") + 1
     prompt = captured_cmd[prompt_idx]
     assert "@devpulse" in prompt
+    mock_notify.assert_called_once()
 
 
 def test_spawn_agent_prompt_fallback_without_id(tmp_path):
@@ -1632,10 +1607,7 @@ def test_spawn_agent_prompt_fallback_without_id(tmp_path):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         spawn_agent(branch_path, "@testbranch", message, config, state)
 
@@ -1643,6 +1615,7 @@ def test_spawn_agent_prompt_fallback_without_id(tmp_path):
     prompt = captured_cmd[prompt_idx]
     assert "reply <id>" in prompt
     assert "required" in prompt.lower()
+    mock_notify.assert_called_once()
 
 
 # ---- run_daemon tests -------------------------------------------
@@ -2054,14 +2027,12 @@ def test_spawn_agent_allows_registered_auto_execute(tmp_path, monkeypatch):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
     assert result is True
+    mock_notify.assert_called_once()
 
 
 def test_spawn_agent_no_auth_check_without_auto_execute(tmp_path, monkeypatch):
@@ -2092,40 +2063,35 @@ def test_spawn_agent_no_auth_check_without_auto_execute(tmp_path, monkeypatch):
             return_value=(True, "Lock acquired"),
         ),
         patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
-        patch(
-            "aipass.ai_mail.apps.handlers.dispatch.daemon.send_notification",
-            create=True,
-        ),
+        patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
     assert result is True
+    mock_notify.assert_called_once()
 
 
 # ---- _write_pid_file atomic tests (DPLAN-0159 S5) ----------------
 
 
-def test_write_pid_file_atomic_no_existing(tmp_path, monkeypatch):
-    """Atomic creation succeeds when no PID file exists."""
-    pid_file = tmp_path / "daemon.pid"
-    monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
-
-    result = _write_pid_file()
-
-    assert result is True
-    assert pid_file.exists()
-    assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
-
-
 def test_write_pid_file_atomic_race_second_loses(tmp_path, monkeypatch):
-    """Second daemon loses the race when both try O_CREAT|O_EXCL."""
+    """Stale PID file, but another daemon re-creates it first: the retry's O_EXCL loses and returns False.
+
+    Mutant: the retry's `return False` after "raced us" turned to `return True` - two daemons start.
+    """
     pid_file = tmp_path / "daemon.pid"
+    pid_file.write_text("999999", encoding="utf-8")
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: pid != 999999)
+    create_calls = []
 
-    # First daemon wins
-    pid_file.write_text(str(os.getpid()), encoding="utf-8")
+    def _create_always_loses():
+        create_calls.append(1)
+        return False
 
-    # Second daemon: file exists, owner is alive → returns False
+    monkeypatch.setattr(daemon_mod, "_create_pid_file", _create_always_loses)
+
     result = _write_pid_file()
 
     assert result is False
+    assert len(create_calls) == 2

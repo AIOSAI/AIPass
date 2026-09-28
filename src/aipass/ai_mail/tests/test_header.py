@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 from pathlib import Path
 
 import aipass.ai_mail.apps.handlers.email.header as mod
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 
 
 # --- Fixtures --------------------------------------------------------
@@ -271,6 +272,34 @@ def test_the_sweep_convicts_an_fstring_opener():
     assert _discarded_module_strings(guilty) == [1]
 
 
+def _branch_sources(root):
+    """Every .py under root, never inside a dropbox, .archive or any other seedgo skip dir.
+
+    Owner ruling: nothing looks into a dropbox. seedgo's SOURCE_SKIP_DIRS is the
+    one list, so this walk cannot drift from the checkers'.
+    """
+    for source in root.rglob("*.py"):
+        if not SOURCE_SKIP_DIRS.intersection(source.relative_to(root).parts[:-1]):
+            yield source
+
+
+def test_the_tree_walk_never_enters_a_dropbox_or_an_archive(tmp_path):
+    """A file placed in a dropbox or .archive under the walked root is not visited.
+
+    apps/handlers/.archive holds retired .py files today, so the bare rglob read
+    them. Mutant: drop the SOURCE_SKIP_DIRS filter and both planted files come back.
+    """
+    (tmp_path / "live").mkdir()
+    (tmp_path / "live" / "kept.py").write_text("", encoding="utf-8")
+    for skipped in ("dropbox", ".archive"):
+        (tmp_path / "live" / skipped).mkdir()
+        (tmp_path / "live" / skipped / "planted.py").write_text("", encoding="utf-8")
+
+    visited = [source.relative_to(tmp_path).as_posix() for source in _branch_sources(tmp_path)]
+
+    assert visited == ["live/kept.py"]
+
+
 def test_no_module_in_the_tree_documents_itself_into_the_void():
     """Tree-wide: the species dies everywhere in this branch, not just here.
 
@@ -280,7 +309,7 @@ def test_no_module_in_the_tree_documents_itself_into_the_void():
     """
     apps = Path(__file__).resolve().parents[1] / "apps"
     scanned, offenders = 0, []
-    for source in apps.rglob("*.py"):
+    for source in _branch_sources(apps):
         scanned += 1
         lines = _discarded_module_strings(source.read_text(encoding="utf-8"))
         if lines:

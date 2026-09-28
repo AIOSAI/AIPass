@@ -1,19 +1,19 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.3.1
+# Version: 1.5.0
 # Created: 2026-03-05
 # Modified: 2026-09-27
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.5.0 (2026-09-27): recorded_bus - no test fires on the real trigger bus
+#   - v1.4.0 (2026-09-27): sandboxed_central - no test writes the live central file
 #   - v1.3.1 (2026-09-27): Template items 20/18 - pinned_console_width, clean_command_state;
 #     product imports hoisted to the top; unused mock_logger removed
 #   - v1.3.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam
 #     alone — mock_infrastructure lands each test in its own sandbox and
 #     mock_json_handler retires with the handler it mocked (DPLAN-0325)
 #   - v1.2.0 (2026-08-11): Autouse feed isolation — tests never touch the real notifications.jsonl
-#   - v1.1.0 (2026-03-27): Added mock_logger, mock_json_handler fixtures
-#   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -33,8 +33,11 @@ import shutil
 from pathlib import Path
 from typing import Generator
 
+import aipass.ai_mail.apps.handlers.central_writer as central_writer
 import aipass.ai_mail.apps.handlers.email.contacts as contacts_mod
 import aipass.ai_mail.apps.handlers.notify as notify_mod
+import aipass.ai_mail.apps.modules.email_send as email_send_mod
+import aipass.trigger.apps.modules.core as trigger_core
 from aipass.ai_mail.apps.handlers.dispatch import register, report
 from aipass.ai_mail.apps.handlers.json import json_handler
 from aipass.cli.apps.modules import display
@@ -60,6 +63,51 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def sandboxed_central(tmp_path, monkeypatch) -> None:
+    """No test reaches the live central file: update_central scans and writes under tmp_path.
+
+    test_message_correlation's mark_as_opened ran the real update_central through
+    _update_central_stats (then _update_dashboard) and rewrote .ai_central/AI_MAIL.central.json from the live
+    inboxes on every suite run (found by mtime, 2026-09-27). Redirecting the
+    module's four paths, rather than stubbing the function, keeps update_central
+    runnable for any test that means to exercise it.
+    """
+    central = tmp_path / "central_sandbox"
+    monkeypatch.setattr(central_writer, "_REPO_ROOT", central)
+    monkeypatch.setattr(central_writer, "BRANCH_REGISTRY", central / "AIPASS_REGISTRY.json")
+    monkeypatch.setattr(central_writer, "AI_CENTRAL_DIR", central / ".ai_central")
+    monkeypatch.setattr(central_writer, "CENTRAL_FILE", central / ".ai_central" / "AI_MAIL.central.json")
+
+
+class _BusRecorder:
+    """Stands where trigger stands: records each fire and delivers it nowhere."""
+
+    def __init__(self) -> None:
+        self.fires: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **data) -> None:
+        self.fires.append((event, data))
+
+    def events(self) -> list[str]:
+        return [event for event, _ in self.fires]
+
+
+@pytest.fixture(autouse=True)
+def recorded_bus(monkeypatch) -> _BusRecorder:
+    """No test fires on the real trigger bus; a test asserts what fired here.
+
+    The fleet bus probe counted 71 fires from this suite on the real bus
+    (2026-09-27): report.py, send.py and dispatch.py import trigger at call time
+    from its home, email_send.py binds it at import, so both homes are replaced.
+    """
+    recorder = _BusRecorder()
+    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    monkeypatch.setattr(trigger_core.Trigger, "fire", staticmethod(recorder.fire))
+    monkeypatch.setattr(email_send_mod, "trigger", recorder)
+    return recorder
 
 
 @pytest.fixture(autouse=True)

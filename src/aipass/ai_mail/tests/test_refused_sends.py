@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_refused_sends.py
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-12
 # Modified: 2026-09-27
 # =============================================
@@ -171,22 +171,24 @@ class TestSendToSingleRefusedBookkeeping:
         )
         return success, error_msg, created["path"]
 
-    def test_refused_delivery_marks_the_record_refused(self, tmp_path):
-        """The fence refused, so the sent record says refused — not sent."""
+    def test_refused_delivery_marks_the_record_refused(self, tmp_path, recorded_bus):
+        """The fence refused, so the sent record says refused — not sent — and no email_sent fires."""
         success, error_msg, path = self._send(tmp_path, (False, REFUSAL))
 
         assert success is False
         assert error_msg == REFUSAL
+        assert recorded_bus.fires == [], "a refused send must not announce email_sent"
 
         record = _read(path)
         assert record["status"] == "refused"
         assert record["refused_reason"] == REFUSAL
 
-    def test_successful_delivery_leaves_the_record_sent(self, tmp_path):
-        """A delivered message keeps status sent and gains no refusal fields."""
+    def test_successful_delivery_leaves_the_record_sent(self, tmp_path, recorded_bus):
+        """A delivered message keeps status sent, gains no refusal fields, and fires email_sent once."""
         success, _, path = self._send(tmp_path, (True, ""))
 
         assert success is True
+        assert recorded_bus.fires == [("email_sent", {"to": "@ai_mail", "subject": "Subj", "auto_execute": False})]
         record = _read(path)
         assert record["status"] == "sent"
         assert "refused_reason" not in record
@@ -246,12 +248,13 @@ class TestSendToBroadcastRefusedBookkeeping:
         assert record["status"] == "refused"
         assert record["refused_reason"] == REFUSAL
 
-    def test_partial_delivery_leaves_the_record_sent(self, tmp_path):
-        """One recipient accepted it, so the record is a real send."""
+    def test_partial_delivery_leaves_the_record_sent(self, tmp_path, recorded_bus):
+        """One recipient accepted it, so the record is a real send and the fire counts one of two."""
         ok, success_count, _, _, path = self._broadcast(tmp_path, [(False, REFUSAL), (True, "")])
 
         assert ok is True
         assert success_count == 1
+        assert recorded_bus.fires == [("email_broadcast_sent", {"recipients": 2, "successful": 1, "subject": "Subj"})]
         assert _read(path)["status"] == "sent"
 
 

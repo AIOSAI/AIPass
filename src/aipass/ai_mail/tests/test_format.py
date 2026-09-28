@@ -9,7 +9,7 @@
 """Tests for apps/handlers/email/format.py -- lookup, preview, header, list item."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — format_update_count(), unrelated to display formatting
+# seedgo: no-test-needed(shared) — format_update_count(), unrelated to display formatting: tests/test_upsert.py
 
 import io
 import json

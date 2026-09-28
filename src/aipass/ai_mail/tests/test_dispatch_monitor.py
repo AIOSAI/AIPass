@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-04-02
 # Modified: 2026-09-27
 # =============================================
@@ -369,13 +369,19 @@ def main_argv(tmp_path):
     return argv, lock_file, stderr_log
 
 
-def test_main_single_attempt_success(monkeypatch, main_argv, tmp_path):
-    """First attempt succeeds, no retries."""
+def test_main_single_attempt_success(monkeypatch, main_argv, tmp_path, recorded_bus):
+    """First attempt succeeds, no retries, and the completion fires once on the bus.
+
+    The fire carries the dispatch id this process runs under, the report file just
+    written, and sender/target as the argv named them.
+    mutant: report.py fires "dispatch_complete" instead of "dispatch_completed" -> KILLED
+    """
     argv, lock_file, stderr_log = main_argv
 
     mock_run = MagicMock(return_value=(0, False))
     mock_bounce = MagicMock()
 
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-single")
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", mock_run)
     monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
@@ -391,6 +397,19 @@ def test_main_single_attempt_success(monkeypatch, main_argv, tmp_path):
     assert exc_info.value.code == 0
     mock_run.assert_called_once()
     mock_bounce.assert_not_called()
+    report_file = tmp_path / ".dispatch_register_root" / ".aipass" / "dispatch_reports" / "dsp-single.json"
+    assert report_file.is_file()
+    assert recorded_bus.fires == [
+        (
+            "dispatch_completed",
+            {
+                "dispatch_id": "dsp-single",
+                "report_path": str(report_file),
+                "sender": "@sender",
+                "target": "@test_branch",
+            },
+        )
+    ]
 
 
 def test_main_second_attempt_success(monkeypatch, main_argv, tmp_path):
@@ -466,8 +485,13 @@ def test_main_third_attempt_fresh(monkeypatch, main_argv, tmp_path):
     assert "-c" not in calls[2]
 
 
-def test_main_all_three_fail_sends_bounce(monkeypatch, main_argv, tmp_path):
-    """All 3 fail: bounce is sent with attempt details."""
+def test_main_all_three_fail_sends_bounce(monkeypatch, main_argv, tmp_path, recorded_bus):
+    """All 3 fail: bounce is sent with attempt details, and the completion still fires.
+
+    A failed dispatch is still a completed one: outside a dispatch the id is None and
+    the report lands as unregistered.json.
+    mutant: report.py fires sender=target -> KILLED
+    """
     argv, lock_file, stderr_log = main_argv
 
     mock_bounce = MagicMock()
@@ -497,6 +521,18 @@ def test_main_all_three_fail_sends_bounce(monkeypatch, main_argv, tmp_path):
     mock_bounce.assert_called_once()
     reason = mock_bounce.call_args[0][1]
     assert "3 attempts" in reason
+    report_file = tmp_path / ".dispatch_register_root" / ".aipass" / "dispatch_reports" / "unregistered.json"
+    assert recorded_bus.fires == [
+        (
+            "dispatch_completed",
+            {
+                "dispatch_id": None,
+                "report_path": str(report_file),
+                "sender": "@sender",
+                "target": "@test_branch",
+            },
+        )
+    ]
 
 
 def test_main_rate_limit_delay(monkeypatch, main_argv, tmp_path):
@@ -596,10 +632,16 @@ def test_send_bounce_missing_stderr(tmp_path, monkeypatch):
 # --- Notification naming test ------------------------------------------
 
 
-def test_notification_uses_at_branch_format(monkeypatch, main_argv, tmp_path):
-    """Notification title uses '@branch_name status' format."""
+def test_notification_uses_at_branch_format(monkeypatch, main_argv, tmp_path, recorded_bus):
+    """Notification title uses '@branch_name status' format.
+
+    The feed line and the bus fire are two halves of one completion: both carry
+    the same dispatch id, sender and report path.
+    mutant: report.py fires report_path=None -> KILLED
+    """
     argv, lock_file, stderr_log = main_argv
 
+    monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-notify")
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
     monkeypatch.setattr(mod, "_send_bounce", MagicMock())
@@ -622,6 +664,12 @@ def test_notification_uses_at_branch_format(monkeypatch, main_argv, tmp_path):
     title = mock_notify.call_args[0][0]
     assert title.startswith("@test_branch")
     assert "completed" in title
+    feed_extra = mock_notify.call_args.kwargs["extra"]
+    assert recorded_bus.events() == ["dispatch_completed"]
+    fired = recorded_bus.fires[0][1]
+    assert fired["report_path"] is not None
+    assert fired == {**feed_extra, "target": "@test_branch"}
+    assert fired["dispatch_id"] == "dsp-notify"
 
 
 # --- _kill_process tests -----------------------------------------------
@@ -657,8 +705,12 @@ def test_kill_process_terminate_timeout_falls_back_to_sigkill():
 # --- Max-turns detection tests -----------------------------------------
 
 
-def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path):
-    """stdout containing stop_reason:max_turns changes status even with exit_code==0."""
+def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path, recorded_bus):
+    """stdout containing stop_reason:max_turns changes status even with exit_code==0.
+
+    A max-turns stop still completes: the bus fire names the same sender and target.
+    mutant: report.py fires target=sender -> KILLED
+    """
     argv, lock_file, stderr_log = main_argv
 
     # Write max_turns to stdout log
@@ -692,6 +744,10 @@ def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path)
     mock_notify.assert_called_once()
     title = mock_notify.call_args[0][0]
     assert "MAX TURNS" in title  # But notification shows max turns
+    assert recorded_bus.events() == ["dispatch_completed"]
+    fired = recorded_bus.fires[0][1]
+    assert sorted(fired) == ["dispatch_id", "report_path", "sender", "target"]
+    assert (fired["sender"], fired["target"]) == ("@sender", "@test_branch")
 
 
 # --- Log rotation tests ------------------------------------------------
@@ -1371,96 +1427,10 @@ def test_stderr_rotation(tmp_path, monkeypatch):
     assert rotated.stat().st_size >= 520_000
 
 
-def test_stdout_rotation(tmp_path, monkeypatch):
-    """stdout log > 512KB triggers rotation to .log.1 before first attempt."""
-    branch_dir = tmp_path / "branch"
-    ai_mail_dir = branch_dir / ".ai_mail.local"
-    ai_mail_dir.mkdir(parents=True)
-    logs_dir = branch_dir / "logs"
-    logs_dir.mkdir(parents=True)
-
-    lock = ai_mail_dir / ".dispatch.lock"
-    lock.write_text("{}", encoding="utf-8")
-    stderr_log = tmp_path / "stderr.log"
-    stderr_log.write_text("", encoding="utf-8")
-
-    stdout_log = logs_dir / "dispatch_stdout.log"
-    stdout_log.write_text("x" * 520_000, encoding="utf-8")
-
-    argv = [
-        "dispatch_monitor.py",
-        "@test",
-        str(lock),
-        "@sender",
-        str(stderr_log),
-        "--",
-        "claude",
-    ]
-
-    monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
-    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(
-        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
-        MagicMock(return_value=tmp_path),
-    )
-
-    with pytest.raises(SystemExit):
-        main()
-
-    rotated = logs_dir / "dispatch_stdout.log.1"
-    assert rotated.exists()
-
-
-# --- Lock file cleanup tests (named per spec) ------------------------------
-
-
-def test_lock_cleaned_on_success(monkeypatch, main_argv, tmp_path):
-    """Lock is deleted when exit_code==0."""
-    argv, lock_file, stderr_log = main_argv
-
-    monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
-    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(
-        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
-        MagicMock(return_value=tmp_path / "repo"),
-    )
-
-    with pytest.raises(SystemExit):
-        main()
-
-    assert not lock_file.exists()
-
-
-def test_lock_cleaned_on_failure(monkeypatch, main_argv, tmp_path):
-    """Lock is deleted even when all attempts fail."""
-    argv, lock_file, stderr_log = main_argv
-
-    monkeypatch.setattr("sys.argv", argv)
-    monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
-    monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
-    monkeypatch.setattr(
-        mod,
-        "time",
-        MagicMock(
-            time=time.time,
-            strftime=time.strftime,
-            sleep=MagicMock(),
-        ),
-    )
-    monkeypatch.setattr(
-        "aipass.ai_mail.apps.handlers.paths.find_repo_root",
-        MagicMock(return_value=tmp_path / "repo"),
-    )
-
-    with pytest.raises(SystemExit):
-        main()
-
-    assert not lock_file.exists()
+# Retired under compass 443 (2026-09-27), each a line-for-line copy of its survivor:
+# test_stdout_rotation -> test_stdout_rotation_on_large_file;
+# test_lock_cleaned_on_success -> test_lock_cleanup_on_success;
+# test_lock_cleaned_on_failure -> test_lock_cleanup_on_failure.
 
 
 # --- Environment variables tests (named per spec) --------------------------
@@ -2133,9 +2103,10 @@ class TestBrokerRealE2E:
     """Real multi-process e2e: broker daemon, identified connection, child reads fd."""
 
     def test_child_inherits_broker_fd(self, tmp_path):
-        """Start real broker, create identified conn, spawn child that reads AIPASS_BROKER_FD."""
-        import time as time_mod
+        """Start real broker, create identified conn, spawn child that reads AIPASS_BROKER_FD.
 
+        mutant: daemon.py binds socket_path + ".x" -> KILLED
+        """
         # Set up repo root with branch dir + .trinity marker (broker marker-walk requires it)
         repo_root = tmp_path / "repo"
         branch_dir = repo_root / "src" / "aipass" / "testbranch"
@@ -2156,8 +2127,11 @@ class TestBrokerRealE2E:
             audit_path=audit_path,
             secret_path=secret_path,
         )
+        # start_background blocks until the socket listens (raises past 5s), and
+        # the secret is written before that: assert the condition, never sleep on it.
         t = broker.start_background()
-        time_mod.sleep(0.5)
+        assert sock_path.exists()
+        assert secret_path.read_bytes()
 
         try:
             # Create identified connection (as the launcher would)
@@ -2597,15 +2571,8 @@ def test_rotate_attempt_stdout_preserves_content(tmp_path):
     assert preserved.read_text(encoding="utf-8") == '{"result": "boom"}'
 
 
-def test_rotate_attempt_stdout_empty_file_noop(tmp_path):
-    """An empty stdout log is left alone -- nothing worth preserving."""
-    stdout_log = tmp_path / "dispatch_stdout.log"
-    stdout_log.write_text("", encoding="utf-8")
-
-    _rotate_attempt_stdout(str(stdout_log), 1)
-
-    assert stdout_log.exists()
-    assert not (tmp_path / "dispatch_stdout.attempt-1.log").exists()
+# test_rotate_attempt_stdout_empty_file_noop retired under compass 443 (2026-09-27):
+# a line-for-line copy of its survivor, test_rotate_attempt_stdout_skips_empty.
 
 
 def test_rotate_attempt_stdout_missing_file_noop(tmp_path):
@@ -2759,14 +2726,8 @@ def test_bounce_reason_includes_parsed_stdout_result(monkeypatch, main_argv, tmp
 # --- Fix 4: lock-ownership-verified cleanup ----------------------------
 
 
-def test_cleanup_own_lock_deletes_when_pid_matches(tmp_path):
-    """Lock is deleted when its recorded pid matches this process."""
-    lock = tmp_path / ".dispatch.lock"
-    lock.write_text(json.dumps({"pid": os.getpid()}), encoding="utf-8")
-
-    _cleanup_own_lock(str(lock))
-
-    assert not lock.exists()
+# test_cleanup_own_lock_deletes_when_pid_matches retired under compass 443 (2026-09-27):
+# a line-for-line copy of its survivor, test_cleanup_own_lock_deletes_when_owner.
 
 
 def test_cleanup_own_lock_preserves_foreign_pid(tmp_path):

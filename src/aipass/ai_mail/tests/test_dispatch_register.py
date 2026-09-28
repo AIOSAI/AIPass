@@ -552,6 +552,7 @@ class TestReadingIsForgiving:
         assert subjects == {"first", "second"}
 
     def test_no_register_yet_is_an_empty_state_not_a_failure(self, repo):
+        """The honest empty state — no file yet means no promises yet."""
         assert register.outstanding(repo_root=repo) == []
 
     def test_the_register_is_capped_like_the_feed(self, repo, monkeypatch):
@@ -574,9 +575,8 @@ class TestEmptyAndUnreadableAreNotTheSameAnswer:
     register that EXISTS and cannot be READ.
     """
 
-    def test_a_missing_register_is_empty_because_nothing_was_registered(self, repo):
-        """The honest empty state — no file yet means no promises yet."""
-        assert register.outstanding(repo_root=repo) == []
+    # The missing-register half of this pair is
+    # TestReadingIsForgiving.test_no_register_yet_is_an_empty_state_not_a_failure.
 
     def test_an_unreadable_register_raises_instead_of_reporting_all_clear(self, repo):
         """A register that exists but cannot be read must never answer "[]".

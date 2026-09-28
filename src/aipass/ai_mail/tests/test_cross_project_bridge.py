@@ -19,7 +19,7 @@
 # reply is always deliverable to the mail it answers.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _is_private_branch_email(), unrelated to the cross-project bridge
+# seedgo: no-test-needed(shared) — _is_private_branch_email(), unrelated to the bridge: tests/test_delivery.py
 
 import json
 from pathlib import Path

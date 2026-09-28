@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_send_helpers.py
 # Description: Tests for email send handler and send_args dispatch resolution
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-04-25
 # Modified: 2026-09-27
 # =============================================
@@ -12,9 +12,15 @@
 # resolve_dispatch_target and parse_send_args.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — send_to_single()'s exact console/log wording, only its return value
+# seedgo: no-test-needed(logging) — send_to_single()'s exact console/log wording, only its return value
+# seedgo: no-test-needed(logging) — send_to_single()'s logger.warning prose: a test is owed; payload and fire are here
+# seedgo: no-test-needed(shared) — send_to_single()'s refused path: tests/test_refused_sends.py
+# seedgo: no-test-needed(shared) — send_to_single()'s upsert key: tests/test_upsert.py
+
+import io
 
 import pytest
+from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
 from aipass.ai_mail.apps.handlers.email.send import (
@@ -60,8 +66,8 @@ def _make_user_info(tmp_path) -> dict:
     }
 
 
-def test_send_to_single_happy_path(tmp_path):
-    """Successful single send returns (True, None)."""
+def test_send_to_single_happy_path(tmp_path, recorded_bus):
+    """Successful single send returns (True, None) and fires email_sent once."""
     email_file = str(tmp_path / "email_file.json")
     mock_create = MagicMock(return_value=email_file)
     mock_load = MagicMock(return_value={"subject": "Test", "message": "Body"})
@@ -93,6 +99,7 @@ def test_send_to_single_happy_path(tmp_path):
     mock_load.assert_called_once_with(email_file)
     mock_deliver.assert_called_once()
     mock_log.assert_called_once_with("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})
+    assert recorded_bus.fires == [("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})]
 
 
 def test_send_to_single_load_fails(tmp_path):
@@ -125,8 +132,8 @@ def test_send_to_single_load_fails(tmp_path):
     mock_deliver.assert_not_called()
 
 
-def test_send_to_single_delivery_fails(tmp_path):
-    """Returns (False, error) when delivery function reports failure."""
+def test_send_to_single_delivery_fails(tmp_path, recorded_bus):
+    """Returns (False, error) when delivery function reports failure, and fires nothing."""
     mock_create = MagicMock(return_value=str(tmp_path / "email_file.json"))
     mock_load = MagicMock(return_value={"subject": "Test", "message": "Body"})
     mock_deliver = MagicMock(return_value=(False, "Branch offline"))
@@ -151,10 +158,11 @@ def test_send_to_single_delivery_fails(tmp_path):
 
     assert success is False
     assert error == "Branch offline"
+    assert recorded_bus.fires == [], "a refused send must not announce email_sent"
 
 
-def test_send_to_single_sets_auto_execute(tmp_path):
-    """auto_execute flag is set on email_data before delivery."""
+def test_send_to_single_sets_auto_execute(tmp_path, recorded_bus):
+    """auto_execute flag is set on email_data before delivery and carried on the email_sent fire."""
     captured_data = {}
 
     def mock_deliver(to, data, on_delivered=None):
@@ -185,13 +193,14 @@ def test_send_to_single_sets_auto_execute(tmp_path):
     assert captured_data["auto_execute"] is True
     assert captured_data["dispatched_to"] == "@flow"
     assert captured_data["no_memory_save"] is True
+    assert recorded_bus.fires == [("email_sent", {"to": "@flow", "subject": "Test", "auto_execute": True})]
 
 
 # ---- send_to_broadcast tests ---------------------------------
 
 
-def test_send_to_broadcast_happy_path(tmp_path):
-    """Successful broadcast returns (True, success_count, total, results)."""
+def test_send_to_broadcast_happy_path(tmp_path, recorded_bus):
+    """Successful broadcast returns (True, success_count, total, results) and fires once."""
     branches = [
         {"email": "@flow", "name": "FLOW"},
         {"email": "@backup", "name": "BACKUP"},
@@ -222,6 +231,7 @@ def test_send_to_broadcast_happy_path(tmp_path):
     assert total == 2
     assert isinstance(results, list)
     assert len(results) == 2
+    assert recorded_bus.fires == [("email_broadcast_sent", {"recipients": 2, "successful": 2, "subject": "Announce"})]
 
 
 def test_send_to_broadcast_load_fails(tmp_path):
@@ -252,8 +262,8 @@ def test_send_to_broadcast_load_fails(tmp_path):
     assert "could not be loaded" in error
 
 
-def test_send_to_broadcast_partial_failure(tmp_path):
-    """Partial delivery failure returns correct counts."""
+def test_send_to_broadcast_partial_failure(tmp_path, recorded_bus):
+    """Partial delivery failure returns correct counts, and the fire carries them."""
     branches = [
         {"email": "@flow", "name": "FLOW"},
         {"email": "@backup", "name": "BACKUP"},
@@ -286,12 +296,34 @@ def test_send_to_broadcast_partial_failure(tmp_path):
     assert total == 3
     assert results[1][1] is False  # Second branch failed
     assert results[1][2] == "offline"
+    assert recorded_bus.fires == [("email_broadcast_sent", {"recipients": 3, "successful": 2, "subject": "Test"})]
 
 
 # ---- collect_interactive_input tests --------------------------
 
 
-def test_collect_interactive_input_refuses_without_a_terminal():
+class _Terminal(io.StringIO):
+    """A stdin that says it is a terminal, answers input() from a script, and counts reads."""
+
+    reads = 0
+
+    def isatty(self) -> bool:
+        return True
+
+    def readline(self, size: int = -1) -> str:
+        self.reads += 1
+        return super().readline(size)
+
+
+class _InterruptedTerminal(_Terminal):
+    """A terminal whose user presses Ctrl-C at the first prompt."""
+
+    def readline(self, size: int = -1) -> str:
+        self.reads += 1
+        raise KeyboardInterrupt
+
+
+def test_collect_interactive_input_refuses_without_a_terminal(monkeypatch):
     """No TTY means nobody can answer the prompt -- refuse instead of blocking.
 
     `drone @ai_mail email` with no args reached this function through a routed
@@ -301,64 +333,76 @@ def test_collect_interactive_input_refuses_without_a_terminal():
     check, because "no input yet" and "no input ever" are indistinguishable here.
     """
     branches = [{"email": "@flow", "name": "FLOW"}]
+    # A pipe with an answer waiting in it: the guard must refuse before reading it.
+    pipe = io.StringIO("1\n")
+    monkeypatch.setattr("sys.stdin", pipe)
 
-    with patch("sys.stdin.isatty", return_value=False):
-        with patch("builtins.input", side_effect=AssertionError("must not prompt without a TTY")):
-            result = collect_interactive_input(branches)
+    result = collect_interactive_input(branches)
 
     assert result is None
+    assert pipe.tell() == 0, "must not prompt without a TTY"
 
 
-def test_collect_interactive_input_still_prompts_on_a_terminal():
+def test_collect_interactive_input_still_prompts_on_a_terminal(monkeypatch):
     """A real terminal is unaffected -- the guard must not disable interactive send."""
     branches = [{"email": "@flow", "name": "FLOW"}]
+    terminal = _Terminal("1\nSubject\n")
+    monkeypatch.setattr("sys.stdin", terminal)
 
-    with patch("sys.stdin.isatty", return_value=True):
-        with patch("builtins.input", side_effect=["1", "Subject", EOFError, "y"]) as mock_input:
-            result = collect_interactive_input(branches)
+    result = collect_interactive_input(branches)
 
     # MEASURED 2026-09-08: the third prompt raises EOFError, so the result is
     # None and ``result["to"]`` was never reached. The ``or`` meant this unit
     # proved nothing about the guard it is named for. What the guard must not do
     # is swallow the prompt, so that is what is asserted — and the None it
     # returns after the cancel is pinned rather than tolerated.
-    assert mock_input.call_count >= 1, "the no-TTY guard must not disable the prompt on a real terminal"
+    # Driven through sys.stdin (the edge input() reads) rather than builtins.input:
+    # both answers consumed proves the recipient and subject prompts both ran.
+    assert terminal.read() == "", "the no-TTY guard must not disable the prompt on a real terminal"
+    assert terminal.tell() == len("1\nSubject\n")
     assert result is None
 
 
-def test_collect_interactive_input_cancelled_on_eof():
+def test_collect_interactive_input_cancelled_on_eof(monkeypatch):
     """Returns None when input raises EOFError (cancelled).
 
     isatty is pinned True in these three: pytest's stdin is not a terminal, so
     without it the no-TTY guard returns None first and each one would pass
     without ever reaching the branch it names.
+    _Terminal is what pins it now: a stdin that says it is a terminal.
     """
     branches = [{"email": "@flow", "name": "FLOW"}]
+    terminal = _Terminal("")
+    monkeypatch.setattr("sys.stdin", terminal)
 
-    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=EOFError):
-        result = collect_interactive_input(branches)
+    result = collect_interactive_input(branches)
 
     assert result is None
+    assert terminal.reads == 1, "the recipient prompt must have been reached and met end of input"
 
 
-def test_collect_interactive_input_cancelled_on_keyboard_interrupt():
+def test_collect_interactive_input_cancelled_on_keyboard_interrupt(monkeypatch):
     """Returns None when input raises KeyboardInterrupt."""
     branches = [{"email": "@flow", "name": "FLOW"}]
+    terminal = _InterruptedTerminal("")
+    monkeypatch.setattr("sys.stdin", terminal)
 
-    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", side_effect=KeyboardInterrupt):
-        result = collect_interactive_input(branches)
+    result = collect_interactive_input(branches)
 
     assert result is None
+    assert terminal.reads == 1, "the recipient prompt must have been reached and interrupted"
 
 
-def test_collect_interactive_input_invalid_selection():
+def test_collect_interactive_input_invalid_selection(monkeypatch):
     """Returns None when user enters non-numeric selection."""
     branches = [{"email": "@flow", "name": "FLOW"}]
+    terminal = _Terminal("abc\nSubject\n")
+    monkeypatch.setattr("sys.stdin", terminal)
 
-    with patch("sys.stdin.isatty", return_value=True), patch("builtins.input", return_value="abc"):
-        result = collect_interactive_input(branches)
+    result = collect_interactive_input(branches)
 
     assert result is None
+    assert terminal.read() == "Subject\n", "only the selection is read; a bad one stops before the subject"
 
 
 # ---- resolve_dispatch_target tests ----------------------------
@@ -411,6 +455,17 @@ def test_resolve_dispatch_target_tilde_path():
     assert result == "@flow"
 
 
+def test_resolve_dispatch_target_knows_a_windows_drive_path():
+    """A drive-letter path is a path, not an address (mutant: drop the PureWindowsPath test)."""
+    windows_path = str(PureWindowsPath("C:\\") / "work" / "src" / "ai_mail")
+    looked_up = []
+
+    result = resolve_dispatch_target(windows_path, True, get_branch_info_fn=looked_up.append)
+
+    assert result == "@ai_mail"
+    assert len(looked_up) == 1
+
+
 # ---- parse_send_args multi-arg message tests (S84 fix) --------
 
 
@@ -445,7 +500,7 @@ def test_parse_send_args_multiline_body_preserved():
 # drone's 60s cap after every message had already been delivered.
 
 
-def test_broadcast_aggregates_central_once_not_per_recipient(tmp_path):
+def test_broadcast_aggregates_central_once_not_per_recipient(tmp_path, recorded_bus):
     """One @all send = one central aggregation, whatever the recipient count.
 
     Red-first: the loop passed on_delivered to every delivery, so an 18-branch
@@ -488,3 +543,4 @@ def test_broadcast_aggregates_central_once_not_per_recipient(tmp_path):
     assert aggregations.call_count == 1, (
         f"broadcast aggregated {aggregations.call_count}x for 18 recipients; the scan is global and must run once"
     )
+    assert recorded_bus.events() == ["email_broadcast_sent"], "one broadcast announces once, not per recipient"

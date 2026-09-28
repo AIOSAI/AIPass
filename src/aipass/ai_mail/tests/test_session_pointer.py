@@ -22,7 +22,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import aipass.ai_mail.apps.handlers.dispatch.session_pointer as mod
-from aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor import _get_jsonl_projects_dir
+import aipass.ai_mail.apps.handlers.dispatch.dispatch_monitor as dispatch_monitor
 from aipass.ai_mail.apps.handlers.dispatch.session_pointer import (
     mint_session_id,
     pointer_path,
@@ -124,10 +124,26 @@ def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
     assert result.parent == transcript_dir(sample)
 
 
-def test_transcript_dir_matches_dispatch_monitors_encoding(fake_home, tmp_path):
-    """The two implementations must never disagree while both exist."""
+def test_dispatch_monitor_asks_transcript_dir_and_holds_no_copy(monkeypatch, tmp_path):
+    """dispatch_monitor's projects dir is whatever transcript_dir answers: one encoding, not two.
+
+    The old shape compared transcript_dir with _get_jsonl_projects_dir, which is a
+    call to transcript_dir, so it compared a function with itself and could not
+    fail (devpulse's mutant dropping the underscore rule passed it). What is still
+    true, and worth pinning, is the delegation: a sentinel answered at
+    session_pointer's home must come back unchanged, which a local copy of the
+    encoding would not do.
+
+    Mutant: `return session_pointer.transcript_dir(cwd)` -> `return Path(cwd)` (a
+    local answer) is caught here.
+    """
+    sentinel = tmp_path / "sentinel-projects-dir"
+    asked = []
+    monkeypatch.setattr(mod, "transcript_dir", lambda cwd: asked.append(cwd) or sentinel)
     cwd = str(tmp_path / "srv" / "branches" / "AIPass" / "src" / "aipass" / "ai_mail")
-    assert transcript_dir(cwd) == _get_jsonl_projects_dir(cwd)
+
+    assert dispatch_monitor._get_jsonl_projects_dir(cwd) == sentinel
+    assert asked == [cwd]
 
 
 # --- pointer_path ----------------------------------------------------

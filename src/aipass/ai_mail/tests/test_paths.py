@@ -9,7 +9,7 @@
 """Tests for apps/handlers/paths.py -- repo root discovery and project root resolution."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — find_project_root()'s DPLAN-0036 consolidation comment
+# seedgo: no-test-needed(shared) — find_project_root(), not driven here: tests/test_registry_case_sweep.py
 
 import pytest
 from pathlib import Path

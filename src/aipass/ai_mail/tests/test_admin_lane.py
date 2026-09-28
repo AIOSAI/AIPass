@@ -18,7 +18,7 @@
 # path in explicitly.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — is_verified_admin_caller(), a thin bool wrapper this file never calls
+# seedgo: no-test-needed(shared) — is_verified_admin_caller(), never called here: tests/test_cross_project_bridge.py
 
 import json
 from contextlib import ExitStack

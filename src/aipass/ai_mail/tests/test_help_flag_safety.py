@@ -36,7 +36,7 @@
 #     owns a genuine ``help`` verb, so position 0 is free.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — print_help()'s rendered wording; it is patched here, never rendered
+# seedgo: no-test-needed(shared) — print_help()'s rendered wording; patched here, rendered in tests/test_cli_routing.py
 
 from unittest.mock import patch
 

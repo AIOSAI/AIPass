@@ -28,7 +28,7 @@
 # map, or the refusal it is describing would stop happening.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _describe_unresolved_address()'s fallback wording for a truly-unknown address
+# seedgo: no-test-needed(owed) — _describe_unresolved_address()'s wording for a truly-unknown address: a test is owed
 
 import json
 from contextlib import contextmanager

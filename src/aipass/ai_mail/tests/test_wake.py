@@ -2127,17 +2127,14 @@ class TestWakeModelPolicy:
         assert "fable" in decision.refusal.lower(), decision.refusal
         assert "2026-09-08" in decision.refusal, decision.refusal
 
-    def test_a_refused_request_never_stalls_the_wake(self, granted):
-        """Refusing the WAKE would punish the target for its schedule's model
-        field. The wake happens; the model does not."""
-        granted(["@devpulse"])
-
-        assert wake_mod.resolve_wake_model("@vera", "fable").model == DEFAULT_MODEL
-
     def test_manager_class_no_longer_buys_fable(self, granted):
         """The superseded rule, pinned as superseded. This is the exact call the
         08-30 version answered with "fable" for any manager; @vera is
-        manager-class and holds no grant, so it is opus now."""
+        manager-class and holds no grant, so it is opus now.
+
+        The refused "fable" request still resolves to a model: refusing the WAKE
+        would punish the target for its schedule's model field. The wake
+        happens; the model does not."""
         granted(["@devpulse"])
 
         assert wake_mod.resolve_wake_model("@vera", None).model == DEFAULT_MODEL

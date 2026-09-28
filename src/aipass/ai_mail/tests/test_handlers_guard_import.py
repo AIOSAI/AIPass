@@ -28,7 +28,7 @@
 # time, and a package already in ``sys.modules`` cannot be imported again.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — _guard_branch_access()'s ACCESS DENIED banner wording
+# seedgo: no-test-needed(owed) — _guard_branch_access()'s ACCESS DENIED banner wording: a test is owed
 
 import ast
 import subprocess

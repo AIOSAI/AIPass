@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: send_args.py
 # Description: Email Send Argument Parsing Handler
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-03-08
-# Modified: 2026-08-10
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -13,7 +13,7 @@ Parses send command arguments into structured data.
 Independent handler - no module or display dependencies.
 """
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import List, Dict, Optional, Any
 
 from aipass.ai_mail.apps.handlers.json import json_handler
@@ -170,11 +170,15 @@ def resolve_dispatch_target(
     if not auto_execute:
         return None
 
-    if branch.startswith("/") or branch.startswith("~"):
+    # A Windows path starts with a drive, not a slash: PureWindowsPath knows it
+    # on every host, where Path.is_absolute only knows the host's own form.
+    windows_absolute = PureWindowsPath(branch).is_absolute()
+    if branch.startswith("/") or branch.startswith("~") or windows_absolute:
+        name = (PureWindowsPath(branch) if windows_absolute else Path(branch)).name.lower()
         if get_branch_info_fn:
             branch_info = get_branch_info_fn(Path(branch))
             if branch_info:
-                return branch_info.get("email", f"@{Path(branch).name.lower()}")
-        return f"@{Path(branch).name.lower()}"
+                return branch_info.get("email", f"@{name}")
+        return f"@{name}"
 
     return branch

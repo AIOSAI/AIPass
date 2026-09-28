@@ -24,7 +24,7 @@
 # built in tmp_path.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — resolve_wake_model()'s ModelDecision, unrelated to address resolution
+# seedgo: no-test-needed(shared) — resolve_wake_model()'s ModelDecision, unrelated here: tests/test_wake.py
 
 import json
 from pathlib import Path

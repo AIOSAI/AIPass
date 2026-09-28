@@ -245,6 +245,29 @@ def test_find_all_inbox_files_ignores_dir_without_inbox(tmp_path, monkeypatch):
     assert len(result) == 0
 
 
+# --- get_valid_branch_names tests --------------------------------------
+
+
+def test_get_valid_branch_names_reads_the_registry_rows_uppercased(tmp_path):
+    """Every registry row's name comes back, uppercased, from the registry it is pointed at.
+
+    The aggregate tests patch this function out, so its body never ran. The
+    autouse sandboxed_central fixture points BRANCH_REGISTRY under tmp_path;
+    the registry written there is the only one read.
+
+    Mutant: `branch["name"].upper()` -> `branch["name"]` returns the rows as
+    written and is caught here.
+    """
+    registry = tmp_path / "central_sandbox" / "AIPASS_REGISTRY.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps({"branches": [{"name": "seedgo"}, {"name": "Drone"}, {"name": "AI_MAIL"}]}),
+        encoding="utf-8",
+    )
+
+    assert mod.get_valid_branch_names() == {"SEEDGO", "DRONE", "AI_MAIL"}
+
+
 # --- aggregate_branch_stats tests --------------------------------------
 
 

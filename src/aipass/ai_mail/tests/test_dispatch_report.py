@@ -34,7 +34,6 @@ from pathlib import Path
 import pytest
 
 from aipass.ai_mail.apps.handlers.dispatch import report
-from aipass.trigger.apps.modules.core import trigger as trigger_module
 
 
 @pytest.fixture
@@ -297,13 +296,13 @@ class TestTheStamp:
 class TestThePush:
     """In-process only, and it must never take the run down with it."""
 
-    def test_a_trigger_failure_is_reported_not_raised(self, monkeypatch, tmp_path):
+    def test_a_trigger_failure_is_reported_not_raised(self, monkeypatch, tmp_path, recorded_bus):
         """The durable write already happened; a failed push must not undo it."""
 
         def _raise(*args, **kwargs):
             raise RuntimeError("trigger down")
 
-        monkeypatch.setattr(trigger_module, "fire", _raise)
+        monkeypatch.setattr(recorded_bus, "fire", _raise)
 
         report_path = str(tmp_path / "x.json")
 

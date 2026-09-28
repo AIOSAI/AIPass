@@ -53,6 +53,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import pytest
 
 from aipass.ai_mail.apps.handlers.paths import find_project_root, registries_in
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 from aipass.ai_mail.apps.handlers.users import branch_detection as bd
 from aipass.ai_mail.apps.handlers.email.reply import _validate_reply_path
 from aipass.ai_mail.apps.handlers.registry.read import (
@@ -688,11 +689,22 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
             return "registry" in arg.id.lower() or "registry" in str(module_constants.get(arg.id, "")).lower()
         return False
 
-    def _registry_glob_calls(self):
+    @staticmethod
+    def _sources(root):
+        """Every .py under root, never inside a dropbox, .archive or any other seedgo skip dir.
+
+        Owner ruling: nothing looks into a dropbox. apps/handlers/.archive holds
+        retired .py files today, which the bare rglob read.
+        """
+        for source in root.rglob("*.py"):
+            if not SOURCE_SKIP_DIRS.intersection(source.relative_to(root).parts[:-1]):
+                yield source
+
+    def _registry_glob_calls(self, root=None):
         """Every ``.glob(...)``/``.rglob(...)`` reaching for a registry pattern,
         outside the one filtered reader."""
         offenders = []
-        for source in self.HANDLERS.rglob("*.py"):
+        for source in self._sources(root or self.HANDLERS):
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
             constants = {
                 target.id: node.value.value
@@ -715,7 +727,7 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         """Positive control for the AST walk itself. If the parser visits nothing
         — wrong root, renamed package — the ban below passes vacuously and
         reports a clean tree it never read."""
-        seen = [s.name for s in self.HANDLERS.rglob("*.py")]
+        seen = [s.name for s in self._sources(self.HANDLERS)]
         assert len(seen) > 20, f"the walk must actually reach the handler tree, saw {len(seen)}"
         assert self.READER_FILE in seen
 
@@ -738,6 +750,24 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         assert self._mentions_registry(by_name, module_constants) is True
         assert self._mentions_registry(by_literal, {}) is True
         assert self._mentions_registry(innocent, {}) is False
+
+    def test_the_ban_never_reads_a_dropbox_or_an_archive(self, tmp_path):
+        """A registry glob planted in a dropbox or .archive under the walked root is
+        not read; the same glob in live source is. The live file is the control:
+        without it an empty walk would pass.
+
+        Mutant: drop the SOURCE_SKIP_DIRS filter in _sources and both planted files
+        come back as offenders.
+        """
+        glob_line = 'd.glob("*_REGISTRY.json")\n'
+        (tmp_path / "live.py").write_text(glob_line, encoding="utf-8")
+        for skipped in ("dropbox", ".archive"):
+            (tmp_path / skipped).mkdir()
+            (tmp_path / skipped / "planted.py").write_text(glob_line, encoding="utf-8")
+
+        offenders = self._registry_glob_calls(tmp_path)
+
+        assert [name for name, _line, _arg in offenders] == ["live.py"]
 
     def test_only_the_shared_reader_globs_for_registries(self):
         offenders = [o for o in self._registry_glob_calls() if o[0] != self.READER_FILE]
