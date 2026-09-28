@@ -3,7 +3,7 @@
 # Description: Tests for the systemd unit lifecycle of the log watcher
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/service_control.py, the systemd control surface extracted from medic.py."""
@@ -98,17 +98,22 @@ class TestSystemctl:
 
         assert service_control._systemctl("start") is False
 
-    def test_a_raising_subprocess_is_reported_as_failure_not_an_exception(
+    def test_a_hung_systemctl_is_unanswered_not_a_failure(
         self, monkeypatch: pytest.MonkeyPatch, systemd_present
     ) -> None:
-        """A missing or hung systemctl must not take the caller down."""
+        """A hung systemctl must not take the caller down, and must not read as "stopped".
+
+        None is the answer systemctl never gave; False is a unit that answered no.
+        Red first 2026-09-28 on the code that answered False for both.
+        Mutant 2026-09-28: the generic except answering False again reddens this.
+        """
 
         def boom(cmd, **kwargs):
             raise subprocess.TimeoutExpired(cmd, 10)
 
         monkeypatch.setattr(service_control.subprocess, "run", boom)
 
-        assert service_control._systemctl("is-active") is False
+        assert service_control._systemctl("is-active") is None
 
 
 class TestIsServiceActive:
@@ -204,7 +209,7 @@ class TestNoSystemdHost:
 
         monkeypatch.setattr(service_control.subprocess, "run", must_not_run)
 
-        assert service_control._systemctl("start") is False
+        assert service_control._systemctl("start") is None
         assert any("no systemctl" in line and "systemd" in line for line in recorded_log.warnings), (
             f"the refusal must name the missing host fact, got {recorded_log.warnings}"
         )
@@ -259,7 +264,7 @@ class TestNoSystemdHost:
 
         monkeypatch.setattr(service_control.subprocess, "run", gone)
 
-        assert service_control._systemctl("stop") is False
+        assert service_control._systemctl("stop") is None
         assert any("no systemctl" in line for line in recorded_log.warnings), recorded_log.warnings
 
 

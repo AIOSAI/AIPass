@@ -3,23 +3,24 @@
 # Description: Unit tests for medic module handle_command
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — the state file format in apps/handlers/medic_state.py; the medic state tests cover it
+# seedgo: no-test-needed(behaviour) — the state file format in apps/handlers/medic_state.py; its own tests cover it
 
 import re
-import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
 from rich.text import Text
 
 from aipass.cli.apps.modules import display
+from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.medic_state import parse_duration
+from aipass.trigger.apps.modules import medic
 
 
 # ---------------------------------------------------------------------------
@@ -27,29 +28,41 @@ from aipass.trigger.apps.handlers.medic_state import parse_duration
 # ---------------------------------------------------------------------------
 
 
+_STATE_NAMES = (
+    "is_enabled",
+    "set_enabled",
+    "get_muted_branches_detail",
+    "get_volume_muted_branches_detail",
+    "get_disabled_until",
+    "mute_branch",
+    "unmute_branch",
+    "mute_branch_volume",
+    "unmute_branch_volume",
+    "get_suppression_stats",
+    "get_rate_limit_stats",
+    "parse_duration",
+    "DEFAULT_MUTE_SECONDS",
+    "DEFAULT_OFF_SECONDS",
+)
+
+_RECORDERS: dict = {}
+
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports before medic module loads."""
+    """Replace medic's edges where medic reads them: state, operation log, logger.
 
-    mock_logger = MagicMock()
+    The medic_state names are bound into medic by `from ... import`, so medic's
+    own namespace is their home as medic reads them; patching there keeps every
+    test off the live trigger_json/medic_state.json.
+    """
+    monkeypatch.setattr(medic, "logger", MagicMock())
 
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
-
-    # -- trigger json handler -----------------------------------------------
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
+    # -- trigger json handler: the operation log is live, record instead -----
+    json_recorder = MagicMock()
+    json_recorder.log_operation.return_value = True
+    monkeypatch.setattr(json_handler, "log_operation", json_recorder.log_operation)
+    _RECORDERS["json_handler"] = json_recorder
 
     # -- medic_state handler ------------------------------------------------
     medic_state_mod = MagicMock()
@@ -77,30 +90,27 @@ def _mock_infrastructure(monkeypatch):
     medic_state_mod.parse_duration = parse_duration
     medic_state_mod.DEFAULT_MUTE_SECONDS = 86400
     medic_state_mod.DEFAULT_OFF_SECONDS = 86400
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.medic_state", medic_state_mod)
+    for name in _STATE_NAMES:
+        monkeypatch.setattr(medic, name, getattr(medic_state_mod, name))
+    _RECORDERS["medic_state"] = medic_state_mod
 
     # The CLI console and rich are real (2026-09-27): output is read with
     # capsys, and a refusal through error() from stderr and cli's failure flag.
 
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.medic", raising=False)
-
 
 def _import_medic():
-    """Import medic module fresh (after mocks are in place)."""
-    import aipass.trigger.apps.modules.medic as medic
-
+    """The medic module, imported once at the top of this file."""
     return medic
 
 
 def _get_medic_state():
-    """Return the mocked medic_state module from sys.modules."""
-    return sys.modules["aipass.trigger.apps.handlers.medic_state"]
+    """Return the recorder standing in for medic_state's names inside medic."""
+    return _RECORDERS["medic_state"]
 
 
 def _get_json_handler():
-    """Return the mocked json_handler from sys.modules."""
-    return sys.modules["aipass.trigger.apps.handlers.json.json_handler"]
+    """Return the recorder whose log_operation stands in json_handler's at its home."""
+    return _RECORDERS["json_handler"]
 
 
 def _printed(capsys):
@@ -773,6 +783,25 @@ def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on(c
     output = "\n".join(_printed(capsys))
     assert "no systemd on this host" in output, output
     assert "run medic on" not in output, output
+
+
+def test_status_names_a_watcher_systemctl_never_answered_for(capsys):
+    """A timed-out is-active is not a stopped watcher, and status says which it was.
+
+    Red first 2026-09-28: the unanswered case printed "stopped — run medic on".
+    Mutant 2026-09-28: the unanswered branch removed from _handle_status reddens this.
+    """
+    medic = _import_medic()
+    state = _get_medic_state()
+    state.is_enabled.return_value = True
+
+    with patch.object(medic, "_is_service_active", return_value=None):
+        with patch.object(medic, "systemd_available", return_value=True):
+            medic.handle_command("status", [])
+
+    output = "\n".join(_printed(capsys))
+    assert "systemctl did not answer" in output, output
+    assert "stopped" not in output, output
 
 
 def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_systemd(capsys):

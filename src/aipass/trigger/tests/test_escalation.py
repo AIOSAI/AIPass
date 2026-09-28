@@ -3,13 +3,13 @@
 # Description: Tests for the escalation digest lane and its CLI module
 # Version: 1.1.0
 # Created: 2026-08-08
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for handlers/escalation.py — repeat-signature counting, digest gating, and modules/escalation.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the upsert key the digest carries into ai_mail, in test_escalation_upsert.py
+# seedgo: no-test-needed(covered_elsewhere) — the upsert key the digest carries to ai_mail: test_escalation_upsert.py
 # seedgo: no-test-needed(external) — ai_mail delivery of the digest; AIPass tests only its own files
 
 import json
@@ -105,7 +105,7 @@ def refused(monkeypatch: pytest.MonkeyPatch, lane) -> List[Dict[str, Any]]:
 
 
 @pytest.fixture
-def medic(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def medic(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     """Registry + medic state describing an error medic is still handling itself.
 
     The lane reaches each of these through a lazy import that resolves out of
@@ -121,9 +121,14 @@ def medic(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setattr(error_registry, "get_dispatch_count", lambda fingerprint: 0)
     monkeypatch.setattr(medic_state, "is_enabled", lambda: switches["medic_enabled"])
     monkeypatch.setattr(medic_state, "get_muted_branches", lambda: [])
-    monkeypatch.setattr(error_detected, "_get_registered_emails", lambda: {"@flow", "@memory"})
+    # The real registry lookup, reading a tmp_path registry file.
+    branch_registry = tmp_path / "AIPASS_REGISTRY.json"
+    branches = [{"email": "@flow"}, {"email": "@memory"}]
+    branch_registry.write_text(json.dumps({"branches": branches}), encoding="utf-8")
+    monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", branch_registry)
 
     return SimpleNamespace(
+        branch_registry=branch_registry,
         registry=error_registry,
         state=medic_state,
         dispatcher=error_detected,
@@ -760,6 +765,22 @@ class TestErrorEligibility:
 
         assert decision["outcome"] == "sent"
         assert "no registered owner" in outbox[0]["message"]
+
+    def test_an_unreadable_branch_registry_manufactures_no_digest(self, lane, outbox, medic) -> None:
+        """A registry the check cannot read is not a registry with nobody in it.
+
+        _has_registered_owner documents True when the check itself failed. The
+        lookup used to swallow the read failure and answer an empty set, so every
+        branch read as unregistered and the lane mailed 'no registered owner'.
+        Red first on that code (outcome 'sent').
+        Mutant 2026-09-28: the lookup's re-raise put back to return set() reddens this.
+        """
+        medic.branch_registry.write_text("{not json", encoding="utf-8")
+
+        decision = _fire_error(lane, times=3)
+
+        assert decision["outcome"] == "not_eligible"
+        assert outbox == []
 
     def test_suppressed_fingerprint_stays_silent(self, monkeypatch, lane, outbox, medic) -> None:
         """A human called this benign (compass #219) — suppression beats 'already dispatched'.

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.7.0
+# Version: 2.8.0
 # Created: 2026-02-10
-# Modified: 2026-09-24
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -210,16 +210,25 @@ def _get_registered_emails() -> set:
     Read registered branch emails from AIPASS_REGISTRY.json.
 
     Returns:
-        Set of registered email addresses (e.g., {'@flow', '@drone'})
+        Set of registered email addresses (e.g., {'@flow', '@drone'}); empty
+        when no registry file exists
+
+    Raises:
+        RuntimeError: the registry exists but cannot be read or parsed. An
+            unreadable registry is not a registry with nobody in it: answering
+            an empty set made every branch read as unregistered, so medic
+            logged 'Unknown branch skipped' and the escalation lane mailed
+            'no registered owner' for a branch that has one. Each caller
+            handles the raise: handle_error_detected's outer except logs it,
+            escalation._has_registered_owner answers True.
     """
-    try:
-        if BRANCH_REGISTRY_FILE.exists():
-            data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
-            return {b["email"] for b in data.get("branches", [])}
-    except Exception as exc:
-        logger.warning(f"_get_registered_emails registry read failed: {exc}")
+    if not BRANCH_REGISTRY_FILE.exists():
         return set()
-    return set()
+    try:
+        data = json.loads(BRANCH_REGISTRY_FILE.read_text(encoding="utf-8"))
+        return {b["email"] for b in data.get("branches", [])}
+    except Exception as exc:
+        raise RuntimeError(f"branch registry unreadable ({BRANCH_REGISTRY_FILE.name}): {exc}") from exc
 
 
 def _is_rate_limited(branch_email: str) -> bool:

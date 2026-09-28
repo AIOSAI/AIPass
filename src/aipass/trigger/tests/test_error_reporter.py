@@ -3,20 +3,22 @@
 # Description: Unit tests for error_reporter handler
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for the error_reporter handler (apps/handlers/error_reporter.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — how report() fingerprints and stores a row, in tests/test_error_registry.py
-# seedgo: no-test-needed(covered_elsewhere) — what the error_detected event does once fired, in tests/test_error_detected.py
+# seedgo: no-test-needed(covered_elsewhere) — how report() fingerprints and stores a row: tests/test_error_registry.py
+# seedgo: no-test-needed(covered_elsewhere) — what error_detected does once fired: tests/test_error_detected.py
 
-import sys
 import pytest
 from unittest.mock import MagicMock
 
-from aipass.trigger.apps.config import atomic_write_json
+from aipass.ai_mail.apps.modules import email_send
+from aipass.trigger.apps.handlers import error_reporter
+from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.modules import core
 
 
 # ---------------------------------------------------------------------------
@@ -24,24 +26,21 @@ from aipass.trigger.apps.config import atomic_write_json
 # ---------------------------------------------------------------------------
 
 
+_RECORDERS: dict = {}
+
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports before error_reporter module loads."""
+    """Replace every edge error_reporter reaches, at the home of each name.
 
-    mock_logger = MagicMock()
-    mock_logger.info = MagicMock()
-    mock_logger.warning = MagicMock()
-
-    # -- prax logger --------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    prax_logger_mod.system_logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
+    The registry, the operation log, the event bus and ai_mail are all live:
+    the registry writes trigger_json/error_registry.json, the bus's
+    error_detected handler dispatches, and deliver_email_to_branch sends real
+    mail. Each is a recorder here for every test, not only the ones that set
+    their own. The two lazy imports inside the handler read core.trigger and
+    email_send.deliver_email_to_branch at call time, so those homes are patched.
+    """
+    monkeypatch.setattr(error_reporter, "logger", MagicMock())
 
     # -- error_registry -----------------------------------------------------
     mock_registry_report = MagicMock(
@@ -57,45 +56,33 @@ def _mock_infrastructure(monkeypatch):
             "component": "FLOW",
         }
     )
-    registry_mod = MagicMock()
-    registry_mod.report = mock_registry_report
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", registry_mod)
+    monkeypatch.setattr(error_reporter, "_registry_report", mock_registry_report)
+    _RECORDERS["registry_report"] = mock_registry_report
 
-    # -- trigger json handler -----------------------------------------------
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
+    # -- trigger json handler: the operation log is live, record instead -----
+    json_recorder = MagicMock()
+    json_recorder.log_operation.return_value = True
+    monkeypatch.setattr(json_handler, "log_operation", json_recorder.log_operation)
+    _RECORDERS["json_handler"] = json_recorder
 
-    # -- trigger config (needed by error_registry import chain) -------------
-
-    config_mock = MagicMock()
-    config_mock.atomic_write_json = atomic_write_json
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", config_mock)
-
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.error_reporter", raising=False)
+    # -- the event bus and real mail: recorders unless a test sets its own ---
+    monkeypatch.setattr(core, "trigger", MagicMock())
+    monkeypatch.setattr(email_send, "deliver_email_to_branch", MagicMock(return_value=(True, "recorded")))
 
 
 def _import_reporter():
-    """Import error_reporter module fresh (after mocks are in place)."""
-    import aipass.trigger.apps.handlers.error_reporter as mod
-
-    return mod
+    """The error_reporter module, imported once at the top of this file."""
+    return error_reporter
 
 
 def _get_registry_report():
-    """Return the mocked registry report function."""
-    return sys.modules["aipass.trigger.apps.handlers.error_registry"].report
+    """Return the recorder standing in for the registry's report inside error_reporter."""
+    return _RECORDERS["registry_report"]
 
 
 def _get_json_handler():
-    """Return the mocked json_handler."""
-    return sys.modules["aipass.trigger.apps.handlers.json"].json_handler
+    """Return the recorder whose log_operation stands in json_handler's at its home."""
+    return _RECORDERS["json_handler"]
 
 
 # ---------------------------------------------------------------------------
@@ -111,12 +98,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(True, "delivered"))
-        email_mod = MagicMock()
-        email_mod.deliver_email_to_branch = mock_deliver
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", email_mod)
+        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "flow",
@@ -171,9 +153,9 @@ class TestSendSourceFixEmail:
         """
         reporter = _import_reporter()
 
-        # Setting a sys.modules entry to None tells Python the import failed,
-        # causing ImportError on 'from aipass.ai_mail.apps.modules.email_send import ...'
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", None)
+        # The name gone from its home makes the handler's lazy
+        # 'from aipass.ai_mail.apps.modules.email_send import ...' raise ImportError.
+        monkeypatch.delattr(email_send, "deliver_email_to_branch")
 
         entry = {
             "component": "flow",
@@ -193,12 +175,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(False, "delivery failed"))
-        email_mod = MagicMock()
-        email_mod.deliver_email_to_branch = mock_deliver
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", email_mod)
+        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "flow",
@@ -218,12 +195,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(side_effect=RuntimeError("connection refused"))
-        email_mod = MagicMock()
-        email_mod.deliver_email_to_branch = mock_deliver
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", email_mod)
+        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "flow",
@@ -249,12 +221,7 @@ class TestSendSourceFixEmail:
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(True, "ok"))
-        email_mod = MagicMock()
-        email_mod.deliver_email_to_branch = mock_deliver
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules", MagicMock())
-        monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", email_mod)
+        monkeypatch.setattr(email_send, "deliver_email_to_branch", mock_deliver)
 
         entry = {
             "component": "api",
@@ -293,9 +260,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -316,9 +281,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -339,9 +302,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -362,9 +323,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -385,9 +344,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW", fire_event=False)
 
@@ -408,9 +365,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -436,9 +391,7 @@ class TestReportError:
 
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("event bus failure")
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         result = reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -486,9 +439,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         reporter.report_error("ImportError", "No module foo", "FLOW")
 
@@ -525,9 +476,7 @@ class TestReportError:
         }
 
         mock_trigger = MagicMock()
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         reporter.report_error("ValueError", "bad value", "DRONE", log_path=str(tmp_path / "drone.log"))
 
@@ -603,9 +552,7 @@ class TestReportError:
 
         mock_trigger = MagicMock()
         mock_trigger.fire.side_effect = RuntimeError("bus down")
-        trigger_mod = MagicMock()
-        trigger_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", trigger_mod)
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
         reporter.report_error("ImportError", "No module foo", "FLOW")
 

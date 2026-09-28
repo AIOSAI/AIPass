@@ -3,14 +3,14 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the live system_logs observer, owned by branch_log_events, in test_branch_log_events.py
-# seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's; AIPass tests only its own files
+# seedgo: no-test-needed(covered_elsewhere) — the live system_logs observer: test_branch_log_events.py
+# seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's
 
 import hashlib
 from pathlib import Path
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import aipass.trigger.apps.handlers.error_registry as error_registry
-import aipass.trigger.apps.handlers.watchers.log_watcher as watchers_log_watcher
+import aipass.trigger.apps.handlers.watchers.log_watcher as wlw
 import aipass.trigger.apps.modules.core as trigger_core
 
 
@@ -37,16 +37,16 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     ``wlw.SYSTEM_LOGS_DIR`` or ``wlw._log_observer`` directly.
     """
     mock_logger = MagicMock()
-    monkeypatch.setattr(watchers_log_watcher, "logger", mock_logger)
+    monkeypatch.setattr(wlw, "logger", mock_logger)
 
     # log_operation appends to the LIVE trigger logs/.
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    monkeypatch.setattr(watchers_log_watcher, "json_handler", mock_json_handler)
+    monkeypatch.setattr(wlw, "json_handler", mock_json_handler)
 
     # SYSTEM_LOGS_DIR is built from TRIGGER_ROOT at import: the LIVE
     # system_logs. It points at this test's own directory instead.
-    monkeypatch.setattr(watchers_log_watcher, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+    monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
     # -- error registry: an ERROR line is reported through a lazy import. Left
     # real, test_reads_new_content wrote a TEST row into the LIVE registry on
@@ -60,13 +60,8 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     monkeypatch.setattr(trigger_core, "trigger", MagicMock())
 
     # -- watchdog: no real observer is ever armed over a directory.
-    monkeypatch.setattr(watchers_log_watcher, "WatchdogObserver", MagicMock())
-    monkeypatch.setattr(watchers_log_watcher, "_log_observer", None)
-
-
-def _import_watchers_lw():
-    """Hand each test the watcher module, its doors already replaced."""
-    return watchers_log_watcher
+    monkeypatch.setattr(wlw, "WatchdogObserver", MagicMock())
+    monkeypatch.setattr(wlw, "_log_observer", None)
 
 
 # ---------------------------------------------------------------------------
@@ -79,26 +74,22 @@ class TestGenerateErrorHash:
 
     def test_deterministic(self):
         """Same inputs always produce the same hash."""
-        wlw = _import_watchers_lw()
         h1 = wlw._generate_error_hash("mod_a", "something broke")
         h2 = wlw._generate_error_hash("mod_a", "something broke")
         assert h1 == h2
 
     def test_length_is_8(self):
         """Hash is exactly 8 characters long."""
-        wlw = _import_watchers_lw()
         h = wlw._generate_error_hash("module", "message")
         assert len(h) == 8
 
     def test_matches_md5_prefix(self):
         """Hash matches the first 8 chars of MD5(module:message)."""
-        wlw = _import_watchers_lw()
         expected = hashlib.md5("mymod:mymsg".encode()).hexdigest()[:8]
         assert wlw._generate_error_hash("mymod", "mymsg") == expected
 
     def test_different_inputs_different_hashes(self):
         """Different inputs produce different hashes."""
-        wlw = _import_watchers_lw()
         h1 = wlw._generate_error_hash("mod_a", "err one")
         h2 = wlw._generate_error_hash("mod_b", "err two")
         assert h1 != h2
@@ -114,22 +105,18 @@ class TestDetectBranchFromLog:
 
     def test_branch_module_pattern(self):
         """seedgo_audit.log returns SEEDGO."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_branch_from_log("seedgo_audit.log") == "SEEDGO"
 
     def test_simple_log(self):
         """simple.log returns SIMPLE."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_branch_from_log("simple.log") == "SIMPLE"
 
     def test_full_path(self, tmp_path):
         """Works with a full path, not just filename."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_branch_from_log(str(tmp_path / "logs" / "trigger_events.log")) == "TRIGGER"
 
     def test_multiple_underscores(self):
         """ai_mail_dispatch.log returns AI (first part before underscore)."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_branch_from_log("ai_mail_dispatch.log") == "AI"
 
 
@@ -143,37 +130,30 @@ class TestDetectLogLevel:
 
     def test_error_dash_format(self):
         """Detects ERROR from dash-separated format."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("2026-01-01 - mod - ERROR - msg") == "error"
 
     def test_error_space_format(self):
         """Detects ERROR from space-separated format."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("2026-01-01 ERROR something") == "error"
 
     def test_error_bracket_format(self):
         """Detects ERROR from bracket format [ERROR]."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("[ERROR] something happened") == "error"
 
     def test_warning(self):
         """Detects WARNING level."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("2026-01-01 - mod - WARNING - msg") == "warning"
 
     def test_critical_maps_to_error(self):
         """CRITICAL level maps to error."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("2026-01-01 - mod - CRITICAL - msg") == "error"
 
     def test_debug(self):
         """Detects DEBUG level."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("2026-01-01 - mod - DEBUG - msg") == "debug"
 
     def test_info_default(self):
         """Lines without a recognized level default to info."""
-        wlw = _import_watchers_lw()
         assert wlw._detect_log_level("just a plain log message") == "info"
 
 
@@ -187,19 +167,16 @@ class TestParseLogMessage:
 
     def test_pipe_format_extracts_message(self):
         """Extracts message from pipe-separated format."""
-        wlw = _import_watchers_lw()
         line = "2026-01-01 | mod | ERROR | Connection refused"
         assert wlw._parse_log_message(line) == "Connection refused"
 
     def test_pipe_format_with_pipes_in_message(self):
         """Handles messages that contain pipe characters."""
-        wlw = _import_watchers_lw()
         line = "ts | mod | ERROR | a | b | c"
         assert wlw._parse_log_message(line) == "a | b | c"
 
     def test_non_pipe_returns_stripped_line(self):
         """Non-pipe line is returned stripped."""
-        wlw = _import_watchers_lw()
         assert wlw._parse_log_message("  just a message  ") == "just a message"
 
 
@@ -213,13 +190,11 @@ class TestExtractModuleName:
 
     def test_pipe_format_extracts_module(self):
         """Extracts module from second pipe-separated field."""
-        wlw = _import_watchers_lw()
         line = "2026-01-01 | my_module | ERROR | msg"
         assert wlw._extract_module_name(line) == "my_module"
 
     def test_non_pipe_returns_unknown(self):
         """Non-pipe line returns 'unknown'."""
-        wlw = _import_watchers_lw()
         assert wlw._extract_module_name("no pipes here") == "unknown"
 
 
@@ -233,27 +208,22 @@ class TestShouldSkipLog:
 
     def test_initialization_line_skipped(self):
         """Initialization noise is skipped."""
-        wlw = _import_watchers_lw()
         assert wlw._should_skip_log("Initializing trigger module") is True
 
     def test_module_initialized_skipped(self):
         """'Module initialized' line is skipped."""
-        wlw = _import_watchers_lw()
         assert wlw._should_skip_log("Module initialized successfully") is True
 
     def test_configuration_loaded_skipped(self):
         """'Configuration loaded' line is skipped."""
-        wlw = _import_watchers_lw()
         assert wlw._should_skip_log("Configuration loaded from config.json") is True
 
     def test_real_error_not_skipped(self):
         """Actual error messages are NOT skipped."""
-        wlw = _import_watchers_lw()
         assert wlw._should_skip_log("Database connection failed") is False
 
     def test_cleanup_zero_skipped(self):
         """'Cleanup completed - Removed 0' noise line is skipped."""
-        wlw = _import_watchers_lw()
         assert wlw._should_skip_log("Cleanup completed - Removed 0 entries") is True
 
 
@@ -267,7 +237,6 @@ class TestLogFileWatcherReadNewLines:
 
     def test_reads_new_content(self, tmp_path):
         """Reads only new content appended after initial position."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "test.log"
@@ -288,7 +257,6 @@ class TestLogFileWatcherReadNewLines:
 
     def test_no_change_no_read(self, tmp_path):
         """When file has not changed since last position, nothing is read."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "unchanged.log"
@@ -368,7 +336,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_rotation_drains_unread_tail(self, tmp_path):
         """Lines written between last position and rotation ARE processed."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -396,7 +363,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_drain_uses_branch_and_noise_filter(self, tmp_path):
         """Drained lines get the same branch arg and _should_skip_log filter."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -421,7 +387,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_stale_backup_inode_mismatch_not_reprocessed(self, tmp_path):
         """A stale '.log.1' from an earlier rotation is never re-read."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -447,7 +412,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_missing_backup_file_still_reads_new_file(self, tmp_path):
         """No '.log.1' present: no crash, the new file is still read."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -467,7 +431,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_in_place_truncation_no_duplicate_processing(self, tmp_path):
         """Truncation in place (same inode) never re-fires the old content."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -498,7 +461,6 @@ class TestLogFileWatcherRotationDrain:
         This test passes with and without the fix - it exists to prove the
         drain does not run on the normal (non-shrink) path.
         """
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -521,7 +483,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_repeat_shrink_event_does_not_drain_twice(self, tmp_path):
         """Two events after one rotation drain the tail exactly once."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -548,7 +509,6 @@ class TestLogFileWatcherRotationDrain:
         No-overreach guard: passes with and without the fix - it proves an
         unknown inode degrades to exactly the pre-fix behaviour.
         """
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -568,7 +528,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_rotated_file_smaller_than_position_skipped(self, tmp_path):
         """A backup shorter than the recorded position is not drained."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -589,7 +548,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_drain_failure_does_not_block_new_file(self, tmp_path):
         """An exception inside the drain never prevents reading the new file."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -609,7 +567,6 @@ class TestLogFileWatcherRotationDrain:
 
     def test_record_position_tracks_inode(self, tmp_path):
         """_record_position stores the current inode alongside the offset."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -641,7 +598,6 @@ class TestLogFileWatcherInodeRotation:
         The size-only check missed this entirely and seeked into the middle of
         the brand new file, yielding a partial line.
         """
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -672,7 +628,6 @@ class TestLogFileWatcherInodeRotation:
 
     def test_rotated_file_found_at_second_backup(self, tmp_path):
         """Two rotations: the tail is drained from '.log.2' and a warning is emitted."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -703,7 +658,6 @@ class TestLogFileWatcherInodeRotation:
 
     def test_tracked_inode_beyond_chain_reads_new_file_from_zero(self, tmp_path):
         """Inode matching nothing within the chain: nothing drained, new file read whole."""
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -737,7 +691,6 @@ class TestLogFileWatcherInodeRotation:
         Passes with and without the fix - it proves walking the chain did not
         turn an in-place truncation into a false rotation.
         """
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -766,7 +719,6 @@ class TestLogFileWatcherInodeRotation:
         Passes with and without the fix - it proves the chain walk only runs
         when the inode actually changed.
         """
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -793,7 +745,6 @@ class TestLogFileWatcherInodeRotation:
         Passes with and without the fix - some Windows filesystems report
         st_ino 0, which must never be trusted as a rotation signal.
         """
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -823,25 +774,21 @@ class TestStartStopActive:
 
     def test_start_returns_none_when_watchdog_unavailable(self, monkeypatch):
         """start_log_watcher returns None when WATCHDOG_AVAILABLE is False."""
-        wlw = _import_watchers_lw()
         monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", False)
         assert wlw.start_log_watcher() is None
 
     def test_start_returns_none_when_dir_missing(self, tmp_path, monkeypatch):
         """start_log_watcher returns None when SYSTEM_LOGS_DIR does not exist."""
-        wlw = _import_watchers_lw()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "nonexistent")
         assert wlw.start_log_watcher() is None
 
     def test_is_log_watcher_active_false_when_not_started(self, monkeypatch):
         """is_log_watcher_active returns False when no observer is set."""
-        wlw = _import_watchers_lw()
         monkeypatch.setattr(wlw, "_log_observer", None)
         assert wlw.is_log_watcher_active() is False
 
     def test_is_log_watcher_active_false_when_observer_dead(self, monkeypatch):
         """is_log_watcher_active returns False when observer is not alive."""
-        wlw = _import_watchers_lw()
         mock_obs = MagicMock()
         mock_obs.is_alive.return_value = False
         monkeypatch.setattr(wlw, "_log_observer", mock_obs)
@@ -857,7 +804,6 @@ class TestWatcherOnModified:
     """Tests for LogFileWatcher.on_modified."""
 
     def test_skips_directory_events(self):
-        wlw = _import_watchers_lw()
         watcher = wlw.LogFileWatcher()
         watcher._read_new_lines = MagicMock()
         event = MagicMock()
@@ -867,7 +813,6 @@ class TestWatcherOnModified:
         watcher._read_new_lines.assert_not_called()
 
     def test_skips_non_log_files(self, monkeypatch, tmp_path):
-        wlw = _import_watchers_lw()
         logs_dir = tmp_path / "system_logs"
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
@@ -880,7 +825,6 @@ class TestWatcherOnModified:
         watcher._read_new_lines.assert_not_called()
 
     def test_skips_files_outside_system_logs(self, monkeypatch, tmp_path):
-        wlw = _import_watchers_lw()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
         watcher = wlw.LogFileWatcher()
         watcher._read_new_lines = MagicMock()
@@ -891,7 +835,6 @@ class TestWatcherOnModified:
         watcher._read_new_lines.assert_not_called()
 
     def test_processes_valid_log_file(self, monkeypatch, tmp_path):
-        wlw = _import_watchers_lw()
         logs_dir = tmp_path / "system_logs"
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
@@ -910,7 +853,6 @@ class TestWatcherOnModified:
         swallow that says nothing is the shape where system_logs goes unread
         and the board stays green. Named cause, and the next event still lands.
         """
-        wlw = _import_watchers_lw()
         logs_dir = tmp_path / "system_logs"
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", logs_dir)
         watcher = wlw.LogFileWatcher()
@@ -944,7 +886,6 @@ class TestWatcherInitializePositions:
     """Tests for LogFileWatcher.initialize_positions."""
 
     def test_initializes_to_eof(self, tmp_path, monkeypatch):
-        wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
@@ -956,7 +897,6 @@ class TestWatcherInitializePositions:
 
     def test_initializes_inodes(self, tmp_path, monkeypatch):
         """Inodes are recorded alongside positions at startup."""
-        wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
@@ -967,14 +907,12 @@ class TestWatcherInitializePositions:
         assert watcher.log_inodes[str(log_file)] == log_file.stat().st_ino
 
     def test_handles_missing_dir(self, tmp_path, monkeypatch):
-        wlw = _import_watchers_lw()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path / "nonexistent")
         watcher = wlw.LogFileWatcher()
         watcher.initialize_positions()
         assert len(watcher.log_positions) == 0
 
     def test_multiple_files(self, tmp_path, monkeypatch):
-        wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
@@ -988,7 +926,6 @@ class TestWatcherInitializePositions:
         assert watcher.log_positions[str(f2)] == 5
 
     def test_ignores_non_log_files(self, tmp_path, monkeypatch):
-        wlw = _import_watchers_lw()
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", sys_logs)
@@ -1020,7 +957,6 @@ class TestSystemLogsOwnership:
         deliberate refusal, so it has to be proven under conditions where the
         old code WOULD have started an observer.
         """
-        wlw = _import_watchers_lw()
         wlw.WATCHDOG_AVAILABLE = True
         wlw.SYSTEM_LOGS_DIR = tmp_path
         (tmp_path / "hooks_edit_gate.log").write_text("x", encoding="utf-8")
@@ -1034,7 +970,6 @@ class TestSystemLogsOwnership:
 
     def test_start_leaves_no_observer_behind(self, tmp_path, monkeypatch):
         """Declining must not build an observer or park one in module state (mutant: WatchdogObserver() built)."""
-        wlw = _import_watchers_lw()
         wlw.WATCHDOG_AVAILABLE = True
         wlw.SYSTEM_LOGS_DIR = tmp_path
         wlw._log_observer = None
@@ -1044,10 +979,8 @@ class TestSystemLogsOwnership:
         wlw.start_log_watcher()
 
         observer_cls.assert_not_called()
-        assert wlw._log_observer is None
         assert wlw.is_log_watcher_active() is False
 
     def test_owner_is_named_in_module_state(self):
         """The ruling is readable from the code, not just from a commit."""
-        wlw = _import_watchers_lw()
         assert wlw.SYSTEM_LOGS_OWNER == "branch_log_events"

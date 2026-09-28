@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -396,15 +396,16 @@ def test_circuit_breaker_half_open_allows_one_dispatch(tmp_path: Path) -> None:
     # Trip the breaker
     er.circuit_breaker_trip(reason="test")
 
-    # Simulate cooldown expiry by backdating opened_at
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
+    # A clock reading one second past the cooldown, handed in
+    tripped = er.get_circuit_breaker_status()
+    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
     # First call transitions open -> half_open and allows dispatch
-    assert er.circuit_breaker_allows() is True
-    assert er._circuit_breaker.state == "half_open"
+    assert er.circuit_breaker_allows(now=later) is True
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
     # Second call in half_open should be blocked (probe already used)
-    assert er.circuit_breaker_allows() is False
+    assert er.circuit_breaker_allows(now=later) is False
 
 
 def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path: Path) -> None:
@@ -413,18 +414,19 @@ def test_circuit_breaker_half_open_error_reopens_with_doubled_cooldown(tmp_path:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    base_cooldown = er._circuit_breaker.base_cooldown
+    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
     # Trip and expire cooldown
     er.circuit_breaker_trip(reason="test")
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
-    er.circuit_breaker_allows()  # Transition to half_open
+    later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
+    er.circuit_breaker_allows(now=later)  # Transition to half_open
 
     # Record an error during half_open
-    er.circuit_breaker_record_error()
+    er.circuit_breaker_record_error(now=later)
 
-    assert er._circuit_breaker.state == "open"
-    assert er._circuit_breaker.cooldown_seconds == base_cooldown * 2
+    status = er.get_circuit_breaker_status(now=later)
+    assert status["state"] == "open"
+    assert status["cooldown_seconds"] == base_cooldown * 2
 
 
 # ===========================================================================
@@ -460,10 +462,8 @@ def test_should_dispatch_true_after_backoff_expires(tmp_path: Path) -> None:
     fp = "test_fingerprint_xyz"
     er.record_dispatch(fp)
 
-    # Backdate the dispatch timestamp past the 300s window
-    er._fingerprint_dispatch_times[fp] = [time.time() - 301]
-
-    assert er.should_dispatch(fp) is True
+    # A clock reading past the 300s window, handed in
+    assert er.should_dispatch(fp, now=time.time() + 301) is True
 
 
 def test_get_backoff_seconds_schedule() -> None:
@@ -487,8 +487,9 @@ def test_record_dispatch_increments_count(tmp_path: Path) -> None:
     er.record_dispatch(fp)
     er.record_dispatch(fp)
 
-    assert er._fingerprint_dispatch_count[fp] == 3
-    assert len(er._fingerprint_dispatch_times[fp]) == 3
+    assert er.get_dispatch_count(fp) == 3
+    # The third dispatch sets the backoff: one minute short of it, still held
+    assert er.should_dispatch(fp, now=time.time() + er.get_backoff_seconds(3) - 60) is False
 
 
 # ===========================================================================
@@ -539,8 +540,7 @@ def test_unsuppress_keeps_existing_backoff(tmp_path: Path) -> None:
     # Backoff from the pre-suppression dispatch still applies
     assert er.should_dispatch(fp) is False
 
-    er._fingerprint_dispatch_times[fp] = [time.time() - 301]
-    assert er.should_dispatch(fp) is True
+    assert er.should_dispatch(fp, now=time.time() + 301) is True
 
 
 def test_bookkeeping_continues_while_suppressed(tmp_path: Path) -> None:
@@ -1196,10 +1196,11 @@ def test_evaluate_state_transitions_open_to_half_open_after_cooldown(tmp_path: P
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # Backdate opened_at so cooldown is expired
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 10
+    # A clock reading ten seconds past the cooldown, handed in
+    tripped = er.get_circuit_breaker_status()
+    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 10
 
-    status = er.get_circuit_breaker_status()
+    status = er.get_circuit_breaker_status(now=later)
     assert status["state"] == "half_open"
 
 
@@ -1210,10 +1211,11 @@ def test_evaluate_state_no_transition_before_cooldown(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # opened_at is now (cooldown is 300s), so it should stay open
-    assert er._circuit_breaker.state == "open"
+    tripped = er.get_circuit_breaker_status()
+    assert tripped["state"] == "open"
 
-    status = er.get_circuit_breaker_status()
+    # One second short of the cooldown it must stay open
+    status = er.get_circuit_breaker_status(now=tripped["opened_at"] + tripped["cooldown_seconds"] - 1)
     assert status["state"] == "open"
 
 
@@ -1223,9 +1225,7 @@ def test_evaluate_state_no_op_when_closed(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    assert er._circuit_breaker.state == "closed"
-
-    status = er.get_circuit_breaker_status()
+    status = er.get_circuit_breaker_status(now=time.time() + 86400)
     assert status["state"] == "closed"
 
 
@@ -1234,19 +1234,21 @@ def test_probe_succeeded_closes_breaker(tmp_path: Path) -> None:
     _seed_registry(tmp_path)
     er = _import_registry()
     er.circuit_breaker_reset()
+    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
     # Trip the breaker and expire cooldown to get to half_open
     er.circuit_breaker_trip(reason="test")
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
-    er.circuit_breaker_allows()  # Transitions to half_open
-    assert er._circuit_breaker.state == "half_open"
+    later = er.get_circuit_breaker_status()["opened_at"] + base_cooldown + 1
+    er.circuit_breaker_allows(now=later)  # Transitions to half_open
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
     er.circuit_breaker_probe_succeeded()
 
-    assert er._circuit_breaker.state == "closed"
-    assert er._circuit_breaker.cooldown_seconds == er._circuit_breaker.base_cooldown
-    assert er._circuit_breaker.opened_at == 0.0
-    assert er._circuit_breaker.recent_errors == []
+    status = er.get_circuit_breaker_status(now=later)
+    assert status["state"] == "closed"
+    assert status["cooldown_seconds"] == base_cooldown
+    assert status["opened_at"] == 0.0
+    assert status["recent_error_count"] == 0
 
 
 def test_probe_succeeded_noop_when_closed(tmp_path: Path) -> None:
@@ -1255,11 +1257,11 @@ def test_probe_succeeded_noop_when_closed(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    assert er._circuit_breaker.state == "closed"
+    assert er.get_circuit_breaker_status()["state"] == "closed"
 
     er.circuit_breaker_probe_succeeded()
 
-    assert er._circuit_breaker.state == "closed"
+    assert er.get_circuit_breaker_status()["state"] == "closed"
 
 
 def test_probe_succeeded_noop_when_open(tmp_path: Path) -> None:
@@ -1269,28 +1271,25 @@ def test_probe_succeeded_noop_when_open(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    assert er._circuit_breaker.state == "open"
+    assert er.get_circuit_breaker_status()["state"] == "open"
 
     er.circuit_breaker_probe_succeeded()
 
-    assert er._circuit_breaker.state == "open"
+    assert er.get_circuit_breaker_status()["state"] == "open"
 
 
 def test_status_returns_remaining_seconds(tmp_path: Path) -> None:
-    """get_circuit_breaker_status returns approximately correct remaining_seconds."""
+    """get_circuit_breaker_status returns the remaining cooldown at the reading it is handed."""
     _seed_registry(tmp_path)
     er = _import_registry()
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    cooldown = er._circuit_breaker.cooldown_seconds
-    # Backdate opened_at by 100 seconds so remaining ~ cooldown - 100
-    er._circuit_breaker.opened_at = time.time() - 100
+    tripped = er.get_circuit_breaker_status()
 
-    status = er.get_circuit_breaker_status()
-    expected_remaining = cooldown - 100
-    # Allow 2-second tolerance for timing
-    assert abs(status["remaining_seconds"] - expected_remaining) <= 2
+    # 100 seconds after the trip, exactly cooldown - 100 remain: the clock is handed in
+    status = er.get_circuit_breaker_status(now=tripped["opened_at"] + 100)
+    assert status["remaining_seconds"] == int(tripped["cooldown_seconds"] - 100)
 
 
 def test_status_remaining_zero_when_closed(tmp_path: Path) -> None:
@@ -1310,14 +1309,16 @@ def test_breaker_half_open_on_read_then_allows_probe(tmp_path: Path) -> None:
     er.circuit_breaker_reset()
 
     er.circuit_breaker_trip(reason="test")
-    # Expire the cooldown
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
+    # A clock reading past the cooldown, handed in
+    tripped = er.get_circuit_breaker_status()
+    later = tripped["opened_at"] + tripped["cooldown_seconds"] + 1
 
     # First call: transitions open -> half_open, returns True (probe allowed)
-    result = er.circuit_breaker_allows()
+    result = er.circuit_breaker_allows(now=later)
     assert result is True
-    assert er._circuit_breaker.state == "half_open"
-    assert er._circuit_breaker.half_open_allow is False
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
+    # The probe slot is spent: a second ask is refused
+    assert er.circuit_breaker_allows(now=later) is False
 
 
 def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
@@ -1326,24 +1327,26 @@ def test_breaker_closes_after_successful_probe_dispatch(tmp_path: Path) -> None:
     er = _import_registry()
     er.circuit_breaker_reset()
 
-    base_cooldown = er._circuit_breaker.base_cooldown
+    base_cooldown = er.get_circuit_breaker_status()["cooldown_seconds"]
 
     # Trip the breaker
     er.circuit_breaker_trip(reason="test")
-    assert er._circuit_breaker.state == "open"
+    tripped = er.get_circuit_breaker_status()
+    assert tripped["state"] == "open"
 
-    # Expire the cooldown
-    er._circuit_breaker.opened_at = time.time() - er._circuit_breaker.cooldown_seconds - 1
+    # A clock reading past the cooldown, handed in
+    later = tripped["opened_at"] + base_cooldown + 1
 
     # Probe dispatch: transitions open -> half_open and allows
-    assert er.circuit_breaker_allows() is True
-    assert er._circuit_breaker.state == "half_open"
+    assert er.circuit_breaker_allows(now=later) is True
+    assert er.get_circuit_breaker_status(now=later)["state"] == "half_open"
 
     # Probe succeeded: transitions half_open -> closed
     er.circuit_breaker_probe_succeeded()
-    assert er._circuit_breaker.state == "closed"
-    assert er._circuit_breaker.cooldown_seconds == base_cooldown
-    assert er._circuit_breaker.opened_at == 0.0
+    status = er.get_circuit_breaker_status(now=later)
+    assert status["state"] == "closed"
+    assert status["cooldown_seconds"] == base_cooldown
+    assert status["opened_at"] == 0.0
 
 
 # ===========================================================================
@@ -1399,7 +1402,9 @@ def test_get_dispatch_count_matches_the_backing_counter(tmp_path: Path) -> None:
     er.record_dispatch(fp)
     er.record_dispatch(fp)
 
-    assert er.get_dispatch_count(fp) == er._fingerprint_dispatch_count[fp]
+    assert er.get_dispatch_count(fp) == 2
+    # Backoff reads the same counter: one minute short of the count-2 backoff, still held
+    assert er.should_dispatch(fp, now=time.time() + er.get_backoff_seconds(2) - 60) is False
 
 
 def test_get_dispatch_count_does_not_mutate_state(tmp_path: Path) -> None:

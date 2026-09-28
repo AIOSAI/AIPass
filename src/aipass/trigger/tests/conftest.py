@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Version: 1.4.0
 # Category: trigger/tests
 #
@@ -45,6 +45,7 @@ from aipass.trigger.apps.handlers import escalation as _escalation
 from aipass.trigger.apps.handlers.json import config_loader as _config_loader
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers.json import json_handler
+from aipass.trigger.apps.handlers.events import startup as _startup
 from aipass.cli.apps.modules import display
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
@@ -101,18 +102,16 @@ def isolate_catchup_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     value, so a test run eats the recovery window the live watcher service
     exists to cover (DPLAN-0339 step 2, row 12).
 
-    Resolved through sys.modules rather than a top-level import so the fixture
-    patches whichever copy of the module is currently registered — several
-    tests in this suite delete it and re-import it under a mocked config.
+    Bound by a top-level import since 2026-09-28 (fleet green leg 3): no test
+    in this suite deletes and re-imports the startup module any more, so the
+    one copy imported here is the one every handler reaches.
 
     NOT a full cure: a suite running from ANOTHER branch's directory never
     loads this conftest, so @ai_mail's own reproduction still writes the live
     file. That needs a read-time seam on TRIGGER_JSON_DIR itself, which is a
     change to a shared constant and carries its own plan.
     """
-    import aipass.trigger.apps.handlers.events.startup  # noqa: F401 - registers in sys.modules
-
-    mod = sys.modules["aipass.trigger.apps.handlers.events.startup"]
+    mod = _startup
     sandbox = tmp_path / "_catchup_sandbox"
     sandbox.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(mod, "CATCHUP_STATE_FILE", sandbox / "error_catchup.json")
@@ -165,6 +164,22 @@ def pinned_console_width() -> None:
     under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def header_off_the_live_bus(monkeypatch: pytest.MonkeyPatch) -> list:
+    """cli's header fires cli_header_displayed on the trigger it loaded once.
+
+    display keeps that trigger in _TRIGGER behind _TRIGGER_LOADED, so any test
+    printing through the real header would fire on the live bus, whose handler
+    writes trigger's live operation log. Set here for every test, to a
+    recorder: the api cure of 2026-09-27, chosen by this branch in leg 3.
+    """
+    fired: list = []
+    recorder = types.SimpleNamespace(fire=lambda event, **data: fired.append((event, data)))
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return fired
 
 
 @pytest.fixture(autouse=True)

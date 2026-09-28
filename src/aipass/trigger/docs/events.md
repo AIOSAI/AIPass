@@ -36,30 +36,13 @@ kept and marked, because those files are still on disk and the distinction is re
 
 | Old name | Current name | State |
 |---|---|---|
-| `file_deleted` | `profile_write_failed` | **Aliased 2026-09-07** (FPLAN-0492 wave 5, ruled by @devpulse). `DEPRECATED_EVENT_ALIASES` in `modules/core.py` resolves the old name in `fire()`, `on()` and `off()`, and logs a deprecation **once per name per process**. The entry is deleted next release |
+| — | — | **The table is empty.** `DEPRECATED_EVENT_ALIASES` in `modules/core.py` resolves an old name in `fire()`, `on()` and `off()` and logs a deprecation **once per name per process**; the mechanism stays for the next rename |
 
-The old name described the opposite of what happens: the event fires when a **profile
-write fails** and `json_handler` removes its own temp file — the store is never deleted.
-
-Measured 2026-09-07: **zero handlers are registered on either name**, anywhere in the
-fleet, so the alias is precautionary rather than load-bearing. Three fire sites carry
-the old name, none of them in this branch —
-`aipass/apps/modules/profile.py:84`, `aipass/apps/modules/init_flow.py:125` and
-`daemon/apps/modules/timer_install.py:157`. One display consumer keys on the string:
-`prax/apps/handlers/monitoring/unified_stream.py:59` colours `file_deleted` red and
-will need the new key. (`plan_file_deleted` is a different event and is unaffected.)
-
-**@daemon's fire site is not a profile write failure.** `timer_install.py:157` fires
-immediately after `dst.unlink()` removes a systemd unit — a real deletion, accurately
-named. Aliasing relabels it as a profile write failure, which is the same kind of lie
-the rename exists to remove; the table keys on the event name and cannot tell the two
-callers apart. Ruled by @devpulse 2026-09-07: that site "is a different event entirely"
-and gets its own honest name in a @daemon item they queue. Until it moves, its fires
-are relabelled by this table — a known interim, not an oversight.
-
-Renaming the fire calls is **not this branch's work**: @aipass's two sites go into its
-own wave-6 brief. The error registry holds no entry under either name (measured
-2026-09-07), so there was nothing there to update.
+`file_deleted` names a **real deletion**: @aipass `install.py` fires it when it removes
+its install lock, @daemon `timer_install.py` after it unlinks a systemd unit. A failed
+profile write fires `profile_write_failed` by name. The alias that joined the two is
+retired; its dated record is the comment above the table in `modules/core.py`.
+(`plan_file_deleted` is a different event and is unaffected.)
 
 **Not wired — files on disk, deliberately unregistered:**
 

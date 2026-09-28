@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.3.1
+# Version: 1.4.0
 # Created: 2026-07-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -281,18 +281,21 @@ def handle_runaway_log_detected(
         target_branch = branch or "UNKNOWN"
         is_critical = severity.lower() == "critical"
 
+        # One event writes one trail line. The gate decides its reason; the line
+        # itself is written where the outcome is known, so "delivered" is never
+        # written before the send has returned True.
+        gate_reason: Optional[str] = None
         muted = False if is_unknown else _is_branch_volume_muted(target_branch)
         if muted is None:
             # Unread is not muted: a runaway must reach someone. The trail says
             # the mute was never read, so it is not mistaken for "nobody muted it".
-            outcome = "delivered" if is_critical else "observed"
-            _write_decision_log(outcome, "mute_unreadable", file_path, target_branch)
+            gate_reason = "mute_unreadable"
         elif muted:
             if not is_critical:
                 _write_decision_log("suppressed", "volume_muted", file_path, target_branch)
                 return
             # A machine-eating flood is never something you asked to silence.
-            _write_decision_log("delivered", "bypass_critical", file_path, target_branch)
+            gate_reason = "bypass_critical"
 
         if not is_critical:
             # Observe-only: record with full fidelity, wake nobody. The cooldown
@@ -301,7 +304,7 @@ def handle_runaway_log_detected(
             _write_alert(
                 file_path, severity, target_branch, rate_lines_per_min, sustained_duration_sec, forever=forever
             )
-            _write_decision_log("observed", "observe_only", file_path, target_branch)
+            _write_decision_log("observed", gate_reason or "observe_only", file_path, target_branch)
             _record_file_dispatch(file_path)
             json_handler.log_operation("runaway_observed", {"branch": target_branch, "file": file_path})
             return
@@ -340,6 +343,8 @@ def handle_runaway_log_detected(
         if not sent:
             logger.warning(f"Email delivery failed for {recipient} ({file_path})")
             return
+        if gate_reason:
+            _write_decision_log("delivered", gate_reason, file_path, target_branch)
 
         try:
             from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch

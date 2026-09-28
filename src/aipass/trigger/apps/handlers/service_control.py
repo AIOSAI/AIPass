@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: service_control.py
 # Description: systemd unit lifecycle for the trigger log watcher
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-08-31
-# Modified: 2026-09-12
+# Modified: 2026-09-28
 # =============================================
 
 """The systemd user unit behind the log watcher, and nothing else.
@@ -33,6 +33,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from aipass.prax.apps.modules.logger import system_logger as logger
 from aipass.trigger.apps.config import TRIGGER_ROOT
@@ -115,7 +116,7 @@ def _ensure_service_installed() -> bool:
     return True
 
 
-def _run_systemctl(*args: str) -> bool:
+def _run_systemctl(*args: str) -> Optional[bool]:
     """Run ``systemctl --user <args>`` and report whether it succeeded.
 
     Takes the argv tail whole rather than one action, because two of the four
@@ -128,14 +129,18 @@ def _run_systemctl(*args: str) -> bool:
         args: the systemctl argv after ``--user``
 
     Returns:
-        True if the command succeeded (exit code 0); False when it failed and
-        False when this host has no systemd, each said by name in the log.
+        True if the command exited 0; False if systemctl answered with a
+        non-zero exit; None if systemctl could not be asked at all (no
+        systemd on this host, the binary gone at exec, a timeout, any other
+        exec failure), each said by name in the log. None is not False: a
+        hung ``is-active`` is not a stopped unit, and medic status says which.
     """
     spelled = " ".join(args)
-    if shutil.which("systemctl") is None:
-        logger.warning("[MEDIC] systemctl %s refused: %s", spelled, NO_SYSTEMD_REASON)
-        return False
     try:
+        # The probe comes before exec: no systemctl on PATH is the same fact
+        # exec would raise, said without starting a process.
+        if shutil.which("systemctl") is None:
+            raise FileNotFoundError("systemctl is not on PATH")
         result = subprocess.run(
             ["systemctl", "--user", *args],
             capture_output=True,
@@ -145,24 +150,29 @@ def _run_systemctl(*args: str) -> bool:
         return result.returncode == 0
     except FileNotFoundError as exc:
         logger.warning("[MEDIC] systemctl %s refused: %s (%s)", spelled, NO_SYSTEMD_REASON, exc)
-        return False
+        return None
     except Exception as exc:
-        logger.warning(f"[MEDIC] systemctl {spelled} failed: {exc}")
-        return False
+        logger.warning(f"[MEDIC] systemctl {spelled} could not be asked: {exc}")
+        return None
 
 
-def _systemctl(action: str) -> bool:
+def _systemctl(action: str) -> Optional[bool]:
     """Run a systemctl --user action against the log watcher unit.
 
     Args:
         action: unit-scoped systemctl action (start, stop, restart, is-active)
 
     Returns:
-        True if command succeeded (exit code 0)
+        True on exit 0, False on a non-zero exit, None when systemctl could
+        not be asked (see _run_systemctl)
     """
     return _run_systemctl(action, SERVICE_NAME)
 
 
-def _is_service_active() -> bool:
-    """Check if the log watcher systemd service is running."""
+def _is_service_active() -> Optional[bool]:
+    """Check if the log watcher systemd service is running.
+
+    Returns:
+        True running, False not running, None when systemctl never answered
+    """
     return _systemctl("is-active")

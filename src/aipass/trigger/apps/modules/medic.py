@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.6.0
+# Version: 1.7.0
 # Created: 2026-02-12
-# Modified: 2026-09-12
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -393,6 +393,10 @@ def _handle_status(console) -> None:
         watcher_text = "[green]running[/green] (systemd)"
     elif not systemd_available():
         watcher_text = "[yellow]unavailable[/yellow] — no systemd on this host"
+    elif watcher_active is None:
+        # systemctl was there but never answered (a timeout, an exec failure):
+        # the watcher's state is unknown, and "stopped" would be a guess.
+        watcher_text = "[yellow]unknown[/yellow] — systemctl did not answer; see the service log"
     elif enabled:
         watcher_text = "[yellow]stopped[/yellow] — run [bold]medic on[/bold] to start"
     else:

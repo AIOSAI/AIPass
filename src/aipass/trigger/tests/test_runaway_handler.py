@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.1
 # Created: 2026-08-09
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -11,14 +11,15 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(behaviour) — the detection in apps/handlers/log_watcher.py; the log watcher tests cover it
 import json
-import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.ai_mail.apps.handlers.dispatch import wake as ai_mail_wake
 from aipass.trigger.apps import config as trigger_config
 from aipass.trigger.apps.handlers.events import runaway_handler as mod
 
@@ -50,14 +51,8 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     _trail.reset_mock()
     monkeypatch.setattr(trigger_config, "_append_jsonl", _trail)
 
-    # Mock wake_branch import chain so the in-function import succeeds
-    mock_wake_mod = MagicMock()
-    mock_wake_mod.wake_branch = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch.wake", mock_wake_mod)
+    # The handler imports wake_branch from its home at call time: replace it there
+    monkeypatch.setattr(ai_mail_wake, "wake_branch", MagicMock())
 
     yield
 
@@ -305,7 +300,10 @@ class TestBranchMuted:
 
         Before, a corrupt file read as "not muted" with only a sidecar warning, so
         the decision trail could not tell an unread mute from a branch nobody muted.
-        Failing open is kept: a runaway must reach someone.
+        Failing open is kept: a runaway must reach someone. One event is one
+        trail line: the observe_only line is not written beside it (2026-09-28,
+        red first on the code that wrote both).
+        Mutant 2026-09-28: the observe-only write keyed to 'observe_only' alone reddens this.
         """
         (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
 
@@ -319,6 +317,7 @@ class TestBranchMuted:
 
         entries = _decision_entries("mute_unreadable")
         assert [(e["outcome"], e["branch"]) for e in entries] == [("observed", "flow")]
+        assert _decision_entries("observe_only") == []
         assert len(_read_alerts(tmp_path)) == 1
 
 
@@ -429,10 +428,8 @@ class TestSuccessfulDispatch:
         assert "[RUNAWAY]" in kwargs["subject"]
         assert "CRITICAL" in kwargs["subject"]
 
-        # wake_branch called (via mocked import)
-        from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-
-        wake_branch.assert_called_once_with("@flow", fresh=False, sender="@trigger")  # type: ignore[union-attr]
+        # wake_branch called (replaced at its home by the autouse fixture)
+        _wake_mock().assert_called_once_with("@flow", fresh=False, sender="@trigger")
 
         # Alert file written
         alerts_file = tmp_path / "alerts.json"
@@ -660,6 +657,29 @@ class TestSuppressionLog:
         assert entries[0]["branch"] == "flow"
         assert not _decision_entries("volume_muted")
 
+    def test_critical_bypass_that_fails_to_send_is_not_delivered(self, tmp_path: Path) -> None:
+        """Delivered is written after the send returns, never before it.
+
+        The handler used to write the bypass_critical 'delivered' line before the
+        mail was attempted, so a refused send left a trail saying delivered.
+        Red first on that code (2026-09-28).
+        Mutant 2026-09-28: the delivered write moved back above the send reddens this.
+        """
+        send = MagicMock(return_value=False)
+        mod.set_send_email_callback(send)
+        _write_config(tmp_path, {"volume_muted_branches": ["flow"]})
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        assert _decision_entries("bypass_critical") == []
+
     def test_content_mute_writes_no_decision_entry(self, tmp_path: Path) -> None:
         """A content mute is not a runaway gate — it leaves no decision entry."""
         _setup_happy_path()
@@ -706,9 +726,7 @@ class TestSetSendEmailCallback:
 
 def _wake_mock() -> MagicMock:
     """Return the mocked wake_branch installed by the autouse fixture."""
-    from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch
-
-    return wake_branch  # type: ignore[return-value]
+    return cast(MagicMock, ai_mail_wake.wake_branch)
 
 
 def _read_alerts(tmp_path: Path) -> list:

@@ -3,7 +3,7 @@
 # Description: Unit tests for medic_state handler — real file I/O via tmp_path
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for the medic_state handler (apps/handlers/medic_state.py)."""
@@ -13,10 +13,12 @@
 
 import json
 from datetime import datetime, timedelta
-import sys
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
+
+from aipass.trigger.apps.handlers import medic_state
+from aipass.trigger.apps.handlers.json import json_handler
 
 
 # ---------------------------------------------------------------------------
@@ -24,77 +26,42 @@ from unittest.mock import MagicMock
 # ---------------------------------------------------------------------------
 
 
+_RECORDERS: dict = {}
+
+
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch, tmp_path):
-    """Mock heavy infrastructure imports before medic_state module loads."""
+    """Keep every test off live state: medic_state's own names, patched at home.
 
-    mock_logger = MagicMock()
+    The four path constants are bound at import off the live TRIGGER_ROOT, so
+    they are pointed into tmp_path here for every test, not just the ones that
+    remember. The config helpers (atomic write, retrying read, the real flock)
+    stay real: read_config parses what they return, and only the real lock
+    proves the nested migration does not deadlock the process against itself.
+    """
+    monkeypatch.setattr(medic_state, "logger", MagicMock())
 
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    prax_logger_mod.system_logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
+    # -- trigger json handler: the operation log is live, record instead -----
+    json_recorder = MagicMock()
+    json_recorder.log_operation.return_value = True
+    monkeypatch.setattr(json_handler, "log_operation", json_recorder.log_operation)
+    _RECORDERS["json_handler"] = json_recorder
 
-    # -- trigger json handler -----------------------------------------------
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
-
-    # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import (
-        atomic_write_json,
-        json_file_lock,
-        migrate_json_file,
-        read_text_with_retry,
-    )
-
-    config_mod = MagicMock()
-    config_mod.TRIGGER_ROOT = tmp_path / "fake_trigger_root"
-    config_mod.TRIGGER_JSON_DIR = tmp_path / "fake_trigger_root" / "trigger_json"
-    config_mod.atomic_write_json = atomic_write_json
-    config_mod.migrate_json_file = migrate_json_file
-    # Real, not a mock: read_config parses what this returns, and a MagicMock
-    # here reads as an unreadable file — the exact confusion this round is about.
-    config_mod.read_text_with_retry = read_text_with_retry
-    # Real lock, not a mock: the write paths hold this lock while read_config
-    # runs the migration underneath, and only the real flock proves that
-    # nesting does not deadlock the process against itself.
-    config_mod.json_file_lock = json_file_lock
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", config_mod)
-
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.medic_state", raising=False)
+    monkeypatch.setattr(medic_state, "MEDIC_STATE_FILE", tmp_path / "trigger_json" / "medic_state.json")
+    monkeypatch.setattr(medic_state, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_json" / "trigger_config.json")
+    monkeypatch.setattr(medic_state, "MEDIC_SUPPRESSED_LOG", tmp_path / "logs" / "medic_suppressed.jsonl")
+    monkeypatch.setattr(medic_state, "RATE_LIMITED_LOG", tmp_path / "logs" / "rate_limited.jsonl")
 
 
 @pytest.fixture
-def state_mod(tmp_path, monkeypatch):
-    """Import medic_state and point all file path constants to tmp_path."""
-    import aipass.trigger.apps.handlers.medic_state as mod
-
-    config_file = tmp_path / "trigger_json" / "medic_state.json"
-    suppressed_log = tmp_path / "logs" / "medic_suppressed.jsonl"
-    rate_limited_log = tmp_path / "logs" / "rate_limited.jsonl"
-
-    monkeypatch.setattr(mod, "MEDIC_STATE_FILE", config_file)
-    monkeypatch.setattr(mod, "LEGACY_MEDIC_STATE_FILE", tmp_path / "trigger_json" / "trigger_config.json")
-    monkeypatch.setattr(mod, "MEDIC_SUPPRESSED_LOG", suppressed_log)
-    monkeypatch.setattr(mod, "RATE_LIMITED_LOG", rate_limited_log)
-
-    return mod
+def state_mod():
+    """medic_state, imported once at the top; its paths already sit in tmp_path."""
+    return medic_state
 
 
 def _get_json_handler():
-    """Return the mocked json_handler."""
-    return sys.modules["aipass.trigger.apps.handlers.json"].json_handler
+    """Return the recorder whose log_operation stands in json_handler's at its home."""
+    return _RECORDERS["json_handler"]
 
 
 # ---------------------------------------------------------------------------
@@ -1156,17 +1123,20 @@ class TestARefusedReadDoesNotBlankTheState:
         state_mod.mute_branch("flow")
         assert state_mod.get_muted_branches() == ["flow"]
 
-        real = Path.read_text
         seen = []
+        state_file = str(state_mod.MEDIC_STATE_FILE)
 
-        def read_text(self_path, *args, **kwargs):
-            if str(self_path) == str(state_mod.MEDIC_STATE_FILE) and not seen:
-                seen.append(1)
-                raise PermissionError(13, "used by another process")
-            return real(self_path, *args, **kwargs)
+        class _RefusedOnce(type(Path())):
+            """The state file's own path, refused once — no other path in the process is touched."""
+
+            def read_text(self, *args, **kwargs):
+                if str(self) == state_file and not seen:
+                    seen.append(1)
+                    raise PermissionError(13, "used by another process")
+                return super().read_text(*args, **kwargs)
 
         with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(Path, "read_text", read_text)
+            mp.setattr(state_mod, "MEDIC_STATE_FILE", _RefusedOnce(state_file))
             state_mod.mute_branch("seedgo")
 
         assert seen, "fixture refused nothing — test is vacuous"
