@@ -20,7 +20,10 @@
 import json
 from pathlib import Path
 
-from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, migrate_json_file
+import pytest
+
+from aipass.trigger.apps import config as config_module
+from aipass.trigger.apps.config import ARCHIVE_DIR_NAME, TrailLogger, migrate_json_file
 
 LIVE_STATE = {
     "config": {"medic_enabled": True, "muted_branches": [{"name": "flow", "expires_at": None}]},
@@ -47,13 +50,20 @@ class TestMigrateJsonFile:
         assert not (tmp_path / ARCHIVE_DIR_NAME).exists()
 
     def test_migrates_contents_when_new_absent(self, tmp_path: Path) -> None:
-        """Legacy contents land in the new file byte-for-byte in meaning."""
+        """Legacy contents land in the new file byte-for-byte in meaning.
+
+        The new file is swapped into place, not copied: no staging `.tmp` is
+        left beside it in the directory json_handler's trio machinery owns.
+        Mutant run: atomic_write_json copying the staged file instead of
+        replacing it (the staged .tmp left behind) reddens this.
+        """
         legacy = tmp_path / "trigger_config.json"
         new = tmp_path / "medic_state.json"
         _write(legacy, LIVE_STATE)
 
         assert migrate_json_file(legacy, new) is True
         assert json.loads(new.read_text(encoding="utf-8")) == LIVE_STATE
+        assert sorted(p.name for p in tmp_path.glob("*.tmp")) == []
 
     def test_legacy_is_archived_not_deleted(self, tmp_path: Path) -> None:
         """The legacy file moves to .archive/ — never deleted."""
@@ -97,14 +107,23 @@ class TestMigrateJsonFile:
         assert json.loads(legacy.read_text(encoding="utf-8")) == blank_template
         assert not (tmp_path / ARCHIVE_DIR_NAME).exists()
 
-    def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path) -> None:
-        """Corrupt legacy file is not archived and not guessed at — a human decides."""
+    def test_unreadable_legacy_is_left_in_place(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Corrupt legacy file is not archived and not guessed at — a human decides.
+
+        The skip warns through config's module logger, whose trail is the live
+        logs/config.jsonl; the logger is pointed under tmp_path so the test
+        writes no line into the product's trail.
+        """
+        monkeypatch.setattr(config_module, "logger", TrailLogger(tmp_path / "logs" / "config.jsonl"))
         legacy = tmp_path / "trigger_config.json"
         new = tmp_path / "medic_state.json"
         legacy.parent.mkdir(parents=True, exist_ok=True)
         legacy.write_text("{not json", encoding="utf-8")
 
-        assert migrate_json_file(legacy, new) is False
+        # None, not False: False is "nothing to migrate", and an unreadable
+        # legacy file is something left undone. Red first 2026-09-27 against
+        # the handler's `return False`.
+        assert migrate_json_file(legacy, new) is None
         assert legacy.exists()
         assert not new.exists()
 

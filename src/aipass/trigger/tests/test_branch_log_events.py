@@ -11,11 +11,14 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(behaviour) — the watcher in apps/handlers/log_watcher.py that it starts; its own tests cover it
 
-import sys
 import pytest
 from unittest.mock import MagicMock, call, patch
 
 from aipass.cli.apps.modules import display
+from aipass.trigger.apps.modules import branch_log_events
+
+# The mocks the autouse fixture set on the real module, read by the helpers below.
+_MOCKS: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -24,42 +27,32 @@ from aipass.cli.apps.modules import display
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports before branch_log_events module loads."""
+def _mock_infrastructure(monkeypatch, tmp_path):
+    """Patch every name branch_log_events reaches outside with, on the real module.
 
-    mock_logger = MagicMock()
-
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
+    The logger is patched because start()'s failure path logs at ERROR, and a
+    real prax ERROR line is what the live watcher escalates. trigger is patched
+    so no test hands the live bus to a watcher; the watcher functions are
+    patched so no test starts a real filesystem observer.
+    """
+    mod = branch_log_events
+    monkeypatch.setattr(mod, "logger", MagicMock())
 
     # -- trigger json handler -----------------------------------------------
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
+    monkeypatch.setattr(mod, "json_handler", mock_json_handler)
 
     # -- trigger core (trigger object with .fire method) --------------------
     mock_trigger = MagicMock()
     mock_trigger.fire = MagicMock()
-    core_mod = MagicMock()
-    core_mod.trigger = mock_trigger
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core_mod)
+    monkeypatch.setattr(mod, "trigger", mock_trigger)
 
     # -- log_watcher handler ------------------------------------------------
     mock_log_watcher = MagicMock()
     mock_log_watcher.set_event_callback = MagicMock()
     mock_log_watcher.start_branch_log_watcher = MagicMock(return_value=MagicMock())
     mock_log_watcher.stop_branch_log_watcher = MagicMock()
-    mock_log_watcher.is_branch_log_watcher_active = MagicMock(return_value=False)
     mock_log_watcher.get_watcher_status = MagicMock(
         return_value={
             "active": True,
@@ -69,44 +62,40 @@ def _mock_infrastructure(monkeypatch):
         }
     )
     mock_log_watcher.clear_seen_hashes = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.log_watcher", mock_log_watcher)
-
-    # -- trigger config -----------------------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = "/fake/trigger"
-    mock_config.AIPASS_PKG_ROOT = "/fake/aipass"
-    mock_config.atomic_write_json = atomic_write_json
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
+    for name in (
+        "set_event_callback",
+        "start_branch_log_watcher",
+        "stop_branch_log_watcher",
+        "get_watcher_status",
+        "clear_seen_hashes",
+    ):
+        monkeypatch.setattr(mod, name, getattr(mock_log_watcher, name))
+    monkeypatch.setattr(mod, "AIPASS_PKG_ROOT", tmp_path)
 
     # The CLI console and rich are real: output is read with capsys, and a
     # refusal through error() is read from cli's own failure flag.
-
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.branch_log_events", raising=False)
+    _MOCKS.clear()
+    _MOCKS.update(watcher=mock_log_watcher, json_handler=mock_json_handler, trigger=mock_trigger)
 
 
 def _import_module():
-    """Import branch_log_events module fresh (after mocks are in place)."""
-    import aipass.trigger.apps.modules.branch_log_events as mod
-
-    return mod
+    """Return the real branch_log_events module the fixture patched."""
+    return branch_log_events
 
 
 def _get_log_watcher():
-    """Return the mocked log_watcher handler from sys.modules."""
-    return sys.modules["aipass.trigger.apps.handlers.log_watcher"]
+    """Return the mock whose attributes stand in for the watcher functions."""
+    return _MOCKS["watcher"]
 
 
 def _get_json_handler():
-    """Return the mocked json_handler from sys.modules."""
-    return sys.modules["aipass.trigger.apps.handlers.json.json_handler"]
+    """Return the mocked json_handler."""
+    return _MOCKS["json_handler"]
 
 
 def _get_core_trigger():
-    """Return the mocked trigger object from sys.modules."""
-    return sys.modules["aipass.trigger.apps.modules.core"].trigger
+    """Return the mocked trigger object."""
+    return _MOCKS["trigger"]
 
 
 # ---------------------------------------------------------------------------

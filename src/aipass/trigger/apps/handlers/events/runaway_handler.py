@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.3.0
+# Version: 1.3.1
 # Created: 2026-07-14
-# Modified: 2026-08-09
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -38,7 +38,9 @@ Severity doctrine — WARNING observes, CRITICAL wakes:
 
 Gating:
     - Per-file cooldown (30min default) — independent of medic circuit breaker
-    - VOLUME mute check (volume_muted_branches in medic_state.json)
+    - VOLUME mute check (volume_muted_branches in medic_state.json). An
+      unreadable medic_state.json is not a mute: the alert goes on (a runaway
+      must reach someone) and the trail records reason "mute_unreadable".
     - UNKNOWN/missing branch → dispatch to @prax as fallback
 
 Mute classes are deliberately separate. Medic CONTENT mutes (muted_branches)
@@ -152,7 +154,7 @@ def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:
     return datetime.fromisoformat(expires_at) > now
 
 
-def _is_branch_volume_muted(branch_name: str) -> bool:
+def _is_branch_volume_muted(branch_name: str) -> Optional[bool]:
     """Check if a branch is VOLUME-muted for runaway dispatch.
 
     Reads volume_muted_branches from medic_state.json — deliberately NOT
@@ -163,7 +165,8 @@ def _is_branch_volume_muted(branch_name: str) -> bool:
         branch_name: Branch name (case-insensitive)
 
     Returns:
-        True if branch is actively volume-muted
+        True if branch is actively volume-muted, False if it is not, None if
+        medic_state.json could not be read — unknown, never "not muted".
     """
     try:
         migrate_json_file(LEGACY_MEDIC_STATE_FILE, MEDIC_STATE_FILE)
@@ -176,7 +179,7 @@ def _is_branch_volume_muted(branch_name: str) -> bool:
         return any(_mute_entry_matches(e, branch_lower, now) for e in muted)
     except Exception as exc:
         logger.warning(f"_is_branch_volume_muted config read failed: {exc}")
-        return False
+        return None
 
 
 def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) -> None:
@@ -278,7 +281,13 @@ def handle_runaway_log_detected(
         target_branch = branch or "UNKNOWN"
         is_critical = severity.lower() == "critical"
 
-        if not is_unknown and _is_branch_volume_muted(target_branch):
+        muted = False if is_unknown else _is_branch_volume_muted(target_branch)
+        if muted is None:
+            # Unread is not muted: a runaway must reach someone. The trail says
+            # the mute was never read, so it is not mistaken for "nobody muted it".
+            outcome = "delivered" if is_critical else "observed"
+            _write_decision_log(outcome, "mute_unreadable", file_path, target_branch)
+        elif muted:
             if not is_critical:
                 _write_decision_log("suppressed", "volume_muted", file_path, target_branch)
                 return

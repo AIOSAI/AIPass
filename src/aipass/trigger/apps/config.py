@@ -3,7 +3,7 @@
 # Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
 # Version: 1.4.0
 # Created: 2026-03-09
-# Modified: 2026-08-31
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -486,7 +486,7 @@ def _archive_legacy_file(path: Path) -> bool:
         return False
 
 
-def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
+def migrate_json_file(legacy_path: Path, new_path: Path) -> bool | None:
     """Move live JSON state from a legacy path to its new home, losslessly.
 
     Idempotent and safe to call on every read — it stats the legacy path and
@@ -514,7 +514,9 @@ def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
         new_path: New file location
 
     Returns:
-        True if the legacy file was migrated or archived on this call
+        True if the legacy file was migrated or archived on this call. False
+        if there was nothing to move. None if the legacy file was unreadable
+        and left in place: a migration left undone, not one that was unneeded.
     """
     if new_path.exists() or not legacy_path.exists():
         return False
@@ -525,7 +527,7 @@ def migrate_json_file(legacy_path: Path, new_path: Path) -> bool:
             data = json.loads(legacy_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError, ValueError) as exc:
             logger.warning(f"migration of {legacy_path.name} skipped, unreadable: {exc}")
-            return False
+            return None
         atomic_write_json(new_path, data)
         return _archive_legacy_file(legacy_path)
 

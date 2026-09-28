@@ -162,8 +162,13 @@ class TestSendSourceFixEmail:
 
         assert result is False
 
-    def test_ai_mail_unavailable_returns_false(self, monkeypatch):
-        """send_source_fix_email returns False when ai_mail import fails."""
+    def test_ai_mail_unavailable_returns_none(self, monkeypatch):
+        """send_source_fix_email returns None, the failed-send answer, when ai_mail import fails.
+
+        False is "nothing to send" (no branch named); a send that could not be
+        attempted must not read the same. Red first 2026-09-27 against the
+        handler's `return False`.
+        """
         reporter = _import_reporter()
 
         # Setting a sys.modules entry to None tells Python the import failed,
@@ -178,10 +183,13 @@ class TestSendSourceFixEmail:
         }
         result = reporter.send_source_fix_email(entry)
 
-        assert result is False
+        assert result is None
 
-    def test_deliver_failure_returns_false(self, monkeypatch):
-        """send_source_fix_email returns False when deliver_email_to_branch fails."""
+    def test_deliver_failure_returns_none(self, monkeypatch):
+        """send_source_fix_email returns None when deliver_email_to_branch refuses the mail.
+
+        Red first 2026-09-27 against `return success` handing back the refusal's False.
+        """
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(return_value=(False, "delivery failed"))
@@ -200,10 +208,13 @@ class TestSendSourceFixEmail:
         }
         result = reporter.send_source_fix_email(entry)
 
-        assert result is False
+        assert result is None
 
-    def test_deliver_exception_returns_false(self, monkeypatch):
-        """send_source_fix_email returns False when deliver raises an exception."""
+    def test_deliver_exception_returns_none(self, monkeypatch):
+        """send_source_fix_email returns None when deliver raises an exception.
+
+        Red first 2026-09-27 against the handler's `return False`.
+        """
         reporter = _import_reporter()
 
         mock_deliver = MagicMock(side_effect=RuntimeError("connection refused"))
@@ -222,7 +233,7 @@ class TestSendSourceFixEmail:
         }
         result = reporter.send_source_fix_email(entry)
 
-        assert result is False
+        assert result is None
 
     def test_missing_component_key_returns_false(self):
         """send_source_fix_email returns False when entry has no component key."""

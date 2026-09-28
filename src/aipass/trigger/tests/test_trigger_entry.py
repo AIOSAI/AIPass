@@ -11,11 +11,14 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(behaviour) — each command's own behaviour under apps/modules/; each has its own test file
 
-import sys
+import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.cli.apps.modules import error, mark_command_failed
+from aipass.trigger.apps import trigger as trigger_entry
 
 
 # ---------------------------------------------------------------------------
@@ -27,32 +30,24 @@ _mock_logger = MagicMock()
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replace heavy infrastructure imports with lightweight mocks."""
+    """Patch the entry point's prax logger on the real module.
+
+    The entry point logs failures at ERROR, and a real prax ERROR line is what
+    the live branch watcher escalates, so the logger is the edge patched here.
+    """
     # Reset call counts between tests
     _mock_logger.reset_mock()
-
-    # ---- prax logger ----
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = _mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
+    monkeypatch.setattr(trigger_entry, "logger", _mock_logger)
 
     # ---- cli ----
     # cli is REAL here (2026-09-27): console output is read with capsys and a
     # refusal from error() on stderr. The exit seam was already real; a mocked
     # console only let the tests read call args instead of what a user sees.
 
-    # ---- force re-import so the module picks up our mocks ----
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.trigger", raising=False)
-
 
 def _import_trigger():
-    """Import trigger.py fresh (after infrastructure mocks are in place)."""
-    import aipass.trigger.apps.trigger as mod
-
-    return mod
+    """Return the real trigger.py entry module the fixture patched."""
+    return trigger_entry
 
 
 # ===================================================================
@@ -372,8 +367,6 @@ class TestMain:
         trigger = _import_trigger()
 
         def _refuse(command, args):
-            from aipass.cli.apps.modules import error
-
             error("Not started — withdrawn by ruling, not failed")
             return True
 
@@ -393,8 +386,6 @@ class TestMain:
         long-lived process — anything importing and calling main() twice — one
         refusal would otherwise make every later command exit 2 forever.
         """
-        from aipass.cli.apps.modules import mark_command_failed
-
         trigger = _import_trigger()
         mock_mod = MagicMock()
         mock_mod.handle_command.return_value = True
@@ -456,9 +447,7 @@ class TestVersionString:
         among them — shipped without the string moving. Nothing enforced the
         pairing, so it drifted silently and `--version` misreported the branch.
         """
-        import re
-
-        from aipass.trigger.apps.trigger import __version__
+        __version__ = trigger_entry.__version__
 
         readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
         match = re.search(r"^\*\*Version:\*\*\s*(\S+)", readme, re.MULTILINE)

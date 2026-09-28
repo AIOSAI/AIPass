@@ -12,47 +12,39 @@
 # seedgo: no-test-needed(covered_elsewhere) — what the registry stores and returns, in tests/test_error_registry.py
 # seedgo: no-test-needed(covered_elsewhere) — how report_error fingerprints and dispatches, in tests/test_error_reporter.py
 
-import sys
-import tempfile
-from pathlib import Path
+import time
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+
+from aipass.cli.apps.modules import display
+from aipass.trigger.apps.handlers import error_reporter
+from aipass.trigger.apps.modules import errors
 
 # Module-level dict populated by the autouse fixture each test.
 _shared_mocks: dict[str, Any] = {}
 
 
 # ---------------------------------------------------------------------------
-# Infrastructure mocking — autouse fixture
+# The edge — autouse fixture
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock all external dependencies before the errors module is imported.
+def _registry_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Swap what the real errors module reaches outside through, and nothing else.
 
-    Patches sys.modules for prax logger, json_handler, error_registry,
-    error_reporter, and cli display so the module can be imported in
-    isolation without touching disk or real infrastructure.
+    The module under test, rich and the cli console are all real; output is read
+    off capsys. Replaced on the errors module are the registry reads and writes
+    (the live trigger_json/error_registry.json and its circuit breaker), the
+    source-fix email the suppress route sends, the prax logger, and
+    json_handler.log_operation.
     """
-    # --- prax logger ---
     mock_logger = MagicMock()
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.system_logger = mock_logger
-    prax_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock(logger=mock_logger))
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
-
-    # --- json_handler ---
-    mock_json_handler = MagicMock()
-    json_mod = MagicMock()
-    json_mod.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_mod)
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", mock_json_handler)
+    mock_log_operation = MagicMock()
+    monkeypatch.setattr(errors, "logger", mock_logger)
+    monkeypatch.setattr(errors.json_handler, "log_operation", mock_log_operation)
 
     # --- error_registry handler ---
     mock_query = MagicMock(return_value=[])
@@ -78,66 +70,26 @@ def _mock_infrastructure(monkeypatch):
     )
     mock_cb_reset = MagicMock()
     mock_update_fix_status = MagicMock(return_value=True)
-
-    registry_mod = MagicMock()
-    registry_mod.query = mock_query
-    registry_mod.get_entry = mock_get_entry
-    registry_mod.update_status = mock_update_status
-    registry_mod.clear_resolved = mock_clear_resolved
-    registry_mod.get_stats = mock_get_stats
-    registry_mod.get_circuit_breaker_status = mock_get_cb_status
-    registry_mod.circuit_breaker_reset = mock_cb_reset
-    registry_mod.update_source_fix_status = mock_update_fix_status
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", registry_mod)
-
-    # --- error_reporter handler ---
-    mock_report_error = MagicMock(
-        return_value={
-            "fingerprint": "abc123",
-            "is_new": True,
-            "dispatched": False,
-        }
-    )
+    mock_purge_stale = MagicMock(return_value=0)
     mock_send_fix_email = MagicMock(return_value=False)
 
-    reporter_mod = MagicMock()
-    reporter_mod.report_error = mock_report_error
-    reporter_mod.send_source_fix_email = mock_send_fix_email
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_reporter", reporter_mod)
-
-    # --- cli display (console, error) ---
-    mock_console = MagicMock()
-    mock_error_fn = MagicMock()
-    mock_cli_modules = MagicMock()
-    mock_cli_modules.console = mock_console
-    mock_cli_modules.error = mock_error_fn
-    monkeypatch.setitem(sys.modules, "aipass.cli", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", mock_cli_modules)
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules.display", MagicMock(console=mock_console))
-
-    # --- rich (for Rich table/panel used inside command functions) ---
-    mock_table_cls = MagicMock()
-    mock_panel_cls = MagicMock()
-    mock_rich_table = MagicMock()
-    mock_rich_table.Table = mock_table_cls
-    mock_rich_panel = MagicMock()
-    mock_rich_panel.Panel = mock_panel_cls
-    monkeypatch.setitem(sys.modules, "rich.table", mock_rich_table)
-    monkeypatch.setitem(sys.modules, "rich.panel", mock_rich_panel)
-    monkeypatch.setitem(sys.modules, "rich.console", MagicMock())
-
-    # Force re-import of the errors module so it picks up all mocks
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.modules.errors", raising=False)
+    monkeypatch.setattr(errors, "query", mock_query)
+    monkeypatch.setattr(errors, "get_entry", mock_get_entry)
+    monkeypatch.setattr(errors, "update_status", mock_update_status)
+    monkeypatch.setattr(errors, "clear_resolved", mock_clear_resolved)
+    monkeypatch.setattr(errors, "get_stats", mock_get_stats)
+    monkeypatch.setattr(errors, "get_circuit_breaker_status", mock_get_cb_status)
+    monkeypatch.setattr(errors, "circuit_breaker_reset", mock_cb_reset)
+    monkeypatch.setattr(errors, "update_source_fix_status", mock_update_fix_status)
+    monkeypatch.setattr(errors, "purge_stale", mock_purge_stale)
+    monkeypatch.setattr(errors, "_send_source_fix_email", mock_send_fix_email)
 
     # Expose mocks to tests via the module-level dict
     _shared_mocks.clear()
     _shared_mocks.update(
         {
             "logger": mock_logger,
-            "json_handler": mock_json_handler,
-            "console": mock_console,
-            "error_fn": mock_error_fn,
+            "log_operation": mock_log_operation,
             "query": mock_query,
             "get_entry": mock_get_entry,
             "update_status": mock_update_status,
@@ -146,10 +98,8 @@ def _mock_infrastructure(monkeypatch):
             "get_cb_status": mock_get_cb_status,
             "cb_reset": mock_cb_reset,
             "update_fix_status": mock_update_fix_status,
-            "report_error": mock_report_error,
+            "purge_stale": mock_purge_stale,
             "send_fix_email": mock_send_fix_email,
-            "table_cls": mock_table_cls,
-            "panel_cls": mock_panel_cls,
         }
     )
 
@@ -157,6 +107,20 @@ def _mock_infrastructure(monkeypatch):
 def _mocks() -> dict[str, Any]:
     """Shorthand accessor for the shared mock dict."""
     return _shared_mocks
+
+
+def _has_line(text: str, *parts: str) -> bool:
+    """True when one printed line carries every part."""
+    return any(all(part in line for part in parts) for line in text.splitlines())
+
+
+def _row_cells(out: str, row_id: str) -> list[str]:
+    """The cells of the rendered table row whose first cell is *row_id*."""
+    for line in out.splitlines():
+        cells = [cell.strip() for cell in line.split("│")[1:-1]]
+        if cells and cells[0] == row_id:
+            return cells
+    raise AssertionError(f"no table row {row_id!r} in:\n{out}")
 
 
 # ---------------------------------------------------------------------------
@@ -167,23 +131,19 @@ def _mocks() -> dict[str, Any]:
 class TestHandleCommandList:
     """Tests for the 'list' subcommand."""
 
-    def test_list_empty_registry(self):
+    def test_list_empty_registry(self, capsys: pytest.CaptureFixture[str]) -> None:
         """list with no errors prints a 'no errors' message."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["query"].return_value = []
 
-        result = handle_command("errors", ["list"])
+        result = errors.handle_command("errors", ["list"])
 
         assert result is True
         mocks["query"].assert_called_once()
-        mocks["console"].print.assert_any_call("[dim]No errors in registry[/dim]")
+        assert "No errors in registry" in capsys.readouterr().out
 
-    def test_list_with_entries_renders_table(self):
+    def test_list_with_entries_renders_table(self, capsys: pytest.CaptureFixture[str]) -> None:
         """list with entries calls query and prints a Rich table with correct data."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["query"].return_value = [
             {
@@ -198,47 +158,36 @@ class TestHandleCommandList:
             },
         ]
 
-        result = handle_command("errors", ["list"])
+        result = errors.handle_command("errors", ["list"])
 
         assert result is True
         mocks["query"].assert_called_once()
+        out = capsys.readouterr().out
 
-        # Verify the Table was constructed with a title containing "Error Registry"
-        table_instance = mocks["table_cls"].return_value
-        mocks["table_cls"].assert_called_once()
-        create_kwargs = mocks["table_cls"].call_args
-        assert "Error Registry" in str(create_kwargs), "Table title should contain 'Error Registry'"
+        # The table's title
+        assert "Error Registry" in out, "Table title should contain 'Error Registry'"
 
-        # Verify add_row was called with the entry data
-        table_instance.add_row.assert_called_once()
-        row_args = table_instance.add_row.call_args[0]
-        assert row_args[0] == "e001"  # ID
-        assert row_args[1] == "abc123de"  # fingerprint[:8]
-        assert row_args[2] == "ImportError"  # error_type
-        assert row_args[3] == "FLOW"  # component
-        assert row_args[4] == "3"  # count (as string)
-
-        # Verify the table object was printed to console
-        mocks["console"].print.assert_any_call(table_instance)
+        # The one row, cell by cell
+        cells = _row_cells(out, "e001")
+        assert cells[1] == "abc123de"  # fingerprint[:8]
+        assert cells[2] == "ImportError"  # error_type
+        assert cells[3] == "FLOW"  # component
+        assert cells[4] == "3"  # count (as string)
 
         # Verify summary line with entry count was printed
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        has_count = any("1 error(s)" in text for text in printed_texts)
-        assert has_count, "Expected '1 error(s)' in list summary output"
+        assert "1 error(s)" in out, "Expected '1 error(s)' in list summary output"
 
-        mocks["json_handler"].log_operation.assert_called_with(
+        mocks["log_operation"].assert_called_with(
             "error_command",
             {"subcommand": "list"},
         )
 
-    def test_list_passes_filters_to_query(self):
+    def test_list_passes_filters_to_query(self) -> None:
         """list --status=new --component=FLOW passes filters through."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["query"].return_value = []
 
-        handle_command("errors", ["list", "--status=new", "--component=FLOW", "--severity=high"])
+        errors.handle_command("errors", ["list", "--status=new", "--component=FLOW", "--severity=high"])
 
         mocks["query"].assert_called_once_with(
             status="new",
@@ -247,14 +196,12 @@ class TestHandleCommandList:
             limit=50,
         )
 
-    def test_list_custom_limit(self):
+    def test_list_custom_limit(self) -> None:
         """list --limit=10 passes the limit to query."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["query"].return_value = []
 
-        handle_command("errors", ["list", "--limit=10"])
+        errors.handle_command("errors", ["list", "--limit=10"])
 
         mocks["query"].assert_called_once_with(
             status=None,
@@ -272,10 +219,8 @@ class TestHandleCommandList:
 class TestHandleCommandStats:
     """Tests for the 'stats' subcommand."""
 
-    def test_stats_displays_statistics(self):
+    def test_stats_displays_statistics(self, capsys: pytest.CaptureFixture[str]) -> None:
         """stats calls get_stats and get_circuit_breaker_status and prints specific values."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_stats"].return_value = {
             "total": 5,
@@ -291,39 +236,33 @@ class TestHandleCommandStats:
             "summary_sent": False,
         }
 
-        result = handle_command("errors", ["stats"])
+        result = errors.handle_command("errors", ["stats"])
 
         assert result is True
         mocks["get_stats"].assert_called_once()
         mocks["get_cb_status"].assert_called_once()
 
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
+        out = capsys.readouterr().out
 
         # Verify heading
-        has_heading = any("Error Registry Statistics" in text for text in printed_texts)
-        assert has_heading, "Expected 'Error Registry Statistics' heading in output"
+        assert "Error Registry Statistics" in out, "Expected 'Error Registry Statistics' heading in output"
 
         # Verify total errors value printed
-        has_total = any("5" in text and "Total errors" in text for text in printed_texts)
-        assert has_total, "Expected 'Total errors' line with value 5 in stats output"
+        assert _has_line(out, "Total errors", "5"), "Expected 'Total errors' line with value 5 in stats output"
 
         # Verify circuit breaker section is included
-        has_cb = any("Circuit Breaker" in text for text in printed_texts)
-        assert has_cb, "Expected 'Circuit Breaker' section in stats output"
+        assert "Circuit Breaker" in out, "Expected 'Circuit Breaker' section in stats output"
 
         # Verify cooldown value printed
-        has_cooldown = any("300" in text and "Cooldown" in text for text in printed_texts)
-        assert has_cooldown, "Expected cooldown '300s' in stats output"
+        assert _has_line(out, "Cooldown", "300"), "Expected cooldown '300s' in stats output"
 
-    def test_stats_logs_operation(self):
+    def test_stats_logs_operation(self) -> None:
         """stats logs the operation via json_handler."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
 
-        handle_command("errors", ["stats"])
+        errors.handle_command("errors", ["stats"])
 
-        mocks["json_handler"].log_operation.assert_called_with(
+        mocks["log_operation"].assert_called_with(
             "error_command",
             {"subcommand": "stats"},
         )
@@ -337,10 +276,8 @@ class TestHandleCommandStats:
 class TestHandleCommandCircuitBreaker:
     """Tests for the 'circuit-breaker' subcommand."""
 
-    def test_circuit_breaker_shows_status(self):
+    def test_circuit_breaker_shows_status(self, capsys: pytest.CaptureFixture[str]) -> None:
         """circuit-breaker without args shows current circuit breaker state with all fields."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_cb_status"].return_value = {
             "state": "closed",
@@ -350,42 +287,33 @@ class TestHandleCommandCircuitBreaker:
             "summary_sent": False,
         }
 
-        result = handle_command("errors", ["circuit-breaker"])
+        result = errors.handle_command("errors", ["circuit-breaker"])
 
         assert result is True
         mocks["get_cb_status"].assert_called()
 
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
+        out = capsys.readouterr().out
 
         # Verify heading
-        has_heading = any("Circuit Breaker Status" in text for text in printed_texts)
-        assert has_heading, "Expected 'Circuit Breaker Status' heading in output"
+        assert "Circuit Breaker Status" in out, "Expected 'Circuit Breaker Status' heading in output"
 
         # Verify state value (closed) is displayed
-        has_state = any("closed" in text and "State" in text for text in printed_texts)
-        assert has_state, "Expected State line with 'closed' in output"
+        assert _has_line(out, "State", "closed"), "Expected State line with 'closed' in output"
 
         # Verify cooldown value
-        has_cooldown = any("300" in text and "Cooldown" in text for text in printed_texts)
-        assert has_cooldown, "Expected Cooldown line with '300' in output"
+        assert _has_line(out, "Cooldown", "300"), "Expected Cooldown line with '300' in output"
 
         # Verify recent errors value
-        has_recent = any("Recent errors" in text and "0" in text for text in printed_texts)
-        assert has_recent, "Expected Recent errors line with '0' in output"
+        assert _has_line(out, "Recent errors", "0"), "Expected Recent errors line with '0' in output"
 
         # Verify summary_sent field
-        has_summary = any("Summary sent" in text and "False" in text for text in printed_texts)
-        assert has_summary, "Expected Summary sent line with 'False' in output"
+        assert _has_line(out, "Summary sent", "False"), "Expected Summary sent line with 'False' in output"
 
         # Verify closed-state normal operation message
-        has_normal = any("Normal operation" in text for text in printed_texts)
-        assert has_normal, "Expected 'Normal operation' message for closed state"
+        assert "Normal operation" in out, "Expected 'Normal operation' message for closed state"
 
-    def test_circuit_breaker_open_state(self):
+    def test_circuit_breaker_open_state(self, capsys: pytest.CaptureFixture[str]) -> None:
         """circuit-breaker displays open-state details with remaining time."""
-        from aipass.trigger.apps.modules.errors import handle_command
-        import time
-
         mocks = _mocks()
         mocks["get_cb_status"].return_value = {
             "state": "open",
@@ -395,33 +323,26 @@ class TestHandleCommandCircuitBreaker:
             "summary_sent": True,
         }
 
-        result = handle_command("errors", ["circuit-breaker"])
+        result = errors.handle_command("errors", ["circuit-breaker"])
 
         assert result is True
-        cli_modules = sys.modules["aipass.cli.apps.modules"]
-        err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
-        has_paused = any("paused" in text.lower() for text in err_args)
-        assert has_paused, "Expected 'paused' in error() output"
+        assert "paused" in capsys.readouterr().err.lower(), "Expected 'paused' in error() output"
 
-    def test_circuit_breaker_reset(self):
+    def test_circuit_breaker_reset(self, capsys: pytest.CaptureFixture[str]) -> None:
         """circuit-breaker reset calls reset and confirms CLOSED state in output."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
 
-        result = handle_command("errors", ["circuit-breaker", "reset"])
+        result = errors.handle_command("errors", ["circuit-breaker", "reset"])
 
         assert result is True
         mocks["cb_reset"].assert_called_once()
+        out = capsys.readouterr().out
 
         # Verify reset confirmation message was printed
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        has_reset_msg = any("Circuit breaker reset to CLOSED" in text for text in printed_texts)
-        assert has_reset_msg, "Expected 'Circuit breaker reset to CLOSED' confirmation in output"
+        assert "Circuit breaker reset to CLOSED" in out, "Expected 'Circuit breaker reset to CLOSED' confirmation"
 
         # Verify dispatch allowed message
-        has_dispatch = any("dispatch" in text.lower() for text in printed_texts)
-        assert has_dispatch, "Expected dispatch status message after reset"
+        assert "dispatch" in out.lower(), "Expected dispatch status message after reset"
 
 
 # ---------------------------------------------------------------------------
@@ -432,52 +353,39 @@ class TestHandleCommandCircuitBreaker:
 class TestHandleCommandHelp:
     """Tests for help display."""
 
-    def test_help_flag_shows_help(self):
+    def test_help_flag_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """--help triggers the help display with panel, sections, and commands."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        mocks = _mocks()
-
-        result = handle_command("errors", ["--help"])
+        result = errors.handle_command("errors", ["--help"])
 
         assert result is True
+        out = capsys.readouterr().out
 
-        # print_help creates a Panel with the title text
-        mocks["panel_cls"].assert_called_once()
-        panel_args = str(mocks["panel_cls"].call_args)
-        assert "Error Registry" in panel_args, "Expected Panel with 'Error Registry' title"
+        # print_help opens with a Panel carrying the title text
+        assert "Error Registry - Medic v2 Error Management" in out, "Expected Panel with 'Error Registry' title"
 
-        # print_help uses console.rule for section headers
-        rule_calls = [str(c) for c in mocks["console"].rule.call_args_list]
-        assert any("USAGE" in text for text in rule_calls), "Expected USAGE rule section"
-        assert any("COMMANDS" in text for text in rule_calls), "Expected COMMANDS rule section"
-        assert any("EXAMPLES" in text for text in rule_calls), "Expected EXAMPLES rule section"
+        # print_help uses console.rule for section headers — a rule line carries the name
+        assert _has_line(out, "─", "USAGE"), "Expected USAGE rule section"
+        assert _has_line(out, "─", "COMMANDS"), "Expected COMMANDS rule section"
+        assert _has_line(out, "─", "EXAMPLES"), "Expected EXAMPLES rule section"
 
         # Verify command names appear in help output
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        assert any("list" in text for text in printed_texts), "Expected 'list' command in help"
-        assert any("resolve" in text for text in printed_texts), "Expected 'resolve' command in help"
-        assert any("stats" in text for text in printed_texts), "Expected 'stats' command in help"
+        assert _has_line(out, "list", "List tracked errors"), "Expected 'list' command in help"
+        assert _has_line(out, "resolve", "Mark error as resolved"), "Expected 'resolve' command in help"
+        assert _has_line(out, "stats", "Summary statistics"), "Expected 'stats' command in help"
 
-    def test_h_flag_shows_help(self):
+    def test_h_flag_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """-h triggers the help display."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        result = handle_command("errors", ["-h"])
+        result = errors.handle_command("errors", ["-h"])
 
         assert result is True
-        rules = [str(c) for c in _mocks()["console"].rule.call_args_list]
-        assert any("COMMANDS" in text for text in rules), "-h must print the COMMANDS section"
+        assert _has_line(capsys.readouterr().out, "─", "COMMANDS"), "-h must print the COMMANDS section"
 
-    def test_help_subcommand_shows_help(self):
+    def test_help_subcommand_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
         """'help' as subcommand triggers help display."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        result = handle_command("errors", ["help"])
+        result = errors.handle_command("errors", ["help"])
 
         assert result is True
-        rules = [str(c) for c in _mocks()["console"].rule.call_args_list]
-        assert any("COMMANDS" in text for text in rules), "help must print the COMMANDS section"
+        assert _has_line(capsys.readouterr().out, "─", "COMMANDS"), "help must print the COMMANDS section"
 
 
 # ---------------------------------------------------------------------------
@@ -488,34 +396,25 @@ class TestHandleCommandHelp:
 class TestHandleCommandIntrospection:
     """Tests for introspection display (no arguments)."""
 
-    def test_no_args_shows_introspection(self):
+    def test_no_args_shows_introspection(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Calling handle_command with empty args shows module introspection with handler details."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        mocks = _mocks()
-
-        result = handle_command("errors", [])
+        result = errors.handle_command("errors", [])
 
         assert result is True
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
+        out = capsys.readouterr().out
 
         # Verify module name heading
-        has_module_name = any("errors Module" in text for text in printed_texts)
-        assert has_module_name, "Expected 'errors Module' heading in introspection output"
+        assert "errors Module" in out, "Expected 'errors Module' heading in introspection output"
 
         # Verify description line
-        has_desc = any("error registry management" in text.lower() for text in printed_texts)
-        assert has_desc, "Expected module description in introspection output"
+        assert "error registry management" in out.lower(), "Expected module description in introspection output"
 
         # Verify handler listing
-        has_handlers = any("Connected Handlers" in text for text in printed_texts)
-        assert has_handlers, "Expected 'Connected Handlers' section in introspection output"
+        assert "Connected Handlers" in out, "Expected 'Connected Handlers' section in introspection output"
 
         # Verify specific handler names appear
-        has_registry = any("error_registry.py" in text for text in printed_texts)
-        assert has_registry, "Expected 'error_registry.py' handler in introspection"
-        has_reporter = any("error_reporter.py" in text for text in printed_texts)
-        assert has_reporter, "Expected 'error_reporter.py' handler in introspection"
+        assert "error_registry.py" in out, "Expected 'error_registry.py' handler in introspection"
+        assert "error_reporter.py" in out, "Expected 'error_reporter.py' handler in introspection"
 
 
 # ---------------------------------------------------------------------------
@@ -526,11 +425,9 @@ class TestHandleCommandIntrospection:
 class TestHandleCommandWrongModule:
     """Tests for command name mismatch."""
 
-    def test_wrong_command_returns_false(self):
+    def test_wrong_command_returns_false(self) -> None:
         """handle_command returns False when command is not 'errors'."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        result = handle_command("medic", ["list"])
+        result = errors.handle_command("medic", ["list"])
 
         assert result is False
 
@@ -543,7 +440,7 @@ class TestHandleCommandWrongModule:
 class TestHandleCommandUnknown:
     """Tests for unknown subcommands."""
 
-    def test_unknown_subcommand_refuses_rather_than_reporting_handled(self):
+    def test_unknown_subcommand_refuses_rather_than_reporting_handled(self, capsys: pytest.CaptureFixture[str]) -> None:
         """`errors foobar` returns False so the entry point can exit non-zero.
 
         This test used to assert the opposite: the module printed its own
@@ -552,16 +449,15 @@ class TestHandleCommandUnknown:
         could branch on it (the owner's standing ruling, FPLAN-0492). Returning
         False routes the refusal through the ONE gate, which names the whole
         invocation and exits 1.
+        Mutant run 2026-09-27: handle_command calling error("Unknown subcommand")
+        before its return False reddens this.
         """
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        mocks = _mocks()
-
-        result = handle_command("errors", ["foobar"])
+        result = errors.handle_command("errors", ["foobar"])
 
         assert result is False
         # The module must NOT print its own refusal — the gate owns the message.
-        mocks["error_fn"].assert_not_called()
+        assert capsys.readouterr().err == ""
+        assert display.command_failed() is False
 
 
 # ---------------------------------------------------------------------------
@@ -572,39 +468,14 @@ class TestHandleCommandUnknown:
 class TestReportError:
     """Tests for the report_error public API re-export."""
 
-    def test_report_error_delegates_to_reporter(self):
-        """report_error is the function from error_reporter."""
-        from aipass.trigger.apps.modules.errors import report_error
+    def test_report_error_delegates_to_reporter(self) -> None:
+        """report_error is the function from error_reporter.
 
-        mocks = _mocks()
-        mocks["report_error"].return_value = {
-            "fingerprint": "deadbeef1234",
-            "is_new": True,
-            "dispatched": False,
-        }
-
-        # Never opened — report_error hands the path straight through. Built
-        # from the platform temp dir rather than a literal /tmp so the string
-        # is portable on Windows too.
-        log_path = str(Path(tempfile.gettempdir()) / "flow.log")
-
-        result = report_error(
-            error_type="ImportError",
-            message="No module named 'foo'",
-            component="FLOW",
-            log_path=log_path,
-            severity="high",
-        )
-
-        mocks["report_error"].assert_called_once_with(
-            error_type="ImportError",
-            message="No module named 'foo'",
-            component="FLOW",
-            log_path=log_path,
-            severity="high",
-        )
-        assert result["fingerprint"] == "deadbeef1234"
-        assert result["is_new"] is True
+        Drone calls errors.report_error; what it reaches must be the reporter's
+        own function, not a copy or a wrapper that could drift from it. How the
+        reporter fingerprints and dispatches is tests/test_error_reporter.py's.
+        """
+        assert errors.report_error is error_reporter.report_error
 
 
 # ---------------------------------------------------------------------------
@@ -615,10 +486,8 @@ class TestReportError:
 class TestHandleCommandResolve:
     """Tests for the 'resolve' subcommand."""
 
-    def test_resolve_marks_error_resolved(self):
+    def test_resolve_marks_error_resolved(self, capsys: pytest.CaptureFixture[str]) -> None:
         """resolve <id> looks up the entry and updates status with correct fingerprint."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_entry"].return_value = {
             "id": "e001",
@@ -628,7 +497,7 @@ class TestHandleCommandResolve:
             "status": "new",
         }
 
-        result = handle_command("errors", ["resolve", "e001"])
+        result = errors.handle_command("errors", ["resolve", "e001"])
 
         assert result is True
         mocks["update_status"].assert_called_once()
@@ -640,25 +509,16 @@ class TestHandleCommandResolve:
         )
         assert update_call[0][1] == "resolved"
 
-        # Verify confirmation message was routed through success()
-        cli_modules = sys.modules["aipass.cli.apps.modules"]
-        success_args = [str(a) for call in cli_modules.success.call_args_list for a in call.args]
-        has_resolved = any("Resolved" in text and "e001" in text for text in success_args)
-        assert has_resolved, "Expected 'Resolved' confirmation with error ID in success() output"
+        # Verify confirmation message was routed through success() — its ✅ line on stdout
+        out = capsys.readouterr().out
+        assert _has_line(out, "✅", "Resolved", "e001"), "Expected 'Resolved' confirmation with error ID from success()"
 
-    def test_resolve_no_id_prints_usage(self):
+    def test_resolve_no_id_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
         """resolve with no ID prints a usage hint."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        _mocks()
-
-        result = handle_command("errors", ["resolve"])
+        result = errors.handle_command("errors", ["resolve"])
 
         assert result is True
-        cli_modules = sys.modules["aipass.cli.apps.modules"]
-        err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
-        has_missing = any("missing" in text.lower() for text in err_args)
-        assert has_missing, "Expected 'missing' in error() output"
+        assert "missing" in capsys.readouterr().err.lower(), "Expected 'missing' in error() output"
 
 
 # ---------------------------------------------------------------------------
@@ -669,10 +529,8 @@ class TestHandleCommandResolve:
 class TestHandleCommandUnsuppress:
     """Tests for the 'unsuppress' subcommand (compass #219)."""
 
-    def test_unsuppress_restores_status_to_new(self):
+    def test_unsuppress_restores_status_to_new(self, capsys: pytest.CaptureFixture[str]) -> None:
         """unsuppress <id> sets a suppressed entry back to 'new' so dispatch resumes."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_entry"].return_value = {
             "id": "e001",
@@ -683,7 +541,7 @@ class TestHandleCommandUnsuppress:
             "suppress_reason": "known noise",
         }
 
-        result = handle_command("errors", ["unsuppress", "e001"])
+        result = errors.handle_command("errors", ["unsuppress", "e001"])
 
         assert result is True
         mocks["update_status"].assert_called_once()
@@ -694,15 +552,11 @@ class TestHandleCommandUnsuppress:
         # No reason passed — the original suppress_reason survives as history
         assert len(update_call[0]) == 2
 
-        cli_modules = sys.modules["aipass.cli.apps.modules"]
-        success_args = [str(a) for call in cli_modules.success.call_args_list for a in call.args]
-        has_confirm = any("Unsuppressed" in text and "e001" in text for text in success_args)
-        assert has_confirm, "Expected 'Unsuppressed' confirmation with error ID in success() output"
+        out = capsys.readouterr().out
+        assert _has_line(out, "✅", "Unsuppressed", "e001"), "Expected 'Unsuppressed' confirmation from success()"
 
-    def test_unsuppress_noop_when_not_suppressed(self):
+    def test_unsuppress_noop_when_not_suppressed(self, capsys: pytest.CaptureFixture[str]) -> None:
         """unsuppress on a non-suppressed entry changes nothing and says so."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_entry"].return_value = {
             "id": "e002",
@@ -710,46 +564,33 @@ class TestHandleCommandUnsuppress:
             "status": "new",
         }
 
-        result = handle_command("errors", ["unsuppress", "e002"])
+        result = errors.handle_command("errors", ["unsuppress", "e002"])
 
         assert result is True
         mocks["update_status"].assert_not_called()
-        printed = [str(c) for c in mocks["console"].print.call_args_list]
-        assert any("not suppressed" in text for text in printed), "Expected 'not suppressed' notice"
+        assert "not suppressed" in capsys.readouterr().out, "Expected 'not suppressed' notice"
 
-    def test_unsuppress_no_id_prints_usage(self):
+    def test_unsuppress_no_id_prints_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
         """unsuppress with no ID prints a usage hint."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        _mocks()
-
-        result = handle_command("errors", ["unsuppress"])
+        result = errors.handle_command("errors", ["unsuppress"])
 
         assert result is True
-        cli_modules = sys.modules["aipass.cli.apps.modules"]
-        err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
-        assert any("missing" in text.lower() for text in err_args), "Expected 'missing' in error() output"
+        assert "missing" in capsys.readouterr().err.lower(), "Expected 'missing' in error() output"
 
-    def test_unsuppress_unknown_id_reports_not_found(self):
+    def test_unsuppress_unknown_id_reports_not_found(self, capsys: pytest.CaptureFixture[str]) -> None:
         """unsuppress on an unknown ID reports not found without touching status."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_entry"].return_value = None
         mocks["query"].return_value = []
 
-        result = handle_command("errors", ["unsuppress", "nope"])
+        result = errors.handle_command("errors", ["unsuppress", "nope"])
 
         assert result is True
         mocks["update_status"].assert_not_called()
-        cli_modules = sys.modules["aipass.cli.apps.modules"]
-        err_args = [str(a) for call in cli_modules.error.call_args_list for a in call.args]
-        assert any("not found" in text.lower() for text in err_args), "Expected 'not found' in error() output"
+        assert "not found" in capsys.readouterr().err.lower(), "Expected 'not found' in error() output"
 
-    def test_stats_shows_silenced_count(self):
+    def test_stats_shows_silenced_count(self, capsys: pytest.CaptureFixture[str]) -> None:
         """stats surfaces how many fingerprints are currently silenced."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["get_stats"].return_value = {
             "total": 7,
@@ -758,12 +599,9 @@ class TestHandleCommandUnsuppress:
             "by_severity": {},
         }
 
-        handle_command("errors", ["stats"])
+        errors.handle_command("errors", ["stats"])
 
-        printed = [str(c) for c in mocks["console"].print.call_args_list]
-        assert any("Silenced" in text and "2" in text for text in printed), (
-            "Expected a 'Silenced' count line in stats output"
-        )
+        assert _has_line(capsys.readouterr().out, "Silenced", "2"), "Expected a 'Silenced' count line in stats output"
 
 
 # ---------------------------------------------------------------------------
@@ -774,77 +612,65 @@ class TestHandleCommandUnsuppress:
 class TestHandleCommandClearResolved:
     """Tests for the 'clear-resolved' subcommand."""
 
-    def test_clear_resolved_default_days(self):
+    def test_clear_resolved_default_days(self) -> None:
         """clear-resolved with no args uses default 7 days."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["clear_resolved"].return_value = 3
 
-        result = handle_command("errors", ["clear-resolved"])
+        result = errors.handle_command("errors", ["clear-resolved"])
 
         assert result is True
         mocks["clear_resolved"].assert_called_once_with(days=7)
 
-    def test_clear_resolved_custom_days(self):
+    def test_clear_resolved_custom_days(self) -> None:
         """clear-resolved --days=14 passes the custom days value."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["clear_resolved"].return_value = 0
 
-        handle_command("errors", ["clear-resolved", "--days=14"])
+        errors.handle_command("errors", ["clear-resolved", "--days=14"])
 
         mocks["clear_resolved"].assert_called_once_with(days=14)
 
-    def test_clear_resolved_failure_reports_error(self):
+    def test_clear_resolved_failure_reports_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         """clear-resolved reports a failed clear (-1) through error(), not as "nothing to clear".
 
         Red first 2026-09-27 against _cmd_clear_resolved with no removed < 0 branch.
         """
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["clear_resolved"].return_value = -1
 
-        assert handle_command("errors", ["clear-resolved"]) is True
+        assert errors.handle_command("errors", ["clear-resolved"]) is True
 
-        mocks["error_fn"].assert_called_once()
-        assert "clear" in mocks["error_fn"].call_args[0][0].lower()
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        assert not any("no resolved" in text.lower() for text in printed_texts)
+        captured = capsys.readouterr()
+        assert captured.err.count("❌") == 1
+        assert _has_line(captured.err, "❌", "clear")
+        assert display.command_failed() is True
+        assert "no resolved" not in captured.out.lower()
 
-    def test_purge_failure_reports_error(self):
+    def test_purge_failure_reports_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         """purge reports a failed purge (-1) through error(), never as "Purged -1 entries".
 
         Red first 2026-09-27 against _cmd_purge with no removed < 0 branch.
         """
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
-        registry = sys.modules["aipass.trigger.apps.handlers.error_registry"]
-        registry.purge_stale.return_value = -1
+        mocks["purge_stale"].return_value = -1
 
-        assert handle_command("errors", ["purge"]) is True
+        assert errors.handle_command("errors", ["purge"]) is True
 
-        mocks["error_fn"].assert_called_once()
-        assert "purge" in mocks["error_fn"].call_args[0][0].lower()
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        assert not any("Purged -1" in text for text in printed_texts)
+        captured = capsys.readouterr()
+        assert captured.err.count("❌") == 1
+        assert _has_line(captured.err, "❌", "purge")
+        assert display.command_failed() is True
+        assert "Purged -1" not in captured.out
 
-    def test_clear_resolved_none_removed(self):
+    def test_clear_resolved_none_removed(self, capsys: pytest.CaptureFixture[str]) -> None:
         """clear-resolved prints dim message when nothing was removed."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["clear_resolved"].return_value = 0
 
-        handle_command("errors", ["clear-resolved"])
+        errors.handle_command("errors", ["clear-resolved"])
 
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        assert any("no resolved" in text.lower() for text in printed_texts), (
-            "Expected 'no resolved' message when nothing cleared"
-        )
+        assert "no resolved" in capsys.readouterr().out.lower(), "Expected 'no resolved' message when nothing cleared"
 
 
 # ---------------------------------------------------------------------------
@@ -856,71 +682,65 @@ class TestArgsAndTimeThroughList:
     """--key=value parsing and the Last Seen cell, read off the list command."""
 
     @staticmethod
-    def _last_seen_cell(last_seen: str) -> str:
+    def _last_seen_cell(capsys: pytest.CaptureFixture[str], last_seen: str) -> str:
         """Run `errors list` over one entry and return the Last Seen cell it rendered."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
         mocks = _mocks()
         mocks["query"].return_value = [{"id": "e001", "fingerprint": "abc123def456", "last_seen": last_seen}]
-        handle_command("errors", ["list"])
-        return mocks["table_cls"].return_value.add_row.call_args[0][7]
+        errors.handle_command("errors", ["list"])
+        return _row_cells(capsys.readouterr().out, "e001")[7]
 
-    def test_list_parses_key_value_flags(self):
+    def test_list_parses_key_value_flags(self) -> None:
         """--key=value pairs reach query with the dashes stripped; a bare word is ignored.
 
         Mutant run 2026-09-27: _parse_args keeps the leading dashes (no lstrip) -> red.
         """
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        handle_command("errors", ["list", "--status=new", "--limit=10", "positional"])
+        errors.handle_command("errors", ["list", "--status=new", "--limit=10", "positional"])
 
         _mocks()["query"].assert_called_once_with(status="new", component=None, severity=None, limit=10)
 
-    def test_list_with_no_flags_uses_defaults(self):
+    def test_list_with_no_flags_uses_defaults(self) -> None:
         """No flags parse to nothing: no filters and the default limit of 50.
 
         Mutant run 2026-09-27: _cmd_list default limit "50" -> "20" -> red.
         """
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        handle_command("errors", ["list"])
+        errors.handle_command("errors", ["list"])
 
         _mocks()["query"].assert_called_once_with(status=None, component=None, severity=None, limit=50)
 
-    def test_last_seen_trims_iso_with_fractional(self):
+    def test_last_seen_trims_iso_with_fractional(self, capsys: pytest.CaptureFixture[str]) -> None:
         """'2026-03-20T10:00:00.123456' renders as '2026-03-20 10:00:00'.
 
         Mutant run 2026-09-27: _fmt_time returns iso unchanged -> red.
         """
-        assert self._last_seen_cell("2026-03-20T10:00:00.123456") == "2026-03-20 10:00:00"
+        assert self._last_seen_cell(capsys, "2026-03-20T10:00:00.123456") == "2026-03-20 10:00:00"
 
-    def test_last_seen_trims_iso_without_fractional(self):
+    def test_last_seen_trims_iso_without_fractional(self, capsys: pytest.CaptureFixture[str]) -> None:
         """ISO without fractional seconds still loses its T.
 
         Mutant run 2026-09-27: _fmt_time returns iso unchanged -> red.
         """
-        assert self._last_seen_cell("2026-03-20T10:00:00") == "2026-03-20 10:00:00"
+        assert self._last_seen_cell(capsys, "2026-03-20T10:00:00") == "2026-03-20 10:00:00"
 
-    def test_last_seen_passthrough_plain(self):
+    def test_last_seen_passthrough_plain(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A non-ISO string renders unchanged.
 
         Mutant run 2026-09-27: _fmt_time's last return iso -> iso.upper() -> red.
         """
-        assert self._last_seen_cell("yesterday") == "yesterday"
+        assert self._last_seen_cell(capsys, "yesterday") == "yesterday"
 
-    def test_last_seen_empty_string(self):
+    def test_last_seen_empty_string(self, capsys: pytest.CaptureFixture[str]) -> None:
         """An empty last_seen renders as an empty cell.
 
         Mutant run 2026-09-27: _fmt_time's last return iso -> iso or "?" -> red.
         """
-        assert self._last_seen_cell("") == ""
+        assert self._last_seen_cell(capsys, "") == ""
 
-    def test_last_seen_date_only_passthrough(self):
+    def test_last_seen_date_only_passthrough(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A date with no T or dot falls through unchanged.
 
         Mutant run 2026-09-27: _fmt_time's last return iso -> iso.replace("-", "/") -> red.
         """
-        assert self._last_seen_cell("2026-03-20") == "2026-03-20"
+        assert self._last_seen_cell(capsys, "2026-03-20") == "2026-03-20"
 
 
 # ---------------------------------------------------------------------------
@@ -931,10 +751,11 @@ class TestArgsAndTimeThroughList:
 class TestQueryResultStructure:
     """Tests verifying query result structure flows correctly through list command."""
 
-    def test_query_result_keys_rendered_in_table(self):
-        """query() results with expected keys are rendered correctly in the table."""
-        from aipass.trigger.apps.modules.errors import handle_command
+    def test_query_result_keys_rendered_in_table(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """query() results with expected keys are rendered correctly in the table.
 
+        Mutant run 2026-09-27: _cmd_list fingerprint [:8] -> [:9] reddens this.
+        """
         mocks = _mocks()
         mocks["query"].return_value = [
             {
@@ -949,20 +770,17 @@ class TestQueryResultStructure:
             },
         ]
 
-        result = handle_command("errors", ["list"])
+        result = errors.handle_command("errors", ["list"])
 
         assert result is True
 
         # Verify the table row contains all key fields from the query result
-        table_instance = mocks["table_cls"].return_value
-        table_instance.add_row.assert_called_once()
-        row_args = table_instance.add_row.call_args[0]
+        row_cells = _row_cells(capsys.readouterr().out, "e042")
 
-        assert row_args[0] == "e042"  # id
-        assert row_args[1] == "deadbeef"  # fingerprint[:8]
-        assert row_args[2] == "ValueError"  # error_type
-        assert row_args[3] == "API"  # component
-        assert row_args[4] == "7"  # count as string
+        assert row_cells[1] == "deadbeef"  # fingerprint[:8]
+        assert row_cells[2] == "ValueError"  # error_type
+        assert row_cells[3] == "API"  # component
+        assert row_cells[4] == "7"  # count as string
 
 
 # ---------------------------------------------------------------------------
@@ -973,23 +791,15 @@ class TestQueryResultStructure:
 class TestHandleCommandNoneArgs:
     """Tests for edge-case None args input."""
 
-    def test_handle_command_none_args_shows_introspection(self):
+    def test_handle_command_none_args_shows_introspection(self, capsys: pytest.CaptureFixture[str]) -> None:
         """handle_command('errors', None) — None args treated as falsy, shows introspection."""
-        from aipass.trigger.apps.modules.errors import handle_command
-
-        mocks = _mocks()
-
         # None is falsy like [], so `if not args` branch triggers introspection
-        from typing import Any
-
         none_as_list: Any = None
-        result = handle_command("errors", none_as_list)
+        result = errors.handle_command("errors", none_as_list)
 
         assert result is True
         # Introspection should have printed module name
-        printed_texts = [str(c) for c in mocks["console"].print.call_args_list]
-        has_module = any("errors Module" in text for text in printed_texts)
-        assert has_module, "Expected introspection output when args is None"
+        assert "errors Module" in capsys.readouterr().out, "Expected introspection output when args is None"
 
 
 # ---------------------------------------------------------------------------
@@ -1000,14 +810,12 @@ class TestHandleCommandNoneArgs:
 class TestHelpFlagSafety:
     """A help flag past position 0 must describe, never run the subcommand."""
 
-    def test_help_flag_after_subcommand_does_not_run_it(self, monkeypatch):
+    def test_help_flag_after_subcommand_does_not_run_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`errors list --help` must not execute the list query.
 
         `list` is the read-only probe. The route target is mocked, so a
         missing gate surfaces as a call that should not have happened.
         """
-        from aipass.trigger.apps.modules import errors
-
         ran = MagicMock()
         monkeypatch.setattr(errors, "_cmd_list", ran)
         printed = MagicMock()
@@ -1019,10 +827,8 @@ class TestHelpFlagSafety:
         printed.assert_called_once()
         ran.assert_not_called()
 
-    def test_short_flag_after_subcommand_and_operand(self, monkeypatch):
+    def test_short_flag_after_subcommand_and_operand(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`errors list --branch api -h` — the flag is last, still explains."""
-        from aipass.trigger.apps.modules import errors
-
         ran = MagicMock()
         monkeypatch.setattr(errors, "_cmd_list", ran)
         printed = MagicMock()
@@ -1034,10 +840,8 @@ class TestHelpFlagSafety:
         printed.assert_called_once()
         ran.assert_not_called()
 
-    def test_bare_word_help_as_an_operand_is_not_a_help_request(self, monkeypatch):
+    def test_bare_word_help_as_an_operand_is_not_a_help_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """`errors suppress <id> help` — a reason, not a request for the manual."""
-        from aipass.trigger.apps.modules import errors
-
         ran = MagicMock()
         monkeypatch.setattr(errors, "_cmd_suppress", ran)
         printed = MagicMock()

@@ -15,38 +15,28 @@ import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 
+from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers.events import memory_pool, registry
+from aipass.trigger.apps.modules import core
+
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock heavy infrastructure imports."""
-    import sys
+    """Point the real handler's two outward writes away from live state.
 
-    from aipass.trigger.apps.config import atomic_write_json, trail_logger
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.atomic_write_json = atomic_write_json
-    # Real trail_logger, not the auto-mock: the handler's sidecar is what
-    # test_writes_handler_log_on_failure reads back, and TRIGGER_ROOT above
-    # already points it at tmp_path.
-    mock_config.trail_logger = trail_logger
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
-
+    Real trail_logger, not a mock: the handler's sidecar is what
+    test_writes_handler_log_on_failure reads back, so the logger is rebuilt
+    on tmp_path. json_handler writes the live operation log and is mocked.
+    """
+    monkeypatch.setattr(memory_pool, "logger", trail_logger(tmp_path / "logs" / "memory_pool_handler.jsonl"))
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", mock_json_handler)
-
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.events.memory_pool", raising=False)
+    monkeypatch.setattr(memory_pool, "json_handler", mock_json_handler)
 
 
 def _import_module():
-    """Import fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.memory_pool as m
-
-    return m
+    """Return the real memory_pool module the fixture patched."""
+    return memory_pool
 
 
 class TestHandleMemoryPoolAutoProcessedSuccess:
@@ -55,9 +45,7 @@ class TestHandleMemoryPoolAutoProcessedSuccess:
     def test_logs_success(self) -> None:
         """Logs pool stats via json_handler on success."""
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_memory_pool_auto_processed(
             success=True,
@@ -101,9 +89,7 @@ class TestHandleMemoryPoolAutoProcessedSuccess:
         equally if the handler returned early and logged nothing at all.
         """
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_memory_pool_auto_processed(success=True)
 
@@ -121,9 +107,7 @@ class TestHandleMemoryPoolAutoProcessedSuccess:
     def test_empty_pool_noop(self) -> None:
         """Zero files processed logs correctly."""
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_memory_pool_auto_processed(
             success=True,
@@ -161,9 +145,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
     def test_logs_failure(self) -> None:
         """Logs failure via json_handler."""
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_memory_pool_auto_processed(
             success=False,
@@ -214,9 +196,7 @@ class TestHandleMemoryPoolAutoProcessedFailure:
         would leave a memory pool error with no trace anywhere.
         """
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_memory_pool_auto_processed(
             success=False,
@@ -254,21 +234,18 @@ class TestEventRegistration:
         mock_trigger = MagicMock()
         mock_trigger.on = MagicMock()
 
-        # setup_handlers resolves core/email_send at CALL time, so pinning the
-        # sys.modules entries is enough — no registry re-import needed. The old
-        # raw assignments here were never restored and left MagicMocks in
-        # sys.modules for every later import on the same xdist worker.
-        core_mod = MagicMock()
-        core_mod.trigger = mock_trigger
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", core_mod)
+        # setup_handlers resolves core/email_send at CALL time, so no registry
+        # re-import is needed. The real core module, its bus swapped for a recording mock, so
+        # setup_handlers wires nothing onto the live bus.
+        monkeypatch.setattr(core, "trigger", mock_trigger)
 
+        # HELD: ai_mail's email_send is another branch's live delivery; the stub
+        # keeps the adapter setup_handlers builds off real mail.
         mock_mail = MagicMock()
         mock_mail.deliver_email_to_branch = MagicMock(return_value=(True, None))
         monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.modules.email_send", mock_mail)
 
-        from aipass.trigger.apps.handlers.events.registry import setup_handlers
-
-        setup_handlers()
+        registry.setup_handlers()
 
         registered_events = [call[0][0] for call in mock_trigger.on.call_args_list]
         assert "memory_pool_auto_processed" in registered_events
@@ -276,9 +253,7 @@ class TestEventRegistration:
     def test_fires_once_per_invocation(self) -> None:
         """Handler executes once per event fire (not per-turn)."""
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_memory_pool_auto_processed(
             success=True,

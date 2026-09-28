@@ -10,7 +10,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — the errors command that reads this registry, in tests/test_errors.py
-# seedgo: no-test-needed(covered_elsewhere) — the dispatch gate built on should_dispatch, in tests/test_error_detected.py
+# seedgo: no-test-needed(covered_elsewhere) — the dispatch gate on should_dispatch, in tests/test_error_detected.py
 
 import json
 import time
@@ -20,7 +20,9 @@ import pytest
 from unittest.mock import MagicMock
 from pathlib import Path
 
-from aipass.trigger.apps.config import atomic_write_json, read_text_with_retry
+# Bound as `er`, the name every test uses, so a reach into a private name
+# stays visible to the audit (through_the_command resolves import bindings).
+import aipass.trigger.apps.handlers.error_registry as er
 
 
 # ---------------------------------------------------------------------------
@@ -29,48 +31,28 @@ from aipass.trigger.apps.config import atomic_write_json, read_text_with_retry
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock heavy infrastructure imports and redirect file paths to tmp_path."""
-    import sys
+def _registry_on_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Point every file the registry writes at tmp_path and start each test from a fresh breaker.
 
-    mock_logger = MagicMock()
-
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
-
-    # -- trigger json handler -----------------------------------------------
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
-
-    # -- trigger config (TRIGGER_ROOT) --------------------------------------
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.atomic_write_json = atomic_write_json
-    # Real, not a mock: _load_registry parses what this returns, and a MagicMock
-    # here reads as an unreadable registry — which is now a distinct outcome.
-    mock_config.read_text_with_retry = read_text_with_retry
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
-
-    # Force re-import so the module picks up mocked sys.modules
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", raising=False)
+    The real module is imported once at the top; what it reaches outside is
+    patched here: REGISTRY_FILE and CB_STATE_FILE (both module constants built
+    off TRIGGER_ROOT at import, so the live trigger_json/ unless swapped),
+    json_handler.log_operation, and the logger. The breaker and the
+    per-fingerprint dicts are module state restored from the live
+    trigger_cb_state.json at import; each test gets empty ones.
+    """
+    json_dir = tmp_path / "trigger_json"
+    monkeypatch.setattr(er, "REGISTRY_FILE", json_dir / "error_registry.json")
+    monkeypatch.setattr(er, "CB_STATE_FILE", json_dir / "trigger_cb_state.json")
+    monkeypatch.setattr(er, "_circuit_breaker", er.CircuitBreakerState())
+    monkeypatch.setattr(er, "_fingerprint_dispatch_times", {})
+    monkeypatch.setattr(er, "_fingerprint_dispatch_count", {})
+    monkeypatch.setattr(er.json_handler, "log_operation", MagicMock(return_value=True))
+    monkeypatch.setattr(er, "logger", MagicMock())
 
 
 def _import_registry():
-    """Import the error_registry module fresh (after mocking)."""
-    import aipass.trigger.apps.handlers.error_registry as er
-
+    """Return the registry module; the autouse fixture has already put it on tmp_path."""
     return er
 
 
@@ -143,6 +125,20 @@ def test_normalize_strips_paths(tmp_path: Path) -> None:
     normalized = er.normalize_message(f"Cannot read {data_file}")
     assert str(tmp_path) not in normalized
     assert "<path>" in normalized
+
+
+def test_normalize_strips_windows_paths() -> None:
+    """normalize_message replaces a drive-letter path with either separator (compass 458).
+
+    Two Windows errors differing only by path must share one fingerprint; a
+    pattern that begins with '/' replaced nothing in a backslash path and kept
+    the drive letter of a forward-slash one.
+    """
+    er = _import_registry()
+    backslash = er.normalize_message(r"failed at C:\work\AIPass\src\foo.py line 12")
+    forward = er.normalize_message("failed at D:/work/AIPass/src/bar.py line 99")
+    assert backslash == "failed at <path> line N"
+    assert forward == "failed at <path> line N"
 
 
 def test_normalize_strips_uuids() -> None:

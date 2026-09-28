@@ -14,14 +14,18 @@
 # seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's; AIPass tests only its own files
 
 import json
-import sys
 import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+import aipass.trigger.apps.handlers.error_registry as error_registry
+import aipass.trigger.apps.handlers.json.config_loader as config_loader
+import aipass.trigger.apps.handlers.log_watcher as log_watcher
 
 
 # Synthetic path roots. _detect_branch_from_path, _should_process and
@@ -41,69 +45,55 @@ _SYNTHETIC_ELSEWHERE = PurePosixPath("/synthetic/elsewhere")
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch, tmp_path):
-    """Mock heavy infrastructure imports before log_watcher module loads."""
+    """Replace every door the watcher opens onto live state, on the real module.
 
-    mock_logger = MagicMock()
-    mock_logger.info = MagicMock()
-    mock_logger.warning = MagicMock()
+    The module is imported once, at the top. Each outward function and every
+    path constant it writes is set here and put back by monkeypatch; the
+    module-level state a fresh import used to reset is reset here too.
+    """
+    monkeypatch.setattr(log_watcher, "logger", MagicMock())
 
-    # -- prax logger --------------------------------------------------------
-    prax_logger_mod = MagicMock()
-    prax_logger_mod.get_direct_logger = MagicMock(return_value=mock_logger)
-    monkeypatch.setitem(sys.modules, "aipass.prax", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", prax_logger_mod)
-
-    # -- trigger json handler -----------------------------------------------
+    # log_operation appends to the LIVE trigger logs/.
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
-
-    # -- trigger config (TRIGGER_ROOT, AIPASS_PKG_ROOT) ---------------------
-    from aipass.trigger.apps.config import atomic_write_json
+    monkeypatch.setattr(log_watcher, "json_handler", mock_json_handler)
 
     # Built under tmp_path so every trigger_data.json flush the product makes
-    # (TRIGGER_DATA_FILE = TRIGGER_ROOT / "trigger_data.json") lands in this
-    # test's own directory, never the live watcher positions.
+    # lands in this test's own directory, never the live watcher positions.
     fake_trigger_root = tmp_path / "fake_trigger_root"
     fake_trigger_root.mkdir()
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = fake_trigger_root
-    mock_config.AIPASS_PKG_ROOT = tmp_path / "fake_aipass_pkg"
-    mock_config.atomic_write_json = atomic_write_json
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
+    monkeypatch.setattr(log_watcher, "TRIGGER_DATA_FILE", fake_trigger_root / "trigger_data.json")
+    monkeypatch.setattr(log_watcher, "AIPASS_PKG_ROOT", tmp_path / "fake_aipass_pkg")
+    monkeypatch.setattr(log_watcher, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
-    # -- error_registry (report) -------------------------------------------
-    mock_registry = MagicMock()
-    mock_registry.report = MagicMock(return_value={"is_new": True, "count": 1, "id": "abc123"})
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
+    # -- error registry: the import-time binding and the lazy fallback import
+    # both answer from this recorder, never the LIVE registry.
+    registry_answer = MagicMock(return_value={"is_new": True, "count": 1, "id": "abc123"})
+    monkeypatch.setattr(log_watcher, "registry_report", registry_answer)
+    monkeypatch.setattr(log_watcher, "_REGISTRY_AVAILABLE", True)
+    monkeypatch.setattr(error_registry, "report", registry_answer)
 
-    # -- watchdog (make it available) ---------------------------------------
-    mock_observer_cls = MagicMock()
-    mock_observer_mod = MagicMock()
-    mock_observer_mod.Observer = mock_observer_cls
-    monkeypatch.setitem(sys.modules, "watchdog", MagicMock())
-    monkeypatch.setitem(sys.modules, "watchdog.observers", mock_observer_mod)
+    # -- the operator switch for WARNING capture: read lazily per line.
+    monkeypatch.setattr(config_loader, "section", MagicMock(return_value={}))
 
-    mock_events_mod = MagicMock()
-    mock_events_mod.FileSystemEventHandler = type("FakeFileSystemEventHandler", (object,), {})
-    monkeypatch.setitem(sys.modules, "watchdog.events", mock_events_mod)
+    # -- watchdog: no real observer is ever armed over a directory.
+    monkeypatch.setattr(log_watcher, "WatchdogObserver", MagicMock())
 
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.log_watcher", raising=False)
+    # -- module state a fresh import used to start from.
+    monkeypatch.setattr(log_watcher, "_branch_log_observer", None)
+    monkeypatch.setattr(log_watcher, "_active_watcher", None)
+    monkeypatch.setattr(log_watcher, "_seen_error_hashes", set())
+    monkeypatch.setattr(log_watcher, "_fallback_error_counts", {})
+    monkeypatch.setattr(log_watcher, "_data_dirty", False)
+    monkeypatch.setattr(log_watcher, "_last_flush_time", 0.0)
+    monkeypatch.setattr(log_watcher, "_branch_names_cache", (0.0, ()))
+    monkeypatch.setattr(log_watcher, "_fire_event", None)
+    monkeypatch.setattr(log_watcher, "_warning_capture_cache", (0.0, True))
 
 
 def _import_log_watcher():
-    """Import log_watcher module fresh (after mocks are in place)."""
-    import aipass.trigger.apps.handlers.log_watcher as lw
-
-    return lw
+    """Hand each test the watcher module, its doors already replaced."""
+    return log_watcher
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +168,20 @@ class TestDetectBranchFromPath:
         lw = _import_log_watcher()
         assert lw._detect_branch_from_path(str(_SYNTHETIC_ELSEWHERE / "some" / "random" / "path.log")) == "UNKNOWN"
 
+    def test_failure_raises_instead_of_answering_unknown(self):
+        """A path it cannot read raises; it is not filed under the UNKNOWN branch.
+
+        UNKNOWN is a real answer (a log outside every known tree), so a
+        failure returned as UNKNOWN fired an error_detected event for a branch
+        nobody owns. The caller, _process_log_line, contains the raise and
+        skips that one line (test_outer_exception_handler_catches_unexpected).
+        Mutant run: `Path(log_path or "")` (a swallowed failure) reddens this.
+        """
+        lw = _import_log_watcher()
+        unreadable: Any = None
+        with pytest.raises(TypeError):
+            lw._detect_branch_from_path(unreadable)
+
 
 # ---------------------------------------------------------------------------
 # Tests -- _parse_prax_log_line
@@ -237,6 +241,21 @@ class TestParsePraxLogLine:
         """Empty line returns None."""
         lw = _import_log_watcher()
         assert lw._parse_prax_log_line("") is None
+
+    def test_failure_raises_instead_of_answering_none(self):
+        """A line it cannot read raises; None means "not an error line".
+
+        Returning None on a failure made the line look like an ordinary
+        INFO line. The callers, _process_log_line and _process_warning_line,
+        contain the raise and skip that one line
+        (test_outer_exception_handler_catches_unexpected,
+        test_unexpected_failure_is_contained).
+        Mutant run: `if log_line is None: return None` ahead of the parse reddens this.
+        """
+        lw = _import_log_watcher()
+        unreadable: Any = None
+        with pytest.raises(TypeError):
+            lw._parse_prax_log_line(unreadable)
 
 
 # ---------------------------------------------------------------------------
@@ -1894,14 +1913,13 @@ class TestProcessLogLineDeeper:
 
         monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
 
-        with patch.dict(
-            sys.modules,
-            {"aipass.trigger.apps.handlers.error_registry": None},
-        ):
-            watcher = lw.BranchLogWatcher()
-            lw._fallback_error_counts.clear()
-            line = self._make_error_line("Fallback triggered")
-            watcher._process_log_line(line, _BRANCH_LOG_PATH)
+        # The lazy fallback reaches the registry and it fails too: the
+        # watcher is left with its own local count.
+        monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ImportError("registry gone")))
+        watcher = lw.BranchLogWatcher()
+        lw._fallback_error_counts.clear()
+        line = self._make_error_line("Fallback triggered")
+        watcher._process_log_line(line, _BRANCH_LOG_PATH)
 
         fire.assert_called_once()
         call_kwargs = fire.call_args[1]
@@ -1932,14 +1950,11 @@ class TestProcessLogLineDeeper:
         monkeypatch.setattr(lw, "registry_report", MagicMock(side_effect=RuntimeError("registry down")))
         lw._fallback_error_counts.clear()
 
-        with patch.dict(
-            sys.modules,
-            {"aipass.trigger.apps.handlers.error_registry": None},
-        ):
-            watcher = lw.BranchLogWatcher()
-            line = self._make_error_line("Repeated failure")
-            watcher._process_log_line(line, _BRANCH_LOG_PATH)
-            watcher._process_log_line(line, _BRANCH_LOG_PATH)
+        monkeypatch.setattr(error_registry, "report", MagicMock(side_effect=ImportError("registry gone")))
+        watcher = lw.BranchLogWatcher()
+        line = self._make_error_line("Repeated failure")
+        watcher._process_log_line(line, _BRANCH_LOG_PATH)
+        watcher._process_log_line(line, _BRANCH_LOG_PATH)
 
         assert fire.call_count == 2
         second_call = fire.call_args_list[1][1]
@@ -1974,10 +1989,10 @@ def _set_warning_capture(lw, enabled: bool, monkeypatch) -> MagicMock:
     answer is configured on the mocked handlers.json package and the 60s TTL
     cache is dropped.
     """
-    json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
-    json_pkg.config_loader.section = MagicMock(return_value={"watch_branch_log_warnings": enabled})
+    section = MagicMock(return_value={"watch_branch_log_warnings": enabled})
+    monkeypatch.setattr(config_loader, "section", section)
     monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, True))
-    return json_pkg.config_loader.section
+    return section
 
 
 def _warning_line(message: str = "Queue depth at 91%", module: str = "watcher", level: str = "WARNING") -> str:
@@ -2185,8 +2200,7 @@ class TestWarningCaptureEnabled:
     def test_unreadable_config_keeps_capture_on(self, monkeypatch):
         """Fails OPEN: losing the count silently is the failure the lane exists to stop."""
         lw = _import_log_watcher()
-        json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
-        json_pkg.config_loader.section = MagicMock(side_effect=OSError("disk gone"))
+        monkeypatch.setattr(config_loader, "section", MagicMock(side_effect=OSError("disk gone")))
         monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, False))
 
         assert lw._warning_capture_enabled() is True
@@ -2194,8 +2208,7 @@ class TestWarningCaptureEnabled:
     def test_missing_key_defaults_to_on(self, monkeypatch):
         """A config predating this setting still watches warnings."""
         lw = _import_log_watcher()
-        json_pkg = sys.modules["aipass.trigger.apps.handlers.json"]
-        json_pkg.config_loader.section = MagicMock(return_value={})
+        monkeypatch.setattr(config_loader, "section", MagicMock(return_value={}))
         monkeypatch.setattr(lw, "_warning_capture_cache", (0.0, False))
 
         assert lw._warning_capture_enabled() is True

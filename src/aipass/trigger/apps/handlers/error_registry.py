@@ -544,8 +544,10 @@ def normalize_message(message: str) -> str:
     # Strip date-only patterns (2026-02-13)
     normalized = re.sub(r"\d{4}-\d{2}-\d{2}", "<date>", normalized)
 
-    # Strip absolute paths (any /path/to/something)
-    normalized = re.sub(r"/[\w./-]+", "<path>", normalized)
+    # Strip absolute paths: a drive-letter path with either separator
+    # (C:\path\to\x, C:/path/to/x) or any /path/to/something. The drive
+    # colon is eaten here, before the port rule below can see it.
+    normalized = re.sub(r"\b[A-Za-z]:[\\/][\w.\\/-]*|/[\w./-]+", "<path>", normalized)
 
     # Strip line numbers ("line 42" -> "line N")
     normalized = re.sub(r"\bline \d+\b", "line N", normalized, flags=re.IGNORECASE)

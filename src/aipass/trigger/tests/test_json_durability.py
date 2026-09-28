@@ -77,7 +77,10 @@ class TestWindowsLockIsRealNotSkipped:
         assert fake.calls.count((fake.LK_NBLCK, 1)) == 4
 
     def test_win32_refuses_rather_than_running_unlocked(self, monkeypatch, tmp_path):
-        """Exhausting the retries RAISES after a bounded wait (mutant: the win32 backoff sleep deleted)."""
+        """Exhausting the retries RAISES after a bounded wait. Silent data loss is the one forbidden outcome.
+
+        Mutant run: the win32 backoff sleep deleted reddens this.
+        """
         fake = _FakeMsvcrt(fail_times=config._LOCK_ATTEMPTS + 5)
         monkeypatch.setattr(config.sys, "platform", "win32")
         monkeypatch.setitem(sys.modules, "msvcrt", fake)

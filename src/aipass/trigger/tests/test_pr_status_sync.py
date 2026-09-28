@@ -15,36 +15,27 @@ import subprocess
 
 import pytest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
+
+from aipass.trigger.apps.handlers.events import pr_status_sync
 
 
 @pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock heavy infrastructure imports."""
-    import sys
+def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch the handler's two outward writes on the real module.
 
-    from aipass.trigger.apps.config import atomic_write_json
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.atomic_write_json = atomic_write_json
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
-
+    logger is a trail logger bound at import to the live logs/ directory, and
+    json_handler writes the live operation log; both are replaced with mocks.
+    Popen is patched per test, so no test launches a real drone.
+    """
+    monkeypatch.setattr(pr_status_sync, "logger", MagicMock())
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", mock_json_handler)
-
-    monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.events.pr_status_sync", raising=False)
+    monkeypatch.setattr(pr_status_sync, "json_handler", mock_json_handler)
 
 
 def _import_module():
-    """Import fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.pr_status_sync as m
-
-    return m
+    """Return the real pr_status_sync module the fixture patched."""
+    return pr_status_sync
 
 
 class TestHandlePrCreated:
@@ -80,9 +71,7 @@ class TestHandlePrCreated:
         the sync at all. Not raising was neither of those.
         """
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         with patch.object(mod, "logger") as mock_logger:
             mod.handle_pr_created(branch="flow")
@@ -98,9 +87,7 @@ class TestHandlePrCreated:
     def test_logs_operation(self, mock_popen: MagicMock) -> None:
         """Logs the event via json_handler."""
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_pr_created(branch="spawn", pr_url="https://example.com/pr/1")
 
@@ -148,9 +135,7 @@ class TestHandlePrMerged:
         exercised on a second exception class, not just the obvious one.
         """
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         with patch.object(mod, "logger") as mock_logger:
             mod.handle_pr_merged(pr_number="99")
@@ -166,9 +151,7 @@ class TestHandlePrMerged:
     def test_logs_operation(self, mock_popen: MagicMock) -> None:
         """Logs the event via json_handler."""
         mod = _import_module()
-        from aipass.trigger.apps.handlers.json import json_handler
-
-        json_handler.log_operation.reset_mock()  # type: ignore[union-attr]
+        json_handler = mod.json_handler
 
         mod.handle_pr_merged(pr_number="7", title="Add feature")
 

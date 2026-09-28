@@ -13,7 +13,7 @@
 # seedgo: no-test-needed(covered_elsewhere) — the digest body and the aged lane, in test_escalation.py
 # seedgo: no-test-needed(covered_elsewhere) — the two producers of this event, log_watcher and the catch-up scan
 # seedgo: no-test-needed(external) — ai_mail delivery and wake_branch; AIPass tests only its own files
-# seedgo: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps around its fields
+# seedgo: no-test-needed(constant) — the fixed investigation-step prose _build_notification_message() wraps
 
 import json
 import sys
@@ -25,73 +25,73 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import aipass.trigger.apps.handlers as handlers_pkg
-from aipass.trigger.apps.config import atomic_write_json, migrate_json_file, trail_logger
+import aipass.trigger.apps.handlers.error_registry as error_registry
+import aipass.trigger.apps.handlers.events.error_detected as error_detected
+from aipass.ai_mail.apps.handlers.dispatch import wake
+from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers import escalation
-from aipass.trigger.apps.handlers.error_registry import normalize_message
 
 
 # ---------------------------------------------------------------------------
-# Shared fixture: mocks config + json_handler, provides a registry-available
-# environment by default.  Individual tests override module-level helpers
-# after importing.
+# Shared fixture: the real module, with every edge that reaches outside
+# patched, and a registry-available environment by default. Individual tests
+# override module-level helpers after it.
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock config, json_handler, error_registry, and wake_branch before import."""
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.atomic_write_json = atomic_write_json
-    mock_config.TRIGGER_JSON_DIR = tmp_path / "trigger_json"
-    mock_config.migrate_json_file = migrate_json_file
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
+    """Put the real error_detected module on tmp_path and recording stubs.
 
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.json.json_handler",
-        mock_json_handler,
-    )
+    Every edge that reaches outside is swapped with monkeypatch.setattr, so
+    teardown restores it even when a test assigns over it directly:
+    _send_email (mail), wake.wake_branch (the lazy import wakes a branch),
+    the registry gates error_detected bound at import, json_handler's
+    log_operation, the medic/branch-registry files and the logger. Escalation
+    reaches error_registry.report (a registry write) by a lazy import, so
+    report is a recording stub and the registry's files point at tmp_path.
 
-    # Provide a working error_registry mock so _REGISTRY_DISPATCH_AVAILABLE=True
-    mock_registry = MagicMock()
-    mock_registry.circuit_breaker_allows = MagicMock(return_value=True)
-    mock_registry.circuit_breaker_record_error = MagicMock()
-    mock_registry.should_dispatch = MagicMock(return_value=True)
-    mock_registry.record_dispatch = MagicMock()
-    # The REAL normalizer, not a MagicMock. Escalation signatures are computed off
-    # this function, and a mock returns the same object for every input — so every
-    # message would normalize identically and any "these two share one signature"
-    # assertion below would pass without the normalizer ever running.
-    mock_registry.normalize_message = normalize_message
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
+    The registry's normalize_message stays REAL: escalation signatures are
+    computed off it, and a mock returns the same object for every input, so
+    any "these two share one signature" assertion would pass without it.
+    """
+    json_dir = tmp_path / "trigger_json"
+    monkeypatch.setattr(error_registry, "REGISTRY_FILE", json_dir / "error_registry.json")
+    monkeypatch.setattr(error_registry, "CB_STATE_FILE", json_dir / "trigger_cb_state.json")
+    monkeypatch.setattr(error_registry, "report", MagicMock(return_value={"is_new": False}))
+    monkeypatch.setattr(error_registry, "is_suppressed", MagicMock(return_value=False))
+    monkeypatch.setattr(error_registry, "get_dispatch_count", MagicMock(return_value=0))
+    monkeypatch.setattr(wake, "wake_branch", MagicMock())
 
-    # Mock wake_branch import chain to prevent real imports
-    mock_wake = MagicMock()
-    mock_wake.wake_branch = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch.wake", mock_wake)
-
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.events.error_detected",
-        raising=False,
-    )
+    monkeypatch.setattr(error_detected, "_send_email", None)
+    monkeypatch.setattr(error_detected, "circuit_breaker_allows", MagicMock(return_value=True))
+    monkeypatch.setattr(error_detected, "circuit_breaker_record_error", MagicMock())
+    monkeypatch.setattr(error_detected, "circuit_breaker_probe_succeeded", MagicMock())
+    monkeypatch.setattr(error_detected, "registry_should_dispatch", MagicMock(return_value=True))
+    monkeypatch.setattr(error_detected, "registry_record_dispatch", MagicMock())
+    monkeypatch.setattr(error_detected, "registry_is_suppressed", MagicMock(return_value=False))
+    monkeypatch.setattr(error_detected, "_REGISTRY_DISPATCH_AVAILABLE", True)
+    monkeypatch.setattr(error_detected.json_handler, "log_operation", MagicMock(return_value=True))
+    monkeypatch.setattr(error_detected, "MEDIC_STATE_FILE", json_dir / "medic_state.json")
+    monkeypatch.setattr(error_detected, "LEGACY_MEDIC_STATE_FILE", json_dir / "trigger_config.json")
+    monkeypatch.setattr(error_detected, "BRANCH_REGISTRY_FILE", tmp_path / "AIPASS_REGISTRY.json")
+    monkeypatch.setattr(error_detected, "TRIGGER_ROOT", tmp_path)
+    monkeypatch.setattr(error_detected, "logger", trail_logger(tmp_path / "error_detected_handler.jsonl"))
+    monkeypatch.setattr(error_detected, "_dispatch_timestamps", {})
+    # Tests assign over these directly; setattr them first so teardown undoes it.
+    for name in (
+        "_is_medic_enabled",
+        "_is_branch_muted",
+        "_get_registered_emails",
+        "_write_suppression_log",
+        "_write_rate_log",
+    ):
+        monkeypatch.setattr(error_detected, name, getattr(error_detected, name))
 
 
 def _import_module():
-    """Import error_detected module fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.error_detected as m
-
-    return m
+    """Return the error_detected module; the autouse fixture has already patched its edges."""
+    return error_detected
 
 
 def _setup_happy_path(mod: object) -> MagicMock:
@@ -470,27 +470,32 @@ class TestHandleErrorDetectedHappyPath:
 class TestFallbackStubs:
     """Tests for fallback functions defined when error_registry is unavailable."""
 
-    @pytest.fixture(autouse=True)
-    def _force_registry_unavailable(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Set error_registry to None so the ImportError fallback triggers."""
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", None)
-        monkeypatch.delitem(
-            sys.modules,
-            "aipass.trigger.apps.handlers.events.error_detected",
-            raising=False,
-        )
+    @pytest.fixture
+    def fallback_mod(self, monkeypatch: pytest.MonkeyPatch) -> Any:
+        """A second copy of error_detected, imported while error_registry cannot be.
 
-    def test_registry_should_dispatch_returns_true(self) -> None:
+        HELD for import_site: these stubs exist only in the `except ImportError`
+        arm, so the one way to reach them is an import that fails. No setattr on
+        the real module can make its import-time `from ... import` fail again.
+        monkeypatch restores both sys.modules entries at teardown.
+        """
+        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", None)
+        monkeypatch.delitem(sys.modules, "aipass.trigger.apps.handlers.events.error_detected")
+        import aipass.trigger.apps.handlers.events.error_detected as fresh
+
+        return fresh
+
+    def test_registry_should_dispatch_returns_true(self, fallback_mod: Any) -> None:
         """Fallback always allows dispatch for any fingerprint."""
-        mod = _import_module()
+        mod = fallback_mod
         assert mod.registry_should_dispatch("any-fingerprint") is True
 
-    def test_registry_is_suppressed_returns_false(self) -> None:
+    def test_registry_is_suppressed_returns_false(self, fallback_mod: Any) -> None:
         """Fallback suppresses nothing — no registry means no silencing."""
-        mod = _import_module()
+        mod = fallback_mod
         assert mod.registry_is_suppressed("any-fingerprint") is False
 
-    def test_registry_record_dispatch_is_a_no_op_with_the_real_arity(self) -> None:
+    def test_registry_record_dispatch_is_a_no_op_with_the_real_arity(self, fallback_mod: Any) -> None:
         """The fallback takes the same one argument and answers None like the real one.
 
         A stub stands in for a function the caller cannot see is missing, so
@@ -499,12 +504,12 @@ class TestFallbackStubs:
         argument, or returned a truthy sentinel a caller then branched on,
         would pass it. record_dispatch returns nothing, so the stub must too.
         """
-        mod = _import_module()
+        mod = fallback_mod
 
         assert mod.registry_record_dispatch("any-fingerprint") is None
         assert mod._REGISTRY_DISPATCH_AVAILABLE is False
 
-    def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self) -> None:
+    def test_circuit_breaker_record_error_takes_no_argument_and_answers_none(self, fallback_mod: Any) -> None:
         """The fallback breaker records nothing and says nothing.
 
         Same reasoning as the record_dispatch stub, with one addition that
@@ -512,7 +517,7 @@ class TestFallbackStubs:
         must not fabricate one. It counts nothing and returns None, and a
         caller cannot tell it apart from the real call by the answer.
         """
-        mod = _import_module()
+        mod = fallback_mod
 
         assert mod.circuit_breaker_record_error() is None
         assert mod.circuit_breaker_allows() is True
@@ -921,13 +926,11 @@ def lane(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SimpleNamespace:
     medic.get_muted_branches.return_value = []
     monkeypatch.setattr(handlers_pkg, "medic_state", medic, raising=False)
 
-    registry = sys.modules["aipass.trigger.apps.handlers.error_registry"]
-    registry.is_suppressed.return_value = False
-    registry.get_dispatch_count.return_value = 0
-
+    # The lane's lazy is_suppressed / get_dispatch_count reads: not suppressed,
+    # never dispatched (the autouse fixture sets them on the real registry).
     escalation._config_cache = (0.0, None)
     escalation._branch_names_cache = (0.0, None)
-    return SimpleNamespace(mod=escalation, config=config, digests=digests, medic=medic, registry=registry)
+    return SimpleNamespace(mod=escalation, config=config, digests=digests, medic=medic, registry=error_registry)
 
 
 class TestEscalationRecording:

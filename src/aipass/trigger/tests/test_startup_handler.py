@@ -13,59 +13,49 @@
 # seedgo: no-test-needed(covered_elsewhere) — what handle_error_detected does with the fired payload
 # seedgo: no-test-needed(stdlib) — datetime.fromisoformat parsing the persisted cursor
 
-import sys
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from aipass.trigger.apps.config import atomic_write_json, migrate_json_file
+import aipass.trigger.apps.handlers.error_registry as error_registry
+import aipass.trigger.apps.handlers.events.startup as startup
 
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Mock heavy infrastructure imports before importing the handler module."""
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path
-    mock_config.atomic_write_json = atomic_write_json
-    mock_config.TRIGGER_JSON_DIR = tmp_path / "trigger_json"
-    mock_config.migrate_json_file = migrate_json_file
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
+    """Put the real startup module's edges on tmp_path and recording stubs.
 
-    mock_json_handler = MagicMock()
-    mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.json.json_handler",
-        mock_json_handler,
-    )
+    The catch-up looks rows up and reports untracked ones. Unstubbed, that
+    reached the LIVE registry: one run on 2026-09-24 wrote 52 FLOW rows into
+    trigger_json/error_registry.json. The catch-up reaches the registry by
+    lazy imports, which read the real module's attributes at call time, so
+    every registry name it imports is a stub here and the registry's files
+    point at tmp_path besides. Every test starts with an empty registry that
+    stores nothing; the registry-linkage tests patch the seams on top.
 
-    # The catch-up looks rows up and reports untracked ones. Unstubbed, that
-    # reached the LIVE registry: one run on 2026-09-24 wrote 52 FLOW rows into
-    # trigger_json/error_registry.json. Every test starts with an empty registry
-    # that stores nothing; the registry-linkage tests patch the seams on top.
-    mock_registry = MagicMock()
-    mock_registry.compute_fingerprint = MagicMock(return_value="")
-    mock_registry.normalize_message = MagicMock(side_effect=lambda m: m)
-    mock_registry.get_entry = MagicMock(return_value=None)
-    mock_registry.report = MagicMock(return_value={})
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
+    The conftest already puts the catch-up state files and the logger on a
+    sandbox. SYSTEM_LOGS_DIR (the live system_logs/ the scan reads) and
+    log_operation are swapped here, and the names the tests assign over
+    directly are setattr'd first so teardown undoes those assignments.
+    """
+    json_dir = tmp_path / "trigger_json"
+    monkeypatch.setattr(error_registry, "REGISTRY_FILE", json_dir / "error_registry.json")
+    monkeypatch.setattr(error_registry, "CB_STATE_FILE", json_dir / "trigger_cb_state.json")
+    monkeypatch.setattr(error_registry, "compute_fingerprint", MagicMock(return_value=""))
+    monkeypatch.setattr(error_registry, "normalize_message", MagicMock(side_effect=lambda m: m))
+    monkeypatch.setattr(error_registry, "get_entry", MagicMock(return_value=None))
+    monkeypatch.setattr(error_registry, "report", MagicMock(return_value={}))
 
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.events.startup",
-        raising=False,
-    )
+    monkeypatch.setattr(startup.json_handler, "log_operation", MagicMock(return_value=True))
+    monkeypatch.setattr(startup, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
+    for name in ("_run_error_catchup", "_scan_system_logs_for_errors"):
+        monkeypatch.setattr(startup, name, getattr(startup, name))
 
 
 def _import_startup():
-    """Import fresh after mocking."""
-    import aipass.trigger.apps.handlers.events.startup as m
-
-    return m
+    """Return the startup module; the autouse fixture has already patched its edges."""
+    return startup
 
 
 class TestHandleStartup:
@@ -333,11 +323,12 @@ class TestCatchupNamesTheRegistryRow:
     def test_the_lookup_uses_the_level_stored_rows_carry(self, tmp_path: Path) -> None:
         """Stored rows say error_type "ERROR"; a lower-cased lookup finds nothing and mints a twin."""
         mod = _import_startup()
-        registry = sys.modules["aipass.trigger.apps.handlers.error_registry"]
 
         self._scan(mod, self._log(tmp_path))
 
-        level, _, component = registry.compute_fingerprint.call_args.args
+        fingerprint = error_registry.compute_fingerprint
+        assert isinstance(fingerprint, MagicMock)
+        level, _, component = fingerprint.call_args.args
         assert (level, component) == ("ERROR", "HOOKS")
 
     def test_the_payload_names_the_log_under_the_key_the_handler_reads(self, tmp_path: Path, monkeypatch) -> None:

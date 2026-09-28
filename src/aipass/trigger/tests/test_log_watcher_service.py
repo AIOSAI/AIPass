@@ -13,12 +13,13 @@
 # seedgo: no-test-needed(covered_elsewhere) — the branch watcher start_branch_watcher drives, in test_log_watcher.py
 
 import signal
-import sys
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+import aipass.trigger.apps.log_watcher_service as log_watcher_service
 
 
 # ---------------------------------------------------------------------------
@@ -28,58 +29,35 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock heavy watcher module imports before log_watcher_service loads."""
+    """Patch every door main() opens onto the live watchers and the catch-up.
 
-    # Mock branch_log_events module
-    mock_branch = MagicMock()
-    mock_branch.start = MagicMock(return_value=True)
-    mock_branch.stop = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.modules.branch_log_events",
-        mock_branch,
-    )
-
-    # Mock log_events module
-    mock_system = MagicMock()
-    mock_system.start = MagicMock(return_value=True)
-    mock_system.stop = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.modules.log_events",
-        mock_system,
-    )
+    The service binds its five collaborators by name at import, so they are
+    replaced on the service module itself. monkeypatch records the real
+    binding first, which also undoes the tests below that assign
+    ``mod.start_branch_watcher = MagicMock(...)`` directly on the shared module.
+    """
+    # The real watchers arm watchdog observers over the LIVE log tree.
+    monkeypatch.setattr(log_watcher_service, "start_branch_watcher", MagicMock(return_value=True))
+    monkeypatch.setattr(log_watcher_service, "stop_branch_watcher", MagicMock())
+    monkeypatch.setattr(log_watcher_service, "start_system_watcher", MagicMock(return_value=True))
+    monkeypatch.setattr(log_watcher_service, "stop_system_watcher", MagicMock())
 
     # Stub the catch-up. main() now calls it for real (DPLAN-0339 step 2), and
     # the real one walks the LIVE system_logs and fires error_detected for
     # anything it finds — every main() test below would scan the tree and
     # dispatch other branches' errors through medic. The tests that care about
-    # the call assert on this mock.
-    #
-    # Stubbed at the MEDIC MODULE, which is where the service binds it from:
-    # log_watcher_service is an entry point, so it reaches the handler through
-    # a module (seedgo encapsulation rule 3), not directly.
-    mock_medic = MagicMock()
-    mock_medic.run_error_catchup = MagicMock()
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.trigger.apps.modules.medic",
-        mock_medic,
-    )
+    # the call assert on this mock; trigger.fire is only handed to it, never
+    # called.
+    monkeypatch.setattr(log_watcher_service, "run_error_catchup", MagicMock())
 
-    # Force re-import so mocks take effect
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.trigger.apps.log_watcher_service",
-        raising=False,
-    )
+    # The shell may be systemd-supervised: main() starts reload_sentinel,
+    # whose evaluate() only acts under INVOCATION_ID.
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
 
 
 def _import_module():
-    """Import log_watcher_service fresh (after mocks are in place)."""
-    import aipass.trigger.apps.log_watcher_service as mod
-
-    return mod
+    """Hand each test the service module, its doors already patched."""
+    return log_watcher_service
 
 
 # ---------------------------------------------------------------------------
@@ -392,18 +370,22 @@ class TestStartupCatchup:
     def test_main_runs_the_catchup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Recovery no longer depends on anything firing the startup event (mutant: catch-up handed None)."""
         mod = _import_module()
+        catchup = MagicMock()
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
 
         self._run(mod, monkeypatch)
 
-        mod.run_error_catchup.assert_called_once_with(mod.trigger.fire)
+        catchup.assert_called_once_with(mod.trigger.fire)
 
     def test_catchup_gets_a_fire_event_so_errors_reach_medic(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Scanning without dispatching would recover errors into silence."""
         mod = _import_module()
+        catchup = MagicMock()
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
 
         self._run(mod, monkeypatch)
 
-        assert mod.run_error_catchup.call_args[0][0] == mod.trigger.fire
+        assert catchup.call_args[0][0] == mod.trigger.fire
 
     def test_catchup_runs_after_the_watchers_are_up(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Order is deliberate: overlap is safe, a gap is not.
@@ -454,6 +436,8 @@ class TestStartupCatchup:
     def test_no_catchup_when_both_watchers_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Nothing will be watching, so there is no window to recover into."""
         mod = _import_module()
+        catchup = MagicMock()
+        monkeypatch.setattr(mod, "run_error_catchup", catchup)
 
         pre_set = threading.Event()
         pre_set.set()
@@ -464,4 +448,4 @@ class TestStartupCatchup:
         with pytest.raises(SystemExit):
             mod.main()
 
-        mod.run_error_catchup.assert_not_called()
+        catchup.assert_not_called()

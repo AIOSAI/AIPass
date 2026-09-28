@@ -3,7 +3,7 @@
 # Description: Branch log watcher event producer for error detection
 # Version: 2.6.0
 # Created: 2026-02-02
-# Modified: 2026-08-04
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -450,35 +450,35 @@ def _detect_branch_from_path(log_path: str) -> str:
         log_path: Full path to log file
 
     Returns:
-        Branch name in uppercase (e.g., 'FLOW', 'PRAX')
+        Branch name in uppercase (e.g., 'FLOW', 'PRAX'), or 'UNKNOWN' for a
+        path outside every known tree. A path that cannot be read raises:
+        UNKNOWN is an answer, never a failure. Both callers
+        (_process_log_line, _process_warning_line) contain the raise and
+        skip that one line, so the observer thread never sees it.
     """
-    try:
-        path = Path(log_path)
+    path = Path(log_path)
 
-        # Check system_logs/ files first
-        if path.parent == SYSTEM_LOGS_DIR:
-            filename = path.name
-            # Explicit mapping for known services
-            if filename in SYSTEM_LOGS_BRANCH_MAP:
-                return SYSTEM_LOGS_BRANCH_MAP[filename]
-            # Match filename prefix against live branch names (longest-first)
-            name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
-            for prefix in _known_branch_names():
-                if name_stem.startswith(prefix + "_") or name_stem == prefix:
-                    return prefix.upper()
-            return "UNKNOWN"
+    # Check system_logs/ files first
+    if path.parent == SYSTEM_LOGS_DIR:
+        filename = path.name
+        # Explicit mapping for known services
+        if filename in SYSTEM_LOGS_BRANCH_MAP:
+            return SYSTEM_LOGS_BRANCH_MAP[filename]
+        # Match filename prefix against live branch names (longest-first)
+        name_stem = path.stem  # e.g. "memory_rollover" from "memory_rollover.log"
+        for prefix in _known_branch_names():
+            if name_stem.startswith(prefix + "_") or name_stem == prefix:
+                return prefix.upper()
+        return "UNKNOWN"
 
-        # Standard src/aipass/<branch>/logs/ pattern
-        parts = path.parts
-        for i, part in enumerate(parts):
-            if part == "aipass" and i + 1 < len(parts) and parts[i + 1] != "__pycache__":
-                # Check if this looks like a branch dir (has logs/ subdir)
-                if i + 2 < len(parts) and parts[i + 2] == "logs":
-                    return parts[i + 1].upper()
-        return "UNKNOWN"
-    except Exception as exc:
-        logger.warning("Failed to detect branch from path '%s': %s", log_path, exc)
-        return "UNKNOWN"
+    # Standard src/aipass/<branch>/logs/ pattern
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part == "aipass" and i + 1 < len(parts) and parts[i + 1] != "__pycache__":
+            # Check if this looks like a branch dir (has logs/ subdir)
+            if i + 2 < len(parts) and parts[i + 2] == "logs":
+                return parts[i + 1].upper()
+    return "UNKNOWN"
 
 
 def _parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optional[Dict[str, str]]:
@@ -496,47 +496,47 @@ def _parse_prax_log_line(log_line: str, levels: tuple = ERROR_LEVELS) -> Optiona
 
     Returns:
         Dict with keys: timestamp, module, level, message
-        None if parsing fails or the line's level is not in *levels*
+        None if the line matches no format or its level is not in *levels*.
+        A line that cannot be read raises: None means "not a line for this
+        lane", never a failure. Both callers (_process_log_line,
+        _process_warning_line) contain the raise and skip that one line, so
+        the observer thread never sees it.
     """
-    try:
-        # Try Prax format first (pipe-separated)
-        if " | " in log_line:
-            parts = log_line.split(" | ", 3)
-            if len(parts) >= 4:
-                level = parts[2].strip().upper()
-                if level in levels:
-                    return {
-                        "timestamp": parts[0].strip(),
-                        "module": parts[1].strip(),
-                        "level": level,
-                        "message": parts[3].strip(),
-                    }
-                return None
+    # Try Prax format first (pipe-separated)
+    if " | " in log_line:
+        parts = log_line.split(" | ", 3)
+        if len(parts) >= 4:
+            level = parts[2].strip().upper()
+            if level in levels:
+                return {
+                    "timestamp": parts[0].strip(),
+                    "module": parts[1].strip(),
+                    "level": level,
+                    "message": parts[3].strip(),
+                }
+            return None
 
-        # Fallback: Python logging format (dash-separated)
-        # Format: 2026-02-10 15:12:29,460 - telegram_bridge - ERROR - message
-        # NOTE: We do NOT pre-check ' - ERROR - ' in log_line because that
-        # matches ERROR appearing anywhere in the text (false positive).
-        # Instead, we split positionally and validate parts[2] is a
-        # standalone level word.
-        if " - " in log_line:
-            parts = log_line.split(" - ", 3)
-            if len(parts) >= 4:
-                level = parts[2].strip().upper()
-                # Strict check: level field must be EXACTLY a known level,
-                # not a longer string that happens to contain one.
-                if level in levels:
-                    return {
-                        "timestamp": parts[0].strip(),
-                        "module": parts[1].strip(),
-                        "level": level,
-                        "message": parts[3].strip(),
-                    }
+    # Fallback: Python logging format (dash-separated)
+    # Format: 2026-02-10 15:12:29,460 - telegram_bridge - ERROR - message
+    # NOTE: We do NOT pre-check ' - ERROR - ' in log_line because that
+    # matches ERROR appearing anywhere in the text (false positive).
+    # Instead, we split positionally and validate parts[2] is a
+    # standalone level word.
+    if " - " in log_line:
+        parts = log_line.split(" - ", 3)
+        if len(parts) >= 4:
+            level = parts[2].strip().upper()
+            # Strict check: level field must be EXACTLY a known level,
+            # not a longer string that happens to contain one.
+            if level in levels:
+                return {
+                    "timestamp": parts[0].strip(),
+                    "module": parts[1].strip(),
+                    "level": level,
+                    "message": parts[3].strip(),
+                }
 
-        return None
-    except Exception as exc:
-        logger.warning("Failed to parse log line: %s", exc)
-        return None
+    return None
 
 
 def set_event_callback(callback: Callable[..., object]) -> None:

@@ -12,12 +12,15 @@
 # seedgo: no-test-needed(covered_elsewhere) — the live system_logs observer, owned by branch_log_events, in test_branch_log_events.py
 # seedgo: no-test-needed(external) — WatchdogObserver's event delivery is the watchdog package's; AIPass tests only its own files
 
-import sys
 import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+import aipass.trigger.apps.handlers.error_registry as error_registry
+import aipass.trigger.apps.handlers.watchers.log_watcher as watchers_log_watcher
+import aipass.trigger.apps.modules.core as trigger_core
 
 
 # ---------------------------------------------------------------------------
@@ -27,75 +30,43 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch, tmp_path):
-    """Mock heavy infrastructure imports before watchers/log_watcher loads."""
+    """Replace every door the watcher opens onto live state, on the real modules.
 
+    The module is imported once, at the top; each door is set here and put
+    back by monkeypatch, which also undoes the tests below that assign
+    ``wlw.SYSTEM_LOGS_DIR`` or ``wlw._log_observer`` directly.
+    """
     mock_logger = MagicMock()
-    mock_logger.info = MagicMock()
-    mock_logger.warning = MagicMock()
+    monkeypatch.setattr(watchers_log_watcher, "logger", mock_logger)
 
-    # -- prax logger (imported as `from aipass.prax import logger`) ----------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules", MagicMock())
-    monkeypatch.setitem(sys.modules, "aipass.prax.apps.modules.logger", MagicMock())
-
-    # -- trigger json handler -----------------------------------------------
+    # log_operation appends to the LIVE trigger logs/.
     mock_json_handler = MagicMock()
     mock_json_handler.log_operation = MagicMock(return_value=True)
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.json.json_handler", json_mod)
+    monkeypatch.setattr(watchers_log_watcher, "json_handler", mock_json_handler)
 
-    # -- trigger config (TRIGGER_ROOT) --------------------------------------
-    from aipass.trigger.apps.config import atomic_write_json
-
-    mock_config = MagicMock()
-    mock_config.TRIGGER_ROOT = tmp_path / "src" / "aipass" / "trigger"
-    mock_config.atomic_write_json = atomic_write_json
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.config", mock_config)
+    # SYSTEM_LOGS_DIR is built from TRIGGER_ROOT at import: the LIVE
+    # system_logs. It points at this test's own directory instead.
+    monkeypatch.setattr(watchers_log_watcher, "SYSTEM_LOGS_DIR", tmp_path / "system_logs")
 
     # -- error registry: an ERROR line is reported through a lazy import. Left
     # real, test_reads_new_content wrote a TEST row into the LIVE registry on
-    # every run (found 2026-09-24, first written 2026-05-22).
-    mock_registry = MagicMock()
-    mock_registry.report = MagicMock(return_value={})
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.handlers.error_registry", mock_registry)
+    # every run (found 2026-09-24, first written 2026-05-22). The lazy
+    # `from ... import report` reads the attribute at call time, so the
+    # replacement on the real module is what it gets.
+    monkeypatch.setattr(error_registry, "report", MagicMock(return_value={}))
 
-    # -- trigger core (trigger.fire) ----------------------------------------
-    mock_trigger_obj = MagicMock()
-    mock_core = MagicMock()
-    mock_core.trigger = mock_trigger_obj
-    monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_core)
+    # -- trigger core: the lazy `from ... import trigger` gets this recorder,
+    # never the live bus that would run medic's handlers.
+    monkeypatch.setattr(trigger_core, "trigger", MagicMock())
 
-    # -- watchdog (make it available) ---------------------------------------
-    mock_observer_cls = MagicMock()
-    mock_observer_mod = MagicMock()
-    mock_observer_mod.Observer = mock_observer_cls
-    monkeypatch.setitem(sys.modules, "watchdog", MagicMock())
-    monkeypatch.setitem(sys.modules, "watchdog.observers", mock_observer_mod)
-
-    mock_events_mod = MagicMock()
-    mock_events_mod.FileSystemEventHandler = type("FakeFileSystemEventHandler", (object,), {})
-    monkeypatch.setitem(sys.modules, "watchdog.events", mock_events_mod)
-
-    # -- Force re-import so mocks take effect -------------------------------
-    monkeypatch.delitem(
-        sys.modules,
-        "aipass.trigger.apps.handlers.watchers.log_watcher",
-        raising=False,
-    )
+    # -- watchdog: no real observer is ever armed over a directory.
+    monkeypatch.setattr(watchers_log_watcher, "WatchdogObserver", MagicMock())
+    monkeypatch.setattr(watchers_log_watcher, "_log_observer", None)
 
 
 def _import_watchers_lw():
-    """Import watchers/log_watcher module fresh (after mocks are in place)."""
-    import aipass.trigger.apps.handlers.watchers.log_watcher as wlw
-
-    return wlw
+    """Hand each test the watcher module, its doors already replaced."""
+    return watchers_log_watcher
 
 
 # ---------------------------------------------------------------------------

@@ -41,7 +41,7 @@ _trail = MagicMock()
 @pytest.fixture(autouse=True)
 def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: ignore[misc]
     """Reset module state and redirect file paths to tmp_path."""
-    mod._file_cooldowns.clear()
+    monkeypatch.setattr(mod, "_file_cooldowns", {})
     mod._send_email = None
 
     monkeypatch.setattr(mod, "MEDIC_STATE_FILE", tmp_path / "medic_state.json")
@@ -60,8 +60,6 @@ def _reset_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # type: igno
     monkeypatch.setitem(sys.modules, "aipass.ai_mail.apps.handlers.dispatch.wake", mock_wake_mod)
 
     yield
-
-    mod._file_cooldowns.clear()
 
 
 def _setup_happy_path() -> MagicMock:
@@ -301,6 +299,27 @@ class TestBranchMuted:
         )
         send.assert_not_called()
         assert not (tmp_path / "alerts.json").exists()
+
+    def test_unreadable_mute_file_fails_open_and_says_so(self, tmp_path: Path) -> None:
+        """An unreadable medic_state.json is not a mute, and the trail says it was unread.
+
+        Before, a corrupt file read as "not muted" with only a sidecar warning, so
+        the decision trail could not tell an unread mute from a branch nobody muted.
+        Failing open is kept: a runaway must reach someone.
+        """
+        (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=150,
+            sustained_duration_sec=720,
+            severity="warning",
+        )
+
+        entries = _decision_entries("mute_unreadable")
+        assert [(e["outcome"], e["branch"]) for e in entries] == [("observed", "flow")]
+        assert len(_read_alerts(tmp_path)) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -997,12 +1016,17 @@ class TestVolumeMuteMigration:
     """Volume mutes are read through the legacy-path migration."""
 
     def test_volume_mute_survives_migration(self, tmp_path: Path) -> None:
-        """A volume mute written under the old filename still silences the alert."""
+        """A volume mute written under the old filename still silences the alert.
+
+        Mutant run: skipping the legacy-file migration in the mute read reddens this.
+        """
         mod.LEGACY_MEDIC_STATE_FILE.write_text(
             json.dumps({"config": {"volume_muted_branches": [{"name": "hooks", "expires_at": None}]}}),
             encoding="utf-8",
         )
 
-        assert mod._is_branch_volume_muted("hooks") is True
+        mod.handle_runaway_log_detected(file_path=RUNAWAY_LOG, branch="hooks", severity="warning")
+
+        assert [e["outcome"] for e in _decision_entries("volume_muted")] == ["suppressed"]
         assert mod.MEDIC_STATE_FILE.exists()
         assert not mod.LEGACY_MEDIC_STATE_FILE.exists()
