@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-04-16
 # Modified: 2026-09-28
 # =============================================
@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Dict, List, NamedTuple
-
+from rich.markup import escape
 from aipass.cli.apps.modules import console, error as cli_error, success
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.prax import logger
@@ -1095,8 +1095,8 @@ def run_cross_os(run_e2e: bool = False) -> int:
     error_count = 0
 
     console.print("  [bold]Cross-OS[/bold]")
-    for check in checks:
-        line = format_check(check.label, check.glyph, check.detail, check.remediation)
+    for check in checks:  # rows carry registry and probe text, never markup: escaped so brackets print as written
+        line = format_check(escape(check.label), check.glyph, escape(check.detail), escape(check.remediation))
         console.print(line)
         if check.glyph == GLYPH_PASS:
             pass_count += 1

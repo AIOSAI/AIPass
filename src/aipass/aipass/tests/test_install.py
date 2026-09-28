@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.2.6
+# Version: 1.2.7
 # Created: 2026-07-05
 # Modified: 2026-09-28
 # =============================================
@@ -23,16 +23,16 @@ from aipass.aipass.apps.modules.install import (
     DEFAULT_HOME,
     REPO_URL,
     TOTAL_STEPS,
-    _acquire_install_lock,
+    acquire_install_lock,
     _ask_permission_mode,
     _build_install_prompt,
     _check_and_fix_owner,
     _clone_repo,
     _end_in_chat,
-    _install_lock_path,
+    install_lock_path,
     _install_phone_face,
     _looks_like_aipass_tree,
-    _release_install_lock,
+    release_install_lock,
     _print_next_steps,
     _registry_user_name,
     _resolve_home,
@@ -155,7 +155,7 @@ class TestInstallLock:
     def test_lock_lives_beside_home_not_inside_it(self, tmp_path: Path) -> None:
         """The lock must not live in a directory the clone has yet to create."""
         home = tmp_path / "AIPass"
-        lock = _install_lock_path(home)
+        lock = install_lock_path(home)
         assert lock.parent == tmp_path
         assert home not in lock.parents
 
@@ -165,44 +165,44 @@ class TestInstallLock:
         Mutant: `return lock` -> `return lock.parent` (the claim hands back the wrong path) -> red.
         """
         home = tmp_path / "AIPass"
-        first = _acquire_install_lock(home)
-        assert first == _install_lock_path(home)
+        first = acquire_install_lock(home)
+        assert first == install_lock_path(home)
 
         with patch(f"{_MOD}.error") as err:
-            second = _acquire_install_lock(home)
+            second = acquire_install_lock(home)
 
         assert second is None
         message = err.call_args[0][0]
-        assert str(_install_lock_path(home)) in message
+        assert str(install_lock_path(home)) in message
         assert str(os.getpid()) in message
 
     def test_release_frees_the_home(self, tmp_path: Path) -> None:
         """After release the next install can claim it, and the removal is announced once.
 
-        Mutant: `"install_lock_released"` -> `"released"` in _release_install_lock -> red.
+        Mutant: `"install_lock_released"` -> `"released"` in release_install_lock -> red.
         """
         home = tmp_path / "AIPass"
-        lock = _acquire_install_lock(home)
+        lock = acquire_install_lock(home)
         with patch(_BUS) as bus:
-            _release_install_lock(lock)
+            release_install_lock(lock)
         bus.fire.assert_called_once_with(
-            "file_deleted", path=str(_install_lock_path(home)), reason="install_lock_released"
+            "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
-        assert not _install_lock_path(home).exists()
-        assert _acquire_install_lock(home) is not None
+        assert not install_lock_path(home).exists()
+        assert acquire_install_lock(home) is not None
 
     def test_stale_lock_from_a_dead_pid_is_taken_over(self, tmp_path: Path) -> None:
         """A crashed install must not wedge the home forever.
 
-        Mutant: `return _acquire_install_lock(home, _retry=False)` -> `return None` -> red.
+        Mutant: `return acquire_install_lock(home, _retry=False)` -> `return None` -> red.
         """
         home = tmp_path / "AIPass"
-        lock = _install_lock_path(home)
+        lock = install_lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
 
         with patch(f"{_MOD}._pid_alive", return_value=False), patch(_BUS) as bus:
-            claimed = _acquire_install_lock(home)
+            claimed = acquire_install_lock(home)
 
         bus.fire.assert_called_once_with("file_deleted", path=str(lock), reason="stale_install_lock_cleared")
         assert claimed == lock
@@ -211,13 +211,13 @@ class TestInstallLock:
     def test_live_holder_is_never_stolen(self, tmp_path: Path) -> None:
         """The counterfactual: a lock whose pid IS alive is left alone."""
         home = tmp_path / "AIPass"
-        lock = _install_lock_path(home)
+        lock = install_lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
 
         with patch(f"{_MOD}._pid_alive", return_value=True):
             with patch(f"{_MOD}.error"):
-                assert _acquire_install_lock(home) is None
+                assert acquire_install_lock(home) is None
 
         assert "999999999" in lock.read_text(encoding="utf-8")
 
@@ -230,12 +230,12 @@ class TestInstallLock:
         Mutant: `if _retry and alive is False:` -> `if _retry and not alive:` -> red.
         """
         home = tmp_path / "AIPass"
-        lock = _install_lock_path(home)
+        lock = install_lock_path(home)
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
 
         with patch(f"{_MOD}._pid_alive", return_value=None), patch(f"{_MOD}.error") as err, patch(_BUS) as bus:
-            assert _acquire_install_lock(home) is None
+            assert acquire_install_lock(home) is None
 
         bus.fire.assert_not_called()
         assert "999999999" in lock.read_text(encoding="utf-8")
@@ -376,19 +376,30 @@ class TestRunInstall:
         assert rc == 0
         run.assert_not_called()
         net.assert_not_called()
-        assert not _install_lock_path(home).parent.exists()
+        assert not install_lock_path(home).parent.exists()
 
     def test_aborts_when_clone_fails(self, tmp_path: Path) -> None:
-        """A failed fetch aborts before the setup step runs."""
+        """A failed fetch aborts before the setup step runs.
+
+        The throwaway gate is passed, so the run takes the lock and reaches the clone
+        itself; before, it stopped at the gate and the setup assert could not fail.
+        Mutant (fleet green leg 4): the clone failure's `return 1` removed -> red.
+        """
         home = tmp_path / "AIPass"
         with (
             patch(f"{_MOD}._resolve_home", return_value=home),
-            patch(f"{_MOD}._clone_repo", return_value=False),
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}._clone_repo", return_value=False) as clone,
             patch(f"{_MOD}._run_setup") as setup,
+            patch(_BUS) as bus,
         ):
             rc = run_install(non_interactive=True, dry_run=False)
-        assert rc == 1
+        clone.assert_called_once_with(home, False)
         setup.assert_not_called()
+        assert rc == 1
+        bus.fire.assert_called_once_with(
+            "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
+        )
 
     def test_full_happy_path(self, tmp_path: Path) -> None:
         """Clone + setup + verify + owner check + next-steps returns success."""
@@ -407,7 +418,7 @@ class TestRunInstall:
             rc = run_install(non_interactive=True, dry_run=False)
         assert rc == 0
         bus.fire.assert_called_once_with(
-            "file_deleted", path=str(_install_lock_path(home)), reason="install_lock_released"
+            "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
         face.assert_called_once_with(False, False)
         nxt.assert_called_once()
@@ -438,7 +449,7 @@ class TestRunInstall:
             rc = run_install(non_interactive=True, dry_run=False, no_baud=False)
         assert rc == 0
         bus.fire.assert_called_once_with(
-            "file_deleted", path=str(_install_lock_path(home)), reason="install_lock_released"
+            "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
         assert [c[0] for c in order.mock_calls] == ["verify", "face", "chat"]
         assert header.call_args_list[3:] == [call(4, 5, "Phone face + baud-cli"), call(5, 5, "Welcome")]
@@ -920,11 +931,16 @@ class TestThrowawayGate:
         assert result == 1
 
     def test_force_flag_overrides(self, tmp_path) -> None:
-        """--force-global-home lets a temp home proceed past the gate."""
+        """--force-global-home lets a temp home proceed past the gate.
+
+        The home sits one level under tmp_path, as in the other lock tests: the lock
+        lies in the home's parent, so a home of tmp_path itself put it in pytest's base.
+        """
+        home = tmp_path / "AIPass"
         with (
             patch(
                 "aipass.aipass.apps.modules.install._resolve_home",
-                return_value=tmp_path,
+                return_value=home,
             ),
             patch(
                 "aipass.aipass.apps.modules.install.sys.argv",
@@ -949,7 +965,7 @@ class TestThrowawayGate:
             result = run_install(non_interactive=True)
         assert result == 0
         bus.fire.assert_called_once_with(
-            "file_deleted", path=str(_install_lock_path(tmp_path)), reason="install_lock_released"
+            "file_deleted", path=str(install_lock_path(home)), reason="install_lock_released"
         )
 
 

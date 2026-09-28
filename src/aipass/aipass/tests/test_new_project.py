@@ -14,8 +14,8 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — spawn_agent's own behavior; @spawn's function, mocked here
 
-import functools
 import hashlib
+import io
 import json
 import shutil
 import subprocess
@@ -34,11 +34,7 @@ from aipass.aipass.apps.handlers.new_project import (
 )
 from aipass.aipass.apps.handlers.new_project.adopt import adopt_project
 from aipass.aipass.shared.registry_discovery import registries_in
-from aipass.aipass.apps.modules.new_project import (
-    _prompt_agent,
-    _prompt_template,
-    handle_command,
-)
+from aipass.aipass.apps.modules.new_project import handle_command
 from aipass.spawn.apps.handlers.class_registry import (
     LEGACY_CLASSES,
     refuse_retired_or_forbidden,
@@ -72,7 +68,7 @@ def test_find_host_root_finds_closest_registry(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _validate_name
+# Project-name check (_validate_name), read through create_project
 # ---------------------------------------------------------------------------
 
 
@@ -705,100 +701,103 @@ def test_module_handles_no_args(capsys: pytest.CaptureFixture[str]):
 # ---------------------------------------------------------------------------
 
 
-def _eof(prompt: str) -> str:
-    """Stand-in for input() at a closed stdin."""
-    raise EOFError
+# Read through `aipass new`, the prompts' one caller, with stdin holding what the user
+# types (fleet green leg 4): input() is the product's own, nothing process-wide is
+# replaced. The host is tmp_path, create_project is a recording stub answering "no
+# agent" and the operation log is patched, so no answer writes a project, logs to the
+# live store or launches anything. The answer is read off create_project's arguments.
 
 
-def test_prompt_template_default():
-    assert _prompt_template(["empty", "python"], ask=lambda prompt: "") == "empty"
+class _CtrlCStdin(io.StringIO):
+    """A stdin the user presses Ctrl-C on: input() reads it and gets KeyboardInterrupt."""
+
+    def readline(self, size: int | None = -1) -> str:
+        """Raise as a terminal does when Ctrl-C arrives mid-read."""
+        raise KeyboardInterrupt
 
 
-def test_prompt_template_by_number():
-    """Mutant: `return templates[int(choice) - 1]` -> `return templates[0]` -> red."""
-    assert _prompt_template(["empty", "python"], ask=lambda prompt: "2") == "python"
+def _new_answering(host_env, monkeypatch, stdin: io.StringIO, args: list[str], expect_exit: int | None = None):
+    """Run `aipass new <args>` with *stdin* as the terminal; return the create_project recorder.
+
+    With *expect_exit* the command must exit with that code, so a cancel is read off both
+    the code it exits with and the build it never asked for.
+    """
+    monkeypatch.chdir(host_env)
+    name = args[0]
+    built = {
+        "target": str(host_env / "projects" / name),
+        "registry_file": str(host_env / "projects" / name / f"{name.upper()}_REGISTRY.json"),
+        "template": "empty",
+        "agent_created": False,
+    }
+    with (
+        patch("sys.stdin", stdin),
+        patch("aipass.aipass.apps.handlers.new_project.create_project", return_value=built) as mock_create,
+        patch("aipass.aipass.apps.modules.new_project.json_handler", autospec=True),
+    ):
+        if expect_exit is None:
+            handle_command("new", args)
+        else:
+            with pytest.raises(SystemExit) as exited:
+                handle_command("new", args)
+            assert exited.value.code == expect_exit
+    return mock_create
 
 
-def test_prompt_template_by_name():
-    assert _prompt_template(["empty", "python"], ask=lambda prompt: "python") == "python"
+@pytest.mark.parametrize(
+    "typed,template",
+    [
+        ("\n", "empty"),  # Enter takes the default, the first template
+        ("2\n", "python"),  # a number picks by position
+        ("python\n", "python"),  # a name picks by name
+        ("", "empty"),  # end of input is no answer: the default
+    ],
+)
+def test_template_prompt_answer_reaches_the_build(host_env, monkeypatch, typed: str, template: str):
+    """What the user types at the template prompt is the template the project is built with.
+
+    Mutant: `return templates[int(choice) - 1]` -> `return templates[0]` -> red at "2".
+    """
+    create = _new_answering(host_env, monkeypatch, io.StringIO(typed), ["demo", "--no-agent"])
+    create.assert_called_once_with("demo", template, True)
 
 
-def test_prompt_template_eof():
-    assert _prompt_template(["empty", "python"], ask=_eof) == "empty"
+@pytest.mark.parametrize(
+    "typed,no_agent",
+    [
+        ("\n", False),  # Enter is the prompt's default, Y
+        ("n\n", True),  # n skips the agent
+        ("", False),  # end of input is no answer: the default, Y
+    ],
+)
+def test_agent_prompt_answer_reaches_the_build(host_env, monkeypatch, typed: str, no_agent: bool):
+    """What the user types at the agent prompt decides whether the build seats an agent.
 
-
-def test_prompt_agent_default_yes():
-    assert _prompt_agent(ask=lambda prompt: "") is False
-
-
-def test_prompt_agent_no():
-    """Mutant: the `("n", "no")` branch's `return True` -> `return False` -> red."""
-    assert _prompt_agent(ask=lambda prompt: "n") is True
-
-
-def test_prompt_agent_eof():
-    assert _prompt_agent(ask=_eof) is False
-
-
-def _ctrl_c(prompt: str) -> str:
-    """Stand-in for input() when the user presses Ctrl-C."""
-    raise KeyboardInterrupt
+    Mutant: the `("n", "no")` branch's `return True` -> `return False` -> red at "n".
+    """
+    create = _new_answering(host_env, monkeypatch, io.StringIO(typed), ["demo", "--template", "empty"])
+    create.assert_called_once_with("demo", "empty", no_agent)
 
 
 def test_ctrl_c_at_the_agent_prompt_creates_nothing(host_env, monkeypatch):
     """Ctrl-C is a cancel, never a yes: no project is created and the command exits 130.
 
     Red before the cure: _prompt_agent answered Ctrl-C like Enter and the project was built.
-    The host is tmp_path and create_project is a recording stub answering "no agent", so even
-    a broken prompt writes no project and launches nothing.
     Mutant (fleet green leg 3): `except EOFError:` -> `except (EOFError, KeyboardInterrupt):` -> red.
     """
-    monkeypatch.chdir(host_env)
-    built = {
-        "target": str(host_env / "projects" / "cancelled"),
-        "registry_file": str(host_env / "projects" / "cancelled" / "CANCELLED_REGISTRY.json"),
-        "template": "empty",
-        "agent_created": False,
-    }
-    with (
-        patch(
-            "aipass.aipass.apps.modules.new_project._prompt_agent",
-            functools.partial(_prompt_agent, ask=_ctrl_c),
-        ),
-        patch("aipass.aipass.apps.handlers.new_project.create_project", return_value=built) as mock_create,
-        pytest.raises(SystemExit) as exited,
-    ):
-        handle_command("new", ["cancelled", "--template", "empty"])
-    assert exited.value.code == 130
-    mock_create.assert_not_called()
+    create = _new_answering(host_env, monkeypatch, _CtrlCStdin(), ["cancelled", "--template", "empty"], expect_exit=130)
+    create.assert_not_called()
+    assert not (host_env / "projects" / "cancelled").exists()
 
 
 def test_ctrl_c_at_the_template_prompt_creates_nothing(host_env, monkeypatch):
     """Ctrl-C at the template prompt is a cancel, never "use the default": nothing is created, exit 130.
 
     Red before the cure: _prompt_template answered Ctrl-C with templates[0] and went on to the build.
-    The host is tmp_path and create_project is a recording stub answering "no agent", so even
-    a broken prompt writes no project and launches nothing.
     Mutant (fleet green leg 3): template prompt `except EOFError:` -> `except (EOFError, KeyboardInterrupt):` -> red.
     """
-    monkeypatch.chdir(host_env)
-    built = {
-        "target": str(host_env / "projects" / "cancelled"),
-        "registry_file": str(host_env / "projects" / "cancelled" / "CANCELLED_REGISTRY.json"),
-        "template": "empty",
-        "agent_created": False,
-    }
-    with (
-        patch(
-            "aipass.aipass.apps.modules.new_project._prompt_template",
-            functools.partial(_prompt_template, ask=_ctrl_c),
-        ),
-        patch("aipass.aipass.apps.handlers.new_project.create_project", return_value=built) as mock_create,
-        pytest.raises(SystemExit) as exited,
-    ):
-        handle_command("new", ["cancelled", "--no-agent"])
-    assert exited.value.code == 130
-    mock_create.assert_not_called()
+    create = _new_answering(host_env, monkeypatch, _CtrlCStdin(), ["cancelled", "--no-agent"], expect_exit=130)
+    create.assert_not_called()
     assert not (host_env / "projects" / "cancelled").exists()
 
 
@@ -823,11 +822,6 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
     }
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        # The real agent prompt, answered Enter through its own ask seam (never builtins.input).
-        patch(
-            "aipass.aipass.apps.modules.new_project._prompt_agent",
-            functools.partial(_prompt_agent, ask=lambda prompt: ""),
-        ),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
@@ -841,6 +835,7 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
         patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
     ):
         mock_stdin.isatty.return_value = True
+        mock_stdin.readline.return_value = "\n"  # the real agent prompt, answered Enter
         handle_command("new", ["launch", "--template", "empty"])
     mock_launch.assert_called_once()
     assert mock_launch.call_args[0][0] == "claude"
@@ -863,11 +858,6 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureF
     }
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        # The real agent prompt, answered Enter through its own ask seam (never builtins.input).
-        patch(
-            "aipass.aipass.apps.modules.new_project._prompt_agent",
-            functools.partial(_prompt_agent, ask=lambda prompt: ""),
-        ),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
@@ -881,6 +871,7 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureF
         patch("aipass.aipass.apps.handlers.handoff_platform.launch_inline") as mock_launch,
     ):
         mock_stdin.isatty.return_value = False
+        mock_stdin.readline.return_value = "\n"  # the real agent prompt, answered Enter
         handle_command("new", ["piped", "--template", "empty"])
     mock_launch.assert_not_called()
     out, _err = capsys.readouterr()

@@ -3,7 +3,7 @@
 # Description: Tests for aipass adopt — project adoption handler
 # Version: 1.1.3
 # Created: 2026-07-20
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/new_project/adopt.py and apps/modules/adopt.py."""
@@ -204,29 +204,30 @@ def test_adopt_writes_registry_and_settings(host_env):
     assert "env" not in settings
 
 
-def test_adopt_writes_claude_md_excludes_fence(host_env):
+def test_adopt_writes_claude_md_excludes_fence(host_env, tmp_path):
     """adopt only ever targets <host>/projects/<name>, so settings.local.json must
     always carry the claudeMdExcludes fence when AIPASS_HOME is detected — never
     just the bare env.AIPASS_HOME that `nested=False` would produce."""
     _, target = host_env
-    # literal_path (HELD): fake_home cannot be built from tmp_path — adopt.py's
-    # is_throwaway_path() (shared/project_home.py) treats any path under
-    # tempfile.gettempdir()/"/tmp" as throwaway and SKIPS writing
-    # settings.local.json entirely, so a tmp_path-built fake_home silently
-    # turns off the exact branch this test exercises.
-    fake_home = "/fake/aipass/home"
+    # The home is built from tmp_path, so adopt.py's is_throwaway_path() would call it
+    # throwaway and skip the very write under test: it answers False here, as it does for
+    # a real home. Nothing else on this path asks it (fleet green leg 4).
+    fake_home = str(tmp_path / "aipass_home")
     with (
         patch(
             "aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home",
             return_value=fake_home,
         ),
+        patch("aipass.aipass.apps.handlers.new_project.adopt.is_throwaway_path", return_value=False),
         patch("aipass.aipass.apps.handlers.new_project.adopt._enroll_project"),
     ):
         adopt_project(target, no_agent=True)
 
-    settings = json.loads((target / ".claude" / "settings.local.json").read_text(encoding="utf-8"))
+    local_settings = target / ".claude" / "settings.local.json"
+    assert local_settings.is_file()
+    settings = json.loads(local_settings.read_text(encoding="utf-8"))
     assert settings["env"]["AIPASS_HOME"] == fake_home
-    assert settings["claudeMdExcludes"] == [
+    assert settings.get("claudeMdExcludes") == [
         (Path(fake_home) / "CLAUDE.md").as_posix(),
         (Path(fake_home) / ".claude" / "CLAUDE.md").as_posix(),
     ]

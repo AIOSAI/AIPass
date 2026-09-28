@@ -196,8 +196,11 @@ class TestWriteDurability:
     def test_write_failure_raises_instead_of_answering_false(self, tmp_store) -> None:
         """json_handler answers False; save_profile must not pass that off as success.
 
-        The bus is patched where it lives; the one fire is asserted with its arguments.
+        What it adds to its neighbours: the FIRST save, with no store on disk yet. The failure
+        still raises and fires, and leaves no store behind that a later read would take for a
+        profile. The bus is patched where it lives; the one fire is asserted with its arguments.
         """
+        assert not tmp_store.exists()
         with (
             self._fail_the_replace(),
             patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
@@ -206,6 +209,7 @@ class TestWriteDurability:
             with pytest.raises(OSError):
                 save_profile({"name": "Doomed"})
 
+        assert not tmp_store.exists()
         self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_trigger_fires_on_write_failure(self, tmp_store) -> None:
@@ -584,11 +588,6 @@ class TestHandleCommand:
         This is the row canary's sweep named directly -- `aipass profile clear`
         in a pipe hit EOFError, printed Cancelled and exited 0 while the profile
         sat untouched, so a script could not tell a clear from a no-op.
-
-        The pipe's own door is `clear --yes`: the same empty stdin with the flag
-        clears the store on disk without asking, so a script that means it can.
-        Mutant 2026-09-28: the skip-confirm flags `("--yes", "-y")` became `("-y",)`, so --yes no
-        longer skips the prompt, and this test went red.
         """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Kept", "os": "Linux"})
@@ -602,6 +601,16 @@ class TestHandleCommand:
         _out, err = capsys.readouterr()
         assert "Cancelled — no confirmation read, profile NOT cleared." in err
 
+    def test_clear_yes_clears_a_piped_store_without_asking(self, tmp_store) -> None:
+        """The pipe's own door is `clear --yes`: the same empty stdin with the flag clears the
+        store on disk without asking, so a script that means it can.
+
+        Moved out of test_clear_eof_error on 2026-09-28, one behaviour per test.
+        Mutant 2026-09-28: the skip-confirm flags `("--yes", "-y")` became `("-y",)`, so --yes no
+        longer skips the prompt, and this test went red.
+        """
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "Kept", "os": "Linux"})
         with (
             patch("sys.stdin", io.StringIO("")),
             patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),

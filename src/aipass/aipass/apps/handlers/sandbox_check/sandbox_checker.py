@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: sandbox_checker.py
 # Description: Kernel sandbox prerequisite checks for aipass doctor
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-06-10
-# Modified: 2026-06-10
+# Modified: 2026-09-28
 # =============================================
 
 """Sandbox prerequisite checker — detects bwrap, node, srt, rg, broker.
@@ -311,6 +311,12 @@ def _find_broker_socket(repo_root: Path | None) -> Path | None:
     return None
 
 
-def is_linux() -> bool:
-    """Return True if running on Linux."""
-    return sys.platform.startswith("linux")
+def is_linux(platform: str | None = None) -> bool:
+    """Return True if running on Linux.
+
+    ``platform`` is the sys.platform to read (None means this process's). It is
+    handed in for the tests, which ask about darwin and win32 without replacing
+    sys.platform process-wide; doctor, the one caller, passes nothing (fleet green leg 4).
+    """
+    platform = sys.platform if platform is None else platform
+    return platform.startswith("linux")

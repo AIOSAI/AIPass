@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cross_os.py
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-07-02
 # Modified: 2026-09-28
 # =============================================
@@ -242,7 +242,7 @@ class TestFailToError:
 
 
 # =============================================================================
-# _cross_os_gap_rows — OS-gap cross-reference row shape (slice 1 logic)
+# OS-gap cross-reference row shape (doctor.py _cross_os_gap_rows), read through run_cross_os
 # =============================================================================
 
 
@@ -274,6 +274,19 @@ class TestCrossOsGapRows:
         assert row.detail.startswith("pre-flight:")
         assert "WinError 1314" in row.detail
         assert "aipass" in row.remediation
+
+    def test_bracketed_registry_text_reaches_the_screen_as_written(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """What the gap registry holds is printed as written, brackets included.
+
+        The row wraps the status in brackets and a symptom may hold its own; Rich read
+        both as markup and dropped them (red first on HEAD, fleet green leg 4).
+        Mutant: doctor.py run_cross_os's escape of the row dropped (the shape of HEAD) -> red.
+        """
+        fake = [CrossOsGap("9", "route masks", "all", "printed as [unknown command]", "aipass", "recommended")]
+        self._gap_rows(fake)
+        out = " ".join(capsys.readouterr().out.split())
+        assert "pre-flight: printed as [unknown command]" in out
+        assert "tracked gap [recommended] — owner aipass" in out
 
     def test_no_gaps_emits_single_pass(self) -> None:
         """Mutant (fleet green leg 3): `if not gaps:` -> `if False:` -> red."""
@@ -399,7 +412,8 @@ class TestRunE2e:
 
 
 # =============================================================================
-# _check_cross_os — composed group (gap rows + pre-flight rows + optional e2e)
+# Composed group (doctor.py _check_cross_os: gap rows + pre-flight rows + optional e2e),
+# read through run_cross_os
 # =============================================================================
 
 
@@ -584,19 +598,20 @@ class TestInitStage2HeadsUp:
     def test_heads_up_prints_gaps(self, capsys: pytest.CaptureFixture[str]) -> None:
         """The output is the heads-up-free output followed by the heads-up, and nothing else.
 
+        The registry's text is printed as written: the status in its brackets and a
+        symptom that holds a bracket of its own (Rich ate both on HEAD, fleet green leg 4).
         Mutant: per-gap line not printed -> red.
+        Mutant: init_flow.py's escape of the gap line dropped (the shape of HEAD) -> red.
         """
-        fake = [CrossOsGap("9", "route masks", "all", "printed as Unknown command", "aipass", "rec")]
+        fake = [CrossOsGap("9", "route masks", "all", "printed as [unknown command]", "aipass", "rec")]
         without, _ = self._stage_2(capsys, heads_up=False)
         with patch("aipass.aipass.apps.handlers.cross_os.gaps_for_platform", return_value=fake):
             out, err = self._stage_2(capsys)
         assert out.startswith(without)
         # Rich wraps at the console width, so the tail is compared word by word.
-        # The gap's status "[all]" is absent: init_flow prints it unescaped and Rich reads it
-        # as markup, so it vanishes (a product defect, named in the leg 3b reply, not cured here).
         expected = (
             "Heads-up — 1 tracked cross-OS gap(s) may apply on this OS (machine pre-flight, not a guarantee): "
-            "! gap #9: printed as Unknown command"
+            "! gap #9: printed as [unknown command] [rec]"
         )
         assert out[len(without) :].split() == expected.split()
         assert err == ""

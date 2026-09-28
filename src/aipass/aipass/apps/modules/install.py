@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-07-05
 # Modified: 2026-09-28
 # =============================================
@@ -114,7 +114,7 @@ def _resolve_home(path: str | None, here: bool, non_interactive: bool) -> Path:
     return Path(raw).expanduser().resolve()
 
 
-def _install_lock_path(home: Path) -> Path:
+def install_lock_path(home: Path) -> Path:
     """The lock guarding one install of `home`.
 
     Lives in the PARENT, not in `home`: on a fresh machine `home` does not exist
@@ -162,15 +162,20 @@ def _clear_stale_lock(lock: Path, holder_pid: str) -> bool:
     return True
 
 
-def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
+def acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     """Claim the install lock for `home`, or return None if another run holds it.
 
     Refuses by NAMING the lock and its holder rather than dying somewhere deep
     in a half-finished clone, which is what a second concurrent install used to
     do (FPLAN-0492 wave 6). A lock whose pid is gone is stale and is taken over,
     announced -- a crashed install must not wedge the machine forever.
+
+    Public with install_lock_path and release_install_lock: the lock is a unit
+    this module exists to keep (one install per home, never stolen on an unknown
+    holder), with a contract of its own. Caller: run_install, which takes and
+    drops it (aipass's decision, fleet green leg 4).
     """
-    lock = _install_lock_path(home)
+    lock = install_lock_path(home)
     try:
         lock.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -184,7 +189,7 @@ def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
                 return None
             # _retry=False: one takeover only, so two racing installs that both
             # see the same stale lock cannot ping-pong clearing each other.
-            return _acquire_install_lock(home, _retry=False)
+            return acquire_install_lock(home, _retry=False)
         holder = f", held by pid {holder_pid}" if holder_pid else ""
         if holder_pid and alive is None:
             holder += f" - could not tell whether pid {holder_pid} is alive"
@@ -248,7 +253,7 @@ def _pid_alive(
     return True
 
 
-def _release_install_lock(lock: Path | None) -> None:
+def release_install_lock(lock: Path | None) -> None:
     """Drop the install lock, never raising — a failed release must not mask the install."""
     if lock is None:
         return
@@ -630,7 +635,7 @@ def run_install(
     # returns, so a release after it would never run and would wedge the home.
     # A dry run takes no lock: it writes nothing, so it has nothing to guard,
     # and must not mkdir the home's parent or touch a real lock file.
-    install_lock = None if dry_run else _acquire_install_lock(home)
+    install_lock = None if dry_run else acquire_install_lock(home)
     if install_lock is None and not dry_run:
         return 1
 
@@ -660,7 +665,7 @@ def run_install(
         if not dry_run:
             _check_and_fix_owner(home)
     finally:
-        _release_install_lock(install_lock)
+        release_install_lock(install_lock)
 
     # Step 4 — the phone face, best-effort: its result is reported, never fatal
     console.print()

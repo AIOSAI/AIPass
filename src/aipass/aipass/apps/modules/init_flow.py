@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-04-16
 # Modified: 2026-09-28
 # =============================================
@@ -390,8 +390,12 @@ def _print_os_gap_heads_up() -> None:
         f"[dim]Heads-up — {len(gaps)} tracked cross-OS gap(s) may apply on this OS "
         "(machine pre-flight, not a guarantee):[/dim]"
     )
+    from rich.markup import escape
+
+    # The registry's cells are text, never markup: escaped so a bracket prints as written.
     for gap in gaps:
-        console.print(f"  [yellow]![/yellow] [dim]gap #{gap.number}: {gap.symptom} [{gap.status}][/dim]")
+        text = escape(f"gap #{gap.number}: {gap.symptom} [{gap.status}]")
+        console.print(f"  [yellow]![/yellow] [dim]{text}[/dim]")
 
 
 def stage_2_system_detect(dry_run: bool = False) -> Dict[str, Any]:

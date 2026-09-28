@@ -140,7 +140,7 @@ def _capture_depth_offer_prints(readme_path: Path) -> None:
 
 
 # =============================================================================
-# _extract_keywords
+# Keyword extraction (_extract_keywords), read through `aipass help`
 # =============================================================================
 
 
@@ -195,7 +195,7 @@ class TestExtractKeywords:
 
 
 # =============================================================================
-# _match_branches
+# Branch matching (_match_branches), read through `aipass help`
 # =============================================================================
 
 
@@ -216,8 +216,17 @@ class TestMatchBranches:
         assert data["branches_searched"] == ["drone", "flow"]
 
     def test_fallback_returns_all_branches_when_no_match(self, tmp_path, capsys: pytest.CaptureFixture[str]):
-        """Unrecognised keyword triggers broad fallback — all branches searched (capped at three)."""
-        _out, _err, data = _ask(tmp_path, ["xyzzy999"], capsys, branches=_FAKE_BRANCHES)
+        """Unrecognised keyword falls back to every branch; the first three are searched and logged.
+
+        Every branch resolves to one README holding the word, so a searched branch prints its
+        section: what is searched is read off the screen, what is logged off the log call.
+        Mutants: the search loop over `branches` uncapped -> red at the fourth branch printed;
+        the log of `branches` uncapped -> red at the logged list.
+        """
+        readme = "# Topic\nxyzzy999 here\n"
+        out, _err, data = _ask(tmp_path, ["xyzzy999"], capsys, readme=readme, branches=_FAKE_BRANCHES)
+        searched = [b for b in _FAKE_BRANCHES if f"{b} — Topic" in out]
+        assert searched == _FAKE_BRANCHES[:3]
         assert data["branches_searched"] == _FAKE_BRANCHES[:3]
 
     def test_partial_keyword_in_branch_name(self, tmp_path, capsys: pytest.CaptureFixture[str]):
@@ -240,7 +249,8 @@ class TestMatchBranches:
 
 
 # =============================================================================
-# _search_readme
+# Section splitting and ranking (_split_sections, _score_section, _search_readme),
+# read through `aipass help`
 # =============================================================================
 
 
@@ -293,14 +303,19 @@ class TestScoreSection:
         assert out.index("README.md:2-2") < out.index("README.md:1-1")
 
     def test_body_hit_lines_are_capped(self, tmp_path, capsys: pytest.CaptureFixture[str]):
-        """30 hit lines score no more than 5 — tables can't drown the earlier intro.
+        """30 hit lines score the same as 5 — tables can't drown the earlier intro.
 
-        Mutant: `min(hit_lines, 5)` -> `hit_lines` (no cap) -> red.
+        Equal scores tie to document order, so each section comes first when it comes first in
+        the README: a long section scored higher loses the first order, lower loses the second.
+        Mutants: `min(hit_lines, 5)` -> `hit_lines` (no cap) -> red at the first order;
+        the long section scored lower -> red at the second.
         """
         short = "# Short\n" + "".join(f"drone s{i}\n" for i in range(5))
         long = "# Long\n" + "".join(f"drone l{i}\n" for i in range(30))
         out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=short + long)
         assert out.index("drone — Short") < out.index("drone — Long")
+        out, _err, _data = _ask(tmp_path, ["drone"], capsys, readme=long + short)
+        assert out.index("drone — Long") < out.index("drone — Short")
 
     def test_no_hits_scores_zero(self, tmp_path, capsys: pytest.CaptureFixture[str]):
         """A section without any keyword is never printed."""
@@ -363,7 +378,7 @@ class TestSearchReadme:
 
 
 # =============================================================================
-# _format_answer
+# Answer rendering (_format_answer), read through `aipass help`
 # =============================================================================
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: project_home.py
 # Description: Shared AIPass-home detection, project-path validation, and settings content
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-07-21
-# Modified: 2026-07-21
+# Modified: 2026-09-28
 # =============================================
 
 """Project home — AIPASS_HOME detection, path validation, settings content.
@@ -73,7 +73,7 @@ def _claude_settings() -> str:
     AIPASS_HOME is a machine-local absolute path — it never belongs in this
     tracked file. It goes in .claude/settings.local.json instead, which is
     gitignored and merged over tracked settings by Claude Code natively.
-    See _claude_local_settings().
+    See claude_local_settings().
     """
     data: dict = {
         "permissions": {
@@ -87,12 +87,15 @@ def _claude_settings() -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def _claude_md_excludes(aipass_home: str) -> list[str]:
+def claude_md_excludes(aipass_home: str) -> list[str]:
     """Absolute paths of the host CLAUDE.md files a nested project must fence out.
 
     Claude Code loads CLAUDE.md from every ancestor directory regardless of git
     boundaries, so a project nested under ``<host>/projects/<name>`` inherits
     the host root CLAUDE.md and .claude/CLAUDE.md unless excluded.
+
+    Public as the one definition of the fence: claude_local_settings writes it and
+    find_fenceless_projects checks for it (aipass's decision, fleet green leg 4).
     """
     home = Path(aipass_home)
     # Forward slashes on every platform — settings files carry POSIX-style
@@ -110,24 +113,30 @@ def _normalize_exclude(entry: str) -> str:
     return entry.replace("\\", "/")
 
 
-def _claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
+def claude_local_settings(aipass_home: str, *, nested: bool = False) -> str:
     """Generate .claude/settings.local.json — machine-local env (gitignored).
 
     When *nested* is True (target lives under ``<host>/projects/<name>``),
     also emits ``claudeMdExcludes`` fencing out the host's ancestor CLAUDE.md
-    files — see ``_claude_md_excludes``.
+    files — see ``claude_md_excludes``.
+
+    Public for its callers outside this module: handlers/init/bootstrap.py (scaffold
+    and update), handlers/new_project/__init__.py and handlers/new_project/adopt.py.
     """
     data: dict = {"env": {"AIPASS_HOME": aipass_home}}
     if nested:
-        data["claudeMdExcludes"] = _claude_md_excludes(aipass_home)
+        data["claudeMdExcludes"] = claude_md_excludes(aipass_home)
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def _merge_local_settings(existing: dict, generated: dict) -> dict:
+def merge_local_settings(existing: dict, generated: dict) -> dict:
     """Merge generated .claude/settings.local.json content into existing (retrofit-safe).
 
     Unions ``env`` and ``claudeMdExcludes`` rather than overwriting, so a
     hand-edited or previously-written file is never clobbered.
+
+    Public for its caller outside this module: handlers/init/bootstrap.py's retrofit
+    of an existing settings.local.json.
     """
     merged = dict(existing)
 
@@ -192,12 +201,12 @@ def find_fenceless_projects(aipass_home: str) -> list[Path]:
 
     A project is nested if it has a ``*_REGISTRY.json``. It's fenceless if its
     ``.claude/settings.local.json`` is missing, unparseable, or lacks the
-    ``claudeMdExcludes`` entries from ``_claude_md_excludes``.
+    ``claudeMdExcludes`` entries from ``claude_md_excludes``.
     """
     projects_dir = Path(aipass_home) / "projects"
     if not projects_dir.is_dir():
         return []
-    expected = set(_claude_md_excludes(aipass_home))
+    expected = set(claude_md_excludes(aipass_home))
     fenceless: list[Path] = []
     for child in sorted(projects_dir.iterdir()):
         if not child.is_dir():

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_init_flow.py
 # Description: Tests for aipass init_flow Phase 3
-# Version: 1.2.5
+# Version: 1.2.6
 # Created: 2026-04-16
 # Modified: 2026-09-28
 # =============================================
@@ -931,7 +931,7 @@ class TestProviderGaps:
 
 
 # =============================================================================
-# init_update_registry_sync: subprocess_sync
+# `aipass init update`: owner/identity check and fix via drone @spawn sync-registry
 # =============================================================================
 
 
@@ -1313,6 +1313,7 @@ class TestInitUpdateGitAuth:
 
         Mutant 2026-09-27: console.print_json swapped for console.print reddens this.
         Mutant 2026-09-28: the --json redirect aimed at sys.stdout instead of sys.stderr reddens this.
+        Mutant (fleet green leg 4): the redirect removed -> red at the raw-text assert, before json.loads.
         """
         self._project(tmp_path)
         plan = {
@@ -1332,6 +1333,8 @@ class TestInitUpdateGitAuth:
         assert exit_info.value.code == 2
         mock_run.assert_not_called()
         out, err = capsys.readouterr()
+        # On the raw text first, so a plan printed to stdout dies at an assert, not in json.loads.
+        assert "Git authorization (owner-tier)" not in out
         emitted = json.loads(out)
         assert emitted["files"][0]["action"] == "update"
         assert emitted["handlers"][0]["name"] == "testwrite_gate"

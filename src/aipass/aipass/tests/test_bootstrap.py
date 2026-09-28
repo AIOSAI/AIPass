@@ -3,12 +3,12 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.1.2
 # Created: 2026-05-04
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
 
-# Covers _sanitize_name(), init_project(), update_project(), and
+# Covers init_project() (and the name sanitizing inside it), update_project(), and
 # scaffold_content generators — all file operations use tmp_path to
 # stay fully isolated from the live filesystem.
 
@@ -25,7 +25,6 @@ import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps.handlers.init.bootstrap import (
     _merge_hooks_json,
-    _sanitize_name,
     is_throwaway_path,
     init_project,
     update_project,
@@ -34,6 +33,7 @@ from aipass.aipass.apps.handlers.init import bootstrap
 from aipass.aipass.apps.handlers.init.scaffold_manifest import read_manifest
 from aipass.aipass.apps.handlers.init.scaffold_manifest import sha256_text as sc_sha256
 from aipass.aipass.shared import scaffold_content as sc
+from aipass.aipass.shared.registry_discovery import registries_in
 
 
 def _expected_aipass_home() -> str:
@@ -48,58 +48,46 @@ def _expected_aipass_home() -> str:
 
 
 # ---------------------------------------------------------------------------
-# _sanitize_name tests
+# Project-name sanitizing (_sanitize_name), read through init_project, its one
+# caller, off the registry file it names (fleet green leg 4). The old bare-""
+# case is gone: init_project reads an empty name as "use the directory's name".
 # ---------------------------------------------------------------------------
 
 
-def test_sanitize_name_normal_input():
-    """Normal lowercase string is uppercased."""
-    assert _sanitize_name("my_project") == "MY_PROJECT"
+@pytest.mark.parametrize(
+    "raw,registry_name",
+    [
+        ("my_project", "MY_PROJECT"),  # lowercase is uppercased
+        ("my-project", "MY-PROJECT"),  # hyphens are kept
+        ("my project!v2", "MY_PROJECT_V2"),  # other characters become underscores
+        ("foo.bar/baz", "FOO_BAR_BAZ"),  # dots and slashes too
+        ("...name...", "NAME"),  # leading and trailing underscores are stripped
+        ("hello world", "HELLO_WORLD"),  # spaces become underscores
+        ("ALPHA", "ALPHA"),  # uppercase passes through
+    ],
+)
+def test_project_name_is_sanitized_into_the_registry_name(tmp_path, raw: str, registry_name: str):
+    """The registry file init writes carries the sanitized name, and no other registry lands.
+
+    Mutant: _sanitize_name's .upper() dropped -> red.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name=raw)
+    assert [p.name for p in registries_in(target)] == [f"{registry_name}_REGISTRY.json"]
 
 
-def test_sanitize_name_preserves_hyphens():
-    """Hyphens are kept as-is (valid filename chars)."""
-    assert _sanitize_name("my-project") == "MY-PROJECT"
+@pytest.mark.parametrize("raw", ["!!!", "___"])
+def test_a_name_that_sanitizes_to_nothing_is_refused(tmp_path, raw: str):
+    """A name with nothing left after sanitizing is refused, and no registry is written.
 
-
-def test_sanitize_name_replaces_special_chars():
-    """Non-alphanumeric characters (except _ and -) become underscores."""
-    assert _sanitize_name("my project!v2") == "MY_PROJECT_V2"
-
-
-def test_sanitize_name_replaces_dots_and_slashes():
-    """Dots and slashes are replaced with underscores."""
-    assert _sanitize_name("foo.bar/baz") == "FOO_BAR_BAZ"
-
-
-def test_sanitize_name_strips_leading_trailing_underscores():
-    """Leading/trailing underscores from replacement are stripped."""
-    assert _sanitize_name("...name...") == "NAME"
-
-
-def test_sanitize_name_spaces_become_underscores():
-    """Spaces are not alphanumeric, so they become underscores."""
-    assert _sanitize_name("hello world") == "HELLO_WORLD"
-
-
-def test_sanitize_name_empty_after_sanitize():
-    """All-special-character input collapses to empty string."""
-    assert _sanitize_name("!!!") == ""
-
-
-def test_sanitize_name_already_upper():
-    """Already-uppercase names pass through unchanged."""
-    assert _sanitize_name("ALPHA") == "ALPHA"
-
-
-def test_sanitize_name_empty_string():
-    """Empty input returns empty string."""
-    assert _sanitize_name("") == ""
-
-
-def test_sanitize_name_only_underscores():
-    """All-underscore input is stripped to empty string."""
-    assert _sanitize_name("___") == ""
+    Mutant: _sanitize_name's .strip("_") dropped -> "___" survives as a name -> red.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    with pytest.raises(ValueError, match="Cannot derive project name"):
+        init_project(target, project_name=raw)
+    assert registries_in(target) == []
 
 
 # ---------------------------------------------------------------------------

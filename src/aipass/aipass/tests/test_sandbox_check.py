@@ -3,7 +3,7 @@
 # Description: Tests for sandbox prerequisite checker and doctor integration
 # Version: 1.1.2
 # Created: 2026-06-10
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -488,17 +488,22 @@ class TestCheckBrokerAlive:
 
 
 class TestIsLinux:
-    def test_linux(self, monkeypatch):
-        monkeypatch.setattr("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.sys.platform", "linux")
-        assert is_linux() is True
+    """The platform is handed in (fleet green leg 4); sys.platform is never replaced."""
 
-    def test_darwin(self, monkeypatch):
-        monkeypatch.setattr("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.sys.platform", "darwin")
-        assert is_linux() is False
+    def test_linux(self):
+        """Mutant: `.startswith("linux")` -> `.startswith("darwin")` -> red."""
+        assert is_linux("linux") is True
 
-    def test_win32(self, monkeypatch):
-        monkeypatch.setattr("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.sys.platform", "win32")
-        assert is_linux() is False
+    def test_darwin(self):
+        """Mutant: `return True` for every platform -> red."""
+        assert is_linux("darwin") is False
+
+    def test_win32(self):
+        assert is_linux("win32") is False
+
+    def test_no_platform_reads_this_process(self):
+        """Nothing handed in (doctor's call) reads sys.platform itself."""
+        assert is_linux() is sys.platform.startswith("linux")
 
 
 # =============================================================================

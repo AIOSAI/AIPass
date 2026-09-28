@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: handoff_platform/__init__.py
 # Description: OS-dispatched CLI session launch — tmux, wt.exe, fallback
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-04-20
-# Modified: 2026-04-20
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -23,7 +23,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
-from typing import Optional
+from typing import Callable, List, Optional
 
 from aipass.prax import logger
 
@@ -166,31 +166,47 @@ def launch_wt(cli: str, prompt: str, cwd: str, flag_variant: str = "default") ->
         return False
 
 
-def launch_inline(cli: str, prompt: str, cwd: str, flag_variant: str = "default") -> None:
+def launch_inline(
+    cli: str,
+    prompt: str,
+    cwd: str,
+    flag_variant: str = "default",
+    which: Optional[Callable[[str], Optional[str]]] = None,
+    chdir: Optional[Callable[[str], None]] = None,
+    execvp: Optional[Callable[[str, List[str]], None]] = None,
+) -> None:
     """Replace the current process with the CLI in the agent directory. Does not return.
 
     Wraps the CLI in a shell so a return-path breadcrumb prints once the
     session exits (see ``return_path_breadcrumb``) — ``execvp`` replaces this
     process outright, so nothing after this call can print once the CLI
     starts; the breadcrumb has to be baked into the exec'd command itself.
+
+    ``which``, ``chdir`` and ``execvp`` exist for the test: it hands in three
+    recorders rather than patching shutil and os, which are the whole process's,
+    where a patch that fails to apply would move the run or replace it. The
+    defaults are shutil.which, os.chdir and os.execvp, so every caller runs as before.
     """
     import os
     import shlex
 
+    which = shutil.which if which is None else which
+    chdir = os.chdir if chdir is None else chdir
+    execvp = os.execvp if execvp is None else execvp
     cli_cmd = build_cli_cmd(cli, flag_variant)
     cli_bin = cli_cmd.split()[0]
-    cli_path = shutil.which(cli_bin)
+    cli_path = which(cli_bin)
     if not cli_path:
         logger.warning("[handoff_platform] %s not found on PATH, cannot exec inline", cli_bin)
         return
 
-    os.chdir(cwd)
+    chdir(cwd)
     argv = [cli_path, *cli_cmd.split()[1:], prompt]
     breadcrumb = return_path_breadcrumb(cwd)
     shell_cmd = f"{shlex.join(argv)}; printf '\\n%s\\n' {shlex.quote(breadcrumb)}"
-    shell = shutil.which("bash") or shutil.which("sh") or "/bin/sh"
+    shell = which("bash") or which("sh") or "/bin/sh"
     logger.info("[handoff_platform] exec inline via shell: %s (cwd=%s)", shell_cmd, cwd)
-    os.execvp(shell, [shell, "-c", shell_cmd])
+    execvp(shell, [shell, "-c", shell_cmd])
 
 
 def launch_handoff(

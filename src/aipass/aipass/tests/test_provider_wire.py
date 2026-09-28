@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.3.2
+# Version: 1.3.3
 # Created: 2026-08-01
 # Modified: 2026-09-28
 # =============================================
@@ -24,14 +24,22 @@ from aipass.aipass.apps.handlers.provider_wire import (
     STATE_DIFFERENT,
     STATE_MISSING,
     STATE_SET,
-    _build_manifest_hook_entries,
     _platform_bridge_command,
-    _strip_and_readd_hooks,
     auto_wire_provider,
     manifest_settings,
     refresh_provider_hooks,
     settings_gaps,
 )
+
+
+def _write_world(tmp_path, manifest_hooks: list, existing_hooks: dict):
+    """Write a provider manifest and a settings file under tmp_path; return both paths."""
+    manifest = tmp_path / "provider_manifest.json"
+    manifest.write_text(json.dumps({"cli": {"claude": {"hooks": manifest_hooks}}}), encoding="utf-8")
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps({"hooks": existing_hooks}), encoding="utf-8")
+    return manifest, settings_path
 
 
 # =============================================================================
@@ -60,25 +68,26 @@ class TestPlatformBridgeCommand:
         result = _platform_bridge_command(other_cmd, os_name="nt")
         assert result == other_cmd
 
-    def test_build_manifest_hook_entries_applies_transform_on_windows(self, monkeypatch) -> None:
-        """The single choke point (_build_manifest_hook_entries) applies the transform, so both
-        refresh_provider_hooks and auto_wire_provider pick it up via _strip_and_readd_hooks.
+    @pytest.mark.parametrize("door", ["refresh_provider_hooks", "auto_wire_provider"])
+    def test_both_wire_doors_write_the_windows_command(self, tmp_path, monkeypatch, door) -> None:
+        """End to end: each public door writes the Windows interpreter into a settings file under tmp_path.
 
-        The choke point reaches the real transform, bound to the Windows answer through its
-        os_name seam, rather than os.name patched process-wide."""
+        The transform is bound to the Windows answer through its os_name seam, rather than
+        os.name patched process-wide; no public door needs an os_name of its own (fleet green leg 4).
+        Mutant: _build_manifest_hook_entries writes the manifest command without the transform -> red.
+        """
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        manifest_hooks = [{"command": posix_cmd, "event": "Stop"}]
+        manifest, settings_path = _write_world(tmp_path, [{"command": posix_cmd, "event": "Stop"}], {})
         monkeypatch.setattr(
             provider_wire, "_platform_bridge_command", functools.partial(_platform_bridge_command, os_name="nt")
         )
-        fresh = _build_manifest_hook_entries(manifest_hooks)
-        written_cmd = fresh["Stop"][0]["hooks"][0]["command"]
+        if door == "refresh_provider_hooks":
+            refresh_provider_hooks(manifest, settings_path=settings_path)
+        else:
+            auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
+        written = json.loads(settings_path.read_text(encoding="utf-8"))
+        written_cmd = written["hooks"]["Stop"][0]["hooks"][0]["command"]
         assert written_cmd == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
-
-    # NOTE: _platform_bridge_command has an os_name seam (fleet green leg 3), so no test forces
-    # os.name to "nt" any more; the test above binds the seam instead. An end-to-end
-    # refresh_provider_hooks/auto_wire_provider variant bound the same way is not written yet:
-    # the choke point above is where the transform happens, and it is covered there.
 
 
 # =============================================================================
@@ -87,16 +96,23 @@ class TestPlatformBridgeCommand:
 
 
 class TestStripAndReaddHooks:
-    """Tests for _strip_and_readd_hooks (DPLAN-0279)."""
+    """The strip-and-readd merge (DPLAN-0279), reached through refresh_provider_hooks with a
+    settings file under tmp_path, and read back from that file (fleet green leg 4)."""
 
-    def test_stale_command_replaced_not_duplicated(self) -> None:
+    @staticmethod
+    def _refresh(tmp_path, manifest_hooks: list, existing_hooks: dict) -> tuple[dict, list]:
+        """Run the install door on a tmp world; return the hooks written and the actions."""
+        manifest, settings_path = _write_world(tmp_path, manifest_hooks, existing_hooks)
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
+        return json.loads(settings_path.read_text(encoding="utf-8"))["hooks"], actions
+
+    def test_stale_command_replaced_not_duplicated(self, tmp_path) -> None:
         """Old bridge command for an event is gone after merge — only the fresh one survives."""
         old_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop:old_shape"
         new_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
         existing_hooks = {"Stop": [{"hooks": [{"type": "command", "command": old_cmd}]}]}
-        manifest_hooks = [{"command": new_cmd, "event": "Stop"}]
 
-        merged, actions = _strip_and_readd_hooks(existing_hooks, manifest_hooks)
+        merged, actions = self._refresh(tmp_path, [{"command": new_cmd, "event": "Stop"}], existing_hooks)
 
         assert len(merged["Stop"]) == 1
         stop_dump = json.dumps(merged["Stop"])
@@ -106,21 +122,20 @@ class TestStripAndReaddHooks:
         assert _platform_bridge_command(new_cmd) in stop_dump
         assert any("Refreshed Stop" in action for action in actions)
 
-    def test_user_wired_hook_preserved(self) -> None:
+    def test_user_wired_hook_preserved(self, tmp_path) -> None:
         """A non-bridge (user-wired) hook entry survives the merge untouched."""
         user_entry = {"hooks": [{"type": "command", "command": "some-other-tool --flag"}]}
-        existing_hooks = {"Stop": [user_entry]}
 
-        merged, _actions = _strip_and_readd_hooks(existing_hooks, [])
+        merged, _actions = self._refresh(tmp_path, [], {"Stop": [user_entry]})
 
-        assert merged["Stop"] == [user_entry]
+        assert merged.get("Stop") == [user_entry]
 
-    def test_orphaned_event_dropped(self) -> None:
+    def test_orphaned_event_dropped(self, tmp_path) -> None:
         """Event with only stale bridge entries and nothing else is dropped, with an orphaned action noted."""
         stale_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py OldEvent:stale"
         existing_hooks = {"OldEvent": [{"hooks": [{"type": "command", "command": stale_cmd}]}]}
 
-        merged, actions = _strip_and_readd_hooks(existing_hooks, [])
+        merged, actions = self._refresh(tmp_path, [], existing_hooks)
 
         assert "OldEvent" not in merged
         assert any("orphaned" in action for action in actions)
