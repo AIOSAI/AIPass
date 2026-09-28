@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: activity_collector.py
 # Description: Branch Activity Data Collector
-# Version: 0.2.0
+# Version: 0.3.0
 # Created: 2026-01-30
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -153,8 +153,13 @@ def _scan_directory_files(
         return {"code_files": code_files, "memory_files": memory_files}
 
     def _should_skip_dir(item: Path) -> bool:
-        """Check if a directory should be skipped during scanning."""
-        if item.name == "__pycache__":
+        """Check if a directory should be skipped during scanning.
+
+        A dropbox is a sandbox like .archive (owner's ruling 2026-09-27 20:42,
+        paraphrased): nothing looks into it. Judged by the directory's own name,
+        below the scanned root, so a branch that lives under a dropbox is read.
+        """
+        if item.name in ("__pycache__", "dropbox"):
             return True
         return item.name.startswith(".") and item.name != ".trinity"
 

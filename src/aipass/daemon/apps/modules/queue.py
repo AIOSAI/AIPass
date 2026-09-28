@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: queue.py
 # Description: Unified job queue view (drone @daemon queue)
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-06-25
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -72,7 +72,8 @@ def _schedule_human(job: dict) -> str:
         m = sched.get("time", "0")
         return f"hourly @ :{int(m):02d}"
     if sched_type == "interval":
-        mins = sched.get("interval_minutes", 0)
+        # Absent reads as 60, the default the scheduler fires by (runstate).
+        mins = sched.get("interval_minutes", 60)
         # One bad row costs its own cell, never the view: text, null or a bool
         # cannot be compared with 60, so the raw value is shown as unreadable.
         if isinstance(mins, bool) or not isinstance(mins, (int, float)):

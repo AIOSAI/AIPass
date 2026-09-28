@@ -3,7 +3,7 @@
 # Description: Tests for registry-led citizen discovery and .daemon/ schedule job discovery
 # Version: 1.1.0
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/schedule/discovery.py — citizens from the registries, jobs from their .daemon/."""
@@ -143,13 +143,15 @@ class TestValidateJob:
         jobs = [{"id": f"t-{stype}", "schedule": {"type": stype}, "prompt": "do stuff"} for stype in stypes]
         assert discovered_ids(one_branch, *jobs) == ["keep"] + [f"t-{stype}" for stype in stypes]
 
-    @pytest.mark.parametrize("interval", ["60", None, "abc", 0, -5, True])
+    @pytest.mark.parametrize("interval", ["60", None, "abc", 0, -5, True, float("nan"), float("inf")])
     def test_an_interval_that_is_not_a_positive_number_is_refused_and_named(self, interval, one_branch, caplog):
         """Refused at the source, the job and its file named: never due, never read by a reader downstream.
 
         Let through, a text or null interval raised TypeError in runstate and stopped the tick for every job.
         Mutant killed: the interval_minutes check removed from _validate_job.
         Mutant killed: the isinstance(interval, bool) clause dropped (True read as the number 1).
+        Mutant killed: the upper bound dropped (inf let through); the bound put back to interval <= 0 (nan let
+        through, DPLAN-0354 leg 4).
         """
         job = {"id": "tick", "schedule": {"type": "interval", "interval_minutes": interval}, "prompt": "x"}
         with caplog.at_level("WARNING"):

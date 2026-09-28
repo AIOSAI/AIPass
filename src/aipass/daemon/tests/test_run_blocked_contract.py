@@ -3,7 +3,7 @@
 # Description: Blocked is not ran — a wake that never started must not consume the period
 # Version: 1.0.0
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/run.py — blocked is not ran: a wake that never started must not consume the period."""
@@ -338,6 +338,23 @@ class TestBlockedStaysDueAndRetries:
         rs.record_job_failure(st, "@vera", "release-watch", "spawn failed", timestamp="2026-08-30T09:58:00")
         assert rs.is_job_due(_job(), st, now=datetime(2026, 8, 30, 10, 4)) is False
         assert rs.is_job_due(_job(), st, now=datetime(2026, 8, 30, 10, 9)) is True
+
+    @pytest.mark.parametrize("key", ["last_success_at", "last_failure_at"])
+    @pytest.mark.parametrize("garbage", ["zzz", "yesterday"], ids=["sorts-after-digits", "a-word"])
+    def test_an_unreadable_later_stamp_does_not_lift_the_hold(self, caplog, key, garbage):
+        """The stamps were compared as text, so any string sorting after "2026-..." read as a later event.
+
+        Both are parsed now; an unreadable one lifts nothing and is warned (DPLAN-0354 leg 4).
+        Measured on an INTERVAL job with no last_run, so the hold is the only thing that says no.
+        Mutant killed: an unparsable later stamp read as later than the block.
+        """
+        job = _job(schedule={"type": "interval", "interval_minutes": 1})
+        st = self._blocked_at("2026-08-30T09:52:00")
+        st["jobs"]["@vera/release-watch"][key] = garbage
+
+        with caplog.at_level("WARNING"):
+            assert rs.is_job_due(job, st, now=datetime(2026, 8, 30, 9, 54)) is False
+        assert repr(garbage) in caplog.text
 
 
 class TestBlockedIsNotAFailureStatus:

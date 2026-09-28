@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.4.0
+# Version: 2.5.0
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -353,9 +353,11 @@ def _validate_job(job: dict, file_path: Path) -> bool:
     # Refused at the source rather than guarded in every reader: a text or null
     # interval raised TypeError downstream and stopped the whole tick, and a zero
     # or negative one can never fire. Absent is fine: the readers default to 60.
+    # JSON also reads NaN and Infinity: NaN compares false both ways, so the chained
+    # bound refuses it, and an infinite interval overflows timedelta downstream.
     interval = schedule.get("interval_minutes")
     if sched_type == "interval" and "interval_minutes" in schedule:
-        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or not 0 < interval < float("inf"):
             logger.warning(
                 "[discovery] Job '%s' refused in %s: interval_minutes %r is not a positive number",
                 job.get("id"),

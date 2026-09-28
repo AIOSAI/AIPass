@@ -3,7 +3,7 @@
 # Description: CLI Routing Tests for DAEMON
 # Version: 1.1.0
 # Created: 2026-03-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/daemon.py — the router: help, introspection, unknown commands, the argument gate."""
@@ -13,7 +13,7 @@
 # seedgo: no-test-needed(constant) — the version literal main() prints for --version
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -331,9 +331,9 @@ class TestUnknownArgumentIsRefused:
         units = ("daemon-tick.service", "daemon-tick.timer")
         before = sorted(name for name in units if (live_dir / name).exists())
 
-        # uninstall-timer asks systemctl only when a unit stands in the unit dir,
-        # so the sealed dir is given both units first: with it empty the verb says
-        # "nothing to stop" and never reaches the seal this test is about.
+        # uninstall-timer unlinks only the units that stand in the unit dir, so the
+        # sealed dir is given both units first: the file operations below are then
+        # seen landing in the sealed dir, never in the live one.
         sealed_dir = tmp_path / "_sealed_unit_dir"
         if verb == "uninstall-timer":
             sealed_dir.mkdir()
@@ -367,7 +367,9 @@ class TestUnknownArgumentIsRefused:
             fire.assert_not_called()
         else:
             assert list(sealed_dir.iterdir()) == [], f"uninstall-timer left units: {list(sealed_dir.iterdir())}"
-            assert [c.args[0] for c in fire.call_args_list] == ["file_deleted", "file_deleted"]
+            assert fire.call_args_list == [
+                call("file_deleted", path=str(sealed_dir / name), source="timer_install") for name in units
+            ]
 
         after = sorted(name for name in units if (live_dir / name).exists())
         assert after == before, f"{verb} changed the live unit files: {before} -> {after}"

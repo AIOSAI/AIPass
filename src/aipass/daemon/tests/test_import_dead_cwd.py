@@ -3,7 +3,7 @@
 # Description: Pins daemon imports against a dead working directory
 # Version: 1.0.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/module_root.py — every daemon module imports without a readable working directory."""
@@ -23,11 +23,13 @@ import pytest
 from aipass.daemon.apps.handlers import module_root
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.module_root import module_file
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 
-# No sweep in this file walks into a directory seedgo's own list skips, dropbox and
-# .archive above all (owner ruling 2026-09-27 20:37: "Dropbox should be ignored by all").
-SWEEP_SKIP_DIRS = SOURCE_SKIP_DIRS
+# No sweep in this file walks into a dropbox or an .archive: the owner of the project
+# ruled on 2026-09-27 at 20:42 that a dropbox is a sandbox like .archive, which nothing
+# looks into and no process runs out of (a paraphrase). __pycache__ holds no source.
+# Three names written here, not seedgo's list: seedgo's handlers refuse a caller from
+# another branch, and that list also names docs, tools, logs, reports and backups.
+SWEEP_SKIP_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 # Every daemon module must import without a readable working directory.
 #
@@ -280,7 +282,7 @@ def _sweepable(root: Path):
     """Python files under *root*, or nothing if the root is not on this machine.
 
     A file under any directory SWEEP_SKIP_DIRS names is left out, judged BELOW the
-    root: the tools/ root is itself a name on seedgo's list and must still be read.
+    root, so a branch that lives under a directory named dropbox is still read.
     """
     if not root.is_dir():
         return []
@@ -551,14 +553,15 @@ class TestNoModuleLevelResolveSurvives:
         assert _sweepable(tools), "tools/ is present but the sweep reads no Python from it"
 
     def test_the_sweep_never_enters_a_dropbox_or_an_archive(self, tmp_path):
-        """Owner ruling 2026-09-27 20:37: nothing looks into a dropbox; it is a sandbox like .archive.
+        """The owner's ruling of 2026-09-27 20:42, paraphrased: nothing looks into a dropbox, a sandbox like .archive.
 
-        The skip is judged below the swept root, so a root that is itself named tools/ is still read.
-        Mutant killed: _sweepable skipping .archive alone (dropbox/stray.py swept, the code before this pin).
-        Mutant, reasoned not run (the runner cannot serve a test module): the skip judged on the whole
-        path, so the tools/ root reads as nothing.
+        The skip is judged below the swept root, and the root here stands inside a
+        directory named dropbox: a skip judged on the whole path would read nothing.
+        Red first: _sweepable skipping .archive alone (dropbox/stray.py swept, the code before leg 3).
+        HELD for mutants (the runner cannot serve a test module): the skip judged on the whole
+        path is reasoned, not run; this pin stands on red first alone.
         """
-        tools = tmp_path / "tools"
+        tools = tmp_path / "dropbox" / "tools"
         for folder in ("handlers", "dropbox", ".archive", "handlers/dropbox"):
             (tools / folder).mkdir(parents=True)
         for rel in ("handlers/kept.py", "dropbox/stray.py", ".archive/old.py", "handlers/dropbox/stray.py"):

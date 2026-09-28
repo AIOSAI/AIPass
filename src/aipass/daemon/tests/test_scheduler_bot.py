@@ -3,7 +3,7 @@
 # Description: Tests for TDPLAN-0008 Phase 1 — scheduler bot daemon layer
 # Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/queue.py, apps/modules/run.py and handlers/schedule/ — TDPLAN-0008 Phase 1."""
@@ -263,6 +263,16 @@ class TestQueueJsonSchema:
         job = dict(interval_job, schedule={"type": "interval", "interval_minutes": bad_interval})
         (row,) = _queue_json(monkeypatch, capsys, [job], {"jobs": {}})["jobs"]
         assert row["schedule_human"] == f"every ? (interval_minutes {bad_interval!r} unreadable)"
+
+    def test_an_absent_interval_reads_as_the_hour_the_scheduler_uses(self, interval_job, monkeypatch, capsys):
+        """An interval job with no interval_minutes fires every 60 minutes; the queue said "every 0m".
+
+        The queue now reads the same default the scheduler reads (DPLAN-0354 leg 4).
+        Mutant killed: the queue's default put back to 0.
+        """
+        job = dict(interval_job, schedule={"type": "interval"})
+        (row,) = _queue_json(monkeypatch, capsys, [job], {"jobs": {}})["jobs"]
+        assert row["schedule_human"] == "every 1h"
 
 
 # ── Test 5: empty tick emits ZERO telegram calls ──

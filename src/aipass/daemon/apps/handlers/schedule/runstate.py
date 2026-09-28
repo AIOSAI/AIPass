@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runstate.py
 # Description: Daemon runstate tracking and due-logic for decentralized scheduler
-# Version: 1.5.0
+# Version: 1.6.0
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -575,21 +575,31 @@ def _in_blocked_hold(state: dict, now: datetime) -> bool:
     An unreadable last_blocked_at answers no hold: a hold that cannot be measured
     could never expire and would stall the job for good, while releasing it costs
     at most one early attempt, whose own block writes a fresh stamp.
+
+    An unreadable last_success_at or last_failure_at lifts nothing: the stamps are
+    parsed, never compared as text, because any string sorting after "2026-..."
+    would read as a later event and end a hold that is still due (DPLAN-0354 leg 4).
     """
     blocked_at = state.get("last_blocked_at")
     if not blocked_at:
         return False
-    # Anything that happened AFTER the block ends the hold: a success means the
-    # target freed up, and a failure hands the job to the longer failure
-    # backoff. The old last_blocked_at stays in the record as history.
-    for later in (state.get("last_success_at"), state.get("last_failure_at")):
-        if later and later >= blocked_at:
-            return False
     try:
         blocked_dt = datetime.fromisoformat(blocked_at)
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Blocked hold parse failed for %r: %s", blocked_at, e)
         return False
+    # Anything that happened AFTER the block ends the hold: a success means the
+    # target freed up, and a failure hands the job to the longer failure
+    # backoff. The old last_blocked_at stays in the record as history.
+    for key in ("last_success_at", "last_failure_at"):
+        later = state.get(key)
+        if not later:
+            continue
+        try:
+            if datetime.fromisoformat(later) >= blocked_dt:
+                return False
+        except (ValueError, TypeError) as e:
+            logger.warning("[runstate] Unreadable %s %r does not lift the blocked hold: %s", key, later, e)
     return (now - blocked_dt) < timedelta(minutes=_BLOCKED_RETRY_MINUTES)
 
 

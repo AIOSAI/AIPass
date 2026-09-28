@@ -3,7 +3,7 @@
 # Description: Tests for the activity_report CLI module
 # Version: 1.1.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/activity_report.py — activity, activity-report, branch-health."""
@@ -13,12 +13,15 @@
 # seedgo: no-test-needed(generated) — the report bodies; handlers/monitoring/report_generator builds them
 
 import re
+from datetime import datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from aipass.cli.apps.modules import console as cli_console
 from aipass.daemon.apps.handlers.cli.arg_gate import UnknownArgument
+from aipass.daemon.apps.handlers.monitoring.activity_collector import scan_branch_activity
 from aipass.daemon.apps.modules import activity_report
 from aipass.daemon.apps.modules.activity_report import handle_command
 from aipass.memory.apps.modules import health as memory_health
@@ -546,3 +549,24 @@ class TestSharedConsoleContract:
         assert "[ok]" not in out, "cli console stopped parsing markup — revisit the marker convention"
         assert "[OK]" in out
         assert "alpha" in out and "beta" in out
+
+
+class TestCollectorSkipsSandboxes:
+    """The activity scan never reads a dropbox or an .archive (owner's ruling 2026-09-27 20:42, paraphrased:
+    a dropbox is a sandbox like .archive; nothing looks into it)."""
+
+    def test_a_file_in_a_dropbox_or_an_archive_is_not_activity(self, tmp_path):
+        """Only the branch's own file counts; the skip is judged below the branch, whose root stands in a dropbox.
+
+        Red first: the scan walked into dropbox/ and counted dropbox/stray.py (leg 3 code).
+        Mutant killed: the dropbox name dropped from the skip.
+        """
+        branch = tmp_path / "dropbox" / "branch"
+        for rel in ("apps/kept.py", "dropbox/stray.py", ".archive/old.py", "apps/dropbox/stray.py"):
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text("", encoding="utf-8")
+
+        found = scan_branch_activity("BRANCH", str(branch), since=datetime(2000, 1, 1))
+
+        assert [Path(f["path"]).relative_to(branch).as_posix() for f in found["code_files"]] == ["apps/kept.py"]
+        assert found["total_files"] == 1
