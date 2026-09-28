@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
 # Version: 1.2.2
 # Created: 2026-08-25
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
@@ -36,6 +36,26 @@ from aipass.memory.apps.handlers.json import lint_handler
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.templates import receipt
 from aipass.memory.apps.handlers.tracking import tab_renderer
+
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
 
 
 _MEMORY_ROOT = Path(__file__).resolve().parents[1]
@@ -385,7 +405,7 @@ class TestNoHealthStamping:
         """One sweep so the next copy of this cannot land quietly."""
         offenders = [
             str(path.relative_to(_MEMORY_ROOT))
-            for path in (_MEMORY_ROOT / "apps").rglob("*.py")
+            for path in _walk(_MEMORY_ROOT / "apps")
             if self._stamps_health(path.read_text(encoding="utf-8"))
         ]
         assert offenders == []
@@ -616,6 +636,24 @@ class TestTemplateVersionReceipt:
         trinity = tmp_path / ".trinity"
         trinity.mkdir()
         assert receipt.read_receipt(trinity) is None
+
+    def test_an_unreadable_receipt_is_named_never_reported_absent(self, tmp_path):
+        """The renderer's bump names a broken receipt as broken, and leaves its bytes.
+
+        Until leg 3 of DPLAN-0354 read_receipt answered None here, the answer
+        for no receipt, so the bump said "No receipt ... only a push, birth, or
+        reset may create one" over a file that was there.
+        """
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        (trinity / receipt.RECEIPT_NAME).write_text("NOT JSON {{{", encoding="utf-8")
+        before = (trinity / receipt.RECEIPT_NAME).read_bytes()
+
+        result = receipt.bump_config_rendered(trinity)
+
+        assert result["success"] is False
+        assert "Unreadable receipt" in result["error"]
+        assert (trinity / receipt.RECEIPT_NAME).read_bytes() == before
 
     def test_a_receipt_outside_the_aipass_root_is_neither_stamped_nor_bumped(self, tmp_path, monkeypatch):
         """The receipt lives in ``.trinity/`` — a branch memory file like its neighbours.

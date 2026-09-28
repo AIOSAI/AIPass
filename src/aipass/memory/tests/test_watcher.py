@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: memory/tests
 # =============================================
 
@@ -700,3 +700,55 @@ class TestTheTrinityMatchIsAFilenameNotAPattern:
         monkeypatch.setattr(memory_watcher, "_startup_check_done", False)
 
         assert memory_watcher.check_and_rollover()["files_checked"] == 1
+
+
+class TestAnUnreadableRegistryIsAnsweredByEveryEntry:
+    """Each watcher entry answers its own failure shape, naming the registry, never a raise (DPLAN-0354 leg 3b).
+
+    The registry read raises at its home in detector; the real _get_branch_paths runs. No observer starts.
+    """
+
+    @staticmethod
+    def _unreadable(monkeypatch, tmp_path) -> Path:
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        def _raise():
+            raise detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+
+        monkeypatch.setattr(detector, "_read_registry", _raise)
+        return registry
+
+    def test_the_startup_check_fails_and_names_it(self, monkeypatch, tmp_path):
+        mod, _ = _import_watcher(monkeypatch)
+        registry = self._unreadable(monkeypatch, tmp_path)
+        monkeypatch.setattr(mod, "_startup_check_done", False)
+        deps = MagicMock(return_value=True)  # the probe is a real subprocess; never run here
+        monkeypatch.setattr(mod, "_check_vector_deps", deps)
+
+        result = mod.check_and_rollover()
+
+        deps.assert_called_once_with()
+        assert result["success"] is False
+        assert str(registry) in result["error"]
+
+    def test_the_start_refuses_and_names_it(self, monkeypatch, tmp_path):
+        mod, mocks = _import_watcher(monkeypatch)
+        registry = self._unreadable(monkeypatch, tmp_path)
+
+        result = mod.start_memory_watcher()
+
+        assert result["success"] is False
+        assert str(registry) in result["error"]
+        mocks["observer_instance"].start.assert_not_called()
+
+    def test_the_status_of_a_running_watcher_names_it(self, monkeypatch, tmp_path):
+        mod, _ = _import_watcher(monkeypatch)
+        registry = self._unreadable(monkeypatch, tmp_path)
+        running = MagicMock()
+        running.is_alive.return_value = True
+        monkeypatch.setattr(mod, "_observer", running)
+
+        result = mod.get_watcher_status()
+
+        assert result["active"] is True
+        assert str(registry) in result["error"]

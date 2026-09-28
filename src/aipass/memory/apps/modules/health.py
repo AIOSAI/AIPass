@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: health.py
 # Description: Branch health module — public API (entry-count + entry-size)
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-08-16
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -46,7 +46,7 @@ if sys.platform == "win32":
         if _reconfigure is not None:
             _reconfigure(encoding="utf-8", errors="replace")
 
-from aipass.prax import logger  # noqa: F401
+from aipass.prax import logger
 from aipass.memory.apps.handlers.json import json_handler
 
 # Handler import (same package family — json handlers)
@@ -57,6 +57,7 @@ from aipass.memory.apps.handlers.json.lint_handler import run_lint
 # read_scope, not _read_registry: health reads and never writes, so its scope
 # is the declared fleet including externals. The write scope stops at the edge.
 from aipass.memory.apps.handlers.monitor.detector import (
+    RegistryUnreadable,
     _get_memory_file_path,
     check_single_file,
     read_scope,
@@ -107,8 +108,16 @@ def get_branch_health(branch_name: str) -> dict:
         See the module docstring for the intended severity mapping a
         consumer should apply to ``should_rollover`` and to a non-empty
         ``violations`` list — this function itself assigns none.
+
+        An unreadable registry answers ``{"success": False, "error": ...}``
+        naming the file, never a raise: @daemon calls this outside any try
+        (DPLAN-0354 leg 3b).
     """
-    branches = read_scope()
+    try:
+        branches = read_scope()
+    except RegistryUnreadable as e:
+        logger.error(f"[health] {e}")
+        return {"success": False, "error": str(e)}
 
     branch = None
     for candidate in branches:

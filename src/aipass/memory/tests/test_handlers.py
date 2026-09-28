@@ -3,7 +3,7 @@
 # Description: Handler-layer tests — rollover extractor, line counter, normalize and the todos operational schema
 # Version: 1.1.1
 # Created: 2026-04-01
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/rollover/extractor.py, tracking/line_counter.py and schema/normalize.py."""
@@ -29,6 +29,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.memory.apps.handlers import write_fence
+from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import extractor
 from aipass.memory.apps.handlers.schema import normalize
 from aipass.memory.apps.handlers.tracking import line_counter
@@ -383,6 +384,21 @@ class TestUpdateLineCount:
         result = lc.update_line_count(tmp_path / "gone.json")
         assert result["success"] is False
 
+    def test_the_fleet_walk_answers_an_unreadable_registry_never_raises(self, monkeypatch, tmp_path):
+        """report-lines reaches this through orchestrator.sync_line_counts (DPLAN-0354 leg 3b)."""
+        lc, _ = _import_line_counter(monkeypatch)
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+
+        def _raise():
+            raise detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+
+        monkeypatch.setattr(detector, "_read_registry", _raise)
+
+        result = lc.update_all_memory_files()
+
+        assert result["success"] is False
+        assert str(registry) in result["error"]
+
     def test_updates_line_count_successfully(self, monkeypatch, tmp_path):
         lc, _mocks = _import_line_counter(monkeypatch)
         f = tmp_path / "test.local.json"
@@ -446,6 +462,25 @@ class TestNormalizeMemoryFile:
         assert looked["success"] is True and looked["changes"], "the read half must still work"
         assert result["success"] is False
         assert f.read_bytes() == before
+
+    def test_an_unreadable_template_is_a_warning_the_caller_sees(self, monkeypatch, tmp_path):
+        """The conformance pass is skipped out loud, never read as "nothing to strip".
+
+        Until leg 3 of DPLAN-0354 the template load answered None here, the
+        answer for a file with no template, and the result said success with no
+        warning while the orphan keys stayed.
+        """
+        norm, _ = _import_normalize(monkeypatch)
+        (tmp_path / "templates").mkdir()
+        (tmp_path / "templates" / "LOCAL.template.json").write_text("NOT JSON {{{", encoding="utf-8")
+        monkeypatch.setattr(norm, "_MEMORY_ROOT", tmp_path)
+        f = tmp_path / "test.local.json"
+        self._write_json(f, {"document_metadata": {}, "sessions": [], "orphan": 1})
+
+        result = norm.normalize_memory_file(f, dry_run=True)
+
+        assert result["success"] is True
+        assert any("LOCAL.template.json" in w for w in result["warnings"])
 
     def test_moves_root_limits_then_strips(self, monkeypatch, tmp_path):
         """Root limits merged into metadata, then stripped (limits live in config now)."""

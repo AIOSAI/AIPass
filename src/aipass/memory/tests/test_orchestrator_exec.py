@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # Category: memory/tests
 # =============================================
 
@@ -21,7 +21,11 @@
 import sys
 from unittest.mock import MagicMock
 
+from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
+
+# The real lookup, held before any test replaces it at orchestrator's name.
+_REAL_LOCAL_CHROMA_PATH = orchestrator.get_branch_local_chroma_path
 
 # The post-rollover chain imports these by name at call time, through
 # sys.modules; a dotted target patches whatever module sys.modules holds then.
@@ -475,6 +479,27 @@ class TestExecuteRolloverFullPipeline:
         assert result["triggers_count"] == 1
         assert len(result["results"]) == 1
         assert result["results"][0]["memories_count"] == 1
+
+    def test_a_registry_that_turns_unreadable_after_the_check_never_strands_the_entries(self, monkeypatch, tmp_path):
+        """The file is already trimmed when the local store's path is looked up; the global store still takes it.
+
+        Leg 3b of DPLAN-0354: the registry read raises RegistryUnreadable since
+        leg 3, and at this step that raise left the file trimmed with its
+        entries in neither store. The local store is the second store.
+        """
+        orch, mocks = _import_orchestrator(monkeypatch)
+        self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
+        monkeypatch.setattr(orch, "get_branch_local_chroma_path", _REAL_LOCAL_CHROMA_PATH)
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        mocks["detector"]._read_registry.side_effect = detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+        stored = []
+        monkeypatch.setattr(orch, "store_vectors_subprocess", lambda **kw: stored.append(kw) or {"success": True})
+
+        result = orch.execute_rollover()
+
+        assert result["success_count"] == 1
+        assert [call.get("db_path") for call in stored] == [None]
+        assert any(str(registry) in c.args[0] for c in orch.logger.error.call_args_list)
 
     def test_post_rollover_trigger_fires(self, monkeypatch, tmp_path):
         """After success, Trigger.fire is called."""

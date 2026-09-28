@@ -3,7 +3,7 @@
 # Description: Tests for rollover trigger detection handler
 # Version: 1.3.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/monitor/detector.py."""
@@ -30,7 +30,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from aipass.memory.apps.handlers import write_fence
-from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.monitor import detector, registry_scope
 
 logger = logging.getLogger(__name__)
 
@@ -582,17 +582,43 @@ class TestReadRegistry:
 
         assert result == []
 
-    def test_invalid_json_returns_empty(self, tmp_path: Path, monkeypatch):
-        """Malformed registry JSON should return empty list."""
+    def test_an_unreadable_core_registry_is_not_an_empty_fleet(self, tmp_path: Path, monkeypatch):
+        """An unreadable core registry is a failure the walk reports, never "No branches in registry".
+
+        Until leg 3 of DPLAN-0354 the read answered [] here, the list an empty
+        registry gives, so check_all_branches said success with nothing to do
+        and no rollover ran anywhere.
+        """
         registry_file = tmp_path / "AIPASS_REGISTRY.json"
         registry_file.write_text("NOT JSON {{{", encoding="utf-8")
 
         monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
         monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
 
-        result = detector.read_scope()
+        with pytest.raises(detector.RegistryUnreadable, match="AIPASS_REGISTRY"):
+            detector.read_scope()
+        walk = detector.check_all_branches()
+        assert walk["success"] is False
+        assert str(registry_file) in walk["error"]
+        assert detector.get_rollover_stats()["success"] is False
 
-        assert result == []
+    def test_an_unreadable_resident_registry_costs_only_its_own_rows(self, tmp_path: Path, monkeypatch):
+        """A broken resident registry is skipped at error level; the core fleet is still walked."""
+        core = {"branches": [{"name": "memory", "path": "src/aipass/memory"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(core), encoding="utf-8")
+        broken = tmp_path / "projects" / "p" / "P_REGISTRY.json"
+        broken.parent.mkdir(parents=True)
+        broken.write_text("NOT JSON {{{", encoding="utf-8")
+
+        monkeypatch.setattr(detector, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(detector, "_find_caller_registries", lambda: [])
+        monkeypatch.setattr(registry_scope, "resident_registry_paths", lambda root: [broken])
+        monkeypatch.setattr(registry_scope, "accepted_resident_paths", lambda root: set())
+        log = MagicMock()
+        monkeypatch.setattr(detector, "logger", log)
+
+        assert [b["name"] for b in detector.read_scope()] == ["memory"]
+        assert any(str(broken) in c.args[0] for c in log.error.call_args_list)
 
     def test_registry_resolves_relative_paths(self, tmp_path: Path, monkeypatch):
         """Relative paths in registry should be resolved to absolute."""

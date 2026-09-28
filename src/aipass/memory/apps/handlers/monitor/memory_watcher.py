@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: memory_watcher.py
 # Description: Memory File System Watcher
-# Version: 1.2.0
+# Version: 1.2.1
 # Created: 2025-11-26
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -45,7 +45,7 @@ except ImportError:
 
 # Handler imports (relative within package — after conditional watchdog block)
 from aipass.memory.apps.handlers.tracking.line_counter import update_line_count
-from aipass.memory.apps.handlers.monitor.detector import check_single_file
+from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, check_single_file
 from aipass.memory.apps.handlers import repo_root
 from aipass.memory.apps.handlers.repo_root import exists_exactly
 from aipass.prax.apps.modules.logger import get_system_logger
@@ -137,7 +137,13 @@ def check_and_rollover() -> Dict[str, Any]:
     }
 
     # Get all branch paths
-    branch_paths = _get_branch_paths()
+    try:
+        branch_paths = _get_branch_paths()
+    except RegistryUnreadable as e:
+        logger.error(f"[memory_watcher] {e}")
+        results["success"] = False
+        results["error"] = str(e)
+        return results
 
     if not branch_paths:
         results["error"] = "No branch paths found"
@@ -489,7 +495,11 @@ def start_memory_watcher() -> Dict[str, Any]:
         return {"success": False, "error": "Watcher already running"}
 
     # Get all branch paths
-    branch_paths = _get_branch_paths()
+    try:
+        branch_paths = _get_branch_paths()
+    except RegistryUnreadable as e:
+        logger.error(f"[memory_watcher] Not started: {e}")
+        return {"success": False, "error": str(e)}
 
     if not branch_paths:
         return {"success": False, "error": "No branch paths found in AIPASS_REGISTRY.json"}
@@ -560,7 +570,12 @@ def get_watcher_status() -> Dict[str, Any]:
         return {"active": False, "message": "Watcher not running"}
 
     # Get watched paths
-    branch_paths = _get_branch_paths()
+    try:
+        branch_paths = _get_branch_paths()
+    except RegistryUnreadable as e:
+        # The observer runs; what it watches cannot be listed.
+        logger.error(f"[memory_watcher] {e}")
+        return {"active": True, "error": str(e)}
 
     return {"active": True, "watched_directories": len(branch_paths), "paths": [str(p) for p in branch_paths]}
 

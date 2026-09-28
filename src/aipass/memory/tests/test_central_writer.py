@@ -3,7 +3,7 @@
 # Description: Tests for the central writer handler
 # Version: 1.0.2
 # Created: 2026-04-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -31,6 +31,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.memory.apps.handlers import central_writer
 from aipass.memory.apps.handlers import repo_root as rr
 
 
@@ -40,14 +41,12 @@ from aipass.memory.apps.handlers import repo_root as rr
 
 
 def _import_central_writer(monkeypatch, tmp_path):
-    """Import central_writer with mocked dependencies and paths at tmp_path."""
-    monkeypatch.delitem(sys.modules, "aipass.memory.apps.handlers.central_writer", raising=False)
-    parent = sys.modules.get("aipass.memory.apps.handlers")
-    if parent is not None and hasattr(parent, "central_writer"):
-        monkeypatch.delattr(parent, "central_writer")
+    """The real central_writer, with every path constant it writes or reads at tmp_path.
 
-    from aipass.memory.apps.handlers import central_writer
-
+    Its json_handler is the conftest's stand-in, the one repo_root's diagnostic
+    reaches too, so an operation count below sees both lanes on one mock.
+    """
+    monkeypatch.setattr(central_writer, "json_handler", sys.modules["aipass.memory.apps.handlers.json"].json_handler)
     # Redirect all path constants to tmp_path
     monkeypatch.setattr(central_writer, "_MEMORY_ROOT", tmp_path)
     monkeypatch.setattr(central_writer, "CENTRAL_FILE", tmp_path / "central" / "MEMORY.central.json")
@@ -113,15 +112,22 @@ class TestCountChromaVectors:
 
         assert cw.count_chroma_vectors() == 0
 
-    def test_db_error_returns_zero(self, monkeypatch, tmp_path):
-        """Should return 0 if sqlite3 query fails."""
+    def test_an_unreadable_store_is_never_published_as_zero_vectors(self, monkeypatch, tmp_path):
+        """A store that cannot be counted fails the update; the central file is not written.
+
+        Until leg 3 of DPLAN-0354 the count answered 0 here, the count of an
+        empty store, and update_central published 0 vectors as a success.
+        """
         cw = _import_central_writer(monkeypatch, tmp_path)
         chroma_dir = tmp_path / ".chroma"
         chroma_dir.mkdir(parents=True)
-        # Write garbage to the sqlite3 file
         (chroma_dir / "chroma.sqlite3").write_text("not a database", encoding="utf-8")
 
-        assert cw.count_chroma_vectors() == 0
+        result = cw.update_central()
+
+        assert result["success"] is False
+        assert result["error"]
+        assert not cw.CENTRAL_FILE.exists()
 
 
 # ===========================================================================
@@ -502,6 +508,8 @@ class TestTheBareWorldTheOldPinCouldNotSurvive:
         cw = _import_central_writer(monkeypatch, tmp_path)
         mock_handler: MagicMock = sys.modules["aipass.memory.apps.handlers.json"].json_handler
 
+        # The walk runs at import in life (CENTRAL_FILE); the module is imported once, at collection.
+        cw._find_repo_root()
         cw.update_central()
 
         operations = [call[0][0] for call in mock_handler.log_operation.call_args_list]
@@ -514,6 +522,7 @@ class TestTheBareWorldTheOldPinCouldNotSurvive:
         cw = _import_central_writer(monkeypatch, tmp_path)
         mock_handler: MagicMock = sys.modules["aipass.memory.apps.handlers.json"].json_handler
 
+        cw._find_repo_root()
         result = cw.update_central()
 
         assert result["success"] is True

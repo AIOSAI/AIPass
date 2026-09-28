@@ -3,7 +3,7 @@
 # Description: Tests for config_loader handler (FPLAN-0271 Phase 1)
 # Version: 1.2.2
 # Created: 2026-06-13
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/json/config_loader.py and the budget arithmetic it seeds."""
@@ -442,6 +442,29 @@ class TestUnreadableFile:
         assert result["success"] is False
         assert "unreadable" in result["error"]
         assert bad_config.read_bytes() == original
+
+    def test_push_names_an_unreadable_registry_rather_than_an_empty_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A broken registry is reported as broken, and the config is not written.
+
+        Until leg 3 of DPLAN-0354 materialize_per_branch() answered {} here, the
+        answer of a registry with no active branch, so the push said "No
+        branches found in registry" over a file it could not read.
+        """
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        registry.write_text("NOT JSON {{{", encoding="utf-8")
+        mod = _get_module()
+        config = _write_config(tmp_path, copy.deepcopy(mod.DEFAULT_CONFIG))
+        original = config.read_bytes()
+        monkeypatch.setattr(mod, "_CONFIG_PATH", config)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+
+        result = mod.push_defaults_to_per_branch()
+
+        assert result["success"] is False
+        assert str(registry) in result["error"]
+        assert config.read_bytes() == original
 
 
 # ===========================================================================

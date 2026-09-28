@@ -3,7 +3,7 @@
 # Description: Tests for the branch health module (entry-count + entry-size wrapper)
 # Version: 1.0.1
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/health.py -- get_branch_health()."""
@@ -146,6 +146,18 @@ class TestUnknownBranch:
             result = health.get_branch_health("nosuchbranch")
 
         assert result == {"success": False, "error": "Unknown branch: nosuchbranch"}
+
+    def test_an_unreadable_registry_is_answered_never_raised(self, tmp_path: Path):
+        """@daemon calls this outside any try, from a function promising never to raise (DPLAN-0354 leg 3b)."""
+        health = _get_health()
+        registry = tmp_path / "AIPASS_REGISTRY.json"
+        refusal = _detector.RegistryUnreadable(f"Unreadable registry {registry}: x")
+
+        with patch.object(health, "read_scope", side_effect=refusal):
+            result = health.get_branch_health("anything")
+
+        assert result["success"] is False
+        assert str(registry) in result["error"]
 
     def test_empty_registry_is_unknown(self, tmp_path: Path):
         health = _get_health()

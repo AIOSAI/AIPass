@@ -3,7 +3,7 @@
 # Description: Red-first pins for passport-declared residency as the fleet classifier (DPLAN-0319)
 # Version: 1.0.1
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/monitor/registry_scope.py and the callers that classify through it."""
@@ -67,6 +67,26 @@ import pytest
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.monitor import registry_scope as rs
 from aipass.memory.tests.dead_cwd import DEAD_CWD_WORLD
+
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
 
 
 def _write(path: Path, data: dict) -> None:
@@ -325,7 +345,7 @@ class TestEveryLaneReadsTheOneDefinition:
         No mutant run (2026-09-27): the pin reads apps/ source off disk, which a module mutant cannot reach.
         """
         offenders = []
-        for path in sorted(self._APPS.rglob("*.py")):
+        for path in _walk(self._APPS):
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
                 if "RESIDENT_REGISTRIES" in line:
                     offenders.append(f"{path.relative_to(self._APPS)}:{number}: {line.strip()}")

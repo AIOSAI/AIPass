@@ -3,7 +3,7 @@
 # Description: Pins for handlers/repo_root.py - one repo-root answer, never the cwd
 # Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/repo_root.py."""
@@ -55,13 +55,32 @@ from aipass.memory.tests.dead_cwd import (
     WINDOWS_REALPATH_WORLD,
 )
 
+# Directories no walk in this file enters, judged by the parts BELOW the walk's root, never the
+# whole path: a checkout that lives under a directory named dropbox must not hide itself.
+# dropbox and .archive: the owner's ruling of 2026-09-27 20:42 — a dropbox is ignored by all,
+# nothing looks into it, a sandbox like .archive. __pycache__: bytecode, never source.
+_SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
+def _walk(root: Path, pattern: str = "*.py") -> list[Path]:
+    """Every file under *root* matching *pattern*, outside the skipped directories."""
+    return sorted(path for path in root.rglob(pattern) if not _SKIPPED_DIRS.intersection(path.relative_to(root).parts))
+
+
+def test_the_walk_skips_dropbox_archive_and_caches_below_its_root_only(tmp_path: Path) -> None:
+    """Red first against a bare rglob. The root stands inside a directory named dropbox; live/ is the control."""
+    root = tmp_path / "dropbox" / "checkout"
+    for name in (*sorted(_SKIPPED_DIRS), "live"):
+        (root / name).mkdir(parents=True)
+        (root / name / "test_x.py").write_text("", encoding="utf-8")
+    assert _walk(root) == [root / "live" / "test_x.py"]
+
+
 # Every .py in the branch's own source, minus archives (kept deliberately as
 # written) and caches. The sweep must read the tree, not a list someone
 # maintains by hand — a hand-maintained list is how the tenth copy hid.
 _APPS = Path(rr.__file__).resolve().parent.parent
-_SOURCES = sorted(
-    path for path in _APPS.rglob("*.py") if ".archive" not in path.parts and "__pycache__" not in path.parts
-)
+_SOURCES = _walk(_APPS)
 
 # The one other species of cwd read in this tree, and it is not this defect:
 # "where was the caller standing" is a QUESTION ABOUT THE CALLER, and cwd is
@@ -1366,7 +1385,7 @@ class TestTheTwoWorldsMustNotBeStacked:
         concatenates both gets a world where the defect cannot fire.
         """
         offenders = []
-        for path in sorted(Path(__file__).parent.rglob("test_*.py")):
+        for path in _walk(Path(__file__).parent, "test_*.py"):
             if path.name == Path(__file__).name:
                 continue
             text = path.read_text(encoding="utf-8")

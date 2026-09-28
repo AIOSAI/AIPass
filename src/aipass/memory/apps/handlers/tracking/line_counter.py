@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: line_counter.py
 # Description: Memory File Line Counter Handler
-# Version: 0.2.0
+# Version: 0.2.1
 # Created: 2025-11-16
-# Modified: 2026-03-06
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -95,11 +95,16 @@ def update_all_memory_files() -> Dict[str, Any]:
     Update line counts for all memory files in AIPASS_REGISTRY
 
     Returns:
-        Dict with update statistics
+        Dict with update statistics, or ``{"success": False, "error": ...}``
+        naming the registry when it cannot be read (DPLAN-0354 leg 3b).
     """
-    from aipass.memory.apps.handlers.monitor.detector import _read_registry, _get_memory_file_path
+    from aipass.memory.apps.handlers.monitor.detector import RegistryUnreadable, _read_registry, _get_memory_file_path
 
-    branches = _read_registry()
+    try:
+        branches = _read_registry()
+    except RegistryUnreadable as e:
+        logger.error(f"[line_counter] {e}")
+        return {"success": False, "error": str(e)}
     if not branches:
         return {"success": True, "updated": 0, "failed": 0, "message": "No branches in registry"}
 
