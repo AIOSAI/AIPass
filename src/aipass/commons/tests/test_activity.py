@@ -486,12 +486,16 @@ def test_run_catchup_refuses_naming_a_failed_caller_lookup():
     The lookup raises before any database is opened.
     Mutant: catchup_ops `except CallerLookupFailed as exc:` -> `except KeyError as exc:` turns this red.
     """
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.catchup.catchup_ops.get_db") as db,
+    ):
         result = run_catchup()
 
     lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]

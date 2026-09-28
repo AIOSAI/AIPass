@@ -284,12 +284,89 @@ def test_create_room_refuses_naming_a_failed_caller_lookup():
     so the user was told to run from a branch directory. The lookup raises before
     any database is opened.
     """
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.room_ops.get_db") as db,
+    ):
         result = create_room(["pin-room", "a room"])
 
     lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+# room_module binds the same join_room / leave_room the 'room join' / 'room leave' commands call.
+@pytest.mark.parametrize(
+    "command_fn",
+    [
+        pytest.param(room_module.join_room, id="join_room"),
+        pytest.param(room_module.leave_room, id="leave_room"),
+    ],
+)
+def test_room_membership_commands_refuse_naming_a_failed_caller_lookup(command_fn: Any) -> None:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.room_ops.get_db") as db,
+    ):
+        result = command_fn(["general"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_enter_shows_the_room_and_logs_the_visit_unrecorded_naming_a_failed_caller_lookup(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The room data is handed in so no database opens; record_visit would reach space_ops.get_db.
+    room_data = {
+        "found": True,
+        "room": {"name": "general", "mood": "neutral", "entrance_message": "You step into the pin room."},
+        "post_count": 0,
+        "recent_count": 0,
+        "decorations": {},
+    }
+    monkeypatch.setattr(space, "get_room_enter_data", lambda room_name: room_data)
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.space_ops.get_db") as db,
+        patch("aipass.commons.apps.modules.space.logger") as log,
+    ):
+        handled = space.handle_command("enter", ["general"])
+
+    out, _err = capsys.readouterr()
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert handled is True
+    assert "You step into the pin room." in out
+    log.warning.assert_called_once_with("[space] Visit not recorded: Caller lookup failed: registry unreadable")
+
+
+def test_decorate_refuses_naming_a_failed_caller_lookup(capsys: pytest.CaptureFixture[str]) -> None:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.space_ops.get_db") as db,
+    ):
+        handled = space.handle_command("decorate", ["general", "lamp", "A glowing lamp"])
+
+    out, err = capsys.readouterr()
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert handled is True
+    assert "Caller lookup failed: registry unreadable" in err
+    assert "Could not detect calling branch" not in err
+    assert "Placed" not in out

@@ -50,6 +50,7 @@ def _run_parsed(args: list) -> dict:
     return {
         "result": result,
         "conn": mock_get_db.return_value,
+        "get_db": mock_get_db,
         "all": mock_all,
         "posts": mock_posts,
         "comments": mock_comments,
@@ -69,6 +70,7 @@ def test_run_search_refuses_an_empty_query():
     """
     seen = _run_parsed([""])
     assert seen["result"] == {"success": False, "error": "Search query cannot be empty"}
+    seen["get_db"].assert_not_called()
     seen["all"].assert_not_called()
     seen["posts"].assert_not_called()
     seen["comments"].assert_not_called()

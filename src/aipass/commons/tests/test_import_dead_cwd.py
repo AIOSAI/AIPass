@@ -709,38 +709,43 @@ def _inspect_stack_call_lines(source: str, filename: str) -> list:
     return hits
 
 
-#: Ruling of 2026-09-27 (devpulse, via the fleet green brief): a dropbox is
-#: ignored by all, a sandbox like .archive, and a walk skips both -- along
-#: with __pycache__, which is never product. Literal names on purpose: not
-#: seedgo's skip_dirs.py, this file's own walk decides its own skip list.
+#: The rule of the owner of the project, 2026-09-27 20:42, as devpulse
+#: paraphrased it: a dropbox is ignored by all, nothing looks into it and no
+#: process runs out of it, a sandbox like .archive. Skipping __pycache__ too,
+#: and three literal names rather than seedgo's skip_dirs.py, are commons'
+#: decision (DPLAN-0354 leg 3).
 _WALK_SKIPS = {"dropbox", ".archive", "__pycache__"}
 
 
 def _apps_modules(root: Path | None = None) -> list:
-    """Every production .py under apps/, excluding the parked pre-refactor tree."""
-    apps = root if root is not None else Path(__file__).resolve().parent.parent / "apps"
-    return sorted(p for p in apps.rglob("*.py") if not _WALK_SKIPS & set(p.parts))
+    """Every .py under root (default: apps/), skipping dropbox, .archive and __pycache__ below root.
 
-
-def test_apps_modules_walk_skips_dropbox_and_pycache(tmp_path):
-    """_apps_modules ignores dropbox/, .archive/, and __pycache__ under a given root.
-
-    Ruling of 2026-09-27 (devpulse, via the fleet green brief): a dropbox is
-    ignored by all, a sandbox like .archive, and a walk skips both -- so does
-    __pycache__, which is never product. This pin runs against tmp_path via
-    _apps_modules's new optional root parameter; it is a test module the
-    mutant runner cannot serve (it writes a changed copy beside the product
-    module, not this test file), so it stands on red first alone.
+    Only the parts relative to root are judged, so an ancestor with one of the
+    three names hides nothing (commons' decision, DPLAN-0354 leg 4).
     """
-    (tmp_path / "dropbox").mkdir()
-    (tmp_path / "dropbox" / "x.py").write_text("# dropbox\n", encoding="utf-8")
-    (tmp_path / "__pycache__").mkdir()
-    (tmp_path / "__pycache__" / "y.py").write_text("# cache\n", encoding="utf-8")
-    (tmp_path / "a.py").write_text("# real\n", encoding="utf-8")
+    apps = root if root is not None else Path(__file__).resolve().parent.parent / "apps"
+    return sorted(p for p in apps.rglob("*.py") if not _WALK_SKIPS & set(p.relative_to(apps).parts))
 
-    modules = _apps_modules(tmp_path)
 
-    assert modules == [tmp_path / "a.py"]
+def test_apps_modules_walk_skips_the_three_names_below_its_root_only(tmp_path):
+    """The root stands inside a dropbox/, so only the parts below the root are judged.
+
+    The rule of the owner of the project, 2026-09-27 20:42, as devpulse paraphrased
+    it: a dropbox is ignored by all, nothing looks into it and no process runs out
+    of it, a sandbox like .archive. Skipping __pycache__ and the three literal names
+    are commons' decision (DPLAN-0354 leg 3); judging parts relative to the root is
+    commons' decision (leg 4). A test module the mutant runner cannot serve: this
+    pin stands on red first alone.
+    """
+    root = tmp_path / "dropbox" / "apps"
+    for skipped in ("dropbox", ".archive", "__pycache__"):
+        (root / skipped).mkdir(parents=True)
+        (root / skipped / "x.py").write_text("# skipped\n", encoding="utf-8")
+    (root / "a.py").write_text("# real\n", encoding="utf-8")
+
+    modules = _apps_modules(root)
+
+    assert modules == [root / "a.py"]
 
 
 def test_no_inspect_stack_call_anywhere_in_apps():

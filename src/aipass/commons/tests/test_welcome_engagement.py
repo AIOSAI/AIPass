@@ -232,6 +232,7 @@ def test_run_welcome_scan_names_a_failed_branch_and_keeps_scanning(
     result = run_welcome([])
 
     assert result["success"] is False
+    assert result["partial"] is True
     assert result["failed"] == ["broken"]
     assert "good" in result["welcomed"]
     assert "broken" not in result["welcomed"]

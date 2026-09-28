@@ -157,7 +157,7 @@ def test_extract_mentions_with_underscores(initialized_db: sqlite3.Connection):
     assert result == ["ai_mail"]
 
 
-def test_extract_mentions_answers_none_when_the_lookup_fails(initialized_db: sqlite3.Connection):
+def test_extract_mentions_answers_none_when_the_lookup_fails():
     """A failed agents lookup answers None, never the [] of "nobody was mentioned".
 
     Before: the except returned [], so post_ops/comment_ops reported a post that
@@ -659,7 +659,7 @@ def test_branches_from_registry_malformed_json(tmp_path: Path, monkeypatch: pyte
 
 
 @pytest.fixture
-def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch):
+def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Path, list[Path]]]:
     """
     Emulate a case-insensitive filesystem for the registry listing.
 
@@ -668,8 +668,12 @@ def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch):
     call. Replaces identity_ops.list_registry_candidates (the seam whose
     body is production's one glob) rather than Path.glob, so only the
     registry listing is widened, never every glob in the process.
+
+    Returns the recorder: one (directory, listing) pair per call production
+    made to the seam, so a test can prove production went through it.
     """
     pattern = "*_REGISTRY.json"
+    calls: list[tuple[Path, list[Path]]] = []
 
     def widened(directory: Path):
         seen = {}
@@ -677,9 +681,12 @@ def case_insensitive_glob(monkeypatch: pytest.MonkeyPatch):
             seen[str(found)] = found
         for found in directory.glob(pattern.lower()):
             seen[str(found)] = found
-        return iter(sorted(seen.values()))
+        listing = sorted(seen.values())
+        calls.append((directory, listing))
+        return iter(listing)
 
     monkeypatch.setattr(_ops, "list_registry_candidates", widened)
+    return calls
 
 
 def _plant_case_folded_decoy(project: Path, branch_dir: Path) -> Path:
@@ -780,27 +787,37 @@ def _host_folds_glob_case(tmp_path: Path) -> bool:
         probe.unlink()
 
 
-def test_the_widening_instrument_actually_widens(tmp_path: Path, case_insensitive_glob):
+def test_the_widening_instrument_actually_widens(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    aipass_registry: Path,
+    case_insensitive_glob: list[tuple[Path, list[Path]]],
+):
     """
-    POSITIVE CONTROL — the instrument, exercised through production's own call.
+    POSITIVE CONTROL — the instrument is what production lists registries through.
 
-    This makes the exact call ``_find_caller_registries`` makes rather than
-    re-stating its logic. If this fails, the pins above prove nothing and are
-    green for the wrong reason.
+    get_branch_info_by_name on the planted project must reach the stand-in and
+    be handed the decoy; if production globs on its own, the pins above prove
+    nothing and are green for the wrong reason (commons' decision, DPLAN-0354 leg 4).
 
-    On a folding host this control is satisfied by the filesystem itself
-    rather than by the instrument — which is not a defect but is worth
-    knowing. The negative control below names which world the run is in.
+    On a folding host the decoy is listed by the filesystem itself as well —
+    not a defect, but worth knowing. The negative control below names which
+    world the run is in.
     """
     project = tmp_path / "Vera-Studio"
     project.mkdir()
     branch_dir = _make_external_project(project)
     decoy = _plant_case_folded_decoy(project, branch_dir)
+    monkeypatch.setenv("AIPASS_CALLER_CWD", str(branch_dir))
 
-    listed = list(_ops.list_registry_candidates(project))
+    result = _id_mod.get_branch_info_by_name("vera")
 
-    assert decoy in listed, "instrument did not widen — the case-insensitive emulation is broken"
-    assert project / "VERA-STUDIO_REGISTRY.json" in listed
+    listings = dict(case_insensitive_glob)
+    listed = listings.get(project.resolve(), [])
+    assert decoy.resolve() in listed, "production did not list registries through the widened stand-in"
+    assert (project / "VERA-STUDIO_REGISTRY.json").resolve() in listed
+    assert result is not None
+    assert result["name"] == "VERA"
 
 
 def test_raw_glob_matches_what_the_host_filesystem_actually_does(tmp_path: Path):
@@ -919,9 +936,14 @@ def test_get_caller_branch_raises_a_named_failure_when_the_lookup_breaks():
 
 def test_whoami_refuses_naming_a_failed_caller_lookup(capsys: pytest.CaptureFixture[str]):
     """whoami names a broken lookup instead of "run from a branch directory"."""
-    with patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")):
+    # whoami's one database route is identity_ops' lazy import of db.get_db; guarded there.
+    with (
+        patch.object(_ops, "find_branch_root", side_effect=OSError("registry unreadable")),
+        patch("aipass.commons.apps.handlers.database.db.get_db") as db,
+    ):
         assert _id_mod.handle_command("whoami", []) is True
 
+    db.assert_not_called()
     err = " ".join(capsys.readouterr().err.split())
     assert "Caller lookup failed: registry unreadable" in err
     assert "Run from a branch directory" not in err

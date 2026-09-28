@@ -35,6 +35,8 @@ import aipass.commons.apps.handlers.posts.post_ops as _post_ops_mod  # noqa: F40
 
 from aipass.commons.apps.handlers.comments.comment_ops import add_comment, vote_on_content
 from aipass.commons.apps.handlers.posts.post_ops import create_post, delete_post, view_thread
+from aipass.commons.apps.modules import comment as comment_module
+from aipass.commons.apps.modules import post as post_module
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +212,51 @@ def _insert_comment(
     conn.commit()
     assert cursor.lastrowid is not None
     return cursor.lastrowid
+
+
+# ===========================================================================
+# PRINTED LINES, THROUGH THE COMMAND (ruling 5, DPLAN-0354 leg 4)
+# ===========================================================================
+
+
+class TestMentionsNotDeliveredIsPrinted:
+    """The post and comment commands print the handler's mentions_error."""
+
+    @pytest.mark.usefixtures("_mock_caller_test_branch")
+    def test_post_command_prints_that_mentions_were_not_delivered(
+        self, mock_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str]
+    ):
+        with (
+            patch("aipass.commons.apps.handlers.posts.post_ops.extract_mentions", return_value=None) as lookup,
+            patch("aipass.commons.apps.modules.post.resolve_display_name", side_effect=lambda name: name),
+            patch("aipass.commons.apps.modules.post.json_handler", autospec=True),
+        ):
+            assert post_module.handle_command("post", ["general", "Hello", "ping @drone"]) is True
+
+        lookup.assert_called_once_with("Hello ping @drone")
+        out, err = capsys.readouterr()
+        assert "Posted; mentions not delivered: the agents lookup failed" in " ".join(out.split())
+        assert "mentions not delivered" not in err
+        assert mock_db.execute("SELECT COUNT(*) FROM posts WHERE title = 'Hello'").fetchone()[0] == 1
+
+    @pytest.mark.usefixtures("_mock_caller_test_branch")
+    def test_comment_command_prints_that_mentions_were_not_delivered(
+        self, mock_db: sqlite3.Connection, capsys: pytest.CaptureFixture[str]
+    ):
+        post_id = _insert_post(mock_db)
+        with (
+            patch("aipass.commons.apps.handlers.comments.comment_ops.extract_mentions", return_value=None) as lookup,
+            patch("aipass.commons.apps.modules.comment.resolve_display_name", side_effect=lambda name: name),
+            patch("aipass.commons.apps.modules.comment.json_handler", autospec=True),
+        ):
+            assert comment_module.handle_command("comment", [str(post_id), "ping @drone"]) is True
+
+        lookup.assert_called_once_with("ping @drone")
+        out, err = capsys.readouterr()
+        assert "Commented; mentions not delivered: the agents lookup failed" in " ".join(out.split())
+        assert "mentions not delivered" not in err
+        stored = mock_db.execute("SELECT content FROM comments WHERE post_id = ?", (post_id,)).fetchall()
+        assert [row[0] for row in stored] == ["ping @drone"]
 
 
 # ===========================================================================
@@ -736,3 +783,18 @@ def test_add_comment_refuses_naming_a_failed_caller_lookup(mock_db):
     assert result["success"] is False
     assert "Caller lookup failed" in result["error"]
     assert "registry unreadable" in result["error"]
+    assert mock_db.execute("SELECT COUNT(*) FROM comments").fetchone()[0] == 0
+
+
+def test_delete_post_refuses_naming_a_failed_caller_lookup():
+    """A broken caller lookup refuses the delete by name, before any database is opened."""
+    with (
+        _break_caller_lookup() as lookup,
+        patch("aipass.commons.apps.handlers.posts.post_ops.get_db") as db,
+    ):
+        result = delete_post(["1"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]

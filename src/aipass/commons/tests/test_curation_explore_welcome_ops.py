@@ -23,7 +23,10 @@
 # seedgo: no-test-needed(duplicate) — query/routing covered by test_curation.py, test_explore_leaderboard.py
 
 import sqlite3
+from typing import Callable, List
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from aipass.commons.apps.handlers.curation.curation_ops import (
     add_react,
@@ -37,6 +40,37 @@ from aipass.commons.apps.handlers.curation.curation_ops import (
 from aipass.commons.apps.handlers.rooms.explore_ops import explore_rooms, list_secrets
 from aipass.commons.apps.handlers.welcome.welcome_ops import run_welcome
 from aipass.commons.apps.handlers.welcome.welcome_handler import create_welcome_post
+
+
+# =============================================================================
+# curation_ops -- a failed caller lookup (add_react's pin is at the foot of the file)
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        pytest.param(remove_react, ["post", "1", "thumbsup"], id="remove_react"),
+        pytest.param(pin_post_cmd, ["1"], id="pin_post_cmd"),
+        pytest.param(unpin_post_cmd, ["1"], id="unpin_post_cmd"),
+    ],
+)
+def test_curation_commands_refuse_naming_a_failed_caller_lookup(
+    command: Callable[[List[str]], dict], args: List[str]
+) -> None:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.curation.curation_ops.get_db") as db,
+    ):
+        result = command(args)
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
 
 
 # =============================================================================
@@ -1054,25 +1088,49 @@ def test_add_react_refuses_naming_a_failed_caller_lookup():
     Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
     The lookup raises before any database is opened.
     """
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.curation.curation_ops.get_db") as db,
+    ):
         result = add_react(["post", "1", "thumbsup"])
 
     lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]
 
 
 def test_explore_rooms_refuses_naming_a_failed_caller_lookup():
     """The explore family names a broken caller lookup too (DPLAN-0354 leg 3)."""
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db") as db,
+    ):
         result = explore_rooms()
 
     lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_list_secrets_refuses_naming_a_failed_caller_lookup():
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.rooms.explore_ops.get_db") as db,
+    ):
+        result = list_secrets()
+
+    lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]

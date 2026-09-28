@@ -567,25 +567,108 @@ def test_craft_artifact_refuses_naming_a_failed_caller_lookup():
     Before (DPLAN-0354 leg 3): get_caller_branch logged the error and answered None.
     The lookup raises before any database is opened.
     """
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db") as db,
+    ):
         result = craft_artifact(["Pin Relic", "made by a pin"])
 
     lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]
 
 
 def test_seal_capsule_refuses_naming_a_failed_caller_lookup():
     """The capsule family names a broken caller lookup too (DPLAN-0354 leg 3)."""
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db") as db,
+    ):
         result = seal_capsule(["Pin", "sealed by a pin", "3"])
 
     lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        pytest.param(trade_module.gift_artifact, ["1", "@pal"], id="gift_artifact"),
+        pytest.param(trade_module.trade_artifact, ["1", "2", "@pal"], id="trade_artifact"),
+        pytest.param(trade_module.drop_item, ["Coin", "Shiny", "lobby"], id="drop_item"),
+        pytest.param(trade_module.find_item, ["1"], id="find_item"),
+    ],
+)
+def test_trade_commands_refuse_naming_a_failed_caller_lookup(tmp_path, command, args) -> None:
+    """Each trade_ops command names a broken caller lookup and opens no database."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "PAL"}]}), encoding="utf-8")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        # find_item sweeps expired drops (its own get_db) before the lookup; stubbed so only the lookup is guarded.
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.sweep_expired", return_value=0),
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.trade_ops.get_db") as db,
+    ):
+        result = command(args)
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        pytest.param(artifact_module.list_artifacts, [], id="list_artifacts"),
+        pytest.param(artifact_module.collab_artifact, ["Pact", "made by a pin", "@pal"], id="collab_artifact"),
+        pytest.param(artifact_module.sign_artifact, ["1"], id="sign_artifact"),
+    ],
+)
+def test_artifact_commands_refuse_naming_a_failed_caller_lookup(tmp_path, command, args) -> None:
+    """Each artifact_ops command names a broken caller lookup and opens no database."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text(json.dumps({"branches": [{"name": "PAL"}]}), encoding="utf-8")
+    with (
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.BRANCH_REGISTRY_PATH", str(registry)),
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.artifact_ops.get_db") as db,
+    ):
+        result = command(args)
+
+    lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_open_capsule_refuses_naming_a_failed_caller_lookup() -> None:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.artifacts.capsule_ops.get_db") as db,
+    ):
+        result = open_capsule(["1"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]

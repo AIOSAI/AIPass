@@ -111,7 +111,7 @@ def test_the_denial_instrument_denies_one_path_and_only_that_path(monkeypatch: p
 
     sibling = Path(__file__).parent / "conftest.py"
     assert module_root.Path(sibling).resolve() == Path(sibling).absolute(), "the denial leaked past its one target path"
-    assert Path(__file__).resolve().is_absolute(), "the denial leaked out of module_root into pathlib.Path"
+    assert Path(__file__).resolve() == Path(__file__).absolute(), "the denial leaked out of module_root"
 
 
 def test_a_failing_audit_write_never_escapes(monkeypatch: pytest.MonkeyPatch):

@@ -235,12 +235,33 @@ def test_show_profile_refuses_naming_a_failed_caller_lookup():
     With no target named the caller's own profile is asked; the lookup raises
     before any database is opened.
     """
-    with patch(
-        "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
-        side_effect=OSError("registry unreadable"),
-    ) as lookup:
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.profiles.profile_ops.get_db") as db,
+    ):
         result = show_profile([])
 
     lookup.assert_called_once()
+    db.assert_not_called()
+    assert result["success"] is False
+    assert "Caller lookup failed: registry unreadable" in result["error"]
+
+
+def test_profile_set_refuses_naming_a_failed_caller_lookup():
+    # Route: show_profile(["set", field, value]) dispatches to _handle_profile_set.
+    with (
+        patch(
+            "aipass.commons.apps.handlers.identity.identity_ops.find_branch_root",
+            side_effect=OSError("registry unreadable"),
+        ) as lookup,
+        patch("aipass.commons.apps.handlers.profiles.profile_ops.get_db") as db,
+    ):
+        result = show_profile(["set", "bio", "a pinned bio"])
+
+    lookup.assert_called_once()
+    db.assert_not_called()
     assert result["success"] is False
     assert "Caller lookup failed: registry unreadable" in result["error"]
