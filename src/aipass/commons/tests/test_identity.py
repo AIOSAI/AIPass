@@ -820,6 +820,18 @@ def test_the_widening_instrument_actually_widens(
     assert result["name"] == "VERA"
 
 
+def test_list_registry_candidates_lists_one_level_of_registry_files_only(tmp_path: Path):
+    """The seam by name, no fixture (commons' decision, DPLAN-0354 leg 4b, door A); its proof is its two mutants."""
+    (tmp_path / "ALPHA_REGISTRY.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "nested").mkdir()
+    (tmp_path / "nested" / "BETA_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+    listed = list(_ops.list_registry_candidates(tmp_path))
+
+    assert listed == [tmp_path / "ALPHA_REGISTRY.json"]
+
+
 def test_raw_glob_matches_what_the_host_filesystem_actually_does(tmp_path: Path):
     """
     NEGATIVE CONTROL — without the instrument, the host's own answer.

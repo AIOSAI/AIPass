@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(stdlib) — ntpath.realpath's getcwd read; resolve denied for one path here, Windows CI runs it
 # seedgo: no-test-needed(constant) — MODULE_NAME and module_file's logger.debug text
 
+import os
 from pathlib import Path
 
 import pytest
@@ -100,9 +101,9 @@ def test_the_denial_instrument_denies_one_path_and_only_that_path(monkeypatch: p
     normally, and Path(__file__) == Path(__file__).resolve() on a machine with
     no symlink in the path).
 
-    The second half is the control ON the control: the denial must be narrow,
-    or it is patching the whole process again - narrow to one path, and to
-    module_root's own Path binding.
+    The second half is the control ON the control: outside the one denied path,
+    resolve still answers, and answers what the platform answers - a symlinked
+    checkout included (commons' decision, DPLAN-0354 leg 4b).
     """
     _deny_resolve_for(monkeypatch, __file__)
 
@@ -110,8 +111,8 @@ def test_the_denial_instrument_denies_one_path_and_only_that_path(monkeypatch: p
         module_root.Path(__file__).resolve()
 
     sibling = Path(__file__).parent / "conftest.py"
-    assert module_root.Path(sibling).resolve() == Path(sibling).absolute(), "the denial leaked past its one target path"
-    assert Path(__file__).resolve() == Path(__file__).absolute(), "the denial leaked out of module_root"
+    assert module_root.Path(sibling).resolve() == Path(sibling).resolve(), "the denial leaked past its one target path"
+    assert Path(__file__).resolve() == Path(os.path.realpath(__file__)), "the denial leaked out of module_root"
 
 
 def test_a_failing_audit_write_never_escapes(monkeypatch: pytest.MonkeyPatch):
