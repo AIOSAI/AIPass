@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: auth.py
 # Description: Passport-based authorization for devpulse operations
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-03-30
 # Modified: 2026-09-27
 # =============================================
@@ -247,6 +247,19 @@ def _registry_entry(registry_data: dict, name: str) -> dict | None:
     return None
 
 
+def _resolve_location(path: Path) -> Path:
+    """Resolve a path the owner gate binds authority to: the registry's directory or a recorded home.
+
+    Product reason: the gate's one door to ``Path.resolve``, so both anchors of
+    path-binding resolve the same way and every failure is caught at the gate.
+    Test reason, said plainly: a resolve failure cannot be built in tmp_path on
+    every host (a symlink loop raises RuntimeError on 3.12, nothing on 3.13, and
+    symlinks are not portable), so tests replace this name rather than pathlib's
+    process-wide ``Path.resolve``.
+    """
+    return path.resolve()
+
+
 def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     """Resolve a registry entry's recorded path, or None when it records none.
 
@@ -267,7 +280,7 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     if not recorded.is_absolute():
         recorded = repo_root / recorded
     try:
-        return recorded.resolve()
+        return _resolve_location(recorded)
     except OSError as exc:
         # Raised, not None: None reads downstream as "records no path", which would
         # send someone hunting a registry entry that is in fact present and fine.
@@ -276,9 +289,10 @@ def _recorded_home(entry: dict, repo_root: Path) -> Path | None:
     except RuntimeError as exc:
         # Python 3.12 answers a symlink loop in a non-strict resolve with
         # RuntimeError, not OSError. Raised as OSError so the owner gate's refusal
-        # catches it: a loop is a refusal, never a traceback out of the gate.
-        logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
-        raise OSError(f"symlink loop: {exc}") from exc
+        # catches it: a failure is a refusal, never a traceback out of the gate.
+        # Named by its own type: RecursionError is a RuntimeError too, and not a loop.
+        logger.warning("Registry path %s could not be resolved: %s: %s", recorded, type(exc).__name__, exc)
+        raise OSError(f"{type(exc).__name__}: {exc}") from exc
 
 
 def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
@@ -347,7 +361,21 @@ def _owner_tier_refusal(command: str, caller: Caller) -> Refusal | None:
 
     # The registry file's own directory is the repo root by construction, which
     # keeps path-binding anchored to the SAME registry the checks above used.
-    repo_root = registry_path.parent.resolve()
+    try:
+        repo_root = _resolve_location(registry_path.parent)
+    except (OSError, RuntimeError) as exc:
+        # Fails CLOSED as a named refusal: before, this resolve sat outside any try,
+        # and a loop or an unreadable parent left the gate as a traceback.
+        logger.warning(
+            "Registry directory %s could not be resolved: %s: %s", registry_path.parent, type(exc).__name__, exc
+        )
+        return Refusal(
+            (
+                f"the directory of {registry_path.name} could not be resolved ({type(exc).__name__}: {exc}) — "
+                "cannot bind authority to a location"
+            ),
+            _AUTHORITY,
+        )
     try:
         recorded = _recorded_home(entry, repo_root)
     except OSError as exc:

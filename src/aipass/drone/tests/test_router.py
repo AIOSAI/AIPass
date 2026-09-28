@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_router.py
 # Description: Command routing - router module and router_handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/router.py and apps/handlers/router_handler.py."""
@@ -907,7 +907,7 @@ class TestIdentityMessageSeverity:
 
         with patch("aipass.drone.apps.handlers.router_handler.logger") as mock_logger:
             resolve_caller_identity(home)
-            router_handler._LOGGED_IDENTITY_SIGNATURES.clear()  # a fresh process starts empty
+            monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())  # a fresh process starts empty
             resolve_caller_identity(home)
 
         assert len(mock_logger.warning.call_args_list) == 2

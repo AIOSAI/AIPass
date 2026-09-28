@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-09
 # Modified: 2026-09-27
 # =============================================
@@ -109,10 +109,10 @@ def _registry_candidates(directory: Path) -> List[Path]:
     """What the FILESYSTEM answers for ``*_REGISTRY.json`` in *directory* — untrusted.
 
     The half of the lookup that varies by host: case-sensitive on Linux, folded
-    on Windows and default macOS. It is its own name because it is a different
-    kind of answer from the one ``registries_in`` returns — the host's opinion,
-    not yet a registry — and so the name check in Python can be exercised
-    against a folding listing on a host whose filesystem does not fold.
+    on Windows and default macOS. The product has no reason of its own for this
+    name; ``registries_in`` could glob inline. The reason is the test: a folding
+    listing cannot be produced on a Linux filesystem, so tests/test_registry_case_sweep.py
+    supplies one here and exercises the Python name check that follows.
     """
     return list(directory.glob(_REGISTRY_GLOB))
 
@@ -183,9 +183,10 @@ def _working_directory() -> Path:
     """The one raw read of where this process stands. Raises ENOENT when that is gone.
 
     Unguarded on purpose: the guard is ``caller_cwd`` and every location site
-    goes through it (test_no_cwd_sweep bans any other ``Path.cwd()``). The read
-    is its own name because a deleted working directory is a state Windows will
-    not let a process reach, so this is where that state is supplied portably —
+    goes through it (test_no_cwd_sweep bans any other ``Path.cwd()``). The
+    product has no reason of its own for this name; ``caller_cwd`` could read
+    ``Path.cwd()`` inline. The reason is the test: Windows will not let a
+    process stand in a deleted directory, so the tests supply that state here,
     beneath the guard, so the guard itself always runs.
     """
     return Path.cwd()

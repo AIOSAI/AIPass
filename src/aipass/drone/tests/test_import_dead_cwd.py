@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Every drone module imports without a readable working directory
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/ and apps/handlers/json/json_handler.py: every drone module imports and logs with no cwd."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — the run-time location-inference sites, pinned in tests/test_no_cwd_sweep.py
-# seedgo: no-test-needed(external) — other branches' import-time code such as prax.logger, preloaded and held constant here
+# seedgo: no-test-needed(covered_elsewhere) — run-time location-inference sites, pinned in tests/test_no_cwd_sweep.py
+# seedgo: no-test-needed(external) — other branches' import-time code (prax.logger), preloaded and held constant here
 
 import ast
 import subprocess
@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 import aipass.drone.apps as drone_apps
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 
 # Drone must import, and must keep logging, with no working directory.
 #
@@ -283,17 +284,17 @@ print("STACK_DIES: " + _ns["out"])
 """
 
 
-def _drone_modules() -> list[str]:
+def _drone_modules(root: Path | None = None) -> list[str]:
     """Every importable module under ``aipass.drone.apps``, by walking the tree.
 
     Named from the filesystem rather than from a hand-written list: the whole
     species this file is about is a fix landing on some of N identical paths,
     and a list in a test is one more place for N to be undercounted.
     """
-    root = Path(drone_apps.__file__).parent
+    root = root or Path(drone_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
-        if "__pycache__" in source.parts:
+        if SOURCE_SKIP_DIRS.intersection(source.relative_to(root).parts):
             continue
         rel = source.relative_to(root).with_suffix("")
         parts = [p for p in rel.parts if p != "__init__"]
@@ -690,9 +691,9 @@ class TestNoModuleLevelLocationCallSurvives:
     BANNED_ATTRS = frozenset({"resolve", "cwd", "getcwd", "realpath", "abspath"})
 
     @staticmethod
-    def _apps_sources() -> list[Path]:
-        root = Path(drone_apps.__file__).parent
-        return [p for p in sorted(root.rglob("*.py")) if "__pycache__" not in p.parts]
+    def _apps_sources(root: Path | None = None) -> list[Path]:
+        root = root or Path(drone_apps.__file__).parent
+        return [p for p in sorted(root.rglob("*.py")) if not SOURCE_SKIP_DIRS.intersection(p.relative_to(root).parts)]
 
     @staticmethod
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:
@@ -801,3 +802,24 @@ class TestNoModuleLevelLocationCallSurvives:
     def test_the_stack_detector_clears_an_unrelated_stack_attribute(self):
         tree = ast.parse("import numpy\nx = numpy.stack([1, 2])\ntraceback = []\ntraceback.stack()\n")
         assert self._inspect_stack_calls(tree) == [], "the ban is on inspect.stack, not on the word stack"
+
+
+class TestTheSourceWalksSkipADropboxAndAnArchive:
+    """Nothing looks into a dropbox or an .archive (owner ruling): both are
+    sandboxes, so neither walk may import or parse what sits in one."""
+
+    @pytest.fixture()
+    def apps_tree(self, tmp_path: Path) -> Path:
+        apps = tmp_path / "apps"
+        for sandbox in ("dropbox", ".archive"):
+            (apps / "handlers" / sandbox).mkdir(parents=True)
+            (apps / "handlers" / sandbox / "probe.py").write_text("x = 1\n", encoding="utf-8")
+        (apps / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
+        return apps
+
+    def test_the_import_walk_names_no_module_in_a_dropbox_or_an_archive(self, apps_tree: Path) -> None:
+        assert _drone_modules(apps_tree) == ["aipass.drone.apps.handlers.real"]
+
+    def test_the_parse_walk_reads_no_source_in_a_dropbox_or_an_archive(self, apps_tree: Path) -> None:
+        sources = TestNoModuleLevelLocationCallSurvives._apps_sources(apps_tree)
+        assert [p.relative_to(apps_tree).as_posix() for p in sources] == ["handlers/real.py"]

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: lookup.py
 # Description: Command lookup and matching for custom command shortcuts
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-17
 # Modified: 2026-09-27
 # =============================================
@@ -71,6 +71,10 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
     3. ``"plan create"`` (2 words)
     4. ``"plan"`` (1 word)
 
+    The operation log written on a hit is telemetry: a log write that raises
+    (``log_operation`` raises ``InvalidDocument`` on a malformed log) is logged
+    as a warning and the match still stands, so a command that matched runs.
+
     Args:
         args: List of whitespace-split user input tokens.
 
@@ -78,8 +82,8 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
         Tuple of (command_dict, remaining_args) on match, None otherwise.
 
     Raises:
-        Exception: whatever ``load_registry`` raises. A registry that cannot
-        load is a failure, never reported as "no match".
+        Exception: whatever ``load_registry`` raises, and only that. A registry
+        that cannot load is a failure, never reported as "no match".
     """
     if not args:
         return None
@@ -95,10 +99,13 @@ def match_command(args: list[str]) -> tuple[dict[str, Any], list[str]] | None:
         candidate = " ".join(args[:i])
         if candidate in commands:
             remaining = args[i:]
-            json_handler.log_operation(
-                "match_command",
-                {"matched": candidate, "remaining_args": remaining},
-            )
+            try:
+                json_handler.log_operation(
+                    "match_command",
+                    {"matched": candidate, "remaining_args": remaining},
+                )
+            except Exception as exc:
+                logger.warning("[%s] match log for '%s' not written: %s", MODULE_NAME, candidate, exc)
             return (commands[candidate], remaining)
 
     return None

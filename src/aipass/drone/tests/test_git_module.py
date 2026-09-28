@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — lock, status, sync, PR, and routing
-# Version: 1.1.3
+# Version: 1.1.4
 # Created: 2026-04-21
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/git_module.py and the lock, status, sync and PR handlers it drives."""
@@ -1317,6 +1317,18 @@ class TestTriggerFireIntegration:
 _MERGE_MOD = "aipass.drone.apps.plugins.devpulse_ops.merge_plugin"
 
 
+@pytest.fixture
+def merge_bus(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Stand a recorder where merge_pr binds the bus, so no merge test fires the live one.
+
+    merge_pr imports ``trigger`` from trigger's core at call time; replacing it at that
+    home is what the call reaches (the leg-3 bus probe counted these five on the bus).
+    """
+    bus = MagicMock()
+    monkeypatch.setattr(trigger_core, "trigger", bus)
+    return bus
+
+
 def _merge_side_effect(head_ref: str, current_branch: str = "main"):
     """Build a subprocess mock for merge_pr with configurable head ref."""
 
@@ -1344,7 +1356,9 @@ def _merge_side_effect(head_ref: str, current_branch: str = "main"):
 class TestMergeProtectedBranch:
     """Fix 1: --delete-branch omitted for protected branches (dev, main)."""
 
-    def test_dev_head_no_delete_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_dev_head_no_delete_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, merge_bus: MagicMock
+    ) -> None:
         """When PR head is dev, merge command must NOT include --delete-branch."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
@@ -1363,8 +1377,11 @@ class TestMergeProtectedBranch:
         merge_calls = [c for c in calls if c[:3] == ["gh", "pr", "merge"]]
         assert len(merge_calls) == 1
         assert "--delete-branch" not in merge_calls[0]
+        merge_bus.fire.assert_called_once_with("pr_merged", pr_number="10", title="PR Title")
 
-    def test_temp_branch_has_delete_branch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_temp_branch_has_delete_branch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, merge_bus: MagicMock
+    ) -> None:
         """When PR head is a temp branch, merge command includes --delete-branch."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
@@ -1382,8 +1399,11 @@ class TestMergeProtectedBranch:
         assert result["success"] is True
         merge_calls = [c for c in calls if c[:3] == ["gh", "pr", "merge"]]
         assert "--delete-branch" in merge_calls[0]
+        merge_bus.fire.assert_called_once_with("pr_merged", pr_number="20", title="PR Title")
 
-    def test_unknown_head_ref_fails_safe_no_delete(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_unknown_head_ref_fails_safe_no_delete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, merge_bus: MagicMock
+    ) -> None:
         """When the PR head ref can't be determined (empty), fail SAFE: never delete.
 
         Guards the exact path that destroyed `dev` in S183 — if gh can't report
@@ -1406,12 +1426,15 @@ class TestMergeProtectedBranch:
         merge_calls = [c for c in calls if c[:3] == ["gh", "pr", "merge"]]
         assert len(merge_calls) == 1
         assert "--delete-branch" not in merge_calls[0]
+        merge_bus.fire.assert_called_once_with("pr_merged", pr_number="30", title="PR Title")
 
 
 class TestMergeReturnToDev:
     """Fix 2: After merge+sync, checkout dev (or warn if can't)."""
 
-    def test_checkout_dev_after_merge(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_checkout_dev_after_merge(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, merge_bus: MagicMock
+    ) -> None:
         """merge_pr issues 'git checkout dev' when not already on dev."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
@@ -1429,8 +1452,11 @@ class TestMergeReturnToDev:
         assert result["success"] is True
         checkout_calls = [c for c in calls if c[1:3] == ["checkout", "dev"]]
         assert len(checkout_calls) == 1
+        merge_bus.fire.assert_called_once_with("pr_merged", pr_number="30", title="PR Title")
 
-    def test_no_checkout_when_already_on_dev(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_checkout_when_already_on_dev(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, merge_bus: MagicMock
+    ) -> None:
         """merge_pr skips checkout dev when already on dev."""
         registry = tmp_path / "AIPASS_REGISTRY.json"
         registry.write_text("{}", encoding="utf-8")
@@ -1448,6 +1474,7 @@ class TestMergeReturnToDev:
         assert result["success"] is True
         checkout_calls = [c for c in calls if c[1:3] == ["checkout", "dev"]]
         assert len(checkout_calls) == 0
+        merge_bus.fire.assert_called_once_with("pr_merged", pr_number="31", title="PR Title")
 
 
 # ===========================================================================

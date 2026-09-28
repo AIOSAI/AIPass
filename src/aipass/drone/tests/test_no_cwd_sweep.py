@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -346,7 +346,7 @@ class TestTheSweepIsComplete:
     def test_no_bare_cwd_read_survives_outside_caller_cwd(self):
         root = Path(drone_apps.__file__).parent
         offenders = []
-        for source in sorted(root.rglob("*.py")):
+        for source in drone_conftest.python_sources(root):
             if source.name == "router_handler.py":
                 continue  # caller_cwd() itself — the one sanctioned read
             tree = ast.parse(source.read_text(encoding="utf-8"))
@@ -369,6 +369,24 @@ class TestTheSweepIsComplete:
         assert self._bare_cwd_reads(tree) == [], (
             "a docstring explaining the cure is not the defect; convicting it is how cures go unexplained"
         )
+
+    def test_the_sweeps_never_walk_into_a_dropbox_or_an_archive(self, tmp_path):
+        """A dropbox and an .archive are sandboxes: nothing in them is swept (owner ruling).
+
+        Both sweeps in this file and in test_registry_case_sweep.py walk through
+        conftest's python_sources, which skips the directories seedgo's
+        SOURCE_SKIP_DIRS names. Red first on python_sources without the skip
+        (the mutant runner cannot serve conftest, which pytest loads first).
+        """
+        (tmp_path / "handlers").mkdir()
+        (tmp_path / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
+        for sandbox in ("dropbox", ".archive"):
+            (tmp_path / "handlers" / sandbox).mkdir()
+            (tmp_path / "handlers" / sandbox / "stray.py").write_text("x = 1\n", encoding="utf-8")
+
+        walked = drone_conftest.python_sources(tmp_path)
+
+        assert walked == [tmp_path / "handlers" / "real.py"], walked
 
 
 class TestTheWindowsSkipIsNarrow:
@@ -429,13 +447,13 @@ class TestTheWindowsSkipIsNarrow:
                 add_marker=recorded.append,
             )
 
-        monkeypatch.setattr(drone_conftest.sys, "platform", "win32")
+        monkeypatch.setattr(drone_conftest, "host_platform", lambda: "win32")
         on_windows = one_item()
         drone_conftest.pytest_collection_modifyitems(None, [on_windows])
         assert on_windows.recorded, "a deletable-cwd test was left to run on Windows"
         assert drone_conftest.WINDOWS_CWD_REASON in str(on_windows.recorded[0])
 
-        monkeypatch.setattr(drone_conftest.sys, "platform", "linux")
+        monkeypatch.setattr(drone_conftest, "host_platform", lambda: "linux")
         elsewhere = one_item()
         unmarked = SimpleNamespace(keywords={}, recorded=[], add_marker=lambda m: None)
         drone_conftest.pytest_collection_modifyitems(None, [elsewhere, unmarked])

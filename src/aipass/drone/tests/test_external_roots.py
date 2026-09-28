@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_external_roots.py
 # Description: Declared roots are the third resolution source
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py's declared-roots tier: externals resolve, never over a local."""
@@ -337,6 +337,39 @@ class TestGatewayFailureIsContained:
                 registry_handler.get_branch_by_name("nosuchbranch")
 
         assert log.error.called, "losing the external tier must never pass in silence"
+
+    def test_a_lost_tier_answers_none_and_an_empty_fleet_answers_empty(self, local_world):
+        """A lost tier and a fleet with no externals are two answers, not one.
+
+        Both used to answer []: a caller could not tell "the gateway failed"
+        from "nothing is declared". Mutant killed (runner): the gateway
+        failure's None put back to [].
+        """
+        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+            lost = registry_handler.external_branches()
+        with patch.object(fleet, "external_branches", return_value=[]):
+            empty = registry_handler.external_branches()
+
+        assert lost is None, "a lost external tier must not read as an empty one"
+        assert empty == []
+
+    def test_a_tier_with_no_project_root_answers_none(self, local_world):
+        """No project root to scope the declared roots is a lost tier, not an empty one.
+
+        Mutant killed (runner): the no-root None put back to [].
+        """
+        with patch.object(registry_handler, "get_registry_path", side_effect=RuntimeError("no registry")):
+            assert registry_handler.external_branches() is None
+
+    def test_a_lost_tier_still_refuses_an_unknown_name_through_resolve_branch(self, local_world):
+        """resolve_branch's lookup reads the lost tier as no externals, never as a crash.
+
+        Mutant killed (runner): _external_branches handing the lost tier's
+        None straight to get_branch_with_registry's loop.
+        """
+        with patch.object(fleet, "external_branches", side_effect=RuntimeError("gateway down")):
+            with pytest.raises(BranchNotFoundError, match="not found in registry"):
+                resolve_branch("@nosuchbranch")
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.4.1
+# Version: 1.4.2
 # Created: 2026-06-02
 # Modified: 2026-09-27
 # =============================================
@@ -293,12 +293,17 @@ def _standing_inside(resolved: Path, cwd: Path | None) -> str:
 
 
 def _remove_tree(path: Path) -> None:
-    """Remove a directory tree — the one step of a delete the host decides.
+    """Remove a directory tree in rm's direct lane — where the host answers.
 
-    Every guard before this is drone's own verdict; this is where the operating
-    system answers, and it can refuse on its own terms (Windows' WinError 32 on
-    a tree the process stands in). Kept as its own door so that refusal has one
-    place to arrive, and _safe_delete_direct reports it as the host's, not ours.
+    Every guard before this in _safe_delete_direct is drone's own verdict; this
+    is where the operating system answers, and it can refuse on its own terms
+    (Windows' WinError 32 on a tree the process stands in). It is the direct
+    lane's only tree removal, not every one: the broker daemon removes trees
+    with its own shutil.rmtree call in apps/handlers/broker/daemon.py.
+
+    Why this is its own function is the test, said plainly: tests/test_rm.py
+    stands Windows' refusal in for it on a POSIX host, to pin the message
+    _safe_delete_direct adds when the caller stands in the tree.
     """
     shutil.rmtree(path)
 
@@ -566,7 +571,8 @@ def stale_sweep(request: StaleRequest) -> StaleReport:
 
     Each DIR must resolve under the project root (the temp roots the plain lane
     also allows are not swept here) and outside the carve-outs. The walk never
-    enters a carve-out directory and never follows a symlink.
+    enters a carve-out directory, a dropbox or an .archive, and never follows a
+    symlink.
 
     The sibling-branch fence is crossed here and only here, by design
     (DPLAN-0338, the owner's go 2026-09-11): a stale staging temp is no citizen's
@@ -687,7 +693,8 @@ def _find_stale(
             continue
         visited.add(here)
         report.folders_scanned += 1
-        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS]
+        # A dropbox or an .archive is a sandbox nothing looks into (owner ruling).
+        dirnames[:] = [name for name in dirnames if name not in _CARVEOUT_DIRS and name not in (".archive", "dropbox")]
         if not here.name.endswith(_STALE_FOLDER_SUFFIX):
             continue
         for name in filenames:

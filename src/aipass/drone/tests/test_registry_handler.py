@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_handler.py
 # Description: Registry loading, lookup and credential verification
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/registry_handler.py: registry loading, lookup and credential verification."""
@@ -254,11 +254,16 @@ class TestLoadRegistry:
     # ---------------------------------------------------------------
 
     def test_permission_error_raises_registry_permission_error(self, registry_dir: Path):
-        """PermissionError when reading the file triggers RegistryPermissionError."""
+        """PermissionError when reading the file triggers RegistryPermissionError.
+
+        The refusal is supplied at registry_handler's one registry read, not by
+        replacing builtins.open for the whole process. Mutant killed (runner):
+        the PermissionError branch removed, so the refusal reads as corruption.
+        """
         reg_file = _write_registry(registry_dir, _minimal_registry())
         set_registry_path(reg_file)
 
-        with patch("builtins.open", side_effect=PermissionError("access denied")):
+        with patch.object(registry_handler, "_read_registry_json", side_effect=PermissionError("access denied")):
             with pytest.raises(RegistryPermissionError, match="Permission denied"):
                 load_registry()
 

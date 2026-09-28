@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: path_resolver.py
 # Description: Kernel-safe path resolution via openat2 RESOLVE_BENEATH
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-06-09
 # Modified: 2026-09-27
 # =============================================
@@ -103,13 +103,15 @@ def _fd_path(fd: int) -> Path:
     """The path the kernel holds for an open fd, read out of /proc.
 
     /proc is Linux furniture: macOS and Windows have none, so only the openat2
-    lane, which runs on Linux alone, may ask here. The walk proves its answer
-    by inode instead (_verify_leaf); it once read this and raised
-    FileNotFoundError on every call on the hosts it exists for. Off Linux it
-    refuses by name rather than failing on a missing file.
+    lane may ask here, and that lane is entered only when _openat2_available()
+    has said the host is Linux. The walk proves its answer by inode instead
+    (_verify_leaf); it once read this and raised FileNotFoundError on every
+    call on the hosts it exists for.
+
+    Why this is its own function is the test, said plainly: tests/test_broker.py
+    replaces it with a reader that fails, to prove the walk lane never reaches
+    for /proc. The product would read the same with the readlink inline.
     """
-    if sys.platform != "linux":
-        raise OSError(errno.ENOTSUP, "/proc is Linux-only; an fd's path cannot be read here", str(fd))
     return Path(os.readlink(f"/proc/self/fd/{fd}"))
 
 
@@ -181,6 +183,11 @@ def _real_base(base: Path) -> Path:
     It is read after the walk, by name, and nothing ties it to the fds the walk
     held: a component renamed in between makes it name something else. That gap
     is why the assembled path must pass _verify_leaf before it is handed back.
+
+    Why this is its own function is the test, said plainly: no product reason
+    asks for it. tests/test_broker.py replaces it to stand a rename between the
+    walk and this read, which cannot be timed from outside, and so proves
+    _verify_leaf refuses the path that results.
     """
     return Path(os.path.realpath(base))
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-27
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/drone.py, the drone CLI entry point and its routing."""
@@ -517,6 +517,22 @@ class TestHandleModule:
         result, _ = self._run(["@git", "--help"])
         assert result == 0
         assert "No help available for @git." in capsys.readouterr().out
+
+    def test_a_module_that_cannot_load_is_named_on_stderr_not_empty(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """No args on a module that cannot load exits 1 and says so; mutant killed: None read as no information."""
+        result, _ = self._run(["@git"], intro=None)
+        out, err = capsys.readouterr()
+        assert result == 1
+        assert "module @git is registered but not available: it could not load" in err
+        assert "No information available" not in out
+
+    def test_help_on_a_module_that_cannot_load_is_named_on_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--help on a module that cannot load exits 1 and says so; mutant killed: None read as no help."""
+        result, _ = self._run(["@git", "--help"], help=None)
+        out, err = capsys.readouterr()
+        assert result == 1
+        assert "module @git is registered but not available: it could not load" in err
+        assert "No help available" not in out
 
     def test_command_routing(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A verb routes through route_module_command and its stdout is written (mutant: stdout write removed)."""

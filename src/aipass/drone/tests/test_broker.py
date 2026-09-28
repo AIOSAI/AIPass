@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.4
+# Version: 2.0.5
 # Created: 2026-06-09
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/broker/daemon.py, its path resolver, protocol, client and rm routing."""
@@ -11,7 +11,6 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — rm's direct (non-broker) delete lane, pinned in tests/test_rm.py
 # seedgo: no-test-needed(external) — the kernel's openat2 RESOLVE_BENEATH itself; the resolver's use of it is pinned
-# seedgo: no-test-needed(external) — _fd_path's off-Linux refusal; only the Linux-gated openat2 lane calls it
 
 from __future__ import annotations
 
@@ -1149,4 +1148,28 @@ class TestAnUnreadFolderIsNotAnAbsentBranch:
             locked.chmod(0o700)
         assert resp.ok is False
         assert str(locked) in resp.message
+        assert target.exists()
+
+
+class TestASandboxCopyIsNotTheBranch:
+    @pytest.mark.parametrize("sandbox", [".archive", "dropbox"])
+    def test_an_identity_found_only_in_a_sandbox_gets_no_base_and_its_file_stays(
+        self, running_broker: BrokerDaemon, repo_root: Path, sandbox: str
+    ) -> None:
+        """Nothing looks into a dropbox or an .archive (owner ruling): an archived
+        copy of a branch is not the branch, so it lends the identity no base.
+
+        Mutant killed: _resolve_branch_dir's sandbox prune made `pass` (both ids);
+        the prune narrowed to .archive alone ([dropbox])."""
+        copy = repo_root / sandbox / "ghostcopy"
+        (copy / ".trinity").mkdir(parents=True)
+        target = copy / "keep.txt"
+        target.write_text("keep", encoding="utf-8")
+        resp = _send_identified(
+            running_broker,
+            "ghostcopy",
+            BrokerRequest(op="delete", path="keep.txt", request_id="sandbox_copy"),
+        )
+        assert resp.ok is False
+        assert resp.error_code == "NO_BASE"
         assert target.exists()

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_activation.py
 # Description: Tests for command activation, listing, removal, and custom execution
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/drone.py: activate, list, remove, target, and running a custom command."""
@@ -26,6 +26,7 @@ from aipass.drone.apps.handlers.command_registry.formatters import (
     format_removal,
 )
 from aipass.drone.apps.handlers.executor import CommandResult
+from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.drone import main
 from aipass.drone.apps.handlers.registry_handler import reset_registry_path, set_registry_path
 from aipass.drone.apps.modules import BranchNotFoundError
@@ -468,6 +469,43 @@ class TestHandleCustomCommand:
         result = _drone("bad")
 
         assert result == 1
+
+    @patch("aipass.drone.apps.drone.route_command")
+    def test_a_failed_match_log_write_still_runs_the_matched_command(
+        self, mock_route: MagicMock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A failed operation log is never "registry could not load"; mutant killed: the log write unguarded."""
+
+        ops.add_command("audit", "@seedgo", "audit")
+        mock_route.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="seedgo", command="audit")
+
+        def broken_log(*_args: Any, **_kwargs: Any) -> bool:
+            raise json_handler.InvalidDocument("log document is not a list")
+
+        monkeypatch.setattr(json_handler, "log_operation", broken_log)
+
+        result = _drone("audit")
+
+        assert result == 0
+        mock_route.assert_called_once()
+        assert "could not load" not in capsys.readouterr().err
+
+    @patch("aipass.drone.apps.drone.route_command")
+    def test_a_registry_that_cannot_load_is_named_and_exits_1(
+        self, mock_route: MagicMock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A registry that cannot load is named, exit 1, nothing routed; mutant killed: the catch returns 0."""
+
+        def unreadable() -> dict[str, Any]:
+            raise OSError("registry unreadable")
+
+        monkeypatch.setattr(lookup, "load_registry", unreadable)
+
+        result = _drone("audit")
+
+        assert result == 1
+        mock_route.assert_not_called()
+        assert "command registry could not load: registry unreadable" in capsys.readouterr().err
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_no_args_passes_none(self, mock_route: MagicMock) -> None:

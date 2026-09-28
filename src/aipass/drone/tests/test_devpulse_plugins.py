@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_devpulse_plugins.py
 # Description: Tests for devpulse_ops plugins — merge, smart-sync, fix
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-30
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/ merge, sync and fix, and their routing in apps/modules/git_module.py."""
@@ -122,9 +122,13 @@ class TestAuthDenialFix:
 class TestMergePrHappyPath:
     """merge_pr should merge, pull, and return commit + title."""
 
+    @patch("aipass.trigger.apps.modules.core.trigger")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
-    def test_merge_pr_success(self, mock_run: MagicMock, mock_root: MagicMock, tmp_path: Path) -> None:
+    def test_merge_pr_success(
+        self, mock_run: MagicMock, mock_root: MagicMock, mock_bus: MagicMock, tmp_path: Path
+    ) -> None:
+        """A merge fires pr_merged; the bus is replaced where merge_pr binds it, never fired for real."""
         mock_root.return_value = tmp_path
 
         def side_effect(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -152,6 +156,7 @@ class TestMergePrHappyPath:
         assert result["title"] == "feat: awesome feature"
         assert result["merge_commit"] == "abc1234def5678"
         assert "42" in result["message"]
+        mock_bus.fire.assert_called_once_with("pr_merged", pr_number="42", title="feat: awesome feature")
 
 
 class TestMergePrFailure:
@@ -535,16 +540,18 @@ class TestGitModuleRouting:
         "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access",
         return_value="devpulse",
     )
+    @patch("aipass.trigger.apps.modules.core.trigger")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.find_repo_root")
     @patch("aipass.drone.apps.plugins.devpulse_ops.merge_plugin.subprocess.run")
     def test_handle_merge_routes_correctly(
         self,
         mock_run: MagicMock,
         mock_root: MagicMock,
+        mock_bus: MagicMock,
         _mock_access: MagicMock,
         tmp_path: Path,
     ) -> None:
-
+        """merge routes to merge_pr, which fires pr_merged on the recorder, never the live bus."""
         mock_root.return_value = tmp_path
 
         proc = MagicMock()
@@ -557,6 +564,7 @@ class TestGitModuleRouting:
         # merge without it is refused before routing reaches merge_pr.
         result = handle_command("merge", ["42", "--confirm"])
         assert result["exit_code"] == 0
+        mock_bus.fire.assert_called_once_with("pr_merged", pr_number="42", title="ok")
 
     @patch(
         "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access",

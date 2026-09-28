@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Shared pytest fixtures for drone tests."""
@@ -28,6 +28,7 @@ import pytest
 from aipass.cli.apps.modules import display
 from aipass.drone.apps.handlers import router_handler
 from aipass.drone.apps.handlers.json import json_handler
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the DPLAN-0059 stamp trio, the json-dir seam suite) that must
@@ -51,7 +52,7 @@ def clean_command_state() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def _clean_identity_dedupe() -> Generator[None, None, None]:
+def _clean_identity_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give every test a fresh caller-identity dedupe set.
 
     router_handler suppresses repeated identity messages for the life of the
@@ -59,13 +60,12 @@ def _clean_identity_dedupe() -> Generator[None, None, None]:
     log line depends on which tests ran before it — the exact order-dependent
     flake that only surfaces when someone runs a single test in isolation.
 
-    Reaches the module-private set on purpose. Production never needs to forget
+    Hands the module a new empty set, the state a fresh process starts in, and
+    monkeypatch puts the original back after. Production never needs to forget
     what it has already logged, so exporting a reset() just to serve this
-    fixture would put a test-only function in the shipped API.
+    fixture would put a test-only function in the shipped API (owner decision).
     """
-    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
-    yield
-    router_handler._LOGGED_IDENTITY_SIGNATURES.clear()
+    monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())
 
 
 @pytest.fixture(autouse=True)
@@ -224,9 +224,28 @@ def pytest_configure(config):
     )
 
 
+def python_sources(root: Path) -> list[Path]:
+    """Every ``.py`` under *root*, sorted: the walk both source sweeps share.
+
+    Never from a directory seedgo's SOURCE_SKIP_DIRS names. A dropbox and an
+    .archive are sandboxes (owner ruling): nothing looks into them.
+    """
+    return sorted(p for p in root.rglob("*.py") if not SOURCE_SKIP_DIRS.intersection(p.relative_to(root).parts[:-1]))
+
+
+def host_platform() -> str:
+    """The platform the collection hook branches on: ``sys.platform``.
+
+    Its own name for the test and no other reason: the hook's Windows answer is
+    checked from a machine that is not Windows by supplying the platform here,
+    rather than by replacing ``sys.platform`` for the whole process.
+    """
+    return sys.platform
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip deletable-cwd tests on Windows only, and say the whole reason."""
-    if sys.platform != "win32":
+    if host_platform() != "win32":
         return
     skip = pytest.mark.skip(reason=WINDOWS_CWD_REASON)
     for item in items:

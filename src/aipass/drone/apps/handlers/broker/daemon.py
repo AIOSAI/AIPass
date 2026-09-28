@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: daemon.py
 # Description: Broker daemon — privileged deleter for sandboxed agents
-# Version: 2.1.2
+# Version: 2.1.3
 # Created: 2026-06-09
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """Broker daemon — privileged deleter for sandboxed agents.
@@ -185,6 +185,11 @@ class BrokerDaemon:
     def _resolve_branch_dir(self, identity: str) -> Path | None:
         """Find a branch directory by name via .trinity/ marker walk.
 
+        The walk never enters a dropbox or an .archive: both are sandboxes
+        (owner ruling), and an archived or dropped copy of a branch carries
+        its .trinity/ too. Found there, it would hand the identity a base that
+        is not its branch.
+
         Raises:
             OSError: the branch was not found and part of the tree could not be
                 read, so "absent" is unproven. A found branch proves itself; an
@@ -198,6 +203,7 @@ class BrokerDaemon:
             if depth > 3:
                 dirs.clear()
                 continue
+            dirs[:] = [d for d in dirs if d not in (".archive", "dropbox")]
             if Path(root).name == identity and (Path(root) / ".trinity").is_dir():
                 return Path(root).resolve()
         if unlisted:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: A case-insensitive filesystem must not widen what counts as a registry
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/router_handler.py registries_in and every *_REGISTRY.json walk under apps/."""
@@ -20,6 +20,7 @@ import pytest
 from aipass.drone.apps.handlers import registry_handler, router_handler
 from aipass.drone.apps.handlers.router_handler import registries_in
 import aipass.drone.apps as drone_apps
+from aipass.drone.tests import conftest as drone_conftest
 
 
 # ``*_REGISTRY.json`` is a name, not a spelling the filesystem gets to choose.
@@ -197,7 +198,7 @@ class TestTheSweepIsComplete:
 
         root = Path(drone_apps.__file__).parent
         offenders = []
-        for source in sorted(root.rglob("*.py")):
+        for source in drone_conftest.python_sources(root):
             if source.name == "router_handler.py":
                 continue  # registries_in() itself — the one sanctioned glob
             for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):

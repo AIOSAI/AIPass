@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access, new handlers, and PR deprecation
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for apps/plugins/devpulse_ops/auth.py's git tiers and the diff/log/show/commit/checkout doors of apps/modules/git_module.py."""
+"""Tests for apps/plugins/devpulse_ops/auth.py's git tiers and the git doors of apps/modules/git_module.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — subprocess.run; git and gh are stubbed except in the tmp_path repos of the door tests
@@ -17,6 +17,7 @@ import inspect
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -91,6 +92,17 @@ def _registered_verbs() -> list[str]:
     gate.assert_called_once_with("no-such-verb")
     assert result["exit_code"] == 1
     return result["stderr"].split("Available: ", 1)[1].split(", ")
+
+
+def _failing_resolve(target: Path, failure: type[Exception]) -> Callable[[Path], Path]:
+    """A stand-in for auth's resolve seam that raises *failure* for *target* and resolves every other path."""
+
+    def resolve(path: Path) -> Path:
+        if path == target:
+            raise failure("simulated resolve failure")
+        return path.resolve()
+
+    return resolve
 
 
 # ===========================================================================
@@ -390,17 +402,55 @@ class TestOwnerTierIsEarnedPerRepo:
             "branches": {"devpulse": {"name": "devpulse", "path": str(marker), "owner": True}},
         }
         monkeypatch.setattr("aipass.drone.apps.plugins.devpulse_ops.auth.load_registry", lambda *a, **k: registry)
-        real_resolve = Path.resolve
-
-        def resolve(self: Path, strict: bool = False) -> Path:
-            if self == marker:
-                raise failure("simulated resolve failure")
-            return real_resolve(self, strict=strict)
-
-        monkeypatch.setattr(Path, "resolve", resolve)
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(marker, failure)
+        )
         with pytest.raises(PermissionError, match="could not be resolved") as refused:
             verify_git_access("commit")
         assert "records no path" not in str(refused.value)
+
+    def test_recorded_home_failure_is_named_for_its_own_type(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A RecursionError is a RuntimeError but not a symlink loop; the refusal names what was raised.
+
+        Mutant: the RuntimeError arm relabels as f"symlink loop: {exc}" again — killed.
+        """
+        marker = tmp_path / "unresolvable_home"
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        registry = {
+            "metadata": {"id": OWNER_REGISTRY_ID},
+            "branches": {"devpulse": {"name": "devpulse", "path": str(marker), "owner": True}},
+        }
+        monkeypatch.setattr("aipass.drone.apps.plugins.devpulse_ops.auth.load_registry", lambda *a, **k: registry)
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(marker, RecursionError)
+        )
+        with pytest.raises(PermissionError, match="could not be resolved") as refused:
+            verify_git_access("commit")
+        assert "RecursionError: simulated resolve failure" in str(refused.value)
+        assert "symlink loop" not in str(refused.value)
+
+    @pytest.mark.parametrize("failure", [OSError, RuntimeError, RecursionError])
+    def test_registry_directory_that_cannot_resolve_is_refused_not_raised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+    ) -> None:
+        """The registry's own directory failing to resolve is a named refusal, never a traceback out of the gate.
+
+        Mutant: the registry-root try removed (a bare resolve, as before) — the failure escapes uncaught, killed.
+        """
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(tmp_path, failure)
+        )
+        with pytest.raises(PermissionError, match="could not be resolved") as refused:
+            verify_git_access("commit")
+        assert f"{failure.__name__}: simulated resolve failure" in str(refused.value)
+        assert "AIPASS_REGISTRY.json" in str(refused.value)
 
     def test_subdirectory_of_recorded_home_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Path-binding accepts at-or-under, so working from a subdir still authorizes."""

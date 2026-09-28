@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_rm.py
 # Description: drone rm contained safe-delete: containment, carve-outs, stale sweep
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-06-02
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/rm.py and the rm_handler containment it drives."""
@@ -1120,6 +1120,16 @@ class TestStaleSweep:
         hidden = _aged(stale_tree["api"] / ".trinity" / "trinity_json" / "old.tmp", 11 * _DAY)
         _sweep("--stale", "10d", str(stale_tree["api"]))
         assert hidden.exists()
+
+    @pytest.mark.parametrize("sandbox", [".archive", "dropbox"])
+    def test_the_walk_never_enters_a_sandbox_and_the_stale_temp_beside_it_goes(self, stale_tree, sandbox):
+        """Nothing looks into a dropbox or an .archive (owner ruling).
+
+        Mutant killed: _find_stale's sandbox prune dropped (both ids)."""
+        kept = _aged(stale_tree["api"] / sandbox / "api_json" / "old.tmp", 11 * _DAY)
+        _sweep("--stale", "10d", str(stale_tree["api"]))
+        assert kept.exists()
+        assert not stale_tree["stale"].exists()
 
     def test_a_carve_out_dir_is_refused_and_recorded(self, stale_tree, tmp_path):
         trinity = stale_tree["api"] / ".trinity"
