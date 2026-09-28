@@ -13,7 +13,8 @@
 # creates directory, round-trip with load, error handling).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/registry/ parses and imports
+# seedgo: no-test-needed(error_handling) — _atomic_write's warning when the temp file cleanup fails, covered by that row
+# seedgo: no-test-needed(error_handling) — load_last_scan answering {} on an unreadable registry, covered by that row
 
 import json
 import sys

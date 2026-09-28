@@ -26,8 +26,8 @@
 # mocks that must be in place first.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/cli/ parses and imports
+# seedgo: no-test-needed(through_the_command) — log_audit.py's enforce and sweep, covered by tests/test_log_audit.py
+# seedgo: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
 
 import contextlib
 import importlib
@@ -153,7 +153,7 @@ class TestUnknownArgumentIsRefused:
         mod = _load(PRAX_PATH)
 
         with (
-            patch.object(sys, "argv", ["prax", "--definitely-not-a-flag"]),
+            patch("sys.argv", ["prax", "--definitely-not-a-flag"]),
             patch.object(mod, "print_introspection") as self_map,
             patch.object(mod, "print_help") as help_fn,
         ):
@@ -169,7 +169,7 @@ class TestUnknownArgumentIsRefused:
         """A typo gets a pointer, not a lecture."""
         mod = _load(PRAX_PATH)
 
-        with patch.object(sys, "argv", ["prax", "--verison"]), patch.object(mod, "print_introspection"):
+        with patch("sys.argv", ["prax", "--verison"]), patch.object(mod, "print_introspection"):
             assert mod.main() == 1
 
         refusals = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
@@ -179,7 +179,7 @@ class TestUnknownArgumentIsRefused:
         """The gate must not over-refuse: --help is prax's own option."""
         mod = _load(PRAX_PATH)
 
-        with patch.object(sys, "argv", ["prax", "--help"]), patch.object(mod, "print_help") as help_fn:
+        with patch("sys.argv", ["prax", "--help"]), patch.object(mod, "print_help") as help_fn:
             assert mod.main() == 0
 
         help_fn.assert_called_once()
@@ -205,7 +205,7 @@ class TestUnknownArgumentIsRefused:
         """
         mod = _load(PRAX_PATH)
 
-        with patch.object(sys, "argv", ["prax", "log-audit", "not_a_real_subarg_xyz"]):
+        with patch("sys.argv", ["prax", "log-audit", "not_a_real_subarg_xyz"]):
             assert mod.main() == 1
 
         rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
@@ -223,13 +223,29 @@ class TestACrashedHandlerIsNotAnUnknownCommand:
 
         with (
             patch.object(mod, "discover_command_modules", return_value=[crashing_handler]),
-            patch.object(sys, "argv", ["prax", "status"]),
+            patch("sys.argv", ["prax", "status"]),
         ):
             mod.main()
 
         rendered = [str(call) for call in mock_prax_infrastructure.cli.error.call_args_list]
         assert any("Handler failed: registry is unreachable" in call for call in rendered), rendered
         assert not any("Unknown command" in call for call in rendered), rendered
+
+    def test_discovery_returns_each_command_module_handler_and_skips_logger(self):
+        """Mutant: drop the logger.py skip, and the stubbed logger joins the handlers."""
+        mod = _load(PRAX_PATH)
+
+        handlers = mod.discover_command_modules()
+
+        assert all(callable(handler) for handler in handlers)
+        assert sorted(handler.__module__ for handler in handlers) == [
+            "aipass.prax.apps.modules.dashboard",
+            "aipass.prax.apps.modules.discover",
+            "aipass.prax.apps.modules.log_audit",
+            "aipass.prax.apps.modules.log_health",
+            "aipass.prax.apps.modules.monitor",
+            "aipass.prax.apps.modules.status",
+        ]
 
 
 class TestOwnershipStillComesFirst:

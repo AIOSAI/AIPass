@@ -16,7 +16,8 @@
 # - initialize_positions() -- seek-to-end on startup
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(json_structure) — start_log_watcher's log_watcher_started log_operation record
 
 import sys
 from pathlib import Path
@@ -793,6 +794,16 @@ class TestExtractTargetFromCmd:
         mod = _import_log_watcher()
         cmd_path = str(tmp_path / "aipass" / "seedgo" / "run.py")
         result = mod.LogFileWatcher._extract_target_from_cmd(cmd_path)
+        assert result == "SEEDGO"
+
+    def test_extracts_path_target_windows_form(self):
+        """Should extract target from a Windows-form path with backslashes.
+
+        Mutant: searching the raw cmd instead of its slash-normalised copy reddens this.
+        """
+        mod = _import_log_watcher()
+        cmd = "D:\\dev\\AIPass\\src\\aipass\\seedgo\\run.py"
+        result = mod.LogFileWatcher._extract_target_from_cmd(cmd)
         assert result == "SEEDGO"
 
     def test_returns_none_when_no_target(self):

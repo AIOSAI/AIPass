@@ -23,7 +23,9 @@
 # - log_health._display_rates() — the ``[branch]`` attribution tag on every row
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that the render helper's finally-block restore on a raised exception parses
+# seedgo: no-test-needed(through_the_command) — prax.py's main() on each flag, covered by tests/test_help_flag_safety.py
+# seedgo: no-test-needed(through_the_command) — monitor.py's run dispatch, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — log_health.py's handle_command, covered by tests/test_log_health.py
 
 import importlib
 import io

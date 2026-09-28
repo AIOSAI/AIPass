@@ -13,7 +13,7 @@
 # malformed JSON, mixed valid/invalid files, service name derivation.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/central/ parses and imports
+# seedgo: no-test-needed(json_structure) — the shape of read_all_centrals' log_operation record, covered by that row
 
 import json
 import sys

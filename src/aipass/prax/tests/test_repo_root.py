@@ -37,7 +37,8 @@
 # resolve() reads the cwd there too.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/repo_root/ parses and imports
+# seedgo: no-test-needed(error_handling) — resolved_file answering the unresolved path on OSError, covered by that row
+# seedgo: no-test-needed(error_handling) — find_repo_root walking past an unreadable directory, covered by that row
 
 import ast
 import json

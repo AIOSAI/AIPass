@@ -22,7 +22,8 @@
 # - Control-file isolation: no test ever reads the operator's live pause state
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(stdlib) — _flush_loop, a threading.Event.wait timer around the tested _flush_buffer
+# seedgo: no-test-needed(json_structure) — init_relay's and stop_relay's log_operation records, covered by that row
 
 import importlib
 import json

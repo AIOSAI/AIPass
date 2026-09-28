@@ -14,7 +14,7 @@
 # (load_ignore_patterns_from_config).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that load.py's caller-name auto-detection and routing-warning helpers parse and import
+# seedgo: no-test-needed(stderr_routing) — _warn_routing's warning when a log is routed away, covered by that row
 
 import json
 import sys

@@ -2,7 +2,7 @@
 # Name: prax.py
 # Description: Entry point CLI for drone @prax — logging, monitoring, dashboard
 # Version: 1.1.0
-# Created: 2026-03-08
+# Created: 2026-03-05
 # Modified: 2026-09-27
 # =============================================
 

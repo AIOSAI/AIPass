@@ -20,7 +20,9 @@
 # before the import chain triggers.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that logger.py's handler-dependency modules parse and import
+# seedgo: no-test-needed(ruff) — that each __all__ re-export, e.g. get_direct_logger(), names a real import (F822)
+# seedgo: no-test-needed(through_the_command) — append_jsonl()'s writing, covered by tests/test_jsonl_writer.py
+# seedgo: no-test-needed(through_the_command) — check_file_watcher_liveness() itself, covered by tests/test_watcher.py
 
 import json
 import os

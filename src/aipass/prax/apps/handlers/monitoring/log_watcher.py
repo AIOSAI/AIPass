@@ -363,7 +363,8 @@ class LogFileWatcher(FileSystemEventHandler):
         target_match = re.search(r"@(\w+)", cmd)
         if target_match:
             return target_match.group(1).upper()
-        path_match = re.search(r"/aipass/(\w+)", cmd)
+        norm = cmd.replace("\\", "/")
+        path_match = re.search(r"/aipass/(\w+)", norm)
         if path_match:
             return path_match.group(1).upper()
         return None

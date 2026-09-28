@@ -22,7 +22,9 @@
 # fixture must inject sys.modules mocks before any prax module is loaded.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/logging/ parses and imports
+# seedgo: no-test-needed(through_the_command) — log_watchdog's sweep_stale_logs(), covered by tests/test_sweep.py
+# seedgo: no-test-needed(through_the_command) — setup_individual_logger(), covered by tests/test_logging.py
+# seedgo: no-test-needed(through_the_command) — append_jsonl() in jsonl_writer.py, covered by tests/test_jsonl_writer.py
 
 import importlib  # used inside test functions for dynamic module loading
 import json

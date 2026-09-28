@@ -31,7 +31,14 @@
 # tree's current citizen list.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — detect_from_log, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — detect_from_module, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — get_stats, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — reload_registry, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — get_detector, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_log, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(json_structure) — __init__'s log_operation("branch_detected") record, covered by that row
 
 import importlib
 import json

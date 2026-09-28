@@ -14,7 +14,9 @@
 # directory scanning across system_logs/ and branch logs/.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/logging/ parses and imports
+# seedgo: no-test-needed(error_handling) — _file_age_days answering 0.0 when the stat fails, covered by that row
+# seedgo: no-test-needed(error_handling) — _sweep_directory's warning when an unlink fails, covered by that row
+# seedgo: no-test-needed(json_structure) — sweep_stale_logs' log_sweep log_operation record, covered by that row
 
 import os
 import sys

@@ -19,7 +19,7 @@
 # - BranchScope.describe() / unknown_names(): truthful banner text + typo detection
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(json_structure) — parse_scope's log_operation record of the parsed names, covered by that row
 
 from dataclasses import dataclass
 from typing import Optional

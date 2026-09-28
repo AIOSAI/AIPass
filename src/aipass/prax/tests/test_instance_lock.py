@@ -16,7 +16,8 @@
 # - Concurrent viewer: relay lock scoped to TG sends, never blocks display
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(json_structure) — try_acquire's log_operation record, covered by that row
+# seedgo: no-test-needed(log_level) — the info lines naming each liveness verdict, covered by that row
 
 import json
 import os

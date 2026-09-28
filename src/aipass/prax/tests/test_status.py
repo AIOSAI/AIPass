@@ -14,7 +14,10 @@
 # autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/status/ parses and imports
+# seedgo: no-test-needed(error_handling) — sync_status's error on an absent or unreadable registry, covered by that row
+# seedgo: no-test-needed(error_handling) — _handle_sync's error line when sync_status raises, covered by that row
+# seedgo: no-test-needed(json_structure) — sync_status's status_sync_declined log_operation record, covered by that row
+# seedgo: no-test-needed(log_level) — sync_status's info line counting what it scanned, covered by that row
 
 import json
 import sys

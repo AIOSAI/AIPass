@@ -15,7 +15,8 @@
 # to ensure the mocked dependencies are in place.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/dashboard/ parses and imports
+# seedgo: no-test-needed(json_structure) — write_section's log_operation("section_updated") record, covered by that row
+# seedgo: no-test-needed(through_the_command) — merge_quick_status, covered by tests/test_dashboard_merge.py
 
 import importlib
 import json
@@ -2251,7 +2252,7 @@ class TestDashboardMain:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        monkeypatch.setattr(sys, "argv", ["dashboard"])
+        monkeypatch.setattr("sys.argv", ["dashboard"])
         with _patch.object(mod, "print_introspection") as mock_intro:
             mod.main()
         mock_intro.assert_called_once()
@@ -2262,7 +2263,7 @@ class TestDashboardMain:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        monkeypatch.setattr(sys, "argv", ["dashboard", flag])
+        monkeypatch.setattr("sys.argv", ["dashboard", flag])
         with (
             _patch.object(mod, "print_help") as mock_help,
             _patch.object(mod, "handle_command") as mock_hc,
@@ -2277,7 +2278,7 @@ class TestDashboardMain:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        monkeypatch.setattr(sys, "argv", ["dashboard", "dashboard", "status"])
+        monkeypatch.setattr("sys.argv", ["dashboard", "dashboard", "status"])
         with _patch.object(mod, "handle_command", return_value=True) as mock_hc:
             mod.main()
         mock_hc.assert_called_once_with("dashboard", ["status"])
@@ -2287,7 +2288,7 @@ class TestDashboardMain:
         mod = _load_dashboard_module()
         from unittest.mock import patch as _patch
 
-        monkeypatch.setattr(sys, "argv", ["dashboard", "bogus"])
+        monkeypatch.setattr("sys.argv", ["dashboard", "bogus"])
         with (
             _patch.object(mod, "handle_command", return_value=False),
             _patch.object(mod, "print_help") as mock_help,

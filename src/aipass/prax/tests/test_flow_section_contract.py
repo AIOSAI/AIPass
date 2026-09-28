@@ -35,7 +35,11 @@
 # mocks that must be in place first.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/dashboard/ parses and imports
+# seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — _calculate_quick_status, covered by tests/test_dashboard_merge.py
+# seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
+# seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save
+# seedgo: no-test-needed(json_structure) — refresh_all_dashboards' log_operation record, covered by that row
 
 import importlib
 import sys

@@ -26,6 +26,10 @@ import pytest
 from typing import Generator
 from unittest.mock import MagicMock
 
+# The real display, bound before any fixture stubs sys.modules: the two fixtures
+# below pin and reset the consoles the product actually prints through.
+from aipass.cli.apps.modules import display
+
 collect_ignore_glob = [".archive/*"]
 
 
@@ -109,6 +113,30 @@ def _resync_module_attrs() -> Generator[None, None, None]:
                 and f"{pkg_name}.{attr}" not in sys.modules
             ):
                 delattr(pkg, attr)
+
+
+# =============================================
+# CONSOLE WIDTH AND COMMAND STATE
+# =============================================
+
+
+@pytest.fixture(autouse=True, scope="session")
+def pinned_console_width() -> None:
+    """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    for console in (display.CONSOLE, display.err_console):
+        console.width = 200
+
+
+@pytest.fixture(autouse=True)
+def clean_command_state() -> Generator[None, None, None]:
+    """error() marks the process failed; a test must not hand that to the next.
+
+    Declared above mock_prax_infrastructure so the reset runs after its sys.modules
+    stubs come out.
+    """
+    yield
+    display.reset_command_state()
 
 
 # =============================================

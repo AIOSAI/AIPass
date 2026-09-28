@@ -29,7 +29,14 @@
 # on either defect.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — handle_command and _run_monitor, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — _start_threads, _stop_threads, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — _get_watch_directories, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — the observer fallback, covered by tests/test_monitor_module.py
+# seedgo: no-test-needed(through_the_command) — monitor.py's print_help(), covered by tests/test_help_markup.py
+# seedgo: no-test-needed(through_the_command) — print_status's formatting, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(through_the_command) — the rate worker's scan_rates(), covered by tests/test_rate_tracker.py
+# seedgo: no-test-needed(constant) — COLORS, SYMBOLS and LEVEL_COLORS, the style tables print_event reads
 
 import importlib
 import io

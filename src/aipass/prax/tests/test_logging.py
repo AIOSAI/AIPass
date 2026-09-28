@@ -12,7 +12,11 @@
 # and template placeholder replacement.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/logging/ parses and imports
+# seedgo: no-test-needed(through_the_command) — get_calling_module_path, covered by tests/test_logging_handlers.py
+# seedgo: no-test-needed(through_the_command) — setup_system_logger, covered by tests/test_logging_handlers.py
+# seedgo: no-test-needed(through_the_command) — _resolve_caller_path on <stdin>, covered by tests/test_repo_root.py
+# seedgo: no-test-needed(stdlib) — get_calling_module, a Path.stem over the stack walk get_caller_info shares
+# seedgo: no-test-needed(stdlib) — get_captured_loggers_count, the size of _captured_loggers
 
 import copy
 import sys
@@ -43,6 +47,18 @@ class TestIsPraxInternal:
 
         path = tmp_path / "src" / "aipass" / "prax" / "apps" / "handlers" / "logging" / "setup.py"
         assert _is_prax_internal(str(path)) is True
+
+    def test_prax_paths_windows_form(self, mock_prax_infrastructure):
+        """Windows-form logger and handler paths are detected as prax internal.
+
+        Mutant: dropping the backslash-to-slash normalisation in _is_prax_internal reddens this.
+        """
+        from aipass.prax.apps.handlers.logging.introspection import _is_prax_internal
+
+        handler = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\handlers\\logging\\setup.py"
+        logger_module = "D:\\dev\\AIPass\\src\\aipass\\prax\\apps\\modules\\logger.py"
+        assert _is_prax_internal(handler) is True
+        assert _is_prax_internal(logger_module) is True
 
     def test_prax_logger_filename(self, mock_prax_infrastructure, tmp_path):
         """prax_logger.py filename is detected as prax internal."""

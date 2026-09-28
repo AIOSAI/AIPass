@@ -38,7 +38,11 @@
 # redirect.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/json/ parses and imports
+# seedgo: no-test-needed(through_the_command) — load_json and save_json, covered by tests/test_json_handler.py
+# seedgo: no-test-needed(through_the_command) — log_operation, covered by tests/test_json_handler.py
+# seedgo: no-test-needed(through_the_command) — read_json and write_json, covered by tests/test_json_handler.py
+# seedgo: no-test-needed(through_the_command) — for_module, covered by tests/test_json_handler.py
+# seedgo: no-test-needed(json_handler) — _replace_with_retry's bounded retry, pinned by seedgo's contract suite
 
 import os
 import subprocess

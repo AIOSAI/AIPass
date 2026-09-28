@@ -14,7 +14,9 @@
 # autouse mock_prax_infrastructure fixture injects sys.modules mocks first.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
+# seedgo: no-test-needed(through_the_command) — the sweep route _run_sweep(), covered by tests/test_sweep.py
+# seedgo: no-test-needed(help_flag_safety) — -h skipping _run_enforce(), covered by tests/test_help_flag_safety.py
+# seedgo: no-test-needed(json_structure) — the log_audit_executed record written through json_handler.log_operation
 
 import sys
 from unittest.mock import MagicMock

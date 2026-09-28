@@ -14,7 +14,7 @@
 # and scanner.discover_python_modules.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/discovery/ parses and imports
+# seedgo: no-test-needed(through_the_command) — start_file_watcher and stop_file_watcher, covered by tests/test_watcher.py
 
 import importlib
 import sys

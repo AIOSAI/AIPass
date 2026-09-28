@@ -28,7 +28,18 @@
 # mocks that must be in place first.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/dashboard/ parses and imports
+# seedgo: no-test-needed(through_the_command) — load_dashboard and save_dashboard, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — create_fresh_dashboard, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — get_branch_paths, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — resolve_branch_path, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — refresh_all_dashboards, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — diff_dashboard_template, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — push_dashboard_template, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — get_template_status, covered by tests/test_operations.py
+# seedgo: no-test-needed(through_the_command) — _extract_flow_section, covered by tests/test_flow_section_contract.py
+# seedgo: no-test-needed(through_the_command) — plugin refresh(), covered by tests/test_devpulse_dashboard_plugin.py
+# seedgo: no-test-needed(dead_code) — _extract_ai_mail_section's block, which refresh pops before save and nothing reads
+# seedgo: no-test-needed(json_structure) — the log_operation records of the refresh, push and diff, covered by that row
 
 import importlib
 import json

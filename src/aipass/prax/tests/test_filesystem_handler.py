@@ -15,7 +15,10 @@
 # internal event processing, and display name building.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — should_monitor, covered by tests/test_monitoring_filters.py
+# seedgo: no-test-needed(through_the_command) — get_priority, covered by tests/test_monitoring_filters.py
+# seedgo: no-test-needed(through_the_command) — detect_branch_from_path, covered by tests/test_monitoring_handlers.py
+# seedgo: no-test-needed(json_structure) — the shape of __init__'s file_change_handled log_operation record
 
 import importlib
 import json
@@ -29,6 +32,7 @@ _mopen = _mock_file_open
 
 _INJECTED_MODULES = [
     "watchdog",
+    "watchdog.observers",
     "watchdog.events",
     "aipass.prax.apps.handlers.monitoring.event_queue",
     "aipass.prax.apps.handlers.monitoring.branch_detector",
@@ -65,7 +69,10 @@ def _import_filesystem_handler():
         """Stub base class for watchdog handler."""
 
     mock_watchdog_events.FileSystemEventHandler = FakeFileSystemEventHandler
+    # The parent package runs log_watcher, which imports watchdog.observers,
+    # so the stub serves that name too and the file passes when run alone.
     sys.modules["watchdog"] = MagicMock()
+    sys.modules["watchdog.observers"] = MagicMock()
     sys.modules["watchdog.events"] = mock_watchdog_events
 
     # Mock monitoring sub-modules
@@ -1611,6 +1618,55 @@ class TestHandleEvent:
                     str(tmp_path / ".codex" / "sessions" / "session.jsonl"),
                 )
                 mock_parse.assert_called_once()
+
+    def test_claude_code_jsonl_windows_form(self):
+        """A Windows-form Claude Code JSONL path is still parsed as agent activity.
+
+        Mutant: testing ".claude/projects/" against the raw path_str again reddens this.
+        """
+        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        mock_filters.should_monitor.return_value = True
+        mock_bd.detect_branch_from_path.return_value = "PRAX"
+        with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
+            handler._handle_event("modified", "C:\\Users\\dev\\.claude\\projects\\abc\\session.jsonl")
+            mock_parse.assert_called_once()
+
+    def test_claude_code_subagent_windows_form(self):
+        """A Windows-form subagent JSONL path is still tagged with the agent suffix.
+
+        Mutant: testing "/subagents/" against the raw path_str again reddens this.
+        """
+        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        mock_filters.should_monitor.return_value = True
+        mock_bd.detect_branch_from_path.return_value = "PRAX"
+        with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
+            handler._handle_event(
+                "modified",
+                "C:\\Users\\dev\\.claude\\projects\\abc\\subagents\\session.jsonl",
+            )
+            assert mock_parse.call_args.args[1] == "PRAX agent"
+
+    def test_codex_jsonl_windows_form(self):
+        """A Windows-form Codex JSONL path is still parsed, and the raw path goes on unchanged.
+
+        Mutant: testing ".codex/sessions/" against the raw path_str again reddens this.
+        """
+        mod, _, mock_bd, mock_filters, queue = _import_filesystem_handler()
+        handler = _make_handler(mod, queue=queue)
+        mock_filters.should_monitor.return_value = True
+        mock_bd.detect_branch_from_path.return_value = "CODEX"
+        raw = "C:\\Users\\dev\\.codex\\sessions\\session.jsonl"
+        with patch.object(handler, "_get_codex_branch", return_value="PRAX") as mock_branch:
+            with patch.object(
+                handler,
+                "_parse_codex_activity",
+                return_value=True,
+            ) as mock_parse:
+                handler._handle_event("modified", raw)
+                mock_parse.assert_called_once()
+                assert mock_branch.call_args.args[1] == raw
 
     def test_exception_caught(self, tmp_path):
         """A failure inside the handler costs the event, never the watcher.

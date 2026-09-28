@@ -14,7 +14,8 @@
 # filter_log_content, and apply_content_filter.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(constant) — the HIGHLIGHT_PATTERNS entries beyond those the get_priority() tests sample
+# seedgo: no-test-needed(dead_code) — EVENT_TYPES and DEFAULT_EVENT_TYPES, which no product module reads
 
 from pathlib import Path
 

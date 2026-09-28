@@ -11,7 +11,9 @@
 # Tests for devpulse dashboard plugin (git, session, dispatch sections + refresh).
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/plugins/devpulse_dashboard/ parses and imports
+# seedgo: no-test-needed(through_the_command) — the builders' write_section, covered by tests/test_operations.py
+# seedgo: no-test-needed(ruff) — that __init__.py's __all__ re-export of refresh names a real import (F822)
+# seedgo: no-test-needed(log_level) — the lines each builder logs on a failure, covered by that row
 
 import json
 from unittest.mock import patch, MagicMock

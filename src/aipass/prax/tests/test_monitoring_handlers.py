@@ -6,7 +6,7 @@
 # Modified: 2026-09-27
 # =============================================
 
-"""Tests for apps/handlers/monitoring/branch_detector.py, file_watcher_integration.py, interactive_filter.py and unified_stream.py."""
+"""Tests for apps/handlers/monitoring/branch_detector.py and the three sibling handlers listed below."""
 
 # Covers:
 # - branch_detector: get_detector, reload_registry, detect_from_path,
@@ -18,7 +18,7 @@
 # - unified_stream: print_event, print_command_separator, print_status
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — print_hook_event(), covered by tests/test_display_resilience.py
 
 import importlib
 import json

@@ -11,7 +11,7 @@
 # Tests for the thread-safe event queue used by the monitoring system.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — BranchScope's matching rules, covered by tests/test_branch_scope.py
 
 import importlib
 import threading

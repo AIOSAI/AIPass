@@ -14,7 +14,11 @@
 # directory auto-creation, and the package-level export.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that _rotate_with_backup and _maybe_rotate's OSError fallback branches parse and import
+# seedgo: no-test-needed(error_handling) — _rotate_with_backup unlinking when the rename fails, covered by that row
+# seedgo: no-test-needed(error_handling) — _unlink_safe's warning when the unlink fails, covered by that row
+# seedgo: no-test-needed(error_handling) — _maybe_rotate skipping rotation when the stat fails, covered by that row
+# seedgo: no-test-needed(json_structure) — append_jsonl's log_operation("jsonl_append") record, covered by that row
+# seedgo: no-test-needed(constant) — rotation above the JSONL_MAX_BYTES default; only the size under it is tested
 
 import json
 import sys

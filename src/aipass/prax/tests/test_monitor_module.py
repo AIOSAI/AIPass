@@ -20,7 +20,11 @@
 # - _print_status, _run_monitor orchestration
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/modules/ parses and imports
+# seedgo: no-test-needed(through_the_command) — _report_render_failures, covered by tests/test_display_resilience.py
+# seedgo: no-test-needed(through_the_command) — _standalone_run_args, covered by tests/test_display_resilience.py
+# seedgo: no-test-needed(through_the_command) — _rate_tracker_worker's scan_rates, covered by tests/test_rate_tracker.py
+# seedgo: no-test-needed(through_the_command) — the run -h screen, covered by tests/test_help_flag_safety.py
+# seedgo: no-test-needed(json_structure) — _run_monitor's log_operation("monitor_started") record, covered by that row
 
 import json
 import sys

@@ -20,7 +20,11 @@
 # - Disk persistence
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that every module under apps/handlers/monitoring/ parses and imports
+# seedgo: no-test-needed(through_the_command) — _save_state keeping the counters, covered by tests/test_json_handler.py
+# seedgo: no-test-needed(error_handling) — _save_state catching WriteFailed and InvalidDocument, covered by that row
+# seedgo: no-test-needed(error_handling) — _file_size answering 0 when the stat fails, covered by that row
+# seedgo: no-test-needed(json_structure) — _fire_event's runaway_detected log_operation record, covered by that row
+# seedgo: no-test-needed(log_level) — _fire_event's warning line naming a runaway, covered by that row
 
 import sys
 import time

@@ -19,7 +19,7 @@
 # - _get_commons_db_path: env override
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(ruff) — that commons_feed.py's interactive CLI loop and its helpers parse and import
+# seedgo: no-test-needed(through_the_command) — routing to run_commons_feed, covered by tests/test_monitor_module.py
 
 import importlib
 import sqlite3
