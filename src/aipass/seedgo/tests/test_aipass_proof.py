@@ -84,7 +84,10 @@ def test_interface_scan_branch_level_checker(tmp_path):
 
 
 def test_extract_audit_scope_from_source(tmp_path):
-    """Mutant: AUDIT_SCOPE's value never read (return None) in apps/handlers/aipass_proof/interface.py — killed."""
+    """_extract_audit_scope extracts AUDIT_SCOPE value from AST.
+
+    Mutant: AUDIT_SCOPE's value never read (return None) in apps/handlers/aipass_proof/interface.py — killed.
+    """
     (tmp_path / "example_check.py").write_text(
         'AUDIT_SCOPE = "entry_point"\nx = 1\n\ndef check_module(module_path, bypass_rules=None):\n    return {}\n',
         encoding="utf-8",
@@ -94,7 +97,10 @@ def test_extract_audit_scope_from_source(tmp_path):
 
 
 def test_extract_audit_scope_none_when_missing(tmp_path):
-    """Mutant: a missing AUDIT_SCOPE read as "all_files" in apps/handlers/aipass_proof/interface.py — killed."""
+    """_extract_audit_scope returns None when AUDIT_SCOPE not defined.
+
+    Mutant: a missing AUDIT_SCOPE read as "all_files" in apps/handlers/aipass_proof/interface.py — killed.
+    """
     (tmp_path / "example_check.py").write_text("x = 1\ny = 2\n", encoding="utf-8")
     result = interface_scan(tmp_path)
     assert result["results"][0]["audit_scope"] is None

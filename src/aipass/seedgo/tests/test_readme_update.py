@@ -1,9 +1,9 @@
 # =================== META ====================
 # Name: test_readme_update.py
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2026-09-20
-# Modified: 2026-09-21
+# Modified: 2026-09-27
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -232,6 +232,42 @@ class TestMarkerReplacement:
         assert result["errors"] == ["README.md not found"]
         assert result["updated"] == []
 
+    def test_a_section_that_fails_is_named_in_the_errors_not_passed_off_as_empty(self, branch):
+        """A broken passport used to read as "no header": errors stayed empty and the run looked clean.
+
+        Mutant: generate_header_section's old `except (json.JSONDecodeError, OSError): return ""` — killed.
+        """
+        (branch / ".trinity").mkdir()
+        (branch / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+
+        result = readme_generator.update_readme_auto_sections(str(branch))
+
+        assert len(result["errors"]) == 1
+        assert result["errors"][0].startswith("header section failed: ")
+        assert result["updated"] == ["tree"]
+
+    def test_a_tree_that_cannot_be_listed_and_a_help_that_hangs_are_both_named(self, branch, monkeypatch):
+        """Both used to come back as "" beside an empty errors list, so a failed run read as nothing to do.
+
+        Mutant: generate_tree_section's old `except Exception: return ""` — killed.
+        Mutant: generate_commands_section's old `except subprocess.TimeoutExpired: return ""` — killed.
+        """
+        (branch / "apps" / f"{branch.name}.py").write_text("# entry\n", encoding="utf-8")
+
+        def unreadable_tree(directory, *args, **kwargs):
+            raise OSError(5, "Input/output error", str(directory))
+
+        def hung_help(*args, **kwargs):
+            raise readme_generator.subprocess.TimeoutExpired(cmd="--help", timeout=15)
+
+        monkeypatch.setattr(readme_generator, "_build_tree", unreadable_tree)
+        monkeypatch.setattr(readme_generator.subprocess, "run", hung_help)
+
+        result = readme_generator.update_readme_auto_sections(str(branch))
+
+        assert sorted(e.split(" ")[0] for e in result["errors"]) == ["commands", "tree"]
+        assert result["updated"] == []
+
     def test_a_branch_path_holding_a_regex_escape_is_replaced_not_interpreted(self, tmp_path):
         """The replacement went to re.sub as a string, so C:\\Users read as the escape \\U (PR#774)."""
         # Joined, not written whole: this is a directory NAME carrying a
@@ -288,6 +324,26 @@ class TestTreeSection:
 
         assert "__pycache__" not in result
         assert "real_file.py" in result
+
+    def test_a_file_that_cannot_be_read_is_marked_unreadable_not_left_blank(self, tmp_path, monkeypatch):
+        """An unreadable module used to get the same blank comment as one with no docstring.
+
+        Mutant: _get_file_comment's old `except (OSError, UnicodeDecodeError): ... return ""` — killed.
+        """
+        (tmp_path / "locked.py").write_text('"""Never shown."""\n', encoding="utf-8")
+        (tmp_path / "plain.py").write_text("x = 1\n", encoding="utf-8")
+
+        def read_source(file_path):
+            if file_path.name == "locked.py":
+                raise PermissionError(13, "Permission denied", str(file_path))
+            return file_path.read_text(encoding="utf-8", errors="ignore")
+
+        monkeypatch.setattr(readme_generator, "_read_source", read_source)
+
+        result = readme_generator.generate_tree_section(str(tmp_path))
+
+        assert "locked.py  # (unreadable)" in result
+        assert "plain.py  #" not in result
 
 
 class TestModulesSection:

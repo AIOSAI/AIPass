@@ -1,12 +1,20 @@
-"""Tests for seedgo handler functions (audit_display, diagnostics, json extras, readme, hooks_ext)."""
-
 # =================== META ====================
 # Name: test_handler_functions.py
 # Description: Unit tests for handler-level functions across multiple handler packages
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-04-25
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for apps/handlers/ functions: audit/audit_display.py, diagnostics_check.py, readme/readme_ops.py."""
+
+# Handler-level functions across several packages: audit_display, diagnostics,
+# json extras (retired, see section 3-4), readme, hooks_ext.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(removed) — json_handler increment_counter/update_data_metrics, retired in DPLAN-0325
+# seedgo: no-test-needed(covered) — audit_display.print_system_summary, in tests/test_coverage_audit.py
+# seedgo: no-test-needed(introspection) — audit_display.print_introspection, a static help blurb
 
 import json
 from typing import Dict
@@ -19,30 +27,21 @@ from aipass.seedgo.apps.handlers.diagnostics.diagnostics_check import check_dire
 from aipass.seedgo.apps.handlers.readme import readme_generator, readme_ops
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _mock_console(monkeypatch):
-    """Patch audit_display's console seam directly, at the edge."""
-    mock_console = MagicMock()
-    monkeypatch.setattr(audit_display, "console", mock_console)
-    return mock_console
-
-
 # ===========================================================================
 # 1. audit_display -- print_branch_summary
 # ===========================================================================
+# The console is the real one: audit_display prints through aipass.cli's
+# console, which writes to sys.stdout at print time, so capsys reads what the
+# user reads (markup rendered away, width pinned by conftest).
 
 
-def test_print_branch_summary_basic(_mock_console):
+def test_print_branch_summary_basic(capsys: pytest.CaptureFixture[str]) -> None:
     """print_branch_summary renders the branch line, the score grid and the overall.
 
-    Was a bare call that asserted nothing (no_oracle). The lines below are the
-    strings the function actually hands to console.print, measured 2026-09-07;
-    `_mock_console` here is the fixture's mock, which is what the module binds.
+    Was a bare call that asserted nothing (no_oracle). The lines below are what
+    the real console prints, read from stdout through capsys (2026-09-27; were
+    the markup strings handed to a mocked console.print, measured 2026-09-07).
+    Mutant: Overall's `{avg:3}%` to `{avg:4}%` in audit_display.py — killed.
     """
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
@@ -53,20 +52,18 @@ def test_print_branch_summary_basic(_mock_console):
     }
     audit_display.print_branch_summary(audit_result)
 
-    lines = [call.args[0] for call in _mock_console.print.call_args_list if call.args]
-    branch_line = (
-        "[bold cyan]seedgo[/bold cyan] [dim](10 files measured — apps/ plus tests/ test_*.py and conftest.py)[/dim]"
-    )
-    assert branch_line in lines
+    lines = capsys.readouterr().out.splitlines()
+    assert "seedgo (10 files measured — apps/ plus tests/ test_*.py and conftest.py)" in lines
     assert "  Meta            100% ✅    Naming           90% ✅" in lines
-    assert "  [bold]Overall:          95% ✅[/bold]" in lines
+    assert "  Overall:          95% ✅" in lines
 
 
-def test_print_branch_summary_with_violations(_mock_console):
+def test_print_branch_summary_with_violations(capsys: pytest.CaptureFixture[str]) -> None:
     """print_branch_summary renders the violation block: count, file, score, issue.
 
     Was a bare call that asserted nothing (no_oracle) — it could not tell a
     rendered violation from a silently dropped one.
+    Mutant: `{standard_name.upper()} VIOLATIONS` to `{standard_name} VIOLATIONS` — killed.
     """
     audit_result: Dict = {
         "branch": {"name": "testbranch"},
@@ -80,17 +77,14 @@ def test_print_branch_summary_with_violations(_mock_console):
     }
     audit_display.print_branch_summary(audit_result)
 
-    lines = [call.args[0] for call in _mock_console.print.call_args_list if call.args]
-    branch_line = (
-        "[bold cyan]testbranch[/bold cyan] [dim](5 files measured — apps/ plus tests/ test_*.py and conftest.py)[/dim]"
-    )
-    assert branch_line in lines
-    assert "  [bold red]META VIOLATIONS (1 files):[/bold red]" in lines
-    assert "    [red]✗[/red] [magenta]file.py[/magenta] [dim](score: 50%)[/dim]" in lines
-    assert "      [dim]• Missing META block[/dim]" in lines
+    lines = capsys.readouterr().out.splitlines()
+    assert "testbranch (5 files measured — apps/ plus tests/ test_*.py and conftest.py)" in lines
+    assert "  META VIOLATIONS (1 files):" in lines
+    assert "    ✗ file.py (score: 50%)" in lines
+    assert "      • Missing META block" in lines
 
 
-def test_print_branch_summary_with_system_averages(_mock_console):
+def test_print_branch_summary_with_system_averages(capsys: pytest.CaptureFixture[str]) -> None:
     """The optional system-average arguments are accepted and never rendered.
 
     Was a bare call that asserted nothing (no_oracle). Measured 2026-09-07:
@@ -99,6 +93,7 @@ def test_print_branch_summary_with_system_averages(_mock_console):
     signature and the introspection blurb. The 90 passed in below reaches no
     line of output, so that is what this pins. If the comparison is ever wired
     up, this test goes red and should be rewritten to pin the new line.
+    Mutant: Overall's `{avg:3}%` to `{avg:4}%` in audit_display.py — killed.
     """
     audit_result: Dict = {
         "branch": {"name": "seedgo"},
@@ -110,9 +105,9 @@ def test_print_branch_summary_with_system_averages(_mock_console):
     system_averages: Dict[str, int] = {"meta": 90}
     audit_display.print_branch_summary(audit_result, system_averages, 90)
 
-    lines = [call.args[0] for call in _mock_console.print.call_args_list if call.args]
+    lines = capsys.readouterr().out.splitlines()
     assert "  Meta            100% ✅" in lines
-    assert "  [bold]Overall:         100% ✅[/bold]" in lines
+    assert "  Overall:         100% ✅" in lines
     assert not [line for line in lines if "90" in line]
 
 

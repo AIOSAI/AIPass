@@ -236,7 +236,10 @@ def test_inbox_audit_skips_a_directory_named_inbox_json(tmp_path, monkeypatch, c
 
 
 def test_inbox_audit_scan_detects_bad_id(tmp_path, monkeypatch, capsys):
-    """Mutant: the id pattern accepts any 8 characters in apps/modules/inbox_audit.py — killed."""
+    """_scan_inbox flags message ids that are not 8-char lowercase hex.
+
+    Mutant: the id pattern accepts any 8 characters in apps/modules/inbox_audit.py — killed.
+    """
     _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["not-hex!", "a1b2c3d4"])
 
     out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)
@@ -246,7 +249,10 @@ def test_inbox_audit_scan_detects_bad_id(tmp_path, monkeypatch, capsys):
 
 
 def test_inbox_audit_scan_passes_valid_ids(tmp_path, monkeypatch, capsys):
-    """Mutant: every id is flagged in apps/modules/inbox_audit.py — killed."""
+    """_scan_inbox returns empty list when all message ids are valid 8-hex.
+
+    Mutant: every id is flagged in apps/modules/inbox_audit.py — killed.
+    """
     _inbox(tmp_path / "flow" / ".ai_mail.local" / "inbox.json", ["a1b2c3d4", "deadbeef"])
 
     out, err = _run_inbox_ids(tmp_path, monkeypatch, capsys)

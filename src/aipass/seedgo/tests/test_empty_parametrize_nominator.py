@@ -23,7 +23,7 @@
 # can hit.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(constant) — the prose of the nomination message nominate() writes; species, line and argvalues are asserted
+# seedgo: no-test-needed(constant) — the prose of nominate()'s message; species, line and argvalues are asserted
 
 import ast
 import subprocess
@@ -46,12 +46,15 @@ def _nominate(source: str, tmp_path: Path):
 
 class TestTheHazardItself:
     def test_the_hazard_is_real_on_this_pytest(self, tmp_path):
-        """The file this pytest reports green is the file the rule nominates. Mutant: every computed table acquitted in apps/handlers/tests_pytest_standards/empty_parametrize_check.py — killed."""
-        # The measurement the rule stands on, not a citation of it. A parametrized
-        # test over an empty collection must report SKIPPED with an exit code of 0 —
-        # green — on the pytest actually installed here. If a future pytest made this
-        # an error the rule would be nominating a defect that can no longer happen,
-        # and this goes red rather than the rule quietly outliving its reason.
+        """The file this pytest reports green is the file the rule nominates.
+
+        The measurement the rule stands on, not a citation of it. A parametrized test over an empty
+        collection must report SKIPPED with an exit code of 0 — green — on the pytest actually installed
+        here. If a future pytest made this an error the rule would be nominating a defect that can no
+        longer happen, and this goes red rather than the rule quietly outliving its reason.
+        Mutant: every computed table acquitted in apps/handlers/tests_pytest_standards/empty_parametrize_check.py
+        — killed.
+        """
         rows = _nominate(
             """
             import pytest

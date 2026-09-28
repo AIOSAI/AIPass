@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_ops.py
 # Description: Test-template distribution — gold manifest, per-branch receipts, the bump
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-09-27
 # =============================================
 
 """Test-template distribution, on @memory's trinity pattern.
@@ -69,16 +69,17 @@ def manifest_path() -> Path:
 
 
 def gold_versions() -> Dict[str, str]:
-    """The template versions of record, or an empty dict if the manifest is unreadable."""
+    """The template versions of record, or an empty dict if the manifest is unreadable.
+
+    Every caller treats the empty dict as the failure it is ("missing or
+    unreadable") and refuses to compare or stamp against it. json_handler's
+    read_json never raises: an unreadable manifest arrives as None.
+    """
     path = manifest_path()
     if not path.exists():
         logger.info("Gold manifest missing at %s", path)
         return {}
-    try:
-        document = json_handler.read_json(path)
-    except Exception as exc:
-        logger.info("Cannot read gold manifest at %s: %s", path, exc)
-        return {}
+    document = json_handler.read_json(path)
     versions = document.get("template_versions") if isinstance(document, dict) else None
     return versions if isinstance(versions, dict) else {}
 
@@ -102,16 +103,14 @@ def read_receipt(branch_path: Path) -> Optional[Dict[str, str]]:
     """What a branch says it carries, or None when it has no receipt at all.
 
     None and {} are different answers and both are kept: no receipt means never
-    stamped, an empty one means stamped against nothing.
+    stamped, an empty one means stamped against nothing. json_handler's
+    read_json never raises: an unreadable receipt arrives as None and reads here
+    as {}, never current, so the next bump restamps it.
     """
     path = receipt_path(branch_path)
     if not path.exists():
         return None
-    try:
-        document = json_handler.read_json(path)
-    except Exception as exc:
-        logger.info("Cannot read template receipt at %s: %s", path, exc)
-        return None
+    document = json_handler.read_json(path)
     versions = document.get("template_versions") if isinstance(document, dict) else None
     return versions if isinstance(versions, dict) else {}
 
@@ -158,7 +157,8 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
     Returns:
         ``{"dry_run", "gold", "branches": [{"branch", "action", "carries"}]}``.
         ``action`` is one of ``stamped``, ``would-stamp``, ``current``,
-        ``no-tests-dir``, ``skipped``.
+        ``no-tests-dir``, ``skipped``, ``failed``. A ``failed`` row also
+        carries ``error``, the reason the stamp did not land.
     """
     gold = gold_versions()
     page = page_path()
@@ -189,7 +189,13 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
             outcome["branches"].append({"branch": name, "action": "would-stamp", "carries": carries})
             continue
 
-        outcome["branches"].append({"branch": name, "action": _stamp(branch_path, gold, page), "carries": carries})
+        try:
+            _stamp(branch_path, gold, page)
+        except OSError as exc:
+            logger.error("Could not stamp %s: %s", branch_path, exc)
+            outcome["branches"].append({"branch": name, "action": "failed", "carries": carries, "error": str(exc)})
+            continue
+        outcome["branches"].append({"branch": name, "action": "stamped", "carries": carries})
 
     json_handler.log_operation(
         "test_template_bump",
@@ -198,17 +204,18 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
     return outcome
 
 
-def _stamp(branch_path: Path, gold: Dict[str, str], page: Path) -> str:
-    """Write one branch's receipt and its copy of the page."""
+def _stamp(branch_path: Path, gold: Dict[str, str], page: Path) -> None:
+    """Write one branch's receipt and its copy of the page.
+
+    Raises:
+        OSError: the receipt or the page did not land. bump() records it.
+    """
     receipt = {
         "template_versions": dict(gold),
         "stamped": datetime.now().isoformat(timespec="seconds"),
         "stamped_by": STAMPED_BY,
     }
-    try:
-        json_handler.write_json(receipt_path(branch_path), receipt)
-        (branch_path / "tests" / DISTRIBUTED_PAGE).write_text(page.read_text(encoding="utf-8"), encoding="utf-8")
-    except Exception as exc:
-        logger.error("Could not stamp %s: %s", branch_path, exc)
-        return f"failed: {exc}"
-    return "stamped"
+    target = receipt_path(branch_path)
+    if not json_handler.write_json(target, receipt):
+        raise OSError(f"receipt not written: {target}")
+    (branch_path / "tests" / DISTRIBUTED_PAGE).write_text(page.read_text(encoding="utf-8"), encoding="utf-8")

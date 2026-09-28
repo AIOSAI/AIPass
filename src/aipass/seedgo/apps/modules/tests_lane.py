@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-09-21
-# Modified: 2026-09-21
+# Modified: 2026-09-27
 # =============================================
 
 """Tests Lane Module
@@ -280,6 +280,8 @@ def _run_bump(confirm: bool, only: str | None) -> None:
     for row in outcome["branches"]:
         style = styles.get(row["action"], "red")
         console.print(f"  [{style}]{row['action']:<13}[/{style}] {row['branch']}")
+        if row.get("error"):
+            console.print(f"                {row['error']}", markup=False)
     console.print()
 
     if not confirm:

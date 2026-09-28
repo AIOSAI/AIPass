@@ -116,11 +116,14 @@ def test_handle_command_unknown_pack():
 
 
 def test_print_introspection_runs(capsys):
-    """print_introspection prints the module banner and the pack roster. Mutant: malformed markup on the roster heading in apps/modules/proof_query.py — killed."""
-    # "console.print was called" is not an oracle: it holds for a function that
-    # prints one blank line. The two strings pinned here were read off a real run
-    # (2026-09-07) and they are the two the introspection contract owes a reader —
-    # WHICH module answered, and the heading under which its packs are listed.
+    """print_introspection prints the module banner and the pack roster.
+
+    "console.print was called" is not an oracle: it holds for a function that prints one blank line,
+    and it held while nothing else was measured. The two strings pinned here were read off a real
+    run (2026-09-07) and they are the two the introspection contract owes a reader — WHICH module
+    answered, and the heading under which its discovered packs are listed.
+    Mutant: malformed markup on the roster heading in apps/modules/proof_query.py — killed.
+    """
     result = print_introspection()
     printed = capsys.readouterr().out
     assert result is None
@@ -129,10 +132,13 @@ def test_print_introspection_runs(capsys):
 
 
 def test_print_help_runs(capsys):
-    """print_help prints its banner and the pack+proof usage line. Mutant: malformed markup on that usage line in apps/modules/proof_query.py — killed."""
-    # Same reason as the introspection test above. The usage line is the one a
-    # reader comes to help FOR — the three-argument form that shows one proof's
-    # content — so that is what is pinned, read off a real run (2026-09-07).
+    """print_help prints its banner and the pack+proof usage line.
+
+    Same reason as the introspection test above: `console.print.called` passes for any function that
+    prints anything at all. The usage line is the one a reader comes to help FOR — the three-argument
+    form that shows one proof's content — so that is what is pinned, read off a real run (2026-09-07).
+    Mutant: malformed markup on that usage line in apps/modules/proof_query.py — killed.
+    """
     result = print_help()
     printed = capsys.readouterr().out
     assert result is None
@@ -141,7 +147,10 @@ def test_print_help_runs(capsys):
 
 
 def test_discover_proof_packs_returns_dict(tmp_path, monkeypatch, capsys):
-    """Only *_proof dirs holding a *_content.py are packs. Mutant: a pack admitted without content in apps/modules/proof_query.py — killed."""
+    """Only *_proof dirs holding a *_content.py are packs.
+
+    Mutant: a pack admitted without content in apps/modules/proof_query.py — killed.
+    """
     # Build: tmp_path/handlers/ with pack subdirectories
     handlers_dir = tmp_path / "handlers"
     handlers_dir.mkdir()
@@ -178,7 +187,10 @@ def test_discover_proof_content_empty_dir(tmp_path):
 
 
 def test_discover_proof_content_finds_content_files(tmp_path, monkeypatch, capsys):
-    """A pack's proofs are its *_content.py files, suffix stripped. Mutant: the _content suffix kept in apps/modules/proof_query.py — killed."""
+    """A pack's proofs are its *_content.py files, suffix stripped.
+
+    Mutant: the _content suffix kept in apps/modules/proof_query.py — killed.
+    """
     pack = tmp_path / "handlers" / "fake_proof"
     pack.mkdir(parents=True)
     (pack / "triplet_content.py").write_text("# fake", encoding="utf-8")

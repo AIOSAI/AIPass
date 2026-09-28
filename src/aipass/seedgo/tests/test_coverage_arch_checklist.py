@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_coverage_arch_checklist.py
 # Description: Line-coverage tests for architecture_check.py and checklist.py
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-26
 # Modified: 2026-09-27
 # =============================================
@@ -16,7 +16,7 @@
 # seedgo: no-test-needed(documentation) — the text print_help and print_introspection show
 
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import List
 from unittest.mock import MagicMock, patch
 
@@ -42,6 +42,11 @@ from aipass.seedgo.apps.modules.checklist import (
 def _lines(text: str) -> List[str]:
     """Split text into lines, widening LiteralString to str for pyright."""
     return text.split("\n")
+
+
+def _windows_form(tmp_path: Path, *parts: str) -> str:
+    """The tmp_path-rebuilt path as Windows spells it: a drive letter and backslashes."""
+    return str(PureWindowsPath("C:/", *tmp_path.parts[1:], *parts))
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +566,10 @@ class TestTransformPath:
         assert "File: mybranch/apps/mybranch.py" in rows
 
     def test_hyphenated_branch_name(self, tmp_path, monkeypatch):
-        """Mutant: entry named from my_branch in apps/handlers/aipass_standards/architecture_check.py — killed."""
+        """Hyphenated branch: placeholder replaced, then the entry-point rename applied.
+
+        Mutant: entry named from my_branch in apps/handlers/aipass_standards/architecture_check.py — killed.
+        """
 
         rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/{{BRANCH}}.py": "x\n"}, branch_name="my-branch"))
         # branch_lower="my_branch" replaces placeholder -> "apps/my_branch.py"
@@ -569,7 +577,10 @@ class TestTransformPath:
         assert "File: apps/my-branch.py" in rows
 
     def test_dotted_branch_name(self, tmp_path, monkeypatch):
-        """Mutant: the entry-point rename skipped in apps/handlers/aipass_standards/architecture_check.py — killed."""
+        """A leading dot is stripped for the entry-point name.
+
+        Mutant: the entry-point rename skipped in apps/handlers/aipass_standards/architecture_check.py — killed.
+        """
 
         rows = _rows(_baseline(tmp_path, monkeypatch, {"apps/{{BRANCH}}.py": "x\n"}, branch_name=".hidden"))
         # The placeholder replacement gives ".hidden.py"; FILE_RENAMES maps it to "hidden.py"
@@ -640,8 +651,6 @@ class TestCheckTemplateBaselineFull:
         Mutation caught: `item.relative_to(root).as_posix()` becoming
         `str(item.relative_to(root))`, which answers "apps\\something.py" here.
         """
-        from pathlib import PureWindowsPath
-
         spelled = architecture_check._relative_spelling(
             PureWindowsPath(r"C:\templates\citizen\apps\something.py"),
             PureWindowsPath(r"C:\templates\citizen"),
@@ -863,6 +872,19 @@ class TestIsApplicable:
         checker.AUDIT_SCOPE = "entry_point"
         checker.check_module = MagicMock()
         assert _is_applicable(checker, str(tmp_path / "branch" / "apps" / "branch.py")) is True
+
+    def test_entry_point_scope_matches_entry_on_a_windows_path(self, tmp_path, monkeypatch):
+        """A drive letter and backslashes still name an entry point (compass 458).
+
+        Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
+        """
+        # checklist's Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
+        monkeypatch.setattr(checklist, "Path", PureWindowsPath)
+        checker = MagicMock()
+        checker.AUDIT_SCOPE = "entry_point"
+        checker.check_module = MagicMock()
+        assert _is_applicable(checker, _windows_form(tmp_path, "branch", "apps", "branch.py")) is True
+        assert _is_applicable(checker, _windows_form(tmp_path, "branch", "apps", "modules", "helper.py")) is False
 
     def test_entry_point_scope_non_entry(self, tmp_path):
 
@@ -1088,13 +1110,19 @@ class TestFormatFailureEdgeCases:
     """A failed checker's one-line detail, through run_checklist."""
 
     def test_format_failure_no_checks_key(self, tmp_path, monkeypatch):
-        """Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed."""
+        """A failed result with no 'checks' key gets the fallback.
+
+        Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed.
+        """
 
         results, _probe = _run_one(tmp_path, monkeypatch, {"passed": False})
         assert "no details" in results[0]["detail"].lower()
 
     def test_format_failure_all_passed(self, tmp_path, monkeypatch):
-        """Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed."""
+        """A failed result whose checks all passed gets the fallback.
+
+        Mutant: the no-details fallback emptied in apps/modules/checklist.py — killed.
+        """
 
         results, _probe = _run_one(
             tmp_path, monkeypatch, {"passed": False, "checks": [{"passed": True, "message": "OK"}]}
@@ -1252,7 +1280,10 @@ class TestPrintResults:
         return capsys.readouterr().out
 
     def test_print_all_passed(self, tmp_path, capsys):
-        """Mutant: the summary line's markup unclosed in apps/modules/checklist.py — killed."""
+        """All-passed results show a checkmark per standard and the summary.
+
+        Mutant: the summary line's markup unclosed in apps/modules/checklist.py — killed.
+        """
 
         results = [
             {"standard": "architecture", "passed": True, "detail": None},
@@ -1276,7 +1307,10 @@ class TestPrintResults:
         assert "[FAIL] — architecture\n" in out
 
     def test_print_mixed_results(self, tmp_path, capsys):
-        """Mutant: the summary printed unconditionally in apps/modules/checklist.py — killed."""
+        """Mixed results do not print the 'All passed' summary.
+
+        Mutant: the summary printed unconditionally in apps/modules/checklist.py — killed.
+        """
 
         results = [
             {"standard": "architecture", "passed": True, "detail": None},
@@ -1345,3 +1379,13 @@ class TestIsEntryPointEdgeCases:
     def test_valid_entry_point(self, tmp_path):
 
         assert _is_entry_point(str(tmp_path / "branch" / "apps" / "branch.py")) is True
+
+    def test_valid_entry_point_on_a_windows_path(self, tmp_path, monkeypatch):
+        """A drive letter and backslashes still name an entry point (compass 458).
+
+        Mutant: _is_entry_point's `file_path.replace("\\", "/")` back to `file_path` — killed.
+        """
+        # checklist's Path is WindowsPath on Windows; PureWindowsPath stands in for it on this host.
+        monkeypatch.setattr(checklist, "Path", PureWindowsPath)
+        assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "branch.py")) is True
+        assert _is_entry_point(_windows_form(tmp_path, "branch", "apps", "handlers", "thing.py")) is False

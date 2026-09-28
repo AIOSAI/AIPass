@@ -1,7 +1,7 @@
 # =================== META ====================
 # Name: test_diagnostics_audit.py
 # Description: Unit tests for the diagnostics_audit module
-# Version: 1.1.1
+# Version: 1.2.0
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
@@ -22,23 +22,18 @@ from aipass.seedgo.apps.modules import diagnostics_audit
 # ---------------------------------------------------------------------------
 
 
-def _console_lines(function_name: str, *args):
+def _console_lines(capsys, function_name: str, *args):
     """Call a diagnostics_audit render function and read back what it printed.
 
-    The module binds ``console`` at import time and the autouse fixture hands it
-    a MagicMock, so stdout stays empty and ``capsys`` sees nothing. The strings
-    the module actually chose are the ones handed to ``console.print`` — those
-    are the oracle, and they arrive unrendered, so no Rich line-wrap can split a
-    fragment a test pins.
+    The oracle is the rendered text on stdout, read through capsys off the
+    product's real console: markup is gone, so a line is pinned as a reader
+    sees it. conftest pins the console width, so no Rich wrap splits a line.
 
     Returns:
-        (return value of the render function, list of printed strings).
+        (return value of the render function, list of printed lines).
     """
-    recorder = MagicMock()
-    with patch.object(diagnostics_audit, "console", recorder):
-        result = getattr(diagnostics_audit, function_name)(*args)
-    printed = [str(call.args[0]) if call.args else "" for call in recorder.print.call_args_list]
-    return result, printed
+    result = getattr(diagnostics_audit, function_name)(*args)
+    return result, capsys.readouterr().out.splitlines()
 
 
 # ---------------------------------------------------------------------------
@@ -50,13 +45,12 @@ def _console_lines(function_name: str, *args):
 def _mock_infrastructure(monkeypatch):
     """Replace diagnostics_audit's own seams with mocks, at the edge, not by rebuilding the module.
 
-    diagnostics_audit binds ``logger``, ``console``, ``error`` and ``warning`` at
-    import time (module-level names), so patching them directly on the real,
-    already-imported module reaches every call the same way the old sys.modules
-    stub did, without a stand-in for the unit under test.
+    diagnostics_audit binds ``logger``, ``error`` and ``warning`` at import time
+    (module-level names), so patching them directly on the real, already-imported
+    module reaches every call without a stand-in for the unit under test. The
+    console stays real: tests read what it printed through capsys.
     """
     monkeypatch.setattr(diagnostics_audit, "logger", MagicMock())
-    monkeypatch.setattr(diagnostics_audit, "console", MagicMock())
     monkeypatch.setattr(diagnostics_audit, "error", MagicMock())
     monkeypatch.setattr(diagnostics_audit, "warning", MagicMock())
 
@@ -85,12 +79,14 @@ def test_handle_command_accepts_diagnostics_audit_name():
     shown.assert_called_once_with()
 
 
-def test_handle_command_no_args_shows_introspection():
-    """No args names the module on the console, rather than erroring quietly."""
+def test_handle_command_no_args_shows_introspection(capsys):
+    """No args names the module on the console, rather than erroring quietly.
+
+    Mutant: handle_command's no-args branch skips print_introspection() (pass) — killed.
+    """
     assert diagnostics_audit.handle_command("diagnostics", []) is True
 
-    printed = " ".join(str(c.args[0]) for c in diagnostics_audit.console.print.call_args_list if c.args)  # type: ignore[attr-defined]
-    assert "Diagnostics Audit Module" in printed
+    assert "Diagnostics Audit Module" in capsys.readouterr().out.splitlines()
 
 
 def test_handle_command_help_flag():
@@ -131,19 +127,20 @@ def test_handle_command_help_word():
     assert reported.call_args_list == []
 
 
-def test_handle_command_unknown_arg():
+def test_handle_command_unknown_arg(capsys):
     """An unknown argument is named back, with the route that does work.
 
     Was `assert result is True` under a docstring promising an error was
     displayed gracefully — and this module returns True on every path, so the
     test passed with all six console lines and both channels deleted.
+
+    Mutant: the unknown-argument branch drops its `drone @seedgo audit aipass` line — killed.
     """
     assert diagnostics_audit.handle_command("diagnostics", ["some_unknown_arg"]) is True
 
     diagnostics_audit.error.assert_called_once_with("Unknown argument: 'some_unknown_arg'")  # type: ignore[attr-defined]
     diagnostics_audit.warning.assert_called_once_with("This module has no subcommands.")  # type: ignore[attr-defined]
-    printed = " ".join(str(c.args[0]) for c in diagnostics_audit.console.print.call_args_list if c.args)  # type: ignore[attr-defined]
-    assert "drone @seedgo audit aipass" in printed
+    assert "  drone @seedgo audit aipass" in capsys.readouterr().out.splitlines()
 
 
 # ---------------------------------------------------------------------------
@@ -151,33 +148,37 @@ def test_handle_command_unknown_arg():
 # ---------------------------------------------------------------------------
 
 
-def test_print_introspection_runs():
+def test_print_introspection_runs(capsys):
     """Introspection names the module, its handler package, and where the work runs.
 
     The `or mock_cli.header.called` this replaced pinned nothing: introspection
     never calls `header`, so the second clause was dead and the first passed on
     any single print at all.
+
+    Mutant: print_introspection drops its Connected Handlers heading — killed.
     """
-    result, lines = _console_lines("print_introspection")
+    result, lines = _console_lines(capsys, "print_introspection")
 
     assert result is None
-    assert "[bold cyan]Diagnostics Audit Module[/bold cyan]" in lines
-    assert "[yellow]Connected Handlers:[/yellow]" in lines
-    assert "  [cyan]handlers/diagnostics/[/cyan]" in lines
+    assert "Diagnostics Audit Module" in lines
+    assert "Connected Handlers:" in lines
+    assert "  handlers/diagnostics/" in lines
     assert "  Diagnostics checking runs through the audit pipeline:" in lines
 
 
-def test_print_help_runs():
+def test_print_help_runs(capsys):
     """Help carries all three of its sections, and names pyright as the checker.
 
     Same escape as introspection above: `header` is never called here either.
+
+    Mutant: print_help's first check line drops (Pylance/pyright) — killed.
     """
-    result, lines = _console_lines("print_help")
+    result, lines = _console_lines(capsys, "print_help")
 
     assert result is None
-    assert "[yellow]COMMANDS:[/yellow]" in lines
-    assert "[yellow]EXAMPLES:[/yellow]" in lines
-    assert "[yellow]WHAT IT CHECKS:[/yellow]" in lines
+    assert "COMMANDS:" in lines
+    assert "EXAMPLES:" in lines
+    assert "WHAT IT CHECKS:" in lines
     assert "  - Type errors (Pylance/pyright)" in lines
 
 
@@ -186,8 +187,11 @@ def test_print_help_runs():
 # ---------------------------------------------------------------------------
 
 
-def test_print_branch_diagnostics_clean():
-    """Zero errors renders the green tick and the file tally, and no top-files block."""
+def test_print_branch_diagnostics_clean(capsys):
+    """Zero errors renders the green tick and the file tally, and no top-files block.
+
+    Mutant: zero errors gets the yellow warning sign instead of the tick — killed.
+    """
     result = {
         "branch": "TEST",
         "total_errors": 0,
@@ -197,16 +201,19 @@ def test_print_branch_diagnostics_clean():
         "results": [],
     }
 
-    _, lines = _console_lines("print_branch_diagnostics", result)
+    _, lines = _console_lines(capsys, "print_branch_diagnostics", result)
 
-    assert "[green]✓[/green] [bold]TEST[/bold]" in lines
+    assert "✓ TEST" in lines
     assert "  Files: 5 analyzed, 0 with errors" in lines
-    assert "  [green]Errors: 0[/green]  Warnings: 0" in lines
-    assert "  [dim]Top files with errors:[/dim]" not in lines
+    assert "  Errors: 0  Warnings: 0" in lines
+    assert "  Top files with errors:" not in lines
 
 
-def test_print_branch_diagnostics_with_errors():
-    """15 errors renders the red cross, and the offending file with its first lines."""
+def test_print_branch_diagnostics_with_errors(capsys):
+    """15 errors renders the red cross, and the offending file with its first lines.
+
+    Mutant: ten or more errors gets the yellow warning sign instead of the cross — killed.
+    """
     result = {
         "branch": "TEST",
         "total_errors": 15,
@@ -225,36 +232,42 @@ def test_print_branch_diagnostics_with_errors():
         ],
     }
 
-    _, lines = _console_lines("print_branch_diagnostics", result)
+    _, lines = _console_lines(capsys, "print_branch_diagnostics", result)
 
-    assert "[red]✗[/red] [bold]TEST[/bold]" in lines
+    assert "✗ TEST" in lines
     assert "  Files: 10 analyzed, 2 with errors" in lines
-    assert "  [red]Errors: 15[/red]  Warnings: 3" in lines
-    assert "  [dim]Top files with errors:[/dim]" in lines
-    assert "    • /some/path/test.py [dim](5 errors)[/dim]" in lines
-    assert "      [dim]L10:[/dim] Type mismatch" in lines
-    assert "      [dim]L20:[/dim] Undefined variable 'x'" in lines
+    assert "  Errors: 15  Warnings: 3" in lines
+    assert "  Top files with errors:" in lines
+    assert "    • /some/path/test.py (5 errors)" in lines
+    assert "      L10: Type mismatch" in lines
+    assert "      L20: Undefined variable 'x'" in lines
 
 
-def test_print_system_summary_empty():
-    """An empty fleet totals to zero everywhere, and lists no branches by error count."""
-    _, lines = _console_lines("print_system_summary", [])
+def test_print_system_summary_empty(capsys):
+    """An empty fleet totals to zero everywhere, and lists no branches by error count.
 
-    assert "[bold]SYSTEM DIAGNOSTICS SUMMARY:[/bold]" in lines
+    Mutant: the by-error-count block prints at zero branches with errors (>= 0) — killed.
+    """
+    _, lines = _console_lines(capsys, "print_system_summary", [])
+
+    assert "SYSTEM DIAGNOSTICS SUMMARY:" in lines
     assert "  Total branches:        0" in lines
     assert "  Clean branches:        0" in lines
     assert "  Total errors:          0" in lines
-    assert "[bold]BRANCHES BY ERROR COUNT:[/bold]" not in lines
+    assert "BRANCHES BY ERROR COUNT:" not in lines
 
 
-def test_print_system_summary_with_data():
-    """Two branches: the totals add up, and only the one with errors gets listed."""
+def test_print_system_summary_with_data(capsys):
+    """Two branches: the totals add up, and only the one with errors gets listed.
+
+    Mutant: the by-error-count block lists every branch (if True:) — killed.
+    """
     results = [
         {"branch": "FLOW", "total_errors": 0, "total_warnings": 1, "total_files": 5, "files_with_errors": 0},
         {"branch": "CLI", "total_errors": 3, "total_warnings": 0, "total_files": 8, "files_with_errors": 2},
     ]
 
-    _, lines = _console_lines("print_system_summary", results)
+    _, lines = _console_lines(capsys, "print_system_summary", results)
 
     assert "  Total branches:        2" in lines
     assert "  Clean branches:        1" in lines
@@ -262,7 +275,7 @@ def test_print_system_summary_with_data():
     assert "  Files analyzed:        13" in lines
     assert "  Total errors:          3" in lines
     assert "  Total warnings:        1" in lines
-    assert "[bold]BRANCHES BY ERROR COUNT:[/bold]" in lines
+    assert "BRANCHES BY ERROR COUNT:" in lines
     assert "  CLI                3 errors" in lines
     assert not [line for line in lines if line.startswith("  FLOW")], "clean branches are not listed by error count"
 

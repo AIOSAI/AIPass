@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: cli_check.py
 # Description: CLI Standards Checker Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-05
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -458,7 +458,7 @@ def check_cli_imports(content: str, module_path: str = "") -> Optional[Dict]:
     Exception: CLI branch itself uses internal imports
     """
     # Exception: CLI branch uses internal imports (it's the implementation)
-    if "/cli/apps/" in module_path:
+    if "/cli/apps/" in module_path.replace("\\", "/"):
         return {"name": "CLI service imports", "passed": True, "message": "CLI branch exempt (uses internal imports)"}
 
     # Check for CLI imports (canonical, sub-module, or shortcut via cli/__init__.py)
@@ -697,11 +697,11 @@ def check_duplicate_display_functions(content: str, module_path: str = "") -> Op
     Exception: CLI branch itself defines these functions.
     """
     # Exception: CLI branch defines these functions
-    if "/cli/apps/" in module_path:
+    if "/cli/apps/" in module_path.replace("\\", "/"):
         return None
 
     # Exception: Prax logger IS the logging system — it defines these legitimately
-    if "/prax/apps/modules/logger" in module_path:
+    if "/prax/apps/modules/logger" in module_path.replace("\\", "/"):
         return None
 
     # Display functions that CLI service provides

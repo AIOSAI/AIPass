@@ -440,7 +440,11 @@ class TestBudget:
         assert any("still carries a score" in p for p in laws.validate(document))
 
     def test_an_unbuilt_execution_group_needs_no_budget(self):
-        """Unbuilt exec groups carry no budget and pass; Mutant: spine budget stamp / laws skip dropped — killed."""
+        """Unbuilt exec groups carry no budget and pass.
+
+        not_applicable groups never ran, so a budget would be theatre.
+        Mutant: spine budget stamp / laws skip dropped — killed.
+        """
         document = _lawful_document()
         unbuilt = {
             name: group

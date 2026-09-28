@@ -213,7 +213,10 @@ def test_discover_proof_handlers_empty_dir(tmp_path, monkeypatch, capsys):
 
 
 def test_discover_proof_handlers_skips_init(tmp_path, monkeypatch, capsys):
-    """Mutant: _prefixed files run as handlers in apps/modules/seedgo_proof.py — killed."""
+    """__init__.py and _prefixed files are not proof handlers.
+
+    Mutant: _prefixed files run as handlers in apps/modules/seedgo_proof.py — killed.
+    """
     pack = _handlers(tmp_path, monkeypatch) / "code_proof"
     pack.mkdir()
     (pack / "__init__.py").write_text("", encoding="utf-8")
@@ -327,8 +330,10 @@ def test_proof_still_runs_without_a_help_flag(monkeypatch, tmp_path):
 
 
 def test_proof_does_not_answer_for_another_command(monkeypatch):
-    """Ownership first. Mutant: help answered before ownership in apps/modules/seedgo_proof.py — killed."""
-    # A help flag never makes a module claim a command it does not own.
+    """Ownership first: a help flag never makes a module claim a command it does not own.
+
+    Mutant: help answered before ownership in apps/modules/seedgo_proof.py — killed.
+    """
     helped = MagicMock()
     monkeypatch.setattr(seedgo_proof, "print_help", helped)
 

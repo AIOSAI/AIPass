@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: checklist.py
 # Description: Per-File Standards Checklist Module
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-03-15
-# Modified: 2026-09-25
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -89,7 +89,7 @@ def _is_entry_point(file_path: str) -> bool:
     p = Path(file_path)
     if not p.name.endswith(".py"):
         return False
-    if "apps/" not in file_path:
+    if "apps/" not in file_path.replace("\\", "/"):
         return False
     return p.parent.name == "apps"
 

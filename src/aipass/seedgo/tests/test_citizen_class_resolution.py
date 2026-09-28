@@ -291,8 +291,10 @@ class TestGatewayIsTheOnlySource:
         assert proc.stdout.strip() == "LOUD", f"stdout={proc.stdout!r} stderr={proc.stderr[-400:]!r}"
 
     def test_resolution_matches_spawn_on_every_value_spawn_knows(self, tmp_path, monkeypatch):
-        """Mutant: refused class made citizen in apps/handlers/aipass_standards/architecture_check.py — killed."""
-        # End to end: the checker's answer IS spawn's answer, for every known value.
+        """End to end: the checker's answer IS spawn's answer, for every known value.
+
+        Mutant: refused class made citizen in apps/handlers/aipass_standards/architecture_check.py — killed.
+        """
         known = (
             sorted(class_registry.CITIZEN_CLASSES)
             + sorted(class_registry.LEGACY_CLASSES)

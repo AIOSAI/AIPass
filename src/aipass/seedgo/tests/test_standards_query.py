@@ -1,15 +1,25 @@
-"""Tests for standards_query module."""
-
 # =================== META ====================
 # Name: test_standards_query.py
 # Description: Unit tests for the standards_query module
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-15
+# Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/modules/standards_query.py."""
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(shared) — what each content file's standards function returns; tests/test_content_functions.py
+# seedgo: no-test-needed(shared) — wants_help's own flag grammar; tests/test_help_flags.py
+# seedgo: no-test-needed(shared) — json_handler.log_operation's write; tests/test_json_handler_contract.py
+
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import CUSTOM_CONFIG_GUIDE
+from aipass.seedgo.apps.handlers.audit_tests import refusal
+from aipass.seedgo.apps.modules import CommandRefused, standards_query
+from aipass.seedgo.apps.modules.standards_query import ALIAS_COMMAND, QUERY_COMMAND, handle_command
 
 
 # ---------------------------------------------------------------------------
@@ -17,45 +27,21 @@ from unittest.mock import MagicMock, patch
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _mock_infrastructure(monkeypatch):
-    """Mock heavy infrastructure imports for standards_query."""
-    import sys
-
-    mock_logger = MagicMock()
-    mock_console = MagicMock()
-    mock_header = MagicMock()
-    mock_warning = MagicMock()
-    mock_json_handler = MagicMock()
-
-    # -- prax ---------------------------------------------------------------
-    prax_mod = MagicMock()
-    prax_mod.logger = mock_logger
-    monkeypatch.setitem(sys.modules, "aipass.prax", prax_mod)
-
-    # -- cli ----------------------------------------------------------------
-    cli_mod = MagicMock()
-    cli_mod.console = mock_console
-    cli_mod.header = mock_header
-    monkeypatch.setitem(sys.modules, "aipass.cli", cli_mod)
-
-    cli_apps = MagicMock()
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps", cli_apps)
-
-    cli_modules = MagicMock()
-    cli_modules.warning = mock_warning
-    monkeypatch.setitem(sys.modules, "aipass.cli.apps.modules", cli_modules)
-
-    # -- seedgo json handler ------------------------------------------------
-    json_pkg = MagicMock()
-    json_pkg.json_handler = mock_json_handler
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json", json_pkg)
-    json_mod = MagicMock()
-    json_mod.log_operation = mock_json_handler.log_operation
-    monkeypatch.setitem(sys.modules, "aipass.seedgo.apps.handlers.json.json_handler", json_mod)
-
-    # Force re-import
-    monkeypatch.delitem(sys.modules, "aipass.seedgo.apps.modules.standards_query", raising=False)
+@pytest.fixture
+def two_packs(tmp_path, monkeypatch):
+    """Two packs on disk, both defining `dupe` and only b defining `extra`: the only packs the module finds."""
+    packs = {}
+    for pack_name, stems in (("a_standards", ["dupe"]), ("b_standards", ["dupe", "extra"])):
+        pack = tmp_path / pack_name
+        pack.mkdir()
+        for stem in stems:
+            (pack / f"{stem}_content.py").write_text(
+                f"def get_{stem}_standards():\n    return 'CONTENT OF {pack_name} {stem}'\n", encoding="utf-8"
+            )
+        packs[pack_name] = pack
+    # The disk edge: the real discovery walks seedgo's own handlers/ directory.
+    monkeypatch.setattr(standards_query, "_discover_packs", lambda: packs)
+    return packs
 
 
 # ---------------------------------------------------------------------------
@@ -65,15 +51,11 @@ def _mock_infrastructure(monkeypatch):
 
 def test_handle_command_wrong_command_returns_false():
     """handle_command returns False for unrecognised commands."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
-
     assert handle_command("wrong_command", []) is False
 
 
 def test_handle_command_no_args_shows_introspection():
     """No args shows introspection, and does not fall through to help."""
-    from aipass.seedgo.apps.modules import standards_query
-
     with (
         patch.object(standards_query, "print_introspection") as shown,
         patch.object(standards_query, "print_help") as helped,
@@ -85,8 +67,6 @@ def test_handle_command_no_args_shows_introspection():
 
 def test_handle_command_help_flag():
     """--help explains and discovers no packs."""
-    from aipass.seedgo.apps.modules import standards_query
-
     with (
         patch.object(standards_query, "print_help") as helped,
         patch.object(standards_query, "_discover_packs") as discovered,
@@ -103,8 +83,6 @@ def test_handle_command_h_flag():
     <pack> --help` used to look up a standard called '--help'. The return value
     is True on both sides of that bug, so only the effect tells them apart.
     """
-    from aipass.seedgo.apps.modules import standards_query
-
     with (
         patch.object(standards_query, "print_help") as helped,
         patch.object(standards_query, "_discover_packs") as discovered,
@@ -116,8 +94,6 @@ def test_handle_command_h_flag():
 
 def test_handle_command_help_word():
     """The bare word 'help' reaches the same door as the flags."""
-    from aipass.seedgo.apps.modules import standards_query
-
     with (
         patch.object(standards_query, "print_help") as helped,
         patch.object(standards_query, "_discover_packs") as discovered,
@@ -134,101 +110,100 @@ def test_handle_command_unknown_pack():
     so a script reading the exit code saw a successful query of a pack that
     does not exist (the owner's standing ruling, fleet sweep 2026-09-07).
     """
-    import pytest
-
-    from aipass.seedgo.apps.handlers.audit_tests import refusal
-    from aipass.seedgo.apps.modules import CommandRefused
-    from aipass.seedgo.apps.modules.standards_query import handle_command
-
     with pytest.raises(CommandRefused) as refused:
         handle_command("standards_query", ["nonexistent_pack_xyz"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
     assert refused.value.token == "nonexistent_pack_xyz"
 
 
-def test_print_introspection_runs():
+def test_print_introspection_runs(capsys):
     """print_introspection lists the discovered packs and how to open each one.
 
     Was a bare call that asserted nothing (no_oracle): a print_introspection
     that discovered nothing passed just as happily. Lines measured 2026-09-07;
-    `console` is the fixture mock the module binds.
+    read off the real console through capsys since 2026-09-27.
+    Mutant: `[cyan]handlers/{name}/[/cyan]` -> `[cyan]{name}/[/cyan]` reddens it.
     """
-    from aipass.seedgo.apps.modules.standards_query import console, print_introspection
+    standards_query.print_introspection()
 
-    print_introspection()
-
-    # type: ignore -- `console` is the fixture's MagicMock at run time; pyright
-    # sees the real rich.Console the module declares, whose bound `print` has no
-    # call_args_list. Pre-existing on all three call sites here.
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]  # type: ignore[attr-defined]
-    assert "[bold cyan]standards_query Module[/bold cyan]" in lines
-    assert "[yellow]Discovered Packs:[/yellow]" in lines
-    assert "  [cyan]handlers/pytest_quality_standards/[/cyan]" in lines
-    assert "  [green]drone @seedgo standards_query aipass_standards[/green]" in lines
+    out = capsys.readouterr().out
+    assert "standards_query Module" in out
+    assert "Discovered Packs:" in out
+    assert "  handlers/pytest_quality_standards/" in out
+    assert "  drone @seedgo standards_query aipass_standards" in out
 
 
-def test_print_help_runs():
+def test_print_help_runs(capsys):
     """print_help documents all three call forms and names its own commands.
 
     Was a bare call that asserted nothing (no_oracle). Lines measured
-    2026-09-07.
+    2026-09-07; read off the real console through capsys since 2026-09-27.
+    Mutant: `Commands: standards_query, standard, --help` -> `Commands: standards_query, --help` reddens it.
     """
-    from aipass.seedgo.apps.modules.standards_query import console, print_help
+    standards_query.print_help()
 
-    print_help()
-
-    # type: ignore -- `console` is the fixture's MagicMock at run time; pyright
-    # sees the real rich.Console the module declares, whose bound `print` has no
-    # call_args_list. Pre-existing on all three call sites here.
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]  # type: ignore[attr-defined]
-    assert "[bold cyan]Standards Query Module[/bold cyan]" in lines
-    assert "[yellow]COMMANDS:[/yellow]" in lines
-    assert "  [green]drone @seedgo standards_query aipass_standards architecture[/green]" in lines
-    assert "[dim]Commands: standards_query, standard, --help[/dim]" in lines
+    out = capsys.readouterr().out
+    assert "Standards Query Module" in out
+    assert "COMMANDS:" in out
+    assert "  drone @seedgo standards_query aipass_standards architecture" in out
+    assert "Commands: standards_query, standard, --help" in out
 
 
-def test_discover_packs_returns_dict():
-    """_discover_packs finds seedgo's four packs, each mapped to its own directory.
+def test_introspection_finds_the_four_packs_each_mapped_to_its_own_directory(capsys):
+    """The bare command names seedgo's four packs and lists each pack's own content files.
 
-    The isinstance check alone pinned the return TYPE and nothing about the
+    An isinstance check alone once pinned the return TYPE and nothing about the
     value (assertion_shape), so a discovery that found no pack at all scored a
     pass. The four names below are the *_standards directories under
     apps/handlers/ that hold a *_check.py, measured 2026-09-15 when
     context_standards landed (DPLAN-0347 -- `drone @seedgo audit context`); the
-    last assertion pins that the value is the pack directory itself, not its
-    parent.
+    last assertion pins that each pack maps to the pack directory itself, not
+    its parent. Mutant: `packs[d.name] = d` -> `packs[d.name] = d.parent` reddens it.
     """
-    from aipass.seedgo.apps.modules.standards_query import _discover_packs
+    assert handle_command(QUERY_COMMAND, []) is True
 
-    packs = _discover_packs()
-    assert isinstance(packs, dict)
-    assert set(packs) == {
+    out = capsys.readouterr().out
+    prefix = "drone @seedgo standards_query "
+    listed = {line.strip().removeprefix(prefix) for line in out.splitlines() if line.strip().startswith(prefix)}
+    assert listed == {
         "aipass_standards",
         "context_standards",
         "pytest_quality_standards",
         "tests_pytest_standards",
     }
-    assert (packs["pytest_quality_standards"] / "no_oracle_check.py").is_file()
+    assert "- json_structure_content.py (get_json_structure_standards)" in out
 
 
-def test_discover_standards_empty_dir(tmp_path):
-    """_discover_standards returns empty dict for a directory with no content files."""
-    from aipass.seedgo.apps.modules.standards_query import _discover_standards
+def test_a_pack_with_no_content_files_says_so_and_lists_nothing(tmp_path, monkeypatch, capsys):
+    """A pack directory holding no *_content.py is reported empty, not listed.
 
-    result = _discover_standards(tmp_path)
-    assert result == {}
+    Mutant: `if not standards:` -> `if not standards and False:` reddens it.
+    """
+    monkeypatch.setattr(standards_query, "_discover_packs", lambda: {"empty_standards": tmp_path})
+
+    assert handle_command(QUERY_COMMAND, ["empty_standards"]) is True
+
+    out, err = capsys.readouterr()
+    assert "No content handlers found." in err
+    assert "Add *_content.py files to handlers/empty_standards/" in out
+    assert "Available Standards" not in out
 
 
-def test_discover_standards_finds_content_files(tmp_path):
-    """_discover_standards discovers *_content.py files correctly."""
-    from aipass.seedgo.apps.modules.standards_query import _discover_standards
+def test_a_pack_lists_its_content_files_and_nothing_else(tmp_path, monkeypatch, capsys):
+    """A pack lists the standards its *_content.py files name, never another .py beside them.
 
-    # Create a fake content file
+    Mutant: `glob("*_content.py")` -> `glob("*.py")` reddens it.
+    """
     (tmp_path / "architecture_content.py").write_text("# fake", encoding="utf-8")
-    (tmp_path / "not_a_content.py").write_text("# fake", encoding="utf-8")
-    result = _discover_standards(tmp_path)
-    assert "architecture" in result
-    assert "not_a_content" not in result
+    (tmp_path / "architecture_check.py").write_text("# fake", encoding="utf-8")
+    monkeypatch.setattr(standards_query, "_discover_packs", lambda: {"tmp_standards": tmp_path})
+
+    assert handle_command(QUERY_COMMAND, ["tmp_standards"]) is True
+
+    out = capsys.readouterr().out
+    assert "Available Standards: (1)" in out
+    assert "  architecture\n" in out
+    assert "architecture_check" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -236,36 +211,34 @@ def test_discover_standards_finds_content_files(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_alias_no_args_lists_all_standards():
+def test_alias_no_args_lists_all_standards(capsys):
     """`standard` with no args puts real standard names on the console.
 
     Was `assert handle_command("standard", []) is True` under a docstring
     promising a list — and the alias returns True unconditionally, so the
     test passed with _show_all_standards() emptied out.
+    Mutant: `for name in ordered:` -> `for name in ordered[:1]:` reddens it.
     """
-    from aipass.seedgo.apps.modules.standards_query import console, handle_command
-
     assert handle_command("standard", []) is True
 
-    printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)  # type: ignore[attr-defined]
-    assert "json_structure" in printed
-    assert "architecture" in printed
+    out = capsys.readouterr().out
+    assert "  json_structure\n" in out
+    assert "  architecture\n" in out
 
 
-def test_alias_shows_content_for_known_standard():
+def test_alias_shows_content_for_known_standard(capsys):
     """`standard json_structure` resolves the pack itself and prints THAT content.
 
     Pinned against the content module's own first line, so resolving to the
     wrong standard — or to the alias help — reddens this instead of passing
     on the alias's unconditional True.
+    Mutant: `console.print(content)` -> `console.print(str(content)[:10])` reddens it.
     """
-    from aipass.seedgo.apps.modules.standards_query import console, handle_command
-
     assert handle_command("standard", ["json_structure"]) is True
 
-    printed = " ".join(str(call.args[0]) for call in console.print.call_args_list if call.args)  # type: ignore[attr-defined]
-    assert "JSON STRUCTURE STANDARD" in printed
-    assert "Operational JSON Output" in printed
+    out = capsys.readouterr().out
+    assert "JSON STRUCTURE STANDARD" in out
+    assert "Operational JSON Output" in out
 
 
 def test_alias_unknown_standard_refuses_with_a_non_zero_code():
@@ -275,12 +248,6 @@ def test_alias_unknown_standard_refuses_with_a_non_zero_code():
     defect. `seedgo.py` turned it into exit 0, so `drone @seedgo standard
     <typo>` printed ❌ and told the shell it had worked.
     """
-    import pytest
-
-    from aipass.seedgo.apps.handlers.audit_tests import refusal
-    from aipass.seedgo.apps.modules import CommandRefused
-    from aipass.seedgo.apps.modules.standards_query import handle_command
-
     with pytest.raises(CommandRefused) as refused:
         handle_command("standard", ["nonexistent_standard_xyz"])
     assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
@@ -289,8 +256,6 @@ def test_alias_unknown_standard_refuses_with_a_non_zero_code():
 
 def test_alias_help_flag():
     """`standard --help` explains the alias and resolves no standard."""
-    from aipass.seedgo.apps.modules import standards_query
-
     with (
         patch.object(standards_query, "print_alias_help") as helped,
         patch.object(standards_query, "_resolve_standard") as resolved,
@@ -300,79 +265,83 @@ def test_alias_help_flag():
     assert resolved.call_args_list == []
 
 
-def test_print_alias_help_runs():
+def test_print_alias_help_runs(capsys):
     """print_alias_help explains the short form and points back at the long one.
 
     Was a bare call that asserted nothing (no_oracle) — it could not tell the
-    alias help from the query help. Lines measured 2026-09-07.
+    alias help from the query help. Lines measured 2026-09-07; read off the
+    real console through capsys since 2026-09-27.
+    Mutant: `"  Short form of [green]standards_query ..."` -> the line without "Short form of " reddens it.
     """
-    from aipass.seedgo.apps.modules.standards_query import console, print_alias_help
+    standards_query.print_alias_help()
 
-    print_alias_help()
-
-    # type: ignore -- `console` is the fixture's MagicMock at run time; pyright
-    # sees the real rich.Console the module declares, whose bound `print` has no
-    # call_args_list. Pre-existing on all three call sites here.
-    lines = [call.args[0] for call in console.print.call_args_list if call.args]  # type: ignore[attr-defined]
-    assert "[bold cyan]Standard (short alias)[/bold cyan]" in lines
-    assert "  [green]drone @seedgo standard json_structure[/green]" in lines
-    assert "  Short form of [green]standards_query <pack> <standard>[/green]." in lines
-    assert "[dim]Commands: standard, --help[/dim]" in lines
+    out = capsys.readouterr().out
+    assert "Standard (short alias)" in out
+    assert "  drone @seedgo standard json_structure" in out
+    assert "  Short form of standards_query <pack> <standard>." in out
+    assert "Commands: standard, --help" in out
 
 
-def test_resolve_standard_finds_single_owner():
-    """_resolve_standard finds exactly one pack owning a real standard."""
-    from aipass.seedgo.apps.modules.standards_query import _resolve_standard
+def test_alias_resolves_a_name_one_pack_defines_to_that_packs_content(two_packs, capsys):
+    """`standard extra` finds the one pack that defines it and prints that pack's content.
 
-    matches = _resolve_standard("json_structure")
-    assert len(matches) == 1
-    pack_name, content_file = matches[0]
-    assert pack_name.endswith("_standards")
-    assert content_file.name == "json_structure_content.py"
+    Mutant: `matches.append((pack_name, standards[standard_name]))` ->
+    `matches.extend([(pack_name, standards[standard_name])] * 2)` reddens it.
+    """
+    assert handle_command(ALIAS_COMMAND, ["extra"]) is True
 
-
-def test_resolve_standard_unknown_returns_empty():
-    """_resolve_standard returns no matches for an unknown name."""
-    from aipass.seedgo.apps.modules.standards_query import _resolve_standard
-
-    assert _resolve_standard("nonexistent_standard_xyz") == []
+    assert "CONTENT OF b_standards extra" in capsys.readouterr().out
 
 
-def test_all_standard_names_maps_name_to_packs():
-    """_all_standard_names maps each standard name to the packs defining it."""
-    from aipass.seedgo.apps.modules.standards_query import _all_standard_names
+def test_alias_unknown_name_is_refused_and_lists_the_names_it_knows(two_packs, capsys):
+    """A name no pack defines is refused, and the landing list shows what does exist.
 
-    names = _all_standard_names()
-    assert "json_structure" in names
-    assert isinstance(names["json_structure"], list)
-    assert all(pack.endswith("_standards") for pack in names["json_structure"])
-
-
-def test_alias_ambiguous_name_refuses_to_guess(monkeypatch):
-    """Two packs defining one name → error + explicit form, no content loaded."""
-    from aipass.seedgo.apps.modules import standards_query
-
-    fake = {"a_standards": "a", "b_standards": "b"}
-    monkeypatch.setattr(standards_query, "_discover_packs", lambda: fake)
-    monkeypatch.setattr(standards_query, "_discover_standards", lambda _p: {"dupe": "dupe_content.py"})
-
-    loaded = []
-    monkeypatch.setattr(standards_query, "_display_content", lambda *a: loaded.append(a))
-
-    import pytest
-
-    from aipass.seedgo.apps.modules import CommandRefused
-
+    Mutant: `return matches` -> `return matches or [("b_standards", pack_path / "extra_content.py")]`
+    reddens it.
+    """
     with pytest.raises(CommandRefused) as refused:
-        standards_query.handle_command("standard", ["dupe"])
+        handle_command(ALIAS_COMMAND, ["nope"])
+    assert refused.value.code == refusal.EXIT_UNKNOWN_ARGUMENT
+
+    out, err = capsys.readouterr()
+    assert "Unknown standard: 'nope'" in err
+    assert "Available Standards: (2)" in out
+    assert "CONTENT OF" not in out
+
+
+def test_alias_landing_lists_each_name_once_across_every_pack(two_packs, capsys):
+    """The landing counts a name two packs define once, and still lists the second pack's own names.
+
+    Mutant: `for std_name in _discover_standards(pack_path):` ->
+    `for std_name in list(_discover_standards(pack_path))[:1]:` reddens it.
+    """
+    assert handle_command(ALIAS_COMMAND, []) is True
+
+    out = capsys.readouterr().out
+    assert "Available Standards: (2)" in out
+    assert out.count("  dupe\n") == 1
+    assert "  extra\n" in out
+    assert "  drone @seedgo standard dupe" in out
+
+
+def test_alias_ambiguous_name_refuses_to_guess(two_packs, capsys):
+    """Two packs defining one name → error + explicit form, no content loaded.
+
+    Mutant: `if len(matches) > 1:` -> `if len(matches) > 2:` reddens it.
+    """
+    with pytest.raises(CommandRefused) as refused:
+        handle_command(ALIAS_COMMAND, ["dupe"])
     assert refused.value.code == 7, "refusing to guess is a refusal, and a refusal is not exit 0"
-    assert loaded == []
+
+    out, err = capsys.readouterr()
+    assert "Ambiguous standard: 'dupe' is defined in 2 packs" in err
+    assert "  drone @seedgo standards_query a_standards dupe" in out
+    assert "  drone @seedgo standards_query b_standards dupe" in out
+    assert "CONTENT OF" not in out
 
 
 def test_alias_does_not_swallow_other_commands():
     """The alias must not claim commands owned by other modules."""
-    from aipass.seedgo.apps.modules.standards_query import handle_command
-
     assert handle_command("audit", ["aipass"]) is False
     assert handle_command("checklist", ["some_file.py"]) is False
 
@@ -382,37 +351,23 @@ def test_alias_does_not_swallow_other_commands():
 # ---------------------------------------------------------------------------
 
 
-def test_custom_config_guide_pointer_actually_resolves():
+def test_custom_config_guide_pointer_actually_resolves(capsys):
     """The guide command embedded in audit output must be a real, working command.
 
     The whole point of the info line is that a reader can paste it and get the
     standard. A command that errors makes the pointer worse than useless, so
-    this parses the shipped constant and resolves it for real.
+    this parses the shipped constant and runs it through handle_command for real.
+    Mutant: CUSTOM_CONFIG_GUIDE's `standard json_structure` -> `standard json_structur` reddens it.
     """
-    from aipass.seedgo.apps.handlers.aipass_standards.json_structure_check import CUSTOM_CONFIG_GUIDE
-    from aipass.seedgo.apps.modules.standards_query import (
-        ALIAS_COMMAND,
-        QUERY_COMMAND,
-        _discover_packs,
-        _discover_standards,
-        _resolve_standard,
-    )
-
     command_text = CUSTOM_CONFIG_GUIDE.split("Guide:", 1)[-1].strip()
-    tokens = command_text.split()
+    tokens = [str(token) for token in command_text.split()]
     assert tokens[:2] == ["drone", "@seedgo"], f"Pointer is not a drone command: {command_text}"
 
     command, args = tokens[2], tokens[3:]
     assert command in (QUERY_COMMAND, ALIAS_COMMAND), f"Pointer cites unknown command '{command}'"
 
-    if command == ALIAS_COMMAND:
-        assert len(_resolve_standard(args[0])) == 1, f"Alias pointer does not resolve: {command_text}"
-        return
-
-    pack_name, standard_name = args[0], args[1]
-    packs = _discover_packs()
-    assert pack_name in packs, f"Pointer cites unknown pack '{pack_name}'"
-    assert standard_name in _discover_standards(packs[pack_name]), f"Pointer cites unknown standard '{standard_name}'"
+    assert handle_command(command, args) is True, f"Pointer does not resolve: {command_text}"
+    assert args[-1].replace("_", " ").upper() + " STANDARD" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -420,72 +375,59 @@ def test_custom_config_guide_pointer_actually_resolves():
 # ---------------------------------------------------------------------------
 
 
-def test_help_after_the_pack_name_does_not_display_content(monkeypatch, tmp_path):
-    """`drone @seedgo standards_query aipass_standards --help` looked up a standard named '--help'."""
-    from aipass.seedgo.apps.modules import standards_query
+def test_help_after_the_pack_name_does_not_display_content(capsys):
+    """`drone @seedgo standards_query aipass_standards --help` looked up a standard named '--help'.
 
-    monkeypatch.setattr(standards_query, "_discover_packs", MagicMock(return_value={"aipass_standards": tmp_path}))
-    display = MagicMock()
-    monkeypatch.setattr(standards_query, "_display_content", display)
-    monkeypatch.setattr(standards_query, "_show_pack_standards", MagicMock())
-    shown = MagicMock()
-    monkeypatch.setattr(standards_query, "print_help", shown)
+    Mutant: the query's `if wants_help(None, args):` -> `if False:` reddens it.
+    """
+    assert handle_command(QUERY_COMMAND, ["aipass_standards", "--help"]) is True
 
-    assert standards_query.handle_command("standards_query", ["aipass_standards", "--help"]) is True
-    assert display.call_count == 0
-    assert shown.call_count == 1
+    out = capsys.readouterr().out
+    assert "Standards Query Module" in out
+    assert "STANDARDS IN AIPASS_STANDARDS" not in out
 
 
-def test_standards_query_still_displays_content_without_a_help_flag(monkeypatch, tmp_path):
-    """The gate must not swallow the real command."""
-    from aipass.seedgo.apps.modules import standards_query
+def test_standards_query_still_displays_content_without_a_help_flag(capsys):
+    """The gate must not swallow the real command.
 
-    monkeypatch.setattr(standards_query, "_discover_packs", MagicMock(return_value={"aipass_standards": tmp_path}))
-    monkeypatch.setattr(standards_query, "_discover_standards", MagicMock(return_value={"cli": tmp_path / "cli.md"}))
-    display = MagicMock()
-    monkeypatch.setattr(standards_query, "_display_content", display)
-    monkeypatch.setattr(standards_query, "print_help", MagicMock())
+    Mutant: the query's `if wants_help(None, args):` -> `if True:` reddens it.
+    """
+    assert handle_command(QUERY_COMMAND, ["aipass_standards", "json_structure"]) is True
 
-    assert standards_query.handle_command("standards_query", ["aipass_standards", "cli"]) is True
-    assert display.call_count == 1
+    out = capsys.readouterr().out
+    assert "JSON STRUCTURE STANDARD" in out
+    assert "Standards Query Module" not in out
 
 
-def test_alias_help_after_the_standard_name_does_not_display_content(monkeypatch, tmp_path):
-    """`drone @seedgo standard cli --help` printed the whole standard instead of the alias help."""
-    from aipass.seedgo.apps.modules import standards_query
+def test_alias_help_after_the_standard_name_does_not_display_content(capsys):
+    """`drone @seedgo standard cli --help` printed the whole standard instead of the alias help.
 
-    monkeypatch.setattr(
-        standards_query, "_resolve_standard", MagicMock(return_value=[("aipass_standards", tmp_path / "cli.md")])
-    )
-    display = MagicMock()
-    monkeypatch.setattr(standards_query, "_display_content", display)
-    shown = MagicMock()
-    monkeypatch.setattr(standards_query, "print_alias_help", shown)
+    Mutant: the alias's `if wants_help(None, args):` -> `if False:` reddens it.
+    """
+    assert handle_command(ALIAS_COMMAND, ["json_structure", "--help"]) is True
 
-    assert standards_query.handle_command("standard", ["cli", "--help"]) is True
-    assert display.call_count == 0
-    assert shown.call_count == 1
+    out = capsys.readouterr().out
+    assert "Standard (short alias)" in out
+    assert "JSON STRUCTURE STANDARD" not in out
 
 
-def test_alias_still_displays_content_without_a_help_flag(monkeypatch, tmp_path):
-    """The gate must not swallow the real command."""
-    from aipass.seedgo.apps.modules import standards_query
+def test_alias_still_displays_content_without_a_help_flag(capsys):
+    """The gate must not swallow the real command.
 
-    monkeypatch.setattr(
-        standards_query, "_resolve_standard", MagicMock(return_value=[("aipass_standards", tmp_path / "cli.md")])
-    )
-    display = MagicMock()
-    monkeypatch.setattr(standards_query, "_display_content", display)
-    monkeypatch.setattr(standards_query, "print_alias_help", MagicMock())
+    Mutant: the alias's `if wants_help(None, args):` -> `if True:` reddens it.
+    """
+    assert handle_command(ALIAS_COMMAND, ["json_structure"]) is True
 
-    assert standards_query.handle_command("standard", ["cli"]) is True
-    assert display.call_count == 1
+    out = capsys.readouterr().out
+    assert "JSON STRUCTURE STANDARD" in out
+    assert "Standard (short alias)" not in out
 
 
-def test_standards_query_does_not_answer_for_another_command(monkeypatch):
-    """Ownership first: a help flag never makes a module claim a command it does not own."""
-    from aipass.seedgo.apps.modules import standards_query
+def test_standards_query_does_not_answer_for_another_command(capsys):
+    """Ownership first: a help flag never makes a module claim a command it does not own.
 
-    monkeypatch.setattr(standards_query, "print_help", MagicMock())
+    Mutant: `if command != QUERY_COMMAND:` -> `if command == "never":` reddens it.
+    """
+    assert handle_command("proof_query", ["--help"]) is False
 
-    assert standards_query.handle_command("proof_query", ["--help"]) is False
+    assert capsys.readouterr().out == ""

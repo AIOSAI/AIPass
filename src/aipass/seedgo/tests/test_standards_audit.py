@@ -1,15 +1,20 @@
-"""Tests for standards_audit module."""
-
 # =================== META ====================
 # Name: test_standards_audit.py
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
-# Version: 1.2.2
+# Version: 1.3.0
 # Created: 2026-03-24
 # Modified: 2026-09-27
 # =============================================
 
+"""Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
+
+# Tests for the standards_audit module.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(standard) — each checker's own verdict; every <row>_check.py has its own test file
+# seedgo: no-test-needed(covered) — the audit-tests lane's own run, in tests/test_audit_tests_lane.py
+
 import tempfile
-import time
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -34,14 +39,9 @@ from aipass.seedgo.apps.modules import audit_tests as lane
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch, tmp_path):
     """Replace the seams standards_audit reads, so tests run fast and without side effects."""
-    mock_console = MagicMock()
-    # Rich's Progress does real arithmetic on the console clock and branches on
-    # its terminal flags. A bare MagicMock makes it compare MagicMock with
-    # MagicMock (TypeError on the second task update) and warn about Jupyter,
-    # so the audit's progress bar needs these three answered honestly.
-    mock_console.get_time = time.monotonic
-    mock_console.is_jupyter = False
-    mock_console.is_terminal = False
+    # The console is NOT replaced: standards_audit prints through aipass.cli's
+    # real console, which writes to sys.stdout at print time, so a test reads
+    # what the user reads with capsys (width pinned by conftest).
     mock_normalize = MagicMock(side_effect=lambda x: x.lstrip("@").upper())
 
     mock_discovery = MagicMock()
@@ -53,7 +53,6 @@ def _mock_infrastructure(monkeypatch, tmp_path):
     mock_discovery.non_scoring_packs = MagicMock(return_value={"tests_pytest": "execution"})
 
     monkeypatch.setattr(standards_audit, "logger", MagicMock())
-    monkeypatch.setattr(standards_audit, "console", mock_console)
     monkeypatch.setattr(standards_audit, "header", MagicMock())
     monkeypatch.setattr(standards_audit, "error", MagicMock())
     monkeypatch.setattr(standards_audit, "warning", MagicMock())
@@ -141,7 +140,7 @@ def test_handle_command_help_word():
     assert audited.call_args_list == []
 
 
-def test_print_introspection_runs():
+def test_print_introspection_runs(capsys: pytest.CaptureFixture[str]) -> None:
     """print_introspection names the module and both pack lanes.
 
     "console.print OR header was called" is true of a function that prints one
@@ -149,30 +148,30 @@ def test_print_introspection_runs():
     real run (2026-09-07). The third is the one that matters most: this module
     scores STANDARDS packs and must say out loud which discovered packs it is
     NOT scoring, or a reader takes the absence of `tests_pytest` for a missing
-    pack rather than another lane.
+    pack rather than another lane. Read from stdout through capsys since 2026-09-27.
+    Mutant: `Not scored here (other lanes):` to `Not scored here:` — killed.
     """
-    standards_audit.console.reset_mock()
-    standards_audit.header.reset_mock()
+    capsys.readouterr()
     result = standards_audit.print_introspection()
-    printed = "\n".join(str(call.args[0]) for call in standards_audit.console.print.call_args_list if call.args)
+    printed = capsys.readouterr().out
     assert result is None
     assert "standards_audit Module" in printed, f"introspection never named the module: {printed!r}"
     assert "Discovered Packs:" in printed, f"introspection never listed the packs: {printed!r}"
     assert "Not scored here (other lanes):" in printed, f"introspection hid the non-scoring packs: {printed!r}"
 
 
-def test_print_help_runs():
+def test_print_help_runs(capsys: pytest.CaptureFixture[str]) -> None:
     """print_help prints its banner and the honest-score flag.
 
     Same reason as the introspection test above. `--no-bypass` is pinned rather
     than a decorative line: it is the flag that produces the second number every
     APLAN publishes, and help that stops documenting it is the reason a branch
     reports only its bypassed score.
+    Mutant: help's `audit aipass --no-bypass` example to `audit aipass` — killed.
     """
-    standards_audit.console.reset_mock()
-    standards_audit.header.reset_mock()
+    capsys.readouterr()
     result = standards_audit.print_help()
-    printed = "\n".join(str(call.args[0]) for call in standards_audit.console.print.call_args_list if call.args)
+    printed = capsys.readouterr().out
     assert result is None
     assert "Standards Audit Module" in printed, f"help never named the module: {printed!r}"
     assert "audit aipass --no-bypass" in printed, f"help never documented --no-bypass: {printed!r}"
@@ -263,9 +262,9 @@ def _rules_per_branch(audit_mock):
     return [call.args[1] for call in audit_mock.call_args_list]
 
 
-def _console_text():
-    """Everything the module printed this test, as one string."""
-    return "\n".join(str(c.args[0]) if c.args else "" for c in standards_audit.console.print.call_args_list)
+def _console_text(capsys: pytest.CaptureFixture[str]) -> str:
+    """Everything the module printed to stdout since the last read, as one string."""
+    return capsys.readouterr().out
 
 
 def test_no_bypass_after_branch_arg_disables_every_rule(monkeypatch):
@@ -301,40 +300,46 @@ def test_normal_run_still_applies_the_loaded_bypass_rules(monkeypatch):
     assert _rules_per_branch(audit_mock) == [_LOADED_RULES]
 
 
-def test_no_bypass_run_announces_itself(monkeypatch):
-    """A suppressed-rules run says so — no reader may mistake it for a normal one."""
+def test_no_bypass_run_announces_itself(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """A suppressed-rules run says so — no reader may mistake it for a normal one.
+
+    Mutant: the summary's `if no_bypass:` announcement to `if False:` — killed.
+    """
     _wire_branches(monkeypatch, "FLOW")
     standards_audit.handle_command("audit", ["aipass", "@flow", "--no-bypass", "--no-artifact"])
-    text = _console_text().upper()
+    text = _console_text(capsys).upper()
     assert "BYPASS" in text and "DISABLED" in text, "A --no-bypass run must declare that bypasses are off"
 
 
-def test_normal_run_makes_no_bypass_claim(monkeypatch):
+def test_normal_run_makes_no_bypass_claim(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Control — the declaration is not printed on a normal run."""
     _wire_branches(monkeypatch, "FLOW")
     standards_audit.handle_command("audit", ["aipass", "@flow", "--no-artifact"])
-    assert "BYPASSES DISABLED" not in _console_text().upper()
+    assert "BYPASSES DISABLED" not in _console_text(capsys).upper()
 
 
-def test_help_documents_the_no_bypass_flag():
+def test_help_documents_the_no_bypass_flag(capsys: pytest.CaptureFixture[str]) -> None:
     """--help lists --no-bypass — help text must match runtime behaviour."""
-    standards_audit.console.reset_mock()
+    capsys.readouterr()
     standards_audit.print_help()
-    assert "--no-bypass" in _console_text()
+    assert "--no-bypass" in _console_text(capsys)
 
 
 def test_help_text_at_prefix_consistency():
     """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix).
 
     Scans help text strings in seedgo.py and all modules for branch name
-    patterns that should use @ prefix but don't.
+    patterns that should use @ prefix but don't. standards_audit.py is read
+    from wherever the module was loaded, so a mutant copy is scanned too.
+    Mutant: help's `audit aipass @flow --no-bypass` to `audit aipass flow --no-bypass` — killed.
     """
     import re
 
     branch_root = Path(__file__).resolve().parents[1]
     files_to_check = [
         branch_root / "apps" / "seedgo.py",
-        *sorted((branch_root / "apps" / "modules").glob("*.py")),
+        *sorted(p for p in (branch_root / "apps" / "modules").glob("*.py") if p.name != "standards_audit.py"),
+        Path(standards_audit.__file__),
     ]
 
     # Pattern: 'audit aipass <word>' or 'diagnostics <word>' where <word> is
@@ -376,7 +381,7 @@ def test_help_text_at_prefix_consistency():
             if match:
                 violations.append(f"{fpath.name}:{i}: bare '{match.group(1)}' (should be '@{match.group(1)}')")
 
-    assert not violations, f"Help text has {len(violations)} bare branch references (missing @):\n" + "\n".join(
+    assert violations == [], f"Help text has {len(violations)} bare branch references (missing @):\n" + "\n".join(
         violations
     )
 
@@ -459,7 +464,7 @@ def test_the_refusal_names_the_token_and_gives_the_working_command(monkeypatch):
     assert "did you mean: drone @seedgo audit tests @backup" in _refusal_text()
 
 
-def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch):
+def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     _wire_branches(monkeypatch, "BACKUP")
 
     refused = _refuse(["-tests", "@backup"])
@@ -468,7 +473,7 @@ def test_the_refusal_exits_non_zero_and_cites_argv(monkeypatch):
     # The code is printed beside the law, and it is not a pass — AND the
     # process leaves with it. Printing "exit code: 7" over an exit 0 was the
     # defect the 2026-09-07 fleet sweep named.
-    assert "exit code: 7" in _console_text()
+    assert "exit code: 7" in _console_text(capsys)
     assert refused.code == 7
 
 
@@ -616,15 +621,29 @@ def test_every_lane_argument_is_forwarded_verbatim(monkeypatch, tail):
 def test_the_forwarded_line_parses_exactly_as_the_alias_does(monkeypatch):
     """`audit tests X` and `audit-tests X` reach the lane's parser identically.
 
-    Asserted through the lane's OWN `_parse`, not through a restated
+    Asserted through the lane's OWN parser, not through a restated
     expectation: the two spellings are the same command only if the thing that
-    reads them cannot tell them apart.
+    reads them cannot tell them apart. Reached through the lane's `audit-tests`
+    command since 2026-09-27; runner.run is the recorder, so no suite runs.
+    Mutant: standards_audit's `handle_command("audit-tests", args[1:])` to `args[2:]` — killed.
     """
     argv = ["@backup", "--budget", "300", "--prove-refusal"]
 
     forwarded = _forwarded(monkeypatch, ["tests", *argv])
     assert forwarded is not None, "the audit verb never handed the lane anything"
-    assert lane._parse(forwarded) == lane._parse(argv)
+
+    parsed: list = []
+
+    def _record_run(argument, options=None):
+        """What the lane's parser produced, handed to the runner; nothing is run."""
+        parsed.append((argument, options))
+        return [], 0
+
+    monkeypatch.setattr(lane.runner, "run", _record_run)
+    assert lane.handle_command("audit-tests", forwarded) is True
+    assert lane.handle_command("audit-tests", argv) is True
+    assert parsed[0][0] == "@backup"
+    assert parsed[0] == parsed[1]
 
 
 def test_the_hyphenated_alias_still_claims_the_lane():
@@ -693,35 +712,40 @@ def test_a_pack_named_tests_makes_the_word_ambiguous_and_it_refuses(monkeypatch)
     assert audit_mock.call_count == 0, "the pack must not be picked silently"
 
 
-def test_the_ambiguity_refusal_names_both_meanings(monkeypatch):
+def test_the_ambiguity_refusal_names_both_meanings(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
     """A refusal that says only 'ambiguous' leaves the reader to guess what collided."""
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
 
     _refuse(["tests", "@backup"])
-    text = _refusal_text() + "\n" + _console_text()
+    text = _refusal_text() + "\n" + _console_text(capsys)
 
     assert "'tests'" in text
     assert "audit-tests lane" in text, "the execution lane is one of the two meanings"
     assert "standards pack" in text, "the pack is the other"
 
 
-def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(monkeypatch):
+def test_the_ambiguity_refusal_offers_an_unambiguous_spelling_for_each(
+    monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Naming the collision is half the fix; the other half is how to say each one."""
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
 
     _refuse(["tests", "@backup"])
-    text = _console_text()
+    text = _console_text(capsys)
 
     assert "drone @seedgo audit-tests <target>" in text
     assert "drone @seedgo audit tests_standards" in text
 
 
-def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch):
-    """The existing vocabulary, not a parallel one: same law, same code 7."""
+def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """The existing vocabulary, not a parallel one: same law, same code 7.
+
+    Mutant: the `law: ... exit code: {refused.code}` console line to `pass` — killed.
+    """
     _wire_branches(monkeypatch, "BACKUP")
     _wire_lane(monkeypatch)
     _collide(monkeypatch)
@@ -729,7 +753,7 @@ def test_the_ambiguity_refusal_cites_argv_and_its_exit_code(monkeypatch):
     refused = _refuse(["tests", "@backup"])
 
     assert _refusal_text().startswith("REFUSED: [ARGV]")
-    assert "exit code: 7" in _console_text()
+    assert "exit code: 7" in _console_text(capsys)
     assert refused.code == 7, "the printed code and the carried code are one number"
 
 

@@ -1,16 +1,21 @@
-"""Tests for 5 seedgo checker handlers: stderr_routing, todo, trigger, dead_code, unused_function.
-
-Was 6. The test_quality section retired 2026-09-07 with the v4 standard itself
-(FPLAN-0491); disposal copy in tests/.archive/deleted_2026-09-07_test_quality_v4.py.
-"""
-
 # =================== META ====================
 # Name: test_checkers_batch4.py
 # Description: Unit tests for 5 seedgo checker handlers (batch 4)
-# Version: 1.0.3
+# Version: 1.1.0
 # Created: 2026-03-29
 # Modified: 2026-09-27
 # =============================================
+
+"""Tests for 5 checkers: aipass_standards/stderr_routing_check.py, todo, trigger, dead_code, unused_function."""
+
+# Tests for 5 seedgo checker handlers: stderr_routing, todo, trigger, dead_code,
+# unused_function. Was 6. The test_quality section retired 2026-09-07 with the v4
+# standard itself (FPLAN-0491); disposal copy in
+# tests/.archive/deleted_2026-09-07_test_quality_v4.py.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(retired) — the v4 test_quality checker, retired with its standard in FPLAN-0491
+# seedgo: no-test-needed(stdlib) — tokenize's own error classes; the fallback they trigger is pinned via check_branch
 
 from pathlib import Path
 from unittest.mock import patch
@@ -29,7 +34,6 @@ from aipass.seedgo.apps.handlers.aipass_standards.dead_code_check import (
     check_branch as dead_code_check_branch,
 )
 from aipass.seedgo.apps.handlers.aipass_standards.unused_function_check import (
-    _strip_non_code,
     check_branch as unused_function_check_branch,
 )
 
@@ -432,6 +436,7 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
     left this test green while the checker crashed in production. Patching the
     attribute keeps the real module in place: the name has to EXIST for the patch
     to bind, and the pin fails the moment it does not.
+    Mutant: check_completed's `"unused_count": len(unused_functions)` to `total_functions` — killed.
     """
     branch = tmp_path / "victim"
     (branch / "apps").mkdir(parents=True)
@@ -444,10 +449,33 @@ def test_unused_function_survives_a_file_that_cannot_be_tokenized(mock_log, tmp_
 
     assert result["score"] > 0
     assert "error" not in result
+    # The completed scan is logged last, with what it measured: alpha has no caller, beta has one.
+    # (json_handler is the fleet's shared shim, so the .seedgoignore load logs through it first.)
+    mock_log.assert_called_with(
+        "check_completed",
+        {
+            "branch": str(branch),
+            "score": 50,
+            "standard": "unused_function",
+            "total_functions": 2,
+            "unused_count": 1,
+        },
+    )
 
 
-def test_unused_function_strip_non_code_degrades_on_syntax_error():
-    source = "def helper():\n    return 1\n  stray = 2\n"
+def test_unused_function_counts_a_call_made_from_a_file_that_cannot_be_tokenized(tmp_path):
+    """A file caught mid-save still counts as a caller: the tokenizer falls back to the raw corpus.
 
+    Was a direct call of the private _strip_non_code; now through check_branch.
+    Mutant: the fallback's `return _MAIN_BLOCK_RE.sub("", source)` to `return ""` — killed.
+    """
+    branch = tmp_path / "victim"
+    (branch / "apps").mkdir(parents=True)
+    (branch / "apps" / "good.py").write_text("def beta():\n    return 1\n", encoding="utf-8")
     # Falls back to the raw corpus rather than raising -- the name must survive.
-    assert "helper" in _strip_non_code(source)
+    (branch / "apps" / "midsave.py").write_text("def helper():\n    return beta()\n  stray = 2\n", encoding="utf-8")
+
+    result = unused_function_check_branch(str(branch))
+
+    assert result["score"] == 100
+    assert result["checks"][0]["message"] == "All 1 functions are referenced"

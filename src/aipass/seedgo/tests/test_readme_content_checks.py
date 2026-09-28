@@ -222,7 +222,10 @@ def test_count_test_functions_basic(tmp_path):
 
 
 def test_count_test_functions_skips_non_test_files(tmp_path):
-    """Mutant: every *.py counted, not test_*.py, in apps/handlers/aipass_standards/readme_check.py — killed."""
+    """Only test_*.py files are counted, not conftest or helpers.
+
+    Mutant: every *.py counted, not test_*.py, in apps/handlers/aipass_standards/readme_check.py — killed.
+    """
     files = {
         "test_real.py": "def test_one(): pass\n",
         "conftest.py": "def test_fixture(): pass\n",
@@ -314,7 +317,10 @@ def test_markdown_links_bypassed(tmp_path):
 
 
 def test_extract_relative_links_mixed(tmp_path):
-    """Mutant: anchor links no longer skipped in apps/handlers/aipass_standards/readme_check.py — killed."""
+    """Only relative links are read; external and anchor links are skipped.
+
+    Mutant: anchor links no longer skipped in apps/handlers/aipass_standards/readme_check.py — killed.
+    """
     content = "[Ext](https://example.com)\n[Local](docs/setup.md)\n[Anchor](#top)\n[File](README.md)\n"
     # Neither target exists, so the dead-link message lists exactly the relative links read.
     result = check_markdown_links(_lines(content), tmp_path, "fake.py")
@@ -378,7 +384,10 @@ def test_check_module_missing_readme_has_8_failures(tmp_path):
 
 
 def test_is_runtime_artifact_known_dirs(tmp_path):
-    """Mutant: _json not a runtime artifact in apps/handlers/aipass_standards/readme_check.py — killed."""
+    """Known runtime dirs and suffixes are runtime artifacts.
+
+    Mutant: _json not a runtime artifact in apps/handlers/aipass_standards/readme_check.py — killed.
+    """
     names = [
         "logs",
         "artifacts",
@@ -417,7 +426,10 @@ def test_module_list_skips_disabled_file(tmp_path):
 
 
 def test_count_test_functions_skips_disabled_file(tmp_path):
-    """Mutant: the (disabled) skip removed in apps/handlers/aipass_standards/readme_check.py — killed."""
+    """test_*(disabled).py files are not counted.
+
+    Mutant: the (disabled) skip removed in apps/handlers/aipass_standards/readme_check.py — killed.
+    """
     files = {
         "test_active.py": "def test_one(): pass\ndef test_two(): pass\n",
         "test_old(disabled).py": "def test_ghost(): pass\ndef test_phantom(): pass\ndef test_zombie(): pass\n",

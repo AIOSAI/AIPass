@@ -312,6 +312,19 @@ class TestTemplateBump:
             encoding="utf-8"
         ) == stamped
 
+    def test_a_stamp_that_cannot_land_is_reported_failed_with_its_error(self, fleet, gold):
+        """A failed write came back as the action text "failed: <error>", a string no caller compares.
+
+        Mutant: _stamp's old `except Exception: return f"failed: {exc}"` — killed.
+        """
+        (fleet / "src" / "aipass" / "alpha" / "tests" / "TEST_TEMPLATE.md").mkdir()
+
+        outcome = template_ops.bump(confirm=True, only="alpha")
+
+        alpha = [row for row in outcome["branches"] if row["branch"] == "alpha"]
+        assert [row["action"] for row in alpha] == ["failed"]
+        assert "TEST_TEMPLATE.md" in alpha[0]["error"]
+
     def test_a_test_body_is_never_distributed(self, fleet, gold):
         """The one thing this lane must never do: a branch's tests stay its own."""
         mine = fleet / "src" / "aipass" / "alpha" / "tests" / "test_theirs.py"

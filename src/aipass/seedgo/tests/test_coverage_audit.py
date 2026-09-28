@@ -748,7 +748,10 @@ class TestPrintBranchSummary:
         assert "test_branch" in rendered, "the branch summary rendered nothing at all"
 
     def test_no_bypass_label_travels_with_the_branch_score(self, capsys):
-        """A --no-bypass summary says so. Mutant: no_bypass forced False in apps/handlers/audit/audit_display.py — killed."""
+        """A --no-bypass summary says so: the score alone reads as a regression.
+
+        Mutant: no_bypass forced False in apps/handlers/audit/audit_display.py — killed.
+        """
         printed = _rendered(
             capsys, audit_display.print_branch_summary, self._make_audit_result(), no_bypass=True
         ).upper()
@@ -1081,7 +1084,10 @@ class TestCollectPyFiles:
         assert "__init__.py" not in names
 
     def test_collects_init_files_when_requested(self, tmp_path, monkeypatch):
-        """INCLUDE_INIT_FILES keeps __init__.py, for import checkers. Mutant: the init walk asked for no inits in apps/handlers/audit/branch_audit.py — killed."""
+        """INCLUDE_INIT_FILES keeps __init__.py, for import checkers that must not miss them.
+
+        Mutant: the init walk asked for no inits in apps/handlers/audit/branch_audit.py — killed.
+        """
         checker = _recording_checker(include_init=True)
         _audit_corpus(monkeypatch, tmp_path, {"handlers": checker}, files=("apps/__init__.py", "apps/module.py"))
         names = _checked(checker)

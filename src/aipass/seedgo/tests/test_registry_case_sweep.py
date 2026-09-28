@@ -168,7 +168,10 @@ class TestDiscoveryPointsAtTheRealAnchorOnACaseFoldingFilesystem:
         assert found == root / REAL_ANCHOR
 
     def test_what_it_finds_maps_the_real_world(self, tmp_path, widened_glob):
-        """Mutant: registries_in matches the suffix case-blind in apps/handlers/registry_scan.py — killed."""
+        """The assertion is about where discovery POINTS, not set membership.
+
+        Mutant: registries_in matches the suffix case-blind in apps/handlers/registry_scan.py — killed.
+        """
         _root, lane = _project(tmp_path)
         found = registry_scan.find_registry_upward(widened_glob(lane))
         assert found is not None
