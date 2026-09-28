@@ -413,9 +413,12 @@ def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
     anchor names the rhythm, not a one-off date. A slot still in the future is
     seeded one interval BEHIND itself, so the first fire lands exactly on it.
 
-    None on an unreadable slot is the same refusal as a non-positive interval:
-    the caller warns and the job fires on this tick, and that fire writes the
-    last_run that gives it a rhythm, so one bad slot costs one off-slot fire.
+    None on an unreadable slot: the caller warns and the job fires on this tick,
+    and that fire writes the last_run that gives it a rhythm, so one bad slot
+    costs one off-slot fire. None on an interval that is not a positive number
+    (text, null, zero, negative): the caller warns and the job never fires,
+    because _is_interval_due refuses the same interval; one bad job costs that
+    one job, never the tick.
     """
     try:
         anchor = datetime.fromisoformat(slot)
@@ -423,7 +426,7 @@ def _slot_anchor(slot: str, interval: int, now: datetime) -> Optional[datetime]:
         logger.warning("[runstate] Unreadable slot %r: %s", slot, e)
         return None
 
-    if interval <= 0:
+    if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
         logger.warning("[runstate] Slot %r with non-positive interval %r, not seeding", slot, interval)
         return None
 
@@ -457,7 +460,8 @@ def seed_interval_slot(runstate: dict, job: dict, now: Optional[datetime] = None
 
     Returns the seeded ISO timestamp, or None when the job declares no readable
     slot - in which case today's behaviour stands and the job fires on the next
-    tick. Callers warn on None; the decision to fire immediately is not silent.
+    tick - or no positive interval_minutes, which never fires. Callers warn on
+    None; the decision to fire immediately is not silent.
     """
     schedule = job.get("schedule", {})
     slot = schedule.get(SLOT_FIELD)
@@ -534,20 +538,28 @@ def _in_failure_backoff(state: dict, now: datetime) -> bool:
     An unreadable last_failure_at answers no hold: a hold that cannot be measured
     could never expire and would stall the job for good, while releasing it costs
     at most one early retry, whose own failure writes a fresh stamp.
+
+    An unreadable last_success_at cancels nothing: both stamps are parsed, never
+    compared as text, because any string sorting after "2026-..." would read as
+    a later success and lift the hold on a job that is still failing.
     """
     failed_at = state.get("last_failure_at")
     if not failed_at:
-        return False
-    # A later success clears the hold - the old last_failure_at stays in the
-    # record as history and must not keep braking a job that recovered.
-    success = state.get("last_success_at")
-    if success and success >= failed_at:
         return False
     try:
         failed_dt = datetime.fromisoformat(failed_at)
     except (ValueError, TypeError) as e:
         logger.info("[runstate] Failure backoff parse failed for %r: %s", failed_at, e)
         return False
+    # A later success clears the hold - the old last_failure_at stays in the
+    # record as history and must not keep braking a job that recovered.
+    success = state.get("last_success_at")
+    if success:
+        try:
+            if datetime.fromisoformat(success) >= failed_dt:
+                return False
+        except (ValueError, TypeError) as e:
+            logger.warning("[runstate] Unreadable last_success_at %r does not lift the failure backoff: %s", success, e)
     return (now - failed_dt) < timedelta(minutes=_FAILURE_BACKOFF_MINUTES)
 
 
@@ -724,6 +736,11 @@ def _calc_next_run(schedule: dict, last_run_ts: str) -> Optional[str]:
 
     if sched_type == "interval":
         interval = schedule.get("interval_minutes", 60)
+        # The same refusal as _is_interval_due: an interval that is not a positive
+        # number is never due, so there is no next run to advertise.
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+            logger.info("[runstate] calc_next_run: interval_minutes %r is not a positive number", interval)
+            return None
         try:
             last_dt = datetime.fromisoformat(last_run_ts)
             return (last_dt + timedelta(minutes=interval)).isoformat()

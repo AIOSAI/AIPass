@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: discovery.py
 # Description: Decentralized .daemon/ schedule file discovery
-# Version: 2.3.0
+# Version: 2.4.0
 # Created: 2026-06-15
 # Modified: 2026-09-27
 # =============================================
@@ -273,17 +273,35 @@ def branch_path_for(dir_name: str, repo_root: Optional[Path] = None) -> Path:
     return _SRC_AIPASS / dir_name
 
 
+def _stat_passport(passport_file: Path) -> None:
+    """Ask the filesystem whether *passport_file* is there, raising whatever it raises.
+
+    What each failure MEANS is citizen_class_for's decision, not this function's:
+    kept apart so a test can hand that decision an EACCES or ENOTDIR without
+    replacing pathlib for the whole process.
+    """
+    passport_file.stat()
+
+
 def citizen_class_for(branch_path: Path) -> Optional[str]:
     """Read citizen_class from a branch passport.
 
     A missing passport answers '' (no class, an ordinary citizen). A passport that
     exists but cannot be read answers None, which no passport can hold: it may be a
     manager's, so callers must not treat it as a worker (the sweep skips it, the
-    rounds roster leaves it off).
+    rounds roster leaves it off). A .trinity that cannot be read is the same case:
+    only a passport truly absent (FileNotFoundError) answers ''; any other failure
+    to learn whether it is there answers None. Asked with stat() rather than
+    exists(), which on Python 3.12 raises on EACCES and answers False on ENOTDIR.
     """
     passport_file = branch_path / ".trinity" / "passport.json"
-    if not passport_file.exists():
+    try:
+        _stat_passport(passport_file)
+    except FileNotFoundError:
         return ""
+    except OSError as e:
+        logger.warning("[discovery] Could not learn whether a passport is at %s: %s", passport_file, e)
+        return None
     try:
         with open(passport_file, "r", encoding="utf-8") as f:
             passport = json.load(f)
@@ -331,6 +349,20 @@ def _validate_job(job: dict, file_path: Path) -> bool:
             "[discovery] Job '%s' has invalid schedule type '%s' in %s", job.get("id"), sched_type, file_path
         )
         return False
+
+    # Refused at the source rather than guarded in every reader: a text or null
+    # interval raised TypeError downstream and stopped the whole tick, and a zero
+    # or negative one can never fire. Absent is fine: the readers default to 60.
+    interval = schedule.get("interval_minutes")
+    if sched_type == "interval" and "interval_minutes" in schedule:
+        if isinstance(interval, bool) or not isinstance(interval, (int, float)) or interval <= 0:
+            logger.warning(
+                "[discovery] Job '%s' refused in %s: interval_minutes %r is not a positive number",
+                job.get("id"),
+                file_path,
+                interval,
+            )
+            return False
 
     if "command" not in job:
         if command_job.notify_email(job):

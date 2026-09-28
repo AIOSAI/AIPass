@@ -143,31 +143,54 @@ def _install() -> int:
     return 0
 
 
+def _uninstall_step_failed(*args: str) -> int:
+    """Name the systemctl step an uninstall stopped at, with error(), and answer exit code 1."""
+    step = " ".join(args)
+    logger.warning("[timer_install] uninstall stopped: systemctl --user %s failed", step)
+    error(
+        f"uninstall-timer: systemctl --user {step} failed",
+        suggestion="systemctl --user status daemon-tick.timer",
+    )
+    return 1
+
+
 def _uninstall() -> int:
-    """Stop, disable, and remove the daemon-tick timer."""
+    """Stop, disable, and remove the daemon-tick timer.
+
+    Installed means a unit file stands in _UNIT_DIR. None there: nothing to stop,
+    said so, exit 0, and systemctl is not asked (an uninstall of an uninstalled
+    timer is a success). Otherwise stop, disable and, after the files go,
+    daemon-reload must each answer True: the first that fails is named with
+    error() and the answer is 1. A failed stop or disable leaves the files.
+    """
     console.print("[bold cyan]Uninstalling daemon-tick units...[/bold cyan]")
     console.print()
 
-    _run_systemctl("stop", _TIMER_NAME)
-    _run_systemctl("disable", _TIMER_NAME)
+    installed = [_UNIT_DIR / name for name in (_SERVICE_NAME, _TIMER_NAME) if (_UNIT_DIR / name).exists()]
+    if not installed:
+        console.print(f"  [dim]Not installed:[/dim] no daemon-tick unit in {_UNIT_DIR}, nothing to stop")
+        console.print()
+        logger.info("[timer_install] uninstall: daemon-tick timer not installed, nothing to stop")
+        return 0
 
-    for name in (_SERVICE_NAME, _TIMER_NAME):
-        dst = _UNIT_DIR / name
-        if dst.exists():
-            dst.unlink()
-            try:
-                from aipass.trigger.apps.modules.core import trigger
+    for step in (("stop", _TIMER_NAME), ("disable", _TIMER_NAME)):
+        if not _run_systemctl(*step):
+            return _uninstall_step_failed(*step)
 
-                trigger.fire("file_deleted", path=str(dst), source="timer_install")
-            except ImportError:
-                logger.info("[timer_install] Trigger module not available, skipping event fire")
-            except Exception as e:
-                logger.warning("[timer_install] Trigger fire failed (non-critical): %s", e)
-            console.print(f"  [yellow]Removed:[/yellow] {dst}")
-        else:
-            console.print(f"  [dim]Not found:[/dim] {dst}")
+    for dst in installed:
+        dst.unlink()
+        try:
+            from aipass.trigger.apps.modules.core import trigger
 
-    _run_systemctl("daemon-reload")
+            trigger.fire("file_deleted", path=str(dst), source="timer_install")
+        except ImportError:
+            logger.info("[timer_install] Trigger module not available, skipping event fire")
+        except Exception as e:
+            logger.warning("[timer_install] Trigger fire failed (non-critical): %s", e)
+        console.print(f"  [yellow]Removed:[/yellow] {dst}")
+
+    if not _run_systemctl("daemon-reload"):
+        return _uninstall_step_failed("daemon-reload")
 
     console.print()
     console.print("[bold green]daemon-tick units removed.[/bold green]")

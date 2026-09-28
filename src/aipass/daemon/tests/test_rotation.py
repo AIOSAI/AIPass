@@ -241,8 +241,17 @@ class TestNextTarget:
     def test_wraps_at_the_end(self, roster):
         assert whose_turn(roster, "@commons") == "@backup"
 
-    def test_unknown_last_target_restarts_cycle(self, roster):
-        assert whose_turn(roster, "@retired") == "@backup"
+    def test_a_missing_last_target_continues_at_the_next_citizen_in_roster_order(self):
+        """A last target off the roster for one night hands the turn on, never back to the top.
+
+        Mutant killed: next_target returning roster[0] for a last target not on the roster.
+        Mutant killed: next_target comparing the missing name without roster_key.
+        """
+        roster = [citizen("@a"), citizen("@c"), citizen("@d")]
+        assert whose_turn(roster, "@b") == "@c"
+        assert whose_turn(roster, "@B") == "@c", "the roster's own key compares lower-cased emails"
+        assert whose_turn(roster, "@z") == "@a", "past the last citizen the rounds wrap to the first"
+        assert whose_turn(roster, "@c") == "@d", "a last target still on the roster keeps its answer"
 
 
 # ── rotation state ────────────────────────────────────

@@ -3,7 +3,7 @@
 # Description: Manual one-tick scheduler command (drone @daemon run)
 # Version: 1.6.1
 # Created: 2026-06-15
-# Modified: 2026-09-19
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -289,7 +289,8 @@ def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> 
     very tick that discovers it — seeding afterwards would already have fired it
     at whatever minute the daemon happened to tick, which is the whole defect.
 
-    A job declaring no slot keeps today's behaviour and fires immediately. That
+    A job declaring no slot keeps today's behaviour and fires immediately, unless
+    its interval_minutes is not a positive number, which never fires. That
     is not silent: it warns, names itself, and says what is about to happen, so
     an owner who wanted a slot finds out on the first tick rather than a week
     later from the wrong hour in their log.
@@ -305,12 +306,16 @@ def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> 
         if not slot:
             logger.warning(
                 "[run] %s/%s is an interval job that has never run and declares no 'slot' — "
-                "its first fire is IMMEDIATE, on this tick, and every later run measures from "
-                "that arbitrary minute. Add a slot to choose the hour.",
+                "its first fire is IMMEDIATE, on this tick (never, if its interval_minutes is not "
+                "a positive number), and every later run measures from that arbitrary minute. "
+                "Add a slot to choose the hour.",
                 owner,
                 job_id,
             )
-            _log(f"WARNING: {owner}/{job_id} — no slot, first fire is immediate at this tick's minute")
+            _log(
+                f"WARNING: {owner}/{job_id} — no slot, first fire is immediate at this tick's minute "
+                "(never, if its interval is not a positive number)"
+            )
             continue
 
         if dry_run:
@@ -319,7 +324,10 @@ def _seed_interval_slots(enabled: List[dict], runstate: dict, dry_run: bool) -> 
 
         seeded = seed_interval_slot(runstate, job)
         if seeded is None:
-            _log(f"WARNING: {owner}/{job_id} — slot {slot!r} unreadable, first fire is immediate")
+            _log(
+                f"WARNING: {owner}/{job_id} — slot {slot!r} not seeded: an unreadable slot fires "
+                "immediately, an interval that is not a positive number never fires"
+            )
             continue
 
         seeded_count += 1

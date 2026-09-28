@@ -360,6 +360,17 @@ class TestUpdateRunstate:
         assert "last_run" in entry
         assert "next_run" in entry
 
+    @pytest.mark.parametrize("minutes", [0, -30], ids=["zero", "negative"])
+    def test_a_non_positive_interval_advertises_no_next_run(self, minutes):
+        """A non-positive interval is never due, so no next run may be shown (DPLAN-0354 leg 3, item 3).
+
+        Mutant killed: _calc_next_run's interval guard removed (next_run = last_run + 0 or minus minutes).
+        """
+        runstate = {"jobs": {}}
+        schedule = {"type": "interval", "interval_minutes": minutes}
+        update_job_runstate(runstate, "@commons", "wake-test", schedule, timestamp="2026-09-27T22:00:00")
+        assert runstate["jobs"]["@commons/wake-test"]["next_run"] is None
+
     def test_once_marks_completed(self):
         runstate = {"jobs": {}}
         schedule = {"type": "once", "due_date": "2026-01-01"}

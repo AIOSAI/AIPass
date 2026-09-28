@@ -179,6 +179,20 @@ class TestTheFailureBackoffBoundsTheRetry:
 
         assert rs.is_job_due(_job(every_minute), st, now=datetime(2026, 8, 30, 19, 4)) is True
 
+    @pytest.mark.parametrize("garbage", ["zzz", "yesterday"], ids=["sorts-after-digits", "a-word"])
+    def test_an_unreadable_success_stamp_does_not_cancel_the_backoff(self, caplog, garbage):
+        """The stamps were compared as strings, so any text sorting after "2026-..." read as a later success.
+
+        Now both are parsed; an unparsable last_success_at cancels nothing and is warned (DPLAN-0354 leg 3, 7c).
+        Mutant killed: _in_failure_backoff treating an unparsable success as later than the failure.
+        """
+        st = _state_after_failure("2026-08-30T19:02:04")
+        st["jobs"]["@vera/release-watch"]["last_success_at"] = garbage
+
+        with caplog.at_level("WARNING"):
+            assert rs.is_job_due(_job(DAILY), st, now=datetime(2026, 8, 30, 19, 4)) is False
+        assert repr(garbage) in caplog.text
+
 
 class TestIntervalJobsKeepMeasuringFromTheAttempt:
     """The regression this fix must not introduce."""

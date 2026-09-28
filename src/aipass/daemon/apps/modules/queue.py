@@ -3,7 +3,7 @@
 # Description: Unified job queue view (drone @daemon queue)
 # Version: 1.1.0
 # Created: 2026-06-25
-# Modified: 2026-09-11
+# Modified: 2026-09-27
 # =============================================
 
 """
@@ -73,6 +73,10 @@ def _schedule_human(job: dict) -> str:
         return f"hourly @ :{int(m):02d}"
     if sched_type == "interval":
         mins = sched.get("interval_minutes", 0)
+        # One bad row costs its own cell, never the view: text, null or a bool
+        # cannot be compared with 60, so the raw value is shown as unreadable.
+        if isinstance(mins, bool) or not isinstance(mins, (int, float)):
+            return f"every ? (interval_minutes {mins!r} unreadable)"
         if mins >= 60:
             return f"every {mins // 60}h"
         return f"every {mins}m"

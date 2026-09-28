@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.cli.apps.modules import error, mark_command_failed
 
 # ---------------------------------------------------------------------------
 # We import the daemon module and mock json_handler.log_operation to
@@ -111,6 +112,51 @@ def test_version_flag() -> None:
     with patch("sys.argv", ["daemon", "--version"]):
         result = _daemon_mod.main()
     assert result == 0, "daemon --version must return exit code 0"
+
+
+# ============================================================================
+# The exit seam — main() reads the failed flag error() sets (resolve_exit)
+# ============================================================================
+
+
+def _tick_that_reports(message: str | None):
+    """A stand-in for run._run_with_lock: says `message` through error() when given, and answers 0."""
+
+    def tick(dry_run: bool = False) -> int:
+        if message is not None:
+            error(message)
+        return 0
+
+    return tick
+
+
+def test_a_verb_that_reports_through_error_exits_2() -> None:
+    """A routed verb that called error() and returned exits 2, not 0.
+
+    `run` is driven with the tick itself patched out, so nothing is discovered,
+    locked or fired: the stand-in reports through error() and answers 0, the way
+    a verb reports a failure it handled. main() used to answer 0 for every routed
+    verb, so the refusal error() recorded reached no caller.
+    Mutant killed: main returning 0 for a routed verb instead of resolve_exit(handled).
+    """
+    with (
+        patch.object(_daemon_mod.run, "_run_with_lock", _tick_that_reports("run: the tick reported a failure")),
+        patch("sys.argv", ["daemon", "run"]),
+    ):
+        assert _daemon_mod.main() == 2
+
+
+def test_a_failed_flag_left_by_an_earlier_command_is_not_inherited() -> None:
+    """A clean verb exits 0 even when an earlier command in the process tripped the flag.
+
+    Mutant killed: main's reset_command_state() on entry dropped.
+    """
+    mark_command_failed()
+    with (
+        patch.object(_daemon_mod.run, "_run_with_lock", _tick_that_reports(None)),
+        patch("sys.argv", ["daemon", "run"]),
+    ):
+        assert _daemon_mod.main() == 0
 
 
 # ============================================================================
@@ -285,7 +331,21 @@ class TestUnknownArgumentIsRefused:
         units = ("daemon-tick.service", "daemon-tick.timer")
         before = sorted(name for name in units if (live_dir / name).exists())
 
-        with patch.object(_daemon_mod.timer_install, "gate", lambda *a, **k: None):
+        # uninstall-timer asks systemctl only when a unit stands in the unit dir,
+        # so the sealed dir is given both units first: with it empty the verb says
+        # "nothing to stop" and never reaches the seal this test is about.
+        sealed_dir = tmp_path / "_sealed_unit_dir"
+        if verb == "uninstall-timer":
+            sealed_dir.mkdir()
+            for name in units:
+                (sealed_dir / name).write_text("[Unit]\n", encoding="utf-8")
+
+        with (
+            patch.object(_daemon_mod.timer_install, "gate", lambda *a, **k: None),
+            # The uninstall fires file_deleted per removed unit; patched at the
+            # home of the trigger object _uninstall imports, so no fire reaches the bus.
+            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+        ):
             with patch("sys.argv", ["daemon", verb, "not_a_real_subarg_xyz"]):
                 result = _daemon_mod.main()
 
@@ -295,16 +355,19 @@ class TestUnknownArgumentIsRefused:
         )
 
         # Where the file operations actually landed. install-timer copies both
-        # units in, uninstall-timer unlinks whatever is there — against the
-        # SEALED directory, which conftest's _seal_timer_host_state points the
-        # unit-dir seam at under this test's own tmp_path. Units found THERE are
-        # what makes the live-dir assertion below a consequence of the seal
-        # rather than a coincidence.
-        sealed_dir = tmp_path / "_sealed_unit_dir"
+        # units in, uninstall-timer unlinks them — against the SEALED directory,
+        # which conftest's _seal_timer_host_state points the unit-dir seam at
+        # under this test's own tmp_path. What happened THERE is what makes the
+        # live-dir assertion below a consequence of the seal rather than a
+        # coincidence.
         if verb == "install-timer":
             assert sorted(p.name for p in sealed_dir.iterdir()) == sorted(units), (
                 f"install-timer did not write the units into the sealed dir: {list(sealed_dir.iterdir())}"
             )
+            fire.assert_not_called()
+        else:
+            assert list(sealed_dir.iterdir()) == [], f"uninstall-timer left units: {list(sealed_dir.iterdir())}"
+            assert [c.args[0] for c in fire.call_args_list] == ["file_deleted", "file_deleted"]
 
         after = sorted(name for name in units if (live_dir / name).exists())
         assert after == before, f"{verb} changed the live unit files: {before} -> {after}"

@@ -23,6 +23,11 @@ import pytest
 from aipass.daemon.apps.handlers import module_root
 from aipass.daemon.apps.handlers.json import json_handler
 from aipass.daemon.apps.handlers.module_root import module_file
+from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
+
+# No sweep in this file walks into a directory seedgo's own list skips, dropbox and
+# .archive above all (owner ruling 2026-09-27 20:37: "Dropbox should be ignored by all").
+SWEEP_SKIP_DIRS = SOURCE_SKIP_DIRS
 
 # Every daemon module must import without a readable working directory.
 #
@@ -272,10 +277,14 @@ SWEPT_ROOTS = (APPS, _BRANCH / "tools")
 
 
 def _sweepable(root: Path):
-    """Python files under *root*, or nothing if the root is not on this machine."""
+    """Python files under *root*, or nothing if the root is not on this machine.
+
+    A file under any directory SWEEP_SKIP_DIRS names is left out, judged BELOW the
+    root: the tools/ root is itself a name on seedgo's list and must still be read.
+    """
     if not root.is_dir():
         return []
-    return [f for f in sorted(root.rglob("*.py")) if ".archive" not in f.parts]
+    return [f for f in sorted(root.rglob("*.py")) if not SWEEP_SKIP_DIRS.intersection(f.relative_to(root).parts[:-1])]
 
 
 def _run_world(denial: str) -> subprocess.CompletedProcess:
@@ -540,6 +549,22 @@ class TestNoModuleLevelResolveSurvives:
             pytest.skip("tools/ is not on this machine - gitignored, so a fresh clone has none")
 
         assert _sweepable(tools), "tools/ is present but the sweep reads no Python from it"
+
+    def test_the_sweep_never_enters_a_dropbox_or_an_archive(self, tmp_path):
+        """Owner ruling 2026-09-27 20:37: nothing looks into a dropbox; it is a sandbox like .archive.
+
+        The skip is judged below the swept root, so a root that is itself named tools/ is still read.
+        Mutant killed: _sweepable skipping .archive alone (dropbox/stray.py swept, the code before this pin).
+        Mutant, reasoned not run (the runner cannot serve a test module): the skip judged on the whole
+        path, so the tools/ root reads as nothing.
+        """
+        tools = tmp_path / "tools"
+        for folder in ("handlers", "dropbox", ".archive", "handlers/dropbox"):
+            (tools / folder).mkdir(parents=True)
+        for rel in ("handlers/kept.py", "dropbox/stray.py", ".archive/old.py", "handlers/dropbox/stray.py"):
+            (tools / rel).write_text("", encoding="utf-8")
+
+        assert [f.relative_to(tools).as_posix() for f in _sweepable(tools)] == ["handlers/kept.py"]
 
     def test_the_matcher_convicts_the_shape_that_was_cured(self):
         """Positive control - the exact pre-cure line, from json_handler.py:35."""

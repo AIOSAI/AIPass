@@ -55,7 +55,7 @@ logged, the same way a missing `id` or `schedule` is.
 
 | Type | Fields | Due when |
 |------|--------|----------|
-| `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. |
+| `interval` | `interval_minutes: N` | Elapsed >= N since last_run. With no `slot`, a job that has never run fires **immediately** — see below. N must be a positive number (`30`, `0.5`): text, `null`, `true`, zero or a negative is refused at discovery and logged with the file and the job, so the job is never due. Absent, N reads as 60. |
 | `daily` | `time: "HH:MM"` | Within +/-15 min of target time, once per day. |
 | `hourly` | `time: "M"` (minute) | Within +/-15 min of target minute, once per hour. |
 | `once` | `due_date: "YYYY-MM-DD"` | Date <= today, then marks completed. |

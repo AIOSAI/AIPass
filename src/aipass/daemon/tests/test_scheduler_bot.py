@@ -253,6 +253,17 @@ class TestQueueJsonSchema:
             "half-hour": "every 30m",
         }
 
+    @pytest.mark.parametrize("bad_interval", ["sixty", None, True], ids=["text", "null", "bool"])
+    def test_an_unreadable_interval_renders_its_row(self, interval_job, monkeypatch, capsys, bad_interval):
+        """A text or null interval_minutes raised on `mins >= 60` and took the whole queue view down.
+
+        The row renders and names the raw value as unreadable (DPLAN-0354 leg 3, item 3).
+        Mutant killed: _schedule_human's number check removed.
+        """
+        job = dict(interval_job, schedule={"type": "interval", "interval_minutes": bad_interval})
+        (row,) = _queue_json(monkeypatch, capsys, [job], {"jobs": {}})["jobs"]
+        assert row["schedule_human"] == f"every ? (interval_minutes {bad_interval!r} unreadable)"
+
 
 # ── Test 5: empty tick emits ZERO telegram calls ──
 

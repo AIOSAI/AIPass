@@ -496,6 +496,34 @@ class TestSlotSeeding:
         assert "@seedgo/shadow-cycle-weekly" in caplog.text
         assert "IMMEDIATE" in caplog.text
 
+    @pytest.mark.parametrize("bad_interval", ["sixty", None], ids=["text", "null"])
+    def test_a_slotted_job_with_an_unreadable_interval_costs_only_itself(self, caplog, bad_interval):
+        """One bad job costs that one job, never the tick (DPLAN-0354 leg 3, item 2).
+
+        A never-run slotted job whose interval_minutes is text or null raised
+        TypeError in _slot_anchor and stopped the whole tick for every job. Now it
+        is not seeded and not fired, and the good job in the same tick still fires.
+        Mutant killed: _slot_anchor's interval guard reduced to `if interval <= 0:`.
+        """
+        bad = interval_job_with_slot(minutes=bad_interval)
+        good = interval_job_with_slot(slot=None, minutes=60)
+        good["owner"], good["id"] = "@commons", "hourly-good"
+        runstate = {"jobs": {}}
+        with (
+            patch(f"{RUN}.discover_jobs", return_value=[bad, good]),
+            patch(f"{RUN}.load_runstate", return_value=runstate),
+            patch(f"{RUN}.missed_window", return_value=False),
+            patch(f"{RUN}._fire_job", return_value=(OUTCOME_FIRED, "")) as mock_fire,
+            patch(f"{RUN}.save_runstate", return_value=True),
+            caplog.at_level("WARNING"),
+        ):
+            results = run_tick()
+        assert (results["seeded"], results["fired"]) == (0, 1)
+        fired = [call.args[0]["id"] for call in mock_fire.call_args_list]
+        assert fired == ["hourly-good"], f"only the good job may fire, fired {fired}"
+        assert "last_run" not in runstate["jobs"].get("@seedgo/shadow-cycle-weekly", {})
+        assert f"interval {bad_interval!r}" in caplog.text
+
     def test_a_blocked_job_is_still_seedable(self, capsys):
         # record_job_blocked leaves a row with no last_run. Keying the seed on
         # the ROW would strand exactly the job the lesson came from.

@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(external) — parsing the registry files inside fleet.fleet_branches(); @memory's own tests
 # seedgo: no-test-needed(constant) — RESIDENCY_CORE and RESIDENCY_RESIDENT spellings, re-exported from @memory's fleet
 
+import errno
 import json
 import os
 import shutil
@@ -38,6 +39,13 @@ from aipass.daemon.apps.handlers.schedule.discovery import (
 )
 
 DISCOVERY = "aipass.daemon.apps.handlers.schedule.discovery"
+
+# Failures to stat a passport that are NOT its absence: a .trinity that cannot be
+# searched (EACCES) and a .trinity that is not a directory (ENOTDIR).
+NOT_ABSENT = (
+    PermissionError(errno.EACCES, "Permission denied"),
+    NotADirectoryError(errno.ENOTDIR, "Not a directory"),
+)
 
 
 # ── Fixtures ──────────────────────────────────────────
@@ -134,6 +142,27 @@ class TestValidateJob:
         stypes = sorted(VALID_SCHEDULE_TYPES)
         jobs = [{"id": f"t-{stype}", "schedule": {"type": stype}, "prompt": "do stuff"} for stype in stypes]
         assert discovered_ids(one_branch, *jobs) == ["keep"] + [f"t-{stype}" for stype in stypes]
+
+    @pytest.mark.parametrize("interval", ["60", None, "abc", 0, -5, True])
+    def test_an_interval_that_is_not_a_positive_number_is_refused_and_named(self, interval, one_branch, caplog):
+        """Refused at the source, the job and its file named: never due, never read by a reader downstream.
+
+        Let through, a text or null interval raised TypeError in runstate and stopped the tick for every job.
+        Mutant killed: the interval_minutes check removed from _validate_job.
+        Mutant killed: the isinstance(interval, bool) clause dropped (True read as the number 1).
+        """
+        job = {"id": "tick", "schedule": {"type": "interval", "interval_minutes": interval}, "prompt": "x"}
+        with caplog.at_level("WARNING"):
+            assert discovered_ids(one_branch, job) == ["keep"]
+        assert "Job 'tick' refused" in caplog.text
+        assert "interval_minutes" in caplog.text
+        assert str(one_branch / "schedule.json") in caplog.text
+
+    @pytest.mark.parametrize("interval", [1, 0.5, 10080])
+    def test_a_positive_interval_is_accepted(self, interval, one_branch):
+        """Mutant killed: interval <= 0 widened to interval <= 1 in _validate_job (0.5 and 1 refused)."""
+        job = {"id": "tick", "schedule": {"type": "interval", "interval_minutes": interval}, "prompt": "x"}
+        assert discovered_ids(one_branch, job) == ["keep", "tick"]
 
     def test_required_keys_constant(self):
         # prompt left the required set at DPLAN-0338: a job now says exactly one
@@ -637,6 +666,20 @@ class TestCitizenClass:
 
     def test_missing_passport_returns_empty(self, tmp_path):
         assert citizen_class_for(tmp_path) == ""
+
+    @pytest.mark.parametrize("error", NOT_ABSENT, ids=["EACCES", "ENOTDIR"])
+    def test_a_trinity_that_cannot_be_read_returns_none(self, tmp_path, caplog, error):
+        """Only a passport truly absent is an ordinary citizen; not learning whether it exists is None.
+
+        Path.exists() on 3.12 raised PermissionError out of the call and answered False on ENOTDIR,
+        so an unreadable .trinity either crashed the sweep or read as "" (a worker, possibly a manager).
+        Mutant killed: except FileNotFoundError widened to except OSError in citizen_class_for.
+        """
+        passport = tmp_path / ".trinity" / "passport.json"
+        with patch(f"{DISCOVERY}._stat_passport", side_effect=error) as stat, caplog.at_level("WARNING"):
+            assert citizen_class_for(tmp_path) is None
+        stat.assert_called_once_with(passport)
+        assert str(passport) in caplog.text
 
     def test_malformed_passport_returns_none(self, tmp_path):
         """A passport that exists but cannot be read answers None, never "" (not a manager).

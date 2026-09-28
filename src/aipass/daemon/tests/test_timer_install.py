@@ -9,7 +9,7 @@
 """Tests for apps/modules/timer_install.py — install-timer and uninstall-timer, the systemd user timer."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(stdlib) — shutil.copy2's metadata copy; the copied files are asserted on disk, not their mode bits
+# seedgo: no-test-needed(stdlib) — shutil.copy2's metadata copy; the copies are asserted on disk, not their mode bits
 # seedgo: no-test-needed(ruff) — that timer_install.py parses and imports; every test here imports it first
 
 import subprocess
@@ -191,35 +191,96 @@ class TestInstall:
 
 
 class TestUninstall:
-    """Tests for the uninstall flow."""
+    """Tests for the uninstall flow.
+
+    Installed is decided by the unit files in _UNIT_DIR (conftest seals it under
+    tmp_path). None there: nothing to stop, said so, exit 0, systemctl never asked.
+    Any there: stop, disable and daemon-reload must each answer True, or the verb
+    names the step with error() and exits 1.
+    """
 
     @patch(f"{TI}._run_systemctl", return_value=True)
-    def test_uninstall_files_not_present(self, mock_systemctl, tmp_path):
-        """uninstall-timer succeeds even when the unit files are already absent, and still stops the timer.
+    def test_uninstall_files_not_present(self, mock_systemctl, tmp_path, capsys):
+        """uninstall-timer of a timer that is not installed is a success that asks systemctl nothing.
 
-        Mutant killed: _uninstall's stop call dropped.
+        The owner's decision (DPLAN-0354 leg 3): an already-removed timer uninstalls
+        with exit 0. Asking systemctl anyway answered "not loaded" as a failure, and
+        _run_systemctl's error() on that answer would turn the success into exit 2.
+        Mutant killed: the installed check in _uninstall forced true (systemctl asked).
         """
         unit_dir = tmp_path / "units"
         unit_dir.mkdir()
         with patch(f"{TI}._UNIT_DIR", unit_dir):
             assert handle_command("uninstall-timer", []) is True
-        # Nothing to remove is not a reason to leave the timer running.
+        mock_systemctl.assert_not_called()
+        out = capsys.readouterr().out
+        assert "nothing to stop" in out, f"an uninstall with nothing installed must say so: {out!r}"
+        assert list(unit_dir.iterdir()) == [], "an uninstall with nothing to remove must create nothing"
+
+    @patch(f"{TI}._run_systemctl", return_value=True)
+    def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
+        """uninstall-timer stops, disables, removes both unit files, reloads, and fires file_deleted per file.
+
+        The fire is patched where _uninstall binds it: the function imports the
+        module-level `trigger` object of aipass.trigger.apps.modules.core at call
+        time, so the object's `fire` at that home is the one it calls. Unpatched,
+        this test reached the real trigger bus twice (bus probe, 2026-09-27).
+        Mutant killed: _uninstall's stop call dropped.
+        """
+        service, timer = _units(tmp_path)
+
+        with (
+            patch(f"{TI}._UNIT_DIR", tmp_path),
+            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+        ):
+            assert handle_command("uninstall-timer", []) is True
+        assert not service.exists()
+        assert not timer.exists()
         assert [c.args for c in mock_systemctl.call_args_list] == [
             ("stop", "daemon-tick.timer"),
             ("disable", "daemon-tick.timer"),
             ("daemon-reload",),
         ]
-        assert list(unit_dir.iterdir()) == [], "an uninstall with nothing to remove must create nothing"
+        assert [c.args for c in fire.call_args_list] == [("file_deleted",), ("file_deleted",)]
+        assert [c.kwargs for c in fire.call_args_list] == [
+            {"path": str(service), "source": "timer_install"},
+            {"path": str(timer), "source": "timer_install"},
+        ]
 
-    @patch(f"{TI}._run_systemctl", return_value=True)
-    def test_uninstall_removes_files(self, mock_systemctl, tmp_path):
-        """uninstall-timer removes both unit files from the unit directory."""
-        service, timer = _units(tmp_path)
+    @pytest.mark.parametrize("failing", ["stop", "disable", "daemon-reload"])
+    def test_a_failed_step_while_installed_exits_nonzero_and_names_it(
+        self, failing, _seal_timer_host_state, tmp_path, capsys
+    ):
+        """A stop, disable or daemon-reload that fails while the timer is installed exits 1 and names the step.
 
-        with patch(f"{TI}._UNIT_DIR", tmp_path):
-            assert handle_command("uninstall-timer", []) is True
-        assert not service.exists()
-        assert not timer.exists()
+        Driven through the seal's own fake_systemctl, answering False for the one
+        step. The uninstall used to print "removed" whatever systemctl answered and
+        exit 0, so a timer still ticking read as gone.
+        Mutant killed: _uninstall ignoring the answer of the failing step.
+        """
+        unit_dir = tmp_path / "_sealed_unit_dir"
+        unit_dir.mkdir()
+        service, timer = _units(unit_dir)
+        _seal_timer_host_state.side_effect = lambda *args: args[0] != failing
+
+        with (
+            patch("aipass.trigger.apps.modules.core.trigger.fire") as fire,
+            pytest.raises(SystemExit) as stopped,
+        ):
+            handle_command("uninstall-timer", [])
+        assert stopped.value.code == 1
+        err = capsys.readouterr().err
+        assert f"uninstall-timer: systemctl --user {failing}" in err, err
+        called = [c.args[0] for c in _seal_timer_host_state.call_args_list]
+        assert called[-1] == failing, f"the uninstall went on past the failed {failing}: {called}"
+        if failing == "daemon-reload":
+            # Stop and disable held, so the files went before the reload was asked.
+            assert not service.exists() and not timer.exists()
+            assert fire.call_count == 2
+        else:
+            # A timer that would not stop or disable is still installed: its files stay.
+            assert service.exists() and timer.exists()
+            fire.assert_not_called()
 
 
 class TestNoRealHomeWrites:
