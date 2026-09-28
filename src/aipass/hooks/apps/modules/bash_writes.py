@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.7.0
+# Version: 1.7.1
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
 # Created: 2026-08-30
-# Modified: 2026-09-19
+# Modified: 2026-09-28
 # =============================================
 
 """Reads a Bash command and reports which paths it can be seen to WRITE.
@@ -117,8 +117,38 @@ _SOURCE_WRITE_SHAPES = (
         r"|copyFileSync|file_put_contents|fwrite|fputs|fopen)\s*\("
     ),
     # Shelling out. The write verb is then inside a string this parser does not
-    # read as code, so the invocation itself has to count as the evidence.
-    re.compile(r"\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"),
+    # read as code, so the invocation itself has to count as the evidence. Three
+    # readings, the first two before the third:
+    #  1. a word followed by a call bracket (white space or a line continuation
+    #     between) is a call, whatever touches its front: `0-system(`, `1/popen(`;
+    #  2. a word inside the quoted module name handed to a loader is a module:
+    #     require('cross-spawn'), require.resolve(...), import(...), and the ES
+    #     keywords `from '...'` / `import '...'`;
+    #  3. otherwise the word is a NAME in a path, not code, only where a separator
+    #     (slash, hyphen, backslash single or doubled) joins it to a path character
+    #     (a word character or a dot) on the separator's far side: `x/spawn`,
+    #     `popen-gw0`, `aipass\\spawn\\tests`. A continuation, a comment opener or a
+    #     quote beside the separator excuses nothing: `system\` + newline, `exec/**/`,
+    #     `'-popen'`. xdist's popen-gw0 temp dir read as shelling out before this.
+    # Known residue, both ways. Refused although only a path: the word alone after a
+    # slash with nothing before it ('/spawn'), and a bare file name ('system.md'); both
+    # err toward refusing, like reading 1 on 'system (copy).md'. Let through although
+    # code, two families: an alias through an overloaded operator on either side of
+    # the word (`a-system`, `a/system`, `system-a`, `system/a`), and the word taken
+    # out of a path-shaped string (`'a/system'[2:]`, `'./system'.strip('./')`). Each
+    # is path-shaped text no pattern over the text can tell from a path that is only
+    # named, and each takes deliberate disguise; the edit gate keeps its full breadth.
+    # That residue is the decision of devpulse, leg 2d, compass 478.
+    # Compass 460 (2026-09-27); readings 1 and 2 are the decision of hooks, leg 2b; the
+    # narrowing of reading 3 is hooks', leg 2c; the widening of reading 2 hooks', leg 2d.
+    re.compile(
+        r"\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b(?=[\s\\]*\()"
+        r"""|(?:require(?:\s*\.\s*resolve)?|import)\s*\(\s*['"][^'"]*\b"""
+        r"(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"
+        r"""|\b(?:from|import)\s*['"][^'"]*\b(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b"""
+        r"|(?<![\w.][/\\-])(?<![\w.]\\\\)(?<!\w)"
+        r"(system|popen|spawn|exec|execSync|check_call|check_output|subprocess)\b(?!(?:[/-]|\\{1,2})[\w.])"
+    ),
 )
 
 # The flags that put an interpreter's whole program INSIDE the command, next

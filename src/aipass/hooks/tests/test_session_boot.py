@@ -1,15 +1,41 @@
-"""Tests for session boot wrapper (menu-based attach/start/close)."""
+# =================== AIPass ====================
+# Name: test_session_boot.py
+# Version: 1.0.2
+# Description: Tests for session boot wrapper (menu-based attach/start/close)
+# Branch: hooks
+# Created: 2026-07-01
+# Modified: 2026-09-28
+# =============================================
 
+"""Tests for apps/handlers/lifecycle/session_boot.py."""
+
+# Menu-based attach/start/close.
+
+# The declared pass — what is NOT tested here, and what covers it instead:
+# seedgo: no-test-needed(ruff) — that apps/handlers/lifecycle/session_boot.py parses and imports
+# seedgo: no-test-needed(documentation) — the module docstring's menu transcript, illustrative text only
+# seedgo: no-test-needed(constant) — _RECLAIM_WAIT_S and _RECLAIM_POLL_S defaults; tests patch both to short intervals
+# seedgo: no-test-needed(stdlib) — shutil.which and subprocess.run's own process-launch mechanics, stubbed at the edge
+# seedgo: no-test-needed(generated) — logger.info, logger.warning and logger.error text throughout; never asserted here
+
+import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
 from aipass.hooks.apps.handlers.lifecycle import session_boot
-from aipass.hooks.apps.modules import cc_transcripts
+from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
 
 _MOD = "aipass.hooks.apps.handlers.lifecycle.session_boot"
+
+
+def _kept_redirect() -> dict[str, str]:
+    """The json redirect a clear=True wipe must hand back, or the loggers write the live hooks_json."""
+    return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
+
 
 # Classes that test the tmux lookups themselves — they must see the real thing.
 _TMUX_OWN_TESTS = {
@@ -206,7 +232,7 @@ class TestBoot:
 
     def test_no_tmux_errors(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value=None),
         ):
@@ -217,7 +243,7 @@ class TestBoot:
     def test_live_session_resume_via_tmux(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -231,7 +257,7 @@ class TestBoot:
     def test_live_session_resume_continues_dead_window(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -247,7 +273,7 @@ class TestBoot:
     def test_live_session_resume_bg_does_takeover(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "bg"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -263,7 +289,7 @@ class TestBoot:
     def test_live_session_new_stops_old(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -278,7 +304,7 @@ class TestBoot:
     def test_live_session_close_stops_and_exits(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -291,7 +317,7 @@ class TestBoot:
 
     def test_no_live_continue_last(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -305,7 +331,7 @@ class TestBoot:
 
     def test_no_live_new_starts_fresh(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -321,7 +347,7 @@ class TestBoot:
 
     def test_stale_tmux_session_killed_on_fresh_start(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -336,7 +362,7 @@ class TestBoot:
 
     def test_extra_args_passed_on_fresh_start(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -441,7 +467,7 @@ class TestMain:
 class TestHeadlessBypass:
     def test_p_flag_skips_tmux_and_runs_directly(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch(f"{_MOD}.os.execvp") as mock_exec,
         ):
@@ -454,7 +480,7 @@ class TestHeadlessBypass:
 
     def test_p_flag_does_not_look_for_live_sessions(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_live_sessions") as mock_live,
             patch(f"{_MOD}.os.execvp"),
@@ -464,7 +490,7 @@ class TestHeadlessBypass:
 
     def test_p_flag_does_not_require_tmux(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value=None),
             patch(f"{_MOD}.os.execvp") as mock_exec,
@@ -476,7 +502,7 @@ class TestHeadlessBypass:
 
     def test_p_flag_still_gets_permission_mode_default(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch(f"{_MOD}.os.execvp") as mock_exec,
         ):
@@ -487,7 +513,7 @@ class TestHeadlessBypass:
 
     def test_p_flag_respects_custom_permission_mode(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch(f"{_MOD}.os.execvp") as mock_exec,
         ):
@@ -535,7 +561,7 @@ class TestPermissionModeDedupe:
 
     def test_fresh_start_dedupes_too(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -584,7 +610,7 @@ class TestMultipleLiveSessions:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -606,7 +632,7 @@ class TestMultipleLiveSessions:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "interactive"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -624,7 +650,7 @@ class TestMultipleLiveSessions:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -648,7 +674,7 @@ class TestMultipleLiveSessions:
             {"pid": 5678, "sessionId": "other", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -668,7 +694,7 @@ class TestMultipleLiveSessions:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -742,7 +768,7 @@ class TestTakeover:
     def test_single_bg_enter_is_takeover(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "bg"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -758,7 +784,7 @@ class TestTakeover:
     def test_single_bg_n_stops_then_fresh(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "bg"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -775,7 +801,7 @@ class TestTakeover:
     def test_single_bg_c_stops(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "bg"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -973,7 +999,7 @@ class TestExtraArgsThreading:
 
     def test_no_live_continue_threads_extra_args(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -990,7 +1016,7 @@ class TestExtraArgsThreading:
     def test_live_bg_enter_threads_extra_args(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "bg"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1012,7 +1038,7 @@ class TestExtraArgsThreading:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "interactive"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1035,7 +1061,7 @@ class TestNewOverAllAbort:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "bg"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1054,7 +1080,7 @@ class TestMenuQuit:
     def test_single_session_q_quits(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1067,7 +1093,7 @@ class TestMenuQuit:
     def test_single_session_exit_quits(self, tmp_path):
         live = [{"pid": 1234, "sessionId": "abc", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1082,7 +1108,7 @@ class TestMenuQuit:
             {"pid": 5678, "sessionId": "def", "cwd": str(tmp_path), "kind": "interactive"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1093,7 +1119,7 @@ class TestMenuQuit:
 
     def test_no_live_q_quits(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1108,7 +1134,7 @@ class TestAutoNamer:
 
     def test_fresh_start_gets_name(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1152,7 +1178,7 @@ class TestAutoNamer:
 
     def test_no_live_continue_gets_name(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1166,7 +1192,7 @@ class TestAutoNamer:
 
     def test_user_name_not_overridden(self, tmp_path):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1201,7 +1227,7 @@ class TestPickerOffersChatsNotProcesses:
 
     def _boot(self, tmp_path, live, choice, projects_root=None):
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1397,7 +1423,7 @@ class TestVersionDrift:
     def test_boot_warns_before_the_menu(self, tmp_path):
         """The line must land where a human is already looking."""
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1492,7 +1518,7 @@ class TestTmuxLookupsSurviveAMachineWithoutTmux:
             {"pid": 2, "sessionId": "s2", "cwd": str(tmp_path), "kind": "interactive"},
         ]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             # tmux resolves (boot requires it) but every tmux CALL fails —
             # the shape of a host where the binary is stale or sandboxed away.
@@ -1530,7 +1556,7 @@ def home_env(home) -> dict[str, str]:
     skipif: nothing about pointing home at a temp directory is POSIX-only, and
     these doors ship to Windows users too.
     """
-    return {"HOME": str(home), "USERPROFILE": str(home)}
+    return {**_kept_redirect(), "HOME": str(home), "USERPROFILE": str(home)}
 
 
 def set_home(monkeypatch, home) -> str:
@@ -1555,8 +1581,6 @@ def plant_pointer(tmp_path, monkeypatch, session_id):
     environ resolves to the REAL home on POSIX (pwd fallback) and to no home at
     all on Windows — a silent miss on one platform, a RuntimeError on the other.
     """
-    from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
-
     home = tmp_path / "home"
     set_home(monkeypatch, home)
     tdir = sp.transcript_dir(tmp_path)
@@ -1601,7 +1625,7 @@ class TestSessionPointerDoors:
         """No pointer → today's door, unchanged. A branch that predates the
         pointer must still open."""
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1618,8 +1642,6 @@ class TestSessionPointerDoors:
         """A pointer whose transcript is gone must degrade to --continue —
         `--resume <missing id>` would fail the whole launch."""
         home = plant_pointer(tmp_path, monkeypatch, "ptr-gone")
-        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
-
         tdir = sp.transcript_dir(tmp_path)
         assert tdir is not None, "home redirect did not take: session_pointer cannot resolve a home"
         (tdir / "ptr-gone.jsonl").unlink()
@@ -1658,8 +1680,6 @@ class TestSessionPointerDoors:
         claude_cmd = mock_exec.call_args[0][1]
         assert "--session-id" in claude_cmd
         minted = claude_cmd[claude_cmd.index("--session-id") + 1]
-        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
-
         pointer = sp.read_pointer(Path(tmp_path))
         assert pointer is not None and pointer["session_id"] == minted
         assert pointer["set_by"] == "session_boot"
@@ -1715,8 +1735,6 @@ class TestSessionPointerDoors:
         assert result["exit_code"] == 0
         cmd = mock_exec.call_args[0][3]
         picked = cmd[cmd.index("--resume") + 1]
-        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
-
         pointer = sp.read_pointer(Path(tmp_path))
         assert pointer is not None and pointer["session_id"] == picked
         assert pointer["set_by"] == "session_boot"
@@ -1745,8 +1763,6 @@ class TestSessionPointerDoors:
             patch(f"{_MOD}.os.execvp"),
         ):
             session_boot.boot(cwd=str(target))
-        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
-
         assert sp.read_pointer(target) is not None
         assert not (decoy / ".ai_mail.local").exists()
 
@@ -1789,7 +1805,7 @@ class TestDispatchedGuard:
     def test_enter_leaves_the_job_working(self, tmp_path):
         plant_dispatch_lock(tmp_path)
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=[]),
@@ -1813,7 +1829,7 @@ class TestDispatchedGuard:
         plant_dispatch_lock(tmp_path)
         live = [{"pid": os.getpid(), "sessionId": "job-sid", "cwd": str(tmp_path), "kind": "interactive"}]
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
             patch.object(session_boot, "_find_live_sessions", return_value=live),
@@ -1849,11 +1865,9 @@ class TestDispatchedGuard:
         """A lock whose PID is dead means the job is over — the door opens as
         usual. And the probe is READ-ONLY: cleanup belongs to ai_mail's own
         lifecycle, so the file must still be there afterwards."""
-        from aipass.hooks.apps.modules import cc_sessions
-
         lock = plant_dispatch_lock(tmp_path)
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(cc_sessions, "_is_pid_alive", return_value=False),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
@@ -1872,8 +1886,6 @@ class TestDispatchedGuard:
         """'r' is the deliberate takeover: stop the branch's claudes, wait for
         the monitor to surrender the lock, then resume by the pointer — the
         session comes over whole, task state and all."""
-        from aipass.hooks.apps.modules import cc_sessions
-
         lock = plant_dispatch_lock(tmp_path)
         home = plant_pointer(tmp_path, monkeypatch, "job-sid-9")
         monkeypatch.setattr(session_boot, "_RECLAIM_WAIT_S", 1.0)
@@ -1903,13 +1915,11 @@ class TestDispatchedGuard:
     def test_reclaim_refuses_when_the_lock_stays(self, tmp_path, monkeypatch):
         """If the lock never clears, resuming would race the monitor —
         refuse honestly instead."""
-        from aipass.hooks.apps.modules import cc_sessions
-
         plant_dispatch_lock(tmp_path)
         monkeypatch.setattr(session_boot, "_RECLAIM_WAIT_S", 0.15)
         monkeypatch.setattr(session_boot, "_RECLAIM_POLL_S", 0.05)
         with (
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch.object(cc_sessions, "reclaim", return_value=[]),
             patch.object(session_boot, "_resolve_claude_binary", return_value="/usr/local/bin/claude"),
             patch.object(session_boot, "_find_tmux", return_value="/usr/bin/tmux"),
@@ -1957,8 +1967,6 @@ class TestHomeResolutionIsPortable:
         """The CI failure itself, reduced: plant a pointer, clear the environ to
         exactly what the fixture provides, and resolve. This is the call that
         raised on the runner (session_pointer.transcript_dir -> Path.home())."""
-        from aipass.ai_mail.apps.handlers.dispatch import session_pointer as sp
-
         home = plant_pointer(tmp_path, monkeypatch, "portable-sid")
         with patch.dict("os.environ", home_env(home), clear=True):
             sid, reason = sp.resolve_resume_target(Path(tmp_path))
@@ -1968,8 +1976,6 @@ class TestHomeResolutionIsPortable:
         """An unresolvable home must not crash at import. The constants are
         module-level, so `Path.home()` raising there kills the whole module
         rather than the one lookup that wanted a path."""
-        from aipass.hooks.apps.modules import cc_sessions, cc_transcripts
-
         for mod in (cc_sessions, cc_transcripts):
             with patch.object(Path, "home", side_effect=RuntimeError("Could not determine home directory.")):
                 fallback = mod._claude_home()
@@ -1977,7 +1983,5 @@ class TestHomeResolutionIsPortable:
 
     def test_session_file_presence_survives_an_unresolvable_home(self, monkeypatch):
         """A presence check answers True or False — never takes the menu down."""
-        from aipass.hooks.apps.modules import cc_sessions
-
         monkeypatch.setattr(cc_sessions, "CC_SESSIONS_DIR", Path("<no-home>") / ".claude" / "sessions")
         assert session_boot._is_session_file_present(4321) is False

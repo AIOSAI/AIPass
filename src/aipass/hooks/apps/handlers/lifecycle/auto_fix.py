@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: auto_fix.py
-# Version: 1.2.0
+# Version: 1.2.1
 # Description: Post-edit diagnostics — syntax, lint, type, pattern, seedgo checks (PostToolUse)
 # Branch: hooks
 # Layer: apps/handlers/lifecycle
 # Created: 2026-05-22
-# Modified: 2026-08-30
+# Modified: 2026-09-28
 # =============================================
 
 """Runs diagnostics on edited files and surfaces errors for the agent to fix."""
@@ -164,7 +164,7 @@ def _run_python_checks(file_path: str) -> list[str]:
 
 
 def _run_ruff_lint_structured(file_path: str) -> list[dict]:
-    if "/.claude/hooks/" in file_path:
+    if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return []
     try:
         result = subprocess.run(
@@ -198,7 +198,7 @@ def _run_ruff_lint_structured(file_path: str) -> list[dict]:
 
 
 def _run_pyright_check(file_path: str) -> list[dict]:
-    if "/.claude/hooks/" in file_path:
+    if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return []
     try:
         result = subprocess.run(
@@ -297,7 +297,7 @@ def _parse_checklist_findings(stdout: str, marker: str) -> list[str]:
 
 
 def _run_seedgo_checklist(file_path: str) -> list[str]:
-    if "/.claude/hooks/" in file_path:
+    if "/.claude/hooks/" in file_path.replace("\\", "/"):
         return []
     aipass_home = os.environ.get("AIPASS_HOME", "")
     if not aipass_home:

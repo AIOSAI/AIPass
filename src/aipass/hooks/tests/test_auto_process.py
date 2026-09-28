@@ -1,10 +1,10 @@
 # =================== AIPass ====================
 # Name: test_auto_process.py
-# Version: 1.3.1
+# Version: 1.3.2
 # Description: Tests for auto_process lifecycle handler (TDPLAN-0005, DPLAN-0294 phase 1b)
 # Branch: hooks
 # Created: 2026-06-06
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/lifecycle/auto_process.py."""
@@ -22,6 +22,7 @@
 # seedgo: no-test-needed(documentation) — that the handler's functions carry docstrings
 
 import logging
+import os
 import tempfile
 from unittest.mock import patch, MagicMock
 
@@ -32,6 +33,11 @@ from aipass.hooks.apps.handlers.lifecycle.auto_process import (
     _session_guard_path,
     handle,
 )
+
+
+def _kept_redirect() -> dict[str, str]:
+    """The json redirect a clear=True wipe must hand back, or the loggers write the live <branch>_json."""
+    return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
 
 
 MODULE = "aipass.hooks.apps.handlers.lifecycle.auto_process"
@@ -281,14 +287,14 @@ class TestSessionGuard:
 
     def test_guard_path_none_without_session_id(self):
 
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", _kept_redirect(), clear=True):
             path = _session_guard_path()
 
         assert path is None
 
     def test_already_ran_false_without_session_id(self):
 
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", _kept_redirect(), clear=True):
             assert not _already_ran_this_session()
 
     def test_already_ran_false_when_guard_missing(self, tmp_path):

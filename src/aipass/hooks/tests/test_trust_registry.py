@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_trust_registry.py
-# Version: 1.0.1
+# Version: 1.0.2
 # Description: Tests for trusted-project registry — DPLAN-0244 Layer B
 # Branch: hooks
 # Layer: tests
 # Created: 2026-07-15
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/config/trust_registry.py and apps/handlers/config/loader.py's trust integration."""
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(documentation) — that the registry functions carry docstrings
 
 import json
+import os
 from unittest.mock import patch
 
 from aipass.hooks.apps.handlers.config import loader
@@ -36,6 +37,11 @@ from aipass.hooks.apps.handlers.config.loader import (
     never_enrolled_banner,
     trust_break_banner,
 )
+
+
+def _kept_redirect() -> dict[str, str]:
+    """The json redirect a clear=True wipe must hand back, or the loggers write the live <branch>_json."""
+    return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
 
 
 class TestRegistryHelpers:
@@ -522,7 +528,7 @@ class TestBootstrap:
         reg_path = temp_test_dir / "registry.json"
         with (
             patch("aipass.hooks.apps.handlers.config.trust_registry.REGISTRY_PATH", reg_path),
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
         ):
             result = bootstrap()
         assert result is False

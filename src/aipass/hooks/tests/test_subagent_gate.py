@@ -4,7 +4,7 @@
 # Description: Tests for subagent_gate security handler
 # Branch: hooks
 # Created: 2026-05-22
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/security/subagent_gate.py."""
@@ -15,6 +15,7 @@
 # seedgo: no-test-needed(stdlib) — subprocess.run's process launch and time.monotonic's clock, the stdlib's own
 
 import json
+from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
 from aipass.hooks.apps.handlers.security.subagent_gate import (
@@ -89,6 +90,14 @@ class TestSubagentGateHandler:
         # as_posix keeps the "/.claude/" shape the gate matches on every host.
         repo = tmp_path / "repo"
         result = _run_seedgo_checklist(f"{repo.as_posix()}/.claude/hooks/gate.py", repo)
+        assert result == []
+        mock_run.assert_not_called()
+
+    @patch("subprocess.run")
+    def test_skip_claude_hooks_in_the_windows_spelling(self, mock_run, tmp_path):
+        """The caller hands str(repo_root / filepath): backslashes on Windows (compass 458, leg 2 item 2)."""
+        repo = tmp_path / "repo"
+        result = _run_seedgo_checklist(str(PureWindowsPath(repo) / ".claude" / "hooks" / "gate.py"), repo)
         assert result == []
         mock_run.assert_not_called()
 

@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: subagent_gate.py
-# Version: 1.0.0
+# Version: 1.0.1
 # Description: Checks modified Python files against seedgo standards on SubagentStop
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-22
-# Modified: 2026-05-22
+# Modified: 2026-09-27
 # =============================================
 
 """Checks modified Python files against seedgo standards and blocks on violations."""
@@ -101,7 +101,8 @@ def _get_modified_py_files(cwd: str, repo_root: Path) -> list[str]:
 
 def _run_seedgo_checklist(file_path: str, repo_root: Path, timeout: float = _CHECKLIST_TIMEOUT_SECONDS) -> list[str]:
     """Run seedgo checklist on a single file, return violation strings."""
-    if "/.claude/" in file_path:
+    # The caller hands str(repo_root / filepath), which is backslashed on Windows.
+    if "/.claude/" in file_path.replace("\\", "/"):
         return []
     result = subprocess.run(
         ["drone", "@seedgo", "checklist", file_path],

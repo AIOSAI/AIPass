@@ -4,7 +4,7 @@
 # Description: Tests for the test-write gate and its JSON policy switch
 # Branch: hooks
 # Created: 2026-09-01
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/security/testwrite_gate.py and its JSON policy switch."""
@@ -54,7 +54,7 @@
 
 import json
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 import pytest
@@ -93,7 +93,12 @@ def project(tmp_path: Path) -> dict:
       src/aipass/hooks/tests/test_existing.py
       src/aipass/devpulse/                the admin seat
     """
-    root = tmp_path / "AIPass"
+    return _build_project(tmp_path)
+
+
+def _build_project(base: Path) -> dict:
+    """The tree ``project`` hands out, built under *base* — a test picks the parent's name."""
+    root = base / "AIPass"
     (root / ".aipass").mkdir(parents=True)
     (root / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
 
@@ -572,6 +577,144 @@ class TestNamingAPathIsNotWritingIt:
         _policy(project)
         body = "import os; os.sys" + "tem('touch " + project["new_test"] + "')"
         assert _blocked(_run(project["seat"], command='python3 -c "' + body + '"'))
+
+    @pytest.mark.parametrize(
+        ("parent", "form"),
+        [
+            pytest.param("popen-gw0", "", id="popen-gw0"),
+            pytest.param("spawn", "", id="spawn"),
+            pytest.param("spawn", ", '{base}/aipass/spawn'", id="word-last"),
+            pytest.param("spawn", ", '{doubled}'", id="windows-doubled-backslashes"),
+            pytest.param("spawn", ", '{doubled_last}'", id="windows-doubled-word-last"),
+            pytest.param("spawn", ", r'{single}'", id="windows-raw-string"),
+            pytest.param("spawn", ", '~/spawn/notes.md'", id="home-and-the-word-first"),
+            pytest.param("system", ", 'docs/system.md'", id="file-named-after-a-word"),
+            pytest.param("exec", ", '--exec-path'", id="git-flag"),
+            pytest.param("spawn", ", './spawn'", id="dot-slash-word-last"),
+            pytest.param("system", ", 'filesystem'", id="word-inside-a-longer-word"),
+            pytest.param("spawn", ", r'spawn\\tests'", id="word-first-single-backslash"),
+            pytest.param("spawn", ", 'spawn\\\\tests'", id="word-first-doubled-backslash"),
+        ],
+    )
+    def test_a_shelling_word_inside_a_named_path_is_not_code(self, tmp_path, parent, form):
+        """xdist names its temp dirs popen-gw0: the word sat in the PATH, not the program,
+        and four pins here went red under -n 2 (compass 460, item 1). The further forms
+        are devpulse's path specimens of leg 2c, each one path the program only names."""
+        project = _build_project(tmp_path / parent)
+        _policy(project)
+        # The word closing an absolute path, and opening a relative one: each side of
+        # the boundary has a spelling of its own to stand down on.
+        names = [Path(project["new_test"]).as_posix(), (tmp_path / parent).as_posix(), f"{parent}/x"]
+        single = str(PureWindowsPath(tmp_path / "aipass" / "spawn" / "tests"))
+        doubled_last = str(PureWindowsPath(tmp_path / "aipass" / "spawn")).replace("\\", "\\\\")
+        doubled = single.replace("\\", "\\\\")
+        extra = form.format(base=tmp_path.as_posix(), single=single, doubled=doubled, doubled_last=doubled_last)
+        body = "pri" + "nt(" + ", ".join(f"'{name}'" for name in names) + extra + ")"
+        assert not _blocked(_run(project["seat"], command=f"python3 - <<'EOF'\n{body}\nEOF"))
+
+    @pytest.mark.parametrize(
+        ("verb", "template"),
+        [
+            ("system", "python3 -c \"import os; os.{verb}('touch {path}')\""),
+            ("popen", "python3 -c \"import os; os.{verb}('touch {path}')\""),
+            ("spawn", "node -e \"require('child_process').{verb}('touch', ['{path}'])\""),
+            ("exec", "node -e \"require('child_process').{verb}('touch {path}')\""),
+            ("execSync", "node -e \"require('child_process').{verb}('touch {path}')\""),
+            ("check_call", "python3 -c \"{verb}(['touch', '{path}'])\""),
+            ("check_output", "python3 -c \"{verb}(['touch', '{path}'])\""),
+            ("subprocess", "python3 -c \"import {verb} as s; s.run(['touch', '{path}'])\""),
+        ],
+    )
+    def test_each_shelling_word_used_as_code_is_still_refused(self, project, verb, template):
+        """One refusal pin per word, each body carrying no other word of the list, so
+        dropping any one word from the pattern turns exactly its pin red."""
+        _policy(project)
+        command = template.format(verb=verb, path=Path(project["new_test"]).as_posix())
+        assert _blocked(_run(project["seat"], command=command))
+
+    @pytest.mark.parametrize(
+        ("interpreter", "verb", "body"),
+        [
+            pytest.param("python3", "system", "from os import *\n0-{verb}('touch {path}')", id="a-hyphen-call"),
+            pytest.param("python3", "exec", "src = '{path}'\n0-{verb}(src)", id="b-hyphen-builtin"),
+            pytest.param("python3", "popen", "from os import *\nx = 1/{verb}('touch {path}')", id="c-slash-call"),
+            pytest.param("node", "spawn", "require('cross-{verb}')('touch', ['{path}'])", id="d-hyphen-require"),
+            pytest.param("python3", "popen", "from os import *\nx = {verb}\\\n('touch {path}')", id="e-continuation"),
+            pytest.param(
+                "python3",
+                "system",
+                "from os import *\nf = {verb}\\\n if 1 else 0\nf('touch {path}')",
+                id="f-alias-continuation",
+            ),
+            pytest.param(
+                "python3", "exec", "src = '{path}'\ne = {verb}\\\n if 1 else 0\ne(src)", id="g-alias-continuation"
+            ),
+            pytest.param(
+                "node",
+                "exec",
+                "const c = require('child_' + 'process')\nc.{verb}/**/('touch {path}')",
+                id="h-block-comment",
+            ),
+            pytest.param(
+                "node",
+                "exec",
+                "const c = require('child_' + 'process')\nc.{verb}//x\n('touch {path}')",
+                id="i-line-comment",
+            ),
+            pytest.param(
+                "python3",
+                "system",
+                "import os\ngetattr(os, '/{verb}'.strip('/'))('touch {path}')",
+                id="j-slice-after-slash",
+            ),
+            pytest.param(
+                "python3", "popen", "import os\ngetattr(os, '-{verb}'[1:])('touch {path}')", id="k-slice-after-hyphen"
+            ),
+            pytest.param(
+                "python3",
+                "exec",
+                "import os\nos.execvp('find', ['find', '.', '-{verb}', 'touch', '{path}', ';'])",
+                id="m-find-flag",
+            ),
+            pytest.param(
+                "python3", "popen", "from os import *\nx = 1/{verb}\\\n('touch {path}')", id="n-slash-and-continuation"
+            ),
+            pytest.param(
+                "node", "spawn", "import cs from 'cross-{verb}'\ncs.sync('touch', ['{path}'])", id="v1-es-import"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const cs = await import('cross-{verb}')\ncs.sync('touch', ['{path}'])",
+                id="v2-dynamic-import",
+            ),
+            pytest.param(
+                "node", "exec", "import sh from '{verb}-sh'\nsh('touch {path}')", id="v3-es-import-word-first"
+            ),
+            pytest.param(
+                "node",
+                "spawn",
+                "const p = require.resolve('cross-{verb}')\nrequire(p)('touch', ['{path}'])",
+                id="v4-require-resolve",
+            ),
+        ],
+    )
+    def test_a_shelling_word_beside_a_path_character_in_code_is_refused(self, project, interpreter, verb, body):
+        """Code forms that touch a hyphen, a slash or a backslash like a path does (devpulse, leg 2b).
+
+        The program is handed to the gate as a string in a heredoc and only read: nothing runs it."""
+        _policy(project)
+        program = body.format(verb=verb, path=Path(project["new_test"]).as_posix())
+        assert _blocked(_run(project["seat"], command=f"{interpreter} - <<'EOF'\n{program}\nEOF"))
+
+    def test_an_es_import_of_a_local_file_beside_a_named_path_is_allowed(self, tmp_path):
+        """The loader reading (leg 2d) holds a word only inside the quoted module name: a local
+        module named without one, printed beside a path that holds one, stays a name."""
+        project = _build_project(tmp_path / "spawn")
+        _policy(project)
+        named = Path(project["new_test"]).as_posix()
+        program = f"import u from './notes/util.js'\nconsole.log('{named}', 'src/aipass/spawn/x.md')"
+        assert not _blocked(_run(project["seat"], command=f"node - <<'EOF'\n{program}\nEOF"))
 
     def test_a_shell_program_is_read_in_shell_grammar(self, project):
         """`>` is a redirection in a shell and a comparison in python — learning 245.

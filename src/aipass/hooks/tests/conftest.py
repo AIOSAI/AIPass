@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: conftest.py
-# Version: 2.3.0
+# Version: 2.3.1
 # Description: Shared pytest fixtures for hooks tests
 # Branch: hooks
 # Layer: tests
 # Created: 2026-05-18
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Shared pytest fixtures for hooks tests.
@@ -38,6 +38,7 @@ import pytest
 
 from aipass.cli.apps.modules import display
 from aipass.hooks.apps.handlers.json import json_handler
+from aipass.hooks.apps.handlers.lifecycle import auto_fix
 
 collect_ignore_glob = [".archive/*"]
 
@@ -183,9 +184,15 @@ def isolated_diagnostics_state(tmp_path_factory, monkeypatch):
     error another branch had open at that moment. Measured 2026-09-18: @memory's
     open import error turned two tests red in one run and green in the next. The
     tests that exercise the state patch STATE_FILE on top of this.
+
+    auto_fix binds its own STATE_FILE to the same live file, and writes or unlinks it.
+    Measured 2026-09-27: TestAutofixPython wrote it, then removed it, so a run could
+    erase a live session's open error. Both constants get the one sandbox.
     """
     ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-    monkeypatch.setattr(ds, "STATE_FILE", tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json")
+    sandbox = tmp_path_factory.mktemp("diagnostics_state") / ".diagnostics_state.json"
+    monkeypatch.setattr(ds, "STATE_FILE", sandbox)
+    monkeypatch.setattr(auto_fix, "STATE_FILE", sandbox)
 
 
 @pytest.fixture

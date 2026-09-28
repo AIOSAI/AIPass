@@ -1,11 +1,11 @@
 # =================== AIPass ====================
 # Name: test_telegram_response.py
-# Version: 2.0.1
+# Version: 2.0.2
 # Description: Tests for telegram_response notification handler
 # Branch: hooks
 # Layer: tests
 # Created: 2026-06-15
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/notification/telegram_response.py."""
@@ -18,6 +18,7 @@
 
 import io
 import json
+import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -39,6 +40,12 @@ from aipass.hooks.apps.handlers.notification.telegram_response import (
     markdown_to_telegram_html,
     send_to_telegram,
 )
+
+
+def _kept_redirect() -> dict[str, str]:
+    """The json redirect a clear=True wipe must hand back, or the loggers write the live <branch>_json."""
+    return {"AIPASS_TEST_LOG_DIR": os.environ["AIPASS_TEST_LOG_DIR"]}
+
 
 # The prax logger is mocked per test to keep log output out of the run.
 LOGGER_PATCH = "aipass.hooks.apps.handlers.notification.telegram_response.logger"
@@ -181,7 +188,7 @@ class TestFindPendingFile:
         with (
             patch(LOGGER_PATCH),
             patch(f"{MOD}.PENDING_DIR", pending_dir),
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch(f"{MOD}.Path.cwd", return_value=work / "subdir"),
         ):
             result = find_pending_file("session-abc")
@@ -238,7 +245,11 @@ class TestFindPendingFile:
         data = {"timestamp": time.time()}  # no work_dir
         (pending_dir / "bot-1.json").write_text(json.dumps(data), encoding="utf-8")
 
-        with patch(LOGGER_PATCH), patch(f"{MOD}.PENDING_DIR", pending_dir), patch.dict("os.environ", {}, clear=True):
+        with (
+            patch(LOGGER_PATCH),
+            patch(f"{MOD}.PENDING_DIR", pending_dir),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
+        ):
             result = find_pending_file("session-abc")
 
         assert result is None
@@ -1851,7 +1862,7 @@ class TestFindPendingFileMirror:
             patch(LOGGER_PATCH),
             patch(f"{MOD}.MIRROR_DIR", mirror_dir),
             patch(f"{MOD}.PENDING_DIR", tmp_path / "nonexistent"),
-            patch.dict("os.environ", {}, clear=True),
+            patch.dict("os.environ", _kept_redirect(), clear=True),
             patch(f"{MOD}.Path.cwd", return_value=work / "subdir"),
         ):
             result = find_pending_file("session-abc")
