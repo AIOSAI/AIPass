@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for the admin-lane doctor row (DPLAN-0319 train)
-# Version: 1.1.1
+# Version: 1.1.4
 # Created: 2026-08-28
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/admin_lane.py."""
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(ruff) — that admin_lane.py and the modules it imports parse and import
 
 import json
+import os
 from pathlib import Path
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -170,6 +171,22 @@ def test_unreadable_registry_is_not_a_crash(tmp_path, monkeypatch):
     assert admin_lane_state()["state"] == "dark"
 
 
+def test_an_unreadable_registry_is_named_in_the_row(tmp_path, monkeypatch):
+    """A corrupt registry is named by the row; plain "dark" would claim no grant was ever made.
+
+    Mutant: admin_lane.py _holder_entry's registry read wrapped to answer None on _Unreadable -> red.
+    """
+    bad = tmp_path / "AIPASS_REGISTRY.json"
+    bad.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(admin_lane, "KEY_PATH", tmp_path / "nokey")
+    monkeypatch.setattr(admin_lane, "_registry_path", lambda: bad)
+
+    (_label, glyph, detail, _remediation) = check_admin_lane()[0]
+
+    assert glyph == GLYPH_PASS
+    assert "could not read" in detail and str(bad) in detail
+
+
 def test_no_registry_anywhere_is_not_a_crash(tmp_path, monkeypatch):
     """Outside an installation the lane reads dark, not an exception."""
     monkeypatch.setattr(admin_lane, "KEY_PATH", tmp_path / "nokey")
@@ -246,6 +263,21 @@ def test_partial_row_names_the_missing_legs(world):
     assert "admin_setup.md" in remediation
 
 
+def test_an_unreadable_cert_is_named_not_reported_as_missing_legs(world):
+    """A corrupt cert says it could not be read; "missing: grant" alone would claim it absent.
+
+    Mutant: admin_lane.py _read_json's raise back to `return None` -> red.
+    """
+    registry = world()
+    cert = registry.parent / "src" / "aipass" / ADMIN_HOLDER / "artifacts" / "birth_certificate.json"
+    cert.write_text("{not json", encoding="utf-8")
+
+    (_label, glyph, detail, _remediation) = check_admin_lane()[0]
+
+    assert glyph == GLYPH_PASS
+    assert "could not read" in detail and "birth_certificate.json" in detail
+
+
 def test_row_shape_matches_doctor_contract(world):
     """One 4-tuple — doctor builds CheckResult(*tup) straight from it."""
     world()
@@ -277,13 +309,25 @@ def test_never_reimplements_the_signature_check():
 
 def test_never_reads_key_material(world, tmp_path):
     """Presence only — the key file's CONTENT is never opened.
-    Mutant `key = KEY_PATH.is_file()` -> `... and bool(KEY_PATH.read_text(encoding="utf-8"))` goes red."""
-    world()
+    Mutant `key = KEY_PATH.is_file()` -> `... and bool(KEY_PATH.read_text(encoding="utf-8"))` goes red.
+    Mutant (fleet green leg 3): `... and bool(KEY_PATH.read_bytes())` goes red too — the mode-000 file
+    refuses a binary open, which the undecodable bytes alone let pass. That holds only on POSIX for a
+    non-root user: root opens a mode-000 file, and Windows has no such mode, so there the read_bytes
+    mutant passes and only the text-read mutant goes red."""
+    world()  # sets admin_lane.KEY_PATH to this tmp path before admin_lane_state runs
     key_path = tmp_path / "fake_home" / ".aipass" / "admin_grant.key"
     # Material no text read can decode: any read of it as text raises instead of passing.
     key_path.write_bytes(b"\xff\xfe\x00 not utf-8 \x80")
-
-    assert admin_lane_state()["key"] is True
+    # On POSIX the file is also unreadable (mode 000), so ANY open raises, binary included.
+    # Presence (stat) needs no read permission.  Windows has no such mode; the bytes stand alone there.
+    lock = os.name == "posix"
+    if lock:
+        key_path.chmod(0)
+    try:
+        assert admin_lane_state()["key"] is True
+    finally:
+        if lock:
+            key_path.chmod(0o600)
 
 
 def test_does_not_import_devpulses_module():

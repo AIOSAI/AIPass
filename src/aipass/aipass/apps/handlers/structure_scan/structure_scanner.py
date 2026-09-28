@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: structure_scanner.py
 # Description: Project structure validation for aipass doctor
-# Version: 1.1.0
+# Version: 1.1.2
 # Created: 2026-05-14
-# Modified: 2026-09-15
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -93,7 +93,19 @@ def find_project_root(start: Path) -> Optional[Path]:
 # =============================================================================
 
 
-_SCAN_SKIP_DIRS = {".archive", ".backup", ".venv", ".git", "__pycache__", "node_modules", ".chroma", "templates"}
+# dropbox and .archive are sandboxes nothing looks into (the owner's ruling of
+# 09-27, 20:42) -- a branch copied into a dropbox is not an agent.
+_SCAN_SKIP_DIRS = {
+    "dropbox",
+    ".archive",
+    ".backup",
+    ".venv",
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".chroma",
+    "templates",
+}
 
 
 def scan_agents(project_root: Path) -> List[AgentInfo]:
@@ -104,7 +116,8 @@ def scan_agents(project_root: Path) -> List[AgentInfo]:
     """
     agents: List[AgentInfo] = []
     for passport_path in sorted(project_root.rglob(".trinity/passport.json")):
-        if any(skip in passport_path.parts for skip in _SCAN_SKIP_DIRS):
+        # Parts relative to the project: a parent of the project named dropbox is not a sandbox.
+        if any(skip in passport_path.relative_to(project_root).parts for skip in _SCAN_SKIP_DIRS):
             continue
         agent_dir = passport_path.parent.parent
         if agent_dir == project_root:

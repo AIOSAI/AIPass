@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_install.py
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
-# Version: 1.2.4
+# Version: 1.2.6
 # Created: 2026-07-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -46,6 +46,8 @@ from aipass.aipass.apps.modules.install import (
 )
 
 _MOD = "aipass.aipass.apps.modules.install"
+# The trigger object install fires on: _fire_lock_removed imports it from here at call time.
+_BUS = "aipass.trigger.apps.modules.core.trigger"
 
 
 @pytest.fixture(autouse=True)
@@ -175,10 +177,17 @@ class TestInstallLock:
         assert str(os.getpid()) in message
 
     def test_release_frees_the_home(self, tmp_path: Path) -> None:
-        """After release the next install can claim it."""
+        """After release the next install can claim it, and the removal is announced once.
+
+        Mutant: `"install_lock_released"` -> `"released"` in _release_install_lock -> red.
+        """
         home = tmp_path / "AIPass"
         lock = _acquire_install_lock(home)
-        _release_install_lock(lock)
+        with patch(_BUS) as bus:
+            _release_install_lock(lock)
+        bus.fire.assert_called_once_with(
+            "file_deleted", path=str(_install_lock_path(home)), reason="install_lock_released"
+        )
         assert not _install_lock_path(home).exists()
         assert _acquire_install_lock(home) is not None
 
@@ -192,9 +201,10 @@ class TestInstallLock:
         lock.parent.mkdir(parents=True, exist_ok=True)
         lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
 
-        with patch(f"{_MOD}._pid_alive", return_value=False):
+        with patch(f"{_MOD}._pid_alive", return_value=False), patch(_BUS) as bus:
             claimed = _acquire_install_lock(home)
 
+        bus.fire.assert_called_once_with("file_deleted", path=str(lock), reason="stale_install_lock_cleared")
         assert claimed == lock
         assert str(os.getpid()) in lock.read_text(encoding="utf-8")
 
@@ -210,6 +220,39 @@ class TestInstallLock:
                 assert _acquire_install_lock(home) is None
 
         assert "999999999" in lock.read_text(encoding="utf-8")
+
+    def test_holder_of_unknown_liveness_is_never_stolen(self, tmp_path: Path) -> None:
+        """A probe that cannot tell (None) is not a dead holder: the lock stays, and the refusal says so.
+
+        Before 2026-09-28 a failed probe answered True, a guess dressed as "alive", and the
+        refusal claimed another install was running. aipass's decision, fleet green leg 3:
+        unknown is its own answer, never stolen, and named in the refusal.
+        Mutant: `if _retry and alive is False:` -> `if _retry and not alive:` -> red.
+        """
+        home = tmp_path / "AIPass"
+        lock = _install_lock_path(home)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("999999999 2026-09-07T00:00:00+00:00\n", encoding="utf-8")
+
+        with patch(f"{_MOD}._pid_alive", return_value=None), patch(f"{_MOD}.error") as err, patch(_BUS) as bus:
+            assert _acquire_install_lock(home) is None
+
+        bus.fire.assert_not_called()
+        assert "999999999" in lock.read_text(encoding="utf-8")
+        assert "could not tell whether pid 999999999 is alive" in err.call_args[0][0]
+
+    def test_failed_windows_probe_answers_unknown(self) -> None:
+        """On Windows a tasklist that cannot run answers None (unknown), never alive or dead.
+
+        None is what the lock refuses to steal on (test_holder_of_unknown_liveness_is_never_stolen).
+        The platform and the runner are handed in, so nothing is patched process-wide.
+        Mutant: the tasklist failure answers False (dead) instead of None -> red.
+        Mutant: the tasklist failure answers True (the old guess) instead of None -> red.
+        """
+        run = MagicMock(side_effect=OSError("tasklist missing"))
+
+        assert _install._pid_alive(999999999, platform_name="win32", runner=run) is None
+        assert run.call_args[0][0] == ["tasklist", "/FI", "PID eq 999999999", "/NH"]
 
 
 class TestCloneRepo:
@@ -240,14 +283,18 @@ class TestCloneRepo:
         A branch read-back follows the clone, so this pins the CLONE call
         rather than the total call count — the old assert_called_once() was
         asserting an implementation detail, not the behaviour it named.
+        The argv handed to git is pinned whole: a shallow clone of the public repo into home.
+        Mutant: `"--depth", "1", ` dropped from the clone argv -> red.
         """
+        home = tmp_path / "home"
         with (
             patch(f"{_MOD}.shutil.which", return_value="/usr/bin/git"),
             patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run,
         ):
-            assert _clone_repo(tmp_path / "home", dry_run=False) is True
+            assert _clone_repo(home, dry_run=False) is True
             clone_calls = [c for c in run.call_args_list if "clone" in c.args[0]]
             assert len(clone_calls) == 1
+            assert clone_calls[0].args[0] == ["git", "clone", "--depth", "1", REPO_URL, str(home)]
 
     def test_nonzero_exit(self, tmp_path: Path) -> None:
         """A non-zero git clone exit reports failure."""
@@ -313,7 +360,7 @@ class TestRunInstall:
         """Dry-run walks all steps, the phone face included, with no subprocess and no network.
 
         It also takes no install lock: a dry run writes nothing, so it has nothing
-        to guard (owner decision, 2026-09-27). The home sits under tmp_path so the
+        to guard (aipass's decision, fleet green leg 2). The home sits under tmp_path so the
         lock's directory is observable; before, the real home's parent was mkdir'd
         and its real .AIPass.install.lock created and removed.
         Mutant: dry run takes the install lock again -> red.
@@ -355,9 +402,13 @@ class TestRunInstall:
             patch(f"{_MOD}._check_and_fix_owner"),
             patch(f"{_MOD}._install_phone_face", return_value=True) as face,
             patch(f"{_MOD}._end_in_chat") as nxt,
+            patch(_BUS) as bus,
         ):
             rc = run_install(non_interactive=True, dry_run=False)
         assert rc == 0
+        bus.fire.assert_called_once_with(
+            "file_deleted", path=str(_install_lock_path(home)), reason="install_lock_released"
+        )
         face.assert_called_once_with(False, False)
         nxt.assert_called_once()
 
@@ -379,12 +430,16 @@ class TestRunInstall:
             patch(f"{_MOD}._install_phone_face", return_value=False) as face,
             patch(f"{_MOD}._end_in_chat") as chat,
             patch(f"{_MOD}.render_step_header", return_value="") as header,
+            patch(_BUS) as bus,
         ):
             order.attach_mock(verify, "verify")
             order.attach_mock(face, "face")
             order.attach_mock(chat, "chat")
             rc = run_install(non_interactive=True, dry_run=False, no_baud=False)
         assert rc == 0
+        bus.fire.assert_called_once_with(
+            "file_deleted", path=str(_install_lock_path(home)), reason="install_lock_released"
+        )
         assert [c[0] for c in order.mock_calls] == ["verify", "face", "chat"]
         assert header.call_args_list[3:] == [call(4, 5, "Phone face + baud-cli"), call(5, 5, "Welcome")]
 
@@ -442,6 +497,33 @@ class TestHandleCommand:
             with pytest.raises(SystemExit):
                 handle_command("install", ["--no-baud"])
         assert run.call_args.kwargs["no_baud"] is True
+
+    def test_symlink_flags_reach_setup_sh(self, tmp_path: Path) -> None:
+        """--no-symlink and --force-symlink typed at the command land on setup.sh's argv (#660).
+
+        The real run_install and _run_setup run; only the setup.sh process is stubbed.
+        Mutant: `no_symlink = "--no-symlink" in run_args` -> `no_symlink = False` -> red.
+        Mutant: `force_symlink = "--force-symlink" in run_args` -> `force_symlink = False` -> red.
+        """
+        home = tmp_path / "AIPass"
+        home.mkdir()
+        (home / "setup.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        with (
+            patch(f"{_MOD}.is_throwaway_path", return_value=False),
+            patch(f"{_MOD}.subprocess.run", return_value=MagicMock(returncode=0)) as run,
+            patch(f"{_MOD}._verify_binaries", return_value={"drone": "/x/drone", "aipass": "/x/aipass"}),
+            patch(f"{_MOD}._check_and_fix_owner"),
+            patch(f"{_MOD}._end_in_chat"),
+            patch(_BUS),
+        ):
+            with pytest.raises(SystemExit) as exc:
+                handle_command(
+                    "install",
+                    ["--path", str(home), "--non-interactive", "--no-baud", "--no-symlink", "--force-symlink"],
+                )
+        assert exc.value.code == 0
+        setup_calls = [c.args[0] for c in run.call_args_list if c.args[0][:1] == ["bash"]]
+        assert setup_calls == [["bash", str(home / "setup.sh"), "--no-chat", "--no-symlink", "--force-symlink"]]
 
     def test_chat_only_routes_to_run_chat_only(self) -> None:
         """--chat-only routes to run_chat_only instead of run_install."""
@@ -788,6 +870,8 @@ class TestSmoke:
         """print_help names the command, the step order and the init hand-off.
 
         Mutant: --no-baud usage line not printed -> red.
+        It also tells the user a dry run takes no lock, so previewing beside a live install is safe.
+        Mutant: the dry-run lock sentence not printed -> red.
         """
         print_help()
         out, _err = capsys.readouterr()
@@ -796,6 +880,7 @@ class TestSmoke:
         assert "resolve home -> fetch -> setup.sh -> verify -> phone face + baud-cli -> welcome chat" in printed
         assert "--no-baud" in printed
         assert "aipass init run" in printed
+        assert "A dry run takes no install lock, so it can preview beside a live install." in printed
 
     def test_print_introspection_runs(self, capsys: pytest.CaptureFixture[str]) -> None:
         """print_introspection names the module, the default home and the source.
@@ -859,9 +944,13 @@ class TestThrowawayGate:
             ),
             patch("aipass.aipass.apps.modules.install._end_in_chat"),
             patch("aipass.aipass.apps.modules.install._check_and_fix_owner"),
+            patch(_BUS) as bus,
         ):
             result = run_install(non_interactive=True)
         assert result == 0
+        bus.fire.assert_called_once_with(
+            "file_deleted", path=str(_install_lock_path(tmp_path)), reason="install_lock_released"
+        )
 
 
 # ---------------------------------------------------------------------------

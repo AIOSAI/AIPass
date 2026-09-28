@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.1
+# Version: 1.3.2
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -103,8 +104,14 @@ AIPASS_SPECIFIC_STAGES = {6, 7}
 
 
 # --- LOCAL JSON HELPERS ---
-def _read_local_json() -> dict:
-    """Read init progress file, returning empty dict on failure."""
+def _read_local_json() -> dict | None:
+    """Read the init progress file: {} when absent or empty, None when unreadable.
+
+    None is the failure answer and the success path never returns it, so a
+    caller can tell "no progress yet" from "progress exists but cannot be
+    read". Until 2026-09-28 both answered {} and a corrupt file read as a fresh
+    start with no word to the user. aipass's decision, fleet green leg 3.
+    """
     local_json = _get_local_json_path()
     if not local_json.exists() or local_json.stat().st_size == 0:
         return {}
@@ -113,7 +120,7 @@ def _read_local_json() -> dict:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("[init_flow] local.json read error: %s", exc)
-        return {}
+        return None
 
 
 def _fire_profile_write_failed(path: str) -> None:
@@ -244,8 +251,18 @@ def _stamp_test_write_policy(dry_run: bool = False) -> bool:
 
 
 def _get_setup_progress() -> dict:
-    """Return setup_progress section from local.json."""
+    """Return setup_progress section from local.json.
+
+    An unreadable file still reads as not started -- init can only restart --
+    but the user is told, and told that the next saved stage replaces it.
+    """
     data = _read_local_json()
+    if data is None:
+        warning(
+            f"Init progress file unreadable: {_get_local_json_path()} — treated as not started; "
+            "the next saved stage replaces it."
+        )
+        data = {}
     return data.get("setup_progress", {"last_completed_stage": 0, "stages": {}})
 
 
@@ -262,7 +279,11 @@ def _save_stage(stage: int, stage_data: dict | None = None, dry_run: bool = Fals
     if dry_run:
         logger.info("[init_flow] dry-run: skipping _save_stage(%d)", stage)
         return
+    # An unreadable file (None) is replaced by a fresh record: its content is
+    # already lost to the reader, and run_init warned when it read progress.
     data = _read_local_json()
+    if data is None:
+        data = {}
     progress = data.get("setup_progress", {"last_completed_stage": 0, "stages": {}})
     progress["last_completed_stage"] = stage
     progress["stages"][str(stage)] = {
@@ -897,7 +918,14 @@ def run_init(
     dry_run: bool = False,
     template: str | None = None,
 ) -> int:
-    """Run the 10-stage init flow. Returns 0 on success."""
+    """Run the 10-stage init flow; the return is the command's exit code.
+
+    0 when every stage ran (or setup was already complete), 1 when the
+    pre-flight refused, 130 when the user paused it with Ctrl-C -- the shell's
+    interrupt code, so a pause is never read as a finished init; the progress
+    file keeps the resume. 130 was 0 until 2026-09-28: aipass's decision,
+    fleet green leg 3.
+    """
     if not sys.stdin.isatty():
         non_interactive = True
 
@@ -982,7 +1010,7 @@ def run_init(
         except KeyboardInterrupt:
             logger.info("[init_flow] init paused at stage %d by user", stage_num)
             warning(f"Paused at stage {stage_num}. Run 'aipass init run' to resume.")
-            return 0
+            return 130
         except Exception as exc:
             logger.warning("[init_flow] stage %d error: %s", stage_num, exc)
             warning(f"Stage {stage_num} error: {exc} — continuing.")
@@ -1261,7 +1289,18 @@ def _handle_init_update(args: list[str]) -> int:
                 )
             else:
                 console.print("[dim]Preview only — nothing written. Apply needs the owner's or devpulse's go.[/dim]")
-        auth_rc = _run_git_auth_provisioning(target, dry_run=True)
+        if as_json:
+            # Under --json stdout is exactly one JSON document: a manager's agent
+            # pipes it into a parser (docs/scaffold_update.md reads stamp_only off
+            # it). The git-auth plan still prints, to stderr, rather than being
+            # dropped: a refusal there is the only place its fix is named, and the
+            # exit code alone cannot say what to add. aipass's decision, fleet
+            # green leg 3. The console resolves sys.stdout at each print, so the
+            # redirect carries success() and the plan lines with it.
+            with contextlib.redirect_stdout(sys.stderr):
+                auth_rc = _run_git_auth_provisioning(target, dry_run=True)
+        else:
+            auth_rc = _run_git_auth_provisioning(target, dry_run=True)
         if auth_rc != 0:
             return auth_rc
         return 2 if result.get("pending") else 0

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: new_project.py
 # Description: aipass new — create projects inside the AIPass installation
-# Version: 1.0.1
+# Version: 1.0.3
 # Created: 2026-07-17
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -96,6 +96,10 @@ def _prompt_template(templates: list[str], ask: Callable[[str], str] | None = No
     ``ask`` is the line reader (None means ``input``, looked up at call time):
     the seam that lets a caller feed answers without replacing
     ``builtins.input`` for the whole process.
+
+    End of input (EOFError) is no answer, so it takes the default template.
+    Ctrl-C (KeyboardInterrupt) is a cancel and is raised to handle_command,
+    which creates nothing (aipass's decision, fleet green leg 3).
     """
     ask = ask or input
     console.print()
@@ -106,8 +110,8 @@ def _prompt_template(templates: list[str], ask: Callable[[str], str] | None = No
     while True:
         try:
             choice = ask("Template [1]: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            logger.info("template prompt interrupted, defaulting to %s", templates[0])
+        except EOFError:
+            logger.info("template prompt at end of input, defaulting to %s", templates[0])
             return templates[0]
         if not choice:
             return templates[0]
@@ -122,14 +126,18 @@ def _prompt_agent(ask: Callable[[str], str] | None = None) -> bool:
     """Prompt user whether to skip agent creation. Returns no_agent flag.
 
     ``ask`` is the line reader (None means ``input``), the same seam as _prompt_template.
+
+    End of input (EOFError) is no answer, so it takes the prompt's default, Y.
+    Ctrl-C (KeyboardInterrupt) is a cancel and is raised to handle_command,
+    which creates nothing.
     """
     ask = ask or input
     console.print()
     while True:
         try:
             choice = ask("Create resident agent? [Y/n]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            logger.info("agent prompt interrupted, defaulting to create agent")
+        except EOFError:
+            logger.info("agent prompt at end of input, defaulting to create agent")
             return False
         if choice in ("", "y", "yes"):
             return False
@@ -179,14 +187,19 @@ def handle_command(command: str, args: list[str]) -> bool:
 
     from aipass.aipass.apps.handlers.new_project import TEMPLATES, create_project
 
-    if not has_template_flag:
-        template = _prompt_template(list(TEMPLATES))
-    elif template is None:
-        template = "empty"
-    if not has_agent_flag:
-        no_agent = _prompt_agent()
-    elif no_agent is None:
-        no_agent = False
+    try:
+        if not has_template_flag:
+            template = _prompt_template(list(TEMPLATES))
+        elif template is None:
+            template = "empty"
+        if not has_agent_flag:
+            no_agent = _prompt_agent()
+        elif no_agent is None:
+            no_agent = False
+    except KeyboardInterrupt:
+        logger.info("[AIPASS] new project cancelled at a prompt: %s", name)
+        error("Cancelled — no project created.")
+        sys.exit(130)
 
     try:
         result = create_project(name, template, no_agent)

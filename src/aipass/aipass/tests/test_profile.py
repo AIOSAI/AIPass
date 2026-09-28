@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_profile.py
 # Description: Tests for aipass profile Phase 3
-# Version: 1.2.4
+# Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/profile.py and the handlers it drives."""
@@ -54,6 +54,18 @@ def tmp_store(tmp_path):
             yield store
 
 
+class _CtrlCStdin(io.StringIO):
+    """A stdin the user presses Ctrl-C on: input() reads it and gets KeyboardInterrupt.
+
+    Stands where the other clear tests put their StringIO, so the product's own
+    input() runs and nothing process-wide is replaced.
+    """
+
+    def readline(self, size: int | None = -1) -> str:
+        """Raise as a terminal does when Ctrl-C arrives mid-read."""
+        raise KeyboardInterrupt
+
+
 @pytest.fixture
 def tmp_legacy(tmp_store):
     """Return the patched legacy local.json path alongside the store."""
@@ -76,12 +88,30 @@ def tmp_store_with_data(tmp_store):
 class TestLiveStoreIsolation:
     """The suite must never write the branch's real profile store."""
 
-    def test_store_path_is_not_the_live_branch_file(self) -> None:
-        """conftest's autouse guard has redirected both profile paths."""
-        live_store = profile_mod._BRANCH_ROOT / "aipass_json" / "user_profile.json"
-        live_legacy = profile_mod._BRANCH_ROOT / ".trinity" / "local.json"
-        assert profile_mod._PROFILE_JSON != live_store
-        assert profile_mod._LEGACY_LOCAL_JSON != live_legacy
+    def test_store_path_is_not_the_live_branch_file(
+        self, isolate_profile_store: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """conftest's autouse guard has redirected both profile paths, seen through `aipass profile`.
+
+        A legacy "user" section planted in the guard's temp local.json is what the
+        command shows, so the legacy read is the temp one; the store write the
+        first read makes is recorded, never performed, so even a broken guard
+        writes nothing live. The live store is spelled from the module's file.
+        """
+        live_store = Path(profile_mod.__file__).parents[2] / "aipass_json" / "user_profile.json"
+        (isolate_profile_store / "local.json").write_text(
+            json.dumps({"user": {"name": "LegacyProbe"}}), encoding="utf-8"
+        )
+        with (
+            patch("aipass.aipass.apps.modules.profile.json_handler.write_json", return_value=True) as mock_write,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            assert handle_command("profile", []) is True
+
+        assert "LegacyProbe" in capsys.readouterr().out
+        written = Path(mock_write.call_args[0][0])
+        assert written == isolate_profile_store / "user_profile.json"
+        assert written != live_store
 
     def test_unmocked_save_lands_in_the_temp_store(self, isolate_profile_store) -> None:
         """A save with no local patching writes under the guard's temp dir."""
@@ -113,39 +143,70 @@ class TestWriteDurability:
             side_effect=OSError("no space left on device"),
         )
 
+    @staticmethod
+    def _assert_one_write_failed_fire(mock_trigger, store: Path) -> None:
+        """The failed save fired its one bus event, with the full payload profile.py sends."""
+        mock_trigger.fire.assert_called_once_with(
+            "profile_write_failed",
+            path=str(store),
+            reason="write_failure_cleanup",
+            detail="json_handler removed its own temp file; the store was left untouched",
+        )
+
     def test_oserror_mid_write_leaves_the_store_byte_intact(self, tmp_store) -> None:
-        """A failed save must not half-write or truncate the previous profile."""
+        """A failed save must not half-write or truncate the previous profile.
+
+        The bus is patched where it lives, so the failure's event never reaches
+        the real trigger bus; the one fire is asserted with its arguments.
+        Mutant 2026-09-28: the fired path str(_PROFILE_JSON) -> str(_LEGACY_LOCAL_JSON) reddens this.
+        """
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Original", "os": "Linux"})
         before = tmp_store.read_bytes()
 
-        with self._fail_the_replace():
-            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-                with pytest.raises(OSError):
-                    save_profile({"name": "Replacement", "os": "Windows"})
+        with (
+            self._fail_the_replace(),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            with pytest.raises(OSError):
+                save_profile({"name": "Replacement", "os": "Windows"})
 
         assert tmp_store.read_bytes() == before
         assert get_user_profile()["name"] == "Original"
+        self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_failed_write_leaves_no_temp_file_behind(self, tmp_store) -> None:
-        """The handler unlinks its own temp file on the failure path."""
+        """The handler unlinks its own temp file on the failure path; the bus is patched where it lives."""
         with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
             save_profile({"name": "Original"})
 
-        with self._fail_the_replace():
-            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-                with pytest.raises(OSError):
-                    save_profile({"name": "Replacement"})
+        with (
+            self._fail_the_replace(),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            with pytest.raises(OSError):
+                save_profile({"name": "Replacement"})
 
         leftovers = [p.name for p in tmp_store.parent.iterdir() if p.name != tmp_store.name]
         assert leftovers == []
+        self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_write_failure_raises_instead_of_answering_false(self, tmp_store) -> None:
-        """json_handler answers False; save_profile must not pass that off as success."""
-        with self._fail_the_replace():
-            with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
-                with pytest.raises(OSError):
-                    save_profile({"name": "Doomed"})
+        """json_handler answers False; save_profile must not pass that off as success.
+
+        The bus is patched where it lives; the one fire is asserted with its arguments.
+        """
+        with (
+            self._fail_the_replace(),
+            patch("aipass.trigger.apps.modules.core.trigger") as mock_trigger,
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            with pytest.raises(OSError):
+                save_profile({"name": "Doomed"})
+
+        self._assert_one_write_failed_fire(mock_trigger, tmp_store)
 
     def test_trigger_fires_on_write_failure(self, tmp_store) -> None:
         """The write-failure event fires under its true name, with the payload kept.
@@ -506,7 +567,7 @@ class TestHandleCommand:
         Mutant: its Cancelled error() dropped -> red (stderr read).
         """
         before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
+        with patch("sys.stdin", _CtrlCStdin()):
             with pytest.raises(SystemExit) as exc:
                 handle_command("profile", ["clear"])
 
@@ -523,16 +584,31 @@ class TestHandleCommand:
         This is the row canary's sweep named directly -- `aipass profile clear`
         in a pipe hit EOFError, printed Cancelled and exited 0 while the profile
         sat untouched, so a script could not tell a clear from a no-op.
+
+        The pipe's own door is `clear --yes`: the same empty stdin with the flag
+        clears the store on disk without asking, so a script that means it can.
+        Mutant 2026-09-28: the skip-confirm flags `("--yes", "-y")` became `("-y",)`, so --yes no
+        longer skips the prompt, and this test went red.
         """
-        before = tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None
+        with patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"):
+            save_profile({"name": "Kept", "os": "Linux"})
+        before = tmp_store.read_text(encoding="utf-8")
         with patch("sys.stdin", io.StringIO("")):
             with pytest.raises(SystemExit) as exc:
                 handle_command("profile", ["clear"])
 
         assert exc.value.code == 1
-        assert (tmp_store.read_text(encoding="utf-8") if tmp_store.exists() else None) == before
+        assert tmp_store.read_text(encoding="utf-8") == before
         _out, err = capsys.readouterr()
         assert "Cancelled — no confirmation read, profile NOT cleared." in err
+
+        with (
+            patch("sys.stdin", io.StringIO("")),
+            patch("aipass.aipass.apps.modules.profile.json_handler.log_operation"),
+        ):
+            assert handle_command("profile", ["clear", "--yes"]) is True
+        stored = json.loads(tmp_store.read_text(encoding="utf-8"))
+        assert stored["profile"] == {f: None for f in USER_FIELDS}
 
     def test_clear_confirmed_still_exits_zero(self, tmp_store, capsys: pytest.CaptureFixture[str]) -> None:
         """The counterfactual: the real clear path must NOT have become a refusal.

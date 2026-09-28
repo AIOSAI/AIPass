@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_aipass_main.py
 # Description: Tests for aipass.py entry point / CLI main
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/aipass.py and the handlers it drives."""
@@ -26,9 +26,9 @@ import pytest
 
 import aipass.aipass.apps.aipass as aipass_mod
 import aipass.aipass.apps.modules as modules_pkg
+from aipass.cli.apps.modules import error as cli_error
 from aipass.aipass.apps.aipass import (
     _pyproject_version,
-    _resolve_version,
     discover_modules,
     main,
     print_help,
@@ -96,26 +96,31 @@ class TestDiscoverModules:
         assert result == []
 
     def test_skips_modules_without_handle_command(self, tmp_path) -> None:
-        """Modules lacking handle_command are not included."""
+        """Modules lacking handle_command are not included.
+
+        Mutant: `if hasattr(module, "handle_command"):` -> `if True:` -> red.
+        """
         mod_file = tmp_path / "no_handler.py"
         mod_file.write_text("x = 1\n", encoding="utf-8")
         fake_mod = types.ModuleType("no_handler")
         # No handle_command attribute
         with patch("aipass.aipass.apps.aipass.MODULES_DIR", tmp_path):
-            with patch("aipass.aipass.apps.aipass.importlib.import_module", return_value=fake_mod):
+            with patch("aipass.aipass.apps.aipass._import_module", return_value=fake_mod) as imported:
                 result = discover_modules()
         assert len(result) == 0
+        imported.assert_called_once_with("aipass.aipass.apps.modules.no_handler")
 
     def test_includes_modules_with_handle_command(self, tmp_path) -> None:
-        """Modules with handle_command are included."""
-        mod_file = tmp_path / "good.py"
-        mod_file.write_text("def handle_command(c, a): pass\n", encoding="utf-8")
-        fake_mod = types.ModuleType("good")
-        fake_mod.handle_command = lambda c, a: True  # type: ignore[attr-defined]
+        """Modules with handle_command are included.
+
+        discover_modules imports each stem it finds from the real modules
+        package, so a read.py under tmp_path loads the real read module.
+        Mutant: `modules.append(module)` -> `pass` -> red.
+        """
+        (tmp_path / "read.py").write_text("", encoding="utf-8")
         with patch("aipass.aipass.apps.aipass.MODULES_DIR", tmp_path):
-            with patch("aipass.aipass.apps.aipass.importlib.import_module", return_value=fake_mod):
-                result = discover_modules()
-        assert len(result) == 1
+            result = discover_modules()
+        assert [m.__name__ for m in result] == ["aipass.aipass.apps.modules.read"]
 
     def test_handles_import_error_gracefully(self, tmp_path) -> None:
         """ImportError during module load is caught and module skipped.
@@ -225,28 +230,36 @@ class TestResolveVersion:
         (tmp_path / "pyproject.toml").write_text('[project]\nname = "aipass"\n', encoding="utf-8")
         assert _pyproject_version(tmp_path / "file.py") is None
 
-    def test_resolve_version_prefers_pyproject(self) -> None:
+    @staticmethod
+    def _version_out(capsys: pytest.CaptureFixture[str]) -> str:
+        """What `aipass --version` prints — the command is the door to _resolve_version."""
+        with (
+            patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
+            patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
+        ):
+            assert main() == 0
+        return capsys.readouterr().out
+
+    def test_resolve_version_prefers_pyproject(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Repo pyproject wins over installed metadata."""
-        with patch("aipass.aipass.apps.aipass._pyproject_version", return_value="1.2.3"):
-            with patch(
-                "aipass.aipass.apps.aipass.importlib.metadata.version",
-                return_value="9.9.9",
-            ) as mock_meta:
-                assert _resolve_version() == "1.2.3"
+        with (
+            patch("aipass.aipass.apps.aipass._pyproject_version", return_value="1.2.3"),
+            patch("aipass.aipass.apps.aipass._installed_version", return_value="9.9.9") as mock_meta,
+        ):
+            assert self._version_out(capsys) == "aipass 1.2.3\n"
         mock_meta.assert_not_called()
 
-    def test_resolve_version_falls_back_to_metadata(self) -> None:
+    def test_resolve_version_falls_back_to_metadata(self, capsys: pytest.CaptureFixture[str]) -> None:
         """No repo pyproject → installed metadata is used."""
-        with patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None):
-            with patch(
-                "aipass.aipass.apps.aipass.importlib.metadata.version",
-                return_value="2.0.0",
-            ):
-                assert _resolve_version() == "2.0.0"
+        with (
+            patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None),
+            patch("aipass.aipass.apps.aipass._installed_version", return_value="2.0.0"),
+        ):
+            assert self._version_out(capsys) == "aipass 2.0.0\n"
 
-    def test_resolve_version_live_is_current(self) -> None:
+    def test_resolve_version_live_is_current(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Live resolve returns the repo's real version — never the stale 0.1.0/2.7.4."""
-        version = _resolve_version()
+        version = self._version_out(capsys).removeprefix("aipass ").strip()
         assert version not in ("unknown", "0.1.0")
         assert version.count(".") == 2
 
@@ -292,7 +305,7 @@ class TestMain:
             patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "--version"]),
             patch("aipass.aipass.apps.aipass.discover_modules", return_value=[]),
             patch("aipass.aipass.apps.aipass._pyproject_version", return_value=None),
-            patch("aipass.aipass.apps.aipass.importlib.metadata.version", side_effect=_not_found),
+            patch("aipass.aipass.apps.aipass._installed_version", side_effect=_not_found),
         ):
             result = main()
         out, _err = capsys.readouterr()
@@ -443,6 +456,26 @@ class TestMain:
         assert result == 0
         mod.handle_command.assert_called_once_with("doctor", [])
 
+    def test_command_whose_module_reports_error_exits_2(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A module that reports error() and returns True must not exit 0.
+
+        Mutant: `return resolve_exit(True)` -> `return 0` after route_command -> red.
+        """
+
+        def _refuse(command: str, args: list[str]) -> bool:
+            cli_error("refused: nothing to trust")
+            return True
+
+        mod = MagicMock()
+        mod.handle_command.side_effect = _refuse
+        mod.__name__ = "aipass.aipass.apps.modules.trust"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "trust"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                result = main()
+        _out, err = capsys.readouterr()
+        assert result == 2
+        assert "refused: nothing to trust" in err
+
     def test_at_prefix_shows_drone_guidance(self, capsys: pytest.CaptureFixture[str]) -> None:
         """@drone prints guidance pointing to drone, not 'Unknown command'.
 
@@ -532,6 +565,28 @@ class TestMain:
         assert result == 0
         mod.handle_command.assert_any_call("help", ["what", "is", "drone"])
         assert "answering as: aipass help what is drone" in out
+
+    def test_multiword_question_help_cannot_answer_exits_2(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """The catch-all help reports error() and returns True: that is exit 2, not 0.
+
+        Mutant: catch-all `return resolve_exit(True)` -> `return 0` -> red.
+        """
+
+        def _help_refuses(command: str, args: list[str]) -> bool:
+            if command != "help":
+                return False
+            cli_error("Could not extract keywords from question. Try rephrasing.")
+            return True
+
+        mod = MagicMock()
+        mod.handle_command.side_effect = _help_refuses
+        mod.__name__ = "aipass.aipass.apps.modules.help_chat"
+        with patch("aipass.aipass.apps.aipass.sys.argv", ["aipass", "the", "a"]):
+            with patch("aipass.aipass.apps.aipass.discover_modules", return_value=[mod]):
+                result = main()
+        _out, err = capsys.readouterr()
+        assert result == 2
+        assert "Could not extract keywords" in err
 
     def test_multiword_with_flag_stays_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A mistyped command carrying flags must NOT become a help search.

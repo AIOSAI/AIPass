@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.1.1
+# Version: 1.1.3
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """aipass doctor — system health aggregation."""
@@ -164,7 +164,7 @@ def _check_system() -> List[CheckResult]:
 
 
 def _configured_aipass_home() -> str:
-    """``env.AIPASS_HOME`` from ~/.claude/settings.json, or "" when absent."""
+    """``env.AIPASS_HOME`` from ~/.claude/settings.json; "" when absent or unreadable (global settings row FAILs)."""
     settings_path = Path.home() / ".claude" / "settings.json"
     if not settings_path.exists():
         return ""
@@ -188,7 +188,7 @@ def _check_global_aipass_home() -> List[CheckResult]:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.info("[doctor] global settings.json unreadable: %s", exc)
-        return results
+        return [CheckResult("global settings", GLYPH_FAIL, "~/.claude/settings.json unreadable", "Repair its JSON")]
     home_val = data.get("env", {}).get("AIPASS_HOME", "")
     if not home_val:
         return results
@@ -332,8 +332,8 @@ def _fix_owner_seating() -> List[CheckResult]:
     return [CheckResult("owner fix", GLYPH_FAIL, detail, "")]
 
 
-def _check_identity() -> List[CheckResult]:
-    """Run Identity group checks."""
+def check_identity() -> List[CheckResult]:
+    """Run Identity group checks. Public for tests/test_doctor.py; product caller: _compute_doctor_groups."""
     results: List[CheckResult] = []
 
     # Project root + registry — single lookup
@@ -597,7 +597,7 @@ _MAX_NAMED_EXTRAS = 3
 
 
 def _registry_citizen_names() -> set[str]:
-    """Lowercased names of every citizen the root registry lists. Empty on failure."""
+    """Lowercased names of every citizen the root registry lists. Empty on failure: the registry row FAILs it."""
     reg_path = _find_registry()
     if reg_path is None:
         return set()
@@ -1296,7 +1296,7 @@ def _compute_doctor_groups(
     """Run all six check groups (optionally auto-fixing). Returns them by group name."""
     group_specs = [
         ("System", _check_system),
-        ("Identity", _check_identity),
+        ("Identity", check_identity),
         ("Services", lambda: _check_services(verbose=verbose)),
         ("Community", _check_community),
         ("Structure", _check_structure),

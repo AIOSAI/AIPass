@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.3.0
+# Version: 1.3.2
 # Created: 2026-08-01
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -14,11 +14,12 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
+import functools
 import json
-from unittest.mock import patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
+from aipass.aipass.apps.handlers import provider_wire
 from aipass.aipass.apps.handlers.provider_wire import (
     STATE_DIFFERENT,
     STATE_MISSING,
@@ -44,40 +45,40 @@ class TestPlatformBridgeCommand:
     def test_windows_rewrites_venv_interpreter_path(self) -> None:
         """os.name == 'nt' swaps the POSIX venv interpreter path for the Windows one."""
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        with patch("aipass.aipass.apps.handlers.provider_wire.os.name", "nt"):
-            result = _platform_bridge_command(posix_cmd)
+        result = _platform_bridge_command(posix_cmd, os_name="nt")
         assert result == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
 
     def test_posix_leaves_command_unchanged(self) -> None:
         """Non-Windows os.name leaves the manifest's POSIX-canonical command untouched."""
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        with patch("aipass.aipass.apps.handlers.provider_wire.os.name", "posix"):
-            result = _platform_bridge_command(posix_cmd)
+        result = _platform_bridge_command(posix_cmd, os_name="posix")
         assert result == posix_cmd
 
     def test_windows_leaves_command_without_marker_unchanged(self) -> None:
         """Command that doesn't contain the venv interpreter substring is a no-op either way."""
         other_cmd = "some-other-tool --flag"
-        with patch("aipass.aipass.apps.handlers.provider_wire.os.name", "nt"):
-            result = _platform_bridge_command(other_cmd)
+        result = _platform_bridge_command(other_cmd, os_name="nt")
         assert result == other_cmd
 
-    def test_build_manifest_hook_entries_applies_transform_on_windows(self) -> None:
+    def test_build_manifest_hook_entries_applies_transform_on_windows(self, monkeypatch) -> None:
         """The single choke point (_build_manifest_hook_entries) applies the transform, so both
-        refresh_provider_hooks and auto_wire_provider pick it up via _strip_and_readd_hooks."""
+        refresh_provider_hooks and auto_wire_provider pick it up via _strip_and_readd_hooks.
+
+        The choke point reaches the real transform, bound to the Windows answer through its
+        os_name seam, rather than os.name patched process-wide."""
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
         manifest_hooks = [{"command": posix_cmd, "event": "Stop"}]
-        with patch("aipass.aipass.apps.handlers.provider_wire.os.name", "nt"):
-            fresh = _build_manifest_hook_entries(manifest_hooks)
+        monkeypatch.setattr(
+            provider_wire, "_platform_bridge_command", functools.partial(_platform_bridge_command, os_name="nt")
+        )
+        fresh = _build_manifest_hook_entries(manifest_hooks)
         written_cmd = fresh["Stop"][0]["hooks"][0]["command"]
         assert written_cmd == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
 
-    # NOTE: an end-to-end refresh_provider_hooks/auto_wire_provider variant (with os.name mocked
-    # to "nt") is deliberately not included here: json_handler internally builds a fresh Path()
-    # from a string, and forcing os.name="nt" on a POSIX box makes pathlib dispatch that fresh
-    # Path to WindowsPath, which then mis-splits the tmp_path string (same class of landmine
-    # documented for the DPLAN-0279 forced-posix doctor tests). The direct _build_manifest_hook_entries
-    # coverage above exercises the real choke point without touching the filesystem.
+    # NOTE: _platform_bridge_command has an os_name seam (fleet green leg 3), so no test forces
+    # os.name to "nt" any more; the test above binds the seam instead. An end-to-end
+    # refresh_provider_hooks/auto_wire_provider variant bound the same way is not written yet:
+    # the choke point above is where the transform happens, and it is covered there.
 
 
 # =============================================================================
@@ -150,8 +151,7 @@ class TestRefreshProviderHooks:
             encoding="utf-8",
         )
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            refresh_provider_hooks(manifest)
+        refresh_provider_hooks(manifest, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
@@ -169,8 +169,7 @@ class TestRefreshProviderHooks:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"model": "mine"}), encoding="utf-8")
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            actions = refresh_provider_hooks(manifest)
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False
@@ -188,8 +187,7 @@ class TestRefreshProviderHooks:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            actions = refresh_provider_hooks(manifest)
+        actions = refresh_provider_hooks(manifest, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is True
@@ -204,9 +202,8 @@ class TestRefreshProviderHooks:
         original_content = json.dumps({"hooks": {"Stop": [{"hooks": []}]}})
         settings_path.write_text(original_content, encoding="utf-8")
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            with pytest.raises(FileNotFoundError):
-                refresh_provider_hooks(manifest)
+        with pytest.raises(FileNotFoundError):
+            refresh_provider_hooks(manifest, settings_path=settings_path)
 
         assert settings_path.read_text(encoding="utf-8") == original_content
 
@@ -238,8 +235,7 @@ class TestAutoWireProviderHooks:
             encoding="utf-8",
         )
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            auto_wire_provider(manifest, interactive=False)
+        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
@@ -276,8 +272,7 @@ class TestAutoWireProviderHooks:
             encoding="utf-8",
         )
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            auto_wire_provider(manifest, interactive=False)
+        auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["env"]["EXISTING_VAR"] == "keep-me"
@@ -353,8 +348,7 @@ class TestSettingsScalarSlot:
             encoding="utf-8",
         )
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            actions = auto_wire_provider(manifest, interactive=False)
+        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False
@@ -373,8 +367,7 @@ class TestSettingsScalarSlot:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": True}), encoding="utf-8")
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            actions = auto_wire_provider(manifest, interactive=False)
+        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is True
@@ -394,8 +387,7 @@ class TestSettingsScalarSlot:
         settings_path.parent.mkdir(parents=True)
         settings_path.write_text(json.dumps({"includeGitInstructions": False}), encoding="utf-8")
 
-        with patch("aipass.aipass.apps.handlers.provider_wire.Path.home", return_value=tmp_path):
-            actions = auto_wire_provider(manifest, interactive=False)
+        actions = auto_wire_provider(manifest, interactive=False, settings_path=settings_path)
 
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         assert updated["includeGitInstructions"] is False

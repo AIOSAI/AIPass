@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_help_flag.py
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-13
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
@@ -242,13 +242,17 @@ class TestTrustEnrollmentCanary:
 class TestHelpChatBareWordOptOut:
     """`aipass help` OWNS the bare word — pin both directions."""
 
-    def test_bare_help_word_is_answered_not_usage(self, _stub_every_doing_path) -> None:
-        """`aipass help help` is a question about help, not a usage dump."""
+    def test_bare_help_word_is_answered_not_usage(self, _stub_every_doing_path, header_events) -> None:
+        """`aipass help help` is a question about help, not a usage dump.
+
+        Mutant: help_chat's answer header dropped (`header(...)` -> `pass`) -> red.
+        """
         with patch.object(help_chat, "print_help", MagicMock()) as mock_help:
             handled = help_chat.handle_command("help", ["help"])
 
         assert handled is True
         mock_help.assert_not_called()
+        assert header_events.calls == [("cli_header_displayed", {"title": "AIPass Help — 'help'"})]
 
     def test_dashed_flag_still_shows_usage(self, _stub_every_doing_path) -> None:
         """The opt-out must not disarm --help for the help verb itself."""

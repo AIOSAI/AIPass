@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_structure_scan.py
 # Description: Tests for doctor structure scanner (DPLAN-0177)
-# Version: 1.2.1
+# Version: 1.2.4
 # Created: 2026-05-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
@@ -20,7 +20,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
-    _detect_package_names,
     check_placement,
     check_pyproject,
     check_registry_consistency,
@@ -113,6 +112,28 @@ class TestScanAgents:
         agents = scan_agents(tmp_path)
         assert len(agents) == 1
         assert agents[0].name == "good"
+
+    def test_never_enters_a_sandbox(self, tmp_path: Path) -> None:
+        """A passport inside dropbox/ or .archive/ is not an agent; the live one beside them is.
+
+        Red before the cure: a branch copied into a dropbox was reported as an agent.
+        Mutant (fleet green leg 3): "dropbox" -> "not_dropbox" in _SCAN_SKIP_DIRS reddens this.
+        """
+        _make_agent(tmp_path, "live", "uuid-l")
+        _make_agent(tmp_path, "copied", "uuid-c", subdir="dropbox")
+        _make_agent(tmp_path, "retired", "uuid-r", subdir=".archive")
+        assert [a.name for a in scan_agents(tmp_path)] == ["live"]
+
+    def test_a_project_under_a_directory_named_dropbox_still_shows_its_agents(self, tmp_path: Path) -> None:
+        """Only directories inside the project are skipped; the project's own parents never are.
+
+        Red before the cure: the skip names were checked against the absolute path, so a
+        project anywhere under a directory named dropbox showed no agents.
+        Mutant: the skip check back to the absolute passport_path.parts -> red.
+        """
+        project = tmp_path / "dropbox" / "proj"
+        _make_agent(project, "live", "uuid-l")
+        assert [a.name for a in scan_agents(project)] == ["live"]
 
     def test_empty_project(self, tmp_path: Path) -> None:
         """Returns empty list when no passports found."""
@@ -261,44 +282,67 @@ class TestProjectCitizenResidency:
 
 
 class TestDetectPackageNames:
+    """Package detection read through check_placement, its one caller (fleet green leg 3).
+
+    A detected package set shows as which src/<name>/ agents are flagged as outside it;
+    an empty set flags nothing.
+    """
+
+    @staticmethod
+    def _flagged(tmp_path: Path, *names: str) -> list:
+        """Seat an agent at src/<name>/ for each name; return the flagged agents' names."""
+        for name in names:
+            _make_agent(tmp_path, name)
+        return sorted(issue.agent_name for issue in check_placement(scan_agents(tmp_path), tmp_path))
+
     def test_no_pyproject(self, tmp_path: Path) -> None:
-        """Returns empty set when no pyproject.toml."""
-        result = _detect_package_names(tmp_path)
-        assert result == set()
+        """No pyproject.toml declares no package, so no agent is flagged.
+
+        Mutant (fleet green leg 3): the no-pyproject `return set()` -> `return {"other"}` -> red.
+        """
+        assert self._flagged(tmp_path, "myagent") == []
 
     def test_hatch_packages(self, tmp_path: Path) -> None:
-        """Detects package from hatch build config."""
+        """Detects package from hatch build config: "src/aipl" names package aipl.
+
+        Mutant (fleet green leg 3): `name = Path(pkg).name` -> `name = pkg` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[tool.hatch.build.targets.wheel]\npackages = ["src/aipl"]\n',
             encoding="utf-8",
         )
-        result = _detect_package_names(tmp_path)
-        assert "aipl" in result
+        assert self._flagged(tmp_path, "aipl", "stray") == ["stray"]
 
     def test_setuptools_packages(self, tmp_path: Path) -> None:
-        """Detects package from setuptools config."""
+        """Detects package from setuptools config.
+
+        Mutant (fleet green leg 3): `names.add(pkg)` -> `pass` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
             '[tool.setuptools]\npackages = ["mypackage"]\n',
             encoding="utf-8",
         )
-        result = _detect_package_names(tmp_path)
-        assert "mypackage" in result
+        assert self._flagged(tmp_path, "mypackage", "stray") == ["stray"]
 
     def test_corrupt_pyproject(self, tmp_path: Path) -> None:
-        """Returns empty set for corrupt TOML."""
+        """Corrupt TOML declares no package, so no agent is flagged.
+
+        Mutant (fleet green leg 3): the parse-error `return set()` -> `return {"other"}` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text("not valid toml {{{", encoding="utf-8")
-        result = _detect_package_names(tmp_path)
-        assert result == set()
+        assert self._flagged(tmp_path, "myagent") == []
 
     def test_pyproject_without_packages(self, tmp_path: Path) -> None:
-        """Returns empty set when pyproject has no package declarations."""
+        """A wheel target with no packages key declares no package, so no agent is flagged.
+
+        Mutant (fleet green leg 3): hatch `.get("packages", [])` -> `.get("packages", ["src/x"])` -> red.
+        """
         pyproject = tmp_path / "pyproject.toml"
-        pyproject.write_text('[project]\nname = "test"\n', encoding="utf-8")
-        result = _detect_package_names(tmp_path)
-        assert result == set()
+        pyproject.write_text('[tool.hatch.build.targets.wheel]\nsources = ["src"]\n', encoding="utf-8")
+        assert self._flagged(tmp_path, "myagent") == []
 
 
 # =============================================================================

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: admin_lane.py
 # Description: Admin-lane state reporting for doctor — read-only, never a verdict
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-08-28
-# Modified: 2026-08-28
+# Modified: 2026-09-28
 # =============================================
 
 """Admin-lane state for ``aipass doctor`` (DPLAN-0319 train, the owner's ruling).
@@ -72,11 +72,16 @@ def _registry_path() -> Path | None:
     return result if result is not None and result.exists() else None
 
 
-def _read_json(path: Path) -> dict | None:
-    """Read a JSON object from *path*; None when absent or unreadable.
+class _Unreadable(Exception):
+    """A registry or cert that exists but could not be read; the message names the file."""
 
-    Loud on a real read failure, quiet on absence: a missing cert is the
-    ordinary fresh-install state, an unparseable one is worth a log line.
+
+def _read_json(path: Path) -> dict | None:
+    """Read a JSON object from *path*; None when absent, _Unreadable when unreadable.
+
+    Quiet on absence: a missing cert is the ordinary fresh-install state. An
+    unreadable one raises so the row can name it; None would report its legs
+    as missing (aipass's decision, fleet green leg 3).
     """
     if not path.is_file():
         return None
@@ -84,7 +89,7 @@ def _read_json(path: Path) -> dict | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning("[admin_lane] could not read %s: %s", path, exc)
-        return None
+        raise _Unreadable(str(path)) from exc
     return data if isinstance(data, dict) else None
 
 
@@ -125,20 +130,35 @@ def admin_lane_state() -> dict:
 
     Returns:
         ``{"key": bool, "granted": bool, "signed": bool, "registry_flag": bool,
-        "state": "lit" | "dark" | "partial"}``
+        "state": "lit" | "dark" | "partial", "unreadable": [path, ...]}``
+
+        ``unreadable`` names a registry or cert that exists but could not be
+        read. Its facts count as absent, so check_admin_lane still lists them
+        as missing, then names the unreadable file beside them.
 
         - ``lit``     — all three facts present (verify still belongs to devpulse)
         - ``dark``    — none present; the ordinary fresh-install state
         - ``partial`` — some present: a half-run ceremony, worth naming
     """
     key = KEY_PATH.is_file()
+    unreadable: List[str] = []
 
-    cert = _holder_cert()
+    try:
+        cert = _holder_cert()
+    except _Unreadable as exc:
+        cert = None
+        unreadable.append(str(exc))
     privileges = cert.get("privileges") if cert else None
     granted = isinstance(privileges, dict) and privileges.get("admin") is True
     signed = bool(cert and cert.get("signature"))
 
-    entry = _holder_entry()
+    try:
+        entry = _holder_entry()
+    except _Unreadable as exc:
+        # _holder_cert read the registry first, so an unreadable registry is named
+        # above already; the except stays so a second read never escapes as a crash.
+        logger.info("[admin_lane] registry already named unreadable: %s", exc)
+        entry = None
     registry_flag = bool(entry and entry.get("admin") is True)
 
     facts = (key, granted, signed, registry_flag)
@@ -155,6 +175,7 @@ def admin_lane_state() -> dict:
         "signed": signed,
         "registry_flag": registry_flag,
         "state": state,
+        "unreadable": unreadable,
     }
 
 
@@ -186,6 +207,8 @@ def check_admin_lane() -> List[Tuple[str, str, str, str]]:
     else:
         detail = f"partial — ceremony incomplete, missing: {_missing_legs(status)}"
         remediation = DOC_HINT
+    if status["unreadable"]:
+        detail = f"{detail}; could not read: {', '.join(status['unreadable'])}"
 
     logger.info("[admin_lane] state=%s", state)
     # Facts only — the audit trail records WHICH legs were observed, never key

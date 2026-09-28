@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_doctor.py
 # Description: Tests for aipass doctor Phase 1
-# Version: 1.2.3
+# Version: 1.2.4
 # Created: 2026-04-16
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/doctor.py and the handlers it drives."""
@@ -15,6 +15,8 @@
 import io
 import json
 import os
+import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
@@ -48,13 +50,13 @@ from aipass.aipass.apps.modules._doctor_wire import (
 )
 from aipass.aipass.apps.modules.doctor import (
     CheckResult,
+    check_identity,
     handle_command,
     run_doctor,
     run_doctor_preflight,
     _check_drone_systems,
     _check_global_aipass_home,
     _check_home_agreement,
-    _check_identity,
     _check_owner_seating,
     _check_provider_manifest,
     _find_manifest,
@@ -106,8 +108,6 @@ class TestDetectPython:
     def test_current_python_ok(self) -> None:
         """Running Python is >=3.9 and reports ok=True."""
         result = detect_python()
-        import sys
-
         assert result["major"] == sys.version_info.major
         assert result["minor"] == sys.version_info.minor
         assert "." in result["version"]
@@ -249,7 +249,10 @@ class TestDetectShell:
         assert result["path"] == ""
 
     def test_shell_missing_env_falls_back_to_proc_comm(self, monkeypatch, tmp_path) -> None:
-        """Missing SHELL but a resolvable parent /proc comm name is used instead of 'unknown'."""
+        """Missing SHELL but a resolvable parent /proc comm name is used instead of 'unknown'.
+
+        Mutant: system_detector `return {"name": name, "path": resolved}` -> `"path": name` -> red.
+        """
         monkeypatch.delenv("SHELL", raising=False)
         stub = _on_path(tmp_path, "zsh")
         monkeypatch.setenv("PATH", str(tmp_path))
@@ -545,21 +548,27 @@ class TestDoctorHandleCommand:
         that is not there and fails with its own ERROR line; every other group
         and sub-check is stubbed, so nothing reads live state.
         Mutant: `... if verbose)` -> `... if False)` (verbose ignored again) -> red.
+        Mutant: `"--collect-only", "-q"]` -> `"-q"]` (pytest handed a real run) -> red.
         """
         mod = "aipass.aipass.apps.modules.doctor"
         monkeypatch.setattr(f"{mod}._BRANCH_ROOT", tmp_path)
-        for name in ("_check_system", "_check_identity", "_check_community", "_check_structure"):
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         for name in ("_check_scaffold", "_check_sandbox", "_check_drone_systems", "check_wire_verify"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
         monkeypatch.setattr(f"{mod}._check_provider_manifest", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
-        with patch(f"{mod}.json_handler", autospec=True):
+        with (
+            patch(f"{mod}.json_handler", autospec=True),
+            patch(f"{mod}.subprocess.run", wraps=subprocess.run) as run,
+        ):
             assert handle_command("doctor", args) is True
         out = capsys.readouterr().out
         assert "collection issues" in out
         assert ("file or directory not found" in out) is shown
+        handed = [sys.executable, "-m", "pytest", "src/aipass/", "--collect-only", "-q"]
+        assert handed in [c.args[0] for c in run.call_args_list]
 
 
 # =============================================================================
@@ -597,7 +606,7 @@ class TestRunDoctor:
         """run_doctor returns an integer error count."""
         with (
             patch("aipass.aipass.apps.modules.doctor._check_system", return_value=[]),
-            patch("aipass.aipass.apps.modules.doctor._check_identity", return_value=[]),
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_services", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_community", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_structure", return_value=[]),
@@ -611,7 +620,7 @@ class TestRunDoctor:
         fail_check = CheckResult("test", GLYPH_FAIL, "bad", "fix it")
         with (
             patch("aipass.aipass.apps.modules.doctor._check_system", return_value=[fail_check]),
-            patch("aipass.aipass.apps.modules.doctor._check_identity", return_value=[]),
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_services", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_community", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_structure", return_value=[]),
@@ -624,7 +633,7 @@ class TestRunDoctor:
         warn_check = CheckResult("test", GLYPH_WARN, "minor", "")
         with (
             patch("aipass.aipass.apps.modules.doctor._check_system", return_value=[warn_check]),
-            patch("aipass.aipass.apps.modules.doctor._check_identity", return_value=[]),
+            patch("aipass.aipass.apps.modules.doctor.check_identity", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_services", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_community", return_value=[]),
             patch("aipass.aipass.apps.modules.doctor._check_structure", return_value=[]),
@@ -989,7 +998,7 @@ class TestProviderSettingsScalars:
 
 
 class TestHooksJsonCheck:
-    """Tests for hooks.json presence check in _check_identity (DPLAN-0190)."""
+    """Tests for hooks.json presence check in check_identity (DPLAN-0190)."""
 
     def test_hooks_json_present_returns_pass(self, tmp_path) -> None:
         """When .aipass/hooks.json exists, check returns PASS."""
@@ -1000,7 +1009,7 @@ class TestHooksJsonCheck:
         (hooks_dir / "hooks.json").write_text('{"hooks_enabled": true}', encoding="utf-8")
 
         with patch("aipass.aipass.apps.modules.doctor._find_registry", return_value=registry):
-            results = _check_identity()
+            results = check_identity()
 
         hooks_results = [r for r in results if r.label == "hooks.json"]
         assert len(hooks_results) == 1
@@ -1012,7 +1021,7 @@ class TestHooksJsonCheck:
         registry.write_text(json.dumps({"metadata": {"id": "t"}, "branches": []}), encoding="utf-8")
 
         with patch("aipass.aipass.apps.modules.doctor._find_registry", return_value=registry):
-            results = _check_identity()
+            results = check_identity()
 
         hooks_results = [r for r in results if r.label == "hooks.json"]
         assert len(hooks_results) == 1
@@ -1026,7 +1035,7 @@ class TestHooksJsonCheck:
 
 
 class TestPassportRole:
-    """Tests for the passport role read in _check_identity (round-2 addendum: identity.role, not top-level)."""
+    """Tests for the passport role read in check_identity (round-2 addendum: identity.role, not top-level)."""
 
     def _run_with_passport(self, tmp_path, passport_data):
         registry = tmp_path / "TEST_REGISTRY.json"
@@ -1040,7 +1049,7 @@ class TestPassportRole:
             patch("aipass.aipass.apps.modules.doctor._BRANCH_ROOT", tmp_path),
             patch("aipass.aipass.apps.modules.doctor._check_owner_seating", return_value=[]),
         ):
-            return _check_identity()
+            return check_identity()
 
     def test_nested_identity_role_read(self, tmp_path) -> None:
         """Role nested under identity.role is read correctly, not reported as unknown."""
@@ -1341,6 +1350,19 @@ class TestCheckGlobalAipassHome:
         with _home_at(tmp_path):
             results = _check_global_aipass_home()
         assert results == []
+
+    def test_unreadable_settings_is_error_not_silence(self, tmp_path):
+        """Corrupt settings.json is a FAIL row, not the silence of a missing file.
+
+        Mutant: the unreadable branch returns `results` (empty) again -> red.
+        """
+        settings = tmp_path / ".claude" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{not json", encoding="utf-8")
+        with _home_at(tmp_path):
+            results = _check_global_aipass_home()
+        assert [(r.label, r.glyph) for r in results] == [("global settings", GLYPH_FAIL)]
+        assert "~/.claude/settings.json" in results[0].detail
 
 
 # ---------------------------------------------------------------------------

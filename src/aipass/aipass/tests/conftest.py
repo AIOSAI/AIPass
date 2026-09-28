@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for aipass tests — json and profile redirects, console width, command state
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-05-04
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 #
 # CHANGELOG (Max 5 entries):
+#   - v1.2.0 (2026-09-28): header_events recorder keeps cli's header off the real trigger bus (DPLAN-0354 leg 3)
 #   - v1.1.0 (2026-09-27): template C1/C2 fixtures; unused mock_json_handler removed (DPLAN-0354)
 #   - v1.0.0 (2025-11-08): Initial implementation - Shared pytest fixtures
 # =============================================
@@ -113,3 +114,25 @@ def clean_command_state() -> Generator[None, None, None]:
     """error() marks the process failed; a test must not hand that to the next."""
     yield
     display.reset_command_state()
+
+
+class _HeaderEvents:
+    """Stands where cli's display keeps its trigger, and records each fire."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def fire(self, event: str, **data: object) -> None:
+        self.calls.append((event, data))
+
+
+@pytest.fixture(autouse=True)
+def header_events(monkeypatch: pytest.MonkeyPatch) -> _HeaderEvents:
+    """cli's header() fires cli_header_displayed on the real trigger bus, which has a
+    live handler, and display caches the trigger it loaded in _TRIGGER. A test that
+    prints through the real console must not fire it, so every test gets a recorder
+    in that slot; a test about a header asserts the title off .calls."""
+    events = _HeaderEvents()
+    monkeypatch.setattr(display, "_TRIGGER", events)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return events

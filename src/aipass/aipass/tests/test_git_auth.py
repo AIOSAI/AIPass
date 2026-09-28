@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_auth.py
 # Description: Tests for the init git-auth provisioning handler (DPLAN-0281 P2)
-# Version: 1.2.0
+# Version: 1.2.2
 # Created: 2026-08-04
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/init/git_auth.py."""
@@ -15,6 +15,7 @@
 # seedgo: no-test-needed(ruff) — that git_auth.py and the modules it imports parse and import
 
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -29,6 +30,8 @@ from aipass.aipass.apps.handlers.init.git_auth import (
     verify_git_auth,
 )
 
+# The symlink-loop test logs which answer the platform gave, so a run says which branch it took.
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Fixtures / builders
@@ -500,6 +503,51 @@ def test_verify_reports_every_failing_check(tmp_path: Path) -> None:
     assert "check 1" in joined
     assert "check 2" in joined
     assert "check 3" in joined
+
+
+def test_a_symlink_loop_owner_path_refuses_and_is_never_rebound(tmp_path: Path) -> None:
+    """A recorded path that cannot resolve is a named refusal, never "records no path" or a traceback.
+
+    HEAD caught OSError only: on Python 3.12 and older the loop's RuntimeError
+    escaped provision as a traceback; on 3.13 resolve answers the loop without
+    raising and HEAD refused "does not exist". A real passport of VERA sits at
+    src/demo/vera, so an answer of None reaches the passport search, which
+    would rewrite the recorded path — the never-rebound assert can fail.
+    The test asks the platform itself: where the link is refused, the recorded
+    path simply does not exist; where it is made, resolve on the loop decides.
+    Mutant: git_auth.py _resolved_path's catch narrowed to OSError -> red (RuntimeError escapes).
+    Mutant: git_auth.py _resolved_path's raise turned into `return None` -> red (the refusal text).
+    """
+    registry_path = build_project(tmp_path, owner_path="src/demo/loop", make_passport=False)
+    _write(
+        tmp_path / "src" / "demo" / "vera" / ".trinity" / "passport.json",
+        {
+            "branch_info": {"branch_name": "VERA", "path": "src/demo/vera"},
+            "identity": {"citizen_class": "builder", "role": "ceo"},
+            "citizenship": {"registered": True, "registry_id": "8fb38c96-880d-43d6-823b-98f4b9559194"},
+        },
+    )
+    loop = tmp_path / "src" / "demo" / "loop"
+    expected = "does not exist"
+    try:
+        loop.symlink_to("loop2")
+        (tmp_path / "src" / "demo" / "loop2").symlink_to("loop")
+    except OSError as exc:
+        logger.info("the platform refused the symlink (%s): the recorded path does not exist", exc)
+        expected = "does not exist"
+    else:
+        try:
+            loop.resolve()
+        except (OSError, RuntimeError) as exc:
+            logger.info("resolve raised on the loop (%s): the refusal names it unresolvable", exc)
+            expected = "could not be resolved"
+    before = registry_path.read_text(encoding="utf-8")
+
+    with pytest.raises(GitAuthRefusal, match=expected):
+        provision_git_auth(tmp_path)
+    assert registry_path.read_text(encoding="utf-8") == before
+    failures = verify_git_auth(registry_path, "VERA")
+    assert failures and not any("records no path" in f for f in failures)
 
 
 def test_verify_is_clean_on_a_provisioned_project(tmp_path: Path) -> None:

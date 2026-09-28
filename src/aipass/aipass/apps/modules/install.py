@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.2.1
+# Version: 1.2.3
 # Created: 2026-07-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -49,7 +49,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
+from typing import Any, Callable, Dict
 
 from aipass.cli.apps.modules import console, error, success, warning
 from aipass.aipass.apps.handlers.help_flag import wants_help
@@ -177,15 +177,20 @@ def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     except FileExistsError:
         logger.info("[install] install lock %s already held, inspecting holder", lock)
         holder_pid = _lock_holder_pid(lock)
-        if _retry and holder_pid and not _pid_alive(int(holder_pid)):
+        # Only a holder PROVEN dead (False) is taken over; unknown (None) is left alone.
+        alive = _pid_alive(int(holder_pid)) if holder_pid else None
+        if _retry and alive is False:
             if not _clear_stale_lock(lock, holder_pid):
                 return None
             # _retry=False: one takeover only, so two racing installs that both
             # see the same stale lock cannot ping-pong clearing each other.
             return _acquire_install_lock(home, _retry=False)
+        holder = f", held by pid {holder_pid}" if holder_pid else ""
+        if holder_pid and alive is None:
+            holder += f" - could not tell whether pid {holder_pid} is alive"
         error(
             f"REFUSED: another install of {home} is already running "
-            f"(lock: {lock}{f', held by pid {holder_pid}' if holder_pid else ''}). "
+            f"(lock: {lock}{holder}). "
             "Wait for it to finish, or delete the lock if you know it is dead."
         )
         return None
@@ -199,16 +204,31 @@ def _acquire_install_lock(home: Path, _retry: bool = True) -> Path | None:
     return lock
 
 
-def _pid_alive(pid: int) -> bool:
-    """True when `pid` names a live process, on POSIX and on Windows.
+def _pid_alive(
+    pid: int,
+    platform_name: str | None = None,
+    runner: Callable[..., Any] | None = None,
+) -> bool | None:
+    """True when `pid` names a live process, False when it is gone, on POSIX and on Windows.
+
+    ``platform_name`` and ``runner`` exist for the test: it hands in "win32" and a
+    tasklist that raises, rather than patching sys.platform and subprocess.run for
+    the whole process. The defaults are sys.platform and subprocess.run, read at
+    call time, so every caller runs as before.
+
+    None when the Windows probe itself fails: the caller cannot know, so it must
+    not steal the lock, and names the doubt in its refusal (aipass's decision,
+    fleet green leg 3; the probe used to answer True, a guess dressed as "alive").
 
     signal 0 is a POSIX-only probe: on Windows os.kill TERMINATES the target
     whatever the signal, so a liveness check written that way would kill an
-    unrelated process that happened to reuse the pid.
+    unrelated process that happened to reuse the pid. On POSIX a PermissionError
+    IS the answer: the process exists, owned by someone else.
     """
-    if sys.platform == "win32":
+    run = subprocess.run if runner is None else runner
+    if (platform_name is None and sys.platform == "win32") or platform_name == "win32":
         try:
-            out = subprocess.run(
+            out = run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
                 capture_output=True,
                 text=True,
@@ -216,7 +236,7 @@ def _pid_alive(pid: int) -> bool:
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             logger.warning("[install] tasklist probe for pid %s failed: %s", pid, exc)
-            return True  # unknown means occupied: never steal a live lock
+            return None  # unknown: the caller never steals on it
         return str(pid) in out.stdout
 
     try:
@@ -691,6 +711,8 @@ def print_help() -> None:
     )
     console.print()
     console.print("[dim]Project creation isn't part of install — run 'aipass init run' for that, whenever ready.[/dim]")
+    # aipass's decision, fleet green leg 2: a dry run writes nothing, so it takes no lock.
+    console.print("[dim]A dry run takes no install lock, so it can preview beside a live install.[/dim]")
     console.print()
 
 

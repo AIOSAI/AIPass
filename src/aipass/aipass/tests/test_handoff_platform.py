@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.1.2
+# Version: 1.1.3
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -593,9 +593,14 @@ class TestHandoffCommandRefusal:
         did.assert_not_called()
         assert "banana" in err.call_args[0][0]
 
-    def test_known_cli_still_launches(self) -> None:
-        """The counterfactual: a valid CLI is unaffected by the refusal seam."""
-        with patch("aipass.aipass.apps.modules.handoff.do_handoff") as did:
-            assert handle_command("handoff", ["launch", "--cli", "claude"]) is True
+    def test_known_cli_still_launches(self, tmp_path) -> None:
+        """The counterfactual: a valid CLI is unaffected by the refusal seam.
 
-        did.assert_called_once()
+        Mutant: `elif args[i] == "--cwd"` -> `"--cwdx"` (--cwd never read) -> red.
+        Mutant: `elif args[i] == "--flag"` -> `"--flagx"` (--flag never read) -> red.
+        """
+        argv = ["launch", "--cli", "claude", "--cwd", str(tmp_path), "--flag", "skip-permissions"]
+        with patch("aipass.aipass.apps.modules.handoff.do_handoff") as did:
+            assert handle_command("handoff", argv) is True
+
+        did.assert_called_once_with(cli="claude", cwd=str(tmp_path), flag_variant="skip-permissions")

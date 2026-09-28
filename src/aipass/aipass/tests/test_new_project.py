@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_new_project.py
 # Description: Tests for aipass new — project creation handler
-# Version: 1.1.4
+# Version: 1.1.7
 # Created: 2026-07-17
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/new_project/__init__.py and apps/modules/new_project.py."""
@@ -14,6 +14,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — spawn_agent's own behavior; @spawn's function, mocked here
 
+import functools
 import hashlib
 import json
 import shutil
@@ -25,18 +26,14 @@ from unittest.mock import patch
 import pytest  # pyright: ignore[reportMissingImports]
 
 from aipass.aipass.apps import aipass as entry
-from aipass.aipass.apps.handlers.init.bootstrap import _guard_init, is_projects_child
+from aipass.aipass.apps.handlers.init.bootstrap import init_project, is_projects_child
 from aipass.aipass.apps.handlers.new_project import (
-    _agent_home,
     _git_init,
-    _registry_name,
-    _spawn_project_agent,
-    _validate_name,
-    _write_registry,
-    _write_template,
     create_project,
     find_host_root,
 )
+from aipass.aipass.apps.handlers.new_project.adopt import adopt_project
+from aipass.aipass.shared.registry_discovery import registries_in
 from aipass.aipass.apps.modules.new_project import (
     _prompt_agent,
     _prompt_template,
@@ -79,24 +76,39 @@ def test_find_host_root_finds_closest_registry(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_validate_name_accepts_valid():
-    assert _validate_name("myapp") == "myapp"
-    assert _validate_name("My-App_2") == "My-App_2"
+# Read through create_project, the name check's one caller (fleet green leg 3). The
+# check runs first; from a directory with no host above it, a name it accepts goes on
+# to "Not inside an AIPass installation", so nothing is ever written.
 
 
-def test_validate_name_rejects_empty():
-    with pytest.raises(ValueError, match="cannot be empty"):
-        _validate_name("")
+def _name_answer(tmp_path, monkeypatch, name: str) -> str:
+    """create_project's refusal for *name* from a host-less tmp_path: which check stopped it."""
+    assert find_host_root(tmp_path) is None  # premise: no host, so no project can be built
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises((ValueError, RuntimeError)) as refused:
+        create_project(name, no_agent=True)
+    return str(refused.value)
 
 
-def test_validate_name_rejects_leading_digit():
-    with pytest.raises(ValueError, match="Must start with a letter"):
-        _validate_name("2fast")
+def test_validate_name_accepts_valid(tmp_path, monkeypatch):
+    """Mutant (fleet green leg 3): the pattern `^[a-zA-Z][a-zA-Z0-9_-]*$` -> `^[a-z][a-z0-9]*$` -> red."""
+    assert "Not inside an AIPass" in _name_answer(tmp_path, monkeypatch, "myapp")
+    assert "Not inside an AIPass" in _name_answer(tmp_path, monkeypatch, "My-App_2")
 
 
-def test_validate_name_rejects_special_chars():
-    with pytest.raises(ValueError, match="Must start with a letter"):
-        _validate_name("my app!")
+def test_validate_name_rejects_empty(tmp_path, monkeypatch):
+    """Mutant (fleet green leg 3): `if not name:` -> `if False:` -> red."""
+    assert "cannot be empty" in _name_answer(tmp_path, monkeypatch, "")
+
+
+def test_validate_name_rejects_leading_digit(tmp_path, monkeypatch):
+    """Mutant (fleet green leg 3): the pattern's first class `[a-zA-Z]` -> `[a-zA-Z0-9]` -> red."""
+    assert "Must start with a letter" in _name_answer(tmp_path, monkeypatch, "2fast")
+
+
+def test_validate_name_rejects_special_chars(tmp_path, monkeypatch):
+    """Mutant (fleet green leg 3): the pattern's anchor `*$"` -> `*"` -> red."""
+    assert "Must start with a letter" in _name_answer(tmp_path, monkeypatch, "my app!")
 
 
 # ---------------------------------------------------------------------------
@@ -104,16 +116,48 @@ def test_validate_name_rejects_special_chars():
 # ---------------------------------------------------------------------------
 
 
-def test_registry_name_uppercases():
-    assert _registry_name("myapp") == "MYAPP"
+def _built(host_env, monkeypatch, name: str, template: str = "empty") -> dict:
+    """create_project's answer for *name* under the tmp_path host (git stubbed, no agent, no enrolment)."""
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        return create_project(name, template=template, no_agent=True)
 
 
-def test_registry_name_replaces_special():
-    assert _registry_name("my.app") == "MY_APP"
+def _registry_file(host_env, monkeypatch, name: str) -> str:
+    """The registry file create_project mints for *name* under the tmp_path host."""
+    return _built(host_env, monkeypatch, name)["registry_file"]
 
 
-def test_registry_name_preserves_hyphens():
-    assert _registry_name("my-app") == "MY-APP"
+def test_registry_name_uppercases(host_env, monkeypatch):
+    """Read through create_project's registry file (fleet green leg 3).
+
+    Mutant (fleet green leg 3): `name.upper()` -> `name` in _registry_name -> red.
+    """
+    assert _registry_file(host_env, monkeypatch, "myapp") == "MYAPP_REGISTRY.json"
+
+
+def test_registry_name_replaces_special(host_env):
+    """A dot reaches the registry name only through adopt (create_project's name check refuses it).
+
+    Read through a dry-run adopt_project of <host>/projects/my.app: dry run writes nothing,
+    and with no AIPass home detected no live template is read (fleet green leg 3).
+    Mutant (fleet green leg 3): `"_", name.upper()` -> `"", name.upper()` in _registry_name -> red.
+    """
+    target = host_env / "projects" / "my.app"
+    target.mkdir()
+    with patch("aipass.aipass.apps.handlers.new_project.adopt._detect_aipass_home", return_value=None):
+        planned = adopt_project(target, no_agent=True, dry_run=True)
+    assert planned["registry_file"] == "MY_APP_REGISTRY.json"
+    assert list(target.iterdir()) == []
+
+
+def test_registry_name_preserves_hyphens(host_env, monkeypatch):
+    """Mutant (fleet green leg 3): the kept class `[^A-Z0-9_-]` -> `[^A-Z0-9_]` -> red."""
+    assert _registry_file(host_env, monkeypatch, "my-app") == "MY-APP_REGISTRY.json"
 
 
 # ---------------------------------------------------------------------------
@@ -121,12 +165,17 @@ def test_registry_name_preserves_hyphens():
 # ---------------------------------------------------------------------------
 
 
-def test_write_registry_creates_file(tmp_path):
-    rid, fname = _write_registry(tmp_path, "demo")
-    path = tmp_path / fname
+def test_write_registry_creates_file(host_env, monkeypatch):
+    """Read through create_project's minted registry (fleet green leg 3).
+
+    Mutant (fleet green leg 3): the registry's `"name": reg,` -> `"name": name,` -> red.
+    """
+    result = _built(host_env, monkeypatch, "demo")
+    fname = result["registry_file"]
+    path = Path(result["target"]) / fname
     assert path.exists()
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["metadata"]["id"] == rid
+    assert data["metadata"]["id"] == result["registry_id"]
     assert data["metadata"]["name"] == "DEMO"
     assert fname == "DEMO_REGISTRY.json"
     assert data["branches"] == []
@@ -137,15 +186,21 @@ def test_write_registry_creates_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_write_template_empty(tmp_path):
-    created = _write_template(tmp_path, "demo", "empty")
+def test_write_template_empty(host_env, monkeypatch):
+    """Read through create_project's files and target (fleet green leg 3).
+
+    Mutant (fleet green leg 3): _write_template's `created.append(".gitignore")` -> `pass` -> red.
+    """
+    result = _built(host_env, monkeypatch, "demo")
+    created = result["files"]
+    target = Path(result["target"])
     assert "README.md" in created
     assert ".gitignore" in created
-    assert (tmp_path / "README.md").exists()
-    assert (tmp_path / ".gitignore").exists()
-    assert not (tmp_path / "pyproject.toml").exists()
-    assert not (tmp_path / "src").exists()
-    gitignore = (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert (target / "README.md").exists()
+    assert (target / ".gitignore").exists()
+    assert not (target / "pyproject.toml").exists()
+    assert not (target / "src").exists()
+    gitignore = (target / ".gitignore").read_text(encoding="utf-8")
     assert ".venv\n" in gitignore
     assert ".venv/\n" not in gitignore
     assert "*_REGISTRY.lock" in gitignore
@@ -156,19 +211,23 @@ def test_write_template_empty(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_write_template_python(tmp_path):
-    created = _write_template(tmp_path, "demo", "python")
+def test_write_template_python(host_env, monkeypatch):
+    """Mutant (fleet green leg 3): the pyproject line f'name = "{name}"' -> 'name = "x"' -> red."""
+    result = _built(host_env, monkeypatch, "demo", template="python")
+    created = result["files"]
+    target = Path(result["target"])
     assert "pyproject.toml" in created
     assert "src/demo/__init__.py" in created
-    assert (tmp_path / "pyproject.toml").exists()
-    assert (tmp_path / "src" / "demo" / "__init__.py").exists()
-    pyproject = (tmp_path / "pyproject.toml").read_text(encoding="utf-8")
+    assert (target / "pyproject.toml").exists()
+    assert (target / "src" / "demo" / "__init__.py").exists()
+    pyproject = (target / "pyproject.toml").read_text(encoding="utf-8")
     assert 'name = "demo"' in pyproject
 
 
-def test_write_template_python_hyphen_name(tmp_path):
-    _write_template(tmp_path, "my-app", "python")
-    assert (tmp_path / "src" / "my_app" / "__init__.py").exists()
+def test_write_template_python_hyphen_name(host_env, monkeypatch):
+    """Mutant (fleet green leg 3): python branch `pkg = name.replace("-", "_").lower()` -> `name.lower()` -> red."""
+    result = _built(host_env, monkeypatch, "my-app", template="python")
+    assert (Path(result["target"]) / "src" / "my_app" / "__init__.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -325,27 +384,20 @@ def test_create_project_cleans_up_on_failure(host_env, monkeypatch):
 
 
 def test_create_project_registry_before_scaffold(host_env, monkeypatch):
-    """Registry file must exist before scaffold runs (order invariant)."""
+    """Registry file must exist before scaffold runs (order invariant).
+
+    Mutant (fleet green leg 3): _write_template moved above _write_registry in create_project -> red.
+    """
     monkeypatch.chdir(host_env)
-    creation_order = []
-
-    original_write_registry = _write_registry
-    original_write_template = _write_template
-
-    def track_registry(target, name):
-        creation_order.append("registry")
-        return original_write_registry(target, name)
+    registry_seen_by_template = []
 
     def track_template(target, name, template):
-        creation_order.append("template")
-        return original_write_template(target, name, template)
+        """Stands in for the template writer: records whether the registry is already on disk."""
+        registry_seen_by_template.append(bool(registries_in(target)))
+        return []
 
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch(
-            "aipass.aipass.apps.handlers.new_project._write_registry",
-            side_effect=track_registry,
-        ),
         patch(
             "aipass.aipass.apps.handlers.new_project._write_template",
             side_effect=track_template,
@@ -358,7 +410,7 @@ def test_create_project_registry_before_scaffold(host_env, monkeypatch):
     ):
         create_project("ordertest", no_agent=True)
 
-    assert creation_order.index("registry") < creation_order.index("template")
+    assert registry_seen_by_template == [True]
 
 
 # ---------------------------------------------------------------------------
@@ -377,56 +429,73 @@ _SPAWN_SUCCESS = {
 }
 
 
-def test_agent_home_simple(tmp_path):
-    """Agent home is src/<pkg>/<pkg>/."""
-    home = _agent_home(tmp_path, "demo")
-    assert home == tmp_path / "src" / "demo" / "demo"
+def _built_with_agent(host_env, monkeypatch, name: str, spawn_answer: dict):
+    """create_project with an agent under the tmp_path host; spawn_agent is a recording stub.
+
+    Returns (result, spawn stub). The agent code is read through create_project,
+    its one caller (fleet green leg 3); spawn itself never runs.
+    """
+    monkeypatch.chdir(host_env)
+    with (
+        patch("subprocess.run", side_effect=_mock_git_run),
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+        patch("aipass.aipass.apps.handlers.new_project.spawn_agent", return_value=spawn_answer) as mock_spawn,
+    ):
+        return create_project(name, no_agent=False), mock_spawn
 
 
-def test_agent_home_hyphenated(tmp_path):
-    """Hyphens normalized to underscores, matching python template."""
-    home = _agent_home(tmp_path, "my-app")
-    assert home == tmp_path / "src" / "my_app" / "my_app"
+def test_agent_home_simple(host_env, monkeypatch):
+    """Agent home is src/<pkg>/<pkg>/.
+
+    Mutant (fleet green leg 3): _agent_home's `project_root / "src" / pkg / pkg` -> `project_root / "src" / pkg` -> red.
+    """
+    result, _spawn = _built_with_agent(host_env, monkeypatch, "demo", _SPAWN_SUCCESS)
+    assert result["agent_home"] == str(host_env / "projects" / "demo" / "src" / "demo" / "demo")
 
 
-def test_spawn_project_agent_calls_spawn(tmp_path):
-    """Calls spawn_agent with the agent_home path, role and purpose — and no class."""
-    with patch(
-        "aipass.aipass.apps.handlers.new_project.spawn_agent",
-        return_value=_SPAWN_SUCCESS,
-    ) as mock_spawn:
-        result = _spawn_project_agent(tmp_path, "demo")
-    expected_home = str(tmp_path / "src" / "demo" / "demo")
+def test_agent_home_hyphenated(host_env, monkeypatch):
+    """Hyphens normalized to underscores, matching python template.
+
+    Mutant (fleet green leg 3): _agent_home's `pkg = name.replace("-", "_").lower()` -> `pkg = name.lower()` -> red.
+    """
+    result, _spawn = _built_with_agent(host_env, monkeypatch, "my-app", _SPAWN_SUCCESS)
+    assert result["agent_home"] == str(host_env / "projects" / "my-app" / "src" / "my_app" / "my_app")
+
+
+def test_spawn_project_agent_calls_spawn(host_env, monkeypatch):
+    """Calls spawn_agent with the agent_home path, role and purpose — and no class.
+
+    Mutant (fleet green leg 3): `role="project_manager",` -> `role="project_agent",` -> red.
+    """
+    result, mock_spawn = _built_with_agent(host_env, monkeypatch, "demo", _SPAWN_SUCCESS)
+    expected_home = str(host_env / "projects" / "demo" / "src" / "demo" / "demo")
     mock_spawn.assert_called_once_with(
         target_path=expected_home,
         role="project_manager",
         purpose="Resident agent of the demo project.",
     )
-    assert result["success"] is True
-    assert result["branch_name"] == "DEMO"
+    assert result["spawn_result"]["success"] is True
+    assert result["spawn_result"]["branch_name"] == "DEMO"
 
 
-def test_spawn_project_agent_raises_on_failure(tmp_path):
-    """Raises RuntimeError when spawn_agent returns success=False."""
-    with (
-        patch(
-            "aipass.aipass.apps.handlers.new_project.spawn_agent",
-            return_value={"success": False, "error": "template missing"},
-        ),
-        pytest.raises(RuntimeError, match="spawn_agent failed.*template missing"),
-    ):
-        _spawn_project_agent(tmp_path, "broken")
+def test_spawn_project_agent_raises_on_failure(host_env, monkeypatch):
+    """Raises RuntimeError when spawn_agent returns success=False.
+
+    Mutant (fleet green leg 3): `if not result.get("success"):` -> `if False:` -> red.
+    """
+    with pytest.raises(RuntimeError, match="spawn_agent failed.*template missing"):
+        _built_with_agent(host_env, monkeypatch, "broken", {"success": False, "error": "template missing"})
 
 
-def test_spawn_project_agent_returns_spawn_result(tmp_path):
-    """Returns the full result dict from spawn_agent."""
-    with patch(
-        "aipass.aipass.apps.handlers.new_project.spawn_agent",
-        return_value={**_SPAWN_SUCCESS, "citizen_number": 1},
-    ):
-        result = _spawn_project_agent(tmp_path, "demo")
-    assert result["files_copied"] == 12
-    assert result["citizen_number"] == 1
+def test_spawn_project_agent_returns_spawn_result(host_env, monkeypatch):
+    """Returns the full result dict from spawn_agent.
+
+    Mutant (fleet green leg 3): _spawn_project_agent's `return result` -> `return dict(result, files_copied=0)` -> red.
+    """
+    result, _spawn = _built_with_agent(host_env, monkeypatch, "demo", {**_SPAWN_SUCCESS, "citizen_number": 1})
+    assert result["spawn_result"]["files_copied"] == 12
+    assert result["spawn_result"]["citizen_number"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +627,13 @@ def test_is_projects_child_no_host_registry(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# Read through init_project, the guard's one caller (fleet green leg 3). Every call
+# names the project "!!!", which sanitizes to nothing: a target the guard lets through
+# stops at init_project's ValueError before any file is written, so even a broken
+# guard never scaffolds a project.
+_NO_NAME = "!!!"
+
+
 def test_guard_init_blocks_nested_by_default(tmp_path):
     """The refusal names the host it found and the marker file that proved it.
 
@@ -567,7 +643,7 @@ def test_guard_init_blocks_nested_by_default(tmp_path):
     target = tmp_path / "projects" / "nested"
     target.mkdir(parents=True)
     with pytest.raises(RuntimeError, match="inside AIPass project") as exc_info:
-        _guard_init(target)
+        init_project(target, _NO_NAME)
     assert f"at '{tmp_path}' (has AIPASS_REGISTRY.json)" in str(exc_info.value)
 
 
@@ -577,21 +653,27 @@ def test_guard_init_allows_nested_with_flag(tmp_path):
     Both halves stand in one unit on purpose (v5 no_oracle, 2026-09-08): the
     old body called the allowed form and asserted nothing, so a _guard_init
     that had stopped refusing anything at all would have kept it green.
+    Passing the guard shows as reaching init_project's own name check.
+    Mutant (fleet green leg 3): the nested-project `if allow_projects_child and is_projects_child(target):
+    return` -> `if False: return` -> red.
     """
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     target = tmp_path / "projects" / "nested"
     target.mkdir(parents=True)
     with pytest.raises(RuntimeError, match="inside AIPass project"):
-        _guard_init(target)
-    assert _guard_init(target, allow_projects_child=True) is None
+        init_project(target, _NO_NAME)
+    with pytest.raises(ValueError, match="Cannot derive project name"):
+        init_project(target, _NO_NAME, allow_projects_child=True)
+    assert list(target.iterdir()) == []
 
 
 def test_guard_init_still_blocks_non_projects_nested(tmp_path):
+    """Mutant (fleet green leg 3): `raise RuntimeError(` for the inside-project block -> `return (` -> red."""
     (tmp_path / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
     target = tmp_path / "elsewhere" / "nested"
     target.mkdir(parents=True)
     with pytest.raises(RuntimeError, match="inside AIPass project"):
-        _guard_init(target, allow_projects_child=True)
+        init_project(target, _NO_NAME, allow_projects_child=True)
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +740,68 @@ def test_prompt_agent_eof():
     assert _prompt_agent(ask=_eof) is False
 
 
+def _ctrl_c(prompt: str) -> str:
+    """Stand-in for input() when the user presses Ctrl-C."""
+    raise KeyboardInterrupt
+
+
+def test_ctrl_c_at_the_agent_prompt_creates_nothing(host_env, monkeypatch):
+    """Ctrl-C is a cancel, never a yes: no project is created and the command exits 130.
+
+    Red before the cure: _prompt_agent answered Ctrl-C like Enter and the project was built.
+    The host is tmp_path and create_project is a recording stub answering "no agent", so even
+    a broken prompt writes no project and launches nothing.
+    Mutant (fleet green leg 3): `except EOFError:` -> `except (EOFError, KeyboardInterrupt):` -> red.
+    """
+    monkeypatch.chdir(host_env)
+    built = {
+        "target": str(host_env / "projects" / "cancelled"),
+        "registry_file": str(host_env / "projects" / "cancelled" / "CANCELLED_REGISTRY.json"),
+        "template": "empty",
+        "agent_created": False,
+    }
+    with (
+        patch(
+            "aipass.aipass.apps.modules.new_project._prompt_agent",
+            functools.partial(_prompt_agent, ask=_ctrl_c),
+        ),
+        patch("aipass.aipass.apps.handlers.new_project.create_project", return_value=built) as mock_create,
+        pytest.raises(SystemExit) as exited,
+    ):
+        handle_command("new", ["cancelled", "--template", "empty"])
+    assert exited.value.code == 130
+    mock_create.assert_not_called()
+
+
+def test_ctrl_c_at_the_template_prompt_creates_nothing(host_env, monkeypatch):
+    """Ctrl-C at the template prompt is a cancel, never "use the default": nothing is created, exit 130.
+
+    Red before the cure: _prompt_template answered Ctrl-C with templates[0] and went on to the build.
+    The host is tmp_path and create_project is a recording stub answering "no agent", so even
+    a broken prompt writes no project and launches nothing.
+    Mutant (fleet green leg 3): template prompt `except EOFError:` -> `except (EOFError, KeyboardInterrupt):` -> red.
+    """
+    monkeypatch.chdir(host_env)
+    built = {
+        "target": str(host_env / "projects" / "cancelled"),
+        "registry_file": str(host_env / "projects" / "cancelled" / "CANCELLED_REGISTRY.json"),
+        "template": "empty",
+        "agent_created": False,
+    }
+    with (
+        patch(
+            "aipass.aipass.apps.modules.new_project._prompt_template",
+            functools.partial(_prompt_template, ask=_ctrl_c),
+        ),
+        patch("aipass.aipass.apps.handlers.new_project.create_project", return_value=built) as mock_create,
+        pytest.raises(SystemExit) as exited,
+    ):
+        handle_command("new", ["cancelled", "--no-agent"])
+    assert exited.value.code == 130
+    mock_create.assert_not_called()
+    assert not (host_env / "projects" / "cancelled").exists()
+
+
 # ---------------------------------------------------------------------------
 # TTY auto-launch (FIX 3: aipass new auto-launches on TTY)
 # ---------------------------------------------------------------------------
@@ -679,7 +823,11 @@ def test_tty_auto_launches_agent(host_env, monkeypatch):
     }
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch("builtins.input", return_value=""),
+        # The real agent prompt, answered Enter through its own ask seam (never builtins.input).
+        patch(
+            "aipass.aipass.apps.modules.new_project._prompt_agent",
+            functools.partial(_prompt_agent, ask=lambda prompt: ""),
+        ),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
@@ -715,7 +863,11 @@ def test_no_tty_skips_auto_launch(host_env, monkeypatch, capsys: pytest.CaptureF
     }
     with (
         patch("subprocess.run", side_effect=_mock_git_run),
-        patch("builtins.input", return_value=""),
+        # The real agent prompt, answered Enter through its own ask seam (never builtins.input).
+        patch(
+            "aipass.aipass.apps.modules.new_project._prompt_agent",
+            functools.partial(_prompt_agent, ask=lambda prompt: ""),
+        ),
         patch(
             "aipass.aipass.shared.project_home._detect_aipass_home",
             return_value=None,
@@ -812,54 +964,67 @@ def _branches(repo: Path) -> list[str]:
     return sorted(line.strip() for line in out.splitlines() if line.strip())
 
 
-@requires_git
-def test_git_init_creates_main_and_dev(tmp_path, monkeypatch):
-    """R6: a new project is born with BOTH branches, not just main."""
+def _born(host_env, monkeypatch) -> Path:
+    """A project born by create_project under the tmp_path host with REAL git; returns its repo.
+
+    The git steps are read through create_project, their one caller (fleet green leg 3);
+    only enrolment and home detection are stubbed, never subprocess.
+    """
     _git_env(monkeypatch)
-    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
-
-    _git_init(tmp_path, "demo", "empty")
-
-    assert _branches(tmp_path) == ["dev", "main"]
-
-
-@requires_git
-def test_git_init_leaves_head_on_dev(tmp_path, monkeypatch):
-    """R6: the repo is LEFT on dev — agents default to dev, main trails."""
-    _git_env(monkeypatch)
-    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
-
-    _git_init(tmp_path, "demo", "empty")
-
-    assert _run_git(["rev-parse", "--abbrev-ref", "HEAD"], tmp_path) == "dev"
+    monkeypatch.chdir(host_env)
+    with (
+        patch("aipass.aipass.shared.project_home._detect_aipass_home", return_value=None),
+        patch("aipass.aipass.shared.project_home._enroll_project"),
+    ):
+        return Path(create_project("demo", no_agent=True)["target"])
 
 
 @requires_git
-def test_git_init_cuts_dev_from_the_birth_commit(tmp_path, monkeypatch):
+def test_git_init_creates_main_and_dev(host_env, monkeypatch):
+    """R6: a new project is born with BOTH branches, not just main.
+
+    Mutant (fleet green leg 3): `_git(["checkout", "-b", "dev"], target)` -> `_git(["status"], target)` -> red.
+    """
+    repo = _born(host_env, monkeypatch)
+
+    assert _branches(repo) == ["dev", "main"]
+
+
+@requires_git
+def test_git_init_leaves_head_on_dev(host_env, monkeypatch):
+    """R6: the repo is LEFT on dev — agents default to dev, main trails.
+
+    Mutant (fleet green leg 3): `["checkout", "-b", "dev"]` -> `["branch", "dev"]` -> red.
+    """
+    repo = _born(host_env, monkeypatch)
+
+    assert _run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo) == "dev"
+
+
+@requires_git
+def test_git_init_cuts_dev_from_the_birth_commit(host_env, monkeypatch):
     """dev and main share one root — dev is cut AFTER the birth commit.
 
     Cutting dev from an empty repo would give it no history in common with
     main, so the first merge back would be an unrelated-histories refusal.
+    Mutant (fleet green leg 3): `["checkout", "-b", "dev"]` -> `["checkout", "--orphan", "dev"]` -> red.
     """
-    _git_env(monkeypatch)
-    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+    repo = _born(host_env, monkeypatch)
 
-    _git_init(tmp_path, "demo", "empty")
-
-    main = _run_git(["rev-parse", "main"], tmp_path)
-    dev = _run_git(["rev-parse", "dev"], tmp_path)
+    main = _run_git(["rev-parse", "main"], repo)
+    dev = _run_git(["rev-parse", "dev"], repo)
     assert main and main == dev
 
 
 @requires_git
-def test_git_init_birth_commit_carries_the_project_files(tmp_path, monkeypatch):
-    """The birth commit is real — dev's tree has the scaffolded file in it."""
-    _git_env(monkeypatch)
-    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+def test_git_init_birth_commit_carries_the_project_files(host_env, monkeypatch):
+    """The birth commit is real — dev's tree has the scaffolded file in it.
 
-    _git_init(tmp_path, "demo", "empty")
+    Mutant (fleet green leg 3): `_git(["add", "-A"], target)` -> `_git(["add", ".gitignore"], target)` -> red.
+    """
+    repo = _born(host_env, monkeypatch)
 
-    assert "README.md" in _run_git(["ls-tree", "--name-only", "dev"], tmp_path).split()
+    assert "README.md" in _run_git(["ls-tree", "--name-only", "dev"], repo).split()
 
 
 def test_git_init_still_refuses_an_existing_repo(tmp_path):
@@ -875,31 +1040,31 @@ def test_git_init_still_refuses_an_existing_repo(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_project_agent_passes_no_citizen_class(tmp_path):
+def test_spawn_project_agent_passes_no_citizen_class(host_env, monkeypatch):
     """The class is spawn's to decide at mint — naming one here overrides R3.
 
     The project agent is always citizen #1 of a registry minted moments
     earlier, so spawn's first-agent rule mints ``manager`` on its own. Passing
     a class would replace that rule with a guess, and the value this used to
     pass ("project_agent") is a retired name spawn now refuses by name.
+    Mutant (fleet green leg 3): `purpose=...,` gains `citizen_class="manager",` -> red.
     """
-    with patch(
-        "aipass.aipass.apps.handlers.new_project.spawn_agent",
-        return_value={"success": True, "branch_name": "DEMO", "files_copied": 1},
-    ) as mock_spawn:
-        _spawn_project_agent(tmp_path, "demo")
+    _result, mock_spawn = _built_with_agent(
+        host_env, monkeypatch, "demo", {"success": True, "branch_name": "DEMO", "files_copied": 1}
+    )
 
     assert "citizen_class" not in mock_spawn.call_args.kwargs
     assert not mock_spawn.call_args.args
 
 
-def test_spawn_project_agent_never_sends_a_retired_class(tmp_path):
-    """Guard the species, not the one string: no retired name reaches spawn."""
-    with patch(
-        "aipass.aipass.apps.handlers.new_project.spawn_agent",
-        return_value={"success": True, "branch_name": "DEMO", "files_copied": 1},
-    ) as mock_spawn:
-        _spawn_project_agent(tmp_path, "demo")
+def test_spawn_project_agent_never_sends_a_retired_class(host_env, monkeypatch):
+    """Guard the species, not the one string: no retired name reaches spawn.
+
+    Mutant (fleet green leg 3): `role="project_manager",` -> `role="project_agent",` -> red.
+    """
+    _result, mock_spawn = _built_with_agent(
+        host_env, monkeypatch, "demo", {"success": True, "branch_name": "DEMO", "files_copied": 1}
+    )
 
     sent = {str(v) for v in mock_spawn.call_args.kwargs.values()}
     assert sent.isdisjoint(set(LEGACY_CLASSES) | {"admin"})

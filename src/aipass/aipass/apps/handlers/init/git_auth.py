@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_auth.py
 # Description: Init handler — provision a project for manager-class git (owner-tier)
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-08-04
-# Modified: 2026-09-25
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -161,6 +161,11 @@ def _resolved_path(entry: Dict[str, Any], repo_root: Path) -> Optional[Path]:
 
     Relative paths resolve against the repo root — never CWD, which would bind
     authority to wherever the user happened to be standing.
+
+    A recorded path that cannot resolve (a symlink loop raises RuntimeError on
+    Python 3.12) refuses by name. None would read as "records no path" and send
+    provision to the passport search, which rewrites the recorded path
+    (aipass's decision, fleet green leg 3).
     """
     raw = entry.get("path")
     if not raw or not str(raw).strip():
@@ -170,9 +175,12 @@ def _resolved_path(entry: Dict[str, Any], repo_root: Path) -> Optional[Path]:
         recorded = repo_root / recorded
     try:
         return recorded.resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         logger.warning("Registry path %s could not be resolved: %s", recorded, exc)
-        return None
+        raise GitAuthRefusal(
+            f"registry entry for '{entry.get('name', '?')}' records path '{raw}', which could not be resolved "
+            f"({exc}). Correct the path to the citizen's real branch directory, then re-run"
+        ) from exc
 
 
 def _locate_branch_dir(repo_root: Path, name: str) -> Optional[Path]:
@@ -283,7 +291,11 @@ def verify_git_auth(registry_path: Path, owner_name: str) -> List[str]:
     if entry.get("owner") is not True:
         failures.append(f"check 3 (owner flag): entry for '{owner_name}' is not marked owner: true")
 
-    branch_dir = _resolved_path(entry, repo_root)
+    try:
+        branch_dir = _resolved_path(entry, repo_root)
+    except GitAuthRefusal as exc:
+        failures.append(f"check 4 (path-binding): {exc}")
+        return failures
     if branch_dir is None:
         failures.append(f"check 4 (path-binding): entry for '{owner_name}' records no path")
         return failures

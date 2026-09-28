@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Case-insensitive filesystem pins for *_REGISTRY.json discovery
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for shared/registry_discovery.py and its case-insensitive-filesystem pins."""
@@ -255,7 +255,10 @@ def _private_registry_globs(root: Path) -> tuple[list[str], int]:
     scanned = 0
     for py in sorted(root.rglob("*.py")):
         rel = py.relative_to(root).as_posix()
-        if {".backup", ".archive"} & set(py.relative_to(root).parts):
+        # dropbox and .archive are sandboxes nothing looks into (the owner's ruling
+        # of 09-27, 20:42).  docs.local is untracked scratch, never shipped --
+        # aipass's decision, fleet green leg 3.
+        if {"dropbox", ".archive", ".backup", "__pycache__", "docs.local"} & set(py.relative_to(root).parts):
             continue
         if rel in {"tests/test_registry_case_sweep.py", "shared/registry_discovery.py"}:
             continue  # the pin itself, and the one sanctioned implementation
@@ -312,6 +315,15 @@ class TestNoPrivateRegistryGlobSurvives:
         offenders, scanned = _private_registry_globs(tmp_path)
         assert offenders == ["guilty.py:2"]
         assert scanned == 2
+
+    def test_the_walk_never_enters_a_sandbox_or_scratch(self, tmp_path: Path) -> None:
+        """A glob planted in each skipped directory goes unread; the live one beside them is convicted."""
+        planted = 'from pathlib import Path\nx = Path(".").glob("*_REGISTRY.json")\n'
+        for skipped in ("dropbox", ".archive", "__pycache__", "docs.local"):
+            (tmp_path / skipped).mkdir()
+            (tmp_path / skipped / "planted.py").write_text(planted, encoding="utf-8")
+        (tmp_path / "live.py").write_text(planted, encoding="utf-8")
+        assert _private_registry_globs(tmp_path) == (["live.py:2"], 1)
 
     def test_the_walk_also_catches_rglob(self, tmp_path: Path) -> None:
         """``rglob`` is the same defect one keystroke away."""
