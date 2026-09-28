@@ -90,7 +90,7 @@ tests/ · docs/ · docs.local/ · dropbox/ · artifacts/ · spawn_json/ · tools
 # Known Gotchas
 
  - argparse is built with `add_help=False` — intercept `--help`/`-h` before `parse_args()`
- - Tests write to the real `AIPASS_REGISTRY.json`; `conftest.py` backs it up and restores it per session
+ - No test touches the live `AIPASS_REGISTRY.json` — hand the product a tmp_path registry; `conftest.py`'s tripwire fails the session if the live file moves
  - `update` cannot run against spawn itself — the lane executes in this process and imports the shim at module level
  - `handlers/__init__.py` refuses cross-branch imports; other branches come through `apps/modules/`
  - `drone rm` silently refuses `__pycache__`; purge with python and verify by counting what is left
