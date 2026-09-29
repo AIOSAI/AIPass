@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.4
+# Version: 1.0.5
 # Created: 2026-08-31
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/router_handler.py caller_cwd and every site that infers a location from the cwd."""
@@ -225,8 +225,28 @@ class TestTheDeleteLaneSurvivesForReal:
 
 
 class TestTheGitLaneSurvives:
-    def test_the_caller_branch_is_unknown_rather_than_a_crash(self, no_cwd):
-        assert git_module._detect_branch_dir() is None
+    def test_the_caller_branch_is_unknown_rather_than_a_crash(self, no_cwd, monkeypatch):
+        """``drone @git diff`` with no cwd names the missing branch and exits 1, reaching no git.
+
+        Through the command, not the private detector. Auth is stubbed where the
+        product resolves it at call time (the module in sys.modules), and the
+        diff handler fails loudly if the lane ever got past detection.
+        """
+
+        def no_git(*_args, **_kwargs):
+            raise AssertionError("the diff lane ran git with no branch detected")
+
+        assert sys.modules[auth.__name__] is auth
+        monkeypatch.setattr(auth, "verify_git_access", lambda _cmd: "drone")
+        monkeypatch.setattr(git_module.diff_handler, "get_branch_diff", no_git)
+
+        result = git_module.handle_command("diff", [])
+
+        assert result == {
+            "stdout": "",
+            "stderr": "Cannot detect branch directory from CWD. Run from within src/aipass/<branch>/",
+            "exit_code": 1,
+        }
 
     def test_the_repo_root_comes_from_aipass_home_when_there_is_no_cwd(self, no_cwd, home_root):
         """``find_repo_root`` promises a Path, not an Optional — so it must find one.

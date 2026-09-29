@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: git_module.py
 # Description: Git workflow module — PR, status, sync, lock management
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -562,6 +562,18 @@ def _handle_close_pr(args: list[str]) -> dict:
     return {"stdout": "", "stderr": result["message"], "exit_code": 1}
 
 
+def _terminal_answer(prompt: str) -> str | None:
+    """The typed answer to *prompt* on a real terminal, or None when stdin is not one.
+
+    Its body is the two calls the merge gate made inline. It has a name of its
+    own for the tests: they hand the gate a terminal through this name instead of
+    replacing sys.stdin for the whole process (drone's decision, DPLAN-0354 leg 5).
+    """
+    if not sys.stdin.isatty():
+        return None
+    return input(prompt)
+
+
 def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
     """Joint-decision gate: merges must never happen accidentally (DPLAN-0256).
 
@@ -573,8 +585,8 @@ def _confirm_merge(pr_number: str, caller: str, confirmed: bool) -> dict | None:
         json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "--confirm"})
         return None
 
-    if sys.stdin.isatty():
-        answer = input(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    answer = _terminal_answer(f"Merge PR #{pr_number}? Merges are a joint decision. [y/N] ")
+    if answer is not None:
         if answer.strip().lower() in ("y", "yes"):
             json_handler.log_operation("merge_gate", {"pr_number": pr_number, "caller": caller, "path": "tty-yes"})
             return None

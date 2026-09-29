@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-14
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py and the safe_delete path that writes it."""
@@ -16,7 +16,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -600,12 +599,12 @@ class TestRecordFailureIsContained:
         The env override and the tempdir home were both sitting right there,
         unreachable because the walk raised before either was consulted.
         """
-        # tempfile caches gettempdir() on first use, so setting TMPDIR here
-        # would silently keep the real /tmp — and the test would write its
-        # record outside the tree it was given. Patch the resolved value.
+        # The ledger's temp home is handed in through deletion_log._temp_dir, so
+        # the record lands in the tree the test was given and tempfile itself is
+        # left alone for every other reader in the process.
         home = project / "tmphome"
         home.mkdir()
-        monkeypatch.setattr(tempfile, "tempdir", str(home))
+        monkeypatch.setattr(deletion_log, "_temp_dir", lambda: home)
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         doomed = project / "scratch"
         doomed.mkdir()
@@ -676,9 +675,9 @@ class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
         """
         home = tmp_path / "tmphome"
         home.mkdir()
-        # tempfile caches gettempdir() on first use, so setting TMPDIR here
-        # would silently keep the real one. Patch the resolved value.
-        monkeypatch.setattr(tempfile, "tempdir", str(home))
+        # The temp home is handed in through deletion_log._temp_dir, never by
+        # replacing tempfile.tempdir for the whole process.
+        monkeypatch.setattr(deletion_log, "_temp_dir", lambda: home)
         monkeypatch.delenv("AIPASS_DELETION_LOG", raising=False)
         monkeypatch.delenv("AIPASS_HOME", raising=False)
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_git_module.py
 # Description: Tests for the @git module — lock, status, sync, PR, and routing
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-04-21
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/git_module.py and the lock, status, sync and PR handlers it drives."""
@@ -13,10 +13,8 @@
 
 from __future__ import annotations
 
-import io
 import json
 import os
-import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -1624,13 +1622,6 @@ class TestPruneTempBranches:
 _GIT_MOD = "aipass.drone.apps.modules.git_module"
 
 
-class _TtyStdin(io.StringIO):
-    """A terminal's stdin with a typed answer waiting: input() reads it, isatty() says yes."""
-
-    def isatty(self) -> bool:
-        return True
-
-
 _AUTH = "aipass.drone.apps.plugins.devpulse_ops.auth.verify_git_access"
 
 
@@ -1786,8 +1777,7 @@ class TestMergeGate:
     def test_headless_without_confirm_refused(self, _mock_auth: MagicMock) -> None:
         """Non-TTY caller without --confirm is refused before the plugin loads."""
         with patch(_MERGE_PR) as mock_merge:
-            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
-                mock_stdin.isatty.return_value = False
+            with patch(f"{_GIT_MOD}._terminal_answer", return_value=None):
                 result = handle_command("merge", ["123"])
 
         assert result["exit_code"] == 1
@@ -1799,8 +1789,7 @@ class TestMergeGate:
     def test_confirm_flag_proceeds(self, _mock_auth: MagicMock) -> None:
         """--confirm merges without prompting, even headless."""
         with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
-            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
-                mock_stdin.isatty.return_value = False
+            with patch(f"{_GIT_MOD}._terminal_answer", return_value=None):
                 result = handle_command("merge", ["123", "--confirm"])
 
         assert result["exit_code"] == 0
@@ -1810,28 +1799,34 @@ class TestMergeGate:
     def test_confirm_flag_position_agnostic(self, _mock_auth: MagicMock) -> None:
         """--confirm before the PR number still resolves the right PR."""
         with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
-            with patch(f"{_GIT_MOD}.sys.stdin") as mock_stdin:
-                mock_stdin.isatty.return_value = False
+            with patch(f"{_GIT_MOD}._terminal_answer", return_value=None):
                 result = handle_command("merge", ["--confirm", "123"])
 
         assert result["exit_code"] == 0
         mock_merge.assert_called_once_with("123", "devpulse")
 
     @patch(_AUTH, return_value="devpulse")
-    def test_tty_yes_proceeds(self, _mock_auth: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Interactive terminal answering y merges."""
-        monkeypatch.setattr(sys, "stdin", _TtyStdin("y\n"))
-        with patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge:
+    def test_tty_yes_proceeds(self, _mock_auth: MagicMock) -> None:
+        """Interactive terminal answering y merges, after the joint-decision prompt.
+
+        The terminal is handed in through _terminal_answer, never by replacing sys.stdin."""
+        with (
+            patch(f"{_GIT_MOD}._terminal_answer", return_value="y\n") as mock_answer,
+            patch(_MERGE_PR, return_value=dict(_MERGE_OK)) as mock_merge,
+        ):
             result = handle_command("merge", ["123"])
 
         assert result["exit_code"] == 0
+        mock_answer.assert_called_once_with("Merge PR #123? Merges are a joint decision. [y/N] ")
         mock_merge.assert_called_once_with("123", "devpulse")
 
     @patch(_AUTH, return_value="devpulse")
-    def test_tty_default_aborts(self, _mock_auth: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_tty_default_aborts(self, _mock_auth: MagicMock) -> None:
         """Interactive terminal hitting enter (default N) aborts."""
-        monkeypatch.setattr(sys, "stdin", _TtyStdin("\n"))
-        with patch(_MERGE_PR) as mock_merge:
+        with (
+            patch(f"{_GIT_MOD}._terminal_answer", return_value="\n"),
+            patch(_MERGE_PR) as mock_merge,
+        ):
             result = handle_command("merge", ["123"])
 
         assert result["exit_code"] == 1
