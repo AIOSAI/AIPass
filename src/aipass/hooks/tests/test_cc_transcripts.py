@@ -5,7 +5,7 @@
 # Branch: hooks
 # Layer: tests
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/cc_transcripts.py."""
@@ -234,7 +234,9 @@ class TestChatFor:
         write_transcript(root, cwd, "ancient", "Ancient", 5, age=999999)
         for i in range(6):
             write_transcript(root, cwd, f"s{i}", f"Chat {i}", 2, age=i)
-        assert cc_transcripts.chat_for(cwd, "ancient")["title"] == "Ancient"
+        chat = cc_transcripts.chat_for(cwd, "ancient")
+        assert chat is not None
+        assert chat["title"] == "Ancient"
         assert "ancient" not in {c["session_id"] for c in cc_transcripts.recent_chats(cwd, limit=5)}
 
     def test_missing_transcript_is_none(self, root, tmp_path):

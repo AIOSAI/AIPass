@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aipass.hooks.apps.handlers.lifecycle import auto_fix
+from aipass.hooks.apps.modules import diagnostics_state as ds
 from aipass.hooks.apps.handlers.lifecycle.auto_fix import (
     PYTHON_PATTERNS,
     _check_line_pattern,
@@ -178,32 +179,24 @@ class TestAutoFixStateFile:
         mock_ruff_s.return_value = [{"line": 5, "message": "F401: unused import"}]
         mock_pyright.return_value = [{"line": 10, "message": "Type error here"}]
 
-        state_path = tmp_path / ".diagnostics_state.json"
-
-        with patch("aipass.hooks.apps.handlers.lifecycle.auto_fix.STATE_FILE", state_path):
-            result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "errors.py")}})
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "errors.py")}})
 
         assert result.get("sound") == "auto fix diagnostics"
-        assert state_path.exists()
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        assert len(state["errors"]) == 2
-        assert state["errors"][0]["line"] == 5
-        assert state["errors"][1]["line"] == 10
+        state = ds.load_seat("nosession")
+        assert state is not None
+        assert [e["line"] for e in state["errors"]] == [5, 10]
 
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_seedgo_checklist", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_pyright_check", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_ruff_lint_structured", return_value=[])
     @patch("aipass.hooks.apps.handlers.lifecycle.auto_fix._run_python_checks", return_value=[])
     def test_state_file_cleared_on_no_errors(self, mock_py, mock_ruff_s, mock_pyright, mock_seedgo, tmp_path):
-        state_path = tmp_path / ".diagnostics_state.json"
-        state = {"file": str(tmp_path / "old.py"), "errors": [{"line": 1, "message": "old"}]}
-        state_path.write_text(json.dumps(state), encoding="utf-8")
+        ds.save_seat("nosession", str(tmp_path / "old.py"), [{"line": 1, "message": "old"}])
 
-        with patch("aipass.hooks.apps.handlers.lifecycle.auto_fix.STATE_FILE", state_path):
-            result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
+        result = handle({"tool_name": "Edit", "tool_input": {"file_path": str(tmp_path / "clean.py")}})
 
         assert "sound" not in result
-        assert not state_path.exists()
+        assert ds.load_seat("nosession") == {}
 
 
 class TestAutoFixJson:
@@ -277,6 +270,7 @@ class TestAutoFixSubprocessChecks:
             ),
         )
         errors = _run_ruff_lint_structured(str(tmp_path / "lint.py"))
+        assert errors is not None
         assert len(errors) == 1
         assert errors[0]["line"] == 5
         assert "F401" in errors[0]["message"]
@@ -285,8 +279,9 @@ class TestAutoFixSubprocessChecks:
     @pytest.mark.parametrize("spell", _HOOK_SPELLINGS)
     @patch("subprocess.run")
     def test_run_ruff_lint_structured_skips_claude_hooks(self, mock_run, tmp_path, spell):
+        """A skipped file was not judged: None, never [] (devpulse's decision B, leg 4)."""
         errors = _run_ruff_lint_structured(spell(tmp_path / ".claude" / "hooks" / "myhook.py"))
-        assert errors == []
+        assert errors is None
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
@@ -311,14 +306,16 @@ class TestAutoFixSubprocessChecks:
             ),
         )
         errors = _run_pyright_check(str(tmp_path / "typed.py"))
+        assert errors is not None
         assert len(errors) == 1
         assert errors[0]["line"] == 42
 
     @pytest.mark.parametrize("spell", _HOOK_SPELLINGS)
     @patch("subprocess.run")
     def test_run_pyright_skips_claude_hooks(self, mock_run, tmp_path, spell):
+        """A skipped file was not judged: None, never [] (devpulse's decision B, leg 4)."""
         errors = _run_pyright_check(spell(tmp_path / ".claude" / "hooks" / "myhook.py"))
-        assert errors == []
+        assert errors is None
         mock_run.assert_not_called()
 
     @patch("subprocess.run")
@@ -392,14 +389,14 @@ class TestAutoFixSubprocessChecks:
         assert _checklist_marker() == FINDING_MARKER
 
     def test_an_unreadable_seedgo_falls_back_loudly(self):
-        with patch.object(auto_fix.importlib, "import_module", side_effect=ImportError("no seedgo")):
+        with patch.object(auto_fix, "_load_checklist_module", side_effect=ImportError("no seedgo")):
             with patch.object(auto_fix.logger, "warning") as warned:
                 marker = auto_fix._checklist_marker()
         assert marker == auto_fix._CHECKLIST_MARKER_FALLBACK
         warned.assert_called_once()
 
     def test_a_seedgo_publishing_no_marker_falls_back_loudly(self):
-        with patch.object(auto_fix.importlib, "import_module", return_value=object()):
+        with patch.object(auto_fix, "_load_checklist_module", return_value=object()):
             with patch.object(auto_fix.logger, "warning") as warned:
                 marker = auto_fix._checklist_marker()
         assert marker == auto_fix._CHECKLIST_MARKER_FALLBACK

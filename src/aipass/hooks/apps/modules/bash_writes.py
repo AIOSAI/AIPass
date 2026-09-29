@@ -1,6 +1,6 @@
 # =================== AIPass ====================
 # Name: bash_writes.py
-# Version: 1.8.0
+# Version: 1.8.1
 # Description: Write targets a shell command can be seen to name (edit_gate's scripted lane)
 # Branch: hooks
 # Layer: apps/modules
@@ -272,6 +272,9 @@ NOT_CAUGHT: tuple[str, ...] = (
     "what a SCRIPT FILE does — its text is on disk, never in the command, so an interpreter "
     "handed a path instead of inline source keeps the broad reading and no write-verb evidence "
     "is claimed about it",
+    # devpulse's decision C, leg 4: a tilde word that does not expand is read literally.
+    "an operand that neither expands nor reads as a literal path under the working directory "
+    "— dropped and logged, so no fence judges it",
 )
 
 
@@ -533,7 +536,11 @@ def _looks_like_path(token: str) -> bool:
 
 
 def _resolve(token: str, cwd: Path) -> Path | None:
-    """Resolve one operand against the segment's working directory."""
+    """Resolve one operand against the segment's working directory.
+
+    None, which no resolved operand is, means the word could not be read as a path
+    at all, even literally (logged; in NOT_CAUGHT). Every caller drops it.
+    """
     token = token.strip().strip(_TRAILING_JUNK)
     if not token:
         return None
@@ -558,10 +565,18 @@ def _resolve(token: str, cwd: Path) -> Path | None:
     token = token.replace("\\", "/")
     try:
         candidate = Path(token).expanduser()
-        return candidate if candidate.is_absolute() else (cwd / candidate)
     except (OSError, ValueError, RuntimeError) as exc:
-        logger.info("[HOOKS] bash_writes: unresolvable operand %r: %s", token, exc)
-        return None
+        # The shell leaves a tilde word it cannot expand (~nosuchuser) as it is, so
+        # the write lands under the working directory in a directory of that literal
+        # name, and both fences judge it there (devpulse's decision C, leg 4). Only a
+        # word that cannot be read literally either is dropped: NOT_CAUGHT says so.
+        logger.info("[HOOKS] bash_writes: operand %r not expandable (%s), read literally", token, exc)
+        try:
+            candidate = Path(token)
+        except (OSError, ValueError, RuntimeError) as literal_exc:
+            logger.info("[HOOKS] bash_writes: unresolvable operand %r: %s", token, literal_exc)
+            return None
+    return candidate if candidate.is_absolute() else (cwd / candidate)
 
 
 def _redirect_targets(segment: list[str], cwd: Path) -> list[tuple[Path, str]]:

@@ -61,24 +61,35 @@ class TestResolveSessionPid:
 
 
 class TestHasSessionFile:
-    """Reads through CC_SESSIONS_DIR, so an unresolvable home answers instead of raising."""
+    """Reads through CC_SESSIONS_DIR, so an unresolvable home answers instead of raising.
+
+    Read through resolve_session_pid (fleet_green leg 4): our own pid is the
+    walk's first step, and the ppid step answers None so no `ps` is started.
+    Proof: a mutant of the file check.
+    """
 
     def test_true_when_the_file_is_there(self, tmp_path):
-        (tmp_path / "4242.json").write_text("{}", encoding="utf-8")
+        (tmp_path / f"{os.getpid()}.json").write_text("{}", encoding="utf-8")
         with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            assert cc_sessions._has_session_file(4242) is True
+            assert cc_sessions.resolve_session_pid() == os.getpid()
 
     def test_false_when_it_is_not(self, tmp_path):
-        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
-            assert cc_sessions._has_session_file(4242) is False
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
+            patch.object(cc_sessions, "_get_ppid_portable", return_value=None),
+        ):
+            assert cc_sessions.resolve_session_pid() is None
 
     def test_unresolvable_home_answers_false_not_raises(self):
         # _claude_home() degrades to a path that cannot exist. The old presence.py
         # built this path from Path.home() directly, so the same machine raised
         # RuntimeError into presence_gate's except-and-allow — the gate went dark
         # rather than reporting "no session files here".
-        with patch.object(cc_sessions, "CC_SESSIONS_DIR", cc_sessions.Path("<no-home>") / ".claude" / "sessions"):
-            assert cc_sessions._has_session_file(os.getpid()) is False
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", cc_sessions.Path("<no-home>") / ".claude" / "sessions"),
+            patch.object(cc_sessions, "_get_ppid_portable", return_value=None),
+        ):
+            assert cc_sessions.resolve_session_pid() is None
 
 
 class TestGetPpidPortable:
@@ -99,17 +110,32 @@ class TestGetPpidPortable:
 
 
 class TestIsPidAlive:
-    def test_alive(self):
-        assert cc_sessions._is_pid_alive(os.getpid()) is True
+    """Liveness as `drone @hooks sessions` reports it: each listing line ends live or stale.
 
-    def test_dead(self):
-        assert cc_sessions._is_pid_alive(999999999) is False
+    The first four read the answer through the command (fleet_green leg 4);
+    their proof is a mutant of the pid guard and of the probe.
+    """
 
-    def test_pid_zero(self):
-        assert cc_sessions._is_pid_alive(0) is False
+    @staticmethod
+    def _status(tmp_path, capsys, pid: int) -> str:
+        (tmp_path / f"{pid}.json").write_text(json.dumps({"pid": pid, "kind": "interactive"}), encoding="utf-8")
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
+            assert cc_sessions.handle_command("sessions", []) is True
+        lines = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith(f"  PID {pid} · ")]
+        assert len(lines) == 1
+        return lines[0].rsplit(" ", 1)[1]
 
-    def test_pid_one(self):
-        assert cc_sessions._is_pid_alive(1) is False
+    def test_alive(self, tmp_path, capsys):
+        assert self._status(tmp_path, capsys, os.getpid()) == "live"
+
+    def test_dead(self, tmp_path, capsys):
+        assert self._status(tmp_path, capsys, 999999999) == "stale"
+
+    def test_pid_zero(self, tmp_path, capsys):
+        assert self._status(tmp_path, capsys, 0) == "stale"
+
+    def test_pid_one(self, tmp_path, capsys):
+        assert self._status(tmp_path, capsys, 1) == "stale"
 
     def test_permission_error_treated_as_alive(self):
         with patch("sys.platform", "linux"), patch("os.kill", side_effect=PermissionError("denied")):
@@ -121,20 +147,27 @@ class TestIsPidAlive:
 
 
 class TestProcStartTicks:
-    @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
-    def test_current_process_returns_value_on_linux(self):
-        result = cc_sessions._proc_start_ticks(os.getpid())
-        assert result is not None
-        assert result.isdigit()
+    """The first two read the live start through find_live_for_cwd (fleet_green leg 4):
+    our own session file carries a recorded procStart, and the listing keeps it
+    only when the value read back from /proc agrees. Proof: mutants of the read."""
+
+    @staticmethod
+    def _kept(tmp_path, recorded: str) -> bool:
+        s = {"pid": os.getpid(), "sessionId": "own", "cwd": str(tmp_path / "hooks"), "procStart": recorded}
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path):
+            return [r["sessionId"] for r in cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))] == ["own"]
 
     @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
-    def test_matches_raw_proc_stat_field(self):
-        result = cc_sessions._proc_start_ticks(os.getpid())
-        from pathlib import Path
+    def test_current_process_returns_value_on_linux(self, tmp_path):
+        # A value was read: an unreadable start would fall back to keeping it.
+        assert self._kept(tmp_path, "not-a-tick") is False
 
-        raw = Path(f"/proc/{os.getpid()}/stat").read_text(encoding="utf-8")
+    @pytest.mark.skipif(sys.platform != "linux", reason="reads the real /proc filesystem")
+    def test_matches_raw_proc_stat_field(self, tmp_path):
+        raw = (cc_sessions.Path("/proc") / str(os.getpid()) / "stat").read_text(encoding="utf-8")
         expected = raw.rsplit(")", 1)[1].split()[19]
-        assert result == expected
+        assert self._kept(tmp_path, expected) is True
 
     def test_non_linux_returns_none(self):
         with patch("sys.platform", "win32"):
@@ -146,23 +179,13 @@ class TestProcStartTicks:
 
 
 class TestSessionPidMatches:
-    def test_no_procstart_recorded_passes(self):
-        assert cc_sessions._session_pid_matches({"pid": os.getpid()}) is True
+    """Four units moved 2026-09-28: their answers are read through find_live_for_cwd
+    (TestFindLiveForCwd), the units archived in tests/.archive. The non-int guard
+    stays: find_live_for_cwd hands the pid to the liveness check first, so no
+    public route reaches it."""
 
     def test_non_int_pid_passes(self):
         assert cc_sessions._session_pid_matches({"pid": "not-an-int", "procStart": "123"}) is True
-
-    def test_matching_procstart_passes(self):
-        with patch.object(cc_sessions, "_proc_start_ticks", return_value="11277752"):
-            assert cc_sessions._session_pid_matches({"pid": 123, "procStart": "11277752"}) is True
-
-    def test_mismatched_procstart_fails(self):
-        with patch.object(cc_sessions, "_proc_start_ticks", return_value="99999999"):
-            assert cc_sessions._session_pid_matches({"pid": 123, "procStart": "11277752"}) is False
-
-    def test_unreadable_live_start_falls_back_to_pass(self):
-        with patch.object(cc_sessions, "_proc_start_ticks", return_value=None):
-            assert cc_sessions._session_pid_matches({"pid": 123, "procStart": "11277752"}) is True
 
 
 class TestReadAllSessions:
@@ -280,6 +303,28 @@ class TestFindLiveForCwd:
         assert len(result) == 1
         assert result[0]["sessionId"] == "no-procstart"
 
+    def test_unreadable_live_start_falls_back_to_liveness(self, tmp_path):
+        """A recorded procStart the host cannot read back is not a mismatch.
+
+        Moved here from the _session_pid_matches unit (fleet_green leg 4) so the
+        fallback is read through find_live_for_cwd. Proof: the mutant that
+        answers False on an unreadable start.
+        """
+        s = {
+            "pid": os.getpid(),
+            "sessionId": "unreadable",
+            "cwd": str(tmp_path / "hooks"),
+            "kind": "interactive",
+            "procStart": "11277752",
+        }
+        (tmp_path / f"{os.getpid()}.json").write_text(json.dumps(s), encoding="utf-8")
+        with (
+            patch.object(cc_sessions, "CC_SESSIONS_DIR", tmp_path),
+            patch.object(cc_sessions, "_proc_start_ticks", return_value=None),
+        ):
+            result = cc_sessions.find_live_for_cwd(str(tmp_path / "hooks"))
+        assert [r["sessionId"] for r in result] == ["unreadable"]
+
 
 class TestFindOccupant:
     def test_no_occupant_when_free(self, tmp_path):
@@ -364,20 +409,45 @@ class TestReclaim:
 
 
 class TestSessionHelpers:
-    def test_session_branch(self):
-        assert cc_sessions._session_branch({"cwd": "/tmp/project/src/aipass/hooks"}) == "hooks"
+    """Branch and short id, read where a caller outside the module meets them: the listing line.
 
-    def test_session_branch_empty_cwd(self):
-        assert cc_sessions._session_branch({"cwd": ""}) == "?"
+    `drone @hooks sessions` prints one line per session file as
+    PID · branch · short-id · kind · age, so each helper's answer is pinned
+    between its two separators. Green from their first run; their proof is a
+    mutant of each helper (fleet_green leg 4).
+    """
 
-    def test_session_short_id(self):
-        assert cc_sessions._session_short_id({"sessionId": "abcdef1234567890"}) == "abcdef12"
+    @staticmethod
+    def _listing(tmp_path, capsys, session: dict) -> str:
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+        (sessions_dir / "999999999.json").write_text(json.dumps(session), encoding="utf-8")
+        with patch.object(cc_sessions, "CC_SESSIONS_DIR", sessions_dir):
+            assert cc_sessions.handle_command("sessions", []) is True
+        return capsys.readouterr().err
 
-    def test_session_short_id_short(self):
-        assert cc_sessions._session_short_id({"sessionId": "abc"}) == "abc"
+    def test_session_branch(self, tmp_path, capsys):
+        cwd = tmp_path / "project" / "src" / "aipass" / "hooks"
+        err = self._listing(tmp_path, capsys, {"pid": 999999999, "cwd": str(cwd), "kind": "interactive"})
+        assert "PID 999999999 · hooks · " in err
 
-    def test_session_short_id_missing(self):
-        assert cc_sessions._session_short_id({}) == ""
+    def test_session_branch_empty_cwd(self, tmp_path, capsys):
+        err = self._listing(tmp_path, capsys, {"pid": 999999999, "cwd": "", "kind": "interactive"})
+        assert "PID 999999999 · ? · " in err
+
+    def test_session_short_id(self, tmp_path, capsys):
+        session = {"pid": 999999999, "cwd": "", "sessionId": "abcdef1234567890", "kind": "interactive"}
+        err = self._listing(tmp_path, capsys, session)
+        assert " · abcdef12 · interactive · " in err
+
+    def test_session_short_id_short(self, tmp_path, capsys):
+        session = {"pid": 999999999, "cwd": "", "sessionId": "abc", "kind": "interactive"}
+        err = self._listing(tmp_path, capsys, session)
+        assert " · abc · interactive · " in err
+
+    def test_session_short_id_missing(self, tmp_path, capsys):
+        err = self._listing(tmp_path, capsys, {"pid": 999999999, "cwd": "", "kind": "interactive"})
+        assert "PID 999999999 · ? ·  · interactive · " in err
 
 
 class TestIntrospection:

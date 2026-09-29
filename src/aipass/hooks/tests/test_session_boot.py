@@ -76,13 +76,27 @@ class TestResolveClaudeBinary:
 
 
 class TestFindTmux:
-    def test_found(self):
-        with patch("shutil.which", return_value="/usr/bin/tmux"):
-            assert session_boot._find_tmux() == "/usr/bin/tmux"
+    def test_found(self, tmp_path, monkeypatch):
+        """PATH is a real world under tmp_path holding a tmux, not a patched shutil.which.
 
-    def test_not_found(self):
-        with patch("shutil.which", return_value=None):
-            assert session_boot._find_tmux() is None
+        Both a bare `tmux` (POSIX) and `tmux.exe` (Windows, via PATHEXT) are laid down.
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        for name in ("tmux", "tmux.exe"):
+            exe = bin_dir / name
+            exe.write_text("", encoding="utf-8")
+            exe.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bin_dir))
+        monkeypatch.setenv("PATHEXT", ".EXE")
+        found = session_boot._find_tmux()
+        assert found is not None
+        assert Path(found).parent == bin_dir
+        assert Path(found).stem == "tmux"
+
+    def test_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PATH", str(tmp_path))
+        assert session_boot._find_tmux() is None
 
 
 class TestTmuxSessionExists:
@@ -949,16 +963,17 @@ class TestExecInTmux:
 
 
 class TestIsSessionFilePresent:
-    def test_present(self, tmp_path):
+    def test_present(self, tmp_path, monkeypatch):
+        """Home is a real world under tmp_path (env redirect), not a patched Path.home."""
         sessions_dir = tmp_path / ".claude" / "sessions"
         sessions_dir.mkdir(parents=True)
         (sessions_dir / "1234.json").write_text("{}", encoding="utf-8")
-        with patch.object(session_boot.Path, "home", return_value=tmp_path):
-            assert session_boot._is_session_file_present(1234) is True
+        set_home(monkeypatch, tmp_path)
+        assert session_boot._is_session_file_present(1234) is True
 
-    def test_absent(self, tmp_path):
-        with patch.object(session_boot.Path, "home", return_value=tmp_path):
-            assert session_boot._is_session_file_present(1234) is False
+    def test_absent(self, tmp_path, monkeypatch):
+        set_home(monkeypatch, tmp_path)
+        assert session_boot._is_session_file_present(1234) is False
 
     def test_none_pid(self):
         assert session_boot._is_session_file_present(None) is False

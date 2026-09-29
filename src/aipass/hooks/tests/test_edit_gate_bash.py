@@ -228,14 +228,14 @@ class TestAdminIdentityIsVerifiedNotClaimed:
 
     def test_an_unimportable_rail_fails_closed(self, sibling_projects: dict):
         """Only the rail is missing. Since 2026-09-18 the fence itself is a call-time import too."""
-        real = edit_gate.importlib.import_module
+        real = edit_gate._import_module
 
         def _no_rail(name: str):
             if name.endswith("admin_seat") or name.startswith("aipass.ai_mail"):
                 raise ImportError("no ai_mail")
             return real(name)
 
-        with patch.object(edit_gate.importlib, "import_module", side_effect=_no_rail):
+        with patch.object(edit_gate, "_import_module", side_effect=_no_rail):
             result = _run(sibling_projects["admin_seat"], file_path=sibling_projects["foreign_file"], tool="Edit")
         assert _blocked(result)
 
@@ -394,7 +394,7 @@ class TestScriptedLaneDoesNotOverreach:
         assert self._run_plain(sibling_projects, "")["exit_code"] == 0
 
     def test_a_parser_failure_allows_and_says_so(self, sibling_projects: dict):
-        with patch.object(edit_gate.importlib, "import_module", side_effect=RuntimeError("boom")):
+        with patch.object(edit_gate, "_import_module", side_effect=RuntimeError("boom")):
             result = self._run_plain(sibling_projects, f"sed -i s/a/b/ {sibling_projects['foreign_file']}")
         assert result["exit_code"] == 0
 
@@ -402,7 +402,8 @@ class TestScriptedLaneDoesNotOverreach:
         """A fence that cannot locate a boundary must not invent one."""
         loose = tmp_path / "loose"
         loose.mkdir()
-        assert _run(str(loose), command="sed -i s/a/b/ /tmp/whatever.txt")["exit_code"] == 0
+        target = (tmp_path / "whatever.txt").as_posix()
+        assert _run(str(loose), command=f"sed -i s/a/b/ {target}")["exit_code"] == 0
 
     def test_an_interpreter_reading_another_branch_is_allowed(self, registered_projects: dict):
         """Inside one project the branch fence convicts on write grammar only.

@@ -1,12 +1,12 @@
 # =================== AIPass ====================
 # Name: edit_gate.py
-# Version: 1.16.0
+# Version: 1.16.1
 # Description: Cross-project and who-owns-it (tool + scripted, modules/write_ownership), inbox and
 #              shell-to-memory write protection (PreToolUse), plus the shell-memory tripwire
 # Branch: hooks
 # Layer: apps/handlers/security
 # Created: 2026-05-21
-# Modified: 2026-09-18
+# Modified: 2026-09-28
 # =============================================
 
 """Blocks unsafe edits: inbox, cross-project, cross-branch and shell-to-memory writes, daemon confinement, diagnostics
@@ -83,9 +83,20 @@ def _entry_number(entry: dict) -> int | None:
     return None
 
 
+def _import_module(name: str) -> Any:
+    """Import a module this gate reads at call time.
+
+    A seam: the tests are the reason it exists. They replace this function by name
+    in place of patching importlib.import_module, which replaces it process-wide.
+    It changes no verdict. The decision is hooks', leg 4.
+    """
+    load = importlib.import_module
+    return load(name)
+
+
 def _ownership() -> Any:
     """modules/write_ownership, reached at call time: a handler never imports a module at import time."""
-    return importlib.import_module("aipass.hooks.apps.modules.write_ownership")
+    return _import_module("aipass.hooks.apps.modules.write_ownership")
 
 
 def _refuse(reason: str) -> dict:
@@ -128,7 +139,7 @@ def _is_admin_seat(cwd: str) -> bool:
         True when the grant verifies, False on every doubt.
     """
     try:
-        admin = importlib.import_module("aipass.hooks.apps.modules.admin_seat")
+        admin = _import_module("aipass.hooks.apps.modules.admin_seat")
     except Exception as exc:
         # The delegation must not become a way IN. Reaching the rail through a
         # second module adds a second import that can fail, and an exemption
@@ -197,7 +208,7 @@ def _bash_write_targets(cwd: str, command: str) -> list[tuple[Path, str]]:
     if not command:
         return []
     try:
-        bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+        bw = _import_module("aipass.hooks.apps.modules.bash_writes")
         return bw.write_targets(command, cwd)
     except Exception as exc:
         logger.warning("[HOOKS] edit_gate: bash write-target scan failed (allowing): %s", exc)
@@ -304,7 +315,7 @@ def _memory_service_reachable() -> bool:
     `aipass init` projects, which have no @memory (docs/edit_gate.md).
     """
     try:
-        importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        _import_module("aipass.memory.apps.handlers.json.entry_limits")
         return True
     except Exception as exc:  # any import failure means "not reachable here"
         logger.info("[HOOKS] edit_gate: @memory is not reachable from this project (%s)", exc)
@@ -761,7 +772,7 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
         todos = after.get("todos")
         if not isinstance(todos, list):
             return ""
-        cl = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
+        cl = _import_module("aipass.memory.apps.handlers.json.config_loader")
         configured = cl.get_todos_count(branch)
         limit = configured if configured is not None else _TODOS_COUNT_FALLBACK
         count = len(todos)
@@ -778,7 +789,7 @@ def _todos_count_advisory(after: dict, branch: str) -> str:
                 f"next rollover (PreCompact, or drone @memory rollover run --branch @{branch}) to "
                 f"{_TODO_BACKLOG.format(branch=branch)}; drone @memory todo backlog @{branch} reads it."
             )
-        cadence = importlib.import_module("aipass.hooks.apps.modules.cadence")
+        cadence = _import_module("aipass.hooks.apps.modules.cadence")
         if not cadence.should_fire_advisory("todos_count"):
             # debug, not info: the condition is unchanged and already recorded
             # by the emission that did fire. Volume is the defect here.
@@ -881,7 +892,7 @@ def _check_session_counts(branch: str, file_stem: str, entries: list, section_cf
 def _check_section_counts(after: dict, branch: str, file_stem: str) -> None:
     """Warn (never block) when rolling sections exceed their configured entry-count cap."""
     try:
-        cl = importlib.import_module("aipass.memory.apps.handlers.json.config_loader")
+        cl = _import_module("aipass.memory.apps.handlers.json.config_loader")
         roll = cl.section("rollover")
         branch_cfg = roll.get("per_branch", {}).get(branch) or roll.get("defaults", {})
         file_cfg = branch_cfg.get(file_stem, {})
@@ -1030,7 +1041,7 @@ def _check_trinity_change(fp: Path, tool_name: str, tool_input: dict, branch: st
         if block:
             return block
 
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
         limits = el.load_entry_limits(branch)
         if limits.get("enabled"):
             block = _evaluate_limits(before, after, limits, el)
@@ -1133,7 +1144,7 @@ def _read_pending(path: Path) -> dict:
 
 def _runs_memory_verb(command: str, cwd: str) -> bool:
     """True when some segment of *command* is a drone @memory or @spawn verb, the sanctioned writers."""
-    bw = importlib.import_module("aipass.hooks.apps.modules.bash_writes")
+    bw = _import_module("aipass.hooks.apps.modules.bash_writes")
     for segment, _hits in bw.write_targets_by_segment(command, cwd):
         words = list(segment)
         while words and _ENV_ASSIGNMENT.match(words[0]):
@@ -1153,7 +1164,7 @@ def _measure_memory_file(path: Path) -> list[str]:
     if not path.is_file():
         return [f"  {path.name} no longer exists."]
     if path.name in _FILE_BUDGET_FILES:
-        el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+        el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -1167,7 +1178,7 @@ def _measure_memory_file(path: Path) -> list[str]:
         return [f"  {path.name} no longer parses as JSON: {exc}"]
     if not isinstance(doc, dict):
         return [f"  {path.name} is no longer a JSON object."]
-    el = importlib.import_module("aipass.memory.apps.handlers.json.entry_limits")
+    el = _import_module("aipass.memory.apps.handlers.json.entry_limits")
     limits = el.load_entry_limits(path.parent.parent.name)
     if not limits.get("enabled"):
         return []
@@ -1269,8 +1280,10 @@ def handle(hook_data: dict) -> dict:
         if not file_path.endswith(".py"):
             return {"stdout": "", "exit_code": 0}
 
-        ds = importlib.import_module("aipass.hooks.apps.modules.diagnostics_state")
-        state = ds.load()
+        # Each seat reads its own diagnostics state alone (devpulse's decision A, leg 4).
+        ds = _import_module("aipass.hooks.apps.modules.diagnostics_state")
+        seat = ds.seat_key(hook_data)
+        state = ds.load_seat(seat) or {}
 
         errored_file = state.get("file", "")
         errors = state.get("errors", [])
@@ -1301,7 +1314,7 @@ def handle(hook_data: dict) -> dict:
         fresh = ds.revalidate(errored)
         if fresh is not None:
             if not fresh:
-                ds.clear()
+                ds.clear_seat(seat)
                 return {"stdout": "", "exit_code": 0}
             errors = fresh
 

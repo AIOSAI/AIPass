@@ -401,30 +401,31 @@ class TestHandleCommand:
 
 
 class TestRenderResults:
-    def test_renders_pass(self):
-        from io import StringIO
+    def test_renders_pass(self, capsys):
+        """A pass prints the check glyph and the word passed on the real console (stderr).
 
-        from rich.console import Console
+        The product paints the headline green on a pass and red on a failure; plain
+        text loses that colour, so the glyph that differs (✓ against ✗) is pinned.
+        Proof the pin bites: a mutant that swaps the pass line's ✓ for ✗.
+        """
+        wire_verify._render_results({"ok": True, "errors": [], "warnings": [], "info": ["x"]})
+        err = capsys.readouterr().err
+        assert "✓ Wire check passed" in err
+        assert "✗" not in err
+        assert "OK     x" in err
 
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
-        with patch.object(wire_verify, "CONSOLE", test_console):
-            wire_verify._render_results({"ok": True, "errors": [], "warnings": [], "info": ["x"]})
-        output = buf.getvalue()
-        assert "passed" in output
+    def test_renders_fail(self, capsys):
+        """A failure prints the cross glyph, FAILED, and the error under the ERROR word.
 
-    def test_renders_fail(self):
-        from io import StringIO
-
-        from rich.console import Console
-
-        buf = StringIO()
-        test_console = Console(file=buf, force_terminal=False)
-        with patch.object(wire_verify, "CONSOLE", test_console):
-            wire_verify._render_results({"ok": False, "errors": ["bad"], "warnings": [], "info": []})
-        output = buf.getvalue()
-        assert "FAILED" in output
-        assert "bad" in output
+        Plain text loses the red of the headline and of the ERROR tag; the cross
+        glyph (✗ against ✓) and the word ERROR are what still tell it from a pass.
+        Proof the pin bites: a mutant that swaps the fail line's ✗ for ✓.
+        """
+        wire_verify._render_results({"ok": False, "errors": ["bad"], "warnings": [], "info": []})
+        err = capsys.readouterr().err
+        assert "✗ Wire check FAILED" in err
+        assert "✓" not in err
+        assert "ERROR  bad" in err
 
 
 class TestPrintIntrospection:

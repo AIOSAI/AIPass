@@ -53,6 +53,7 @@
 # seedgo: no-test-needed(generated) — bash_writes.write_targets' command parse, owned by tests/test_edit_gate_bash.py
 
 import json
+import os
 import tempfile
 from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
@@ -865,6 +866,46 @@ class TestNamingAPathIsNotWritingIt:
         assert held, "the path must still be REPORTED — only this gate stands down on it"
         assert all(bash_writes.HELD_BY_INTERPRETER in why for _target, why in held)
         assert all(bash_writes.NO_WRITE_VERB in why for _target, why in held)
+
+
+class TestAnOperandPathlibCannotExpand:
+    """devpulse's decision C, leg 4: a tilde word pathlib cannot expand, in bash_writes._resolve.
+
+    The shell leaves ~nosuchuser as it is when no such user exists, so the write lands
+    under the working directory in a directory of that literal name. Before leg 4 the
+    operand was dropped and neither fence saw a target. Where the platform does expand
+    the word (Windows builds ~user from the profile directory and never refuses), the
+    reader names what the platform names, so the test asks the platform first.
+    """
+
+    OPERAND = "~nosuchuser/tests/test_brand_new.py"
+
+    def _expected(self, seat: str) -> Path:
+        """The shell's reading: os.path leaves an unknown user's word as it is, as bash does."""
+        return Path(seat) / os.path.expanduser(self.OPERAND)
+
+    def test_a_redirect_into_an_unknown_users_home_names_the_target_under_cwd(self, project: dict):
+        _policy(project)
+        expected = self._expected(project["seat"])
+        command = f"echo x > {self.OPERAND}"
+
+        targets = [target for target, _ in bash_writes.write_targets(command, project["seat"])]
+        result = _run(project["seat"], command=command)
+
+        assert targets == [expected]
+        assert _blocked(result) is (Path(project["seat"]) in expected.parents)
+
+    def test_the_same_word_for_an_existing_file_is_judged_as_an_edit(self, project: dict):
+        """The path pin: the literal directory exists under the seat, so the write edits a test."""
+        _policy(project, block_test_edits=True)
+        expected = self._expected(project["seat"])
+        literal = Path(project["seat"]) / self.OPERAND
+        literal.parent.mkdir(parents=True)
+        literal.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+
+        result = _run(project["seat"], command=f"echo x >> {self.OPERAND}")
+
+        assert _blocked(result) is (expected == literal)
 
 
 class TestTheTemplatePointer:

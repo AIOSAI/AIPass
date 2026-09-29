@@ -21,7 +21,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from aipass.hooks.apps.handlers.security import edit_gate
-from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits, handle
+from aipass.hooks.apps.handlers.security.edit_gate import handle
 from aipass.hooks.apps.modules import cadence
 
 
@@ -145,12 +145,19 @@ _ROLLOVER_CONFIG_FLEET = {
 }
 
 
-# Captured BEFORE any patch: the routers below fall through to the real
-# importer, and calling importlib.import_module by name there re-enters the
-# patch and recurses until the stack dies ("maximum recursion depth exceeded"
-# surfacing as a fail-open advisory). Any module the handler imports that the
-# router does not name would hit it.
+# The real importer the routers below fall through to. While the tests patched
+# importlib.import_module itself, a call by name there re-entered the patch and
+# recursed; the routers now stand at the gate's seam, so importlib stays real.
 _REAL_IMPORT_MODULE = importlib.import_module
+
+
+def _imports_via_seam(side_effect):
+    """Route the gate's call-time imports through its own seam, edit_gate._import_module.
+
+    Patching importlib.import_module replaced it process-wide: every module the
+    handler reached (and pytest itself) drew the mock. The seam is the gate's alone.
+    """
+    return patch.object(edit_gate, "_import_module", side_effect=side_effect)
 
 
 _OWNERSHIP_MODULE = "aipass.hooks.apps.modules.write_ownership"
@@ -216,7 +223,7 @@ class TestTrinityWriteClean:
             }
         )
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -228,7 +235,7 @@ class TestTrinityWriteClean:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "short observation"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -244,7 +251,7 @@ class TestTrinityWriteOverLimitEnforced:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"learn_1": "x" * 201}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -260,7 +267,7 @@ class TestTrinityWriteOverLimitEnforced:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "x" * 301}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -274,7 +281,7 @@ class TestTrinityWriteOverLimitEnforced:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": "x" * 201}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -288,7 +295,7 @@ class TestTrinityWriteOverLimitEnforced:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "x" * 601}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -302,7 +309,7 @@ class TestTrinityWriteOverLimitEnforced:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 210}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         parsed = json.loads(result["stdout"])
@@ -322,7 +329,7 @@ class TestRejectionNamesTheCutPoint:
     def _reason(self, tmp_path, content: dict) -> str:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, json.dumps(content), cwd=cwd))
         assert result["exit_code"] == 2, "the block itself must not change"
         return json.loads(result["stdout"])["reason"]
@@ -353,15 +360,25 @@ class TestRejectionNamesTheCutPoint:
         assert "301/300 chars (+1)" in reason
         assert f'kept: "{"é" * 300}" | over: "Z"' in reason
 
-    def test_a_record_that_disagrees_with_the_document_draws_no_cut(self):
+    def test_a_record_that_disagrees_with_the_document_draws_no_cut(self, tmp_path):
         """A cut on text the record did not measure would point at the wrong characters."""
-        el = MagicMock()
-        el.changed_entries.return_value = [
-            {"entry_type": "sessions", "container": "sessions", "key": "0", "length": 999, "cap": 300, "over_by": 699}
-        ]
-        block = _evaluate_limits({}, {"sessions": [{"summary": "k" * 310}]}, _TEST_LIMITS_ENFORCE, el)
-        assert block is not None
-        reason = json.loads(block["stdout"])["reason"]
+        el = _mock_entry_limits(_TEST_LIMITS_ENFORCE)
+        record = {
+            "entry_type": "sessions",
+            "container": "sessions",
+            "key": "0",
+            "length": 999,
+            "cap": 300,
+            "over_by": 699,
+        }
+        el.configure_mock(changed_entries=MagicMock(return_value=[record]))
+        file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
+        cwd = str(tmp_path / "src" / "aipass" / "hooks")
+        content = json.dumps({"sessions": [{"summary": "k" * 310}]})
+        with _imports_via_seam(_fence_real(el)):
+            result = handle(_hook_data(file_path, content, cwd=cwd))
+        assert result["exit_code"] == 2
+        reason = json.loads(result["stdout"])["reason"]
         assert "999/300 chars (+699)" in reason
         assert "kept:" not in reason
 
@@ -369,7 +386,7 @@ class TestRejectionNamesTheCutPoint:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 200 + "past"}})
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
         assert result["exit_code"] == 0
         assert '| over: "past"' in caplog.text
@@ -423,7 +440,7 @@ class TestShellMemoryTripwire:
     def _around(self, seat, command, during=None):
         """Both halves of one call, with *during* standing in for what the shell did."""
         data = self._data(seat, command)
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             assert edit_gate.tripwire_snapshot(data) == self.SILENT, "the snapshot never blocks"
             if during:
                 during()
@@ -486,7 +503,7 @@ class TestShellMemoryTripwire:
         seat = self._seat(tmp_path, monkeypatch)
         first = self._data(seat, self.RESIDUAL, tool_use_id="toolu_first")
         second = self._data(seat, "drone @ai_mail inbox", tool_use_id="toolu_second")
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             edit_gate.tripwire_snapshot(first)
             self._over_cap(seat)
             edit_gate.tripwire_snapshot(second)
@@ -498,7 +515,7 @@ class TestShellMemoryTripwire:
         seat = self._seat(tmp_path, monkeypatch)
         before = self._data(seat, self.RESIDUAL)
         after = {**before, "cwd": str(tmp_path)}
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             edit_gate.tripwire_snapshot(before)
             self._over_cap(seat)
             assert "304/300" in self._context(edit_gate.tripwire(after))
@@ -506,14 +523,14 @@ class TestShellMemoryTripwire:
     def test_a_call_with_no_snapshot_says_nothing_and_logs_why(self, tmp_path, monkeypatch, caplog):
         caplog.set_level(logging.INFO)
         seat = self._seat(tmp_path, monkeypatch)
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             assert edit_gate.tripwire(self._data(seat, self.RESIDUAL)) == self.SILENT
         assert "no snapshot for toolu_a" in caplog.text
 
     def test_the_pending_snapshots_stay_bounded(self, tmp_path, monkeypatch):
         """A call whose PostToolUse never fires (a later gate refused it) must not grow the file."""
         seat = self._seat(tmp_path, monkeypatch)
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             for index in range(20):
                 edit_gate.tripwire_snapshot(self._data(seat, "ls", tool_use_id=f"toolu_{index}"))
         pending = json.loads((tmp_path / "aipass-trinity-tripwire-session-1.json").read_text(encoding="utf-8"))
@@ -556,7 +573,7 @@ class TestTripwireWatchesEveryTrinityInTheProject:
             "session_id": "session-wide",
             "tool_use_id": "toolu_wide",
         }
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)):
             edit_gate.tripwire_snapshot(data)
             during()
             return edit_gate.tripwire(data)
@@ -684,7 +701,7 @@ class TestTrinityWriteOverLimitWarnOnly:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"learn_1": "x" * 250}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -696,7 +713,7 @@ class TestTrinityWriteOverLimitWarnOnly:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 250}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -767,7 +784,7 @@ class TestTrinityWriteFailOpen:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, "not valid json {{{", cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -779,7 +796,7 @@ class TestTrinityWriteFailOpen:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, "", cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -790,7 +807,7 @@ class TestTrinityWriteFailOpen:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 500}})
 
-        with patch("importlib.import_module", side_effect=ImportError("no module")):
+        with _imports_via_seam(ImportError("no module")):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -805,7 +822,7 @@ class TestTrinityWriteCharNotByte:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "—" * 200}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -816,7 +833,7 @@ class TestTrinityWriteCharNotByte:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "—" * 201}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -834,7 +851,7 @@ class TestTrinityEditClean:
         existing = {"key_learnings": {"k1": "old value"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -859,7 +876,7 @@ class TestTrinityEditOverLimit:
         existing = {"key_learnings": {"k1": "short"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -882,7 +899,7 @@ class TestTrinityEditOverLimit:
         existing = {"key_learnings": {"k1": "short"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -903,7 +920,7 @@ class TestTrinityEditOverLimit:
         existing = {"key_learnings": {"k1": "a" * 100}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -929,7 +946,7 @@ class TestTrinityEditFailOpen:
         existing = {"key_learnings": {"k1": "hello"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -949,7 +966,7 @@ class TestTrinityEditFailOpen:
         existing = {"key_learnings": {"k1": "hello"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -969,7 +986,7 @@ class TestTrinityEditFailOpen:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         Path(file_path).write_text('{"key_learnings": {"k1": "hello}}', encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(file_path, tool_name="Edit", cwd=cwd, old_string='"hello}}', new_string='"hello"}}')
             )
@@ -981,7 +998,7 @@ class TestTrinityEditFailOpen:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1005,7 +1022,7 @@ class TestTrinityEditReplaceAll:
         existing = {"key_learnings": {"k1": "aaa", "k2": "aaa"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1028,7 +1045,7 @@ class TestTrinityEditReplaceAll:
         existing = {"key_learnings": {"k1": "aaa", "k2": "bbb"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1053,7 +1070,7 @@ class TestTrinityEditCharNotByte:
         existing = {"key_learnings": {"k1": "short"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1073,7 +1090,7 @@ class TestTrinityEditCharNotByte:
         existing = {"key_learnings": {"k1": "short"}}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1101,7 +1118,7 @@ class TestTrinityMultiEdit:
             {"old_string": '"aaa"', "new_string": '"new_a"'},
             {"old_string": '"bbb"', "new_string": '"new_b"'},
         ]
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 {
                     "tool_name": "MultiEdit",
@@ -1123,7 +1140,7 @@ class TestTrinityMultiEdit:
             {"old_string": '"aaa"', "new_string": '"short"'},
             {"old_string": '"bbb"', "new_string": '"' + "x" * 250 + '"'},
         ]
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 {
                     "tool_name": "MultiEdit",
@@ -1147,7 +1164,7 @@ class TestTrinityMultiEdit:
             {"old_string": '"alpha"', "new_string": '"beta"'},
             {"old_string": '"beta"', "new_string": '"gamma"'},
         ]
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 {
                     "tool_name": "MultiEdit",
@@ -1169,7 +1186,7 @@ class TestTrinityMultiEdit:
             {"old_string": '"hello"', "new_string": '"world"'},
             {"old_string": '"NONEXISTENT"', "new_string": '"' + "x" * 500 + '"'},
         ]
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 {
                     "tool_name": "MultiEdit",
@@ -1190,7 +1207,7 @@ class TestTrinityMultiEdit:
         edits = [
             {"old_string": '"zzz"', "new_string": '"' + "x" * 250 + '"', "replace_all": True},
         ]
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 {
                     "tool_name": "MultiEdit",
@@ -1235,7 +1252,7 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
         }
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1260,7 +1277,7 @@ class TestTrinityEditUnrelatedFieldOnFatFile:
         }
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1295,7 +1312,7 @@ class TestTrinityEditUnchangedLegacy:
         }
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1318,7 +1335,7 @@ class TestTrinityWriteDisabled:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "x" * 500}})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_DISABLED))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_DISABLED))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1346,7 +1363,7 @@ class TestTrinityWriteUnchangedLegacy:
         after = {"key_learnings": {"old_fat": "x" * 500, "new_clean": "short"}}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0, "a rollover-shaped write was refused for what it carried"
@@ -1362,7 +1379,7 @@ class TestTrinityWriteUnchangedLegacy:
         after = {"key_learnings": {"old_fat": "y" * 500}}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1379,7 +1396,7 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(11)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1392,7 +1409,7 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(5)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1404,7 +1421,7 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(10)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1418,9 +1435,8 @@ class TestTrinityTodosCountAdvisory:
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
         new_todos = [{"task": f"todo {i}"} for i in range(11)]
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN),
         ):
             result = handle(
                 _hook_data(
@@ -1442,9 +1458,8 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(15)]})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_ENFORCE),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1463,9 +1478,8 @@ class TestTrinityTodosCountAdvisory:
             }
         )
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1491,7 +1505,7 @@ class TestTrinityTodosCountAdvisory:
                 raise ImportError("no config_loader")
             return importlib.import_module(name)
 
-        with patch("importlib.import_module", side_effect=_side_effect):
+        with _imports_via_seam(_side_effect):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1508,9 +1522,8 @@ class TestTrinityTodosCountAdvisory:
             }
         )
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_ENFORCE),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1524,9 +1537,8 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(12)]})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1547,9 +1559,8 @@ class TestTrinityTodosCountAdvisory:
             },
         }
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1562,7 +1573,7 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(13)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         stdout = _advisory_context(result)
@@ -1591,9 +1602,8 @@ class TestTrinityTodosCountAdvisory:
             },
         }
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1607,9 +1617,8 @@ class TestTrinityTodosCountAdvisory:
         content = json.dumps({"todos": [{"task": f"todo {i}"} for i in range(11)]})
         rollover_cfg = {"rollover": {"defaults": {"local": {"todos": {"count": "ten"}}}, "per_branch": {}}}
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1623,9 +1632,8 @@ class TestTrinityTodosCountAdvisory:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": {"k1": "short"}})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1646,7 +1654,7 @@ class TestTrinityNewestFirst:
         after = {"sessions": [{"number": 6, "summary": "new"}, {"number": 5, "summary": "old"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1662,7 +1670,7 @@ class TestTrinityNewestFirst:
         after = {"sessions": [{"number": 5, "summary": "old"}, {"number": 6, "summary": "new"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1680,7 +1688,7 @@ class TestTrinityNewestFirst:
         after = {"sessions": [{"number": 5, "summary": "duplicate number"}, {"number": 5, "summary": "old"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1703,7 +1711,7 @@ class TestTrinityNewestFirst:
         }
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1716,7 +1724,7 @@ class TestTrinityNewestFirst:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"number": 1, "summary": "first"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1731,7 +1739,7 @@ class TestTrinityNewestFirst:
         after = {"sessions": [{"number": 6, "summary": "keep"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1746,7 +1754,7 @@ class TestTrinityNewestFirst:
         after = {"sessions": [{"number": 5, "summary": "old"}, {"number": 6, "summary": "new"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_DISABLED))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_DISABLED))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1758,7 +1766,7 @@ class TestTrinityNewestFirst:
         existing = {"sessions": [{"number": 5, "summary": "old"}], "todos": [{"task": "old todo"}]}
         Path(file_path).write_text(json.dumps(existing), encoding="utf-8")
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(
                 _hook_data(
                     file_path,
@@ -1792,7 +1800,7 @@ class TestTrinityLegacyNumberSchema:
         }
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1813,7 +1821,7 @@ class TestTrinityLegacyNumberSchema:
         }
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1834,7 +1842,7 @@ class TestTrinityLegacyNumberSchema:
         }
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1856,7 +1864,7 @@ class TestTrinityLegacyNumberSchema:
         }
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1871,7 +1879,7 @@ class TestTrinityLegacyNumberSchema:
         after = {"sessions": [{"number": 6, "summary": "new"}, {"session_number": 5, "summary": "old"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1886,7 +1894,7 @@ class TestTrinityLegacyNumberSchema:
         after = {"sessions": [{"summary": "new"}, {"summary": "old"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1901,7 +1909,7 @@ class TestTrinityLegacyNumberSchema:
         after = {"sessions": [{"summary": "old"}, {"summary": "new"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1918,7 +1926,7 @@ class TestTrinityLegacyNumberSchema:
         after = {"sessions": [{"summary": "new"}, {"number": 5, "summary": "old"}]}
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -1941,7 +1949,7 @@ class TestTrinityLegacyNumberSchema:
         }
         content = json.dumps(after)
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1966,7 +1974,7 @@ class TestOverBudgetSeverity:
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(21)]})
 
         with caplog.at_level(logging.INFO):
-            with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+            with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
                 result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -1982,9 +1990,8 @@ class TestOverBudgetSeverity:
         content = json.dumps({"sessions": _regular_sessions(10) + _snapshot_sessions(5)})
 
         with caplog.at_level(logging.INFO):
-            with patch(
-                "importlib.import_module",
-                side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+            with _imports_via_seam(
+                _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
             ):
                 handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -1998,7 +2005,7 @@ class TestOverBudgetSeverity:
         content = json.dumps({"observations": [{"note": "n"} for _ in range(16)]})
 
         with caplog.at_level(logging.INFO):
-            with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+            with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
                 handle(_hook_data(file_path, content, cwd=cwd))
 
         records = self._over_budget_records(caplog)
@@ -2022,7 +2029,7 @@ class TestOverBudgetSeverity:
         content = json.dumps({"sessions": [{"summary": "x" * 5000}]})
 
         with caplog.at_level(logging.INFO):
-            with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+            with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
                 handle(_hook_data(file_path, content, cwd=cwd))
 
         over_limit = [r for r in caplog.records if "over-limit .trinity entry" in r.getMessage()]
@@ -2039,7 +2046,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(21)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2051,7 +2058,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"value": "v"} for _ in range(26)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2063,7 +2070,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"observations": [{"note": "n"} for _ in range(16)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2078,7 +2085,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(10)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2090,7 +2097,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(20)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2102,7 +2109,7 @@ class TestSectionCountGuard:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "s"} for _ in range(30)]})
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2120,7 +2127,7 @@ class TestSectionCountGuard:
             },
         }
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2144,7 +2151,7 @@ class TestSectionCountGuard:
                 raise ImportError("no config_loader")
             return importlib.import_module(name)
 
-        with patch("importlib.import_module", side_effect=_side_effect):
+        with _imports_via_seam(_side_effect):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2180,9 +2187,8 @@ class TestSessionSnapshotBudget:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(14) + _snapshot_sessions(2)})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2195,9 +2201,8 @@ class TestSessionSnapshotBudget:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(17) + _snapshot_sessions(2)})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2211,9 +2216,8 @@ class TestSessionSnapshotBudget:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(10) + _snapshot_sessions(5)})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2226,9 +2230,8 @@ class TestSessionSnapshotBudget:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(20) + _snapshot_sessions(6)})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2248,9 +2251,8 @@ class TestSessionSnapshotBudget:
         sessions = _regular_sessions(14) + _snapshot_sessions(2) + ["a bare string", None]
         content = json.dumps({"sessions": sessions})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2274,7 +2276,7 @@ class TestSessionSnapshotBudget:
             },
         }
 
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN, rollover_cfg)):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2290,9 +2292,8 @@ class TestSessionSnapshotBudget:
         learnings = [{"value": f"v{i}"} for i in range(15)] + [{"value": "odd one", "status": "auto-compact"}]
         content = json.dumps({"key_learnings": learnings})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2309,9 +2310,8 @@ class TestSectionCountWording:
         cwd = str(tmp_path / "src" / "aipass" / "devpulse")
         content = json.dumps({"sessions": _regular_sessions(17)})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2324,9 +2324,8 @@ class TestSectionCountWording:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": _regular_sessions(18)})
 
-        with patch(
-            "importlib.import_module",
-            side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
+        with _imports_via_seam(
+            _mock_importlib_modules(_TEST_LIMITS_WARN, _ROLLOVER_CONFIG_FLEET),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2347,7 +2346,7 @@ class TestSectionCountWording:
 
         with (
             caplog.at_level(logging.INFO),
-            patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)),
+            _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)),
         ):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
@@ -2372,7 +2371,7 @@ class TestTodosAdvisoryIsThrottled:
 
     def _advisory(self, turn):
         with (
-            patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)),
+            _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)),
             patch.object(cadence, "current_turn", return_value=turn),
         ):
             return edit_gate._todos_count_advisory(self._over_cap(), "hooks")
@@ -2411,7 +2410,7 @@ class TestTodosAdvisoryIsThrottled:
         """A quiet branch must not burn its one emission on nothing — the next
         real over-cap edit has to advise immediately."""
         with (
-            patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_WARN)),
+            _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_WARN)),
             patch.object(cadence, "current_turn", return_value=1),
         ):
             assert edit_gate._todos_count_advisory({"todos": [{"task": "one"}]}, "hooks") == ""
@@ -2431,7 +2430,7 @@ class TestThrottleScopeGuard:
         results = []
         for turn in (1, 2, 3):
             with (
-                patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_ENFORCE)),
+                _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_ENFORCE)),
                 patch.object(cadence, "current_turn", return_value=turn),
             ):
                 results.append(handle(_hook_data(file_path, content, cwd=cwd)))
@@ -2494,7 +2493,7 @@ class TestRenamedFieldDodge:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "learning": "x" * 500}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2, "renamed field dodged the cap"
@@ -2509,7 +2508,7 @@ class TestRenamedFieldDodge:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"number": 9, "date": "2026-08-25"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2, "missing field dodged the cap"
@@ -2527,7 +2526,7 @@ class TestRenamedFieldDodge:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "short"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -2538,7 +2537,7 @@ class TestRenamedFieldDodge:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-25", "value": "fine"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2549,7 +2548,7 @@ class TestRenamedFieldDodge:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "value": ""}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2576,7 +2575,7 @@ class TestRenamedFieldLegacyAsymmetry:
         # Same legacy entry, plus a NEW canonical one on top.
         content = json.dumps({"key_learnings": [{"number": 2, "date": "2026-08-25", "value": "new and legal"}, legacy]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0, "a write was refused for a drifted entry it did not author"
@@ -2590,7 +2589,7 @@ class TestRenamedFieldLegacyAsymmetry:
 
         edited = json.dumps({"key_learnings": [{"number": 1, "date": "2026-08-01", "learning": "y" * 500}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, edited, cwd=cwd))
 
         assert result["exit_code"] == 2, "an edited legacy entry kept its exemption"
@@ -2604,7 +2603,7 @@ class TestRenamedFieldLegacyAsymmetry:
 
         content = json.dumps({"key_learnings": [{"number": 2, "date": "2026-08-25", "learning": "z" * 500}, legacy]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2, "a NEW entry in the legacy shape inherited the exemption"
@@ -2619,7 +2618,7 @@ class TestUnreadableFieldWarnMode:
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "x" * 500}]})
 
         with caplog.at_level(logging.WARNING):
-            with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_WARN))):
+            with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_WARN))):
                 result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0
@@ -2638,7 +2637,7 @@ class TestUnmeasurableReasonIsRendered:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"number": 1, "summary": [{"title": "a", "detail": "b"}]}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -2667,7 +2666,7 @@ class TestNoDuplicateViolationLines:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 1, "learning": "x" * 500}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2
@@ -2685,7 +2684,7 @@ class TestNoDuplicateViolationLines:
             }
         )
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         reason = json.loads(result["stdout"])["reason"]
@@ -2698,7 +2697,7 @@ class TestNoDuplicateViolationLines:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"key_learnings": [{"number": 2, "value": "x" * 201}, {"number": 1, "learning": "short"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_LIST_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         reason = json.loads(result["stdout"])["reason"]
@@ -2777,7 +2776,7 @@ class TestCarriedDriftIsNotRefused:
             {"key_learnings": [{"number": 2, "date": "2026-08-27", "value": "clean"}, legacy], "todos": []}
         )
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0, "a write was refused for a drifted entry it did not author"
@@ -2802,7 +2801,7 @@ class TestCarriedDriftIsNotRefused:
             }
         )
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 0, "a drifted todo blocked a write to a different section"
@@ -2816,7 +2815,7 @@ class TestCarriedDriftIsNotRefused:
 
         content = json.dumps({"todos": [{"priority": "low", "status": "open", "chore": "brand new"}, drifted_todo]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2, "a NEW drifted todo inherited the on-disk exemption"
@@ -2829,7 +2828,7 @@ class TestCarriedDriftIsNotRefused:
 
         content = json.dumps({"todos": [{"priority": "medium", "status": "open", "chore": "new text"}]})
 
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_LIMITS_TODOS))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
 
         assert result["exit_code"] == 2, "an edited drifted todo kept its exemption"
@@ -2949,7 +2948,7 @@ class TestMemorysNewRefusalReasonsRender:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [entry]})
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(_TEST_LIMITS_FIELDS)):
+        with _imports_via_seam(_mock_importlib_modules(_TEST_LIMITS_FIELDS)):
             return handle(_hook_data(file_path, content, cwd=cwd))
 
     def test_an_unknown_field_names_the_shape_it_broke(self, tmp_path):
@@ -2990,7 +2989,7 @@ class TestPassportFileBudget:
     def _write(self, tmp_path, doc, limits=_TEST_LIMITS_ENFORCE):
         file_path = _make_trinity_path(tmp_path, "hooks", "passport.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
-        with patch("importlib.import_module", side_effect=_mock_importlib_modules(limits)):
+        with _imports_via_seam(_mock_importlib_modules(limits)):
             return handle(_hook_data(file_path, json.dumps(doc), cwd=cwd))
 
     def test_a_passport_over_its_file_budget_is_refused(self, tmp_path):
@@ -3032,7 +3031,7 @@ class TestTrinityRefusalsAreLogged:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         content = json.dumps({"sessions": [{"summary": "k" * 301}]})
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_ENFORCE))):
             result = handle(_hook_data(file_path, content, cwd=cwd))
         assert result["exit_code"] == 2
         assert "refused" in caplog.text
@@ -3043,7 +3042,7 @@ class TestTrinityRefusalsAreLogged:
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         Path(file_path).write_text(json.dumps({"sessions": [{"number": 5, "summary": "old"}]}), encoding="utf-8")
         after = {"sessions": [{"number": 5, "summary": "old"}, {"number": 6, "summary": "new"}]}
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, json.dumps(after), cwd=cwd))
         assert result["exit_code"] == 2
         assert "refused" in caplog.text
@@ -3053,7 +3052,7 @@ class TestTrinityRefusalsAreLogged:
         file_path = _make_trinity_path(tmp_path, "hooks", "local.json")
         cwd = str(tmp_path / "src" / "aipass" / "hooks")
         Path(file_path).write_text(json.dumps({"sessions": []}), encoding="utf-8")
-        with patch("importlib.import_module", side_effect=_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
+        with _imports_via_seam(_fence_real(_mock_entry_limits(_TEST_LIMITS_WARN))):
             result = handle(_hook_data(file_path, "{not json", cwd=cwd))
         assert result["exit_code"] == 2
         assert "refused" in caplog.text

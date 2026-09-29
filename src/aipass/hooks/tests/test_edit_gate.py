@@ -4,7 +4,7 @@
 # Description: Tests for edit_gate security handler
 # Branch: hooks
 # Created: 2026-05-21
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/security/edit_gate.py."""
@@ -15,13 +15,51 @@
 # seedgo: no-test-needed(stdlib) — tempfile.gettempdir's choice of directory, the stdlib's own
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from aipass.hooks.apps.handlers.lifecycle import auto_fix
 from aipass.hooks.apps.handlers.security.edit_gate import _evaluate_limits, handle
 from aipass.hooks.apps.modules import diagnostics_state as ds
+
+# A made-up session for the seat pins: no real session or agent id is written here.
+_SESSION = "a-test-session"
+_PYRIGHT_TIMES_OUT = subprocess.TimeoutExpired("pyright", 15)
+
+
+def _seat(agent: str = "", session: str = _SESSION) -> dict:
+    """The seat fields of a hook payload: a session, and an agent id for a sub-agent."""
+    seat: dict = {}
+    if session:
+        seat["session_id"] = session
+    if agent:
+        seat["agent_id"] = agent
+    return seat
+
+
+def _auto_fix_edit(target: Path, seat: dict, ruff: list, pyright: list) -> dict:
+    """auto_fix's real entry after an Edit of *target*, the two structured checks answering as given."""
+    with (
+        patch.object(auto_fix, "_run_python_checks", return_value=[]),
+        patch.object(auto_fix, "_run_seedgo_checklist", return_value=[]),
+        patch.object(auto_fix, "_run_ruff_lint_structured", return_value=ruff),
+        patch.object(auto_fix, "_run_pyright_check", return_value=pyright),
+    ):
+        return auto_fix.handle({"tool_name": "Edit", "tool_input": {"file_path": str(target)}, **seat})
+
+
+def _auto_fix_edit_pyright_times_out(target: Path, seat: dict) -> dict:
+    """auto_fix's real entry after an Edit of *target*: ruff finds nothing, pyright times out."""
+    with (
+        patch.object(auto_fix, "_run_python_checks", return_value=[]),
+        patch.object(auto_fix, "_run_seedgo_checklist", return_value=[]),
+        patch.object(auto_fix, "_run_ruff_lint_structured", return_value=[]),
+        patch.object(auto_fix.subprocess, "run", side_effect=_PYRIGHT_TIMES_OUT),
+    ):
+        return auto_fix.handle({"tool_name": "Edit", "tool_input": {"file_path": str(target)}, **seat})
 
 
 class TestEditGateHandler:
@@ -379,10 +417,11 @@ class TestEditGateProjectBoundary:
 
 @pytest.fixture
 def branch_tree(tmp_path: Path):
-    """A two-file branch plus an isolated diagnostics state file.
+    """A two-file branch; the diagnostics state is conftest's sandbox, one seat per payload.
 
     Shaped src/<pkg>/<branch>/... so _get_branch resolves, with no *_REGISTRY.json
-    anywhere so the project fence stays out of the way.
+    anywhere so the project fence stays out of the way. The payloads here carry no
+    session, so the state is written for the "nosession" seat.
     """
     branch = tmp_path / "src" / "aipass" / "seedgo"
     (branch / "tests").mkdir(parents=True)
@@ -393,18 +432,13 @@ def branch_tree(tmp_path: Path):
     impl = branch / "apps" / "modules" / "inbox_audit.py"
     impl.write_text("x = 1\n", encoding="utf-8")
 
-    state_file = tmp_path / ".diagnostics_state.json"
-    with patch.object(ds, "STATE_FILE", state_file):
-        yield {
-            "branch": branch,
-            "red_test": red_test,
-            "impl": impl,
-            "state_file": state_file,
-            "ds": ds,
-            "write_state": lambda errors: state_file.write_text(
-                json.dumps({"file": str(red_test), "errors": errors}), encoding="utf-8"
-            ),
-        }
+    return {
+        "branch": branch,
+        "red_test": red_test,
+        "impl": impl,
+        "ds": ds,
+        "write_state": lambda errors: ds.save_seat("nosession", str(red_test), errors),
+    }
 
 
 UNKNOWN_SYMBOL = {"line": 1, "message": '"_is_live_inbox" is unknown import symbol'}
@@ -466,10 +500,10 @@ class TestEditGateDiagnosticsState:
 
     def test_stale_state_file_is_cleared_not_just_ignored(self, branch_tree: dict):
         branch_tree["write_state"]([LOCAL_ERROR])
-        assert branch_tree["state_file"].exists()
+        assert ds.load_seat("nosession")
         with patch.object(branch_tree["ds"], "revalidate", return_value=[]):
             self._edit_other_file(branch_tree)
-        assert not branch_tree["state_file"].exists()
+        assert ds.load_seat("nosession") == {}
 
     def test_block_reports_the_revalidated_errors_not_the_recorded_ones(self, branch_tree: dict):
         """If the file still fails, the reason should quote what is true now."""
@@ -566,30 +600,134 @@ class TestDiagnosticsStateModule:
     def test_revalidate_returns_none_for_a_file_that_does_not_exist(self, tmp_path: Path):
         assert ds.revalidate(str(tmp_path / "gone.py")) is None
 
-    def test_load_returns_empty_dict_when_there_is_no_state(self, tmp_path: Path):
-        with patch.object(ds, "STATE_FILE", tmp_path / "absent.json"):
-            assert ds.load() == {}
+    def test_load_returns_empty_dict_when_there_is_no_state(self):
+        assert ds.load_seat("a-seat-with-nothing") == {}
 
-    def test_load_returns_empty_dict_on_corrupt_state(self, tmp_path: Path):
-        corrupt = tmp_path / "corrupt.json"
-        corrupt.write_text("{not json", encoding="utf-8")
-        with patch.object(ds, "STATE_FILE", corrupt):
-            assert ds.load() == {}
+    def test_load_returns_none_on_corrupt_state(self, tmp_path: Path):
+        """An unreadable seat file answers None, which no readable file can answer."""
+        ds.save_seat("a-seat", str(tmp_path / "a.py"), [LOCAL_ERROR])
+        (seat_file,) = ds.STATE_DIR.glob("*.json")
+        seat_file.write_text("{not json", encoding="utf-8")
 
-    def test_clear_is_safe_when_the_file_is_already_gone(self, tmp_path: Path):
-        """Clearing an absent state file leaves it absent and reads back empty.
+        assert ds.load_seat("a-seat") is None
 
-        Had no oracle: it called clear() and asserted nothing, so a clear() that
+    def test_clear_is_safe_when_the_file_is_already_gone(self):
+        """Clearing an absent seat leaves nothing behind and reads back empty.
+
+        Had no oracle once: it called clear and asserted nothing, so a clear that
         CREATED the file, or left a partial one behind, was green. The gate
         reads this state to decide whether an edit is fenced, so "absent" and
         "empty" are the two answers that matter.
         """
-        absent = tmp_path / "absent.json"
-        with patch.object(ds, "STATE_FILE", absent):
-            ds.clear()
+        ds.clear_seat("a-seat-with-nothing")
 
-            assert not absent.exists()
-            assert ds.load() == {}
+        assert not list(ds.STATE_DIR.glob("*"))
+        assert ds.load_seat("a-seat-with-nothing") == {}
+
+
+@pytest.fixture
+def seat_tree(tmp_path: Path) -> dict:
+    """A two-file branch under tmp_path; the diagnostics state is conftest's sandbox, patched nowhere else.
+
+    Both handlers run whole: auto_fix writes the state, edit_gate reads it. Only the
+    checkers' answers are given, and revalidate answers "could not tell" so the gate
+    decides on what was recorded.
+    """
+    branch = tmp_path / "src" / "aipass" / "seedgo"
+    (branch / "tests").mkdir(parents=True)
+    (branch / "apps" / "modules").mkdir(parents=True)
+    red_test = branch / "tests" / "test_track_e.py"
+    red_test.write_text("x = 1\n", encoding="utf-8")
+    impl = branch / "apps" / "modules" / "inbox_audit.py"
+    impl.write_text("x = 1\n", encoding="utf-8")
+    return {"branch": branch, "red_test": red_test, "impl": impl}
+
+
+class TestDiagnosticsStateBySeat:
+    """Each seat has its own diagnostics state (hooks, leg 4, devpulse's decisions A and B).
+
+    A seat is the session and, for a sub-agent, its agent id. Before leg 4 every seat
+    on the machine shared one state: a worker's open error refused its siblings, and a
+    sibling's clean edit erased it. Pins 1 and 2 and the no-answer pin were red on the
+    shared state; pins 3 and 6 were green and stay green.
+    """
+
+    def _gate_edit(self, tree: dict, target: Path, seat: dict) -> dict:
+        with patch.object(ds, "revalidate", return_value=None):
+            return handle(
+                {
+                    "tool_name": "Edit",
+                    "cwd": str(tree["branch"]),
+                    "tool_input": {"file_path": str(target), "old_string": "x", "new_string": "y"},
+                    **seat,
+                }
+            )
+
+    def test_pin1_a_seat_is_not_refused_for_a_sibling_seats_open_error(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat("worker-one"), [LOCAL_ERROR], [])
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat("worker-two"))
+
+        assert result["exit_code"] == 0
+
+    def test_pin2_a_siblings_clean_edit_does_not_erase_a_seats_open_error(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat("worker-one"), [LOCAL_ERROR], [])
+        _auto_fix_edit(seat_tree["impl"], _seat("worker-two"), [], [])
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat("worker-one"))
+
+        assert result["exit_code"] == 2
+        assert "test_track_e.py" in json.loads(result["stdout"])["reason"]
+
+    def test_pin3_a_seat_is_still_refused_for_its_own_open_error(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat("worker-one"), [LOCAL_ERROR], [])
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat("worker-one"))
+
+        assert result["exit_code"] == 2
+
+    def test_pin6_a_payload_without_a_session_is_one_seat_of_its_own(self, seat_tree: dict):
+        _auto_fix_edit(seat_tree["red_test"], _seat(session=""), [LOCAL_ERROR], [])
+
+        refused = self._gate_edit(seat_tree, seat_tree["impl"], _seat(session=""))
+        allowed = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+
+        assert refused["exit_code"] == 2
+        assert allowed["exit_code"] == 0
+
+    def test_a_check_that_gave_no_answer_never_clears_an_open_error(self, seat_tree: dict):
+        """Decision B: pyright timed out and ruff found nothing, so the file was not judged clean."""
+        _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
+        _auto_fix_edit_pyright_times_out(seat_tree["red_test"], _seat())
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+
+        assert result["exit_code"] == 2
+
+    def test_pin4_a_version_1_file_is_nobodys_and_replaced_on_the_next_write(self, seat_tree: dict):
+        """Green from its first run, as the shape it reads did not exist before; its proof is a mutant."""
+        ds.LEGACY_FILE.write_text(
+            json.dumps({"file": str(seat_tree["red_test"]), "errors": [LOCAL_ERROR]}), encoding="utf-8"
+        )
+
+        result = self._gate_edit(seat_tree, seat_tree["impl"], _seat(session=""))
+        _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
+
+        assert result["exit_code"] == 0
+        assert not ds.LEGACY_FILE.exists()
+
+    def test_pin5_an_entry_older_than_24_hours_is_ignored(self, seat_tree: dict):
+        """The clock is handed in through diagnostics_state's _now seam. Proof: a mutant."""
+        written_at = 1_000_000.0
+        with patch.object(ds, "_now", return_value=written_at):
+            _auto_fix_edit(seat_tree["red_test"], _seat(), [LOCAL_ERROR], [])
+        with patch.object(ds, "_now", return_value=written_at + 23 * 3600):
+            fresh = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+        with patch.object(ds, "_now", return_value=written_at + 25 * 3600):
+            stale = self._gate_edit(seat_tree, seat_tree["impl"], _seat())
+
+        assert fresh["exit_code"] == 2
+        assert stale["exit_code"] == 0
 
 
 class TestEditGateExternalProject:
