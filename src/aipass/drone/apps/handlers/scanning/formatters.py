@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: formatters.py
 # Description: Rich output formatting for scan results
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-28
 # =============================================
 
 """Rich output formatting for scan results.
@@ -79,3 +79,23 @@ def format_no_commands(branch_name: str) -> None:
     console.print(f"No commands discovered for [bold]{display_name}[/bold].")
     console.print("Ensure the branch has an entry point with --help or modules with handle_command().")
     console.print()
+
+
+def format_help_scan_failure(branch_name: str, help_errors: list[str]) -> None:
+    """Name a failed --help scan on stderr, after the results; nothing when the list is empty.
+
+    Loud where the caller is (drone scan / drone activate): the results shown
+    before are real but partial. Exit stays 0 (drone's decision, DPLAN-0354 leg 3).
+
+    Args:
+        branch_name: Branch name without the ``@`` prefix.
+        help_errors: What scan_branch collected; the first entry is named.
+    """
+    if not help_errors:
+        return
+    from aipass.cli.apps.modules import err_console
+
+    err_console.print(
+        f"scan: @{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only",
+        markup=False,
+    )

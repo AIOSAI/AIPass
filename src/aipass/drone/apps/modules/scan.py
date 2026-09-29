@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: scan.py
 # Description: Module orchestrator for branch command scanning
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-17
 # Modified: 2026-09-28
 # =============================================
@@ -18,6 +18,7 @@ from aipass.prax import logger
 from aipass.drone.apps.handlers.json import json_handler
 from aipass.drone.apps.handlers.scanning.scanner import scan_branch
 from aipass.drone.apps.handlers.scanning.formatters import (
+    format_help_scan_failure,
     format_no_commands,
     format_scan_results,
 )
@@ -83,7 +84,10 @@ def print_introspection() -> None:
     console.print("[yellow]Connected Handlers:[/yellow]")
     console.print("  [cyan]handlers/scanning/[/cyan]")
     console.print("    - [cyan]scanner.py[/cyan] [dim](scan_branch, scan_help_output, scan_module_files)[/dim]")
-    console.print("    - [cyan]formatters.py[/cyan] [dim](format_scan_results, format_no_commands)[/dim]")
+    console.print(
+        "    - [cyan]formatters.py[/cyan]"
+        " [dim](format_scan_results, format_no_commands, format_help_scan_failure)[/dim]"
+    )
     console.print()
     console.print("[yellow]Connected Modules:[/yellow]")
     console.print("  [cyan]modules/[/cyan]")
@@ -146,15 +150,6 @@ def scan(target: str) -> list[dict] | None:
         format_scan_results(branch_name, commands)
     else:
         format_no_commands(branch_name)
-
-    if help_errors:
-        # Loud where the caller is (drone scan / drone activate): the results
-        # above are real but partial. Exit stays 0 (drone's decision, DPLAN-0354 leg 3).
-        from aipass.cli.apps.modules import err_console
-
-        err_console.print(
-            f"scan: @{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only",
-            markup=False,
-        )
+    format_help_scan_failure(branch_name, help_errors)
 
     return commands
