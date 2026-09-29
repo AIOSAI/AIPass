@@ -3,7 +3,7 @@
 # Description: Tests for spawn update orchestrator
 # Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/update_ops.py — the spawn update orchestrator."""
@@ -881,6 +881,90 @@ class TestUpdateIgnoreIsTheOwnersDecision:
         assert result["success"] is True
         assert result["owner_protected"] == 0
         assert "README.md" in [a["template_path"] for a in result["_additions_detail"]]
+
+
+class TestUpdateNeverJudgesASandbox:
+    """A living branch's dropbox and .archive are never read, compared or merged.
+
+    The rule is the owner of the project's, 09-27 20:42, in paraphrase: a
+    dropbox is ignored by all, a sandbox like .archive. devpulse ruled for
+    update (compass 491, 09-29 00:03): what the template ships there is still
+    handed in when absent, and nothing present there is judged. The skip reads
+    the parts below the branch root, so the whole world stands inside a
+    directory named dropbox (spawn's decision, DPLAN-0354 leg 5).
+    """
+
+    _TEMPLATE = {
+        "README.md": "# {{BRANCHNAME}}\nTemplate readme\n",
+        "dropbox/README.md": "# Dropbox\nHanded in here.\n",
+        ".archive/README.md": "# Archive\nRetired things.\n",
+        ".archive/notes.json": json.dumps({"kept": 1, "template_key": 2}),
+        "docs/.archive/old.md": "# Old\nShipped retired page.\n",
+    }
+
+    def _world(self, tmp_path):
+        """A template and a living branch under tmp_path/dropbox, with a registry."""
+        root = tmp_path / "dropbox"
+        tpl = root / "template"
+        for rel, text in self._TEMPLATE.items():
+            (tpl / rel).parent.mkdir(parents=True, exist_ok=True)
+            (tpl / rel).write_text(text, encoding="utf-8")
+        branch = root / "test_branch"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".spawn").mkdir()
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"identity": {"citizen_class": "specialist", "role": "test", "traits": []}}), encoding="utf-8"
+        )
+        registry = root / "AIPASS_REGISTRY.json"
+        entry = {"name": "TEST_BRANCH", "path": "test_branch", "email": "@test_branch", "status": "active"}
+        registry.write_text(json.dumps({"metadata": {}, "branches": [entry]}), encoding="utf-8")
+        return tpl, branch, registry
+
+    def _update(self, tpl, registry):
+        with patch("aipass.spawn.apps.handlers.update_ops.get_template_dir", return_value=tpl):
+            return update_branch("test_branch", dry_run=False, registry_path=registry)
+
+    def test_a_present_dropbox_or_archive_file_is_neither_reported_nor_merged(self, tmp_path):
+        """Ran red before the skip: both READMEs were reported as differs and notes.json merged."""
+        tpl, branch, registry = self._world(tmp_path)
+        planted = {
+            "README.md": "# TEST_BRANCH\nEdited by its owner\n",
+            "dropbox/README.md": "# Dropbox\nChanged by the branch\n",
+            ".archive/README.md": "# Archive\nChanged too\n",
+            ".archive/notes.json": json.dumps({"kept": 1}),
+            "docs/.archive/old.md": "# Old\nA nested archive, changed\n",
+        }
+        for rel, text in planted.items():
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text(text, encoding="utf-8")
+
+        result = self._update(tpl, registry)
+
+        assert result["success"] is True, result
+        # The control: the live README beside them is still judged.
+        assert [(e["branch_path"], e["state"]) for e in result["_md_detail"]] == [("README.md", "differs")]
+        assert result["updates"] == 0
+        for rel, text in planted.items():
+            assert (branch / rel).read_text(encoding="utf-8") == text, rel
+
+    def test_an_absent_dropbox_is_created_with_its_shipped_readme(self, tmp_path):
+        """Handing a file in is what the place is for: directory absent, both land."""
+        tpl, branch, registry = self._world(tmp_path)
+
+        self._update(tpl, registry)
+
+        assert (branch / "dropbox" / "README.md").read_text(encoding="utf-8") == self._TEMPLATE["dropbox/README.md"]
+
+    def test_an_absent_shipped_file_in_a_present_archive_is_written(self, tmp_path):
+        """The directory is there, the shipped README is not: it is written, nothing else is touched."""
+        tpl, branch, registry = self._world(tmp_path)
+        (branch / ".archive").mkdir()
+        (branch / ".archive" / "notes.json").write_text(json.dumps({"kept": 1}), encoding="utf-8")
+
+        self._update(tpl, registry)
+
+        assert (branch / ".archive" / "README.md").read_text(encoding="utf-8") == self._TEMPLATE[".archive/README.md"]
+        assert json.loads((branch / ".archive" / "notes.json").read_text(encoding="utf-8")) == {"kept": 1}
 
 
 class TestUpdateAll:

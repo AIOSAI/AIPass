@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: update_ops.py
 # Description: Update handler — path-based template sync engine (P1 rewrite, TDPLAN-0006)
-# Version: 2.2.1
+# Version: 2.3.0
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Update handler — path-based template sync engine.
@@ -18,7 +18,7 @@ _PASSPORT_HEAL_ALLOWLIST.
 import json
 import shutil
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from aipass.prax.apps.modules.logger import system_logger as logger
@@ -55,6 +55,9 @@ _NEVER_UPDATE_FILES = frozenset(
         "tests/test_scaffold.py",
     }
 )
+# A present file below either name is handed in when absent and never judged
+# after (compass 491, DPLAN-0354 leg 5).
+_SANDBOX_DIRS = frozenset({"dropbox", ".archive"})
 _SKIP_TRACKING = frozenset(
     {
         ".spawn/.template_registry.json",
@@ -278,6 +281,16 @@ def update_branch(
                 md_detail.append({"branch_path": resolved_path, "state": "absent"})
             if trace:
                 logger.info("[update] Added: %s", resolved_path)
+
+        elif _SANDBOX_DIRS.intersection(PurePosixPath(resolved_path).parts[:-1]):
+            # Present inside a dropbox or .archive: never read, compared or
+            # merged, and no report row. The owner of the project's rule of
+            # 09-27 20:42, in paraphrase: a dropbox is ignored by all, a sandbox
+            # like .archive; devpulse's ruling for update, compass 491. Parts
+            # below the branch root, by the directory's own name (spawn's
+            # decision, DPLAN-0354 leg 5).
+            if trace:
+                logger.info("[update] SKIP (sandbox): %s", resolved_path)
 
         elif dest.suffix == ".md":
             # READ-ONLY, ALWAYS. update never rewrites a .md: the README diet is

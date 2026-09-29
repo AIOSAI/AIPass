@@ -1040,8 +1040,8 @@ class TestTheRealpathDenialArmsOnEveryInterpreter:
         )
 
         lines = result.stdout.split()
-        armed_and_inert = "ROUTE_ARMED" in lines and "PATHLIB_INERT" in lines
-        assert not armed_and_inert, (
+        verdict = ("ROUTE_ARMED" in lines, "PATHLIB_INERT" in lines)
+        assert verdict != (True, True), (
             f"the old emulation survived host shape {shape!r} — the shape is no "
             f"longer reproducing the interpreter that convicted it:\n{result.stdout}"
         )
@@ -2053,7 +2053,7 @@ class TestTheRoundNineJudgementsAnswerForHostsThisBoxIsNot:
             Path(__file__).read_text(encoding="utf-8"), self._ROWS_THAT_MAY_MEET_AN_OBJECT_DIALECT_HOST
         )
 
-        assert not offenders, (
+        assert offenders == [], (
             "these tests install a module-shaped flavour without saying which "
             "hosts can carry one and without deriving the symptom: " + ", ".join(offenders)
         )

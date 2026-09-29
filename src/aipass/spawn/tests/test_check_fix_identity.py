@@ -3,7 +3,7 @@
 # Description: Tests for owner/identity check and fix (DPLAN-0239 P4)
 # Version: 1.0.2
 # Created: 2026-07-11
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/sync_registry_ops.py and apps/modules/sync_registry.py."""
@@ -219,16 +219,24 @@ class TestFixOwnerIdentity:
     """Tests for fix_owner_identity — reconcile."""
 
     def test_noop_when_clean(self, tmp_path):
+        """A clean project is not written at all: the registry and passport keep bytes and mtime.
 
-        _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
+        test_refuses_to_alter_correct_seat reads the answer; this reads the disk.
+        """
+
+        branch = _make_branch(tmp_path, "alpha", "src/alpha", passport_rid="proj-id")
         reg = _write_registry(
             tmp_path,
             metadata={"version": "1.0.0", "last_updated": "2026-07-11", "id": "proj-id"},
             branches=[_entry("alpha", "src/alpha", owner=True, registry_id="unique-alpha")],
         )
+        watched = [reg, branch / ".trinity" / "passport.json"]
+        before = [(p.read_bytes(), p.stat().st_mtime_ns) for p in watched]
 
         result = fix_owner_identity(registry_path=reg)
+
         assert result["actions"] == []
+        assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in watched] == before
 
     def test_seats_missing_owner(self, tmp_path):
 

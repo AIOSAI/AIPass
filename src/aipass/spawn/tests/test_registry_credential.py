@@ -3,7 +3,7 @@
 # Description: metadata.id — the project credential a new registry is born with
 # Version: 1.0.2
 # Created: 2026-08-24
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/registry.py's project-credential mint (metadata.id)."""
@@ -185,12 +185,16 @@ class TestLoadDoesNotMint:
         )
 
     def test_missing_registry_still_returns_a_usable_empty_document(self, tmp_path):
-        """Refusing to mint must not break the sixteen callers that just read branches."""
+        """Refusing to mint must not break the sixteen callers that just read branches.
+
+        And a read is only a read: the empty document is answered, never written
+        to disk, where the next reader would take it for a real registry.
+        """
         result = load_registry(tmp_path / "NEW_REGISTRY.json")
 
         assert result["branches"] == []
-        assert result["metadata"]["version"] == "1.0.0"
         assert result["metadata"]["total_branches"] == 0
+        assert not (tmp_path / "NEW_REGISTRY.json").exists()
 
     def test_the_absence_is_said_out_loud(self, tmp_path, caplog):
         """A silent empty document is how the composition stayed invisible."""

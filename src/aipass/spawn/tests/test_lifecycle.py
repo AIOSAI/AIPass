@@ -3,7 +3,7 @@
 # Description: Tests for spawn lifecycle commands (delete, sync-registry)
 # Version: 1.1.3
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/delete_ops.py and apps/handlers/sync_registry_ops.py."""
@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
+from aipass.spawn.apps.handlers import registry as registry_module
 from aipass.spawn.apps.handlers.delete_ops import delete_branch
 from aipass.spawn.apps.handlers.registry import fix_passport_registry_id
 from aipass.spawn.apps.handlers.sync_registry_ops import sync_registry
@@ -934,6 +935,89 @@ class TestFixPassportRegistryId:
 
         result = fix_passport_registry_id(branch, reg)
         assert result is False
+
+    def test_an_unreadable_registry_answers_none_not_already_correct(self, tmp_path):
+        """A failure has its own answer, None; False stays "nothing to change".
+
+        Ran red before the cure: False, the answer for already correct
+        (spawn's decision, DPLAN-0354 leg 5).
+        """
+        branch = tmp_path / "myagent"
+        (branch / ".trinity").mkdir(parents=True)
+        passport = branch / ".trinity" / "passport.json"
+        passport.write_text(json.dumps({"citizenship": {"registry_id": "old-id"}}), encoding="utf-8")
+        reg = tmp_path / "TEST_REGISTRY.json"
+        reg.write_text("{not json", encoding="utf-8")
+
+        assert fix_passport_registry_id(branch, reg) is None
+        assert json.loads(passport.read_text(encoding="utf-8")) == {"citizenship": {"registry_id": "old-id"}}
+
+    def test_a_failed_passport_write_answers_none(self, tmp_path):
+        """The writer refusing, where registry.py binds it, is a failure: None.
+
+        Ran red before the cure: the writer's False came back as the answer.
+        """
+        branch = tmp_path / "myagent"
+        (branch / ".trinity").mkdir(parents=True)
+        (branch / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"registry_id": "old-id"}}), encoding="utf-8"
+        )
+        reg = tmp_path / "TEST_REGISTRY.json"
+        reg.write_text(json.dumps({"metadata": {"id": "new-id"}, "branches": []}), encoding="utf-8")
+
+        with patch.object(registry_module.json_handler, "write_json", return_value=False) as write:
+            answer = fix_passport_registry_id(branch, reg)
+
+        passport_path = branch / ".trinity" / "passport.json"
+        write.assert_called_once_with(passport_path, {"citizenship": {"registry_id": "new-id"}})
+        assert answer is None
+
+    def test_sync_registry_names_a_passport_it_could_not_fix(self, tmp_path, monkeypatch):
+        """sync --fix reports a failed fix under ids_failed, never as fixed or silent.
+
+        Ran red before the cure: the branch was in neither list.
+        """
+        project = tmp_path / "project"
+        (project / "myagent" / ".trinity").mkdir(parents=True)
+        entry = {"name": "MYAGENT", "path": "myagent", "email": "@myagent", "status": "active"}
+        (project / "TEST_REGISTRY.json").write_text(
+            json.dumps({"metadata": {"id": "correct-uuid"}, "branches": [entry]}), encoding="utf-8"
+        )
+        (project / "myagent" / ".trinity" / "passport.json").write_text(
+            json.dumps({"citizenship": {"registry_id": "old-uuid"}}), encoding="utf-8"
+        )
+        monkeypatch.chdir(project)
+
+        with patch.object(registry_module.json_handler, "write_json", return_value=False):
+            result = sync_registry(fix=True)
+
+        assert result["ids_fixed"] == []
+        assert result["ids_failed"] == ["myagent"]
+
+    def test_sync_fix_command_warns_on_screen_for_a_failed_fix(self, tmp_path, monkeypatch, capsys):
+        """Through the command: the failed passport is named on screen.
+
+        Mutant: the ids_failed warning removed from the sync command -> red.
+        """
+        project = tmp_path / "project"
+        (project / "myagent" / ".trinity").mkdir(parents=True)
+        entry = {"name": "MYAGENT", "path": "myagent", "email": "@myagent", "status": "active"}
+        (project / "TEST_REGISTRY.json").write_text(
+            json.dumps({"metadata": {"id": "correct-uuid"}, "branches": [entry]}), encoding="utf-8"
+        )
+        passport = project / "myagent" / ".trinity" / "passport.json"
+        passport.write_text(json.dumps({"citizenship": {"registry_id": "old-uuid"}}), encoding="utf-8")
+        monkeypatch.chdir(project)
+        real_write = registry_module.json_handler.write_json
+
+        def refuse_the_passport(path, data):
+            """Every other write the command makes stays real."""
+            return False if Path(path) == passport else real_write(path, data)
+
+        with patch.object(registry_module.json_handler, "write_json", side_effect=refuse_the_passport):
+            handle_sync_registry(["--fix"])
+
+        assert "registry_id NOT fixed in 1 passport(s): myagent" in capsys.readouterr().err
 
     def test_sync_registry_fix_repairs_ids(self, tmp_path, monkeypatch):
         """sync_registry --fix calls fix_passport_registry_id on healthy branches."""
