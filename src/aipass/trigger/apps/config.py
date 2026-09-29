@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: config.py
 # Description: Trigger package paths, cwd-free module resolve, atomic JSON writes, recursion-safe trail logger
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-03-09
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -29,7 +29,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 try:
     from aipass.prax import append_jsonl as _append_jsonl
@@ -204,7 +204,12 @@ _LOCK_ATTEMPTS = 100
 _LOCK_BACKOFF_SECONDS = 0.05
 
 
-def replace_with_retry(source: str, destination: str) -> None:
+def replace_with_retry(
+    source: str,
+    destination: str,
+    replace_fn: Optional[Callable[[str, str], None]] = None,
+    sleep_fn: Optional[Callable[[float], None]] = None,
+) -> None:
     """Move a staged file into place, tolerating Windows sharing violations.
 
     Public, where the fleet's copies are module-private: config.py IS this
@@ -214,22 +219,33 @@ def replace_with_retry(source: str, destination: str) -> None:
     Args:
         source: Staged file to move.
         destination: The live document being replaced.
+        replace_fn: The move; None (every product caller) is os.replace.
+        sleep_fn: The backoff wait; None (every product caller) is time.sleep.
+            Both exist for the tests alone: a sharing violation is handed in
+            without replacing os.replace or time.sleep for the whole process.
 
     Raises:
         PermissionError: Still blocked after every attempt.
         OSError: Any non-sharing failure, immediately.
     """
+    replace = replace_fn or os.replace
+    sleep = sleep_fn or time.sleep
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
-            os.replace(source, destination)
+            replace(source, destination)
             return
         except PermissionError:
             if attempt == _REPLACE_ATTEMPTS - 1:
                 raise
-            time.sleep(_REPLACE_BACKOFF_SECONDS)
+            sleep(_REPLACE_BACKOFF_SECONDS)
 
 
-def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
+def read_text_with_retry(
+    path: Path,
+    encoding: str = "utf-8",
+    read_fn: Optional[Callable[..., str]] = None,
+    sleep_fn: Optional[Callable[[float], None]] = None,
+) -> str:
     """Read a document, tolerating Windows sharing violations.
 
     The mirror of replace_with_retry, and the half that was missing. While one
@@ -242,6 +258,11 @@ def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
     Args:
         path: Document to read.
         encoding: Text encoding.
+        read_fn: The read, called as read_fn(path, encoding=encoding); None
+            (every product caller) is path.read_text, the object's own method.
+        sleep_fn: The backoff wait; None (every product caller) is time.sleep.
+            Both exist for the tests alone: a refused read is handed in
+            without replacing Path.read_text or time.sleep for the whole process.
 
     Returns:
         The file's contents.
@@ -250,13 +271,16 @@ def read_text_with_retry(path: Path, encoding: str = "utf-8") -> str:
         PermissionError: Still refused after every attempt.
         OSError: Any non-sharing failure, immediately.
     """
+    sleep = sleep_fn or time.sleep
     for attempt in range(_REPLACE_ATTEMPTS):
         try:
-            return path.read_text(encoding=encoding)
+            if read_fn is None:
+                return path.read_text(encoding=encoding)
+            return read_fn(path, encoding=encoding)
         except PermissionError:
             if attempt == _REPLACE_ATTEMPTS - 1:
                 raise
-            time.sleep(_REPLACE_BACKOFF_SECONDS)
+            sleep(_REPLACE_BACKOFF_SECONDS)
     raise AssertionError("unreachable: the loop above either returns or raises")
 
 

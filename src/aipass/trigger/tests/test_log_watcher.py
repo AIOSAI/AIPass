@@ -3,7 +3,7 @@
 # Description: Unit tests for branch log watcher event producer
 # Version: 1.4.0
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for the branch log watcher handler (apps/handlers/log_watcher.py)."""
@@ -28,8 +28,8 @@ import aipass.trigger.apps.handlers.json.config_loader as config_loader
 import aipass.trigger.apps.handlers.log_watcher as lw
 
 
-# Synthetic path roots. _detect_branch_from_path, _should_process and
-# _classify_log_path parse a path STRING and never touch disk, so these are
+# Synthetic path roots. detect_branch_from_path, _should_process and
+# classify_log_path parse a path STRING and never touch disk, so these are
 # inputs under test, not locations — but a literal /home/user or /tmp prefix
 # reads as an assumption about the machine, so the roots are built instead.
 # The POSIX shape IS part of the contract: these functions split on aipass/
@@ -92,67 +92,67 @@ def _mock_infrastructure(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _generate_error_hash
+# Tests -- generate_error_hash
 # ---------------------------------------------------------------------------
 
 
 class TestGenerateErrorHash:
-    """Tests for _generate_error_hash pure function."""
+    """Tests for generate_error_hash pure function."""
 
     def test_deterministic(self):
         """Same inputs always produce the same hash."""
-        h1 = lw._generate_error_hash("mod_a", "something broke")
-        h2 = lw._generate_error_hash("mod_a", "something broke")
+        h1 = lw.generate_error_hash("mod_a", "something broke")
+        h2 = lw.generate_error_hash("mod_a", "something broke")
         assert h1 == h2
 
     def test_length_is_8(self):
         """Hash is exactly 8 characters long."""
-        h = lw._generate_error_hash("module", "message")
+        h = lw.generate_error_hash("module", "message")
         assert len(h) == 8
 
     def test_different_inputs_different_hashes(self):
         """Different module/message combos produce different hashes."""
-        h1 = lw._generate_error_hash("mod_a", "error one")
-        h2 = lw._generate_error_hash("mod_b", "error two")
+        h1 = lw.generate_error_hash("mod_a", "error one")
+        h2 = lw.generate_error_hash("mod_b", "error two")
         assert h1 != h2
 
     def test_matches_md5_prefix(self):
         """Hash matches the first 8 chars of MD5(module:message)."""
         expected = hashlib.md5("mymod:mymsg".encode()).hexdigest()[:8]
-        assert lw._generate_error_hash("mymod", "mymsg") == expected
+        assert lw.generate_error_hash("mymod", "mymsg") == expected
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _detect_branch_from_path
+# Tests -- detect_branch_from_path
 # ---------------------------------------------------------------------------
 
 
 class TestDetectBranchFromPath:
-    """Tests for _detect_branch_from_path."""
+    """Tests for detect_branch_from_path."""
 
     def test_standard_branch_logs_path(self):
         """Detects branch from src/aipass/<branch>/logs/file.log pattern."""
         path = str(_SYNTHETIC_HOME / "src" / "aipass" / "flow" / "logs" / "flow_planner.log")
-        assert lw._detect_branch_from_path(path) == "FLOW"
+        assert lw.detect_branch_from_path(path) == "FLOW"
 
     def test_system_logs_mapped_file(self):
         """Uses SYSTEM_LOGS_BRANCH_MAP for known filenames."""
         path = str(lw.SYSTEM_LOGS_DIR / "telegram_bridge.log")
-        assert lw._detect_branch_from_path(path) == "API"
+        assert lw.detect_branch_from_path(path) == "API"
 
     def test_system_logs_prefix_match(self):
         """Matches prefix against known branch prefixes for system_logs files."""
         path = str(lw.SYSTEM_LOGS_DIR / "seedgo_audit.log")
-        assert lw._detect_branch_from_path(path) == "SEEDGO"
+        assert lw.detect_branch_from_path(path) == "SEEDGO"
 
     def test_system_logs_exact_stem_match(self):
         """Matches when stem equals a known prefix exactly."""
         path = str(lw.SYSTEM_LOGS_DIR / "prax.log")
-        assert lw._detect_branch_from_path(path) == "PRAX"
+        assert lw.detect_branch_from_path(path) == "PRAX"
 
     def test_unknown_path_returns_unknown(self):
         """Returns UNKNOWN for paths that do not match any pattern."""
-        assert lw._detect_branch_from_path(str(_SYNTHETIC_ELSEWHERE / "some" / "random" / "path.log")) == "UNKNOWN"
+        assert lw.detect_branch_from_path(str(_SYNTHETIC_ELSEWHERE / "some" / "random" / "path.log")) == "UNKNOWN"
 
     def test_failure_raises_instead_of_answering_unknown(self):
         """A path it cannot read raises; it is not filed under the UNKNOWN branch.
@@ -165,21 +165,21 @@ class TestDetectBranchFromPath:
         """
         unreadable: Any = None
         with pytest.raises(TypeError):
-            lw._detect_branch_from_path(unreadable)
+            lw.detect_branch_from_path(unreadable)
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _parse_prax_log_line
+# Tests -- parse_prax_log_line
 # ---------------------------------------------------------------------------
 
 
 class TestParsePraxLogLine:
-    """Tests for _parse_prax_log_line."""
+    """Tests for parse_prax_log_line."""
 
     def test_pipe_format_error(self):
         """Parses pipe-separated ERROR line correctly."""
         line = "2026-03-01 12:00:00.123 | my_module | ERROR | Something failed"
-        result = lw._parse_prax_log_line(line)
+        result = lw.parse_prax_log_line(line)
         assert result is not None
         assert result["level"] == "ERROR"
         assert result["module"] == "my_module"
@@ -189,24 +189,24 @@ class TestParsePraxLogLine:
     def test_pipe_format_critical(self):
         """Parses pipe-separated CRITICAL line correctly."""
         line = "2026-03-01 12:00:00.123 | core | CRITICAL | Fatal error"
-        result = lw._parse_prax_log_line(line)
+        result = lw.parse_prax_log_line(line)
         assert result is not None
         assert result["level"] == "CRITICAL"
 
     def test_pipe_format_info_returns_none(self):
         """INFO level lines are not returned (only ERROR/CRITICAL)."""
         line = "2026-03-01 12:00:00.123 | my_module | INFO | All good"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
     def test_pipe_format_warning_returns_none(self):
         """WARNING level lines are not returned."""
         line = "2026-03-01 12:00:00.123 | my_module | WARNING | Watch out"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
     def test_dash_format_error(self):
         """Parses dash-separated ERROR line (Python logging format)."""
         line = "2026-02-10 15:12:29,460 - telegram_bridge - ERROR - Connection lost"
-        result = lw._parse_prax_log_line(line)
+        result = lw.parse_prax_log_line(line)
         assert result is not None
         assert result["level"] == "ERROR"
         assert result["module"] == "telegram_bridge"
@@ -214,11 +214,11 @@ class TestParsePraxLogLine:
 
     def test_malformed_line_returns_none(self):
         """Malformed line that does not match any format returns None."""
-        assert lw._parse_prax_log_line("just some random text") is None
+        assert lw.parse_prax_log_line("just some random text") is None
 
     def test_empty_line_returns_none(self):
         """Empty line returns None."""
-        assert lw._parse_prax_log_line("") is None
+        assert lw.parse_prax_log_line("") is None
 
     def test_failure_raises_instead_of_answering_none(self):
         """A line it cannot read raises; None means "not an error line".
@@ -232,39 +232,39 @@ class TestParsePraxLogLine:
         """
         unreadable: Any = None
         with pytest.raises(TypeError):
-            lw._parse_prax_log_line(unreadable)
+            lw.parse_prax_log_line(unreadable)
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _is_stale_entry
+# Tests -- is_stale_entry
 # ---------------------------------------------------------------------------
 
 
 class TestIsStaleEntry:
-    """Tests for _is_stale_entry."""
+    """Tests for is_stale_entry."""
 
     def test_recent_timestamp_not_stale(self):
         """A timestamp within the threshold is NOT stale."""
         now = datetime.now()
         recent = now - timedelta(seconds=10)
         ts = recent.strftime("%Y-%m-%d %H:%M:%S.%f")
-        assert lw._is_stale_entry(ts) is False
+        assert lw.is_stale_entry(ts) is False
 
     def test_old_timestamp_is_stale(self):
         """A timestamp well beyond the threshold IS stale."""
         old = datetime.now() - timedelta(seconds=600)
         ts = old.strftime("%Y-%m-%d %H:%M:%S.%f")
-        assert lw._is_stale_entry(ts) is True
+        assert lw.is_stale_entry(ts) is True
 
     def test_unparseable_timestamp_returns_true(self):
         """An unparseable timestamp is treated as stale."""
-        assert lw._is_stale_entry("not-a-timestamp") is True
+        assert lw.is_stale_entry("not-a-timestamp") is True
 
     def test_comma_microsecond_format(self):
         """Python logging format with comma microseconds is parsed correctly."""
         recent = datetime.now() - timedelta(seconds=5)
         ts = recent.strftime("%Y-%m-%d %H:%M:%S,") + "123"
-        assert lw._is_stale_entry(ts) is False
+        assert lw.is_stale_entry(ts) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1501,88 +1501,88 @@ class TestDebouncedWriter:
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _is_stale_entry (additional format coverage)
+# Tests -- is_stale_entry (additional format coverage)
 # ---------------------------------------------------------------------------
 
 
 class TestIsStaleEntryFormats:
-    """Additional format coverage for _is_stale_entry."""
+    """Additional format coverage for is_stale_entry."""
 
     def test_iso_format_with_microseconds_fresh(self):
         """ISO format with microseconds: T separator and dot microseconds."""
         recent = datetime.now() - timedelta(seconds=5)
         ts = recent.strftime("%Y-%m-%dT%H:%M:%S.%f")
-        assert lw._is_stale_entry(ts) is False
+        assert lw.is_stale_entry(ts) is False
 
     def test_iso_format_simple_stale(self):
         """ISO format without microseconds, stale timestamp."""
         old = datetime.now() - timedelta(seconds=600)
         ts = old.strftime("%Y-%m-%dT%H:%M:%S")
-        assert lw._is_stale_entry(ts) is True
+        assert lw.is_stale_entry(ts) is True
 
     def test_simple_format_no_microseconds_fresh(self):
         """Simple YYYY-MM-DD HH:MM:SS format, fresh."""
         recent = datetime.now() - timedelta(seconds=2)
         ts = recent.strftime("%Y-%m-%d %H:%M:%S")
-        assert lw._is_stale_entry(ts) is False
+        assert lw.is_stale_entry(ts) is False
 
     def test_whitespace_stripped(self):
         """Leading/trailing whitespace is stripped before parsing."""
         recent = datetime.now() - timedelta(seconds=5)
         ts = "  " + recent.strftime("%Y-%m-%d %H:%M:%S.%f") + "  "
-        assert lw._is_stale_entry(ts) is False
+        assert lw.is_stale_entry(ts) is False
 
     def test_empty_string_returns_true(self):
         """Empty string is unparseable and treated as stale."""
-        assert lw._is_stale_entry("") is True
+        assert lw.is_stale_entry("") is True
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _detect_branch_from_path (additional edge cases)
+# Tests -- detect_branch_from_path (additional edge cases)
 # ---------------------------------------------------------------------------
 
 
 class TestDetectBranchFromPathEdgeCases:
-    """Additional edge cases for _detect_branch_from_path."""
+    """Additional edge cases for detect_branch_from_path."""
 
     def test_pycache_directory_ignored(self):
         """__pycache__ after aipass/ is not treated as a branch."""
         path = str(_SYNTHETIC_HOME / "src" / "aipass" / "__pycache__" / "logs" / "something.log")
-        assert lw._detect_branch_from_path(path) == "UNKNOWN"
+        assert lw.detect_branch_from_path(path) == "UNKNOWN"
 
     def test_system_logs_unknown_file(self):
         """Unknown file in system_logs returns UNKNOWN."""
         path = str(lw.SYSTEM_LOGS_DIR / "completely_random.log")
-        assert lw._detect_branch_from_path(path) == "UNKNOWN"
+        assert lw.detect_branch_from_path(path) == "UNKNOWN"
 
     def test_multiple_aipass_segments(self):
         """First valid aipass/branch/logs/ match wins."""
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "trigger" / "logs" / "inner.log")
-        assert lw._detect_branch_from_path(path) == "TRIGGER"
+        assert lw.detect_branch_from_path(path) == "TRIGGER"
 
     def test_aipass_without_logs_subdir(self):
         """aipass/branch without /logs/ segment returns UNKNOWN."""
         path = str(Path(_SYNTHETIC_HOME) / "src" / "aipass" / "drone" / "core.log")
-        assert lw._detect_branch_from_path(path) == "UNKNOWN"
+        assert lw.detect_branch_from_path(path) == "UNKNOWN"
 
     def test_system_logs_ai_mail_prefix(self):
         """Multi-word prefix (ai_mail) is matched correctly."""
         path = str(lw.SYSTEM_LOGS_DIR / "ai_mail_delivery.log")
-        assert lw._detect_branch_from_path(path) == "AI_MAIL"
+        assert lw.detect_branch_from_path(path) == "AI_MAIL"
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _parse_prax_log_line (additional edge cases)
+# Tests -- parse_prax_log_line (additional edge cases)
 # ---------------------------------------------------------------------------
 
 
 class TestParsePraxLogLineEdgeCases:
-    """Additional edge cases for _parse_prax_log_line."""
+    """Additional edge cases for parse_prax_log_line."""
 
     def test_dash_format_critical(self):
         """Dash format with CRITICAL level is accepted."""
         line = "2026-04-26 10:00:00,100 - core - CRITICAL - System down"
-        result = lw._parse_prax_log_line(line)
+        result = lw.parse_prax_log_line(line)
         assert result is not None
         assert result["level"] == "CRITICAL"
         assert result["module"] == "core"
@@ -1591,27 +1591,27 @@ class TestParsePraxLogLineEdgeCases:
     def test_dash_format_info_returns_none(self):
         """Dash format with INFO level returns None."""
         line = "2026-04-26 10:00:00,100 - core - INFO - All is well"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
     def test_pipe_format_too_few_parts(self):
         """Pipe format with fewer than 4 parts returns None."""
         line = "2026-04-26 10:00:00 | only_two_parts"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
     def test_dash_format_too_few_parts(self):
         """Dash format with fewer than 4 parts returns None."""
         line = "2026-04-26 - module_only"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
     def test_pipe_format_warning_level_returns_none(self):
         """Pipe format with WARNING level (not error) returns None."""
         line = "2026-04-26 10:00:00 | mod | WARNING | caution"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
     def test_dash_format_debug_level_returns_none(self):
         """Dash format with DEBUG level returns None."""
         line = "2026-04-26 10:00:00,100 - mod - DEBUG - tracing"
-        assert lw._parse_prax_log_line(line) is None
+        assert lw.parse_prax_log_line(line) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1857,7 +1857,7 @@ class TestProcessLogLineDeeper:
 
         with patch.object(
             lw,
-            "_parse_prax_log_line",
+            "parse_prax_log_line",
             side_effect=TypeError("boom"),
         ):
             watcher._process_log_line("any line", str(_SYNTHETIC_ELSEWHERE / "any" / "path.log"))
@@ -1910,7 +1910,7 @@ class TestParsePraxLogLineLevels:
 
     def test_warning_parsed_with_warning_levels(self):
         """A WARNING line parses when WARNING_LEVELS is passed."""
-        parsed = lw._parse_prax_log_line(_warning_line(), levels=lw.WARNING_LEVELS)
+        parsed = lw.parse_prax_log_line(_warning_line(), levels=lw.WARNING_LEVELS)
         assert parsed is not None
         assert parsed["level"] == "WARNING"
         assert parsed["module"] == "watcher"
@@ -1918,14 +1918,14 @@ class TestParsePraxLogLineLevels:
 
     def test_warn_alias_parsed(self):
         """The WARN spelling parses the same way."""
-        parsed = lw._parse_prax_log_line(_warning_line(level="WARN"), levels=lw.WARNING_LEVELS)
+        parsed = lw.parse_prax_log_line(_warning_line(level="WARN"), levels=lw.WARNING_LEVELS)
         assert parsed is not None
         assert parsed["level"] == "WARN"
 
     def test_python_dash_format_warning_parsed(self):
         """Python logging format is supported for warnings too."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")
-        parsed = lw._parse_prax_log_line(f"{now} - watcher - WARNING - Queue depth", levels=lw.WARNING_LEVELS)
+        parsed = lw.parse_prax_log_line(f"{now} - watcher - WARNING - Queue depth", levels=lw.WARNING_LEVELS)
         assert parsed is not None
         assert parsed["level"] == "WARNING"
         assert parsed["message"] == "Queue depth"
@@ -1933,11 +1933,11 @@ class TestParsePraxLogLineLevels:
     def test_error_is_not_a_warning(self):
         """An ERROR line is not collected by the warning lane."""
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-        assert lw._parse_prax_log_line(f"{now} | mod | ERROR | boom", levels=lw.WARNING_LEVELS) is None
+        assert lw.parse_prax_log_line(f"{now} | mod | ERROR | boom", levels=lw.WARNING_LEVELS) is None
 
     def test_default_levels_still_ignore_warnings(self):
         """The default stays ERROR-only, so the error path is unchanged."""
-        assert lw._parse_prax_log_line(_warning_line()) is None
+        assert lw.parse_prax_log_line(_warning_line()) is None
 
 
 class TestProcessWarningLine:
@@ -2046,7 +2046,7 @@ class TestProcessWarningLine:
         lw.set_event_callback(fire)
         watcher = lw.BranchLogWatcher()
 
-        with patch.object(lw, "_parse_prax_log_line", side_effect=TypeError("boom")):
+        with patch.object(lw, "parse_prax_log_line", side_effect=TypeError("boom")):
             watcher._process_warning_line(_warning_line(), _BRANCH_LOG_PATH)
 
         fire.assert_not_called()
@@ -2256,7 +2256,7 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         (tmp_path / "aipass" / "hooks").mkdir(parents=True)
         path = str(tmp_path / "system_logs" / "hooks_edit_gate.log")
 
-        assert lw._detect_branch_from_path(path) == "HOOKS"
+        assert lw.detect_branch_from_path(path) == "HOOKS"
 
     def test_non_citizen_still_reports_unknown(self, monkeypatch, tmp_path):
         """UNKNOWN keeps its meaning: nobody in the tree owns this log."""
@@ -2264,14 +2264,14 @@ class TestSystemLogAttributionComesFromTheLiveTree:
         (tmp_path / "aipass" / "hooks").mkdir(parents=True)
         path = str(tmp_path / "system_logs" / "marketstand_listings.log")
 
-        assert lw._detect_branch_from_path(path) == "UNKNOWN"
+        assert lw.detect_branch_from_path(path) == "UNKNOWN"
 
     def test_static_prefixes_are_a_floor_not_a_ceiling(self, monkeypatch, tmp_path):
         """An unreadable tree falls back to the static list instead of UNKNOWN."""
         _point_at_tree(lw, monkeypatch, tmp_path)
         path = str(tmp_path / "system_logs" / "seedgo_audit.log")
 
-        assert lw._detect_branch_from_path(path) == "SEEDGO"
+        assert lw.detect_branch_from_path(path) == "SEEDGO"
 
 
 # ---------------------------------------------------------------------------
@@ -2295,38 +2295,38 @@ class TestLogPathClassificationOnBothPlatforms:
         from pathlib import PureWindowsPath
 
         path = PureWindowsPath(r"C:\p\AIPass\src\aipass\hooks\logs\edit_gate.log")
-        assert lw._classify_log_path(path) == "branch"
+        assert lw.classify_log_path(path) == "branch"
 
     def test_posix_branch_log_is_a_branch_log(self):
         """The same answer from the other separator."""
         from pathlib import PurePosixPath
 
         path = PurePosixPath("/p/AIPass/src/aipass/hooks/logs/edit_gate.log")
-        assert lw._classify_log_path(path) == "branch"
+        assert lw.classify_log_path(path) == "branch"
 
     def test_windows_system_log_is_a_system_log(self):
         """system_logs/ is recognised through backslashes too."""
         from pathlib import PureWindowsPath
 
         path = PureWindowsPath(r"C:\p\AIPass\system_logs\telegram-bot-api.log")
-        assert lw._classify_log_path(path) == "system"
+        assert lw.classify_log_path(path) == "system"
 
     def test_posix_system_log_is_a_system_log(self):
         """Same, forward slashes."""
         from pathlib import PurePosixPath
 
-        assert lw._classify_log_path(PurePosixPath("/p/system_logs/x.log")) == "system"
+        assert lw.classify_log_path(PurePosixPath("/p/system_logs/x.log")) == "system"
 
     def test_unrelated_path_is_foreign_on_both(self):
         """A log outside both trees stays foreign, either separator."""
         from pathlib import PureWindowsPath
 
-        assert lw._classify_log_path(PureWindowsPath(r"C:\tmp\random\output.log")) == "foreign"
-        assert lw._classify_log_path(_SYNTHETIC_ELSEWHERE / "random" / "output.log") == "foreign"
+        assert lw.classify_log_path(PureWindowsPath(r"C:\tmp\random\output.log")) == "foreign"
+        assert lw.classify_log_path(_SYNTHETIC_ELSEWHERE / "random" / "output.log") == "foreign"
 
     def test_aipass_without_a_logs_dir_is_not_a_branch_log(self):
         """Both components are required, not either."""
         from pathlib import PureWindowsPath
 
         path = PureWindowsPath(r"C:\p\src\aipass\drone\core.log")
-        assert lw._classify_log_path(path) == "foreign"
+        assert lw.classify_log_path(path) == "foreign"

@@ -3,14 +3,14 @@
 # Description: Cross-platform durability pins for config.py's write + lock helpers
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/config.py's durability helpers: atomic_write_json, json_file_lock and the retry reads."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(external) — _acquire_lock_win32 against a real Windows host; driven here by injection
-# seedgo: no-test-needed(covered_elsewhere) — medic state's read-modify-write cycles over json_file_lock, in test_medic_state.py
+# seedgo: no-test-needed(covered_elsewhere) — medic state's read-modify-writes over json_file_lock, test_medic_state.py
 
 import json
 import os
@@ -121,11 +121,9 @@ class TestReplaceSurvivesWindowsSharingViolations:
             if attempts["n"] < 3:
                 raise PermissionError("sharing violation")
 
-        monkeypatch.setattr(config.os, "replace", flaky)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", sleeps.append)
 
-        config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+        config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=flaky, sleep_fn=sleeps.append)
         assert attempts["n"] == 3
         assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * 2
 
@@ -137,10 +135,10 @@ class TestReplaceSurvivesWindowsSharingViolations:
             attempts["n"] += 1
             raise PermissionError("sharing violation")
 
-        monkeypatch.setattr(config.os, "replace", always_blocked)
-
         with pytest.raises(PermissionError):
-            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+            config.replace_with_retry(
+                str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=always_blocked, sleep_fn=lambda s: None
+            )
         assert attempts["n"] == config._REPLACE_ATTEMPTS
 
     def test_foreign_oserror_propagates_on_the_first_attempt(self, monkeypatch, tmp_path):
@@ -151,10 +149,8 @@ class TestReplaceSurvivesWindowsSharingViolations:
             attempts["n"] += 1
             raise OSError(18, "Invalid cross-device link")
 
-        monkeypatch.setattr(config.os, "replace", wrong_disk)
-
         with pytest.raises(OSError):
-            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=wrong_disk)
         assert attempts["n"] == 1
 
     def test_the_backoff_is_a_wait_not_a_busy_spin(self, monkeypatch, tmp_path):
@@ -163,12 +159,16 @@ class TestReplaceSurvivesWindowsSharingViolations:
         Counting the sleeps pins the wait without asserting on wall-clock time,
         so it cannot flake on a loaded runner.
         """
-        monkeypatch.setattr(config.os, "replace", lambda s, d: (_ for _ in ()).throw(PermissionError()))
+
+        def refused(src, dst):
+            raise PermissionError()
+
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", lambda s: sleeps.append(s))
 
         with pytest.raises(PermissionError):
-            config.replace_with_retry(str(tmp_path / "a"), str(tmp_path / "b"))
+            config.replace_with_retry(
+                str(tmp_path / "a"), str(tmp_path / "b"), replace_fn=refused, sleep_fn=sleeps.append
+            )
 
         assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * (config._REPLACE_ATTEMPTS - 1)
 
@@ -214,8 +214,7 @@ class TestReadTextWithRetry:
     def test_a_refusal_that_clears_is_waited_out(self, monkeypatch, tmp_path):
         """Three sharing violations, then the real contents."""
         path, state, read_text = self._flaky(tmp_path, 3)
-        monkeypatch.setattr(Path, "read_text", read_text)
-        assert config.read_text_with_retry(path) == "payload"
+        assert config.read_text_with_retry(path, read_fn=read_text, sleep_fn=lambda s: None) == "payload"
         assert state["seen"] == 3
 
     def test_it_actually_waits_between_attempts(self, monkeypatch, tmp_path):
@@ -224,10 +223,8 @@ class TestReadTextWithRetry:
         no wall clock, so a loaded runner cannot flake this.
         """
         path, _state, read_text = self._flaky(tmp_path, 3)
-        monkeypatch.setattr(Path, "read_text", read_text)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", sleeps.append)
-        config.read_text_with_retry(path)
+        config.read_text_with_retry(path, read_fn=read_text, sleep_fn=sleeps.append)
         assert sleeps == [config._REPLACE_BACKOFF_SECONDS] * 3
 
     def test_a_refusal_that_never_clears_raises(self, monkeypatch, tmp_path):
@@ -235,9 +232,8 @@ class TestReadTextWithRetry:
         this function must never have — that is the defect it was written for.
         """
         path, state, read_text = self._flaky(tmp_path, 10_000)
-        monkeypatch.setattr(Path, "read_text", read_text)
         with pytest.raises(PermissionError):
-            config.read_text_with_retry(path)
+            config.read_text_with_retry(path, read_fn=read_text, sleep_fn=lambda s: None)
         assert state["seen"] == config._REPLACE_ATTEMPTS
 
     def test_a_foreign_oserror_propagates_on_the_first_attempt(self, monkeypatch, tmp_path):
@@ -249,9 +245,8 @@ class TestReadTextWithRetry:
             seen.append(1)
             raise FileNotFoundError(2, "No such file")
 
-        monkeypatch.setattr(Path, "read_text", read_text)
         with pytest.raises(FileNotFoundError):
-            config.read_text_with_retry(path)
+            config.read_text_with_retry(path, read_fn=read_text)
         assert len(seen) == 1, "retried something that was never going to clear"
 
 

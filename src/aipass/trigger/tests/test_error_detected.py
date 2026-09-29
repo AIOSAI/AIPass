@@ -3,7 +3,7 @@
 # Description: Tests for error_detected event handler with Medic v2 dispatch gating
 # Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/events/error_detected.py and the dispatch gates it runs."""
@@ -243,6 +243,58 @@ class TestHandleErrorDetectedGates:
         mod.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
 
         send.assert_not_called()
+
+    def test_an_unreadable_branch_registry_is_reported_not_skipped(self, tmp_path: Path) -> None:
+        """A registry that cannot be read names itself in the trail; nothing is skipped or sent.
+
+        The real lookup runs over a tmp registry that is not JSON. Answering the
+        empty set would log 'Unknown branch skipped' for a branch that has an
+        owner. Mutants 2026-09-29: the raise put back to return set(), and the
+        file's name taken out of the message, each redden this.
+        """
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        (tmp_path / "AIPASS_REGISTRY.json").write_text("{not json", encoding="utf-8")
+
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+        assert not (tmp_path / "logs" / "medic_suppressed.jsonl").exists()
+        trail = (tmp_path / "error_detected_handler.jsonl").read_text(encoding="utf-8")
+        assert "branch registry unreadable (AIPASS_REGISTRY.json)" in trail
+
+    def test_an_unreadable_medic_state_dispatches_nothing(self, tmp_path: Path) -> None:
+        """A medic state nobody can read may hold a person's 'off': no mail, the trail names it.
+
+        Red first 2026-09-29: the unreadable state answered enabled and the error was sent.
+        """
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+        registry = {"branches": [{"email": "@flow"}]}
+        (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
+        (tmp_path / "trigger_json").mkdir()
+        (tmp_path / "trigger_json" / "medic_state.json").write_text("{not json", encoding="utf-8")
+
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+        trail = (tmp_path / "error_detected_handler.jsonl").read_text(encoding="utf-8")
+        assert "medic state unreadable (medic_state.json)" in trail
+
+    def test_an_absent_branch_registry_is_a_registry_with_nobody_in_it(self, tmp_path: Path) -> None:
+        """No registry file answers the empty set: the branch is skipped as unknown, no warning.
+
+        Mutant 2026-09-29: an absent file made to raise reddens this.
+        """
+        send = MagicMock(return_value=True)
+        error_detected.set_send_email_callback(send)
+
+        error_detected.handle_error_detected(branch="flow", module="cfg", message="err", error_hash="h1", count=2)
+
+        send.assert_not_called()
+        assert not (tmp_path / "error_detected_handler.jsonl").exists()
+        skipped = (tmp_path / "logs" / "medic_suppressed.jsonl").read_text(encoding="utf-8")
+        assert "Unknown branch skipped: @flow" in skipped
 
     def test_returns_early_circuit_breaker_open(self) -> None:
         """Does not dispatch when circuit breaker is open."""

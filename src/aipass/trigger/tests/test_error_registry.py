@@ -3,7 +3,7 @@
 # Description: Unit tests for the error_registry handler
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/error_registry.py: the dedup engine, circuit breaker and backoff."""
@@ -349,6 +349,25 @@ def test_circuit_breaker_trips_after_threshold(tmp_path: Path) -> None:
 
     status = er.get_circuit_breaker_status()
     assert status["state"] == "open"
+
+
+def test_errors_outside_the_trip_window_do_not_trip_the_breaker(tmp_path: Path) -> None:
+    """Nine errors a window ago and one now are one error in the window, not ten.
+
+    Green on the tree from its first run; its proof is the mutant.
+    Mutant 2026-09-29: circuit_breaker_record_error reading its own clock reddens this.
+    """
+    _seed_registry(tmp_path)
+    er = _import_registry()
+    er.circuit_breaker_reset()
+    window = 60  # the default trip_window_seconds; the status does not report it
+    start = 1_000_000.0
+
+    for _ in range(9):
+        er.circuit_breaker_record_error(now=start)
+    er.circuit_breaker_record_error(now=start + window + 1)
+
+    assert er.get_circuit_breaker_status(now=start + window + 1)["state"] == "closed"
 
 
 def test_circuit_breaker_open_blocks_dispatch(tmp_path: Path) -> None:

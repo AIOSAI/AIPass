@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: runaway_handler.py
 # Description: Runaway log event handler with per-file cooldown gating
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2026-07-14
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -50,12 +50,15 @@ the content mute made this channel structurally dead in its own peak window.
 A volume mute must be set deliberately, and CRITICAL runaways bypass even that
 — a machine-eating flood is never something you asked to silence.
 
-Every gating decision is appended to logs/runaway_suppressed.jsonl with an
-`outcome` field ("suppressed", "delivered" or "observed") so suppressed-by-design,
-delivered-by-bypass and recorded-but-untold are distinguishable in the trail.
-"observed" is the observe-only WARNING outcome: we did record it, so it is not a
-suppression, and nobody was told, so it is not a delivery — it needed its own
-word. Entries written before the `outcome` field existed are all suppressions.
+The trail, logs/runaway_suppressed.jsonl, records what happened to every event
+past the file_path check: one line each, with an `outcome` field ("suppressed",
+"observed", "delivered" or "failed") and a `reason`. "observed" is the
+observe-only WARNING outcome: recorded, nobody told. A critical that was sent is
+"delivered" with its gate reason, or "critical" when no gate touched it; one that
+could not be sent is "failed" with "no_callback" or "send_refused". This is
+@trigger's decision in fleet green leg 4 (2026-09-29): before it, the trail held
+every event the gate stopped and none it passed. Entries written before the
+`outcome` field existed are all suppressions.
 
 Alerts written to .aipass/alerts.json expire after 24h by default (same TTL
 convention as medic_state.py's DEFAULT_MUTE_SECONDS) — pass forever=True to
@@ -186,8 +189,9 @@ def _write_decision_log(outcome: str, reason: str, file_path: str, branch: str) 
     """Write a gating decision to the runaway decision trail.
 
     Args:
-        outcome: "suppressed" (alert dropped), "delivered" (alert sent anyway)
-            or "observed" (recorded, nobody woken — observe-only WARNING)
+        outcome: "suppressed" (alert dropped), "delivered" (alert sent),
+            "observed" (recorded, nobody woken — observe-only WARNING) or
+            "failed" (a critical that could not be sent)
         reason: Machine-readable cause, e.g. "cooldown", "volume_muted"
         file_path: Path to the runaway log file
         branch: Responsible branch name
@@ -311,6 +315,7 @@ def handle_runaway_log_detected(
 
         if _send_email is None:
             logger.warning("No email callback — cannot dispatch runaway alert")
+            _write_decision_log("failed", "no_callback", file_path, target_branch)
             return
 
         recipient = "@prax" if is_unknown else f"@{target_branch.lower()}"
@@ -342,9 +347,9 @@ def handle_runaway_log_detected(
 
         if not sent:
             logger.warning(f"Email delivery failed for {recipient} ({file_path})")
+            _write_decision_log("failed", "send_refused", file_path, target_branch)
             return
-        if gate_reason:
-            _write_decision_log("delivered", gate_reason, file_path, target_branch)
+        _write_decision_log("delivered", gate_reason or "critical", file_path, target_branch)
 
         try:
             from aipass.ai_mail.apps.handlers.dispatch.wake import wake_branch

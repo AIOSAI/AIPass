@@ -3,7 +3,7 @@
 # Description: Tests for the runaway_log_detected event handler
 # Version: 1.0.1
 # Created: 2026-08-09
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/events/runaway_handler.py."""
@@ -589,6 +589,11 @@ def _decision_entries(reason: str) -> list:
     return [c[0][1] for c in calls if isinstance(c[0][1], dict) and c[0][1].get("reason") == reason]
 
 
+def _trail_lines() -> list:
+    """Collect every line written to the decision trail, in order."""
+    return [c[0][1] for c in _trail.call_args_list if c[0][0] == mod.DECISION_LOG]
+
+
 class TestSuppressionLog:
     """Cooldown and mute suppressions write to the decision log."""
 
@@ -679,6 +684,69 @@ class TestSuppressionLog:
 
         send.assert_called_once()
         assert _decision_entries("bypass_critical") == []
+
+    def test_critical_over_an_unreadable_mute_is_delivered_once(self, tmp_path: Path) -> None:
+        """A sent critical over a mute nobody could read leaves one line: delivered, mute_unreadable.
+
+        Green on the tree from its first run; its proof is the mutant.
+        Mutant 2026-09-29: delivered written for bypass_critical alone reddens this.
+        """
+        send = _setup_happy_path()
+        (tmp_path / "medic_state.json").write_text("{not json", encoding="utf-8")
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        send.assert_called_once()
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("delivered", "mute_unreadable")]
+
+    def test_an_unmuted_critical_that_was_sent_is_delivered(self) -> None:
+        """The trail records what happened to every event, the ones the gate passed included.
+
+        Red first on 2026-09-29: an unmuted critical wrote no line at all.
+        """
+        _setup_happy_path()
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("delivered", "critical")]
+
+    def test_a_critical_whose_send_was_refused_is_failed(self) -> None:
+        """A send that answers False is one line, failed, send_refused. Red first on 2026-09-29."""
+        mod.set_send_email_callback(MagicMock(return_value=False))
+
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("failed", "send_refused")]
+
+    def test_a_critical_with_no_mail_callback_is_failed(self) -> None:
+        """No callback to send with is one line, failed, no_callback. Red first on 2026-09-29."""
+        mod.handle_runaway_log_detected(
+            file_path=RUNAWAY_LOG,
+            branch="flow",
+            rate_lines_per_min=5000,
+            sustained_duration_sec=60,
+            severity="critical",
+        )
+
+        assert [(e["outcome"], e["reason"]) for e in _trail_lines()] == [("failed", "no_callback")]
 
     def test_content_mute_writes_no_decision_entry(self, tmp_path: Path) -> None:
         """A content mute is not a runaway gate — it leaves no decision entry."""

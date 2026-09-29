@@ -3,7 +3,7 @@
 # Description: Unit tests for medic module handle_command
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for the medic toggle module (apps/modules/medic.py)."""
@@ -12,12 +12,16 @@
 # seedgo: no-test-needed(behaviour) — the state file format in apps/handlers/medic_state.py; its own tests cover it
 
 import re
+import subprocess
+from pathlib import Path
+
 import pytest
 from unittest.mock import MagicMock, patch
 
 from rich.text import Text
 
 from aipass.cli.apps.modules import display
+from aipass.trigger.apps.handlers import service_control
 from aipass.trigger.apps.handlers.json import json_handler
 from aipass.trigger.apps.handlers.medic_state import parse_duration
 from aipass.trigger.apps.modules import medic
@@ -776,7 +780,8 @@ def test_status_on_a_host_without_systemd_says_so_instead_of_offering_medic_on(c
     state = _get_medic_state()
     state.is_enabled.return_value = True
 
-    with patch.object(medic, "_is_service_active", return_value=False):
+    # None is what is-active answers on such a host since 2026-09-28: the probe refuses.
+    with patch.object(medic, "_is_service_active", return_value=None):
         with patch.object(medic, "systemd_available", return_value=False):
             medic.handle_command("status", [])
 
@@ -808,11 +813,66 @@ def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_system
     """ "failed to start" reads as a broken unit; the truth is a hostless door."""
     medic = _import_medic()
 
-    with patch.object(medic, "_systemctl", return_value=False):
-        with patch.object(medic, "_is_service_active", return_value=False):
+    with patch.object(medic, "_systemctl", return_value=None):
+        with patch.object(medic, "_is_service_active", return_value=None):
             with patch.object(medic, "_ensure_service_installed", return_value=False):
                 with patch.object(medic, "systemd_available", return_value=False):
                     medic.handle_command("on", [])
 
     panel_text = capsys.readouterr().out
     assert "unavailable — no systemd on this host" in panel_text, panel_text
+
+
+@pytest.fixture
+def systemctl_never_answers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list:
+    """A host with systemctl on PATH whose every call times out; returns the argv of each call.
+
+    PATH holds only an inert stub so the probe finds systemctl, and subprocess.run
+    is replaced at service_control's own module, so no real systemctl runs.
+    """
+    bin_dir = tmp_path / "systemd_bin"
+    bin_dir.mkdir()
+    for name in ("systemctl", "systemctl.exe"):  # the .exe is what which() finds on Windows
+        stub = bin_dir / name
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    calls: list = []
+
+    def hung(cmd, **kwargs):
+        calls.append(cmd)
+        raise subprocess.TimeoutExpired(cmd, 10)
+
+    monkeypatch.setattr(service_control.subprocess, "run", hung)
+    return calls
+
+
+def test_medic_on_does_not_guess_a_start_when_systemctl_never_answered(capsys, systemctl_never_answers):
+    """An unanswered is-active is not a stopped watcher: on starts nothing and says unknown.
+
+    Red first 2026-09-29: on tried a start and printed "failed to start".
+    """
+    medic = _import_medic()
+
+    medic.handle_command("on", [])
+
+    panel_text = capsys.readouterr().out
+    assert [cmd for cmd in systemctl_never_answers if "start" in cmd] == []
+    assert "systemctl did not answer" in panel_text, panel_text
+    assert "failed to start" not in panel_text, panel_text
+
+
+def test_medic_off_forever_claims_no_stop_systemctl_never_answered(capsys, systemctl_never_answers):
+    """off --forever sends the stop on an unanswered is-active, and claims no stop it did not see.
+
+    A stop to a unit that is not running is a no-op, so sending it costs nothing.
+    Red first 2026-09-29: off sent no stop and printed "Log watcher stopped".
+    """
+    medic = _import_medic()
+
+    medic.handle_command("off", ["--forever"])
+
+    panel_text = capsys.readouterr().out
+    assert [cmd[2] for cmd in systemctl_never_answers] == ["is-active", "stop"]
+    assert "systemctl did not answer" in panel_text, panel_text
+    assert "Log watcher stopped" not in panel_text, panel_text

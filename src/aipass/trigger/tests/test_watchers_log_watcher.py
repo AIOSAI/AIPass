@@ -3,7 +3,7 @@
 # Description: Unit tests for centralized system_logs log watcher
 # Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for the centralized system_logs watcher (apps/handlers/watchers/log_watcher.py)."""
@@ -65,166 +65,166 @@ def _mock_infrastructure(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _generate_error_hash
+# Tests -- generate_error_hash
 # ---------------------------------------------------------------------------
 
 
 class TestGenerateErrorHash:
-    """Tests for _generate_error_hash pure function."""
+    """Tests for generate_error_hash pure function."""
 
     def test_deterministic(self):
         """Same inputs always produce the same hash."""
-        h1 = wlw._generate_error_hash("mod_a", "something broke")
-        h2 = wlw._generate_error_hash("mod_a", "something broke")
+        h1 = wlw.generate_error_hash("mod_a", "something broke")
+        h2 = wlw.generate_error_hash("mod_a", "something broke")
         assert h1 == h2
 
     def test_length_is_8(self):
         """Hash is exactly 8 characters long."""
-        h = wlw._generate_error_hash("module", "message")
+        h = wlw.generate_error_hash("module", "message")
         assert len(h) == 8
 
     def test_matches_md5_prefix(self):
         """Hash matches the first 8 chars of MD5(module:message)."""
         expected = hashlib.md5("mymod:mymsg".encode()).hexdigest()[:8]
-        assert wlw._generate_error_hash("mymod", "mymsg") == expected
+        assert wlw.generate_error_hash("mymod", "mymsg") == expected
 
     def test_different_inputs_different_hashes(self):
         """Different inputs produce different hashes."""
-        h1 = wlw._generate_error_hash("mod_a", "err one")
-        h2 = wlw._generate_error_hash("mod_b", "err two")
+        h1 = wlw.generate_error_hash("mod_a", "err one")
+        h2 = wlw.generate_error_hash("mod_b", "err two")
         assert h1 != h2
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _detect_branch_from_log
+# Tests -- detect_branch_from_log
 # ---------------------------------------------------------------------------
 
 
 class TestDetectBranchFromLog:
-    """Tests for _detect_branch_from_log."""
+    """Tests for detect_branch_from_log."""
 
     def test_branch_module_pattern(self):
         """seedgo_audit.log returns SEEDGO."""
-        assert wlw._detect_branch_from_log("seedgo_audit.log") == "SEEDGO"
+        assert wlw.detect_branch_from_log("seedgo_audit.log") == "SEEDGO"
 
     def test_simple_log(self):
         """simple.log returns SIMPLE."""
-        assert wlw._detect_branch_from_log("simple.log") == "SIMPLE"
+        assert wlw.detect_branch_from_log("simple.log") == "SIMPLE"
 
     def test_full_path(self, tmp_path):
         """Works with a full path, not just filename."""
-        assert wlw._detect_branch_from_log(str(tmp_path / "logs" / "trigger_events.log")) == "TRIGGER"
+        assert wlw.detect_branch_from_log(str(tmp_path / "logs" / "trigger_events.log")) == "TRIGGER"
 
     def test_multiple_underscores(self):
         """ai_mail_dispatch.log returns AI (first part before underscore)."""
-        assert wlw._detect_branch_from_log("ai_mail_dispatch.log") == "AI"
+        assert wlw.detect_branch_from_log("ai_mail_dispatch.log") == "AI"
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _detect_log_level
+# Tests -- detect_log_level
 # ---------------------------------------------------------------------------
 
 
 class TestDetectLogLevel:
-    """Tests for _detect_log_level."""
+    """Tests for detect_log_level."""
 
     def test_error_dash_format(self):
         """Detects ERROR from dash-separated format."""
-        assert wlw._detect_log_level("2026-01-01 - mod - ERROR - msg") == "error"
+        assert wlw.detect_log_level("2026-01-01 - mod - ERROR - msg") == "error"
 
     def test_error_space_format(self):
         """Detects ERROR from space-separated format."""
-        assert wlw._detect_log_level("2026-01-01 ERROR something") == "error"
+        assert wlw.detect_log_level("2026-01-01 ERROR something") == "error"
 
     def test_error_bracket_format(self):
         """Detects ERROR from bracket format [ERROR]."""
-        assert wlw._detect_log_level("[ERROR] something happened") == "error"
+        assert wlw.detect_log_level("[ERROR] something happened") == "error"
 
     def test_warning(self):
         """Detects WARNING level."""
-        assert wlw._detect_log_level("2026-01-01 - mod - WARNING - msg") == "warning"
+        assert wlw.detect_log_level("2026-01-01 - mod - WARNING - msg") == "warning"
 
     def test_critical_maps_to_error(self):
         """CRITICAL level maps to error."""
-        assert wlw._detect_log_level("2026-01-01 - mod - CRITICAL - msg") == "error"
+        assert wlw.detect_log_level("2026-01-01 - mod - CRITICAL - msg") == "error"
 
     def test_debug(self):
         """Detects DEBUG level."""
-        assert wlw._detect_log_level("2026-01-01 - mod - DEBUG - msg") == "debug"
+        assert wlw.detect_log_level("2026-01-01 - mod - DEBUG - msg") == "debug"
 
     def test_info_default(self):
         """Lines without a recognized level default to info."""
-        assert wlw._detect_log_level("just a plain log message") == "info"
+        assert wlw.detect_log_level("just a plain log message") == "info"
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _parse_log_message
+# Tests -- parse_log_message
 # ---------------------------------------------------------------------------
 
 
 class TestParseLogMessage:
-    """Tests for _parse_log_message."""
+    """Tests for parse_log_message."""
 
     def test_pipe_format_extracts_message(self):
         """Extracts message from pipe-separated format."""
         line = "2026-01-01 | mod | ERROR | Connection refused"
-        assert wlw._parse_log_message(line) == "Connection refused"
+        assert wlw.parse_log_message(line) == "Connection refused"
 
     def test_pipe_format_with_pipes_in_message(self):
         """Handles messages that contain pipe characters."""
         line = "ts | mod | ERROR | a | b | c"
-        assert wlw._parse_log_message(line) == "a | b | c"
+        assert wlw.parse_log_message(line) == "a | b | c"
 
     def test_non_pipe_returns_stripped_line(self):
         """Non-pipe line is returned stripped."""
-        assert wlw._parse_log_message("  just a message  ") == "just a message"
+        assert wlw.parse_log_message("  just a message  ") == "just a message"
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _extract_module_name
+# Tests -- extract_module_name
 # ---------------------------------------------------------------------------
 
 
 class TestExtractModuleName:
-    """Tests for _extract_module_name."""
+    """Tests for extract_module_name."""
 
     def test_pipe_format_extracts_module(self):
         """Extracts module from second pipe-separated field."""
         line = "2026-01-01 | my_module | ERROR | msg"
-        assert wlw._extract_module_name(line) == "my_module"
+        assert wlw.extract_module_name(line) == "my_module"
 
     def test_non_pipe_returns_unknown(self):
         """Non-pipe line returns 'unknown'."""
-        assert wlw._extract_module_name("no pipes here") == "unknown"
+        assert wlw.extract_module_name("no pipes here") == "unknown"
 
 
 # ---------------------------------------------------------------------------
-# Tests -- _should_skip_log
+# Tests -- should_skip_log
 # ---------------------------------------------------------------------------
 
 
 class TestShouldSkipLog:
-    """Tests for _should_skip_log."""
+    """Tests for should_skip_log."""
 
     def test_initialization_line_skipped(self):
         """Initialization noise is skipped."""
-        assert wlw._should_skip_log("Initializing trigger module") is True
+        assert wlw.should_skip_log("Initializing trigger module") is True
 
     def test_module_initialized_skipped(self):
         """'Module initialized' line is skipped."""
-        assert wlw._should_skip_log("Module initialized successfully") is True
+        assert wlw.should_skip_log("Module initialized successfully") is True
 
     def test_configuration_loaded_skipped(self):
         """'Configuration loaded' line is skipped."""
-        assert wlw._should_skip_log("Configuration loaded from config.json") is True
+        assert wlw.should_skip_log("Configuration loaded from config.json") is True
 
     def test_real_error_not_skipped(self):
         """Actual error messages are NOT skipped."""
-        assert wlw._should_skip_log("Database connection failed") is False
+        assert wlw.should_skip_log("Database connection failed") is False
 
     def test_cleanup_zero_skipped(self):
         """'Cleanup completed - Removed 0' noise line is skipped."""
-        assert wlw._should_skip_log("Cleanup completed - Removed 0 entries") is True
+        assert wlw.should_skip_log("Cleanup completed - Removed 0 entries") is True
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ class TestLogFileWatcherRotationDrain:
         assert not any("already seen" in line for line in lines)
 
     def test_drain_uses_branch_and_noise_filter(self, tmp_path):
-        """Drained lines get the same branch arg and _should_skip_log filter."""
+        """Drained lines get the same branch arg and should_skip_log filter."""
         watcher = wlw.LogFileWatcher()
 
         log_file = tmp_path / "prax_core.log"
@@ -957,8 +957,8 @@ class TestSystemLogsOwnership:
         deliberate refusal, so it has to be proven under conditions where the
         old code WOULD have started an observer.
         """
-        wlw.WATCHDOG_AVAILABLE = True
-        wlw.SYSTEM_LOGS_DIR = tmp_path
+        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
         (tmp_path / "hooks_edit_gate.log").write_text("x", encoding="utf-8")
 
         scheduled = MagicMock()
@@ -970,9 +970,9 @@ class TestSystemLogsOwnership:
 
     def test_start_leaves_no_observer_behind(self, tmp_path, monkeypatch):
         """Declining must not build an observer or park one in module state (mutant: WatchdogObserver() built)."""
-        wlw.WATCHDOG_AVAILABLE = True
-        wlw.SYSTEM_LOGS_DIR = tmp_path
-        wlw._log_observer = None
+        monkeypatch.setattr(wlw, "WATCHDOG_AVAILABLE", True)
+        monkeypatch.setattr(wlw, "SYSTEM_LOGS_DIR", tmp_path)
+        monkeypatch.setattr(wlw, "_log_observer", None)
         observer_cls = MagicMock()
         monkeypatch.setattr(wlw, "WatchdogObserver", observer_cls)
 

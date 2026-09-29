@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: reload_sentinel.py
 # Description: Restarts the log watcher when its own handler code changes on disk
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-12
-# Modified: 2026-08-12
+# Modified: 2026-09-29
 # =============================================
 
 """Reload sentinel — keeps the running watcher on the shipped code.
@@ -71,8 +71,18 @@ CHECK_INTERVAL_SECONDS = 30.0
 RELOAD_EXIT_CODE = 75
 
 
+# Sandboxes the watcher never loads code from. Source: the owner's ruling of
+# 2026-09-27 — a dropbox and an .archive are sandboxes, nothing looks into them.
+# __pycache__ holds no .py, and is left out on the same footing.
+SKIPPED_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
+
+
 def _scan_root(root: Path, seen: Dict[Path, float]) -> None:
-    """Record every Python module under *root* into *seen*.
+    """Record every Python module under *root* into *seen*, sandboxes left out.
+
+    The skip compares the parts of the path below *root*, never the whole
+    path: a root that itself lies under a directory named dropbox still shows
+    its files.
 
     Args:
         root: Directory to walk
@@ -80,6 +90,8 @@ def _scan_root(root: Path, seen: Dict[Path, float]) -> None:
     """
     try:
         for path in root.rglob("*.py"):
+            if SKIPPED_DIRS.intersection(path.relative_to(root).parts):
+                continue
             try:
                 seen[path] = path.stat().st_mtime
             except OSError as exc:

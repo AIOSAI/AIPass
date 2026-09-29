@@ -3,7 +3,7 @@
 # Description: Unit tests for trigger event bus core module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/core.py, the Trigger event bus."""
@@ -16,11 +16,15 @@ import sys
 import pytest
 from unittest.mock import MagicMock, call
 
-from aipass.trigger.apps.handlers.events import registry
+from aipass.trigger.apps.config import trail_logger
+from aipass.trigger.apps.handlers.events import error_detected, registry, runaway_handler
 from aipass.trigger.apps.modules import core
 
 # A second import site for the same class, read by the module-identity test at the foot of the file.
 from aipass.trigger.apps.modules.core import Trigger as ReimportedTrigger
+
+# The real wiring pass, held before the autouse fixture replaces it at its home.
+wire_the_real_handlers = registry.setup_handlers
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +359,28 @@ def test_a_second_wiring_pass_does_not_double_fire(trigger_cls):
     trigger_cls.fire("error_detected")
 
     assert calls == ["a", "b"]
+
+
+def test_a_header_event_reaches_no_handler_on_the_real_wiring(trigger_cls, monkeypatch, tmp_path, mock_infrastructure):
+    """cli's header fire runs nothing in trigger and writes no operation line.
+
+    The real setup_handlers wires the bus (an isolated Trigger state). It also
+    hands the live mail adapter to two handler modules; those names are set
+    through monkeypatch first, so teardown takes the adapter back out.
+    Red first 2026-09-29: the retired handler ran and logged 'cli_event'.
+    """
+    for handler_module in (core, error_detected, runaway_handler):
+        assert sys.modules[handler_module.__name__] is handler_module, "not the module setup_handlers imports"
+    monkeypatch.setattr(error_detected, "_send_email", None)
+    monkeypatch.setattr(runaway_handler, "_send_email", None)
+    monkeypatch.setattr(registry, "logger", trail_logger(tmp_path / "registry_handler.jsonl"))
+    wire_the_real_handlers()
+
+    result = trigger_cls.fire("cli_header_displayed", title="probe")
+
+    assert result["handlers"] == 0
+    logged = [p.read_text(encoding="utf-8") for p in mock_infrastructure.rglob("*") if p.is_file()]
+    assert not any("cli_event" in text for text in logged)
 
 
 def test_distinct_handlers_still_both_register(trigger_cls):

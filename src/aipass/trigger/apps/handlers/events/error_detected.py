@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: error_detected.py
 # Description: Error detected event handler with Medic v2 dispatch gating
-# Version: 2.8.0
+# Version: 2.9.0
 # Created: 2026-02-10
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -133,10 +133,18 @@ def _is_medic_enabled() -> bool:
 
     Reads medic_enabled from medic_state.json. If disabled with a TTL
     (medic_disabled_until timestamp), treats an expired TTL as enabled.
-    Defaults to True if config is missing or unreadable.
+    Defaults to True when no state file exists.
 
     Returns:
         True if medic dispatch is enabled
+
+    Raises:
+        RuntimeError: the state exists but cannot be read. It may hold a
+            person's 'medic off', and answering enabled mailed and woke
+            branches against it. @trigger's decision in fleet green leg 4
+            (2026-09-29): the one caller, handle_error_detected, has already
+            counted the error into the escalation lane; its outer except logs
+            this and dispatches nothing.
     """
     try:
         config = _read_medic_state().get("config", {})
@@ -148,8 +156,7 @@ def _is_medic_enabled() -> bool:
             return True
         return False
     except Exception as exc:
-        logger.warning(f"_is_medic_enabled config read failed: {exc}")
-        return True
+        raise RuntimeError(f"medic state unreadable ({MEDIC_STATE_FILE.name}): {exc}") from exc
 
 
 def _mute_entry_matches(entry, branch_lower: str, now: datetime) -> bool:

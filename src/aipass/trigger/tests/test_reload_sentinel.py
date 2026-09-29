@@ -3,13 +3,13 @@
 # Description: Tests the handler-mtime reload sentinel that keeps the watcher on shipped code
 # Version: 1.0.0
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/reload_sentinel.py, the handler-mtime reload sentinel."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(covered_elsewhere) — main() exiting RELOAD_EXIT_CODE when start() asks, in test_log_watcher_service.py
+# seedgo: no-test-needed(covered_elsewhere) — main() exiting RELOAD_EXIT_CODE, in test_log_watcher_service.py
 # seedgo: no-test-needed(external) — systemd restarting the unit on RELOAD_EXIT_CODE; AIPass tests only its own files
 
 import os
@@ -107,6 +107,31 @@ class TestSnapshot:
         monkeypatch.setattr(sentinel, "WATCHED_ROOTS", (tmp_path / "nope",))
 
         assert sentinel.snapshot() == {}
+
+    def test_an_archive_a_dropbox_and_a_pycache_are_not_loaded_code(self, sentinel, tree) -> None:
+        """A file moved into a sandbox is no change the watcher must restart for.
+
+        Red first 2026-09-29: rglob took all three into the snapshot.
+        """
+        for sandbox in (tree / ".archive", tree / "x" / "dropbox", tree / "__pycache__"):
+            sandbox.mkdir(parents=True)
+            (sandbox / "retired.py").write_text("# retired\n", encoding="utf-8")
+        (tree / "x" / "beside.py").write_text("# handler\n", encoding="utf-8")
+
+        snapshot = sentinel.snapshot()
+
+        assert set(snapshot) == {tree / "escalation.py", tree / "error_registry.py", tree / "x" / "beside.py"}
+
+    def test_a_root_inside_a_directory_named_dropbox_still_shows_its_files(
+        self, sentinel, monkeypatch, tmp_path
+    ) -> None:
+        """The skip compares the parts below the root, never the whole path."""
+        root = tmp_path / "dropbox" / ".archive" / "handlers"
+        root.mkdir(parents=True)
+        (root / "escalation.py").write_text("# handler\n", encoding="utf-8")
+        monkeypatch.setattr(sentinel, "WATCHED_ROOTS", (root,))
+
+        assert set(sentinel.snapshot()) == {root / "escalation.py"}
 
 
 # ---------------------------------------------------------------------------

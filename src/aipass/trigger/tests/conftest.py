@@ -3,7 +3,7 @@
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for trigger tests
 # Created: 2025-11-08
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # Version: 1.4.0
 # Category: trigger/tests
 #
@@ -171,9 +171,11 @@ def header_off_the_live_bus(monkeypatch: pytest.MonkeyPatch) -> list:
     """cli's header fires cli_header_displayed on the trigger it loaded once.
 
     display keeps that trigger in _TRIGGER behind _TRIGGER_LOADED, so any test
-    printing through the real header would fire on the live bus, whose handler
-    writes trigger's live operation log. Set here for every test, to a
-    recorder: the api cure of 2026-09-27, chosen by this branch in leg 3.
+    printing through the real header would fire on the live bus. Its handler
+    was retired in leg 4 (2026-09-29), yet this stays: the first fire of a
+    process runs the real setup_handlers, which wires the live mail adapter
+    into three handler modules. Set here for every test, to a recorder: the
+    api cure of 2026-09-27, chosen by this branch in leg 3.
     """
     fired: list = []
     recorder = types.SimpleNamespace(fire=lambda event, **data: fired.append((event, data)))

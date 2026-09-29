@@ -3,10 +3,10 @@
 # Description: Tests for simple event handler functions and the warning escalation lane
 # Version: 1.1.0
 # Created: 2026-04-25
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
-"""Tests for apps/handlers/events/cli.py, memory_template_updated.py and warning_logged.py."""
+"""Tests for apps/handlers/events/memory_template_updated.py and warning_logged.py."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(behaviour) — the lane internals in apps/handlers/escalation.py; the escalation tests cover them
@@ -20,61 +20,21 @@ from unittest.mock import MagicMock
 import pytest
 from aipass.trigger.apps.config import trail_logger
 from aipass.trigger.apps.handlers import escalation
-from aipass.trigger.apps.handlers.events import cli as cli_handler
 from aipass.trigger.apps.handlers.events import memory_template_updated, warning_logged
 
 
 @pytest.fixture(autouse=True)
 def json_log(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """The json_handler each of the three handler modules logs through, as a recorder.
+    """The json_handler each of the two handler modules logs through, as a recorder.
 
     Replaced where each handler module holds the name, so no handler call in
     this file reaches trigger's operation log.
     """
     log = MagicMock()
     log.log_operation = MagicMock(return_value=True)
-    for handler_module in (cli_handler, memory_template_updated, warning_logged):
+    for handler_module in (memory_template_updated, warning_logged):
         monkeypatch.setattr(handler_module, "json_handler", log)
     return log
-
-
-# ---------------------------------------------------------------------------
-# cli.py -- handle_cli_header_displayed
-# ---------------------------------------------------------------------------
-
-
-class TestHandleCliHeaderDisplayed:
-    """Tests for handle_cli_header_displayed from cli.py."""
-
-    def test_calls_log_operation(self, json_log: MagicMock) -> None:
-        """Logs cli_event via json_handler."""
-        mod = cli_handler
-
-        json_log.log_operation.reset_mock()
-
-        mod.handle_cli_header_displayed()
-
-        json_log.log_operation.assert_called_once_with("cli_event", {"success": True})
-
-    def test_arbitrary_kwargs_are_absorbed_and_never_reach_the_log(self, json_log: MagicMock) -> None:
-        """Extra event data is swallowed by **kwargs — the payload is unchanged.
-
-        Not crashing was all this checked, and not crashing is what a handler
-        that quietly forwarded its kwargs into the log payload also does. The
-        bus hands every handler whatever the firer passed; the contract is that
-        this one logs its own fixed payload regardless.
-        """
-        mod = cli_handler
-
-        mod.handle_cli_header_displayed(foo="bar", baz=42)
-
-        json_log.log_operation.assert_called_once_with("cli_event", {"success": True})
-
-    def test_returns_none(self) -> None:
-        """Handler returns None (handlers must not return values)."""
-        mod = cli_handler
-        result = mod.handle_cli_header_displayed()
-        assert result is None
 
 
 # ---------------------------------------------------------------------------

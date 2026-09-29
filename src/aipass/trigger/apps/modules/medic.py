@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: medic.py
 # Description: Medic toggle module for auto-healing error dispatch control
-# Version: 1.7.0
+# Version: 1.8.0
 # Created: 2026-02-12
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -429,18 +429,24 @@ def _handle_on(console) -> None:
         return
 
     logger.info("[MEDIC] Medic ENABLED - error dispatch active")
-    if not _is_service_active():
+    active = _is_service_active()
+    # Only an answered "not running" is started. None means systemctl never
+    # answered, and a start sent after a hung is-active is a guess.
+    if active is False:
         _ensure_service_installed()
         started = _systemctl("start")
         if started:
             logger.info("[MEDIC] Log watcher service started")
         else:
             logger.warning("[MEDIC] Could not start log watcher service")
+        active = _is_service_active()
 
-    if _is_service_active():
+    if active:
         watcher_status = "running"
     elif not systemd_available():
         watcher_status = "unavailable — no systemd on this host"
+    elif active is None:
+        watcher_status = "unknown — systemctl did not answer; see the service log"
     else:
         watcher_status = "failed to start"
     console.print(
@@ -453,6 +459,30 @@ def _handle_on(console) -> None:
             border_style="green",
         )
     )
+
+
+def _stop_watcher() -> str:
+    """Stop the log watcher for 'medic off --forever' and say what happened.
+
+    Running, or systemctl never answered: the stop is sent either way, because
+    a stop to a unit that is not running is a no-op. Only a stop that answered
+    success is reported as one.
+
+    Returns:
+        The watcher sentence for the off panel
+    """
+    active = _is_service_active()
+    if active is False:
+        return "Log watcher was not running."
+    if active is None and not systemd_available():
+        return "Log watcher: unavailable — no systemd on this host."
+    stopped = _systemctl("stop")
+    if stopped:
+        logger.info("[MEDIC] Log watcher service stopped")
+        return "Log watcher stopped."
+    if stopped is None:
+        return "Log watcher: unknown — systemctl did not answer; see the service log."
+    return "Log watcher: stop failed; see the service log."
 
 
 def _handle_off(console, args: list | None = None) -> None:
@@ -468,13 +498,11 @@ def _handle_off(console, args: list | None = None) -> None:
             error("Failed to disable Medic", suggestion="Check medic_state.json")
             return
         logger.info("[MEDIC] Medic DISABLED permanently")
-        if _is_service_active():
-            _systemctl("stop")
-            logger.info("[MEDIC] Log watcher service stopped")
+        watcher_line = _stop_watcher()
         console.print(
             Panel(
                 "[bold yellow]Medic DISABLED (permanent)[/bold yellow]\n\n"
-                "Error dispatch is [yellow]suppressed[/yellow]. Log watcher stopped.\n"
+                f"Error dispatch is [yellow]suppressed[/yellow]. {watcher_line}\n"
                 "Use [bold]medic on[/bold] to re-enable.",
                 title="Medic",
                 border_style="yellow",
