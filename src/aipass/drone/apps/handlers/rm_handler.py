@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: rm_handler.py
 # Description: Contained safe-delete handler
-# Version: 1.4.2
+# Version: 1.4.3
 # Created: 2026-06-02
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Contained safe-delete handler.
@@ -572,7 +572,9 @@ def stale_sweep(request: StaleRequest) -> StaleReport:
     Each DIR must resolve under the project root (the temp roots the plain lane
     also allows are not swept here) and outside the carve-outs. The walk never
     enters a carve-out directory, a dropbox or an .archive, and never follows a
-    symlink.
+    symlink. A DIR the user names that itself lies inside a sandbox is swept all
+    the same: a path a user names is the user's word, as drone rm of a file in a
+    dropbox is (drone's decision, DPLAN-0354 fleet green leg 3 ruling 11).
 
     The sibling-branch fence is crossed here and only here, by design
     (DPLAN-0338, the owner's go 2026-09-11): a stale staging temp is no citizen's

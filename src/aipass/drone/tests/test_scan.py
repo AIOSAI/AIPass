@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_scan.py
 # Description: Tests for branch command scanning
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/scan.py and the scanning handlers it drives."""
@@ -454,6 +454,36 @@ class TestScanHandleCommand:
 class TestScanFunction:
     """Tests for scan.scan() orchestration."""
 
+    def test_a_failed_help_scan_is_named_on_stderr_and_the_module_results_still_show(
+        self, temp_test_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A failure is loud where the caller is: drone scan and drone activate both go through
+        scan(), so the failed --help scan is named on stderr, and the module-file results it
+        did find are still shown and returned (exit stays 0: the results are real, partial).
+
+        Red first: the failure reached the log and the operation record only. Mutant killed:
+        the stderr line removed."""
+        apps_dir = temp_test_dir / "apps"
+        (apps_dir / "modules").mkdir(parents=True)
+        (apps_dir / "mybranch.py").write_text("# entry", encoding="utf-8")
+        (apps_dir / "modules" / "extra.py").write_text(
+            '"""Extra module."""\ndef handle_command(): pass\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr("aipass.drone.apps.modules.scan.resolve_branch", lambda _target: str(temp_test_dir))
+
+        with patch(
+            "aipass.drone.apps.handlers.scanning.scanner.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="mybranch --help", timeout=10),
+        ):
+            result = scan("@mybranch")
+
+        assert result is not None
+        assert [c["name"] for c in result] == ["extra"]
+        err = " ".join(capsys.readouterr().err.split())
+        assert "scan: @mybranch: the --help scan failed (" in err
+        assert "timed out after 10 seconds); showing module files only" in err
+
     @patch("aipass.drone.apps.modules.scan.resolve_branch")
     @patch("aipass.drone.apps.modules.scan.scan_branch")
     @patch("aipass.drone.apps.modules.scan.format_scan_results")
@@ -473,7 +503,7 @@ class TestScanFunction:
         result = scan("@testbranch")
 
         mock_resolve.assert_called_once_with("@testbranch")
-        mock_scan_branch.assert_called_once_with("/fake/path", "testbranch")
+        mock_scan_branch.assert_called_once_with("/fake/path", "testbranch", [])
         mock_format.assert_called_once()
         assert result is not None
         assert len(result) == 1

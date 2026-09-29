@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: scan.py
 # Description: Module orchestrator for branch command scanning
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-03-17
-# Modified: 2026-03-17
+# Modified: 2026-09-28
 # =============================================
 
 """Module orchestrator for branch command scanning.
@@ -139,11 +139,22 @@ def scan(target: str) -> list[dict] | None:
             logger.warning("CLI err_console not available, skipping user-facing error: %s", exc)
         return None
 
-    commands = scan_branch(branch_path, branch_name)
+    help_errors: list[str] = []
+    commands = scan_branch(branch_path, branch_name, help_errors)
 
     if commands:
         format_scan_results(branch_name, commands)
     else:
         format_no_commands(branch_name)
+
+    if help_errors:
+        # Loud where the caller is (drone scan / drone activate): the results
+        # above are real but partial. Exit stays 0 (drone's decision, DPLAN-0354 leg 3).
+        from aipass.cli.apps.modules import err_console
+
+        err_console.print(
+            f"scan: @{branch_name}: the --help scan failed ({help_errors[0]}); showing module files only",
+            markup=False,
+        )
 
     return commands

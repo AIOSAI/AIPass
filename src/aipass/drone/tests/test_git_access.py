@@ -1,12 +1,14 @@
 # =================== AIPass ====================
 # Name: test_git_access.py
 # Description: Tests for tier-based git access, new handlers, and PR deprecation
-# Version: 1.1.6
+# Version: 1.1.7
 # Created: 2026-05-12
 # Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/plugins/devpulse_ops/auth.py's git tiers and the git doors of apps/modules/git_module.py."""
+
+# The git doors pinned here: diff, log, show, commit and checkout.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(stdlib) — subprocess.run; git and gh are stubbed except in the tmp_path repos of the door tests
@@ -451,6 +453,30 @@ class TestOwnerTierIsEarnedPerRepo:
             verify_git_access("commit")
         assert f"{failure.__name__}: simulated resolve failure" in str(refused.value)
         assert "AIPASS_REGISTRY.json" in str(refused.value)
+
+    @pytest.mark.parametrize("mode", ["enforce", "warn"])
+    def test_an_unresolvable_registry_directory_is_an_authority_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mode: str
+    ) -> None:
+        """The refusal is of the species authority: it stands under enforcement, and the
+        warn-mode rollback lifts it as it lifts every other owner-tier authority refusal.
+        The warning names the directory that could not be resolved.
+
+        Green on the tree from its first run; its proof is its mutants: the species
+        changed to capability (warn raises "cannot run"), and the warning removed."""
+        make_owner_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("AIPASS_REGISTRY", str(tmp_path / "AIPASS_REGISTRY.json"))
+        monkeypatch.setenv("AIPASS_GIT_AUTH_MODE", mode)
+        monkeypatch.setattr(
+            "aipass.drone.apps.plugins.devpulse_ops.auth._resolve_location", _failing_resolve(tmp_path, OSError)
+        )
+        if mode == "warn":
+            assert verify_git_access("commit") == "devpulse"
+        else:
+            with pytest.raises(PermissionError, match="is not authorized for 'commit'"):
+                verify_git_access("commit")
+        assert f"Registry directory {tmp_path} could not be resolved: OSError" in caplog.text
 
     def test_subdirectory_of_recorded_home_allowed(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Path-binding accepts at-or-under, so working from a subdir still authorizes."""

@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_activation.py
 # Description: Tests for command activation, listing, removal, and custom execution
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-17
 # Modified: 2026-09-28
 # =============================================
@@ -324,7 +324,9 @@ class TestHandleCustomCommand:
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_routes_matched_command(self, mock_route: MagicMock) -> None:
-        """Should route a matched custom command through route_command; mutant killed: main() skipping the custom-command match."""
+        """Should route a matched custom command through route_command.
+
+        Mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("audit", "@seedgo", "audit", args=["aipass"])
 
@@ -387,7 +389,9 @@ class TestHandleCustomCommand:
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_interactive_detection_for_command(self, mock_route: MagicMock) -> None:
-        """Should set interactive=True for interactive commands; mutant killed: main() skipping the custom-command match."""
+        """Should set interactive=True for interactive commands.
+
+        Mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("mon", "@prax", "monitor")
 
@@ -406,7 +410,9 @@ class TestHandleCustomCommand:
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_interactive_detection_for_branch(self, mock_route: MagicMock) -> None:
-        """Should set interactive=True for CLI branch commands; mutant killed: main() skipping the custom-command match."""
+        """Should set interactive=True for CLI branch commands.
+
+        Mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("status", "@cli", "status")
 
@@ -425,7 +431,9 @@ class TestHandleCustomCommand:
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_watchdog_routes_interactive(self, mock_route: MagicMock) -> None:
-        """watchdog command should route with interactive=True (long-running poller); mutant killed: main() not routing '@target'."""
+        """watchdog command should route with interactive=True (long-running poller).
+
+        Mutant killed: main() not routing '@target'."""
 
         mock_route.return_value = CommandResult(
             stdout="",
@@ -472,9 +480,15 @@ class TestHandleCustomCommand:
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_a_failed_match_log_write_still_runs_the_matched_command(
-        self, mock_route: MagicMock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self,
+        mock_route: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A failed operation log is never "registry could not load"; mutant killed: the log write unguarded."""
+        """A failed operation log is never "registry could not load", and the warning names the command.
+
+        Mutants killed: the log write unguarded; the warning removed (caplog assert)."""
 
         ops.add_command("audit", "@seedgo", "audit")
         mock_route.return_value = CommandResult(stdout="", stderr="", exit_code=0, branch="seedgo", command="audit")
@@ -487,14 +501,18 @@ class TestHandleCustomCommand:
         result = _drone("audit")
 
         assert result == 0
-        mock_route.assert_called_once()
+        mock_route.assert_called_once_with("@seedgo", "audit", args=None, timeout=None, interactive=True)
         assert "could not load" not in capsys.readouterr().err
+        assert "match log for 'audit' not written: log document is not a list" in caplog.text
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_a_registry_that_cannot_load_is_named_and_exits_1(
         self, mock_route: MagicMock, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """A registry that cannot load is named, exit 1, nothing routed; mutant killed: the catch returns 0."""
+        """A registry that cannot load is named, exit 1, nothing routed, and it is not read as an unknown command.
+
+        Mutants killed: the catch returns 0; the catch returns -1 (main then falls to
+        "unknown command", also exit 1: only stderr tells the two apart)."""
 
         def unreadable() -> dict[str, Any]:
             raise OSError("registry unreadable")
@@ -505,11 +523,15 @@ class TestHandleCustomCommand:
 
         assert result == 1
         mock_route.assert_not_called()
-        assert "command registry could not load: registry unreadable" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "command registry could not load: registry unreadable" in err
+        assert "unknown command" not in err
 
     @patch("aipass.drone.apps.drone.route_command")
     def test_no_args_passes_none(self, mock_route: MagicMock) -> None:
-        """Should pass args=None when configured args and remaining args are both empty; mutant killed: main() skipping the custom-command match."""
+        """Should pass args=None when configured args and remaining args are both empty.
+
+        Mutant killed: main() skipping the custom-command match."""
 
         ops.add_command("simple", "@test", "simple")
 

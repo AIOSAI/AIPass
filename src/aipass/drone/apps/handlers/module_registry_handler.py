@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_registry_handler.py
 # Description: Handler for internal module registry operations
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-03-09
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Handler for internal module registry operations.
@@ -53,11 +53,14 @@ class _ExternalModuleConfig:
     version: str
 
 
-def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
-    """Load external module declarations from routing_config.json."""
+def load_external_modules() -> tuple[dict[str, _ExternalModuleConfig], str | None]:
+    """Load external module declarations from routing_config.json, with the reason when they could not load.
+
+    Returns (modules, None) on success; ({}, reason) when the config is absent or unreadable.
+    """
     if not _ROUTING_CONFIG_PATH.exists():
-        logger.warning("_load_external_modules: config not found at %s", _ROUTING_CONFIG_PATH)
-        return {}
+        logger.warning("load_external_modules: config not found at %s", _ROUTING_CONFIG_PATH)
+        return {}, f"config not found at {_ROUTING_CONFIG_PATH}"
     try:
         with open(_ROUTING_CONFIG_PATH, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -70,13 +73,20 @@ def _load_external_modules() -> dict[str, _ExternalModuleConfig]:
                 description=cfg.get("description", ""),
                 version=cfg.get("version", "unknown"),
             )
-        return result
+        return result, None
     except Exception as exc:
-        logger.warning("_load_external_modules: failed to load config: %s", exc)
-        return {}
+        logger.warning("load_external_modules: failed to load config: %s", exc)
+        return {}, f"failed to load {_ROUTING_CONFIG_PATH}: {exc}"
 
 
-_EXTERNAL_MODULES: dict[str, _ExternalModuleConfig] = _load_external_modules()
+_EXTERNAL_MODULES: dict[str, _ExternalModuleConfig]
+_EXTERNAL_MODULES_ERROR: str | None
+_EXTERNAL_MODULES, _EXTERNAL_MODULES_ERROR = load_external_modules()
+
+
+def external_modules_error() -> str | None:
+    """Why the external modules could not load, or None when routing_config.json loaded."""
+    return _EXTERNAL_MODULES_ERROR
 
 
 @dataclass

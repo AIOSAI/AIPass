@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: router_handler.py
 # Description: Handler for command routing implementation
-# Version: 1.2.2
+# Version: 1.2.3
 # Created: 2026-03-09
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -34,7 +34,8 @@ logger = system_logger
 # Long-lived callers turned that into a warning per drone call, forever.
 # Keyed per (kind, cwd, signals) so a genuinely NEW disagreement still speaks.
 #
-# Tests clear this directly (see tests/conftest.py). There is deliberately no
+# Tests replace this set with a fresh empty one per test through monkeypatch
+# (see tests/conftest.py), never clear it in place. There is deliberately no
 # public reset(): nothing in production has a reason to forget what it has
 # already said, and a production function that only tests call is exactly what
 # seedgo's unused_function standard exists to catch.

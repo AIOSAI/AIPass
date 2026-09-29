@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_module_registry.py
 # Description: module_registry orchestrator - handle_command routing
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/module_registry.py and apps/handlers/module_registry_handler.py."""
@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -230,6 +231,20 @@ class TestHandleCommandInfo:
 
         assert result is False
         mock_logger.warning.assert_called()
+
+    def test_info_on_a_registered_module_that_cannot_load_says_so(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A registered module whose adapter cannot import is not "not found": info names it
+        on stderr as registered but not loadable, and answers False.
+
+        Red first: info logged "not found" for it. Mutant killed: the registered check removed."""
+        monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"broken": "fake.broken.mod"})
+        with patch(f"{_MOD}.json_handler", autospec=True):
+            result = handle_command("info", ["broken"])
+        assert result is False
+        err = " ".join(capsys.readouterr().err.split())
+        assert "module_registry: @broken is registered but could not load (see drone log)" in err
 
     def test_info_valid_module_returns_true(self, capsys: pytest.CaptureFixture[str]) -> None:
         """'info' prints name, version and description (mutant: version dropped)."""
@@ -529,13 +544,11 @@ class TestGetModuleHelp:
         assert result == ""
 
     def test_a_module_that_cannot_import_answers_none_not_empty_help(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A broken module is told apart from one with no help text (mutant: the except returns "")."""
+        """A broken module is told apart from one with no help text (mutant: the except returns "").
+
+        The dotted path names no module, so the real import raises ModuleNotFoundError."""
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"broken": "fake.broken.mod"})
-        with patch(
-            f"{_HANDLER}.importlib.import_module",
-            side_effect=ImportError("nope"),
-        ):
-            result = mrh.get_module_help("broken")
+        result = mrh.get_module_help("broken")
         assert result is None
 
 
@@ -543,18 +556,55 @@ class TestGetModuleIntrospective:
     """get_module_introspective() tells a module that cannot load from one with nothing to say."""
 
     def test_a_module_that_cannot_import_answers_none_not_empty_text(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mutant: the except returns ""."""
+        """Mutant: the except returns "". The dotted path names no module: the real import raises."""
         monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"broken": "fake.broken.mod"})
-        with patch(
-            f"{_HANDLER}.importlib.import_module",
-            side_effect=ImportError("nope"),
-        ):
-            result = mrh.get_module_introspective("broken")
+        result = mrh.get_module_introspective("broken")
         assert result is None
 
     def test_a_module_with_nothing_to_say_answers_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The success-path empty answer stays "" so the two remain distinct (mutant: that return None)."""
-        monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"quiet": "fake.quiet.mod"})
-        with patch(f"{_HANDLER}.importlib.import_module", return_value=MagicMock(spec=[])):
-            result = mrh.get_module_introspective("quiet")
+        """The success-path empty answer stays "" so the two remain distinct (mutant: that return None).
+
+        ``string`` imports for real and holds neither get_introspective nor get_help."""
+        monkeypatch.setattr(mrh, "_INTERNAL_MODULES", {"quiet": "string"})
+        result = mrh.get_module_introspective("quiet")
         assert result == ""
+
+
+class TestTheExternalModuleConfig:
+    """load_external_modules() hands back the reason with an empty set, so a lost config is told from none."""
+
+    def test_an_unreadable_config_answers_empty_with_its_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Mutant: the except returns ({}, None). The config is a real file of broken JSON."""
+        config = tmp_path / "routing_config.json"
+        config.write_text("{not json", encoding="utf-8")
+        monkeypatch.setattr(mrh, "_ROUTING_CONFIG_PATH", config)
+        modules, error = mrh.load_external_modules()
+        assert modules == {}
+        assert error is not None
+        assert error.startswith(f"failed to load {config}: ")
+        assert "load_external_modules: failed to load config" in caplog.text
+
+    def test_an_absent_config_answers_empty_with_its_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mutant: the not-found branch returns ({}, None)."""
+        config = tmp_path / "routing_config.json"
+        monkeypatch.setattr(mrh, "_ROUTING_CONFIG_PATH", config)
+        assert mrh.load_external_modules() == ({}, f"config not found at {config}")
+
+    def test_a_config_that_loads_answers_no_reason(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mutant: the success return carries a reason. The success answer is the one with None."""
+        config = tmp_path / "routing_config.json"
+        config.write_text('{"modules": {"ext": {"entry_point": "a.b"}}}', encoding="utf-8")
+        monkeypatch.setattr(mrh, "_ROUTING_CONFIG_PATH", config)
+        modules, error = mrh.load_external_modules()
+        assert error is None
+        assert modules["ext"].entry_point == "a.b"
+        assert modules["ext"].version == "unknown"
+
+    def test_the_reason_is_read_at_call_time(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """external_modules_error() reads the module state, not a copy (mutant: it returns None)."""
+        monkeypatch.setattr(mrh, "_EXTERNAL_MODULES_ERROR", "config not found at x")
+        assert mrh.external_modules_error() == "config not found at x"

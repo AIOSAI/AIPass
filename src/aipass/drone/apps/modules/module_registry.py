@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: module_registry.py
 # Description: Internal module registry for drone
-# Version: 1.0.0
+# Version: 1.0.2
 # Created: 2026-03-09
-# Modified: 2026-03-09
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -26,11 +26,13 @@ from aipass.drone.apps.handlers.module_registry_handler import (
     route_module_command,
     get_module_help,
     get_module_introspective,
+    external_modules_error,
 )
 from aipass.drone.apps.handlers.help_flags import wants_help
 
 __all__ = [
     "ModuleInfo",
+    "external_modules_error",
     "list_modules",
     "is_module",
     "get_module_info",
@@ -114,6 +116,15 @@ def handle_command(command: str | None = None, args: list[str] | None = None) ->
         info = get_module_info(args[0])
         if info:
             console.print(f"Module: {info.name} v{info.version} — {info.description}")
+        elif is_module(args[0]):
+            # None for a REGISTERED name means its adapter could not import; an
+            # unknown name is the other None. Only the second is "not found".
+            from aipass.cli.apps.modules import err_console
+
+            err_console.print(
+                f"module_registry: @{args[0]} is registered but could not load (see drone log)", markup=False
+            )
+            return False
         else:
             logger.warning("Module '%s' not found", args[0])
             return False

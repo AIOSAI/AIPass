@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_import_dead_cwd.py
 # Description: Every drone module imports without a readable working directory
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-31
 # Modified: 2026-09-28
 # =============================================
@@ -10,7 +10,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(covered_elsewhere) — run-time location-inference sites, pinned in tests/test_no_cwd_sweep.py
-# seedgo: no-test-needed(external) — other branches' import-time code (prax.logger), preloaded and held constant here
+# seedgo: no-test-needed(external) — other branches' import-time code (prax.logger, cli, api), preloaded and held here
 
 import ast
 import subprocess
@@ -20,7 +20,10 @@ from pathlib import Path
 import pytest
 
 import aipass.drone.apps as drone_apps
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
+
+# The three skipped names live in conftest (dropbox and .archive: the owner's ruling of
+# 2026-09-27; __pycache__), never imported from seedgo's handlers.
+from .conftest import SANDBOX_DIRS
 
 # Drone must import, and must keep logging, with no working directory.
 #
@@ -294,7 +297,7 @@ def _drone_modules(root: Path | None = None) -> list[str]:
     root = root or Path(drone_apps.__file__).parent
     names = set()
     for source in sorted(root.rglob("*.py")):
-        if SOURCE_SKIP_DIRS.intersection(source.relative_to(root).parts):
+        if SANDBOX_DIRS.intersection(source.relative_to(root).parts):
             continue
         rel = source.relative_to(root).with_suffix("")
         parts = [p for p in rel.parts if p != "__init__"]
@@ -693,7 +696,7 @@ class TestNoModuleLevelLocationCallSurvives:
     @staticmethod
     def _apps_sources(root: Path | None = None) -> list[Path]:
         root = root or Path(drone_apps.__file__).parent
-        return [p for p in sorted(root.rglob("*.py")) if not SOURCE_SKIP_DIRS.intersection(p.relative_to(root).parts)]
+        return [p for p in sorted(root.rglob("*.py")) if not SANDBOX_DIRS.intersection(p.relative_to(root).parts)]
 
     @staticmethod
     def _module_level_location_calls(tree: ast.Module) -> list[tuple[int, str]]:
@@ -823,3 +826,13 @@ class TestTheSourceWalksSkipADropboxAndAnArchive:
     def test_the_parse_walk_reads_no_source_in_a_dropbox_or_an_archive(self, apps_tree: Path) -> None:
         sources = TestNoModuleLevelLocationCallSurvives._apps_sources(apps_tree)
         assert [p.relative_to(apps_tree).as_posix() for p in sources] == ["handlers/real.py"]
+
+    def test_a_root_that_stands_inside_a_dropbox_is_still_walked(self, tmp_path: Path) -> None:
+        """The skip judges the parts below the walked root, never the whole path: a project
+        living under a directory named dropbox keeps every source. Green from its first run;
+        its proof is that comparing the whole path empties both lists."""
+        apps = tmp_path / "dropbox" / "apps"
+        (apps / "handlers").mkdir(parents=True)
+        (apps / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
+        assert _drone_modules(apps) == ["aipass.drone.apps.handlers.real"]
+        assert TestNoModuleLevelLocationCallSurvives._apps_sources(apps) == [apps / "handlers" / "real.py"]

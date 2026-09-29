@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_broker.py
 # Description: Tests for the drone-broker daemon, identity, and allowlist
-# Version: 2.0.5
+# Version: 2.0.6
 # Created: 2026-06-09
 # Modified: 2026-09-28
 # =============================================
@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from aipass.drone.apps.handlers.broker.protocol import BrokerRequest, BrokerResponse
+from aipass.drone.apps.handlers.broker import daemon as broker_daemon
 from aipass.drone.apps.handlers.broker import path_resolver
 from aipass.drone.apps.handlers.broker.path_resolver import resolve_beneath
 from aipass.drone.apps.handlers.broker.daemon import BrokerDaemon
@@ -132,8 +133,14 @@ def repo_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
-def broker(tmp_path: Path, repo_root: Path) -> BrokerDaemon:
-    """Create a broker instance with a temp socket and audit log."""
+def broker(tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> BrokerDaemon:
+    """Create a broker instance with a temp socket and audit log.
+
+    The daemon binds the HOST's temp directory as the first base of every identity
+    at import. Here that base is tmp_path, so a relative request can only ever reach
+    this test's own world, never a real file of the same name in the host's temp.
+    """
+    monkeypatch.setattr(broker_daemon, "_TMP_BASES", (tmp_path,))
     sock_path = tmp_path / "test_broker.sock"
     audit_path = tmp_path / "test_audit.jsonl"
     secret_path = tmp_path / "test_secret"
@@ -143,6 +150,22 @@ def broker(tmp_path: Path, repo_root: Path) -> BrokerDaemon:
         audit_path=audit_path,
         secret_path=secret_path,
     )
+
+
+@pytest.fixture()
+def empty_tmp_base(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An EMPTY stand-in for the host's temp base, and a keep.txt beside it that must survive.
+
+    For tests that send the relative name keep.txt and expect no base: the answer
+    must not hang on whether a file of that name happens to lie in the temp base.
+    """
+    base = tmp_path / "host_tmp"
+    base.mkdir()
+    beside = tmp_path / "beside"
+    beside.mkdir()
+    (beside / "keep.txt").write_text("beside the base", encoding="utf-8")
+    monkeypatch.setattr(broker_daemon, "_TMP_BASES", (base,))
+    return beside / "keep.txt"
 
 
 @pytest.fixture()
@@ -750,6 +773,19 @@ class TestAllowlistPolicy:
         assert resp.ok is True
         assert not target.exists()
 
+    def test_a_relative_request_resolves_in_the_stand_in_temp_base(
+        self, running_broker: BrokerDaemon, tmp_path: Path
+    ) -> None:
+        """A relative name lands in the temp base the fixture stands in, never the host's.
+
+        Red before the broker fixture replaced the base: probe.txt resolved against the
+        host's temp directory, was not there, and the delete was refused."""
+        target = tmp_path / "probe.txt"
+        target.write_text("probe", encoding="utf-8")
+        resp = _send_raw(running_broker.socket_path, BrokerRequest(op="delete", path="probe.txt", request_id="rel"))
+        assert resp.ok is True
+        assert not target.exists()
+
     def test_unidentified_repo_refused(self, running_broker: BrokerDaemon, repo_root: Path) -> None:
         """Unidentified connections cannot delete repo paths."""
         target = repo_root / "src" / "aipass" / "testbranch" / "deleteme.txt"
@@ -1130,7 +1166,7 @@ class TestBrokerFeedsDeletionRecord:
 class TestAnUnreadFolderIsNotAnAbsentBranch:
     @pytest.mark.skipif(_RUNS_AS_ROOT, reason="root reads a mode-0 folder")
     def test_an_identity_hidden_behind_an_unreadable_folder_refuses_naming_the_folder(
-        self, running_broker: BrokerDaemon, repo_root: Path
+        self, running_broker: BrokerDaemon, repo_root: Path, empty_tmp_base: Path
     ) -> None:
         locked = repo_root / "src" / "locked"
         ghost = locked / "ghost"
@@ -1149,12 +1185,13 @@ class TestAnUnreadFolderIsNotAnAbsentBranch:
         assert resp.ok is False
         assert str(locked) in resp.message
         assert target.exists()
+        assert empty_tmp_base.exists()
 
 
 class TestASandboxCopyIsNotTheBranch:
     @pytest.mark.parametrize("sandbox", [".archive", "dropbox"])
     def test_an_identity_found_only_in_a_sandbox_gets_no_base_and_its_file_stays(
-        self, running_broker: BrokerDaemon, repo_root: Path, sandbox: str
+        self, running_broker: BrokerDaemon, repo_root: Path, sandbox: str, empty_tmp_base: Path
     ) -> None:
         """Nothing looks into a dropbox or an .archive (owner ruling): an archived
         copy of a branch is not the branch, so it lends the identity no base.
@@ -1173,3 +1210,4 @@ class TestASandboxCopyIsNotTheBranch:
         assert resp.ok is False
         assert resp.error_code == "NO_BASE"
         assert target.exists()
+        assert empty_tmp_base.exists()

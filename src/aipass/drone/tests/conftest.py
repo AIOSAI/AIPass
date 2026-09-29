@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared fixtures for the drone suite
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-03-05
 # Modified: 2026-09-28
 # =============================================
@@ -28,7 +28,12 @@ import pytest
 from aipass.cli.apps.modules import display
 from aipass.drone.apps.handlers import router_handler
 from aipass.drone.apps.handlers.json import json_handler
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
+
+# Directories no source walk of this suite enters, written here rather than imported
+# from seedgo's handlers (whose guard refuses another branch's caller). dropbox and
+# .archive: the project owner's ruling of 2026-09-27 20:37/20:42, a dropbox is ignored
+# by all and is a sandbox like .archive. __pycache__: bytecode, never source.
+SANDBOX_DIRS = frozenset({"dropbox", ".archive", "__pycache__"})
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the DPLAN-0059 stamp trio, the json-dir seam suite) that must
@@ -63,7 +68,8 @@ def _clean_identity_dedupe(monkeypatch: pytest.MonkeyPatch) -> None:
     Hands the module a new empty set, the state a fresh process starts in, and
     monkeypatch puts the original back after. Production never needs to forget
     what it has already logged, so exporting a reset() just to serve this
-    fixture would put a test-only function in the shipped API (owner decision).
+    fixture would put a test-only function in the shipped API (drone's decision,
+    DPLAN-0354 fleet green leg 3).
     """
     monkeypatch.setattr(router_handler, "_LOGGED_IDENTITY_SIGNATURES", set())
 
@@ -227,10 +233,11 @@ def pytest_configure(config):
 def python_sources(root: Path) -> list[Path]:
     """Every ``.py`` under *root*, sorted: the walk both source sweeps share.
 
-    Never from a directory seedgo's SOURCE_SKIP_DIRS names. A dropbox and an
+    Never from a directory SANDBOX_DIRS names, judged on the parts BELOW *root*, so a
+    root that itself stands inside a dropbox is still walked. A dropbox and an
     .archive are sandboxes (owner ruling): nothing looks into them.
     """
-    return sorted(p for p in root.rglob("*.py") if not SOURCE_SKIP_DIRS.intersection(p.relative_to(root).parts[:-1]))
+    return sorted(p for p in root.rglob("*.py") if not SANDBOX_DIRS.intersection(p.relative_to(root).parts[:-1]))
 
 
 def host_platform() -> str:

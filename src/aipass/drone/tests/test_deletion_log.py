@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_deletion_log.py
 # Description: Every drone delete, and every refused one, leaves a deletion record
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-14
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/handlers/deletion_log.py and the safe_delete path that writes it."""
@@ -634,11 +634,14 @@ class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
     which Windows refuses (see WINDOWS_CWD_REASON in conftest) — so on Windows
     they are skipped and these are the only cover the record's guards have.
 
-    The state here is supplied rather than produced: ``Path.cwd`` raises the
-    ENOENT it raises for real. That is weaker in exactly one way, stated so
-    nobody has to rediscover it — it cannot catch a read that reaches
-    ``os.getcwd`` inside C, the way ``Path.resolve()`` does. It is also stronger
-    in one way: it runs on all three operating systems.
+    The state here is supplied rather than produced: router_handler's
+    ``_working_directory`` seam, the one raw read beneath ``caller_cwd`` (which
+    deletion_log imports), raises the ENOENT ``Path.cwd`` raises for real. The
+    guard above the seam always runs; a raw ``Path.cwd()`` creeping back
+    anywhere else is test_no_cwd_sweep's to catch. Weaker in exactly one way,
+    stated so nobody has to rediscover it — it cannot catch a read that reaches
+    ``os.getcwd`` inside C, the way ``Path.resolve()`` does. Stronger in one
+    way: it runs on all three operating systems.
     """
 
     @pytest.fixture()
@@ -646,7 +649,7 @@ class TestTheRecordSurvivesAnAbsentCwdOnEveryOS:
         def gone():
             raise FileNotFoundError(2, "No such file or directory")
 
-        monkeypatch.setattr(Path, "cwd", staticmethod(gone))
+        monkeypatch.setattr("aipass.drone.apps.handlers.router_handler._working_directory", gone)
         yield
 
     def test_record_deletion_does_not_raise(self, no_cwd, tmp_path, monkeypatch):

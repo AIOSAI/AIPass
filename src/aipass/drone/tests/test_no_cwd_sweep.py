@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_no_cwd_sweep.py
 # Description: Every location-inference site survives a deleted working directory
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-08-31
 # Modified: 2026-09-28
 # =============================================
@@ -374,9 +374,9 @@ class TestTheSweepIsComplete:
         """A dropbox and an .archive are sandboxes: nothing in them is swept (owner ruling).
 
         Both sweeps in this file and in test_registry_case_sweep.py walk through
-        conftest's python_sources, which skips the directories seedgo's
-        SOURCE_SKIP_DIRS names. Red first on python_sources without the skip
-        (the mutant runner cannot serve conftest, which pytest loads first).
+        conftest's python_sources, which skips three names: dropbox, .archive and
+        __pycache__. Red first on python_sources without the skip (the mutant
+        runner cannot serve conftest, which pytest loads first).
         """
         (tmp_path / "handlers").mkdir()
         (tmp_path / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
@@ -387,6 +387,20 @@ class TestTheSweepIsComplete:
         walked = drone_conftest.python_sources(tmp_path)
 
         assert walked == [tmp_path / "handlers" / "real.py"], walked
+
+    def test_a_sweep_rooted_inside_a_dropbox_still_sees_its_sources(self, tmp_path):
+        """The skip judges the parts below the walked root: a project under a directory named
+        dropbox keeps every source. Green from its first run and held for mutants (the runner
+        cannot serve conftest); its proof is that a whole-path comparison empties the list."""
+        root = tmp_path / "dropbox" / "apps"
+        (root / "handlers").mkdir(parents=True)
+        (root / "handlers" / "real.py").write_text("x = 1\n", encoding="utf-8")
+
+        assert drone_conftest.python_sources(root) == [root / "handlers" / "real.py"]
+
+    def test_host_platform_answers_what_sys_platform_holds(self):
+        """The seam's body is the read it replaced; the collection-hook tests replace the seam."""
+        assert drone_conftest.host_platform() == sys.platform
 
 
 class TestTheWindowsSkipIsNarrow:

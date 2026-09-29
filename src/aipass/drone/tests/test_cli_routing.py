@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: test_cli_routing.py
 # Description: CLI Routing Tests for Drone (adapted from universal template)
-# Version: 1.0.3
+# Version: 1.0.4
 # Created: 2026-03-27
 # Modified: 2026-09-28
 # =============================================
@@ -473,6 +473,39 @@ class TestHandleSystems:
             result = main()
         assert result == 0
         assert "export AIPASS_HOME=" in capsys.readouterr().out
+
+    def test_external_modules_that_could_not_load_are_named_on_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A lost routing_config.json is said where the caller is; the list still shows, exit 0.
+
+        Mutant: the stderr print removed."""
+        with (
+            patch("sys.argv", ["drone", "systems"]),
+            patch(f"{_DRONE}._cwd_has_registry", return_value=True),
+            patch(f"{_DRONE}.get_all_branches", return_value=[{"name": "drone"}]),
+            patch(f"{_DRONE}.list_modules", return_value=[]),
+            patch(
+                "aipass.drone.apps.modules.module_registry.external_modules_error",
+                return_value="config not found at /x/routing_config.json",
+            ),
+        ):
+            result = main()
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Infrastructure:" in captured.out
+        assert "drone: external modules could not load: config not found at /x/routing_config.json" in captured.err
+
+    def test_external_modules_that_loaded_add_nothing_on_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Mutant: the print fires on None too."""
+        with (
+            patch("sys.argv", ["drone", "systems"]),
+            patch(f"{_DRONE}._cwd_has_registry", return_value=True),
+            patch(f"{_DRONE}.get_all_branches", return_value=[{"name": "drone"}]),
+            patch(f"{_DRONE}.list_modules", return_value=[]),
+            patch("aipass.drone.apps.modules.module_registry.external_modules_error", return_value=None),
+        ):
+            result = main()
+        assert result == 0
+        assert "external modules could not load" not in capsys.readouterr().err
 
 
 class TestHandleModule:

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: drone.py
 # Description: Drone - Command Router & Discovery
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """
@@ -260,6 +260,14 @@ def _handle_systems() -> int:
             console.print()
             console.print("[dim]Only local registry found. To access AIPass core branches:[/dim]")
             console.print("[dim]  export AIPASS_HOME=/path/to/AIPass[/dim]")
+
+    # A lost routing_config.json empties the external modules; the list above is
+    # partial, so say so where the caller is. Exit stays 0, as for scan.
+    from aipass.drone.apps.modules.module_registry import external_modules_error
+
+    error = external_modules_error()
+    if error:
+        err_console.print(f"drone: external modules could not load: {error}", markup=False)
 
     return 0
 
