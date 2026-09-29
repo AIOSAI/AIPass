@@ -1,16 +1,16 @@
 # =================== AIPass ====================
 # Name: test_logging_handlers.py
 # Description: Tests for prax logging handler modules
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/logging/direct.py and its sibling modules under apps/handlers/logging/."""
 
 # Tests for prax logging handler modules.
 #
-# Covers: direct.py (doRollover), introspection.py (get_calling_module_path),
+# Covers: direct.py (direct_log, doRollover), introspection.py (get_calling_module_path),
 # log_watchdog.py (get_oversized_files, truncate_log_file),
 # monitoring.py (run_monitoring_loop), operations.py (create_config_file),
 # override.py (enhanced_getLogger, install_logger_override, restore_original_logger),
@@ -32,6 +32,37 @@ import logging
 import sys
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
+
+from aipass.prax.apps.handlers.logging import direct
+
+# =============================================
+# direct.py -- direct_log
+# =============================================
+
+
+class TestDirectLog:
+    """direct_log() on the real body, into a logger whose files live under tmp_path."""
+
+    def test_direct_log_writes_the_line(self, monkeypatch, tmp_path):
+        """direct_log writes the message into the caller's system and local logs, both under tmp_path.
+
+        Mutant: dropping the log_fn(message) call reddens this; so does handing it the level.
+        """
+        logs, cache, message = tmp_path / "logs", {}, "direct_log reached its file"
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(logs))
+        monkeypatch.setattr(direct, "_direct_loggers", cache)
+        try:
+            direct.direct_log("warning", message)
+        finally:
+            for built in cache.values():
+                for handler in list(built.handlers):
+                    handler.close()
+                    built.removeHandler(handler)
+
+        written = sorted(logs.rglob("*.log"))
+        assert len(written) == 2
+        for log_file in written:
+            assert message in log_file.read_text(encoding="utf-8")
 
 
 # =============================================

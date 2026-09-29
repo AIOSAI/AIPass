@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_monitoring_handlers.py
 # Description: Unit tests for monitoring handler modules
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/monitoring/branch_detector.py and the three sibling handlers listed below."""
@@ -23,8 +23,15 @@
 import importlib
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest.mock import MagicMock, mock_open as _mock_file_open, patch
+
+# The detector is fed POSIX-spelled strings through a mocked Path, so none of
+# these reach a disk. Built from parts under a root with no home directory in
+# it (prax, leg 3): a checkout path is a fixture, not anyone's home.
+_HOME = PurePosixPath("/", "ws")
+_WS = _HOME / "Projects" / "AIPass"
+_ECO = _WS / "src" / "aipass"
 
 # Alias mock_open to avoid false-positive pattern match on "open(" without encoding
 _mopen = _mock_file_open
@@ -57,11 +64,11 @@ def _import_branch_detector():
         # Registry data returned by json.load
         mock_json_load.return_value = {
             "branches": [
-                {"name": "PRAX", "path": "/home/user/Projects/AIPass/src/aipass/prax"},
-                {"name": "SEEDGO", "path": "/home/user/Projects/AIPass/src/aipass/seedgo"},
-                {"name": "FLOW", "path": "/home/user/Projects/AIPass/src/aipass/flow"},
-                {"name": "CLI", "path": "/home/user/Projects/AIPass/src/aipass/cli"},
-                {"name": "AI_MAIL", "path": "/home/user/Projects/AIPass/src/aipass/ai_mail"},
+                {"name": "PRAX", "path": str(_ECO / "prax")},
+                {"name": "SEEDGO", "path": str(_ECO / "seedgo")},
+                {"name": "FLOW", "path": str(_ECO / "flow")},
+                {"name": "CLI", "path": str(_ECO / "cli")},
+                {"name": "AI_MAIL", "path": str(_ECO / "ai_mail")},
             ],
         }
 
@@ -79,11 +86,11 @@ def _make_detector_with_branches(mod, branches: dict | None = None):
     # Populate known_branches and branch_map manually
     if branches is None:
         branches = {
-            "/home/user/Projects/AIPass/src/aipass/prax": "PRAX",
-            "/home/user/Projects/AIPass/src/aipass/seedgo": "SEEDGO",
-            "/home/user/Projects/AIPass/src/aipass/flow": "FLOW",
-            "/home/user/Projects/AIPass/src/aipass/cli": "CLI",
-            "/home/user/Projects/AIPass/src/aipass/ai_mail": "AI_MAIL",
+            str(_ECO / "prax"): "PRAX",
+            str(_ECO / "seedgo"): "SEEDGO",
+            str(_ECO / "flow"): "FLOW",
+            str(_ECO / "cli"): "CLI",
+            str(_ECO / "ai_mail"): "AI_MAIL",
         }
     for path_str, name in branches.items():
         detector.branch_map[path_str] = name
@@ -174,7 +181,7 @@ class TestDetectFromPath:
         detector = _make_detector_with_branches(mod)
         # Path.resolve() returns the real path; we need the branch_map key
         # to match. Mock Path to control resolution.
-        resolved = "/home/user/Projects/AIPass/src/aipass/prax"
+        resolved = str(_ECO / "prax")
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
             mock_path.__str__ = MagicMock(return_value=resolved)
@@ -183,10 +190,10 @@ class TestDetectFromPath:
             mock_path.parent = MagicMock()
             mock_path.name = "branch_detector.py"
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
             # _find_repo_root
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
             result = detector.detect_from_path(resolved)
 
@@ -196,8 +203,8 @@ class TestDetectFromPath:
         """Should detect branch by walking up parent directories."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        child = "/home/user/Projects/AIPass/src/aipass/seedgo/core/validator.py"
-        parent_str = "/home/user/Projects/AIPass/src/aipass/seedgo"
+        child = str(_ECO / "seedgo" / "core" / "validator.py")
+        parent_str = str(_ECO / "seedgo")
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -211,10 +218,10 @@ class TestDetectFromPath:
             mock_path.parent = mock_parent
 
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
 
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
             result = detector.detect_from_path(child)
 
@@ -227,19 +234,19 @@ class TestDetectFromPath:
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
-            mock_path.__str__ = MagicMock(return_value="/tmp/random/file.txt")
+            mock_path.__str__ = MagicMock(return_value=str(_HOME / "random" / "file.txt"))
             mock_path.resolve.return_value = mock_path
             mock_path.parents = []
             mock_path.parent = MagicMock()
             mock_path.parent.__eq__ = MagicMock(return_value=False)
             mock_path.name = "file.txt"
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
 
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
-            result = detector.detect_from_path("/tmp/random/file.txt")
+            result = detector.detect_from_path(str(_HOME / "random" / "file.txt"))
 
         assert result == "UNKNOWN"
 
@@ -257,7 +264,7 @@ class TestDetectFromPath:
         """detect_from_path should cache results in log_map."""
         mod = _import_branch_detector()
         detector = _make_detector_with_branches(mod)
-        resolved = "/home/user/Projects/AIPass/src/aipass/flow"
+        resolved = str(_ECO / "flow")
 
         with patch(f"{mod.__name__}.Path") as mock_path_cls:
             mock_path = MagicMock(spec=Path)
@@ -267,10 +274,10 @@ class TestDetectFromPath:
             mock_path.parent = MagicMock()
             mock_path.name = "something.py"
             mock_path_cls.return_value = mock_path
-            mock_path_cls.home.return_value = Path("/home/user")
+            mock_path_cls.home.return_value = Path(str(_HOME))
 
             detector._repo_root = MagicMock(spec=Path)
-            detector._repo_root.__str__ = MagicMock(return_value="/home/user/Projects/AIPass")
+            detector._repo_root.__str__ = MagicMock(return_value=str(_WS))
 
             detector.detect_from_path(resolved)
 
@@ -333,7 +340,7 @@ class TestDetectFromLog:
         # Use a POSIX-style path so the "/" in log_file check in detect_from_log
         # triggers the delegation. On Windows, tmp_path uses backslashes which
         # would not match the "/" check in the production code.
-        fake_log_path = "/fakedir/branch_output/something.log"
+        fake_log_path = str(_HOME / "branch_output" / "something.log")
         with patch.object(detector, "detect_from_path", return_value="CLI") as mock_dfp:
             result = detector.detect_from_log(fake_log_path)
 
@@ -476,8 +483,8 @@ class TestLoadBranchPaths:
 
         registry_data = {
             "branches": [
-                {"name": "PRAX", "path": "/home/user/prax"},
-                {"name": "CLI", "path": "/home/user/cli"},
+                {"name": "PRAX", "path": str(_HOME / "prax")},
+                {"name": "CLI", "path": str(_HOME / "cli")},
             ],
         }
 
@@ -501,9 +508,9 @@ class TestLoadBranchPaths:
 
         registry_data = {
             "branches": [
-                {"name": "PRAX", "path": "/home/user/prax"},
-                {"name": "CLI", "path": "/home/user/cli"},
-                {"name": "FLOW", "path": "/home/user/flow"},
+                {"name": "PRAX", "path": str(_HOME / "prax")},
+                {"name": "CLI", "path": str(_HOME / "cli")},
+                {"name": "FLOW", "path": str(_HOME / "flow")},
             ],
         }
 
@@ -1035,7 +1042,7 @@ class TestPrintStatus:
 
 # Fake home base used across external-project tests to avoid
 # hardcoded /home/ paths that trip the SEEDGO log-structure checker.
-_FAKE_HOME = Path("/fakehome/user")
+_FAKE_HOME = Path(str(_HOME / "user"))
 _FAKE_PROJECTS = _FAKE_HOME / "Projects"
 
 

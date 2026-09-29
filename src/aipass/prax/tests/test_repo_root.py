@@ -3,7 +3,7 @@
 # Description: Repo-Root Resolution Pins
 # Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # Category: prax/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -649,11 +649,23 @@ def _module_key(relative: PurePath) -> str:
     return relative.as_posix()
 
 
+# dropbox (hand-offs inbound to a branch) and .archive are not live code, per
+# the ruling of 2026-09-27 20:42 relayed by @devpulse; __pycache__ holds no
+# source. Matched by name RELATIVE to the walk root, so a root that itself sits
+# inside a directory of one of these names is still walked.
+_NOT_LIVE = {"dropbox", ".archive", "__pycache__"}
+
+
+def _not_live(path: Path, root: Path) -> bool:
+    """True when a directory between root and path is one the sweeps skip by name."""
+    return bool(_NOT_LIVE.intersection(path.relative_to(root).parts))
+
+
 def _modules_reading_the_cwd(root: Path) -> dict:
     """AST scan: which files call Path.cwd() or os.getcwd()?"""
     found = {}
     for path in sorted(root.rglob("*.py")):
-        if ".archive" in path.parts or "__pycache__" in path.parts:
+        if _not_live(path, root):
             continue
         # Deliberately NOT skipped. A module in prax's own tree that will not
         # parse is a hole in this sweep, and a sweep that skips its holes reports
@@ -697,6 +709,19 @@ class TestNoPrivateCwdFallback:
         planted.write_text("from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n", encoding="utf-8")
         assert _modules_reading_the_cwd(tmp_path / "apps")
 
+    def test_the_sweep_skips_not_live_trees_by_name_under_its_own_root(self, tmp_path):
+        """dropbox and .archive under the walk root are not live code and are skipped.
+
+        The root itself sits inside a directory named dropbox: a skip matched on
+        the absolute path would skip the whole tree and report a clean sweep.
+        """
+        root = tmp_path / "dropbox" / "apps"
+        body = "from pathlib import Path\n\n\ndef f():\n    return Path.cwd()\n"
+        for planted in (root / "live.py", root / "dropbox" / "handed.py", root / ".archive" / "old.py"):
+            planted.parent.mkdir(parents=True, exist_ok=True)
+            planted.write_text(body, encoding="utf-8")
+        assert set(_modules_reading_the_cwd(root)) == {_module_key(PurePath("apps", "live.py"))}
+
     def test_the_allowlist_matches_a_windows_spelled_key(self):
         """@devpulse's Windows CI leg: the sweep convicted an EXEMPTED line.
 
@@ -737,7 +762,7 @@ class TestEveryLaneUsesTheSharedResolver:
     def test_every_find_repo_root_delegates_to_the_shared_resolver(self):
         private = {}
         for path in sorted(APPS_DIR.rglob("*.py")):
-            if ".archive" in path.parts or "__pycache__" in path.parts:
+            if _not_live(path, APPS_DIR):
                 continue
             if path == Path(repo_root_mod.__file__).resolve():
                 continue
@@ -826,12 +851,8 @@ def _docstrings(tree: ast.AST) -> list:
 
 
 def _tree_modules() -> list:
-    """Every live module under apps/, excluding archives and bytecode."""
-    return [
-        path
-        for path in sorted(APPS_DIR.rglob("*.py"))
-        if ".archive" not in path.parts and "__pycache__" not in path.parts
-    ]
+    """Every live module under apps/, excluding dropbox, archives and bytecode."""
+    return [path for path in sorted(APPS_DIR.rglob("*.py")) if not _not_live(path, APPS_DIR)]
 
 
 class TestNothingCallsInspectStack:

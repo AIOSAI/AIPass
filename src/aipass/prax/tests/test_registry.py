@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry.py
 # Description: Tests for registry load and save handlers
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/registry/load.py and apps/handlers/registry/save.py."""
@@ -17,23 +17,20 @@
 # seedgo: no-test-needed(error_handling) — load_last_scan answering {} on an unreadable registry, covered by that row
 
 import json
-import sys
 from unittest.mock import MagicMock
 
+from aipass.prax.apps.handlers.registry import load as load_mod
+from aipass.prax.apps.handlers.registry import save as save_mod
 
 # =============================================
 # HELPERS
 # =============================================
 
 
-def _fresh_import_registry_load(monkeypatch, tmp_path):
-    """Import registry load module with paths redirected to tmp_path."""
-    for key in list(sys.modules.keys()):
-        if "aipass.prax.apps.handlers.registry" in key:
-            sys.modules.pop(key, None)
-
-    import aipass.prax.apps.handlers.registry.load as load_mod
-
+def _patch_registry_load(monkeypatch, tmp_path):
+    """Redirect registry load's paths to tmp_path and record its json_handler."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(load_mod, "json_handler", MagicMock())
     prax_json_dir = tmp_path / "prax_json"
     prax_json_dir.mkdir(exist_ok=True)
     registry_file = prax_json_dir / "prax_registry.json"
@@ -45,17 +42,11 @@ def _fresh_import_registry_load(monkeypatch, tmp_path):
     mock_logger = MagicMock()
     monkeypatch.setattr(load_mod, "logger", mock_logger)
 
-    return load_mod
 
-
-def _fresh_import_registry_save(monkeypatch, tmp_path):
-    """Import registry save module with paths redirected to tmp_path."""
-    for key in list(sys.modules.keys()):
-        if "aipass.prax.apps.handlers.registry" in key:
-            sys.modules.pop(key, None)
-
-    import aipass.prax.apps.handlers.registry.save as save_mod
-
+def _patch_registry_save(monkeypatch, tmp_path):
+    """Redirect registry save's paths to tmp_path and record its json_handler."""
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(save_mod, "json_handler", MagicMock())
     prax_json_dir = tmp_path / "prax_json"
     # Do NOT create the dir here -- save should create it itself
     registry_file = prax_json_dir / "prax_registry.json"
@@ -68,8 +59,6 @@ def _fresh_import_registry_save(monkeypatch, tmp_path):
     mock_logger = MagicMock()
     monkeypatch.setattr(save_mod, "logger", mock_logger)
 
-    return save_mod
-
 
 # =============================================
 # TESTS: load_module_registry
@@ -80,7 +69,7 @@ class TestLoadModuleRegistry:
     """Tests for load_module_registry()."""
 
     def test_returns_dict(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
         modules = {"prax": {"relative_path": "src/aipass/prax", "size": 1024}}
         load_mod.REGISTRY_FILE.write_text(
             json.dumps({"registry_version": "1.0.0", "modules": modules, "statistics": {"total_modules": 1}}),
@@ -95,13 +84,13 @@ class TestLoadModuleRegistry:
 
     def test_empty_dict_when_file_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Missing registry file should return empty dict."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
         result = load_mod.load_module_registry()
         assert result == {}
 
     def test_loads_modules_from_valid_file(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Valid registry file should return the modules dict."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
 
         modules = {
             "prax": {"relative_path": "src/aipass/prax", "size": 1024},
@@ -122,7 +111,7 @@ class TestLoadModuleRegistry:
 
     def test_empty_dict_on_corrupt_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Corrupt JSON returns an empty dict and says why in a warning."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
         load_mod.REGISTRY_FILE.write_text("<<<not json>>>", encoding="utf-8")
 
         result = load_mod.load_module_registry()
@@ -133,7 +122,7 @@ class TestLoadModuleRegistry:
 
     def test_empty_dict_when_modules_key_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry without 'modules' key should return empty dict."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
         load_mod.REGISTRY_FILE.write_text(json.dumps({"registry_version": "1.0.0"}), encoding="utf-8")
 
         result = load_mod.load_module_registry()
@@ -141,7 +130,7 @@ class TestLoadModuleRegistry:
 
     def test_empty_modules_returns_empty_dict(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Registry with empty modules dict should return empty dict."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
         load_mod.REGISTRY_FILE.write_text(json.dumps({"modules": {}}), encoding="utf-8")
 
         result = load_mod.load_module_registry()
@@ -149,7 +138,7 @@ class TestLoadModuleRegistry:
 
     def test_logs_operation_on_success(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should call json_handler.log_operation on successful load."""
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
 
         registry = {
             "modules": {"mod_a": {"path": "a"}, "mod_b": {"path": "b"}},
@@ -171,13 +160,13 @@ class TestSaveModuleRegistry:
     """Tests for save_module_registry()."""
 
     def test_returns_true_on_success(self, mock_prax_infrastructure, monkeypatch, tmp_path):
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         result = save_mod.save_module_registry({"mod": {"path": "x"}})
         assert result is True
 
     def test_creates_directory_if_missing(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should create prax_json directory if it doesn't exist."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         prax_json_dir = save_mod.PRAX_JSON_DIR
         assert not prax_json_dir.exists()
 
@@ -187,7 +176,7 @@ class TestSaveModuleRegistry:
 
     def test_writes_valid_json(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Saved file should parse back as JSON carrying what was handed in."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         modules = {"test_mod": {"relative_path": "test/mod.py", "size": 100}}
 
         save_mod.save_module_registry(modules)
@@ -199,7 +188,7 @@ class TestSaveModuleRegistry:
 
     def test_saved_structure_has_required_keys(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Saved JSON should contain registry_version, timestamp, modules, statistics."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         modules = {"alpha": {"relative_path": "src/alpha.py"}}
 
         save_mod.save_module_registry(modules)
@@ -212,7 +201,7 @@ class TestSaveModuleRegistry:
 
     def test_saved_modules_match_input(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """The modules dict in the saved file should match what was passed in."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         modules = {
             "alpha": {"relative_path": "src/alpha.py", "size": 500},
             "beta": {"relative_path": "src/beta.py", "size": 750},
@@ -225,7 +214,7 @@ class TestSaveModuleRegistry:
 
     def test_statistics_total_modules(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Statistics should reflect the correct total_modules count."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         modules = {f"mod_{i}": {"path": f"p{i}"} for i in range(5)}
 
         save_mod.save_module_registry(modules)
@@ -235,7 +224,7 @@ class TestSaveModuleRegistry:
 
     def test_registry_version_is_string(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """registry_version should be a version string."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         save_mod.save_module_registry({"x": {"p": "q"}})
 
         data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
@@ -245,7 +234,7 @@ class TestSaveModuleRegistry:
         """Timestamp should be a valid ISO-format UTC string."""
         from datetime import datetime
 
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         save_mod.save_module_registry({"x": {"p": "q"}})
 
         data = json.loads(save_mod.REGISTRY_FILE.read_text(encoding="utf-8"))
@@ -255,7 +244,7 @@ class TestSaveModuleRegistry:
 
     def test_save_empty_modules(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Saving empty modules dict should succeed with total_modules=0."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         result = save_mod.save_module_registry({})
         assert result is True
 
@@ -265,7 +254,7 @@ class TestSaveModuleRegistry:
 
     def test_returns_false_on_write_error(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should return False when the file write fails."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
 
         # Make PRAX_JSON_DIR point to a path that will fail mkdir
         # by setting it to a file (not a directory)
@@ -282,7 +271,7 @@ class TestSaveModuleRegistry:
 
     def test_logs_operation_on_success(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Should call json_handler.log_operation after successful save."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         modules = {"a": {"p": "1"}, "b": {"p": "2"}, "c": {"p": "3"}}
 
         save_mod.save_module_registry(modules)
@@ -292,7 +281,7 @@ class TestSaveModuleRegistry:
 
     def test_no_leftover_tmp_file_after_save(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Atomic write should leave no .tmp file behind after a successful save."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         save_mod.save_module_registry({"mod": {"path": "x"}})
 
         leftovers = list(save_mod.PRAX_JSON_DIR.glob("*.tmp"))
@@ -307,7 +296,7 @@ class TestSaveModuleRegistry:
         (matches the reported 'Extra data: line 21 column 2' error). Atomic
         rename guarantees every reader sees a complete, valid file.
         """
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
 
         writes = [{f"mod_{i}": {"path": f"p{i}"}} for i in range(20)]
         # The floor: an empty write list would send the loop below through
@@ -334,7 +323,7 @@ class TestRegistryRoundTrip:
     def test_round_trip_preserves_data(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Data saved by save_module_registry should be loadable by load_module_registry."""
         # Import both with the same tmp_path
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         save_mod.save_module_registry(
             {
                 "alpha": {"relative_path": "src/alpha.py", "size": 100},
@@ -343,7 +332,7 @@ class TestRegistryRoundTrip:
         )
 
         # Now import load pointing at the same directory
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
 
         result = load_mod.load_module_registry()
         assert len(result) == 2
@@ -352,9 +341,9 @@ class TestRegistryRoundTrip:
 
     def test_round_trip_empty_modules(self, mock_prax_infrastructure, monkeypatch, tmp_path):
         """Round-trip with empty modules should yield empty dict."""
-        save_mod = _fresh_import_registry_save(monkeypatch, tmp_path)
+        _patch_registry_save(monkeypatch, tmp_path)
         save_mod.save_module_registry({})
 
-        load_mod = _fresh_import_registry_load(monkeypatch, tmp_path)
+        _patch_registry_load(monkeypatch, tmp_path)
         result = load_mod.load_module_registry()
         assert result == {}

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: conftest.py
 # Description: Shared pytest fixtures for prax tests
-# Version: 2.2.0
+# Version: 2.3.0
 # Created: 2025-11-08
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Shared pytest fixtures for prax tests.
@@ -137,6 +137,18 @@ def clean_command_state() -> Generator[None, None, None]:
     """
     yield
     display.reset_command_state()
+
+
+@pytest.fixture(autouse=True)
+def header_fires_into_a_recorder(monkeypatch) -> MagicMock:
+    """header() keeps the trigger it loaded in display._TRIGGER and fires
+    cli_header_displayed through it; a real console would open a call on the live
+    bus. Chosen by prax, leg 3, of the three cures: no file of cli is touched and
+    no test can forget it."""
+    recorder = MagicMock()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    return recorder
 
 
 # =============================================

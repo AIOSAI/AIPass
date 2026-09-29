@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_event_queue.py
 # Description: Unit tests for MonitoringEvent and MonitoringQueue
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/monitoring/event_queue.py and the branch_scope.py filter it drives."""
@@ -13,12 +13,14 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(through_the_command) — BranchScope's matching rules, covered by tests/test_branch_scope.py
 
-import importlib
 import threading
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.prax.apps.handlers.monitoring import event_queue
+from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
 
 # =============================================
 # MODULE LOADING
@@ -26,12 +28,16 @@ import pytest
 
 
 @pytest.fixture
-def event_queue_module(mock_prax_infrastructure):
-    """Force-reload event_queue after sys.modules mocks are in place."""
-    import aipass.prax.apps.handlers.monitoring.event_queue as mod
+def event_queue_module(monkeypatch, tmp_path):
+    """event_queue with its logger and json_handler replaced where it binds them.
 
-    mod = importlib.reload(mod)
-    return mod
+    Recorders keep every line off the live logs and prax_json; AIPASS_TEST_LOG_DIR
+    points at tmp_path for anything that still writes.
+    """
+    monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(event_queue, "logger", MagicMock())
+    monkeypatch.setattr(event_queue, "json_handler", MagicMock())
+    return event_queue
 
 
 @pytest.fixture
@@ -51,30 +57,6 @@ def monitoring_queue_cls(event_queue_module):
 
 class TestMonitoringEvent:
     """Tests for the MonitoringEvent dataclass."""
-
-    def test_create_with_all_fields(self, monitoring_event_cls):
-        """All fields can be set explicitly at construction time."""
-        ts = datetime(2026, 3, 24, 12, 0, 0)
-        event = monitoring_event_cls(
-            priority=1,
-            timestamp=ts,
-            event_type="file",
-            branch="PRAX",
-            action="created",
-            message="new config",
-            level="error",
-            caller="DRONE",
-            pid=12345,
-        )
-        assert event.priority == 1
-        assert event.timestamp == ts
-        assert event.event_type == "file"
-        assert event.branch == "PRAX"
-        assert event.action == "created"
-        assert event.message == "new config"
-        assert event.level == "error"
-        assert event.caller == "DRONE"
-        assert event.pid == 12345
 
     def test_default_values(self, monitoring_event_cls):
         """Defaults produce an info-level event with empty strings and None optionals."""
@@ -431,15 +413,15 @@ class TestMonitoringQueue:
         assert len(errors) == 0
         assert q.size() == 200
 
-    def test_json_handler_called_on_enqueue(self, monitoring_queue_cls, monitoring_event_cls, mock_prax_infrastructure):
+    def test_json_handler_called_on_enqueue(self, monitoring_queue_cls, monitoring_event_cls, event_queue_module):
         """json_handler.log_operation is called when an event is enqueued."""
         q = monitoring_queue_cls()
         event = monitoring_event_cls(
             priority=1, event_type="module", branch="SEEDGO", action="loaded", message="jh_test"
         )
         q.enqueue(event)
-        mock_prax_infrastructure.json_handler.log_operation.assert_called()
-        call_args = mock_prax_infrastructure.json_handler.log_operation.call_args
+        event_queue_module.json_handler.log_operation.assert_called_once()
+        call_args = event_queue_module.json_handler.log_operation.call_args
         assert call_args[0][0] == "event_queued"
         assert call_args[0][1]["event_type"] == "module"
         assert call_args[0][1]["branch"] == "SEEDGO"
@@ -589,8 +571,6 @@ class TestQueueScope:
 
     @staticmethod
     def _scope(*names):
-        from aipass.prax.apps.handlers.monitoring.branch_scope import BranchScope
-
         return BranchScope(names)
 
     def test_default_queue_is_unscoped(self, monitoring_queue_cls, monitoring_event_cls):

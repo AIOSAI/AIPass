@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_log_watcher.py
 # Description: Tests for log file monitoring handler
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/monitoring/log_watcher.py."""
@@ -50,7 +50,7 @@ def _import_log_watcher() -> ModuleType:
     mock_watchdog_events.FileSystemEventHandler = _RealFSHandler
 
     mock_config = MagicMock()
-    mock_config.get_system_logs_dir.return_value = Path("/fake/logs/system")
+    mock_config.get_system_logs_dir.return_value = Path("fake", "logs", "system")
 
     mock_branch_detector = MagicMock()
     mock_branch_detector.detect_branch_from_log.return_value = "PRAX"
@@ -156,35 +156,29 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[drone] Drone started with args: ['close', 'plan', '0098']"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "drone" in result["command"]
-        assert "close" in result["command"]
+        # The args list is joined with its commas kept: this pins what the monitor shows today.
+        assert result == {"command": "drone close, plan, 0098", "caller": None, "target": None}
 
     def test_flow_creating_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[FLOW] Creating new flow plan"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "flow create plan" in result["command"]
+        assert result == {"command": "flow create plan", "caller": None, "target": None}
 
     def test_flow_closing_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[FLOW] Closing FPLAN-0164"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "flow close plan" in result["command"]
-        assert "0164" in result["command"]
+        assert result == {"command": "flow close plan 0164", "caller": None, "target": None}
 
     def test_flow_opening_plan(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[FLOW] Opening FPLAN-0098"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "flow open plan" in result["command"]
-        assert "0098" in result["command"]
+        assert result == {"command": "flow open plan 0098", "caller": None, "target": None}
 
     def test_seedgo_audit(self):
         mod = _import_log_watcher()
@@ -209,32 +203,28 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[ai_mail] checking inbox"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "ai_mail inbox" in result["command"]
+        assert result == {"command": "ai_mail inbox", "caller": None, "target": None}
 
     def test_prax_monitor(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[prax] Starting monitor session"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "prax monitor" in result["command"]
+        assert result == {"command": "prax monitor", "caller": None, "target": None}
 
     def test_prax_status(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[prax] Running status check"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "prax status" in result["command"]
+        assert result == {"command": "prax status", "caller": None, "target": None}
 
     def test_backup_snapshot(self):
         mod = _import_log_watcher()
         watcher, _ = _make_watcher(mod)
         line = "[backup] Starting snapshot"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "backup snapshot" in result["command"]
+        assert result == {"command": "backup snapshot", "caller": None, "target": None}
 
     def test_caller_attribution_routing(self):
         mod = _import_log_watcher()
@@ -265,8 +255,7 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[memory] Starting rollover process"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "memory rollover" in result["command"]
+        assert result == {"command": "memory rollover", "caller": None, "target": None}
 
     def test_spawn_create_branch(self):
         mod = _import_log_watcher()
@@ -282,8 +271,7 @@ class TestExtractCommandInfo:
         watcher, _ = _make_watcher(mod)
         line = "[trigger] Event fired: module_discovered"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "trigger fire" in result["command"]
+        assert result == {"command": "trigger fire", "caller": None, "target": None}
 
 
 # ============================================================================
@@ -528,7 +516,7 @@ class TestProcessLogLine:
         ):
             watcher._process_log_line("PRAX", "normal log line")
 
-        mock_log.assert_called_once()
+        mock_log.assert_called_once_with("PRAX", "normal log line", "info")
 
 
 class TestReadNewContent:
@@ -549,8 +537,7 @@ class TestReadNewContent:
             f.write("new line\n")
 
         result = watcher._read_new_content(str(log_file))
-        assert result is not None
-        assert "new line" in result
+        assert result == "new line\n"
 
     def test_returns_none_when_no_new_content(self, tmp_path):
         """Should return None when file hasn't grown."""
@@ -574,8 +561,7 @@ class TestReadNewContent:
         watcher.log_positions[str(log_file)] = 99999  # Way past end
 
         result = watcher._read_new_content(str(log_file))
-        assert result is not None
-        assert "short" in result
+        assert result == "short\n"
 
     def test_returns_none_for_whitespace_only_content(self, tmp_path):
         """Should return None when new content is only whitespace."""
@@ -618,7 +604,7 @@ class TestOnModified:
         ):
             watcher.on_modified(event)
 
-        mock_process.assert_called()
+        mock_process.assert_called_once_with("PRAX", "line one")
 
     def test_handles_read_exception(self, tmp_path):
         """Should catch exceptions during log reading."""
@@ -691,8 +677,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "standards_checklist Running full standard check on prax"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "seedgo checklist" in result["command"]
+        assert result == {"command": "seedgo checklist prax", "caller": None, "target": None}
 
     def test_backup_versioned(self):
         """Should detect backup versioned commands."""
@@ -700,8 +685,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[backup] Starting versioned backup"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "backup versioned" in result["command"]
+        assert result == {"command": "backup versioned", "caller": None, "target": None}
 
     def test_backup_sync(self):
         """Should detect backup sync commands."""
@@ -709,8 +693,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[backup] Running sync operation"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "backup sync" in result["command"]
+        assert result == {"command": "backup sync", "caller": None, "target": None}
 
     def test_memory_search(self):
         """Should detect memory search commands."""
@@ -718,8 +701,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[memory] Handling search query for branch status"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "memory search" in result["command"]
+        assert result == {"command": "memory search", "caller": None, "target": None}
 
     def test_trigger_triggered(self):
         """Should detect trigger events with 'triggered' keyword."""
@@ -727,8 +709,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[trigger] Rule triggered: error_threshold"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "trigger fire" in result["command"]
+        assert result == {"command": "trigger fire", "caller": None, "target": None}
 
     def test_ai_mail_send_without_target(self):
         """Should handle ai_mail send without a parseable recipient."""
@@ -736,8 +717,7 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "[ai_mail] Sending broadcast message"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "ai_mail send" in result["command"]
+        assert result == {"command": "ai_mail send", "caller": None, "target": None}
 
     def test_drone_started_without_bracket_prefix(self):
         """Should detect 'Drone started with args' without [drone] prefix."""
@@ -745,9 +725,8 @@ class TestExtractCommandInfoAdditional:
         watcher, _ = _make_watcher(mod)
         line = "Drone started with args: ['audit', '@prax']"
         result = watcher._extract_command_info(line)
-        assert result is not None
-        assert "drone" in result["command"]
-        assert "audit" in result["command"]
+        # Pins today's output: args joined with commas, and the @prax in them is not read as a target.
+        assert result == {"command": "drone audit, @prax", "caller": None, "target": None}
 
 
 class TestMatchExecutingCommand:
@@ -776,8 +755,7 @@ class TestMatchExecutingCommand:
         watcher, _ = _make_watcher(mod)
         line = "Executing command: /path/to/aipass/flow run"
         result = watcher._match_executing_command(line)
-        assert result is not None
-        assert result["caller"] is None
+        assert result == {"command": "@flow run", "caller": None, "target": "FLOW"}
 
 
 class TestExtractTargetFromCmd:
@@ -823,7 +801,9 @@ class TestEmitCommandSeparator:
         watcher.last_command_per_branch.clear()
 
         watcher._emit_command_separator("PRAX", ("test cmd", "DRONE"))
-        mock_queue.enqueue.assert_called_once()
+        mock_queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
+        built = mod.MonitoringEvent.call_args.kwargs
+        assert (built["message"], built["caller"]) == ("test cmd", "DRONE")
 
     def test_string_format(self):
         """Should handle plain string command format."""
@@ -832,7 +812,9 @@ class TestEmitCommandSeparator:
         watcher.last_command_per_branch.clear()
 
         watcher._emit_command_separator("PRAX", "test cmd")
-        mock_queue.enqueue.assert_called_once()
+        mock_queue.enqueue.assert_called_once_with(mod.MonitoringEvent.return_value)
+        built = mod.MonitoringEvent.call_args.kwargs
+        assert (built["message"], built["caller"]) == ("test cmd", None)
 
     def test_deduplication(self):
         """Should skip duplicate consecutive commands for same branch."""
@@ -908,7 +890,7 @@ class TestStartLogWatcherAdditional:
         ):
             mod.start_log_watcher(mock_queue)
 
-        mock_stop.assert_called_once()
+        mock_stop.assert_called_once_with()
 
 
 class TestInitializePositionsAdditional:

@@ -3,7 +3,7 @@
 # Description: Unit tests for filesystem_handler.py
 # Version: 1.1.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/monitoring/filesystem_handler.py."""
@@ -1629,7 +1629,7 @@ class TestHandleEvent:
         mock_filters.should_monitor.return_value = True
         mock_bd.detect_branch_from_path.return_value = "PRAX"
         with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
-            handler._handle_event("modified", "C:\\Users\\dev\\.claude\\projects\\abc\\session.jsonl")
+            handler._handle_event("modified", "D:\\dev\\.claude\\projects\\abc\\session.jsonl")
             mock_parse.assert_called_once()
 
     def test_claude_code_subagent_windows_form(self):
@@ -1644,7 +1644,7 @@ class TestHandleEvent:
         with patch.object(handler, "_parse_agent_activity", return_value=True) as mock_parse:
             handler._handle_event(
                 "modified",
-                "C:\\Users\\dev\\.claude\\projects\\abc\\subagents\\session.jsonl",
+                "D:\\dev\\.claude\\projects\\abc\\subagents\\session.jsonl",
             )
             assert mock_parse.call_args.args[1] == "PRAX agent"
 
@@ -1657,7 +1657,7 @@ class TestHandleEvent:
         handler = _make_handler(mod, queue=queue)
         mock_filters.should_monitor.return_value = True
         mock_bd.detect_branch_from_path.return_value = "CODEX"
-        raw = "C:\\Users\\dev\\.codex\\sessions\\session.jsonl"
+        raw = "D:\\dev\\.codex\\sessions\\session.jsonl"
         with patch.object(handler, "_get_codex_branch", return_value="PRAX") as mock_branch:
             with patch.object(
                 handler,

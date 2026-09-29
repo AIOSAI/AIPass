@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_sweep.py
 # Description: Tests for stale log sweep in log_audit
-# Version: 1.2.0
+# Version: 1.3.0
 # Created: 2026-07-10
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/logging/log_watchdog.py's sweep_stale_logs and apps/modules/log_audit.py's sweep route."""
@@ -19,10 +19,12 @@
 # seedgo: no-test-needed(json_structure) — sweep_stale_logs' log_sweep log_operation record, covered by that row
 
 import os
-import sys
 import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+from aipass.prax.apps.handlers.logging import log_watchdog as lw
+from aipass.prax.apps.modules import log_audit
 
 
 def _make_old_file(path: Path, age_days: int) -> None:
@@ -33,23 +35,9 @@ def _make_old_file(path: Path, age_days: int) -> None:
     os.utime(path, (old_time, old_time))
 
 
-def _get_lw():
-    """Get the current log_watchdog module from sys.modules (or import it).
-
-    Returns the module object directly — callers use patch.object(lw, ...)
-    so patch and function always share the same __globals__.  This avoids
-    the module-identity split that made the old _get_sweep() wrapper flaky
-    when other tests pop and reimport log_watchdog.
-    """
-    import aipass.prax.apps.handlers.logging.log_watchdog as lw
-
-    return lw
-
-
-def _ensure_watchdog_mock(monkeypatch):
-    """Inject a mock for log_watchdog so handle_command('sweep') works."""
-    mock_watchdog = MagicMock()
-    mock_watchdog.sweep_stale_logs = MagicMock(
+def _stub_sweep(monkeypatch):
+    """Replace the watchdog's sweep on the real module; _run_sweep imports it from there at call time."""
+    sweep = MagicMock(
         return_value={
             "max_age_days": 30,
             "files_removed": 1,
@@ -59,12 +47,8 @@ def _ensure_watchdog_mock(monkeypatch):
             ],
         }
     )
-    monkeypatch.setitem(
-        sys.modules,
-        "aipass.prax.apps.handlers.logging.log_watchdog",
-        mock_watchdog,
-    )
-    return mock_watchdog
+    monkeypatch.setattr(lw, "sweep_stale_logs", sweep)
+    return sweep
 
 
 class TestSweepIntegration:
@@ -72,8 +56,6 @@ class TestSweepIntegration:
 
     def test_deletes_old_system_log(self, tmp_path):
         """Verify sweep deletes old files from system_logs/."""
-        lw = _get_lw()
-
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         _make_old_file(sys_logs / "old_module.log", 45)
@@ -90,8 +72,6 @@ class TestSweepIntegration:
 
     def test_deletes_old_branch_jsonl(self, tmp_path):
         """Verify sweep deletes old .jsonl files from branch logs/."""
-        lw = _get_lw()
-
         eco = tmp_path / "src" / "aipass"
         branch_logs = eco / "testbranch" / "logs"
         branch_logs.mkdir(parents=True)
@@ -109,8 +89,6 @@ class TestSweepIntegration:
 
     def test_keeps_fresh_files(self, tmp_path):
         """Verify sweep leaves files younger than 30 days untouched."""
-        lw = _get_lw()
-
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         fresh = sys_logs / "recent.log"
@@ -128,8 +106,6 @@ class TestSweepIntegration:
 
     def test_deletes_rotation_siblings(self, tmp_path):
         """Verify sweep also removes stale .log.1 rotation backups."""
-        lw = _get_lw()
-
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         _make_old_file(sys_logs / "module.log", 40)
@@ -148,8 +124,6 @@ class TestSweepIntegration:
 
     def test_returns_structured_summary(self, tmp_path):
         """Verify sweep returns summary with counts and reclaimed size."""
-        lw = _get_lw()
-
         sys_logs = tmp_path / "system_logs"
         sys_logs.mkdir()
         _make_old_file(sys_logs / "stale.log", 60)
@@ -173,29 +147,31 @@ class TestSweepIntegration:
 class TestSweepCommand:
     """Test the 'sweep' subcommand routing in handle_command."""
 
-    def test_sweep_subcommand_routes(self, monkeypatch, mock_prax_infrastructure):
+    def test_sweep_subcommand_routes(self, monkeypatch, tmp_path):
         """Verify 'drone @prax log-audit sweep' routes to _run_sweep.
 
-        capsys is gone from the signature because it can never see anything here:
-        conftest's autouse fixture replaces ``aipass.cli.apps.modules`` in
-        sys.modules, so the ``console`` and ``warning`` log_audit prints through
-        are mocks and stdout stays empty (measured: ``CaptureResult(out='',
-        err='')``). The mock's calls ARE the output, and they are what this pins —
-        the exact strings _run_sweep emits for the summary the watchdog returns.
+        log_audit is the real module, imported at the top; its console, warning,
+        logger and json_handler are replaced where log_audit binds them. The
+        recorders' calls ARE the output, and they are what this pins — the exact
+        strings _run_sweep emits for the summary the watchdog returns.
         """
-        watchdog = _ensure_watchdog_mock(monkeypatch)
+        monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path / "logs"))
+        sweep = _stub_sweep(monkeypatch)
+        console, warning, logger, json_handler = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+        monkeypatch.setattr(log_audit, "console", console)
+        monkeypatch.setattr(log_audit, "warning", warning)
+        monkeypatch.setattr(log_audit, "logger", logger)
+        monkeypatch.setattr(log_audit, "json_handler", json_handler)
 
-        mod_name = "aipass.prax.apps.modules.log_audit"
-        sys.modules.pop(mod_name, None)
-        from aipass.prax.apps.modules.log_audit import handle_command
-
-        result = handle_command("log-audit", ["sweep"])
+        result = log_audit.handle_command("log-audit", ["sweep"])
 
         assert result is True
-        watchdog.sweep_stale_logs.assert_called_once_with()
-        printed = [call.args[0] for call in mock_prax_infrastructure.console.print.call_args_list]
+        sweep.assert_called_once_with()
+        printed = [call.args[0] for call in console.print.call_args_list]
         assert printed == [
             "\n[bold cyan]Sweeping stale logs (>30 days)...[/bold cyan]",
             "\n  Removed 1 file(s), reclaimed 12.5 KB\n",
         ]
-        mock_prax_infrastructure.cli.warning.assert_called_once_with("DELETED old.log: 45.2 days old, 12.5 KB")
+        warning.assert_called_once_with("DELETED old.log: 45.2 days old, 12.5 KB")
+        json_handler.log_operation.assert_called_once_with("log_audit_executed", {"mode": "sweep"})
+        logger.info.assert_called_once_with("[log-audit] Sweep removed %d stale files", 1)
