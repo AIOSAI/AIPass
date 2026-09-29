@@ -3,7 +3,7 @@
 # Description: Tests for the intake auto_process handler and the pool module
 # Version: 1.1.1
 # Created: 2026-06-06
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # Category: memory/tests
 # =============================================
 
@@ -36,6 +36,7 @@ import pytest
 
 from aipass.memory.apps.handlers.intake import auto_process
 from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.modules import pool
 
 
@@ -45,6 +46,16 @@ def _auto_process_logs_nowhere(monkeypatch):
     auto_process is imported at the top of the file and bound the real ones."""
     monkeypatch.setattr(auto_process, "logger", MagicMock())
     monkeypatch.setattr(auto_process, "json_handler", MagicMock(log_operation=MagicMock(return_value=True)))
+
+
+def _stand_in_for_the_rollover(monkeypatch, execute):
+    """Replace execute_rollover on the real orchestrator, where the lazy import reads it.
+
+    The check imports it at call time through sys.modules; if that holds another
+    orchestrator, a real fleet rollover would run, so this fails first.
+    """
+    assert sys.modules.get(orchestrator.__name__) is orchestrator, "sys.modules holds another orchestrator"
+    monkeypatch.setattr(orchestrator, "execute_rollover", execute)
 
 
 def _pool_enabled(monkeypatch, enabled):
@@ -357,9 +368,7 @@ class TestRunRolloverCheck:
 
         mock_trigger = MagicMock()
         mock_execute = MagicMock(return_value={"success": True, "triggers_count": 1, "success_count": 1})
-        mock_orchestrator = MagicMock()
-        mock_orchestrator.execute_rollover = mock_execute
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", mock_orchestrator)
+        _stand_in_for_the_rollover(monkeypatch, mock_execute)
 
         with patch(
             "aipass.memory.apps.handlers.monitor.detector.check_all_branches",
@@ -412,9 +421,7 @@ class TestTodosNeverRideTheFleetWalk:
         (tmp_path / "AIPASS_REGISTRY.json").write_text(json.dumps(registry), encoding="utf-8")
 
         execute = MagicMock(return_value={"success": True, "triggers_count": 1, "success_count": 1})
-        orchestrator = MagicMock()
-        orchestrator.execute_rollover = execute
-        monkeypatch.setitem(sys.modules, "aipass.memory.apps.handlers.rollover.orchestrator", orchestrator)
+        _stand_in_for_the_rollover(monkeypatch, execute)
 
         assert loader.get_todos_count("guinea") == 10, "the pad must really be over a configured count"
         result = mod._run_rollover_check()

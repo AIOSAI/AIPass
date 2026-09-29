@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity standard machinery (DPLAN-0318)
 # Version: 1.2.2
 # Created: 2026-08-25
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/json/entry_limits.py and the trinity-standard handlers around it."""
@@ -27,6 +27,7 @@
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -654,6 +655,46 @@ class TestTemplateVersionReceipt:
         assert result["success"] is False
         assert "Unreadable receipt" in result["error"]
         assert (trinity / receipt.RECEIPT_NAME).read_bytes() == before
+
+    def test_a_receipt_that_is_json_but_not_an_object_raises_and_says_so(self, tmp_path):
+        """Valid JSON with a list at the root is broken, never "no receipt".
+
+        Green on the tree from its first run; its proof is the mutant of leg 4
+        of DPLAN-0354 that answers None in place of the raise, and dies here.
+        """
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        path = trinity / receipt.RECEIPT_NAME
+        path.write_text("[1, 2]\n", encoding="utf-8")
+
+        with pytest.raises(receipt.ReceiptUnreadable) as caught:
+            receipt.read_receipt(trinity)
+
+        assert str(caught.value) == f"Unreadable receipt at {path}: root is list, not an object"
+
+    def test_a_stamp_over_a_broken_receipt_replaces_it_and_names_it(self, tmp_path, monkeypatch):
+        """The lane that delivered the templates writes the fact over a broken receipt, and warns.
+
+        Green on the tree from its first run; its proof is the mutant of leg 4
+        of DPLAN-0354 that raises again in place of the catch, and dies here.
+        """
+        log = MagicMock()
+        monkeypatch.setattr(receipt, "logger", log)
+        trinity = tmp_path / ".trinity"
+        trinity.mkdir()
+        path = trinity / receipt.RECEIPT_NAME
+        path.write_text("NOT JSON {{{", encoding="utf-8")
+
+        result = receipt.write_receipt(trinity, receipt.STAMPED_BY_PUSH)
+
+        assert result["success"] is True
+        written = json.loads(path.read_text(encoding="utf-8"))
+        assert written["stamped_by"] == receipt.STAMPED_BY_PUSH
+        assert written["template_versions"] == receipt.template_versions()
+        warned = [call.args[0] for call in log.warning.call_args_list]
+        assert len(warned) == 1
+        assert warned[0].startswith(f"[receipt] Unreadable receipt at {path}: ")
+        assert warned[0].endswith(f" — replaced by the {receipt.STAMPED_BY_PUSH} stamp")
 
     def test_a_receipt_outside_the_aipass_root_is_neither_stamped_nor_bumped(self, tmp_path, monkeypatch):
         """The receipt lives in ``.trinity/`` — a branch memory file like its neighbours.

@@ -3,7 +3,7 @@
 # Description: Tests for source_file matching in the ChromaDB subprocess handler
 # Version: 1.1.2
 # Created: 2026-08-23
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/storage/chroma_subprocess.py."""
@@ -25,10 +25,24 @@
 # seedgo: no-test-needed(covered_elsewhere) — _vectorize_and_store(): tests/test_chroma_vectorize.py
 # seedgo: no-test-needed(external) — chromadb.PersistentClient behind _get_client(); a fake client stands in here
 
+import io
+import json
+
 import pytest
 
 from aipass.memory.apps.handlers.search import query_executor
 from aipass.memory.apps.handlers.storage import chroma_subprocess
+
+
+@pytest.fixture
+def run(capsys):
+    """Send one request through the subprocess's own entry, as the parent does: JSON in, JSON out."""
+
+    def _run(operation, **params):
+        chroma_subprocess.main(io.StringIO(json.dumps({"operation": operation, **params})))
+        return json.loads(capsys.readouterr().out)
+
+    return _run
 
 
 # ---------------------------------------------------------------------------
@@ -80,37 +94,46 @@ def fake_collection(monkeypatch):
 
 
 class TestSourceMatches:
-    """The boundary rule: the character before the label must not be alphanumeric."""
+    """The boundary rule: the character before the label must not be alphanumeric.
 
-    def test_label_at_start_of_filename_matches(self):
-        assert chroma_subprocess._source_matches("DPLAN-0012_hook_management.md", "DPLAN-0012")
+    Each case seeds one chunk and asks the check_plan operation whether the
+    label finds it: the predicate is read where the product reads it.
+    """
+
+    @staticmethod
+    def _found(fake_collection, run, source, pattern):
+        fake_collection([source])
+        return run("check_plan", plan_label=pattern)["found"]
+
+    def test_label_at_start_of_filename_matches(self, fake_collection, run):
+        assert self._found(fake_collection, run, "DPLAN-0012_hook_management.md", "DPLAN-0012") is True
 
     @pytest.mark.parametrize("prefix", ["_", "-", " ", "/", "."])
-    def test_non_alphanumeric_predecessor_matches(self, prefix):
+    def test_non_alphanumeric_predecessor_matches(self, fake_collection, run, prefix):
         source = f"archive{prefix}DPLAN-0012_hook.md"
-        assert chroma_subprocess._source_matches(source, "DPLAN-0012")
+        assert self._found(fake_collection, run, source, "DPLAN-0012") is True
 
-    def test_alphabetic_predecessor_is_rejected(self):
+    def test_alphabetic_predecessor_is_rejected(self, fake_collection, run):
         """The reported collision: TDPLAN-0012 must not answer to DPLAN-0012."""
-        assert not chroma_subprocess._source_matches("TDPLAN-0012_hook_management.md", "DPLAN-0012")
+        assert self._found(fake_collection, run, "TDPLAN-0012_hook_management.md", "DPLAN-0012") is False
 
-    def test_digit_predecessor_is_rejected(self):
-        assert not chroma_subprocess._source_matches("9DPLAN-0012_hook.md", "DPLAN-0012")
+    def test_digit_predecessor_is_rejected(self, fake_collection, run):
+        assert self._found(fake_collection, run, "9DPLAN-0012_hook.md", "DPLAN-0012") is False
 
-    def test_later_anchored_occurrence_still_matches(self):
+    def test_later_anchored_occurrence_still_matches(self, fake_collection, run):
         """A rejected first hit must not stop the scan -- keep looking."""
         source = "TDPLAN-0012_supersedes_DPLAN-0012.md"
-        assert chroma_subprocess._source_matches(source, "DPLAN-0012")
+        assert self._found(fake_collection, run, source, "DPLAN-0012") is True
 
-    def test_absent_label_does_not_match(self):
-        assert not chroma_subprocess._source_matches("FPLAN-0449_watchdog.md", "DPLAN-0012")
+    def test_absent_label_does_not_match(self, fake_collection, run):
+        assert self._found(fake_collection, run, "FPLAN-0449_watchdog.md", "DPLAN-0012") is False
 
-    def test_empty_pattern_matches_nothing(self):
+    def test_empty_pattern_matches_nothing(self, fake_collection, run):
         """Guard the destructive path: an empty pattern must not select every row."""
-        assert not chroma_subprocess._source_matches("DPLAN-0012_hook.md", "")
+        assert self._found(fake_collection, run, "DPLAN-0012_hook.md", "") is False
 
-    def test_missing_source_does_not_match(self):
-        assert not chroma_subprocess._source_matches("", "DPLAN-0012")
+    def test_missing_source_does_not_match(self, fake_collection, run):
+        assert self._found(fake_collection, run, "", "DPLAN-0012") is False
 
 
 # ---------------------------------------------------------------------------
@@ -121,17 +144,17 @@ class TestSourceMatches:
 class TestCheckPlanAnchoring:
     """is_plan_vectorized() must not count another plan's chunks as its own."""
 
-    def test_does_not_count_longer_prefix_family(self, fake_collection):
+    def test_does_not_count_longer_prefix_family(self, fake_collection, run):
         fake_collection(["TDPLAN-0012_hook.md", "TDPLAN-0012_hook.md"])
 
-        result = chroma_subprocess._check_plan("DPLAN-0012")
+        result = run("check_plan", plan_label="DPLAN-0012")
 
         assert result["success"] is True
         assert result["found"] is False
         assert result["count"] == 0
         assert result["source_files"] == []
 
-    def test_counts_only_its_own_chunks_in_a_mixed_collection(self, fake_collection):
+    def test_counts_only_its_own_chunks_in_a_mixed_collection(self, fake_collection, run):
         fake_collection(
             [
                 "DPLAN-0012_hook_management.md",
@@ -140,16 +163,16 @@ class TestCheckPlanAnchoring:
             ]
         )
 
-        result = chroma_subprocess._check_plan("DPLAN-0012")
+        result = run("check_plan", plan_label="DPLAN-0012")
 
         assert result["found"] is True
         assert result["count"] == 2
         assert result["source_files"] == ["DPLAN-0012_hook_management.md"]
 
-    def test_the_longer_label_still_finds_itself(self, fake_collection):
+    def test_the_longer_label_still_finds_itself(self, fake_collection, run):
         fake_collection(["TDPLAN-0012_hook.md", "DPLAN-0012_hook.md"])
 
-        result = chroma_subprocess._check_plan("TDPLAN-0012")
+        result = run("check_plan", plan_label="TDPLAN-0012")
 
         assert result["found"] is True
         assert result["count"] == 1
@@ -164,27 +187,27 @@ class TestCheckPlanAnchoring:
 class TestGetBySourceAnchoring:
     """The search pin fetches through this -- a wrong row here is pinned at 100%."""
 
-    def test_skips_longer_prefix_family(self, fake_collection):
+    def test_skips_longer_prefix_family(self, fake_collection, run):
         fake_collection(["TDPLAN-0012_hook.md"])
 
-        result = chroma_subprocess._get_by_source("flow_plans", "DPLAN-0012")
+        result = run("get_by_source", collection_name="flow_plans", source_pattern="DPLAN-0012")
 
         assert result["success"] is True
         assert result["count"] == 0
         assert result["results"] == []
 
-    def test_returns_only_the_requested_plan(self, fake_collection):
+    def test_returns_only_the_requested_plan(self, fake_collection, run):
         fake_collection(["TDPLAN-0012_hook.md", "DPLAN-0012_hook.md"])
 
-        result = chroma_subprocess._get_by_source("flow_plans", "DPLAN-0012")
+        result = run("get_by_source", collection_name="flow_plans", source_pattern="DPLAN-0012")
 
         assert result["count"] == 1
         assert result["results"][0]["metadata"]["source_file"] == "DPLAN-0012_hook.md"
 
-    def test_n_results_still_caps_matches(self, fake_collection):
+    def test_n_results_still_caps_matches(self, fake_collection, run):
         fake_collection(["DPLAN-0012_a.md", "DPLAN-0012_b.md", "DPLAN-0012_c.md"])
 
-        result = chroma_subprocess._get_by_source("flow_plans", "DPLAN-0012", n_results=2)
+        result = run("get_by_source", collection_name="flow_plans", source_pattern="DPLAN-0012", n_results=2)
 
         assert result["count"] == 2
 
@@ -197,19 +220,19 @@ class TestGetBySourceAnchoring:
 class TestDeleteBySourceAnchoring:
     """Unanchored matching here deletes another plan's vectors outright."""
 
-    def test_does_not_delete_longer_prefix_family(self, fake_collection):
+    def test_does_not_delete_longer_prefix_family(self, fake_collection, run):
         collection = fake_collection(["TDPLAN-0012_hook.md"])
 
-        result = chroma_subprocess._delete_by_source("flow_plans", "DPLAN-0012")
+        result = run("delete_by_source", collection_name="flow_plans", source_pattern="DPLAN-0012")
 
         assert result["success"] is True
         assert result["deleted"] == 0
         assert collection.deleted == []
 
-    def test_deletes_only_the_requested_plan(self, fake_collection):
+    def test_deletes_only_the_requested_plan(self, fake_collection, run):
         collection = fake_collection(["TDPLAN-0012_hook.md", "DPLAN-0012_hook.md"])
 
-        result = chroma_subprocess._delete_by_source("flow_plans", "DPLAN-0012")
+        result = run("delete_by_source", collection_name="flow_plans", source_pattern="DPLAN-0012")
 
         assert result["deleted"] == 1
         assert collection.deleted == ["id_1"]
@@ -249,14 +272,15 @@ class TestPinComposition:
 
         assert seen["plan_id"] == "DPLAN-0012"
 
-    def test_wrong_family_plan_is_not_pinned(self, monkeypatch):
+    def test_wrong_family_plan_is_not_pinned(self, monkeypatch, run):
         """End to end: a TDPLAN-only collection yields nothing to pin for DPLAN."""
         qe = self._query_executor()
         collection = _FakeCollection(["TDPLAN-0012_hook.md"])
         monkeypatch.setattr(chroma_subprocess, "_get_client", lambda db_path=None: _FakeClient(collection))
 
         def _through_handler(plan_id, n_results):
-            return chroma_subprocess._get_by_source("flow_plans", plan_id, n_results)["results"]
+            answer = run("get_by_source", collection_name="flow_plans", source_pattern=plan_id, n_results=n_results)
+            return answer["results"]
 
         monkeypatch.setattr(qe, "_fetch_plan_by_metadata", _through_handler)
         existing = [{"id": "real", "similarity": 0.86}]
@@ -324,37 +348,37 @@ def store(monkeypatch):
 class TestSearchBranchScope:
     """--branch aipass also searched aipass_site_local: a prefix with no owner boundary."""
 
-    def test_branch_does_not_reach_a_longer_owner(self, store):
-        result = chroma_subprocess._search_vectors([0.1], branch="aipass")
+    def test_branch_does_not_reach_a_longer_owner(self, store, run):
+        result = run("search_vectors", query_embedding=[0.1], branch="aipass")
 
         assert store.queried == ["aipass_local", "aipass_observations"]
         assert result["collections_searched"] == 2
         assert [r["collection"] for r in result["results"]] == ["aipass_local", "aipass_observations"]
 
-    def test_the_longer_owner_still_finds_itself(self, store):
-        chroma_subprocess._search_vectors([0.1], branch="aipass_site")
+    def test_the_longer_owner_still_finds_itself(self, store, run):
+        run("search_vectors", query_embedding=[0.1], branch="aipass_site")
 
         assert store.queried == ["aipass_site_local"]
 
-    def test_a_word_that_only_prefixes_a_branch_reaches_nothing(self, store):
+    def test_a_word_that_only_prefixes_a_branch_reaches_nothing(self, store, run):
         """'ai' is no branch: ai_mail_* belongs to ai_mail, whose name merely extends it."""
-        result = chroma_subprocess._search_vectors([0.1], branch="ai")
+        result = run("search_vectors", query_embedding=[0.1], branch="ai")
 
         assert store.queried == []
         assert result["results"] == []
 
-    def test_an_underscored_branch_keeps_every_type(self, store):
-        chroma_subprocess._search_vectors([0.1], branch="AI_MAIL")
+    def test_an_underscored_branch_keeps_every_type(self, store, run):
+        run("search_vectors", query_embedding=[0.1], branch="AI_MAIL")
 
         assert store.queried == ["ai_mail_email_sent", "ai_mail_local", "ai_mail_observations"]
 
-    def test_a_type_beyond_local_and_observations_stays_with_its_owner(self, store):
-        chroma_subprocess._search_vectors([0.1], branch="flow")
+    def test_a_type_beyond_local_and_observations_stays_with_its_owner(self, store, run):
+        run("search_vectors", query_embedding=[0.1], branch="flow")
 
         assert store.queried == ["flow_local", "flow_plans"]
 
-    def test_a_branch_the_store_names_no_owner_for_still_finds_its_collections(self, store):
+    def test_a_branch_the_store_names_no_owner_for_still_finds_its_collections(self, store, run):
         """memory_pool_docs has no memory_local beside it in this store; it is still memory's."""
-        chroma_subprocess._search_vectors([0.1], branch="memory")
+        run("search_vectors", query_embedding=[0.1], branch="memory")
 
         assert store.queried == ["memory_pool_docs"]

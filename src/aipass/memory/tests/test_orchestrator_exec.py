@@ -3,7 +3,7 @@
 # Description: Tests for the orchestrator execute_rollover pipeline
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # Category: memory/tests
 # =============================================
 
@@ -14,7 +14,7 @@
 # Covers: from aipass.memory.apps.handlers.rollover.orchestrator import execute_rollover
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(external) — what @trigger does with the rollover_complete event Trigger.fire sends
+# seedgo: no-test-needed(external) — what @trigger does with the rollover_complete event trigger.fire sends
 # seedgo: no-test-needed(covered_elsewhere) — the stats update_central writes, in tests/test_central_writer.py
 # seedgo: no-test-needed(covered_elsewhere) — the pool run process_memory_pool does, in tests/test_intake.py
 
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 
 from aipass.memory.apps.handlers.monitor import detector
 from aipass.memory.apps.handlers.rollover import orchestrator
+from aipass.trigger.apps.modules import core as trigger_core
 
 # The real lookup, held before any test replaces it at orchestrator's name.
 _REAL_LOCAL_CHROMA_PATH = orchestrator.get_branch_local_chroma_path
@@ -31,6 +32,20 @@ _REAL_LOCAL_CHROMA_PATH = orchestrator.get_branch_local_chroma_path
 # sys.modules; a dotted target patches whatever module sys.modules holds then.
 _CENTRAL_UPDATE = "aipass.memory.apps.handlers.central_writer.update_central"
 _POOL_PROCESS = "aipass.memory.apps.handlers.intake.pool_processor.process_memory_pool"
+
+
+def _stub_the_bus(monkeypatch, recorder):
+    """Stand the recorder's two fire doors on the real trigger core: the instance and the class.
+
+    The fire imports ``trigger`` at call time, through sys.modules, where the
+    conftest's autouse fixture stands a whole mock module (conftest line HELD
+    with the large graphs). So the real core imported at the top is registered
+    there for the test and its two doors are replaced: the published instance
+    and the class form, which reaches the same bus.
+    """
+    monkeypatch.setitem(sys.modules, trigger_core.__name__, trigger_core)
+    monkeypatch.setattr(trigger_core, "trigger", recorder.trigger)
+    monkeypatch.setattr(trigger_core.Trigger, "fire", recorder.Trigger.fire)
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +480,7 @@ class TestExecuteRolloverFullPipeline:
 
         # Mock post-rollover imports so they don't error
         mock_trigger_core = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_core)
+        _stub_the_bus(monkeypatch, mock_trigger_core)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -502,14 +517,14 @@ class TestExecuteRolloverFullPipeline:
         assert any(str(registry) in c.args[0] for c in orch.logger.error.call_args_list)
 
     def test_post_rollover_trigger_fires(self, monkeypatch, tmp_path):
-        """After success, Trigger.fire is called."""
+        """After success, the event goes through the published door, the instance ``trigger``."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
         mock_trigger_mod = MagicMock()
-        mock_trigger_cls = MagicMock()
-        mock_trigger_mod.Trigger = mock_trigger_cls
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        mock_trigger_bus = MagicMock()
+        mock_trigger_mod.trigger = mock_trigger_bus
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -519,9 +534,10 @@ class TestExecuteRolloverFullPipeline:
 
         orch.execute_rollover()
         # Mutant: success_count dropped from the rollover_complete payload — killed.
-        mock_trigger_cls.fire.assert_called_once_with(
+        mock_trigger_bus.fire.assert_called_once_with(
             "rollover_complete", triggers_count=1, success_count=1, failed_count=0
         )
+        mock_trigger_mod.Trigger.fire.assert_not_called()
 
     def test_post_rollover_central_update(self, monkeypatch, tmp_path):
         """After success, central_writer.update_central is called."""
@@ -529,7 +545,7 @@ class TestExecuteRolloverFullPipeline:
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
         mock_trigger_mod = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -548,7 +564,7 @@ class TestExecuteRolloverFullPipeline:
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
         mock_trigger_mod = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -562,13 +578,13 @@ class TestExecuteRolloverFullPipeline:
         orch.logger.info.assert_any_call("[rollover] Memory pool: 2 files processed")
 
     def test_post_rollover_trigger_exception(self, monkeypatch, tmp_path):
-        """Trigger.fire raises but does not crash the pipeline."""
+        """trigger.fire raises but does not crash the pipeline."""
         orch, mocks = _import_orchestrator(monkeypatch)
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
         mock_trigger_mod = MagicMock()
-        mock_trigger_mod.Trigger.fire.side_effect = ImportError("trigger missing")
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        mock_trigger_mod.trigger.fire.side_effect = ImportError("trigger missing")
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -586,7 +602,7 @@ class TestExecuteRolloverFullPipeline:
         self._setup_full_success(monkeypatch, tmp_path, orch, mocks)
 
         mock_trigger_mod = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value=None)
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -644,7 +660,7 @@ class TestExecuteRolloverMultiple:
 
         # Mock post-rollover chain (success_count > 0 triggers it)
         mock_trigger_mod = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -696,7 +712,7 @@ class TestExecuteRolloverMultiple:
 
         # Mock post-rollover chain
         mock_trigger_mod = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)
@@ -746,7 +762,7 @@ class TestExecuteRolloverMultiple:
 
         # Mock post-rollover chain
         mock_trigger_mod = MagicMock()
-        monkeypatch.setitem(sys.modules, "aipass.trigger.apps.modules.core", mock_trigger_mod)
+        _stub_the_bus(monkeypatch, mock_trigger_mod)
         mock_central = MagicMock()
         mock_central.update_central = MagicMock(return_value={"success": True})
         monkeypatch.setattr(_CENTRAL_UPDATE, mock_central.update_central)

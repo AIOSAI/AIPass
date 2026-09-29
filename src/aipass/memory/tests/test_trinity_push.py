@@ -3,7 +3,7 @@
 # Description: Red-first pins for the trinity push — the archive-verify-prune law above all
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/templates/trinity_push.py and the push lane that drives it."""
@@ -30,12 +30,16 @@
 
 import copy
 import json
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+from aipass.memory.apps.handlers import write_fence
 from aipass.memory.apps.handlers.monitor import detector
+from aipass.memory.apps.handlers.rollover import orchestrator
 from aipass.memory.apps.handlers.templates import push_report
 from aipass.memory.apps.handlers.tracking import tab_renderer
 from aipass.memory.apps.modules import push as push_module
@@ -1372,6 +1376,47 @@ class TestTodosMoveToTheBacklog:
 
         assert tp.is_canonical("sessions", note, {"field": "summary", "max_chars": 300})
         assert f"40 todo(s) moved to {backlog}" in note["summary"]
+
+
+# =============================================================================
+# THE PUSH LOOP OVER A REGISTRY THAT TURNS UNREADABLE (DPLAN-0354 leg 4)
+# =============================================================================
+
+
+class TestThePushLoopOverARegistryThatTurnsUnreadable:
+    """The loop with the real local-store lookup over a registry under tmp_path.
+
+    Every other push pin replaces the destinations whole, so the None the
+    lookup answers on an unreadable registry (leg 3b) never reached the loop.
+    Here it does: the entries go to the global store, are verified there and
+    pruned; the lookup logs the registry it could not read. Green from its
+    first run; its proof is the mutants of the lookup's catch, which die here.
+    """
+
+    def test_the_entries_reach_the_global_store_when_the_registry_cannot_be_read(self, monkeypatch, tmp_path):
+        repo = tmp_path / "repo"
+        root = _branch(repo, "guinea", {"sessions": [_entry(2), _entry(1, extra="drift")]})
+        registry = repo / "AIPASS_REGISTRY.json"
+        registry.write_text(json.dumps({"branches": [{"name": "guinea", "path": "guinea"}]}), encoding="utf-8")
+        monkeypatch.setattr(detector, "_REPO_ROOT", repo)
+        monkeypatch.setattr(write_fence, "ROOT", repo)
+        monkeypatch.setattr(tp, "resolve_scope", lambda branch=None: _scope(root))
+        monkeypatch.setattr(tp.config_loader, "load", lambda: _config())
+        log = MagicMock()
+        monkeypatch.setattr(orchestrator, "logger", log)
+        # The push resolves the lookup lazily, through sys.modules: the real module patched here is registered there.
+        monkeypatch.setitem(sys.modules, orchestrator.__name__, orchestrator)
+        assert orchestrator.get_branch_local_chroma_path("guinea") == root / ".chroma"
+
+        registry.write_text("NOT JSON {{{", encoding="utf-8")
+        store = FakeStore("honest")
+        result = tp.push(branch="guinea", dry_run=False, store_client=store, backup_root=tmp_path / ".backup")
+
+        assert result["success"] is True
+        assert [entry["pruned"] for entry in result["branches"]] == [1]
+        assert list(store.shelves) == [str(None)]
+        errors = [call.args[0] for call in log.error.call_args_list]
+        assert any(str(registry) in text for text in errors)
 
 
 # =============================================================================

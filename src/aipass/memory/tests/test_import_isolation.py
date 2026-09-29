@@ -3,7 +3,7 @@
 # Description: Pins against sys.modules poisoning of the handlers.json package
 # Version: 1.0.1
 # Created: 2026-08-27
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for tests/conftest.py's handlers/json stand-in and the suite's sys.modules evictions."""
@@ -298,7 +298,8 @@ class TestNobodyEvictsThePackageOneWay:
         stale = self.KNOWN_BARE_PACKAGE_STAND_INS - self._bare_package_stand_ins()
         assert stale == set(), "fixed — remove from KNOWN_BARE_PACKAGE_STAND_INS:\n  " + "\n  ".join(sorted(stale))
 
-    @pytest.mark.parametrize("name", ["test_tab_renderer", "test_config_loader"])
+    # test_tab_renderer left this list in leg 4 of DPLAN-0354: it no longer evicts at all.
+    @pytest.mark.parametrize("name", ["test_config_loader"])
     def test_the_converted_fixtures_still_use_delitem(self, name):
         """Named one by one: a fixture reverting to a bare pop is a silent relapse.
 

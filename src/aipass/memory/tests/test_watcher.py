@@ -3,7 +3,7 @@
 # Description: memory watcher handler — lifecycle, status, on_modified callback, branch-path walk
 # Version: 1.1.1
 # Created: 2026-04-25
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # Category: memory/tests
 # =============================================
 
@@ -335,50 +335,50 @@ class TestGetWatcherStatus:
 class TestMemoryFileWatcherOnModified:
     """Verify MemoryFileWatcher.on_modified callback behavior."""
 
-    def test_ignores_directory_events(self, monkeypatch):
+    def test_ignores_directory_events(self, monkeypatch, tmp_path):
         """Directory modification events are ignored."""
         mod, mocks = _import_watcher(monkeypatch)
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some"])
         event = MagicMock()
         event.is_directory = True
-        event.src_path = "/some/.trinity/local.json"
+        event.src_path = str(tmp_path / "some" / ".trinity" / "local.json")
 
         watcher.on_modified(event)
 
         mocks["update_line_count"].assert_not_called()
 
-    def test_ignores_non_memory_files(self, monkeypatch):
+    def test_ignores_non_memory_files(self, monkeypatch, tmp_path):
         """Non-memory files (not in .trinity/) are ignored."""
         mod, mocks = _import_watcher(monkeypatch)
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "dir"])
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/some/dir/config.json"
+        event.src_path = str(tmp_path / "some" / "dir" / "config.json")
 
         watcher.on_modified(event)
 
         mocks["update_line_count"].assert_not_called()
 
-    def test_processes_memory_file_modification(self, monkeypatch):
+    def test_processes_memory_file_modification(self, monkeypatch, tmp_path):
         """Valid memory file modification triggers line count update and check.
 
         Mutant: `check_single_file(file_path)` -> `check_single_file(file_path.parent)` reddens this.
         """
         mod, mocks = _import_watcher(monkeypatch)
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/some/branch/.trinity/local.json"
+        event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
 
         watcher.on_modified(event)
 
         mocks["update_line_count"].assert_called_once_with(Path(event.src_path))
         mocks["check_single_file"].assert_called_once_with(Path(event.src_path))
 
-    def test_rollover_triggered_when_threshold_exceeded(self, monkeypatch):
+    def test_rollover_triggered_when_threshold_exceeded(self, monkeypatch, tmp_path):
         """When check_single_file says should_rollover, execute_rollover is called.
 
         Mutant: dropping `self._recent_modifications.add(file_key)` before the rollover reddens this.
@@ -391,10 +391,10 @@ class TestMemoryFileWatcherOnModified:
             "trigger": "5/3 sessions",
         }
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/some/branch/.trinity/local.json"
+        event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
 
         watcher.on_modified(event)
 
@@ -405,7 +405,7 @@ class TestMemoryFileWatcherOnModified:
         """Files already in the recent modifications set are skipped."""
         mod, mocks = _import_watcher(monkeypatch)
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         # Use str(Path(...)) to match how on_modified normalizes the key
         # (Path converts separators on Windows).
 
@@ -433,7 +433,7 @@ class TestMemoryFileWatcherOnModified:
             "error": "File not found",
         }
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
@@ -452,7 +452,7 @@ class TestMemoryFileWatcherOnModified:
             "error": "Read error",
         }
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
@@ -462,17 +462,17 @@ class TestMemoryFileWatcherOnModified:
         mocks["check_single_file"].assert_called_once()
         mocks["execute_rollover"].assert_not_called()
 
-    def test_processes_observations_json(self, monkeypatch):
+    def test_processes_observations_json(self, monkeypatch, tmp_path):
         """observations.json files in .trinity/ are also processed.
 
         Mutant: `update_line_count(file_path)` -> `update_line_count(file_path.parent)` reddens this.
         """
         mod, mocks = _import_watcher(monkeypatch)
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
-        event.src_path = "/some/branch/.trinity/observations.json"
+        event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "observations.json")
 
         watcher.on_modified(event)
 
@@ -494,7 +494,7 @@ class TestMemoryFileWatcherOnModified:
         }
         mocks["execute_rollover"].side_effect = RuntimeError("Rollover crashed")
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
@@ -512,7 +512,7 @@ class TestMemoryFileWatcherOnModified:
         """
         mod, mocks = _import_watcher(monkeypatch)
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
@@ -531,7 +531,7 @@ class TestMemoryFileWatcherOnModified:
             "changes": ["Stripped orphan 'stale_key' from root"],
         }
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
@@ -550,7 +550,7 @@ class TestMemoryFileWatcherOnModified:
             "changes": [],
         }
 
-        watcher = mod.MemoryFileWatcher()
+        watcher = mod.MemoryFileWatcher([tmp_path / "some" / "branch"])
         event = MagicMock()
         event.is_directory = False
         event.src_path = str(tmp_path / "some" / "branch" / ".trinity" / "local.json")
@@ -561,6 +561,63 @@ class TestMemoryFileWatcherOnModified:
         # file_key should NOT be in _recent_modifications from normalize (may be from rollover)
         mocks["check_single_file"].return_value = {"success": True, "should_rollover": False}
         assert file_key not in watcher._recent_modifications
+
+
+class TestTheWatcherOwnsOnlyTheMemoryFilesOfItsRoots:
+    """A dropbox and an .archive are sandboxes: nothing the watcher does reaches them.
+
+    The branch is scheduled recursively, so the observer hears a copy of a
+    memory file anywhere below it. Before leg 4 of fleet green (DPLAN-0354) the
+    handler accepted any ``.trinity/local.json`` it heard: a copy inside
+    ``<branch>/dropbox/...`` or ``<branch>/.archive/`` was rewritten by
+    normalize, measured, and its check could start a fleet rollover. The
+    handler is taken from the observer's own schedule call, so these pins judge
+    the watcher ``start_memory_watcher`` really builds. Normalize, the line
+    count, the check and the rollover are recorders; nothing is written.
+    """
+
+    def _scheduled_watcher(self, monkeypatch, branch):
+        mod, mocks = _import_watcher(monkeypatch)
+        monkeypatch.setattr(mod, "_get_branch_paths", lambda: [branch])
+        assert mod.start_memory_watcher()["success"] is True
+        handler = mocks["observer_instance"].schedule.call_args.args[0]
+        return handler, mocks
+
+    def _modify(self, handler, file_path):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text("{}", encoding="utf-8")
+        event = MagicMock()
+        event.is_directory = False
+        event.src_path = str(file_path)
+        handler.on_modified(event)
+
+    @pytest.mark.parametrize(
+        "sandbox",
+        [("dropbox", "any", ".trinity"), (".archive", ".trinity")],
+        ids=["dropbox", "archive"],
+    )
+    def test_a_memory_file_copy_inside_a_sandbox_is_left_alone(self, monkeypatch, tmp_path, sandbox):
+        """A modified local.json in a sandbox is not rewritten, not measured, not checked."""
+        branch = tmp_path / "src" / "aipass" / "some_branch"
+        handler, mocks = self._scheduled_watcher(monkeypatch, branch)
+
+        self._modify(handler, branch.joinpath(*sandbox, "local.json"))
+
+        mocks["normalize_memory_file"].assert_not_called()
+        mocks["update_line_count"].assert_not_called()
+        mocks["check_single_file"].assert_not_called()
+
+    def test_the_branch_own_memory_file_is_handled_as_before(self, monkeypatch, tmp_path):
+        """The control beside the sandboxes: the branch's own .trinity/local.json."""
+        branch = tmp_path / "src" / "aipass" / "some_branch"
+        handler, mocks = self._scheduled_watcher(monkeypatch, branch)
+        own = branch / ".trinity" / "local.json"
+
+        self._modify(handler, own)
+
+        mocks["normalize_memory_file"].assert_called_once_with(own)
+        mocks["update_line_count"].assert_called_once_with(own)
+        mocks["check_single_file"].assert_called_once_with(own)
 
 
 class TestTheBranchPathWalkReadsNamesNotSpellings:

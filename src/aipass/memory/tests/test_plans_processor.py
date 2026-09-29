@@ -3,7 +3,7 @@
 # Description: Tests for the plans_processor handler — chunking, manifest, memory python and process_plans
 # Version: 1.0.1
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/intake/plans_processor.py."""
@@ -242,17 +242,6 @@ class TestManifest:
     def test_load_manifest_file_missing(self, monkeypatch, tmp_path):
         mod = plans_processor
         manifest_path = tmp_path / "config" / ".plans_processed.json"
-        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
-
-        result = mod._load_manifest()
-
-        assert result == {}
-
-    def test_load_manifest_bad_json(self, monkeypatch, tmp_path):
-        mod = plans_processor
-        manifest_path = tmp_path / "config" / ".plans_processed.json"
-        manifest_path.parent.mkdir(parents=True)
-        manifest_path.write_text("not valid json {{{{", encoding="utf-8")
         monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
 
         result = mod._load_manifest()
@@ -522,6 +511,33 @@ class TestTheManifestKeysOnContentNotOnlyOnAName:
 
         assert again["files_processed"] == 1, "a restored plan's final content was never vectorized"
         assert seen == [plan.name]
+
+    def test_an_unreadable_manifest_refuses_the_run_and_keeps_its_bytes(self, monkeypatch, tmp_path):
+        """No plan is embedded and the manifest is not overwritten.
+
+        Until leg 4 of DPLAN-0354 an unreadable manifest loaded as {}, the
+        manifest of a store that never processed anything, so every plan was
+        embedded again and the broken file was written over.
+        """
+        mod = plans_processor
+        plans = tmp_path / "plans"
+        plans.mkdir()
+        (plans / "FPLAN-0001_x.md").write_text("## Summary\n\nsome real text\n", encoding="utf-8")
+        manifest_path = tmp_path / ".plans_processed.json"
+        manifest_path.write_text("not valid json {{{{", encoding="utf-8")
+        before = manifest_path.read_bytes()
+        monkeypatch.setattr(mod, "_PROCESSED_MANIFEST", manifest_path)
+        monkeypatch.setattr(mod, "_find_repo_root", lambda: tmp_path)
+        self._mock_config(monkeypatch, mod, plans)
+        seen = []
+        self._stub_pipeline(monkeypatch, mod, seen)
+
+        result = mod.process_plans()
+
+        assert result["success"] is False
+        assert str(manifest_path) in result["error"]
+        assert seen == []
+        assert manifest_path.read_bytes() == before
 
     def test_a_newly_processed_plan_records_its_content_not_just_a_time(self, monkeypatch, tmp_path):
         """The write side, pinned separately from the read side.

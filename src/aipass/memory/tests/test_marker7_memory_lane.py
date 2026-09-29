@@ -3,7 +3,7 @@
 # Description: Red-first pins for marker 7 — self-healing triggers and the aftercare rulings
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/rollover.py, apps/modules/templates.py and the handlers they drive."""
@@ -626,6 +626,26 @@ class TestRolloverHealsWhatItTouches:
             assert rollover.run_rollover() is True
 
         tabs.assert_called_once_with(branches=["guinea"])
+
+    def test_a_tab_refresh_crash_is_logged_as_an_error_and_keeps_the_rollover(self):
+        """The rollover landed, so the run stands; the fault is an error, not a degradation.
+
+        Leg 4 of DPLAN-0354 (answer D of leg 3b): it was logged at warning.
+        """
+        with (
+            patch.object(rollover, "_handler_execute_rollover", return_value=self._rolled("guinea")),
+            patch(
+                "aipass.memory.apps.handlers.tracking.tab_renderer.refresh_all_tabs",
+                side_effect=RuntimeError("tab boom"),
+            ),
+            patch.object(rollover, "_normalize_rolled") as normalized,
+            patch.object(rollover, "logger") as log,
+        ):
+            assert rollover.run_rollover() is True
+
+        log.error.assert_any_call("[rollover] Tab refresh failed: tab boom")
+        assert all("Tab refresh failed" not in str(call) for call in log.warning.call_args_list)
+        normalized.assert_called_once_with(["guinea"])
 
 
 # =============================================================================

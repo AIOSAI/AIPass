@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: orchestrator.py
 # Description: Rollover Orchestration Handler
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-03-08
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -534,9 +534,10 @@ def execute_rollover() -> Dict[str, Any]:
     if success_count > 0:
         # Post-rollover: fire event for trigger system
         try:
-            from aipass.trigger.apps.modules.core import Trigger
+            # The published door is the instance; aliased, `trigger` is this function's loop name.
+            from aipass.trigger.apps.modules.core import trigger as trigger_bus
 
-            Trigger.fire(
+            trigger_bus.fire(
                 "rollover_complete", triggers_count=len(triggers), success_count=success_count, failed_count=len(failed)
             )
             logger.info("[rollover] Fired rollover_complete event")
