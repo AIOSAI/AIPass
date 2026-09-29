@@ -3,7 +3,7 @@
 # Description: What the newborn's handler guard must survive on its very first import
 # Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for templates/citizen/apps/handlers/__init__.py, the newborn's import-time access guard."""
@@ -3175,21 +3175,29 @@ def _inspect_stack_calls(source: str) -> list:
     return sorted(found)
 
 
-# Every .py under these roots, excluding the retired template archive.
-_BANNED_ROOTS = (Path(__file__).resolve().parents[1] / "apps", get_template_dir("specialist"))
+# What the .py sweeps never enter, read relative to the swept root. The rule is
+# the owner of the project's, 09-27 20:42, in paraphrase: a dropbox is ignored
+# by all, nothing looks into it and no process runs out of it, a sandbox like
+# .archive. The template's own dropbox and .archive are not such places: they
+# are shipped content copied into every newborn, so the sweep of
+# templates/citizen skips __pycache__ alone. apps/ holds real archives (retired
+# .py under apps/modules/.archive and apps/handlers/.archive), so its sweep
+# skips .archive and dropbox too. The real template archive, templates/.archive,
+# lies outside both roots (spawn's decision, DPLAN-0354 leg 4).
+_SWEEP_SKIP_DIRS = frozenset({"__pycache__"})
+_APPS_SKIP_DIRS = frozenset({"__pycache__", ".archive", "dropbox"})
 
-# What the .py sweeps never enter, read relative to the swept root. dropbox and
-# .archive are sandboxes: nothing looks into one (spawn's decision, DPLAN-0354
-# leg 3). Both names are in seedgo's SOURCE_SKIP_DIRS, copied rather than
-# imported because seedgo's handlers package guards cross-branch imports.
-_SWEEP_SKIP_DIRS = frozenset({"__pycache__", ".archive", "dropbox"})
+
+def _swept_py_files(root: Path, skip: frozenset[str] = _SWEEP_SKIP_DIRS) -> list[Path]:
+    """Every .py under root, in order, outside the directories skip names."""
+    return [path for path in sorted(root.rglob("*.py")) if not skip.intersection(path.relative_to(root).parts)]
 
 
-def _swept_py_files(root: Path) -> list[Path]:
-    """Every .py under root, in order, outside the directories no sweep enters."""
-    return [
-        path for path in sorted(root.rglob("*.py")) if not _SWEEP_SKIP_DIRS.intersection(path.relative_to(root).parts)
-    ]
+# Every .py under these roots, each with the directories its sweep skips.
+_BANNED_ROOTS = (
+    (Path(__file__).resolve().parents[1] / "apps", _APPS_SKIP_DIRS),
+    (get_template_dir("specialist"), _SWEEP_SKIP_DIRS),
+)
 
 
 # Measured 2026-08-31: 48 files across apps/ and templates/citizen/. The floor
@@ -3234,8 +3242,8 @@ class TestTheStackWalkCannotComeBack:
         offenders = []
         swept = 0
 
-        for root in _BANNED_ROOTS:
-            for path in _swept_py_files(root):
+        for root, skip in _BANNED_ROOTS:
+            for path in _swept_py_files(root, skip):
                 swept += 1
                 offenders += [
                     f"{path.name}:{line}" for line in _inspect_stack_calls(_render(path.read_text(encoding="utf-8")))
@@ -3248,16 +3256,25 @@ class TestTheStackWalkCannotComeBack:
         )
         assert offenders == [], f"inspect.stack() at import-capable sites: {offenders}"
 
-    def test_the_sweep_skips_dropbox_and_archive(self, tmp_path):
-        """A dropbox is a sandbox like .archive: no sweep walks into one (spawn's decision, DPLAN-0354 leg 3).
+    def test_the_sweep_watches_the_template_dropbox_and_archive(self, tmp_path):
+        """The template's dropbox and .archive are shipped content, swept; __pycache__ is not.
 
-        Ran red before _SWEEP_SKIP_DIRS named dropbox: the dropped file was swept.
+        The root stands inside a directory named dropbox, so a skip read on the
+        whole path would hide everything. Ran red while _SWEEP_SKIP_DIRS named
+        dropbox and .archive: neither template file was swept.
         """
-        for relative in ("kept.py", "dropbox/dropped.py", ".archive/old.py"):
-            (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
-            (tmp_path / relative).write_text("import inspect\n", encoding="utf-8")
+        root = tmp_path / "dropbox" / "citizen"
+        for relative in ("kept.py", "dropbox/shipped.py", ".archive/shipped.py", "__pycache__/stale.py"):
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
+            (root / relative).write_text("import inspect\n", encoding="utf-8")
 
-        assert _swept_py_files(tmp_path) == [tmp_path / "kept.py"]
+        assert _swept_py_files(root) == [
+            root / ".archive" / "shipped.py",
+            root / "dropbox" / "shipped.py",
+            root / "kept.py",
+        ]
+        # apps/ holds real archives: its sweep skips them.
+        assert _swept_py_files(root, _APPS_SKIP_DIRS) == [root / "kept.py"]
 
 
 class TestTheStackMatcherIsTheRealOne:

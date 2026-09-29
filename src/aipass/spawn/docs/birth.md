@@ -42,7 +42,7 @@ name instead of silently making a branch called WIZARD in `./wizard` (APLAN-0007
 
 ---
 
-## The create pipeline (`_spawn_agent`, `core.py`)
+## The create pipeline (`spawn_agent` in `core.py`, `mint_citizen` in `handlers/mint_ops.py`)
 
 1. **Resolve** — Extract the branch name from the target path and refuse a target that sits
    inside another citizen's tree (any parent holding `.trinity/passport.json`). An existing

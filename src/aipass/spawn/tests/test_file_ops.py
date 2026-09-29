@@ -3,7 +3,7 @@
 # Description: Tests for file_ops handler
 # Version: 1.0.2
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/file_ops.py."""
@@ -484,6 +484,28 @@ class TestRegenerateTemplateRegistry:
         assert "visible.txt" in all_paths
         # No .spawn/ files should appear
         assert not any(".spawn" in p for p in all_paths)
+
+    def test_regenerate_template_registry_never_enters_a_dropbox_or_archive(self, tmp_path: Path) -> None:
+        """A living branch's dropbox and every .archive in it are listed, never entered.
+
+        sync-registry --fix runs this over living branches. The rule is the
+        owner of the project's, 09-27 20:42, in paraphrase: nothing looks into
+        a dropbox, a sandbox like .archive. The branch stands inside a directory
+        named dropbox, so a skip read on the whole path would hide everything.
+        Ran red before the walk skipped them (spawn's decision, DPLAN-0354 leg 4).
+        """
+        branch = tmp_path / "dropbox" / "branch"
+        for rel in ("visible.txt", "dropbox/dropped.txt", ".archive/old.txt", "apps/.archive/retired.py"):
+            (branch / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch / rel).write_text("content", encoding="utf-8")
+        (branch / ".spawn").mkdir()
+
+        regenerate_template_registry(branch)
+
+        data = json.loads((branch / ".spawn" / ".template_registry.json").read_text(encoding="utf-8"))
+        assert [v["path"] for v in data["files"].values()] == ["visible.txt"]
+        directories = sorted(v["path"] for v in data["directories"].values())
+        assert directories == [".archive", "apps", "apps/.archive", "dropbox"]
 
     def test_regenerate_template_registry_no_spawn_dir_noop(self, tmp_path: Path) -> None:
         """If .spawn/ directory does not exist, function returns early."""

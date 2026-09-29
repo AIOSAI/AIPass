@@ -3,7 +3,7 @@
 # Description: Shared test fixtures for spawn test suite
 # Version: 1.2.1
 # Created: 2026-03-07
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Shared test fixtures for spawn test suite."""
@@ -70,15 +70,23 @@ def _live_registry_is_never_written():
 # ---------------------------------------------------------------------------
 
 
-# What the template-tree walks below never enter. dropbox and .archive are
-# sandboxes: nothing looks into one (spawn's decision, DPLAN-0354 leg 3). Both
-# names come from seedgo's SOURCE_SKIP_DIRS
-# (seedgo/apps/handlers/aipass_standards/skip_dirs.py), copied rather than
-# imported: seedgo's handlers package guards cross-branch imports at import
-# time. Not the whole list either: it also names .spawn, .trinity, docs, tools,
-# logs and artifacts, which are shipped template content these guards exist to
-# watch — .spawn/.template_registry.json above all (PR #745).
-_WALK_SKIP_DIRS = frozenset({"__pycache__", "dropbox", ".archive"})
+# What the template-tree walks below never enter. The rule is the owner of the
+# project's, 09-27 20:42, in paraphrase: a dropbox is ignored by all, nothing
+# looks into it and no process runs out of it, a sandbox like .archive.
+# templates/.archive is such an archive. templates/citizen/dropbox and
+# templates/citizen/.archive are not: they are the templates of those places,
+# shipped content copied into every newborn, and these guards watch them. So
+# the walks skip __pycache__ anywhere and .archive only at the root of the walk,
+# names read relative to that root (spawn's decision, DPLAN-0354 leg 4).
+_WALK_SKIP_DIRS = frozenset({"__pycache__"})
+_ROOT_ARCHIVE = ".archive"
+
+
+def _walk_skips(relative_parts: tuple[str, ...]) -> bool:
+    """True for a path under templates/.archive or any __pycache__."""
+    return bool(relative_parts) and (
+        relative_parts[0] == _ROOT_ARCHIVE or bool(_WALK_SKIP_DIRS.intersection(relative_parts))
+    )
 
 
 def _shipped_templates_root() -> Path:
@@ -105,7 +113,10 @@ def _template_tree_stats(root: Path | None = None) -> dict[str, tuple[int, int]]
 
     stats: dict[str, tuple[int, int]] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [name for name in dirnames if name not in _WALK_SKIP_DIRS]
+        at_root = dirpath == str(root)
+        dirnames[:] = [
+            name for name in dirnames if name not in _WALK_SKIP_DIRS and not (at_root and name == _ROOT_ARCHIVE)
+        ]
         for filename in filenames:
             full = os.path.join(dirpath, filename)
             info = os.stat(full)
@@ -122,7 +133,7 @@ def _template_snapshot(root: Path) -> dict[Path, bytes]:
     return {
         path: path.read_bytes()
         for path in root.rglob("*")
-        if path.is_file() and not _WALK_SKIP_DIRS.intersection(path.relative_to(root).parts)
+        if path.is_file() and not _walk_skips(path.relative_to(root).parts)
     }
 
 
@@ -258,3 +269,58 @@ def _isolate_spawn_json(tmp_path, monkeypatch) -> Path:
     """
     monkeypatch.setenv("AIPASS_TEST_LOG_DIR", str(tmp_path))
     return tmp_path / "spawn" / "spawn_json"
+
+
+# ---------------------------------------------------------------------------
+# Shared builders — imported by name from test files
+# ---------------------------------------------------------------------------
+
+MACHINE_REGISTRY_ID = "11111111-1111-4111-8111-111111111111"
+MACHINE_CITIZEN_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def make_passport(branch: str = "wanderer") -> dict:
+    """A live 2.0 passport, in canonical order — the shape the fleet carries.
+
+    Lives here, not in test_passport_seeds.py, so test_cli_routing.py does not
+    fail its collection when that file cannot import (DPLAN-0354 leg 4).
+    """
+    return {
+        "document_metadata": {
+            "document_type": "branch_identity",
+            "document_name": f"{branch}.PASSPORT",
+            "version": "2.0.0",
+            "schema_version": "2.0.0",
+            "created": "2026-03-05",
+            "last_updated": "2026-08-28",
+            "managed_by": branch,
+            "tags": ["identity", "passport", "branch_profile"],
+        },
+        "branch_info": {
+            "branch_name": branch,
+            "alias": "",
+            "path": f"src/aipass/{branch}",
+            "module": f"aipass.{branch}",
+            "email": f"@{branch}",
+            "created": "2026-03-05",
+            "git_branch": "dev",
+        },
+        "citizenship": {
+            "registered": True,
+            "residency": "core",
+            "registry_id": MACHINE_REGISTRY_ID,
+            "citizen_id": MACHINE_CITIZEN_ID,
+            "registry_path": ".aipass/registry.json",
+            "communications": True,
+            "memory": True,
+        },
+        "identity": {
+            "citizen_class": "specialist",
+            "role": "wanderer",
+            "purpose": "Walks the fleet — an identity worth shipping.",
+            "what_i_do": ["Walk", "Report"],
+            "what_i_dont_do": ["Guess"],
+            "traits": ["curious"],
+            "principles": ["Code is truth - fail honestly"],
+        },
+    }

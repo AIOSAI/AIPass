@@ -3,7 +3,7 @@
 # Description: Admin grant ceremony + permanent admin-class refusal (FPLAN-0401 P2)
 # Version: 1.0.2
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/registry.py and apps/handlers/class_registry.py, the two halves of the admin fence."""
@@ -283,8 +283,11 @@ class TestAdminClassRefusal:
 
         assert "devpulse" in str(exc.value).lower()
 
-    def test_spawn_agent_refuses_admin_class(self, tmp_path):
-        """The Python API refuses the class and creates nothing."""
+    def test_spawn_agent_refuses_admin_class(self, tmp_path, _isolate_spawn_json):
+        """The Python API refuses the class, creates nothing, and logs the refusal.
+
+        Mutant: the mint_refused log_operation in core removed -> red.
+        """
 
         target = tmp_path / "would_be_admin"
 
@@ -293,6 +296,8 @@ class TestAdminClassRefusal:
         assert result["success"] is False
         assert "devpulse" in result["error"].lower()
         assert not target.exists()
+        logged = [p.read_text(encoding="utf-8") for p in _isolate_spawn_json.rglob("*") if p.is_file()]
+        assert any('"mint_refused"' in text and '"admin"' in text for text in logged), logged
 
     def test_spawn_agent_refuses_admin_template_dir(self, tmp_path):
         """--template admin can't sneak past as a raw directory value."""

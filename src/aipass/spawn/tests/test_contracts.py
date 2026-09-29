@@ -3,14 +3,14 @@
 # Description: Tests for return types, exceptions, data structures, and init
 # Version: 1.0.2
 # Created: 2026-03-27
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/core.py's mint contract and apps/handlers/json/json_handler.py's return/exception types."""
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that apps/modules/regenerate_registry.py and apps/spawn.py parse and import
-# seedgo: no-test-needed(documentation) — docstrings on handle_command, _spawn_agent, and read_json
+# seedgo: no-test-needed(documentation) — docstrings on handle_command, spawn_agent, and read_json
 
 import json
 from pathlib import Path
@@ -115,7 +115,7 @@ class TestDataStructureContracts:
         rule. It is measured here instead, the same way copy_template counts:
         every file under the template directory whose relative path does not
         touch a name in SKIP_NAMES. And ``path`` is resolved on both sides —
-        _spawn_agent resolves the target it is given, so an unresolved
+        spawn_agent resolves the target it is given, so an unresolved
         ``target`` built from an 8.3 short temp-dir name (Windows) would never
         compare equal to the resolved path it actually returns.
         """
@@ -134,6 +134,15 @@ class TestDataStructureContracts:
         assert Path(result["path"]) == target, result["path"]
         assert result["files_copied"] == expected_files_copied, result["files_copied"]
         assert result["validation_issues"] == [], result["validation_issues"]
+        # The newborn still gets its dropbox and .archive, each with the shipped
+        # README, placeholders filled: the walks that skip them after the mint
+        # must not reach the copy.
+        for sandbox in ("dropbox", ".archive"):
+            assert (target / sandbox / "README.md").is_file(), sandbox
+            shipped = (template / sandbox / "README.md").read_text(encoding="utf-8").splitlines()
+            minted = (target / sandbox / "README.md").read_text(encoding="utf-8").splitlines()
+            assert minted[0] == shipped[0]
+            assert len(minted) == len(shipped)
 
 
 class TestInfrastructureMocking:

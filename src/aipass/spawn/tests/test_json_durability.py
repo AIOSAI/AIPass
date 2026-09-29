@@ -3,7 +3,7 @@
 # Description: Torn-write durability tests for spawn's JSON/text write paths
 # Version: 1.1.3
 # Created: 2026-08-16
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/atomic_write.py and the write paths it makes durable."""
@@ -1085,9 +1085,10 @@ class TestSaveRegistryStaysAtomic:
 # Directories under apps/ the guard does not scan. Parked code does not run, so
 # a revivable file carrying an old shape is not a live defect; flagging it would
 # only pressure someone into weakening the guard. Both are clean today. dropbox
-# joins them: a sandbox like .archive, nothing looks into one (spawn's decision,
-# DPLAN-0354 leg 3; the name is in seedgo's SOURCE_SKIP_DIRS, not imported
-# because seedgo's handlers package guards cross-branch imports).
+# joins them under the owner of the project's rule of 09-27 20:42, in
+# paraphrase: a dropbox is ignored by all, nothing looks into it and no process
+# runs out of it, a sandbox like .archive. That this walk skips it, and by these
+# three literal names, is spawn's decision (DPLAN-0354 leg 3).
 _UNSCANNED_DIRS = {"__pycache__", ".archive", "dropbox"}
 
 # A mode string with 'w' or 'a' truncates or appends the target in place.
@@ -1181,18 +1182,22 @@ class TestNoRawTruncatingWritesInSource:
     """Guard: the shape that caused this whole defect cannot reappear in apps/."""
 
     def test_guard_never_walks_into_a_dropbox(self, tmp_path):
-        """A dropbox is a sandbox like .archive: the walk skips it (spawn's decision, DPLAN-0354 leg 3).
+        """The walk skips a dropbox; the same write beside it is still reported.
 
+        The owner of the project's rule (09-27 20:42, paraphrase): nothing looks
+        into a dropbox. The skip by name is spawn's decision, DPLAN-0354 leg 3.
         Ran red before _UNSCANNED_DIRS named dropbox: the planted write was reported.
         """
+        raw_write = "def save(path, text):\n    with open(path, 'w', encoding='utf-8') as f:\n        f.write(text)\n"
         dropbox = tmp_path / "apps" / "dropbox"
         dropbox.mkdir(parents=True)
-        (dropbox / "dropped.py").write_text(
-            "def save(path, text):\n    with open(path, 'w', encoding='utf-8') as f:\n        f.write(text)\n",
-            encoding="utf-8",
-        )
+        (dropbox / "dropped.py").write_text(raw_write, encoding="utf-8")
+        (tmp_path / "apps" / "live.py").write_text(raw_write, encoding="utf-8")
 
-        assert scan_for_raw_writes(tmp_path / "apps") == []
+        findings = scan_for_raw_writes(tmp_path / "apps")
+
+        assert len(findings) == 1
+        assert findings[0].startswith("apps/live.py")
 
     def test_apps_source_has_no_raw_truncating_writes(self):
         findings = scan_for_raw_writes()

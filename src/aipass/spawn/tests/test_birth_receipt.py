@@ -3,7 +3,7 @@
 # Description: Birth receipt lane — a newborn arrives carrying .trinity/.template_version.json
 # Version: 1.2.2
 # Created: 2026-08-27
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/receipt_ops.py and the birth-receipt lane it drives through apps/modules/core.py."""
@@ -20,7 +20,7 @@ import pytest
 
 from aipass.hooks.apps.modules import grounding_content
 from aipass.prax.apps.modules import dashboard
-from aipass.spawn.apps.handlers import delete_ops, receipt_ops, update_ops
+from aipass.spawn.apps.handlers import delete_ops, mint_ops, receipt_ops, update_ops
 from aipass.spawn.apps.handlers.class_registry import get_available_classes, get_template_dir
 from aipass.spawn.apps.modules import core
 from aipass.spawn.apps.modules.core import spawn_agent
@@ -276,7 +276,7 @@ def test_an_unstampable_receipt_surfaces_but_does_not_abandon_the_birth(tmp_path
     """@memory's gold templates are another branch's files — a citizen that cannot
     be born because they are unreadable is worse than one missing a receipt."""
 
-    monkeypatch.setattr(core, "write_birth_receipt", lambda _: {"success": False, "error": "gold unreadable"})
+    monkeypatch.setattr(mint_ops, "write_birth_receipt", lambda _: {"success": False, "error": "gold unreadable"})
     result = core.spawn_agent(str(tmp_path / "orphan"), role="Test", purpose="receipt failure")
 
     assert result["success"] is True
@@ -289,14 +289,14 @@ def test_the_receipt_is_stamped_before_the_citizen_is_registered(tmp_path, monke
 
     seen = {}
 
-    real_add = core.add_to_registry
+    real_add = mint_ops.add_to_registry
 
     def spy(*args, **kwargs):
         target = tmp_path / "ordered" / ".trinity" / receipt_ops.RECEIPT_NAME
         seen["receipt_existed_at_registration"] = target.exists()
         return real_add(*args, **kwargs)
 
-    monkeypatch.setattr(core, "add_to_registry", spy)
+    monkeypatch.setattr(mint_ops, "add_to_registry", spy)
     core.spawn_agent(str(tmp_path / "ordered"), role="Test", purpose="ordering")
 
     assert seen["receipt_existed_at_registration"] is True

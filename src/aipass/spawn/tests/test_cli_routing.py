@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help output
 # Version: 1.0.3
 # Created: 2026-03-27
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/spawn.py's CLI routing, help output, and introspection."""
@@ -23,7 +23,7 @@ from aipass.spawn.apps.modules.export_seeds import handle_export_seeds
 from aipass.spawn.apps.modules.sync_registry import handle_sync_registry
 from aipass.spawn.apps.modules.update import handle_update
 from aipass.spawn.apps.spawn import handle_create, main, print_help, print_introspection
-from aipass.spawn.tests.test_passport_seeds import make_passport
+from aipass.spawn.tests.conftest import make_passport
 
 
 class TestCliRouting:

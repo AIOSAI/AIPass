@@ -3,7 +3,7 @@
 # Description: Tests for repair handler — move, registry path update, pollution cleanup
 # Version: 1.0.3
 # Created: 2026-05-15
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/repair_ops.py — move_branch, update_registry_path, pollution cleanup."""
@@ -252,9 +252,36 @@ class TestMoveBranch:
 
         result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
 
+        passport = (project / "src" / "compass" / "navigator").resolve() / ".trinity" / "passport.json"
         assert result["success"] is True
         assert result["passport_updated"] is False
-        assert "passport" in result["passport_error"]
+        assert result["passport_error"] == f"passport at {passport} could not be read"
+
+    def test_a_passport_that_cannot_be_written_is_reported_as_a_failure(self, tmp_path):
+        """The json writer answering False, where repair_ops binds it, lands in passport_error.
+
+        Mutant: the helper answers False for a failed write -> red.
+        """
+
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        passport = (project / "src" / "compass" / "navigator").resolve() / ".trinity" / "passport.json"
+        real_write = repair_ops.json_handler.write_json
+        refused: list[Path] = []
+
+        def refuse_the_passport(path, data):
+            """The registry write goes through the same shim and stays real."""
+            if Path(path) == passport:
+                refused.append(Path(path))
+                return False
+            return real_write(path, data)
+
+        with patch.object(repair_ops.json_handler, "write_json", side_effect=refuse_the_passport):
+            result = move_branch("NAV", "src/compass/navigator", registry_path=reg)
+
+        assert refused == [passport]
+        assert result["success"] is True
+        assert result["passport_updated"] is False
+        assert result["passport_error"] == f"passport at {passport} could not be written"
 
     def test_a_missing_passport_is_a_skip_with_no_error(self, tmp_path):
         """No passport at all is the skip: False, and no error beside it."""
@@ -474,22 +501,50 @@ class TestRepairCLI:
         assert not (project / ".chroma").exists()
         assert (project / "src" / "compass" / "navigator" / ".chroma").is_dir()
 
+    def test_relocate_warns_on_screen_when_the_passport_is_not_updated(self, tmp_path, monkeypatch, capsys):
+        """A passport the move could not update is named on screen, and the exit stays 0.
+
+        Mutant: the passport warning line removed from the repair command -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / "navigator" / ".trinity" / "passport.json").write_text("{not json", encoding="utf-8")
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        assert handle_repair(["--relocate", "@nav", "src/compass/navigator", "--apply"]) == 0
+
+        assert "Passport not updated: passport at " in capsys.readouterr().err
+
+    def test_relocate_warns_on_screen_when_chroma_is_not_moved(self, tmp_path, monkeypatch, capsys):
+        """A .chroma move that failed is named on screen with its error.
+
+        Mutant: the .chroma warning line removed from the repair command -> red.
+        """
+        project, reg = _make_project(tmp_path, branches=[{"name": "NAV", "path": "navigator"}])
+        (project / ".chroma").mkdir()
+        monkeypatch.chdir(project)
+        monkeypatch.setattr(repair_ops, "find_registry", lambda *a, **k: reg)
+
+        args = ["--relocate", "@nav", "src/compass/navigator", "--relocate-artifacts", "--apply"]
+        with patch.object(repair_ops, "_move_chroma", side_effect=OSError("device is full")):
+            assert handle_repair(args) == 0
+
+        assert ".chroma not relocated: device is full" in capsys.readouterr().err
+
     def test_clean_pollution_flag_archives_the_duplicate(self, tmp_path, monkeypatch):
         """--clean-pollution, through handle_repair, archives and removes the nested duplicate.
 
-        The project carries its own empty registry, so is_protected answers from
-        tmp_path; the registry module's find_registry is pointed there too.
+        The project carries its own empty registry and the product hands it on:
+        repair_ops finds it in the project and passes it to is_protected, so no
+        lookup of the live registry is ever made.
         Mutant: the --clean-pollution check never matches (the args fall to the
         read-only scan) -> red.
         """
-        from aipass.spawn.apps.handlers import registry as registry_module
-
         project = tmp_path / "polluted"
         (project / "polluted").mkdir(parents=True)
         (project / "polluted" / "junk.txt").write_text("dup", encoding="utf-8")
-        reg = _empty_registry(project)
+        _empty_registry(project)
         monkeypatch.chdir(project)
-        monkeypatch.setattr(registry_module, "find_registry", lambda *a, **k: reg)
 
         assert handle_repair([str(project), "--clean-pollution", "--apply"]) == 0
 
@@ -975,10 +1030,7 @@ class TestRegistryLookupIsCaseSensitive:
 
         calls = _case_insensitive_listing(monkeypatch)
 
-        # The decoy sorts first, so an unfiltered first-match returns it.
-        assert sorted(p.name for p in repair_ops._list_registry_candidates(tmp_path))[0] == decoy.name
-        calls.clear()
-
+        # The decoy sorts first (".t" before "A"), so an unfiltered first-match returns it.
         # Reached through repair_project, the public door onto the one lookup.
         # Mutant: the lookup drops its case-sensitive suffix check -> red.
         assert repair_project(tmp_path, dry_run=True)["registry"] == real.name

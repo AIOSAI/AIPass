@@ -3,7 +3,7 @@
 # Description: Pins that spawn's own mocking fixtures reach the code they claim to mock
 # Version: 1.0.1
 # Created: 2026-08-30
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests that tests/conftest.py's mocking fixtures actually reach apps/handlers/file_ops.py."""
@@ -12,6 +12,7 @@
 # seedgo: no-test-needed(ruff) — that apps/handlers/file_ops.py and apps/handlers/json/json_handler.py parse and import
 # seedgo: no-test-needed(documentation) — docstrings on the conftest fixtures themselves
 
+import shutil
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -81,33 +82,65 @@ class TestMockJsonHandlerReachesItsConsumer:
         assert file_ops.json_handler.log_operation is mock_json_handler
 
 
-def _plant_sandboxes(root: Path) -> None:
-    """One real file, and one inside each sandbox a walk must never enter."""
-    (root / "citizen" / "dropbox").mkdir(parents=True)
-    (root / ".archive").mkdir()
-    (root / "citizen" / "README.md").write_text("kept", encoding="utf-8")
-    (root / "citizen" / "dropbox" / "dropped.md").write_text("sandbox", encoding="utf-8")
-    (root / ".archive" / "old.md").write_text("sandbox", encoding="utf-8")
+def _copy_of_the_templates(tmp_path: Path) -> Path:
+    """The shipped template tree, copied under a directory named dropbox.
+
+    The parent is named dropbox so a skip that read the whole path, and not the
+    parts under the root of the walk, would hide the whole copy. The real
+    archive gets one planted file, since templates/.archive is untracked and a
+    fresh checkout has none.
+    """
+    root = tmp_path / "dropbox" / "templates"
+    shutil.copytree(spawn_conftest._shipped_templates_root(), root, ignore=shutil.ignore_patterns("__pycache__"))
+    (root / ".archive").mkdir(exist_ok=True)
+    (root / ".archive" / "old.md").write_text("retired", encoding="utf-8")
+    (root / "citizen" / "__pycache__").mkdir()
+    (root / "citizen" / "__pycache__" / "stale.pyc").write_bytes(b"\x00")
+    return root
 
 
-class TestTemplateWalksSkipTheSandboxes:
-    """The shipped-template guards never walk into a dropbox or an .archive.
+_TEMPLATE_DROPBOX_README = Path("citizen") / "dropbox" / "README.md"
+_TEMPLATE_ARCHIVE_README = Path("citizen") / ".archive" / "README.md"
 
-    A dropbox is a sandbox like .archive: nothing looks into one (spawn's
-    decision, DPLAN-0354 leg 3).
+
+class TestTemplateWalksWatchTheTemplate:
+    """The shipped-template guards watch all of templates/citizen and skip the real archive.
+
+    The rule is the owner of the project's, 09-27 20:42, in paraphrase: a
+    dropbox is ignored by all, nothing looks into it and no process runs out of
+    it, a sandbox like .archive. templates/citizen/dropbox and
+    templates/citizen/.archive are not such places: they are the templates of
+    them, shipped content copied into every newborn, so they are watched.
+    templates/.archive is a real archive. Which walks skip and by which names is
+    spawn's decision (DPLAN-0354 leg 4): templates/.archive at the root of the
+    walk, and __pycache__ anywhere. The runner cannot serve conftest, so these
+    pins stand on red first alone.
     """
 
-    def test_the_per_test_guard_walk_skips_dropbox_and_archive(self, tmp_path):
-        """Ran red before the prune named dropbox and .archive (the runner cannot serve conftest)."""
-        _plant_sandboxes(tmp_path)
+    def test_the_per_test_guard_catches_a_write_to_the_template_dropbox(self, tmp_path):
+        """Ran red while the prune named dropbox: the write was not seen."""
+        root = _copy_of_the_templates(tmp_path)
+        before = spawn_conftest._template_tree_stats(root)
 
-        assert set(spawn_conftest._template_tree_stats(tmp_path)) == {str(Path("citizen") / "README.md")}
+        with (root / _TEMPLATE_DROPBOX_README).open("a", encoding="utf-8") as readme:
+            readme.write("\nwritten by a test\n")
+        (root / ".archive" / "old.md").write_text("rewritten under the real archive", encoding="utf-8")
+        after = spawn_conftest._template_tree_stats(root)
 
-    def test_the_session_net_walk_skips_dropbox_and_archive(self, tmp_path):
-        """Ran red before the filter named dropbox and .archive (the runner cannot serve conftest)."""
-        _plant_sandboxes(tmp_path)
+        touched = {name for name in set(before) | set(after) if before.get(name) != after.get(name)}
+        assert touched == {str(_TEMPLATE_DROPBOX_README)}
+        assert str(_TEMPLATE_ARCHIVE_README) in after
+        assert not any(Path(name).parts[0] == ".archive" or "__pycache__" in Path(name).parts for name in after)
 
-        assert set(spawn_conftest._template_snapshot(tmp_path)) == {tmp_path / "citizen" / "README.md"}
+    def test_the_session_net_holds_the_template_dropbox_and_not_the_real_archive(self, tmp_path):
+        """Ran red while the filter named dropbox and .archive at any depth."""
+        root = _copy_of_the_templates(tmp_path)
+
+        snapshot = set(spawn_conftest._template_snapshot(root))
+
+        assert {root / _TEMPLATE_DROPBOX_README, root / _TEMPLATE_ARCHIVE_README} <= snapshot
+        assert root / ".archive" / "old.md" not in snapshot
+        assert root / "citizen" / "__pycache__" / "stale.pyc" not in snapshot
 
 
 class TestTheHeaderNeverReachesTheRealBus:

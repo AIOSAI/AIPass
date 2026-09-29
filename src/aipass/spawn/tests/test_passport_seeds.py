@@ -3,7 +3,7 @@
 # Description: TDPLAN-0017 — passport seeds: export, validation, mint-from-seed
 # Version: 1.0.3
 # Created: 2026-08-28
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/seed_ops.py and apps/modules/core.py's mint-from-seed path."""
@@ -37,6 +37,7 @@ from aipass.spawn.apps.handlers.seed_ops import (
     validate_seed,
 )
 from aipass.spawn.apps.modules.core import spawn_agent
+from aipass.spawn.tests.conftest import MACHINE_CITIZEN_ID, MACHINE_REGISTRY_ID, make_passport
 
 # Four properties carry the whole feature, and each is pinned on its own below because
 # each could be lost alone (TDPLAN-0017):
@@ -49,52 +50,6 @@ from aipass.spawn.apps.modules.core import spawn_agent
 #   stamp naming the exact seed file bytes it came from;
 # * an INVALID seed refuses loudly and writes NOTHING — a citizen never lands on
 #   disk holding a malformed identity.
-
-MACHINE_REGISTRY_ID = "11111111-1111-4111-8111-111111111111"
-MACHINE_CITIZEN_ID = "22222222-2222-4222-8222-222222222222"
-
-
-def make_passport(branch: str = "wanderer") -> dict:
-    """A live 2.0 passport, in canonical order — the shape the fleet carries."""
-    return {
-        "document_metadata": {
-            "document_type": "branch_identity",
-            "document_name": f"{branch}.PASSPORT",
-            "version": "2.0.0",
-            "schema_version": "2.0.0",
-            "created": "2026-03-05",
-            "last_updated": "2026-08-28",
-            "managed_by": branch,
-            "tags": ["identity", "passport", "branch_profile"],
-        },
-        "branch_info": {
-            "branch_name": branch,
-            "alias": "",
-            "path": f"src/aipass/{branch}",
-            "module": f"aipass.{branch}",
-            "email": f"@{branch}",
-            "created": "2026-03-05",
-            "git_branch": "dev",
-        },
-        "citizenship": {
-            "registered": True,
-            "residency": "core",
-            "registry_id": MACHINE_REGISTRY_ID,
-            "citizen_id": MACHINE_CITIZEN_ID,
-            "registry_path": ".aipass/registry.json",
-            "communications": True,
-            "memory": True,
-        },
-        "identity": {
-            "citizen_class": "specialist",
-            "role": "wanderer",
-            "purpose": "Walks the fleet — an identity worth shipping.",
-            "what_i_do": ["Walk", "Report"],
-            "what_i_dont_do": ["Guess"],
-            "traits": ["curious"],
-            "principles": ["Code is truth - fail honestly"],
-        },
-    }
 
 
 def write_repo(root: Path, branches=("wanderer",), residents=()) -> Path:

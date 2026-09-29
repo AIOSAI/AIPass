@@ -3,7 +3,7 @@
 # Description: Tests for regenerate_registry_ops handler
 # Version: 1.0.3
 # Created: 2026-04-03
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/regenerate_registry_ops.py and apps/modules/regenerate_registry.py."""
@@ -13,6 +13,7 @@
 # seedgo: no-test-needed(documentation) — docstrings on the scan/regenerate helper functions
 
 import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -624,6 +625,25 @@ def _shipped_registry_path() -> Path:
     than hardcoding a name that a rename would point at nothing.
     """
     return get_template_dir() / ".spawn" / ".template_registry.json"
+
+
+class TestRegistryDateSeam:
+    """The clock seam itself, unpatched: every other date test replaces it."""
+
+    def test_the_seam_answers_an_iso_day(self, tmp_path):
+        """The real clock stamps a ten-character day that date.fromisoformat takes.
+
+        Reached through regenerate_template_registry on a fresh template, which
+        stamps last_updated from the seam with nothing patched. Compares against
+        no second clock, so midnight cannot redden it.
+        Mutant: the body formats day/month/year with slashes -> red.
+        """
+        tpl = _make_template(tmp_path, files={"main.py": "print('hi')"}, dirs=["apps"])
+
+        answer = regenerate_template_registry(tpl)["metadata"]["last_updated"]
+
+        assert len(answer) == 10
+        assert date.fromisoformat(answer).isoformat() == answer
 
 
 class TestLastUpdatedTracksContentNotTheCalendar:

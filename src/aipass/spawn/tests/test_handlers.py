@@ -3,7 +3,7 @@
 # Description: Tests for spawn update handler modules
 # Version: 1.0.1
 # Created: 2026-03-07
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/meta_ops.py and apps/handlers/json_ops.py."""
@@ -15,6 +15,7 @@
 import pytest
 from pathlib import Path
 
+from aipass.spawn.apps.handlers import meta_ops
 from aipass.spawn.apps.handlers.json_ops import backup_json, deep_merge
 from aipass.spawn.apps.handlers.meta_ops import (
     compute_file_hash,
@@ -175,6 +176,47 @@ class TestGenerateBranchMeta:
         assert "d001" in result["directory_tracking"]
         assert "d002" in result["directory_tracking"]
         assert result["directory_tracking"]["d001"]["current_path"] == "apps"
+
+    def test_never_enters_a_branch_dropbox_or_archive(self, tmp_path, monkeypatch):
+        """A living branch's dropbox and .archive are neither read nor tracked.
+
+        The rule is the owner of the project's, 09-27 20:42, in paraphrase:
+        nothing looks into a dropbox, a sandbox like .archive. The template
+        ships dropbox/README.md and .archive/README.md, so the scan used to list
+        and hash whatever a branch had dropped there. Ran red before the scan
+        skipped them (spawn's decision, DPLAN-0354 leg 4).
+        """
+        branch_dir = tmp_path / "dropbox" / "branch"
+        for rel in ("README.md", "dropbox/README.md", "dropbox/dropped.md", ".archive/README.md"):
+            (branch_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+            (branch_dir / rel).write_text("# same bytes", encoding="utf-8")
+
+        template_registry = {
+            "metadata": {"version": "1.0.0"},
+            "files": {
+                "f001": {"current_name": "README.md", "path": "README.md", "content_hash": "x"},
+                "f002": {"current_name": "README.md", "path": "dropbox/README.md", "content_hash": "x"},
+                "f003": {"current_name": "README.md", "path": ".archive/README.md", "content_hash": "x"},
+            },
+            "directories": {
+                "d001": {"current_name": "dropbox", "path": "dropbox"},
+                "d002": {"current_name": ".archive", "path": ".archive"},
+            },
+        }
+        hashed: list[Path] = []
+        real_hash = meta_ops.compute_file_hash
+
+        def recording_hash(path):
+            hashed.append(Path(path))
+            return real_hash(path)
+
+        monkeypatch.setattr(meta_ops, "compute_file_hash", recording_hash)
+
+        result = generate_branch_meta(branch_dir, template_registry)
+
+        assert hashed == [branch_dir / "README.md"]
+        assert set(result["file_tracking"]) == {"f001"}
+        assert {"d001", "d002"} <= set(result["directory_tracking"])
 
 
 class TestLoadSaveBranchMeta:
