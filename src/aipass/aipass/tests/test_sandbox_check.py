@@ -3,7 +3,7 @@
 # Description: Tests for sandbox prerequisite checker and doctor integration
 # Version: 1.1.2
 # Created: 2026-06-10
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/sandbox_check/sandbox_checker.py and the doctor integration it drives."""
@@ -21,7 +21,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest  # pyright: ignore[reportMissingImports]
 
-from aipass.aipass.apps.handlers.sandbox_check import sandbox_checker
 from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     check_broker_alive,
     check_bwrap_functional,
@@ -237,7 +236,7 @@ class TestCheckSrtResolvable:
         bins = _path_with(monkeypatch, tmp_path, "node")
         monkeypatch.setattr(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
-            lambda: resolver,
+            lambda find_spec: resolver,
         )
         mock_proc = MagicMock(
             returncode=0,
@@ -263,7 +262,7 @@ class TestCheckSrtResolvable:
         _path_with(monkeypatch, tmp_path, "node")
         monkeypatch.setattr(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
-            lambda: resolver,
+            lambda find_spec: resolver,
         )
         monkeypatch.setattr(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._srt_install_hint",
@@ -284,7 +283,7 @@ class TestCheckSrtResolvable:
         _path_with(monkeypatch, tmp_path, "node")
         monkeypatch.setattr(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
-            lambda: resolver,
+            lambda find_spec: resolver,
         )
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
@@ -298,7 +297,7 @@ class TestCheckSrtResolvable:
         _path_with(monkeypatch, tmp_path, "node")
         monkeypatch.setattr(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker._find_srt_resolver",
-            lambda: None,
+            lambda find_spec: None,
         )
         result = check_srt_resolvable()
         assert result["found"] is False
@@ -311,10 +310,10 @@ class TestCheckSrtResolvable:
 # =============================================================================
 
 
-def _hooks_package_at(monkeypatch, location: Path | None) -> None:
-    """find_spec("aipass.hooks") answers: None = not importable, else a package at *location*."""
+def _hooks_package_at(location: Path | None):
+    """A find_spec for check_srt_resolvable's seam: None = not importable, else a package at *location*."""
     spec = None if location is None else MagicMock(submodule_search_locations=[str(location)])
-    monkeypatch.setattr(sandbox_checker.importlib.util, "find_spec", lambda name: spec)
+    return lambda name: spec
 
 
 class TestFindSrtResolver:
@@ -338,18 +337,16 @@ class TestFindSrtResolver:
     def test_missing_spec_returns_none(self, monkeypatch, tmp_path):
         """Mutant: `if spec is None or not spec.submodule_search_locations:` -> `if False:` reddens this test."""
         _path_with(monkeypatch, tmp_path, "node")
-        _hooks_package_at(monkeypatch, None)
         with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run") as mock_run:
-            result = check_srt_resolvable()
+            result = check_srt_resolvable(_hooks_package_at(None))
         assert mock_run.call_count == 0
         assert result["found"] is False
 
     def test_missing_file_returns_none(self, monkeypatch, tmp_path):
         """Mutant: `if not resolver.is_file():` -> `if False:` reddens this test."""
         _path_with(monkeypatch, tmp_path, "node")
-        _hooks_package_at(monkeypatch, tmp_path)
         with patch("aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run") as mock_run:
-            result = check_srt_resolvable()
+            result = check_srt_resolvable(_hooks_package_at(tmp_path))
         assert mock_run.call_count == 0
         assert result["found"] is False
 
@@ -362,32 +359,29 @@ class TestFindSrtResolver:
 class TestSrtInstallHint:
     def test_no_npm_falls_back_to_plain(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "node")
-        _hooks_package_at(monkeypatch, None)
-        hint = check_srt_resolvable()["install_hint"]
+        hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
     def test_npm_root_success_names_prefix(self, monkeypatch, tmp_path):
         """Mutant: `[npm, "root", "-g"]` -> `[npm, "root"]` reddens this test."""
         bins = _path_with(monkeypatch, tmp_path, "node", "npm")
-        _hooks_package_at(monkeypatch, None)
         mock_proc = MagicMock(returncode=0, stdout="/usr/local/lib/node_modules\n", stderr="")
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
             return_value=mock_proc,
         ) as mock_run:
-            hint = check_srt_resolvable()["install_hint"]
+            hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
         assert mock_run.call_args[0][0] == [bins["npm"], "root", "-g"]
         assert "/usr/local/lib/node_modules" in hint
         assert "npm install -g @anthropic-ai/sandbox-runtime" in hint
 
     def test_npm_root_failure_falls_back_to_plain(self, monkeypatch, tmp_path):
         _path_with(monkeypatch, tmp_path, "node", "npm")
-        _hooks_package_at(monkeypatch, None)
         with patch(
             "aipass.aipass.apps.handlers.sandbox_check.sandbox_checker.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="npm", timeout=5),
         ):
-            hint = check_srt_resolvable()["install_hint"]
+            hint = check_srt_resolvable(_hooks_package_at(None))["install_hint"]
         assert hint == "npm install -g @anthropic-ai/sandbox-runtime"
 
 

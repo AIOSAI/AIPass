@@ -3,7 +3,7 @@
 # Description: Tests for aipass install — one-command bootstrap (DPLAN-0233)
 # Version: 1.2.7
 # Created: 2026-07-05
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/install.py (DPLAN-0233) and the install command it drives."""
@@ -383,7 +383,12 @@ class TestRunInstall:
 
         The throwaway gate is passed, so the run takes the lock and reaches the clone
         itself; before, it stopped at the gate and the setup assert could not fail.
-        Mutant (fleet green leg 4): the clone failure's `return 1` removed -> red.
+        Three guards stand past the clone: the autouse fixture phone_face_step_stays_offline
+        (the phone step is stubbed, the network refused), a home that does not exist
+        (tmp_path / "AIPass" is never made), and a stdin that is not a terminal (pytest's).
+        Mutant (fleet green leg 5, run): the clone failure's `return 1` -> `return 0` -> red at rc.
+        Mutant, reasoned and never run: `return 1` removed — the run would go on past the
+        clone behind those guards alone.
         """
         home = tmp_path / "AIPass"
         with (

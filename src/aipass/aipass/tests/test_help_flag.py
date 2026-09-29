@@ -3,7 +3,7 @@
 # Description: Tests for the help_flag predicate + per-module help-gate canaries
 # Version: 1.2.2
 # Created: 2026-08-13
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/help_flag.py and every module's help gate."""
@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aipass.aipass.apps.aipass import discover_modules
 from aipass.aipass.apps.handlers.help_flag import wants_help
 from aipass.aipass.apps.modules import help_chat, init_flow, trust
 
@@ -88,6 +89,14 @@ class TestWantsHelp:
 # Per-module canaries — asking must never act
 # =============================================================================
 
+
+def _discovered(stem: str):
+    """The module for a stem, found the way the CLI finds it: discover_modules() (fleet green leg 5)."""
+    found = {module.__name__.rsplit(".", 1)[-1]: module for module in discover_modules()}
+    assert stem in found, f"{stem} is not a discovered command module"
+    return found[stem]
+
+
 # (module stem, command, args that would ACT if the gate missed)
 _GATE_CASES = [
     ("init_flow", "init", ["agent", "--help"]),
@@ -145,6 +154,8 @@ class TestHelpGateCanaries:
         self, stem: str, command: str, args: list[str], _stub_every_doing_path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Mutant: help gate returns True without printing -> red."""
+        # importlib, not _discovered: discover_modules skips the _doctor_fix/_doctor_wire
+        # cases below, whose handle_command the CLI never routes to (reported, leg 5)
         module = importlib.import_module(f"aipass.aipass.apps.modules.{stem}")
 
         try:
@@ -269,6 +280,6 @@ class TestOwnershipCheckRunsFirst:
     @pytest.mark.parametrize("stem", ["init_flow", "trust", "new_project", "install"])
     def test_foreign_command_with_help_flag_is_declined(self, stem: str, _stub_every_doing_path) -> None:
         """A module must return False for a command it does not own."""
-        module = importlib.import_module(f"aipass.aipass.apps.modules.{stem}")
+        module = _discovered(stem)
 
         assert module.handle_command("not-my-command", ["--help"]) is False

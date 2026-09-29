@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handoff_platform.py
 # Description: Tests for handoff_platform handler
-# Version: 1.1.4
+# Version: 1.1.5
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/handoff_platform/__init__.py and the handoff module it drives."""
@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -452,12 +453,19 @@ class TestLaunchInline:
         assert "hello world" in shell_cmd
 
     def test_shell_command_includes_breadcrumb_after_cli(self, tmp_path) -> None:
-        """Breadcrumb (cd + claude --continue) prints via printf after the CLI invocation."""
+        """Breadcrumb (cd + claude --continue) prints via printf after the CLI invocation.
+
+        The breadcrumb holds spaces and `&&`, so the command must end with it as one
+        shell-quoted word: unquoted, the shell runs `cd <proj>` and `claude --continue`
+        itself instead of printing them.
+        Mutant (fleet green leg 5): `shlex.quote(breadcrumb)` -> `breadcrumb` -> red at the endswith assert.
+        """
         proj = str(tmp_path / "proj")
         _, execvp = self._launch(proj)
         _, argv = execvp.call_args[0]
         shell_cmd = argv[2]
         breadcrumb = return_path_breadcrumb(proj)
+        assert shell_cmd.endswith(f"printf '\\n%s\\n' {shlex.quote(breadcrumb)}")
         assert breadcrumb in shell_cmd
         cli_idx = shell_cmd.index("/usr/bin/claude")
         breadcrumb_idx = shell_cmd.index(breadcrumb)

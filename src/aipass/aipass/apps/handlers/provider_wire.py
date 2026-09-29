@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: provider_wire.py
 # Description: Auto-wire provider settings from manifest into user config
-# Version: 1.2.1
+# Version: 1.2.2
 # Created: 2026-07-11
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """provider_wire — auto-wire provider settings.
@@ -164,12 +164,16 @@ def _merge_settings_scalars(settings: dict, wanted: Dict[str, Any]) -> List[str]
 # =============================================================================
 
 
-def _platform_bridge_command(command: str, os_name: Optional[str] = None) -> str:
+def platform_bridge_command(command: str, os_name: Optional[str] = None) -> str:
     """Write-time OS transform for the venv interpreter path (manifest stays POSIX-canonical).
 
     *os_name* defaults to ``os.name`` read at call time; every product caller passes
-    nothing.  It exists so the tests can ask for the Windows answer without patching
+    nothing, or forwards doctor.check_provider_manifest's own os_name seam, None in
+    the product.  It exists so the tests can ask for the Windows answer without patching
     ``os.name`` process-wide (the seam is for the test).
+
+    Public because a second module calls it: doctor's manifest check verifies with
+    the same transform this module writes with (write and verify must agree).
     """
     # DPLAN-0234 Strand C: CC on Windows runs hooks via Git Bash so $AIPASS_HOME expansion still
     # works, but the venv interpreter itself lives at .venv/Scripts/python.exe there, not .venv/bin/python3.
@@ -182,7 +186,7 @@ def _build_manifest_hook_entries(manifest_hooks: List[dict]) -> Dict[str, List[d
     """Build the settings.json hook-entry shape per event from manifest hook rows."""
     fresh: Dict[str, List[dict]] = {}
     for hook in manifest_hooks:
-        command = _platform_bridge_command(hook.get("command", ""))
+        command = platform_bridge_command(hook.get("command", ""))
         event = hook.get("event", "")
         if not command or not event:
             continue

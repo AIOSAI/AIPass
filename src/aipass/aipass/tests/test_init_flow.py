@@ -3,7 +3,7 @@
 # Description: Tests for aipass init_flow Phase 3
 # Version: 1.2.6
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/init_flow.py and the handlers it drives."""
@@ -899,7 +899,7 @@ class TestProviderGaps:
         """Only non-pass manifest results reach the report; run_doctor is never called."""
         gap = MagicMock(glyph="WARN", label="hooks", detail="wire the hook")
         passing = MagicMock(glyph=doctor.GLYPH_PASS, label="env", detail="")
-        with patch.object(doctor, "_check_provider_manifest", return_value=[gap, passing]):
+        with patch.object(doctor, "check_provider_manifest", return_value=[gap, passing]):
             with patch.object(doctor, "run_doctor") as mock_run:
                 report = self._report_from_stage_10(tmp_path)
         assert report["provider_gaps"] == {"hooks": "wire the hook"}
@@ -907,7 +907,7 @@ class TestProviderGaps:
 
     def test_collect_provider_gaps_swallows_errors(self, tmp_local_json, tmp_path: Path) -> None:
         """A failing manifest check still drops the report, with no gaps claimed, not a crash."""
-        with patch.object(doctor, "_check_provider_manifest", side_effect=RuntimeError("boom")):
+        with patch.object(doctor, "check_provider_manifest", side_effect=RuntimeError("boom")):
             with patch(f"{_MOD}.logger"):
                 report = self._report_from_stage_10(tmp_path)
         assert report["agent_name"] == "BOT"
@@ -916,7 +916,7 @@ class TestProviderGaps:
     def test_init_report_includes_provider_gaps(self, tmp_local_json, tmp_path: Path) -> None:
         """The init report embeds provider gaps + action when the manifest reports them."""
         gap = MagicMock(glyph="WARN", label="hooks", detail="missing")
-        with patch.object(doctor, "_check_provider_manifest", return_value=[gap]):
+        with patch.object(doctor, "check_provider_manifest", return_value=[gap]):
             report = self._report_from_stage_10(tmp_path)
         assert report["provider_gaps"] == {"hooks": "missing"}
         assert "provider_action" in report
@@ -924,7 +924,7 @@ class TestProviderGaps:
     def test_init_report_omits_provider_gaps_when_clean(self, tmp_local_json, tmp_path: Path) -> None:
         """No provider keys are written when the manifest is fully satisfied."""
         passing = MagicMock(glyph=doctor.GLYPH_PASS, label="env", detail="")
-        with patch.object(doctor, "_check_provider_manifest", return_value=[passing]):
+        with patch.object(doctor, "check_provider_manifest", return_value=[passing]):
             report = self._report_from_stage_10(tmp_path)
         assert "provider_gaps" not in report
         assert "provider_action" not in report

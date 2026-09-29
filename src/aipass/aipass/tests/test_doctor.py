@@ -3,7 +3,7 @@
 # Description: Tests for aipass doctor Phase 1
 # Version: 1.2.4
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/doctor.py and the handlers it drives."""
@@ -14,6 +14,7 @@
 
 import io
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -51,6 +52,7 @@ from aipass.aipass.apps.modules._doctor_wire import (
 from aipass.aipass.apps.modules.doctor import (
     CheckResult,
     check_identity,
+    check_provider_manifest,
     handle_command,
     run_doctor,
     run_doctor_preflight,
@@ -58,7 +60,6 @@ from aipass.aipass.apps.modules.doctor import (
     _check_global_aipass_home,
     _check_home_agreement,
     _check_owner_seating,
-    _check_provider_manifest,
     _find_manifest,
     _fix_owner_seating,
 )
@@ -117,17 +118,13 @@ class TestDetectPython:
 
     def test_python_38_is_warning(self) -> None:
         """Python 3.8 is marked as warning, not ok."""
-        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.sys") as mock_sys:
-            mock_sys.version_info = MagicMock(major=3, minor=8, micro=0)
-            result = detect_python()
+        result = detect_python(MagicMock(major=3, minor=8, micro=0))
         assert result["ok"] is False
         assert result["warning"] is True
 
     def test_python_37_is_fail(self) -> None:
         """Python 3.7 is not ok and not warning."""
-        with patch("aipass.aipass.apps.handlers.system_detect.system_detector.sys") as mock_sys:
-            mock_sys.version_info = MagicMock(major=3, minor=7, micro=0)
-            result = detect_python()
+        result = detect_python(MagicMock(major=3, minor=7, micro=0))
         assert result["ok"] is False
         assert result["warning"] is False
 
@@ -282,35 +279,29 @@ class TestDetectShell:
 # =============================================================================
 
 
-"""The three forced-posix tests patch os.name process-wide; on Windows that
-makes pathlib dispatch Path() to PosixPath, which any code running inside the
-patch window (e.g. the logger call in the OSError branch) trips over with
-NotImplementedError. The code path is POSIX-gated anyway — skip on Windows;
-test_non_posix_reports_unknown keeps the Windows-relevant coverage."""
-_posix_only = pytest.mark.skipif(os.name == "nt", reason="forces os.name='posix'; breaks pathlib dispatch on Windows")
-
-
 class TestShellFromParentProc:
-    """The /proc fallback, reached the way doctor reaches it: detect_shell() with SHELL unset."""
+    """The /proc fallback, reached the way doctor reaches it: detect_shell() with SHELL unset.
+
+    The platform and parent pid go in through detect_shell's os_name/getppid
+    seams (fleet green leg 5), so os is never replaced process-wide — which is
+    what once made these tests skip on Windows (pathlib dispatch followed the
+    forced os.name).
+    """
 
     @pytest.fixture(autouse=True)
     def _no_shell_env(self, monkeypatch, tmp_path) -> None:
         monkeypatch.delenv("SHELL", raising=False)
         monkeypatch.setenv("PATH", str(tmp_path))
 
-    def test_non_posix_reports_unknown(self, monkeypatch) -> None:
-        monkeypatch.setattr(system_detector.os, "name", "nt")
-        assert detect_shell()["name"] == "unknown"
+    def test_non_posix_reports_unknown(self) -> None:
+        """Mutant: `if os_name != "posix"` -> `if False` -> red (the real /proc answers on Linux)."""
+        assert detect_shell(os_name="nt")["name"] == "unknown"
 
-    @_posix_only
     def test_reads_comm_file(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 424242
         proc_dir = tmp_path / str(fake_ppid)
         proc_dir.mkdir()
         (proc_dir / "comm").write_text("bash\n", encoding="utf-8")
-
-        monkeypatch.setattr(system_detector.os, "name", "posix")
-        monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
 
         real_path_cls = system_detector.Path
 
@@ -320,13 +311,10 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert detect_shell() == {"name": "bash", "path": ""}
+        assert detect_shell(os_name="posix", getppid=lambda: fake_ppid) == {"name": "bash", "path": ""}
 
-    @_posix_only
     def test_missing_comm_file_reports_unknown(self, monkeypatch, tmp_path) -> None:
         fake_ppid = 999999
-        monkeypatch.setattr(system_detector.os, "name", "posix")
-        monkeypatch.setattr(system_detector.os, "getppid", lambda: fake_ppid)
 
         real_path_cls = system_detector.Path
 
@@ -336,13 +324,9 @@ class TestShellFromParentProc:
             return real_path_cls(arg, *a, **kw)
 
         monkeypatch.setattr(system_detector, "Path", _fake_path)
-        assert detect_shell()["name"] == "unknown"
+        assert detect_shell(os_name="posix", getppid=lambda: fake_ppid)["name"] == "unknown"
 
-    @_posix_only
     def test_read_oserror_reports_unknown(self, monkeypatch) -> None:
-        monkeypatch.setattr(system_detector.os, "name", "posix")
-        monkeypatch.setattr(system_detector.os, "getppid", lambda: 1)
-
         class _BoomPath:
             def is_file(self):
                 return True
@@ -351,7 +335,7 @@ class TestShellFromParentProc:
                 raise OSError("permission denied")
 
         monkeypatch.setattr(system_detector, "Path", lambda *a, **kw: _BoomPath())
-        assert detect_shell()["name"] == "unknown"
+        assert detect_shell(os_name="posix", getppid=lambda: 1)["name"] == "unknown"
 
 
 # =============================================================================
@@ -557,7 +541,7 @@ class TestDoctorHandleCommand:
         for name in ("_check_scaffold", "_check_sandbox", "_check_drone_systems", "check_wire_verify"):
             monkeypatch.setattr(f"{mod}.{name}", lambda: [])
         monkeypatch.setattr(f"{mod}.check_admin_lane", lambda: [])
-        monkeypatch.setattr(f"{mod}._check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
         monkeypatch.setattr(f"{mod}.reconcile_stale_deny", lambda **_kw: [])
         with (
             patch(f"{mod}.json_handler", autospec=True),
@@ -569,6 +553,34 @@ class TestDoctorHandleCommand:
         assert ("file or directory not found" in out) is shown
         handed = [sys.executable, "-m", "pytest", "src/aipass/", "--collect-only", "-q"]
         assert handed in [c.args[0] for c in run.call_args_list]
+
+    def test_unreadable_updateignore_is_one_scaffold_row(self, tmp_path, monkeypatch, capsys) -> None:
+        """An .updateignore that is there but cannot be read: doctor says so in one Scaffold row.
+
+        read_ignore raises for it now (the update refuses); without the catch in the
+        Scaffold group, `aipass doctor` would end in a traceback. The file is a directory,
+        which no platform reads as text. Every other group is stubbed and the registry
+        found is a tmp project, so nothing reads live state.
+        Mutant: the catch returns no row and goes on with no patterns -> red at the row assert.
+        (With the catch removed the raise escapes the command: red, but not at an assert.)
+        """
+        project = tmp_path / "proj"
+        project.mkdir()
+        registry = project / "PROJ_REGISTRY.json"
+        registry.write_text("{}", encoding="utf-8")
+        (project / ".updateignore").mkdir()
+        mod = "aipass.aipass.apps.modules.doctor"
+        for name in ("_check_system", "check_identity", "_check_community", "_check_structure", "_check_sandbox"):
+            monkeypatch.setattr(f"{mod}.{name}", lambda: [])
+        monkeypatch.setattr(f"{mod}._check_services", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}.check_provider_manifest", lambda **_kw: [])
+        monkeypatch.setattr(f"{mod}._find_registry", lambda: registry)
+        with patch(f"{mod}.json_handler", autospec=True):
+            assert handle_command("doctor", []) is True
+        out = capsys.readouterr().out
+        assert ".updateignore" in out
+        assert "is there but cannot be read" in out
+        assert "scaffold manifest" not in out  # one row: the drift report is not guessed without the claims
 
 
 # =============================================================================
@@ -653,7 +665,7 @@ class TestProviderManifest:
     def test_manifest_not_found_returns_warn(self) -> None:
         """Missing manifest → single WARN result."""
         with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=None):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "manifest" in results[0].detail
@@ -664,7 +676,7 @@ class TestProviderManifest:
         bad_manifest.parent.mkdir(parents=True)
         bad_manifest.write_text("not json{{{", encoding="utf-8")
         with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=bad_manifest):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "unreadable" in results[0].detail
@@ -675,7 +687,7 @@ class TestProviderManifest:
         manifest.parent.mkdir(parents=True)
         manifest.write_text(json.dumps({"cli": {}}), encoding="utf-8")
         with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
 
@@ -716,7 +728,7 @@ class TestProviderManifest:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.glyph == GLYPH_PASS
         assert "2" in hooks_result.detail
@@ -746,14 +758,14 @@ class TestProviderManifest:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.glyph == GLYPH_WARN
         assert "Stop" in hooks_result.detail
 
     def test_windows_scripts_path_command_recognized_as_wired(self, tmp_path) -> None:
         """A Scripts-path (Windows-transformed) hook entry must not be flagged missing against
-        the POSIX-canonical manifest — write (_platform_bridge_command) and verify must agree
+        the POSIX-canonical manifest — write (platform_bridge_command) and verify must agree
         (DPLAN-0234 Strand C)."""
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
         manifest = tmp_path / ".claude" / "provider_manifest.json"
@@ -768,12 +780,8 @@ class TestProviderManifest:
             json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": windows_cmd}]}]}}),
             encoding="utf-8",
         )
-        with (
-            patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
-            patch("aipass.aipass.apps.modules.doctor.Path.home", return_value=tmp_path),
-            patch("aipass.aipass.apps.handlers.provider_wire.os.name", "nt"),
-        ):
-            results = _check_provider_manifest()
+        with patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest):
+            results = check_provider_manifest(settings_path=provider_settings, os_name="nt")
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.glyph == GLYPH_PASS
         assert "1" in hooks_result.detail
@@ -794,7 +802,7 @@ class TestProviderManifest:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert "UserPromptSubmit:UserPromptSubmit" not in hooks_result.detail
         assert "UserPromptSubmit:presence_gate" in hooks_result.detail
@@ -825,7 +833,7 @@ class TestProviderManifest:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         hooks_result = [r for r in results if r.label == "hooks"][0]
         assert hooks_result.detail.count("PreCompact:pre_compact_prep") == 1
 
@@ -846,7 +854,7 @@ class TestProviderManifest:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         env_results = [r for r in results if r.label == "env vars"]
         assert len(env_results) == 1
         assert env_results[0].glyph == GLYPH_PASS
@@ -865,7 +873,7 @@ class TestProviderManifest:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            results = _check_provider_manifest()
+            results = check_provider_manifest()
         env_results = [r for r in results if r.label == "env vars"]
         assert len(env_results) == 1
         assert env_results[0].glyph == GLYPH_WARN
@@ -916,7 +924,7 @@ class TestProviderSettingsScalars:
             patch("aipass.aipass.apps.modules.doctor._find_manifest", return_value=manifest),
             _home_at(tmp_path),
         ):
-            return _check_provider_manifest(**kwargs)
+            return check_provider_manifest(**kwargs)
 
     def test_missing_key_is_named_with_the_cure_command(self, tmp_path) -> None:
         """The regression DPLAN-0347 exists for: doctor must NAME the absent key, not stay silent."""
@@ -1688,6 +1696,36 @@ class TestHomeAgreement:
         link.symlink_to(real)
 
         assert self._run(str(real), str(link)) == []
+
+    def test_a_pair_that_cannot_be_compared_is_one_warn_row(self, tmp_path) -> None:
+        """A home that cannot be resolved is one WARN row saying so, never silence or a traceback.
+
+        Silence (the empty list) reads as agreement. resolve on a symlink loop raises
+        RuntimeError up to Python 3.12 and answers the loop on 3.13, and a platform may
+        refuse the link itself: the test asks both inside itself and says which row follows.
+        Mutant: the catch narrowed to OSError -> red on 3.10 to 3.12 (RuntimeError escapes).
+        Mutant: the catch answers [] again (the shape of HEAD) -> red at the row assert.
+        """
+        log = logging.getLogger(__name__)
+        other = tmp_path / "tree"
+        other.mkdir()
+        loop = tmp_path / "loop"
+        expected = ("AIPASS_HOME split", GLYPH_FAIL)  # no loop, or resolve answers it: two different trees
+        try:
+            loop.symlink_to("loop2")
+            (tmp_path / "loop2").symlink_to("loop")
+        except OSError as exc:
+            log.info("the platform refused the symlink (%s): the pair differs and is compared", exc)
+        else:
+            try:
+                loop.resolve()
+            except (OSError, RuntimeError) as exc:
+                log.info("resolve raised on the loop (%s): the pair cannot be compared", exc)
+                expected = ("AIPASS_HOME pair", GLYPH_WARN)
+
+        rows = self._run(str(loop), str(other))
+
+        assert [(r.label, r.glyph) for r in rows] == [expected]
 
     def test_missing_either_value_emits_nothing(self, tmp_path) -> None:
         """Nothing to compare is not a disagreement — the other rows own that."""

@@ -3,7 +3,7 @@
 # Description: Tests for init bootstrap handler (DPLAN-0164)
 # Version: 1.1.2
 # Created: 2026-05-04
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/init/bootstrap.py and the init/update flows it drives."""
@@ -16,6 +16,7 @@
 # seedgo: no-test-needed(ruff) — that every module this file imports parses and imports
 
 import json
+import os
 import uuid
 from datetime import date
 from pathlib import Path
@@ -30,7 +31,7 @@ from aipass.aipass.apps.handlers.init.bootstrap import (
     update_project,
 )
 from aipass.aipass.apps.handlers.init import bootstrap
-from aipass.aipass.apps.handlers.init.scaffold_manifest import read_manifest
+from aipass.aipass.apps.handlers.init.scaffold_manifest import UpdateIgnoreUnreadable, read_manifest
 from aipass.aipass.apps.handlers.init.scaffold_manifest import sha256_text as sc_sha256
 from aipass.aipass.shared import scaffold_content as sc
 from aipass.aipass.shared.registry_discovery import registries_in
@@ -1422,6 +1423,42 @@ def test_update_project_leaves_a_protected_file_out_of_the_manifest(tmp_path):
 
     assert str(prep.resolve()) in result["kept_files"]
     assert prep.read_text(encoding="utf-8") == "# my own prep\n"
+
+
+def _files_and_bytes(root: Path) -> dict:
+    """Every file under *root* with its bytes; symlinked directories (the .venv link) are not entered."""
+    return {
+        Path(d, f).relative_to(root).as_posix(): Path(d, f).read_bytes()
+        for d, _dirs, names in os.walk(root)
+        for f in names
+        if not Path(d, f).is_symlink()
+    }
+
+
+def test_update_refuses_when_the_ignore_file_is_there_but_unreadable(tmp_path):
+    """A .updateignore that exists but cannot be read stops the update before any write.
+
+    Read as no patterns, it would let the update overwrite the files the owner claimed.
+    The file is a directory here; what reading it raises is the platform's choice
+    (IsADirectoryError on Linux and macOS, PermissionError on Windows), so the test
+    reads it with its own hands first and asserts the refusal carries that same error.
+    Mutant: read_ignore's unreadable branch -> `return []` (the shape of HEAD) -> red.
+    """
+    target = tmp_path / "proj"
+    target.mkdir()
+    init_project(target, project_name="claimed")
+    ignore = target / ".updateignore"
+    ignore.mkdir()
+    with pytest.raises(OSError) as asked:  # what this platform raises for the same read
+        ignore.read_text(encoding="utf-8")
+    platform_error = asked.value
+    before = _files_and_bytes(target)
+
+    with pytest.raises(UpdateIgnoreUnreadable, match=r"\.updateignore") as refused:
+        update_project(target)
+
+    assert type(refused.value.__cause__) is type(platform_error)
+    assert _files_and_bytes(target) == before
 
 
 def test_update_project_keeps_an_edited_tier_file(tmp_path):

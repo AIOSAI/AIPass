@@ -3,7 +3,7 @@
 # Description: Tests for doctor structure scanner (DPLAN-0177)
 # Version: 1.2.4
 # Created: 2026-05-14
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/structure_scan/structure_scanner.py and the handlers it drives."""
@@ -15,6 +15,7 @@
 # seedgo: no-test-needed(documentation) — that the public scan and check functions carry docstrings
 
 import json
+import sys
 import pytest
 from pathlib import Path
 from unittest.mock import patch
@@ -703,6 +704,46 @@ class TestCheckStructureIntegration:
         glyphs = {r.glyph for r in results}
         assert GLYPH_FAIL not in glyphs
         assert GLYPH_WARN not in glyphs
+
+    @staticmethod
+    def _unknown_rows(tmp_path: Path) -> tuple:
+        """Seat src/stray/ under a pyproject; return the package-names rows and the placement labels."""
+        _make_agent(tmp_path, "stray", "uuid-1")
+        _make_registry(tmp_path, [{"name": "stray", "path": str(tmp_path / "src" / "stray")}])
+        with (
+            patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
+            patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
+        ):
+            results = _check_structure()
+        rows = [(r.glyph, r.detail) for r in results if r.label == "package names"]
+        return rows, [r.label for r in results if r.label.startswith("placement")]
+
+    def test_unparseable_pyproject_is_unknown_not_no_packages(self, tmp_path: Path) -> None:
+        """A pyproject that cannot be parsed is one WARN row naming the parse, and no placement issue.
+
+        Mutant: the parse-error `return None` -> `return set()` (the shape of HEAD) -> red at the row assert.
+        Mutant: check_placement drops the unknown list it was handed -> red at the row assert.
+        """
+        (tmp_path / "pyproject.toml").write_text("not valid toml {{{", encoding="utf-8")
+        rows, placement = self._unknown_rows(tmp_path)
+        assert [glyph for glyph, _ in rows] == [GLYPH_WARN]
+        assert "pyproject.toml could not be parsed" in rows[0][1]
+        assert placement == ["placement"]  # the all-clear row: unknown flagged nobody
+
+    def test_no_toml_parser_is_unknown_and_says_so(self, tmp_path: Path, monkeypatch) -> None:
+        """No tomllib and no tomli (Python 3.10 without it) is one WARN row naming the missing parser.
+
+        The stub stands where the product looks: the import runs at call time, so
+        sys.modules holding None for both names is what an interpreter without them answers.
+        Mutant: the no-parser `return None` -> `return set()` (the shape of HEAD) -> red at the row assert.
+        """
+        (tmp_path / "pyproject.toml").write_text('[tool.setuptools]\npackages = ["mypackage"]\n', encoding="utf-8")
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        monkeypatch.setitem(sys.modules, "tomli", None)
+        rows, placement = self._unknown_rows(tmp_path)
+        assert [glyph for glyph, _ in rows] == [GLYPH_WARN]
+        assert "no TOML parser" in rows[0][1]
+        assert placement == ["placement"]  # stray is not measured against a package set nobody read
 
     def test_root_artifacts_reported(self, tmp_path: Path) -> None:
         """Root artifacts show up as WARN in structure check."""

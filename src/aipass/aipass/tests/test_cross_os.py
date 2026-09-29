@@ -3,7 +3,7 @@
 # Description: Tests for cross-OS gap registry parser + doctor/init integration
 # Version: 1.1.6
 # Created: 2026-07-02
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/cross_os/gap_registry.py and the handlers it drives."""
@@ -57,6 +57,7 @@ _HANDLER_MOD = "aipass.aipass.apps.handlers.cross_os.gap_registry"
 _PREFLIGHT_MOD = "aipass.aipass.apps.handlers.cross_os.preflight"
 _RECORD_MOD = "aipass.aipass.apps.handlers.cross_os.run_record"
 _DOCTOR_MOD = "aipass.aipass.apps.modules.doctor"
+_ROWS_MOD = "aipass.aipass.apps.handlers.cross_os.doctor_rows"  # builds the rows doctor prints (leg 5 split)
 _INIT_MOD = "aipass.aipass.apps.modules.init_flow"
 
 
@@ -242,7 +243,7 @@ class TestFailToError:
 
 
 # =============================================================================
-# OS-gap cross-reference row shape (doctor.py _cross_os_gap_rows), read through run_cross_os
+# OS-gap cross-reference row shape (doctor_rows.cross_os_gap_rows), read through run_cross_os
 # =============================================================================
 
 
@@ -252,10 +253,10 @@ class TestCrossOsGapRows:
         """The gap rows `doctor --cross-os` prints; the three light probes are stubbed, so no drone runs."""
         ok = PreflightResult("probe", True, "ok")
         with (
-            patch(f"{_DOCTOR_MOD}.gaps_for_platform", return_value=gaps, side_effect=raises),
-            patch(f"{_DOCTOR_MOD}.check_routing", return_value=ok),
-            patch(f"{_DOCTOR_MOD}.check_versions", return_value=ok),
-            patch(f"{_DOCTOR_MOD}.check_hookstatus", return_value=ok),
+            patch(f"{_ROWS_MOD}.gaps_for_platform", return_value=gaps, side_effect=raises),
+            patch(f"{_ROWS_MOD}.check_routing", return_value=ok),
+            patch(f"{_ROWS_MOD}.check_versions", return_value=ok),
+            patch(f"{_ROWS_MOD}.check_hookstatus", return_value=ok),
         ):
             rows = _cross_os_rows()
         return [row for row in rows if row.label.startswith("cross-os")]
@@ -281,10 +282,14 @@ class TestCrossOsGapRows:
         The row wraps the status in brackets and a symptom may hold its own; Rich read
         both as markup and dropped them (red first on HEAD, fleet green leg 4).
         Mutant: doctor.py run_cross_os's escape of the row dropped (the shape of HEAD) -> red.
+        Mutant (fleet green leg 5): the label's escape alone dropped -> red at the label assert
+        (the registry number cell holds a bracket Rich would read as a tag; `[9]` alone
+        is not one, and survived).
         """
-        fake = [CrossOsGap("9", "route masks", "all", "printed as [unknown command]", "aipass", "recommended")]
+        fake = [CrossOsGap("[new] 9", "route masks", "all", "printed as [unknown command]", "aipass", "recommended")]
         self._gap_rows(fake)
         out = " ".join(capsys.readouterr().out.split())
+        assert "cross-os gap #[new] 9 (pre-flight)" in out
         assert "pre-flight: printed as [unknown command]" in out
         assert "tracked gap [recommended] — owner aipass" in out
 
@@ -412,7 +417,7 @@ class TestRunE2e:
 
 
 # =============================================================================
-# Composed group (doctor.py _check_cross_os: gap rows + pre-flight rows + optional e2e),
+# Composed group (doctor_rows.check_cross_os: gap rows + pre-flight rows + optional e2e),
 # read through run_cross_os
 # =============================================================================
 
@@ -424,10 +429,10 @@ class TestCheckCrossOsComposed:
         versions = versions or PreflightResult("versions", True, "drone v1; aipass 0.1")
         hookstatus = hookstatus or PreflightResult("hookstatus", True, "config ok")
         return (
-            patch(f"{_DOCTOR_MOD}.gaps_for_platform", return_value=[]),
-            patch(f"{_DOCTOR_MOD}.check_routing", return_value=routing),
-            patch(f"{_DOCTOR_MOD}.check_versions", return_value=versions),
-            patch(f"{_DOCTOR_MOD}.check_hookstatus", return_value=hookstatus),
+            patch(f"{_ROWS_MOD}.gaps_for_platform", return_value=[]),
+            patch(f"{_ROWS_MOD}.check_routing", return_value=routing),
+            patch(f"{_ROWS_MOD}.check_versions", return_value=versions),
+            patch(f"{_ROWS_MOD}.check_hookstatus", return_value=hookstatus),
         )
 
     def test_preflight_rows_pass_when_ok(self) -> None:
@@ -437,6 +442,8 @@ class TestCheckCrossOsComposed:
                 stack.enter_context(p)
             results = _cross_os_rows()
         labels = {r.label: r for r in results}
+        probes = ["routing (pre-flight)", "versions (pre-flight)", "hookstatus (pre-flight)"]
+        assert [label for label in probes if label in labels] == probes  # every probe has its row
         assert labels["routing (pre-flight)"].glyph == GLYPH_PASS
         assert labels["versions (pre-flight)"].glyph == GLYPH_PASS
         assert labels["hookstatus (pre-flight)"].glyph == GLYPH_PASS
@@ -458,7 +465,7 @@ class TestCheckCrossOsComposed:
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            mock_e2e = stack.enter_context(patch(f"{_DOCTOR_MOD}.run_e2e_preflight"))
+            mock_e2e = stack.enter_context(patch(f"{_ROWS_MOD}.run_e2e_preflight"))
             results = _cross_os_rows()
         mock_e2e.assert_not_called()
         assert not any("e2e" in r.label for r in results)
@@ -469,7 +476,7 @@ class TestCheckCrossOsComposed:
             for p in self._patch_preflight():
                 stack.enter_context(p)
             mock_e2e = stack.enter_context(
-                patch(f"{_DOCTOR_MOD}.run_e2e_preflight", return_value=PreflightResult("e2e", True, "14 passed"))
+                patch(f"{_ROWS_MOD}.run_e2e_preflight", return_value=PreflightResult("e2e", True, "14 passed"))
             )
             results = _cross_os_rows(run_e2e=True)
         mock_e2e.assert_called_once()
@@ -483,7 +490,7 @@ class TestCheckCrossOsComposed:
                 stack.enter_context(p)
             stack.enter_context(
                 patch(
-                    f"{_DOCTOR_MOD}.run_e2e_preflight",
+                    f"{_ROWS_MOD}.run_e2e_preflight",
                     return_value=PreflightResult("e2e", False, "2 failed, 12 passed"),
                 )
             )
@@ -497,7 +504,7 @@ class TestCheckCrossOsComposed:
         with contextlib.ExitStack() as stack:
             for p in self._patch_preflight():
                 stack.enter_context(p)
-            stack.enter_context(patch(f"{_DOCTOR_MOD}.run_e2e_preflight", return_value=unrunnable))
+            stack.enter_context(patch(f"{_ROWS_MOD}.run_e2e_preflight", return_value=unrunnable))
             results = _cross_os_rows(run_e2e=True)
         row = next(r for r in results if r.label == "e2e suite (pre-flight)")
         assert row.glyph == GLYPH_WARN

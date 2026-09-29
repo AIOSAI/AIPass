@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_provider_wire.py
 # Description: Tests for provider_wire — manifest-driven strip-and-readd hook merge
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-08-01
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/provider_wire.py and the manifest-driven hook merge it drives."""
@@ -24,7 +24,7 @@ from aipass.aipass.apps.handlers.provider_wire import (
     STATE_DIFFERENT,
     STATE_MISSING,
     STATE_SET,
-    _platform_bridge_command,
+    platform_bridge_command,
     auto_wire_provider,
     manifest_settings,
     refresh_provider_hooks,
@@ -48,24 +48,24 @@ def _write_world(tmp_path, manifest_hooks: list, existing_hooks: dict):
 
 
 class TestPlatformBridgeCommand:
-    """Tests for _platform_bridge_command — write-time OS transform (DPLAN-0234 Strand C)."""
+    """Tests for platform_bridge_command — write-time OS transform (DPLAN-0234 Strand C)."""
 
     def test_windows_rewrites_venv_interpreter_path(self) -> None:
         """os.name == 'nt' swaps the POSIX venv interpreter path for the Windows one."""
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        result = _platform_bridge_command(posix_cmd, os_name="nt")
+        result = platform_bridge_command(posix_cmd, os_name="nt")
         assert result == "$AIPASS_HOME/.venv/Scripts/python.exe $AIPASS_HOME/bridges/claude.py Stop"
 
     def test_posix_leaves_command_unchanged(self) -> None:
         """Non-Windows os.name leaves the manifest's POSIX-canonical command untouched."""
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
-        result = _platform_bridge_command(posix_cmd, os_name="posix")
+        result = platform_bridge_command(posix_cmd, os_name="posix")
         assert result == posix_cmd
 
     def test_windows_leaves_command_without_marker_unchanged(self) -> None:
         """Command that doesn't contain the venv interpreter substring is a no-op either way."""
         other_cmd = "some-other-tool --flag"
-        result = _platform_bridge_command(other_cmd, os_name="nt")
+        result = platform_bridge_command(other_cmd, os_name="nt")
         assert result == other_cmd
 
     @pytest.mark.parametrize("door", ["refresh_provider_hooks", "auto_wire_provider"])
@@ -79,7 +79,7 @@ class TestPlatformBridgeCommand:
         posix_cmd = "$AIPASS_HOME/.venv/bin/python3 $AIPASS_HOME/bridges/claude.py Stop"
         manifest, settings_path = _write_world(tmp_path, [{"command": posix_cmd, "event": "Stop"}], {})
         monkeypatch.setattr(
-            provider_wire, "_platform_bridge_command", functools.partial(_platform_bridge_command, os_name="nt")
+            provider_wire, "platform_bridge_command", functools.partial(platform_bridge_command, os_name="nt")
         )
         if door == "refresh_provider_hooks":
             refresh_provider_hooks(manifest, settings_path=settings_path)
@@ -119,7 +119,7 @@ class TestStripAndReaddHooks:
         assert old_cmd not in stop_dump
         # expected through the write-time OS transform — on Windows the fresh
         # entry is written with Scripts/python.exe, by design
-        assert _platform_bridge_command(new_cmd) in stop_dump
+        assert platform_bridge_command(new_cmd) in stop_dump
         assert any("Refreshed Stop" in action for action in actions)
 
     def test_user_wired_hook_preserved(self, tmp_path) -> None:
@@ -171,7 +171,7 @@ class TestRefreshProviderHooks:
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
-        assert _platform_bridge_command(new_cmd) in stop_dump
+        assert platform_bridge_command(new_cmd) in stop_dump
 
     def test_install_door_sets_the_manifest_settings_scalar(self, tmp_path) -> None:
         """The scalars land at INSTALL, not one doctor run later (setup.sh's only wire door)."""
@@ -255,7 +255,7 @@ class TestAutoWireProviderHooks:
         updated = json.loads(settings_path.read_text(encoding="utf-8"))
         stop_dump = json.dumps(updated["hooks"]["Stop"])
         assert old_cmd not in stop_dump
-        assert _platform_bridge_command(new_cmd) in stop_dump
+        assert platform_bridge_command(new_cmd) in stop_dump
 
     def test_env_and_permissions_remain_additive(self, tmp_path) -> None:
         """Env vars and permission rules are added, never removed/overwritten — unchanged behavior."""

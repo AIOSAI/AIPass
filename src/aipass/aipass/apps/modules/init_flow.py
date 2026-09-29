@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: init_flow.py
 # Description: 10-stage guided first-run setup — aipass init command
-# Version: 1.3.3
+# Version: 1.3.4
 # Created: 2026-04-16
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -128,8 +128,8 @@ def _fire_profile_write_failed(path: str) -> None:
 
     Named for the failed write, not the cleanup: the deletion of the temp file
     is a consequence of the failure, not the event worth signalling. Was
-    ``file_deleted`` until 2026-09-07; @trigger delivers that name as a
-    deprecated alias for one release.
+    ``file_deleted`` until 2026-09-07; @trigger has since retired that old
+    name, so only ``profile_write_failed`` is delivered.
     """
     try:
         from aipass.trigger.apps.modules.core import trigger
@@ -800,7 +800,7 @@ def _collect_provider_gaps() -> Dict[str, Any]:
     try:
         from aipass.aipass.apps.modules import doctor
 
-        for r in doctor._check_provider_manifest():
+        for r in doctor.check_provider_manifest():
             if r.glyph != doctor.GLYPH_PASS:
                 gaps[r.label] = r.detail
     except Exception as exc:
