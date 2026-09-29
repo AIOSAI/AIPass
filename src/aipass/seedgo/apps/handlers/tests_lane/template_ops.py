@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: template_ops.py
 # Description: Test-template distribution — gold manifest, per-branch receipts, the bump
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2026-09-21
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Test-template distribution, on @memory's trinity pattern.
@@ -170,6 +170,14 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
     if not page.exists():
         outcome["error"] = f"no page to distribute: {page} is missing"
         return outcome
+    # Read once, before any branch: a page read per branch that raised a
+    # ValueError left the fleet stamped half way (seedgo, fleet green leg 4).
+    try:
+        page_text = page.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.error("Gold page unreadable, nothing stamped: %s: %s", page, exc)
+        outcome["error"] = f"page unreadable: {page}: {exc}"
+        return outcome
 
     for branch in discovery.discover_branches():
         name = branch["name"].lower()
@@ -190,7 +198,7 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
             continue
 
         try:
-            _stamp(branch_path, gold, page)
+            _stamp(branch_path, gold, page_text)
         except OSError as exc:
             logger.error("Could not stamp %s: %s", branch_path, exc)
             outcome["branches"].append({"branch": name, "action": "failed", "carries": carries, "error": str(exc)})
@@ -204,12 +212,19 @@ def bump(confirm: bool = False, only: Optional[str] = None) -> Dict:
     return outcome
 
 
-def _stamp(branch_path: Path, gold: Dict[str, str], page: Path) -> None:
-    """Write one branch's receipt and its copy of the page.
+def _stamp(branch_path: Path, gold: Dict[str, str], page_text: str) -> None:
+    """Write one branch's copy of the page, then its receipt.
+
+    The receipt goes LAST because it is the claim that the branch carries
+    gold: a later bump reads it and calls the branch current. A page that
+    failed after its receipt landed would read current for ever and never be
+    stamped again; a receipt that fails after its page leaves the branch
+    unstamped, so the next bump writes both again (seedgo, fleet green leg 4).
 
     Raises:
-        OSError: the receipt or the page did not land. bump() records it.
+        OSError: the page or the receipt did not land. bump() records it.
     """
+    (branch_path / "tests" / DISTRIBUTED_PAGE).write_text(page_text, encoding="utf-8")
     receipt = {
         "template_versions": dict(gold),
         "stamped": datetime.now().isoformat(timespec="seconds"),
@@ -218,4 +233,3 @@ def _stamp(branch_path: Path, gold: Dict[str, str], page: Path) -> None:
     target = receipt_path(branch_path)
     if not json_handler.write_json(target, receipt):
         raise OSError(f"receipt not written: {target}")
-    (branch_path / "tests" / DISTRIBUTED_PAGE).write_text(page.read_text(encoding="utf-8"), encoding="utf-8")

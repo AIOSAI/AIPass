@@ -3,7 +3,7 @@
 # Description: Fleet-wide contract suite over every branch json_handler
 # Version: 1.2.0
 # Created: 2026-09-01
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for every branch's apps/handlers/json/json_handler.py, one contract over the fleet."""
@@ -513,6 +513,65 @@ def redirect_documents(module: Any, target: Path, monkeypatch: pytest.MonkeyPatc
             monkeypatch.setenv(SERVICE_REDIRECT_ENV, str(target))
 
 
+class LogRecorder:
+    """Stands where a handler binds its own ``logger``: keeps each call, writes nothing."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, tuple]] = []
+
+    def debug(self, *args: Any, **kwargs: Any) -> None:
+        """Keep one debug call."""
+        self.records.append(("debug", args))
+
+    def info(self, *args: Any, **kwargs: Any) -> None:
+        """Keep one info call."""
+        self.records.append(("info", args))
+
+    def warning(self, *args: Any, **kwargs: Any) -> None:
+        """Keep one warning call."""
+        self.records.append(("warning", args))
+
+    def error(self, *args: Any, **kwargs: Any) -> None:
+        """Keep one error call."""
+        self.records.append(("error", args))
+
+
+def silence_own_logger(module: Any, monkeypatch: pytest.MonkeyPatch) -> LogRecorder | None:
+    """Replace the logger a handler binds at module scope with a recorder.
+
+    A resident handler (research, vera, verify, writer under Vera-Studio) logs
+    through prax, which routes a caller outside the AIPass tree to that
+    project's own logs/ and system_logs/ and never reads the test seam: four
+    lines landed there on every run of this file from a seat with no
+    AIPASS_BRANCH_NAME (seedgo, fleet green leg 4). A migrated shim binds no
+    logger; the service it imports logs under the seam.
+
+    Returns:
+        The recorder, or None when the module binds no logger of its own.
+    """
+    if "logger" not in vars(module):
+        return None
+    recorder = LogRecorder()
+    monkeypatch.setattr(module, "logger", recorder)
+    return recorder
+
+
+def assert_warned_of_corrupt_bytes(module: Any, branch: str) -> None:
+    """A handler with its own logger warned once, naming the corrupt document.
+
+    Only a module :func:`silence_own_logger` replaced has a record to read; a
+    migrated shim's warning is the service's, logged under the seam.
+    """
+    recorder = vars(module).get("logger")
+    if not isinstance(recorder, LogRecorder):
+        return
+    heads = [(level, args[:2]) for level, args in recorder.records]
+    assert heads == [("warning", ("[json_handler] Corrupt JSON %s: %s", "corrupt_config.json"))], (
+        f"{branch}: the corrupt document was not warned of once — {recorder.records!r}"
+    )
+    assert isinstance(recorder.records[0][1][2], json.JSONDecodeError)
+
+
 def redirected(branch: str, target: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     """Import a branch's handler, redirect it, and PROVE the redirect took.
 
@@ -531,6 +590,7 @@ def redirected(branch: str, target: Path, monkeypatch: pytest.MonkeyPatch) -> An
     """
     module = implementation(branch)
     redirect_documents(module, target, monkeypatch)
+    silence_own_logger(module, monkeypatch)
     resolver = getattr(module, "get_json_path", None)
     if resolver is None:
         return module
@@ -730,6 +790,7 @@ def test_load_json_survives_a_corrupt_document(branch: str, tmp_path: Path, monk
             f"{branch}: corrupt bytes did not regenerate a template for the document asked for — {answer!r}"
         )
         assert answer["version"] == "1.0.0", f"{branch}: regenerated template carries {answer!r}"
+        assert_warned_of_corrupt_bytes(module, branch)
     else:
         corrupt = tmp_path / "corrupt.json"
         corrupt.write_text("{not json at all", encoding="utf-8")
@@ -1322,7 +1383,27 @@ RETRY_HELPER_NAMES = ("_replace_with_retry", "replace_with_retry")
 #: Path parts that mean "not shipped code". A suite copy names the same symbol
 #: while monkeypatching it, and an archived file is on no import path; either
 #: one would enter the parametrization as an implementation that is not one.
-UNSHIPPED_PARTS = frozenset({"tests", "test", ".archive", "__pycache__", ".sorting_unprocessed"})
+UNSHIPPED_PARTS = frozenset({"tests", "test", ".archive", "__pycache__", ".sorting_unprocessed", "dropbox"})
+
+
+def shipped_python_files(root: Path) -> list[Path]:
+    """Every ``.py`` file under ``root`` that is shipped code, sorted.
+
+    Args:
+        root: The directory walked, :data:`PACKAGE_ROOT` in the suite.
+
+    Returns:
+        The files outside every :data:`UNSHIPPED_PARTS` directory.
+
+    A directory is pruned by its own name before the walk enters it, so a
+    dropbox is never listed, and ``root`` itself is never judged: a checkout
+    standing under a directory named ``dropbox`` is still read whole.
+    """
+    found = []
+    for directory, subdirectories, files in os.walk(root):
+        subdirectories[:] = [name for name in subdirectories if name not in UNSHIPPED_PARTS]
+        found.extend(Path(directory) / name for name in files if name.endswith(".py"))
+    return sorted(found)
 
 
 def ships_retry_helper(path: Path) -> bool:
@@ -1332,10 +1413,8 @@ def ships_retry_helper(path: Path) -> bool:
         path: A ``.py`` file found under :data:`PACKAGE_ROOT`.
 
     Returns:
-        True when the file is shipped code that contains the definition.
+        True when the file contains the definition.
     """
-    if UNSHIPPED_PARTS.intersection(path.parts):
-        return False
     source = path.read_text(encoding="utf-8", errors="ignore")
     return any(f"def {name}(" in source for name in RETRY_HELPER_NAMES)
 
@@ -1387,7 +1466,7 @@ def retry_label(relative: Path) -> str:
 RETRY_IMPLEMENTATIONS = {
     retry_label(path.relative_to(PACKAGE_ROOT)): "aipass."
     + ".".join(path.relative_to(PACKAGE_ROOT).with_suffix("").parts)
-    for path in sorted(PACKAGE_ROOT.rglob("*.py"))
+    for path in shipped_python_files(PACKAGE_ROOT)
     if ships_retry_helper(path)
 }
 
@@ -1688,6 +1767,24 @@ def test_retry_discovery_finds_the_whole_package_and_names_no_module_itself():
     for label, dotted in RETRY_IMPLEMENTATIONS.items():
         module = importlib.import_module(dotted)
         assert retry_helper_of(module) is not None, f"{label}: discovered but exposes no bounded replace helper"
+
+
+def test_the_package_walk_skips_a_dropbox_and_an_archive_but_not_a_root_beneath_one(tmp_path: Path):
+    """The walk reads shipped code and never a sandbox, judged below the root.
+
+    A dropbox is a sandbox like ``.archive`` (the owner's ruling, 2026-09-27):
+    what another branch hands in there is no implementation of this package,
+    and the walk must not read it. The directory is judged by its own name
+    relative to the walked root, so a checkout that itself stands under a
+    directory named ``dropbox`` is still read whole. Red first on the walk
+    that filtered absolute parts and did not name dropbox: it read
+    ``dropbox/stray.py`` (seedgo, fleet green leg 4).
+    """
+    root = tmp_path / "dropbox" / "package"
+    for relative in ("live.py", "dropbox/stray.py", ".archive/old.py", "branch/__pycache__/cached.py"):
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text("", encoding="utf-8")
+    assert shipped_python_files(root) == [root / "live.py"]
 
 
 def test_every_canonical_handler_that_stages_a_write_also_retries_the_replace():
@@ -2446,6 +2543,7 @@ def test_ensure_json_exists_regenerates_an_unreadable_document(
     ensure("corrupt", "config")
 
     assert json.loads(document.read_text(encoding="utf-8")), f"{branch}: corrupt document was not regenerated"
+    assert_warned_of_corrupt_bytes(module, branch)
 
 
 @pytest.mark.parametrize("branch", parametrized())

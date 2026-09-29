@@ -3,7 +3,7 @@
 # Description: Template v1 — tests_lane module, retire_ops and template_ops
 # Version: 1.0.2
 # Created: 2026-09-21
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/tests_lane.py and the handlers it drives."""
@@ -11,7 +11,7 @@
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(ruff) — that every file in handlers/tests_lane/ parses and imports
 # seedgo: no-test-needed(documentation) — that the public handler functions carry docstrings
-# seedgo: no-test-needed(constant) — RECEIPT_FILE's spelling and the BUMP_EVENT string; both asserted BY NAME
+# seedgo: no-test-needed(constant) — RECEIPT_FILE's spelling, asserted BY NAME; the bump tests pin the event's string
 # seedgo: no-test-needed(stdlib) — shutil.move's ability to move a file
 # seedgo: no-test-needed(cli) — Rich's rendering of the status table
 
@@ -20,6 +20,7 @@ import json
 import pytest
 
 from aipass.seedgo.apps.handlers import registry_scan
+from aipass.seedgo.apps.handlers.json import json_handler
 from aipass.seedgo.apps.handlers.tests_lane import template_ops
 from aipass.seedgo.apps.modules import CommandRefused, tests_lane
 
@@ -97,6 +98,31 @@ def gold(tmp_path, monkeypatch):
     (folder / "test_template_v1.md").write_text("# Test template\n\nthe page body\n", encoding="utf-8")
     monkeypatch.setattr(template_ops, "GOLD_DIR", folder)
     return folder
+
+
+@pytest.fixture
+def refused_receipts(monkeypatch) -> list:
+    """write_json answers False at its home, and every path it was asked to write is kept."""
+    asked: list = []
+
+    def refuse(path, data):
+        asked.append(path)
+        return False
+
+    monkeypatch.setattr(json_handler, "write_json", refuse)
+    return asked
+
+
+def bumped(dry_run: bool, stamped: int, branches: str) -> tuple:
+    """The one event a bump announces, as the bus recorder holds it.
+
+    Spelled out in full, the event's name included, so a renamed event or two
+    keys swapped reddens every bump test (seedgo, fleet green leg 4).
+    """
+    return (
+        "test_template_bumped",
+        {"dry_run": dry_run, "stamped": stamped, "branches": branches, "versions": '{"test_template": "9.9.9"}'},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -271,15 +297,18 @@ class TestTemplateStatus:
 
 
 class TestTemplateBump:
-    def test_a_dry_run_names_who_would_be_stamped_and_writes_nothing(self, capsys, fleet, gold):
+    def test_a_dry_run_names_who_would_be_stamped_and_writes_nothing(self, capsys, fleet, gold, bus):
+        """Mutants: the event renamed; stamped and dry_run swapped — both killed (leg 4)."""
         tests_lane.handle_command("tests", ["template", "bump"])
 
         printed = capsys.readouterr().out
         assert "DRY RUN" in printed and "would-stamp   alpha" in printed
         assert "Nothing was written" in printed
         assert not (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).exists()
+        assert bus.fired == [bumped(dry_run=True, stamped=0, branches="")]
 
-    def test_confirm_writes_the_receipt_and_the_page_into_the_branch(self, fleet, gold):
+    def test_confirm_writes_the_receipt_and_the_page_into_the_branch(self, fleet, gold, bus):
+        """Mutants: the event renamed; stamped and dry_run swapped — both killed (leg 4)."""
         tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
 
         tests_dir = fleet / "src" / "aipass" / "alpha" / "tests"
@@ -287,20 +316,23 @@ class TestTemplateBump:
         assert receipt["template_versions"] == {"test_template": "9.9.9"}
         assert receipt["stamped_by"] == "seedgo tests template bump"
         assert "the page body" in (tests_dir / "TEST_TEMPLATE.md").read_text(encoding="utf-8")
+        assert bus.fired == [bumped(dry_run=False, stamped=1, branches="alpha")]
 
-    def test_a_branch_with_no_tests_directory_is_named_not_created(self, capsys, fleet, gold):
+    def test_a_branch_with_no_tests_directory_is_named_not_created(self, capsys, fleet, gold, bus):
         tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
 
         assert "no-tests-dir  beta" in capsys.readouterr().out
         assert not (fleet / "src" / "aipass" / "beta" / "tests").exists()
+        assert bus.fired == [bumped(dry_run=False, stamped=1, branches="alpha")]
 
-    def test_naming_one_branch_leaves_every_other_branch_alone(self, capsys, fleet, gold):
+    def test_naming_one_branch_leaves_every_other_branch_alone(self, capsys, fleet, gold, bus):
         tests_lane.handle_command("tests", ["template", "bump", "@beta", "--confirm"])
 
         assert "skipped       alpha" in capsys.readouterr().out
         assert not (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).exists()
+        assert bus.fired == [bumped(dry_run=False, stamped=0, branches="")]
 
-    def test_a_second_bump_leaves_a_current_branch_untouched(self, capsys, fleet, gold):
+    def test_a_second_bump_leaves_a_current_branch_untouched(self, capsys, fleet, gold, bus):
         tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
         stamped = (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).read_text(encoding="utf-8")
         capsys.readouterr()
@@ -311,21 +343,98 @@ class TestTemplateBump:
         assert (fleet / "src" / "aipass" / "alpha" / "tests" / template_ops.RECEIPT_FILE).read_text(
             encoding="utf-8"
         ) == stamped
+        assert bus.fired == [
+            bumped(dry_run=False, stamped=1, branches="alpha"),
+            bumped(dry_run=False, stamped=0, branches=""),
+        ]
 
     def test_a_stamp_that_cannot_land_is_reported_failed_with_its_error(self, fleet, gold):
         """A failed write came back as the action text "failed: <error>", a string no caller compares.
 
         Mutant: _stamp's old `except Exception: return f"failed: {exc}"` — killed.
         """
-        (fleet / "src" / "aipass" / "alpha" / "tests" / "TEST_TEMPLATE.md").mkdir()
+        tests_dir = fleet / "src" / "aipass" / "alpha" / "tests"
+        (tests_dir / "TEST_TEMPLATE.md").mkdir()
 
         outcome = template_ops.bump(confirm=True, only="alpha")
 
         alpha = [row for row in outcome["branches"] if row["branch"] == "alpha"]
         assert [row["action"] for row in alpha] == ["failed"]
         assert "TEST_TEMPLATE.md" in alpha[0]["error"]
+        assert not (tests_dir / template_ops.RECEIPT_FILE).exists()
 
-    def test_a_test_body_is_never_distributed(self, fleet, gold):
+    def test_a_receipt_that_does_not_land_is_failed_and_never_reads_current(self, fleet, gold, refused_receipts):
+        """The receipt is written LAST, so a branch whose receipt did not land is stamped again next time.
+
+        The receipt is the claim "this branch carries gold"; a later bump sees
+        it and calls the branch current. Written first, a receipt beside a page
+        that then failed would read current for ever (seedgo's order, leg 4).
+        Mutant T2: the raise condition made always false — killed (leg 4).
+        """
+        branch = fleet / "src" / "aipass" / "alpha"
+
+        outcome = template_ops.bump(confirm=True, only="alpha")
+
+        target = template_ops.receipt_path(branch)
+        assert refused_receipts == [target]
+        assert outcome["branches"] == [
+            {"branch": "alpha", "action": "failed", "carries": None, "error": f"receipt not written: {target}"},
+            {"branch": "beta", "action": "skipped", "carries": None},
+        ]
+        assert "the page body" in (branch / "tests" / "TEST_TEMPLATE.md").read_text(encoding="utf-8")
+        assert template_ops.read_receipt(branch) is None
+
+    def test_a_page_that_is_not_utf8_stops_the_bump_before_any_branch_is_stamped(self, fleet, gold):
+        """The page is read once, before the fleet: an unreadable page is the bump's error.
+
+        It was read per branch inside the loop, and a UnicodeDecodeError (a
+        ValueError, not an OSError) escaped bump() with no outcome returned
+        (seedgo's decision, leg 4).
+        """
+        page = gold / "test_template_v1.md"
+        page.write_bytes(b"\xff\xfe not utf-8 \x80")
+        with pytest.raises(UnicodeDecodeError) as unreadable:
+            page.read_text(encoding="utf-8")
+
+        outcome = template_ops.bump(confirm=True, only="alpha")
+
+        assert outcome == {
+            "dry_run": False,
+            "gold": {"test_template": "9.9.9"},
+            "branches": [],
+            "error": f"page unreadable: {page}: {unreadable.value}",
+        }
+        assert template_ops.read_receipt(fleet / "src" / "aipass" / "alpha") is None
+
+    def test_the_command_prints_the_error_of_a_failed_stamp(self, capsys, fleet, gold, refused_receipts):
+        """A failed row's reason reaches the user, and the shell reads the failure.
+
+        The command exited 0 with a branch unstamped, so drone and a script
+        saw success (seedgo's decision, leg 4: exit 2, a lane that could not run).
+        Mutant L1: _run_bump's error print replaced by pass — killed (leg 4).
+        """
+        with pytest.raises(CommandRefused) as refusal:
+            tests_lane.handle_command("tests", ["template", "bump", "@alpha", "--confirm"])
+
+        assert refusal.value.code == 2
+        target = template_ops.receipt_path(fleet / "src" / "aipass" / "alpha")
+        assert refused_receipts == [target]
+        printed = capsys.readouterr()
+        lines = [line.strip() for line in printed.out.splitlines()]
+        assert lines.count(f"receipt not written: {target}") == 1
+        assert "1 of 2 branches not stamped" in printed.err
+
+    def test_a_bump_with_nothing_to_distribute_exits_non_zero(self, capsys, fleet, gold):
+        """An outcome error was printed and then handed the shell a 0 (seedgo's decision, leg 4)."""
+        (gold / "test_template_v1.md").unlink()
+
+        with pytest.raises(CommandRefused) as refusal:
+            tests_lane.handle_command("tests", ["template", "bump", "--confirm"])
+
+        assert refusal.value.code == 2
+        assert f"no page to distribute: {gold / 'test_template_v1.md'} is missing" in capsys.readouterr().err
+
+    def test_a_test_body_is_never_distributed(self, fleet, gold, bus):
         """The one thing this lane must never do: a branch's tests stay its own."""
         mine = fleet / "src" / "aipass" / "alpha" / "tests" / "test_theirs.py"
         mine.write_text("# alpha's own test\n", encoding="utf-8")
@@ -335,6 +444,7 @@ class TestTemplateBump:
         assert mine.read_text(encoding="utf-8") == "# alpha's own test\n"
         landed = {p.name for p in (fleet / "src" / "aipass" / "alpha" / "tests").iterdir()}
         assert landed == {"test_theirs.py", "TEST_TEMPLATE.md", template_ops.RECEIPT_FILE}
+        assert bus.fired == [bumped(dry_run=False, stamped=1, branches="alpha")]
 
     def test_an_unknown_verb_under_template_refuses_with_the_argument_exit_code(self, capsys, fleet, gold):
         with pytest.raises(CommandRefused) as refusal:

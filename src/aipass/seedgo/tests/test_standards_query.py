@@ -3,7 +3,7 @@
 # Description: Unit tests for the standards_query module
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/standards_query.py."""
@@ -123,14 +123,17 @@ def test_print_introspection_runs(capsys):
     that discovered nothing passed just as happily. Lines measured 2026-09-07;
     read off the real console through capsys since 2026-09-27.
     Mutant: `[cyan]handlers/{name}/[/cyan]` -> `[cyan]{name}/[/cyan]` reddens it.
+    Each line is matched whole, never as a substring of the whole output
+    (seedgo, fleet green leg 4). Mutant: `  [cyan]handlers/{name}/` ->
+    `  [cyan]handlers/{name}/ ` (a trailing space) reddens it.
     """
     standards_query.print_introspection()
 
-    out = capsys.readouterr().out
-    assert "standards_query Module" in out
-    assert "Discovered Packs:" in out
-    assert "  handlers/pytest_quality_standards/" in out
-    assert "  drone @seedgo standards_query aipass_standards" in out
+    lines = capsys.readouterr().out.splitlines()
+    assert "standards_query Module" in lines
+    assert "Discovered Packs:" in lines
+    assert "  handlers/pytest_quality_standards/" in lines
+    assert "  drone @seedgo standards_query aipass_standards" in lines
 
 
 def test_print_help_runs(capsys):

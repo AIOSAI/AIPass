@@ -3,7 +3,7 @@
 # Description: Unit tests for the standards_audit module and the seedgo-audit CI gate
 # Version: 1.3.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/standards_audit.py and the seedgo-audit CI gate."""
@@ -19,6 +19,7 @@ import tempfile
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
+from typing import cast
 
 
 # ---------------------------------------------------------------------------
@@ -329,8 +330,7 @@ def test_help_text_at_prefix_consistency():
     """All help text branch references use @ prefix (DPLAN-0085 fresh-eyes fix).
 
     Scans help text strings in seedgo.py and all modules for branch name
-    patterns that should use @ prefix but don't. standards_audit.py is read
-    from wherever the module was loaded, so a mutant copy is scanned too.
+    patterns that should use @ prefix but don't.
     Mutant: help's `audit aipass @flow --no-bypass` to `audit aipass flow --no-bypass` — killed.
     """
     import re
@@ -338,8 +338,7 @@ def test_help_text_at_prefix_consistency():
     branch_root = Path(__file__).resolve().parents[1]
     files_to_check = [
         branch_root / "apps" / "seedgo.py",
-        *sorted(p for p in (branch_root / "apps" / "modules").glob("*.py") if p.name != "standards_audit.py"),
-        Path(standards_audit.__file__),
+        *sorted((branch_root / "apps" / "modules").glob("*.py")),
     ]
 
     # Pattern: 'audit aipass <word>' or 'diagnostics <word>' where <word> is
@@ -417,7 +416,7 @@ def _refusal_text():
     -- a real console would wrap the line and split the very command the
     assertions are about.
     """
-    calls = standards_audit.error.call_args_list
+    calls = cast(MagicMock, standards_audit.error).call_args_list
     return "\n".join(str(call.args[0]) if call.args else "" for call in calls)
 
 
@@ -656,7 +655,7 @@ def test_the_hyphenated_alias_still_claims_the_lane():
 def test_the_lane_word_is_recognised_before_pack_validation(monkeypatch):
     """`tests` is not a pack, and must never be reported as an unknown one."""
     _wire_branches(monkeypatch, "BACKUP")
-    standards_audit.error.reset_mock()
+    cast(MagicMock, standards_audit.error).reset_mock()
     _forwarded(monkeypatch, ["tests", "@backup"])
 
     assert "Unknown pack" not in _refusal_text()

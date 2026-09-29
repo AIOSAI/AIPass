@@ -3,10 +3,10 @@
 # Description: Equivalence + re-run-matrix tests for audit_branch_incremental
 # Version: 1.4.1
 # Created: 2026-07-31
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
-"""Tests for apps/handlers/audit/branch_audit.py audit_branch_incremental and apps/handlers/audit/incremental_cache.py."""
+"""Tests for apps/handlers/audit/branch_audit.py's audit_branch_incremental and incremental_cache.py beside it."""
 
 # Equivalence tests for the incremental audit cache (DPLAN-0275).
 #
@@ -17,7 +17,7 @@
 # must never mean approximate.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(standard) — each row's own verdict; apps/handlers/aipass_standards/trinity_check.py has its own tests
+# seedgo: no-test-needed(standard) — a row's verdict; apps/handlers/aipass_standards/trinity_check.py has its own tests
 # seedgo: no-test-needed(stdlib) — hashlib's digest and json's round-trip of the cache file
 
 import json
@@ -1256,13 +1256,30 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         edited = "mybranch_json/thing_config.json"
         assert self._an_edit_busts_the_cache(tmp_path, monkeypatch, ("{branch}_json/*.json",), edited)
 
+    @staticmethod
+    def _saved_watch_set(tmp_path) -> set:
+        """The watch set the last audit saved, read back from its cache entry."""
+        key = branch_audit.cache_key_for("mybranch", tmp_path / "pack")
+        return set(incremental_cache.load_branch_entry(key)["files"])
+
     def test_a_checker_declaring_nothing_adds_nothing(self, tmp_path, monkeypatch):
-        """Over-refusal guard: the watch set must not widen for every checker."""
+        """Over-refusal guard: the watch set must not widen for every checker.
+
+        The whole saved watch set is asserted, beside the content-edit probe
+        (seedgo, fleet green leg 4). Mutant: the README.md entry added whether
+        or not the file exists — killed.
+        """
         assert not self._an_edit_busts_the_cache(tmp_path, monkeypatch, None, ".trinity/local.json")
+        assert self._saved_watch_set(tmp_path) == {Path("apps", "main.py").as_posix()}
 
     def test_an_undeclared_path_is_still_not_watched(self, tmp_path, monkeypatch):
-        """The declaration is the whole allow-list -- no incidental widening."""
+        """The declaration is the whole allow-list -- no incidental widening.
+
+        The path's absence from the saved watch set is asserted, beside the
+        content-edit probe (seedgo, fleet green leg 4).
+        """
         assert not self._an_edit_busts_the_cache(tmp_path, monkeypatch, (".trinity/*",), "random/file.json")
+        assert Path("random", "file.json").as_posix() not in self._saved_watch_set(tmp_path)
 
     def test_directories_matched_by_a_glob_are_watched(self, tmp_path, monkeypatch):
         """REVERSED 2026-08-27. This test previously asserted the opposite --
@@ -1299,7 +1316,8 @@ class TestBranchLevelCheckerInputsInvalidateTheCache:
         ],
     )
     def test_the_two_real_checkers_declare_their_inputs(self, module_name, attribute, expected):
-        """Mutant: trinity_check's BRANCH_INPUTS renamed away in apps/handlers/aipass_standards/trinity_check.py — killed.
+        """Mutant: trinity_check's BRANCH_INPUTS renamed away in
+        apps/handlers/aipass_standards/trinity_check.py — killed.
 
         The shipped declarations, not a fixture: this is what closes ruling 6.
         Read from SOURCE rather than imported: this module's autouse fixture

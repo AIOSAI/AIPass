@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: tests_lane.py
 # Description: Tests Lane Module — the retire lane and the test-template distribution
-# Version: 1.0.1
+# Version: 1.1.0
 # Created: 2026-09-21
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests Lane Module
@@ -53,6 +53,10 @@ from aipass.seedgo.apps.modules import CommandRefused
 #: An argument nobody recognised. The vocabulary is
 #: handlers/audit_tests/refusal.py's, so one code never means two things.
 EXIT_UNKNOWN_ARGUMENT = 7
+
+#: A bump that could not stamp what it was asked to: a lane that could not run,
+#: in the same vocabulary. A failed branch exited 0 until leg 4 of fleet green.
+EXIT_NOT_STAMPED = 2
 
 #: This branch. The retire lane is per-branch and seedgo only ever operates its
 #: own: another branch's retirement is that branch's move to make.
@@ -265,7 +269,7 @@ def _run_bump(confirm: bool, only: str | None) -> None:
     outcome = template_ops.bump(confirm=confirm, only=only)
     if outcome.get("error"):
         display_error(outcome["error"])
-        return
+        raise CommandRefused(EXIT_NOT_STAMPED, "template bump")
 
     console.print("[bold]Gold:[/bold] " + " · ".join(f"{k} {v}" for k, v in sorted(outcome["gold"].items())))
     console.print()
@@ -289,6 +293,10 @@ def _run_bump(confirm: bool, only: str | None) -> None:
         console.print()
 
     _announce_bump(outcome)
+    failed = [row for row in outcome["branches"] if row["action"] == "failed"]
+    if failed:
+        display_error(f"{len(failed)} of {len(outcome['branches'])} branches not stamped")
+        raise CommandRefused(EXIT_NOT_STAMPED, "template bump")
 
 
 def _announce_bump(outcome: dict) -> None:

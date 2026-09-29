@@ -3,7 +3,7 @@
 # Description: Unit tests for the checklist module
 # Version: 1.2.1
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Tests for apps/modules/checklist.py."""
@@ -12,7 +12,6 @@
 # seedgo: no-test-needed(standard) — each checker's own verdict; every <row>_check.py has its own test file
 # seedgo: no-test-needed(stdlib) — argparse's own parsing of the flag list
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -20,10 +19,6 @@ import pytest
 
 from aipass.seedgo.apps.handlers.aipass_standards import skip_dirs
 from aipass.seedgo.apps.modules import checklist
-
-# checklist.py's home, found from a sibling package rather than from the module
-# object, which the mutant runner loads from a copy in dropbox/.
-_CHECKLIST_HOME = Path(skip_dirs.__file__).resolve().parents[2] / "modules" / "checklist.py"
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +37,7 @@ def _mock_infrastructure(monkeypatch):
     -> [] keep branch/bypass resolution off the live AIPASS_REGISTRY.json
     (template item 17). Tests that need a real branch or real checkers
     override the seam themselves, on the same module object.
-
-    __file__ is pinned to the module's real home: the pack lookup and the
-    introspection resolve handlers/ from it, and a copy served from dropbox/
-    by the mutant runner would otherwise find no pack at all, so every test
-    would fail on "Pack 'aipass' not found" whatever the mutant was.
     """
-    monkeypatch.setattr(checklist, "__file__", str(_CHECKLIST_HOME))
     monkeypatch.setattr(checklist, "discover_checkers", lambda pack_path=None: {})
     monkeypatch.setattr(checklist, "get_branch_from_path", lambda file_path: None)
     monkeypatch.setattr(checklist, "load_bypass_rules", lambda branch_path: [])

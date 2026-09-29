@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for seedgo tests
 # Version: 2.0.2
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-09-28
 # =============================================
 
 """Shared pytest fixtures for seedgo tests.
@@ -34,6 +34,7 @@ from unittest.mock import MagicMock
 from aipass.cli.apps.modules import display
 from aipass.seedgo.apps import seedgo as seedgo_entry
 from aipass.seedgo.apps.handlers.json import json_handler
+from aipass.trigger.apps.modules import core as trigger_core
 
 # Never discover out of .archive/: it holds verbatim disposal copies (the old
 # handler's tests, the pre-service durability suite) that must not be collected
@@ -95,6 +96,41 @@ def pinned_console_width() -> None:
     """
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
+
+
+class BusRecorder:
+    """Stands where @trigger's bus stands: records every fire and sends none."""
+
+    def __init__(self) -> None:
+        self.fired: List[Tuple[str, dict]] = []
+
+    def fire(self, event: str, **data) -> dict:
+        """Record one event in call order, as the bus would have received it."""
+        self.fired.append((event, data))
+        return {}
+
+
+@pytest.fixture(autouse=True)
+def bus(monkeypatch) -> BusRecorder:
+    """No test fires a real event: a recorder stands at both homes of the bus.
+
+    Two homes, because two names reach it. The cli header keeps the trigger it
+    loaded in ``display._TRIGGER`` behind ``display._TRIGGER_LOADED``, so a
+    replacement at the trigger's own home comes too late once one header has
+    run in the session; the recorder goes into the cached name and the flag is
+    set, api's cure of 09-27. ``tests_lane._announce_bump`` imports ``trigger``
+    from ``aipass.trigger.apps.modules.core`` inside the function, so it reads
+    that module's name on every call. Leg 3's probe counted 27 fires reaching
+    the bus from this suite (seedgo, fleet green leg 4).
+
+    Returns:
+        The recorder, so a test can assert what would have fired.
+    """
+    recorder = BusRecorder()
+    monkeypatch.setattr(display, "_TRIGGER", recorder)
+    monkeypatch.setattr(display, "_TRIGGER_LOADED", True)
+    monkeypatch.setattr(trigger_core, "trigger", recorder)
+    return recorder
 
 
 @pytest.fixture(autouse=True)
