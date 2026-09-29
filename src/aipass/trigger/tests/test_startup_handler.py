@@ -3,7 +3,7 @@
 # Description: Tests for startup event handler
 # Version: 1.2.0
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/events/startup.py and the error catch-up it runs."""
@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 import aipass.trigger.apps.handlers.error_registry as error_registry
 import aipass.trigger.apps.handlers.events.startup as startup
+import aipass.trigger.apps.handlers.watchers.log_watcher as system_log_reader
 
 
 @pytest.fixture(autouse=True)
@@ -222,7 +223,7 @@ class TestCatchupOccurrenceCounting:
         from datetime import datetime
 
         log = self._write_log(tmp_path, [self._line("2026-09-07 10:00:00")] * 5)
-        old_hash = mod._generate_error_hash("flow.runner", "connection timed out")
+        old_hash = system_log_reader.generate_error_hash("flow.runner", "connection timed out")
 
         errors: list = []
         mod._scan_single_log_file(log, datetime(2026, 9, 7, 0, 0, 0), {old_hash}, errors, time.monotonic(), {})
@@ -343,6 +344,7 @@ class TestCatchupNamesTheRegistryRow:
         errors = self._scan(mod, log)
 
         assert errors[0]["log_path"] == str(log)
+        assert errors[0]["branch"] == "HOOKS", "the branch is read off the file name, hooks_ops.log"
         assert "log_file" not in errors[0], "two names for one fact is how the wrong one gets fired"
 
 

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: repo_root.py
 # Description: One guarded answer to "where is my file" and "where is the repo root" — never the process cwd
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-08-31
-# Modified: 2026-08-31
+# Modified: 2026-09-29
 # =============================================
 
 """Module-file and repo-root resolution, defined once for trigger.
@@ -67,6 +67,7 @@ never become the import crash this module exists to prevent.
 """
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from aipass.trigger.apps.config import TRIGGER_ROOT, module_file, trail_logger
@@ -105,7 +106,7 @@ SOURCE_ROOT = next(
 )
 
 
-def exists_exactly(path: Path) -> bool:
+def exists_exactly(path: Path, exists_fn: Callable[[Path], bool] | None = None) -> bool:
     """True when *path* exists AND is spelled on disk exactly as asked.
 
     ``Path.exists()`` asks the filesystem, and Windows and macOS-default
@@ -121,12 +122,17 @@ def exists_exactly(path: Path) -> bool:
 
     Args:
         path: The exact filename being asserted.
+        exists_fn: The existence probe; None calls the path's own exists() at
+            call time. The seam exists for the tests, which hand in the answer
+            a case-folding filesystem gives: patching Path.exists reaches every
+            reader in the process.
 
     Returns:
         True when a directory entry with that exact name exists.
     """
     candidate = Path(path)
-    if not candidate.exists():
+    exists = candidate.exists() if exists_fn is None else exists_fn(candidate)
+    if not exists:
         return False
     try:
         with os.scandir(candidate.parent) as entries:
@@ -170,7 +176,13 @@ def _record_fallback(caller: str, marker: str, current: Path) -> None:
         RECORD_FAILURES.append(f"{caller}/{marker}: {type(exc).__name__}: {exc}")
 
 
-def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, caller: str = MODULE_NAME) -> Path:
+def find_repo_root(
+    start: Path | None = None,
+    *,
+    marker: str = CORE_REGISTRY,
+    caller: str = MODULE_NAME,
+    exists_fn: Callable[[Path], bool] | None = None,
+) -> Path:
     """Walk up from *start* to the directory holding *marker*.
 
     Falls back to the root implied by THIS FILE's location — never to the process
@@ -185,6 +197,9 @@ def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, ca
         marker: Filename that marks a repo root.
         caller: Name used in the log line, so a fallback names the lane that took
             it rather than reporting anonymously.
+        exists_fn: Handed to exists_exactly for every step of the walk; None
+            there is the path's own exists(). For the tests; no product caller
+            hands it in.
 
     Returns:
         The directory holding *marker*, or ``SOURCE_ROOT`` when no *marker*
@@ -195,7 +210,7 @@ def find_repo_root(start: Path | None = None, *, marker: str = CORE_REGISTRY, ca
     # that matters is REACHED AT IMPORT, not written at module scope.
     current = Path(start) if start is not None else _THIS_FILE.parent
     for parent in [current] + list(current.parents):
-        if exists_exactly(parent / marker):
+        if exists_exactly(parent / marker, exists_fn):
             return parent
     _record_fallback(caller, marker, current)
     return SOURCE_ROOT

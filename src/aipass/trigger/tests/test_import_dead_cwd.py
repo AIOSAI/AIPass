@@ -3,7 +3,7 @@
 # Name: test_import_dead_cwd.py
 # Description: trigger imports without a readable cwd
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # Version: 1.3.1
 # Category: trigger/tests
 # =============================================
@@ -48,7 +48,7 @@
 # 2026-08-31 once their cure was verified from here.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(behaviour) — what each module under apps/modules/ does once imported; each has its own test file
+# seedgo: no-test-needed(behaviour) — what each module under apps/modules/ does once imported; each has its own tests
 
 import subprocess
 import sys
@@ -795,7 +795,7 @@ print("CWD", Path.cwd())
     )
 
 
-def test_repo_root_refuses_a_case_folded_marker(tmp_path, monkeypatch):
+def test_repo_root_refuses_a_case_folded_marker(tmp_path):
     """A cased literal folds too: exists() answers about `aipass_registry.json`.
 
     find_repo_root decides which installation this branch belongs to and several
@@ -805,8 +805,11 @@ def test_repo_root_refuses_a_case_folded_marker(tmp_path, monkeypatch):
     THE FOLDING IS INJECTED, not waited for. On ext4 the bait cannot fire, so a
     test that merely places a lowercase file and asserts refusal passes for the
     wrong reason - measured: a mutant degrading exists_exactly() to a bare
-    exists() SURVIVED that shape on Linux. Path.exists is given the answer a
-    folding filesystem would give, which is the call the defect actually makes.
+    exists() SURVIVED that shape on Linux. The probe handed in through exists_fn
+    gives the answer a folding filesystem would give, which is the call the
+    defect actually makes. Moved off a patch of Path.exists onto the seam in
+    leg 5 (2026-09-29); green on the tree from its first run, so its proof is
+    its mutant.
     """
     bait_dir = tmp_path / "bait"
     bait_dir.mkdir()
@@ -814,26 +817,22 @@ def test_repo_root_refuses_a_case_folded_marker(tmp_path, monkeypatch):
     start = bait_dir / "deep"
     start.mkdir()
 
-    real_exists = Path.exists
-
-    def folding_exists(self, *args, **kwargs):
-        if real_exists(self, *args, **kwargs):
+    def folding_exists(path: Path) -> bool:
+        if path.exists():
             return True
         try:
-            names = {entry.name.lower() for entry in self.parent.iterdir()}
+            names = {entry.name.lower() for entry in path.parent.iterdir()}
         except OSError:
             return False
-        return self.name.lower() in names
-
-    monkeypatch.setattr(Path, "exists", folding_exists)
+        return path.name.lower() in names
 
     # The instrument must be live, or this pin proves nothing.
-    assert (bait_dir / "AIPASS_REGISTRY.json").exists(), "the folding injection never fired"
+    assert folding_exists(bait_dir / "AIPASS_REGISTRY.json"), "the folding injection never fired"
 
-    assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json"), (
+    assert not repo_root.exists_exactly(bait_dir / "AIPASS_REGISTRY.json", exists_fn=folding_exists), (
         "a case-folded bait file was accepted as the blessed filename"
     )
-    assert repo_root.find_repo_root(start, caller="pin") != bait_dir, (
+    assert repo_root.find_repo_root(start, caller="pin", exists_fn=folding_exists) != bait_dir, (
         "the walk stopped at a directory holding aipass_registry.json"
     )
 
@@ -841,8 +840,22 @@ def test_repo_root_refuses_a_case_folded_marker(tmp_path, monkeypatch):
     real_dir = tmp_path / "real"
     real_dir.mkdir()
     (real_dir / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
-    assert repo_root.exists_exactly(real_dir / "AIPASS_REGISTRY.json")
-    assert repo_root.find_repo_root(real_dir, caller="pin") == real_dir
+    assert repo_root.exists_exactly(real_dir / "AIPASS_REGISTRY.json", exists_fn=folding_exists)
+    assert repo_root.find_repo_root(real_dir, caller="pin", exists_fn=folding_exists) == real_dir
+
+    # The probe reaches every step of the walk: one that denies the inner marker
+    # walks past it to the outer one. Without this the seam could go unread and
+    # ext4's own answer would keep every assert above green.
+    inner = real_dir / "inner"
+    inner.mkdir()
+    (inner / "AIPASS_REGISTRY.json").write_text("{}", encoding="utf-8")
+
+    def deny_inner(path: Path) -> bool:
+        return path.parent != inner and path.exists()
+
+    assert repo_root.find_repo_root(inner, caller="pin", exists_fn=deny_inner) == real_dir, (
+        "the walk did not read the probe it was handed"
+    )
 
 
 def test_the_folding_injection_is_a_real_negative_control(tmp_path, monkeypatch):

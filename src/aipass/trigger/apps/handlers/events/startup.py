@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: startup.py
 # Description: Startup event handler with error catch-up scanning
-# Version: 1.4.0
+# Version: 1.5.0
 # Created: 2025-12-04
-# Modified: 2026-09-24
+# Modified: 2026-09-29
 # =============================================
 
 """Startup Event Handler - Run startup checks
@@ -33,7 +33,6 @@ were never recoverable. See ScanOutcome and _run_error_catchup.
 """
 
 import json
-import hashlib
 import time
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -145,25 +144,6 @@ class ScanOutcome(NamedTuple):
     reason: str
 
 
-def _generate_error_hash(source_module: str, message: str) -> str:
-    """Generate 8-char hash for error deduplication.
-
-    Deliberately timestamp-free: the key answers "is this the same error?",
-    not "is this the same line". One event per distinct error is the point —
-    37 identical lines must not become 37 dispatches.
-
-    What the key must NOT do is throw the repeats away. It did until
-    2026-09-07: every line after the first was dropped, so a burst and a
-    single line were indistinguishable and the payload said `count=1`. Gate 3
-    in error_detected needs `count >= 2` before it dispatches, so the loudest
-    errors in the log were the ones held back as "could be transient".
-    _scan_single_log_file now counts every matching line against this key
-    (FPLAN-0492 wave 5, shape ruled by @devpulse).
-    """
-    content = f"{source_module}:{message}"
-    return hashlib.md5(content.encode()).hexdigest()[:8]
-
-
 def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
     """Parse a log line and extract fields if it's an ERROR.
 
@@ -177,38 +157,37 @@ def _parse_log_line(log_line: str) -> Optional[Dict[str, str]]:
         Dict with timestamp, module, level, message if ERROR/CRITICAL.
         None otherwise.
     """
-    try:
-        # Prax format: timestamp | module | LEVEL | message
-        if " | " in log_line:
-            parts = log_line.split(" | ", 3)
-            if len(parts) >= 4:
-                level = parts[2].strip().upper()
-                if level in ("ERROR", "CRITICAL"):
-                    return {
-                        "timestamp": parts[0].strip(),
-                        "module": parts[1].strip(),
-                        "level": level,
-                        "message": parts[3].strip(),
-                    }
-            return None
-
-        # Python logging format: timestamp - module - LEVEL - message
-        if " - " in log_line:
-            parts = log_line.split(" - ", 3)
-            if len(parts) >= 4:
-                level = parts[2].strip().upper()
-                if level in ("ERROR", "CRITICAL"):
-                    return {
-                        "timestamp": parts[0].strip(),
-                        "module": parts[1].strip(),
-                        "level": level,
-                        "message": parts[3].strip(),
-                    }
-
+    # No try: the body is str methods on a str (the one caller hands in a line
+    # read in text mode), so nothing here raises. The except arm that stood
+    # here returned None for a failure it could never see (leg 5, 2026-09-29).
+    # Prax format: timestamp | module | LEVEL | message
+    if " | " in log_line:
+        parts = log_line.split(" | ", 3)
+        if len(parts) >= 4:
+            level = parts[2].strip().upper()
+            if level in ("ERROR", "CRITICAL"):
+                return {
+                    "timestamp": parts[0].strip(),
+                    "module": parts[1].strip(),
+                    "level": level,
+                    "message": parts[3].strip(),
+                }
         return None
-    except Exception as exc:
-        logger.warning(f"parse log line failed: {exc}")
-        return None
+
+    # Python logging format: timestamp - module - LEVEL - message
+    if " - " in log_line:
+        parts = log_line.split(" - ", 3)
+        if len(parts) >= 4:
+            level = parts[2].strip().upper()
+            if level in ("ERROR", "CRITICAL"):
+                return {
+                    "timestamp": parts[0].strip(),
+                    "module": parts[1].strip(),
+                    "level": level,
+                    "message": parts[3].strip(),
+                }
+
+    return None
 
 
 def _extract_timestamp(timestamp_str: str) -> Optional[datetime]:
@@ -231,18 +210,6 @@ def _extract_timestamp(timestamp_str: str) -> Optional[datetime]:
         except ValueError:
             continue
     return None
-
-
-def _detect_branch_from_log(log_file: str) -> str:
-    """Detect branch from log filename (e.g., drone_ops.log -> DRONE)."""
-    try:
-        name = Path(log_file).stem
-        if "_" in name:
-            return name.split("_")[0].upper()
-        return name.upper()
-    except Exception as exc:
-        logger.warning(f"detect branch from log failed: {exc}")
-        return "UNKNOWN"
 
 
 def _registry_fingerprint(level: str, message: str, component: str) -> str:
@@ -340,6 +307,11 @@ def _scan_single_log_file(
         after this one were never read, which is what row 12 has to know: it
         travels up to ScanOutcome rather than being flattened back to a bool.
     """
+    # The system_logs reader's own parsers, not a copy of them (fleet green leg 5,
+    # 2026-09-29). Function-local like the registry calls below: medic imports
+    # this module, and the reader pulls watchdog and prax in at its import.
+    from aipass.trigger.apps.handlers.watchers.log_watcher import detect_branch_from_log, generate_error_hash
+
     with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
             if len(errors) >= MAX_ERRORS_PER_SCAN:
@@ -366,14 +338,17 @@ def _scan_single_log_file(
 
             module = parsed["module"]
             message = parsed["message"]
-            error_hash = _generate_error_hash(module, message)
+            # Timestamp-free on purpose: the key answers "is this the same error?",
+            # so 37 identical lines are one error counted 37 times, never 37
+            # dispatches, and never one line with count=1 (gate 3 needs count >= 2).
+            error_hash = generate_error_hash(module, message)
             line_iso = line_ts.isoformat() if line_ts else datetime.now().isoformat()
 
             if error_hash in processed_hashes:
                 _count_repeat(by_hash.get(error_hash), line_iso)
                 continue
 
-            branch = _detect_branch_from_log(str(log_file))
+            branch = detect_branch_from_log(str(log_file))
             identity = _registry_identity(parsed["level"], message, branch, str(log_file), line_iso)
             if identity is None:
                 # Not added to processed_hashes: a newer line of the same error

@@ -42,12 +42,9 @@ class _FakeMsvcrt:
 
 
 @pytest.fixture
-def win32(monkeypatch):
-    """Make config believe it is running on Windows, with a fake msvcrt."""
-    fake = _FakeMsvcrt()
-    monkeypatch.setattr(config.sys, "platform", "win32")
-    monkeypatch.setitem(sys.modules, "msvcrt", fake)
-    return fake
+def win32():
+    """A fake msvcrt, handed to the lock through its seam with platform "win32"."""
+    return _FakeMsvcrt()
 
 
 class TestWindowsLockIsRealNotSkipped:
@@ -58,38 +55,34 @@ class TestWindowsLockIsRealNotSkipped:
 
     def test_win32_acquires_and_releases_a_real_lock(self, win32, tmp_path):
         """The win32 path calls the OS primitive, both ways."""
-        with config.json_file_lock(tmp_path / "doc.json"):
+        with config.json_file_lock(tmp_path / "doc.json", platform="win32", msvcrt_module=win32):
             assert (win32.LK_NBLCK, 1) in win32.calls, "no lock taken on win32"
         assert win32.calls[-1] == (win32.LK_UNLCK, 1), "lock never released"
 
-    def test_win32_retries_a_contended_lock_then_succeeds(self, monkeypatch, tmp_path):
+    def test_win32_retries_a_contended_lock_then_succeeds(self, tmp_path):
         """A lock held by someone else is waited for, not walked past."""
         fake = _FakeMsvcrt(fail_times=3)
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setitem(sys.modules, "msvcrt", fake)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", lambda s: sleeps.append(s))
 
-        with config.json_file_lock(tmp_path / "doc.json"):
+        with config.json_file_lock(tmp_path / "doc.json", platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append):
             pass
 
         assert sleeps == [config._LOCK_BACKOFF_SECONDS] * 3
         assert fake.calls.count((fake.LK_NBLCK, 1)) == 4
 
-    def test_win32_refuses_rather_than_running_unlocked(self, monkeypatch, tmp_path):
+    def test_win32_refuses_rather_than_running_unlocked(self, tmp_path):
         """Exhausting the retries RAISES after a bounded wait. Silent data loss is the one forbidden outcome.
 
         Mutant run: the win32 backoff sleep deleted reddens this.
         """
         fake = _FakeMsvcrt(fail_times=config._LOCK_ATTEMPTS + 5)
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setitem(sys.modules, "msvcrt", fake)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", sleeps.append)
 
         entered = False
         with pytest.raises(OSError):
-            with config.json_file_lock(tmp_path / "doc.json"):
+            with config.json_file_lock(
+                tmp_path / "doc.json", platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append
+            ):
                 entered = True
         assert entered is False, "body ran without the lock"
         assert sleeps == [config._LOCK_BACKOFF_SECONDS] * (config._LOCK_ATTEMPTS - 1)
@@ -289,7 +282,7 @@ class TestWindowsLockIsPositionAware:
     writes to it, position drift would silently un-serialise every caller.
     """
 
-    def test_a_sidecar_that_grew_still_collides(self, monkeypatch, tmp_path):
+    def test_a_sidecar_that_grew_still_collides(self, tmp_path):
         """The drift case, constructed: the file grows between the two opens.
 
         Handle A opens an empty sidecar and sits at byte 0. The sidecar then
@@ -299,18 +292,15 @@ class TestWindowsLockIsPositionAware:
         Mutant for the wait assert: the win32 backoff sleep deleted.
         """
         fake = _PositionalFakeMsvcrt()
-        monkeypatch.setattr(config.sys, "platform", "win32")
-        monkeypatch.setitem(sys.modules, "msvcrt", fake)
         sleeps: list = []
-        monkeypatch.setattr(config.time, "sleep", sleeps.append)
         doc = tmp_path / "doc.json"
         lock_path = doc.with_suffix(".lock")
         lock_path.write_text("", encoding="utf-8")
 
-        with config.json_file_lock(doc):
+        with config.json_file_lock(doc, platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append):
             lock_path.write_text("x" * 64, encoding="utf-8")
             with pytest.raises(OSError):
-                with config.json_file_lock(doc):
+                with config.json_file_lock(doc, platform="win32", msvcrt_module=fake, sleep_fn=sleeps.append):
                     pass
 
         assert fake.grants[0] == (0, 1), f"outer lock landed at {fake.grants[0]}, not byte 0"
@@ -357,6 +347,23 @@ class TestAtomicCreateJsonNeverOverwrites:
 
         assert config.atomic_create_json(path, {"a": 1}) is False
         assert json.loads(path.read_text(encoding="utf-8")) == {"written": "by someone else"}
+
+    def test_a_filesystem_without_hard_links_refuses_rather_than_overwrites(self, tmp_path):
+        """No link support is a refusal, never the replacing write the create exists to avoid.
+
+        Red first 2026-09-29 (leg 5): the create fell back to replace_with_retry,
+        returned True, and the other writer's document was gone.
+        """
+        path = tmp_path / "taken.json"
+        path.write_text(json.dumps({"written": "by someone else"}), encoding="utf-8")
+
+        def no_links(source: str, destination: str) -> None:
+            raise OSError("no hard links on this filesystem")
+
+        with pytest.raises(OSError, match="no hard links"):
+            config.atomic_create_json(path, {"a": 1}, link_fn=no_links)
+        assert json.loads(path.read_text(encoding="utf-8")) == {"written": "by someone else"}
+        assert list(tmp_path.glob("*.tmp")) == []
 
     def test_it_leaves_no_staged_file_behind_either_way(self, tmp_path):
         """Both paths clean up their temp file — a create that loses the race

@@ -98,6 +98,12 @@ def _mock_infrastructure(monkeypatch):
         monkeypatch.setattr(medic, name, getattr(medic_state_mod, name))
     _RECORDERS["medic_state"] = medic_state_mod
 
+    # -- the installer: on reaches it on an answered "not running", and the real
+    # one writes a systemd unit; every test here gets a recorder in its place.
+    installer = MagicMock(return_value=True)
+    monkeypatch.setattr(medic, "_ensure_service_installed", installer)
+    _RECORDERS["installer"] = installer
+
     # The CLI console and rich are real (2026-09-27): output is read with
     # capsys, and a refusal through error() from stderr and cli's failure flag.
 
@@ -148,14 +154,14 @@ def test_handle_command_on_enables_medic(capsys):
 
 
 def test_handle_command_on_starts_service_when_inactive():
-    """handle_command('on', []) starts the systemd service when it is not running."""
+    """handle_command('on', []) installs, then starts the service when it is not running."""
     medic = _import_medic()
 
     with patch.object(medic, "_systemctl", return_value=True) as mock_ctl:
         with patch.object(medic, "_is_service_active", side_effect=[False, True]):
-            with patch.object(medic, "_ensure_service_installed", return_value=True):
-                medic.handle_command("on", [])
+            medic.handle_command("on", [])
 
+    _RECORDERS["installer"].assert_called_once_with()
     mock_ctl.assert_called_with("start")
 
 
@@ -815,9 +821,8 @@ def test_medic_on_reports_unavailable_rather_than_failed_to_start_without_system
 
     with patch.object(medic, "_systemctl", return_value=None):
         with patch.object(medic, "_is_service_active", return_value=None):
-            with patch.object(medic, "_ensure_service_installed", return_value=False):
-                with patch.object(medic, "systemd_available", return_value=False):
-                    medic.handle_command("on", [])
+            with patch.object(medic, "systemd_available", return_value=False):
+                medic.handle_command("on", [])
 
     panel_text = capsys.readouterr().out
     assert "unavailable — no systemd on this host" in panel_text, panel_text
@@ -858,6 +863,7 @@ def test_medic_on_does_not_guess_a_start_when_systemctl_never_answered(capsys, s
 
     panel_text = capsys.readouterr().out
     assert [cmd for cmd in systemctl_never_answers if "start" in cmd] == []
+    _RECORDERS["installer"].assert_not_called()
     assert "systemctl did not answer" in panel_text, panel_text
     assert "failed to start" not in panel_text, panel_text
 
