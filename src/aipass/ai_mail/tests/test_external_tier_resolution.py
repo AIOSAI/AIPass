@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_external_tier_resolution.py
 # Description: resolve_branch reaches the declared-roots external tier (FPLAN-0460)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-30
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- the external tier, through my door."""
@@ -282,7 +282,7 @@ class TestTheStepIsContained:
         """
         _declare(home, vera_studio)
 
-        assert wake_mod.resolve_branch("@vera", admin=False) is not None
+        assert wake_mod.resolve_branch("@vera", admin=False) == (vera_studio / "src" / "vera_studio" / "vera", "@vera")
 
 
 class TestCollisionsAreNamedNotGuessed:
@@ -344,7 +344,7 @@ class TestCollisionsAreNamedNotGuessed:
 
         result = wake_mod.resolve_branch("@twin")
 
-        assert result is not None
+        assert result == (zulu / "src" / "twin", "@twin"), "the first declared root wins the tie"
         assert "@twin" in caplog.text
         assert str(alpha / "src" / "twin") in caplog.text, "the loser must be named, not just the winner"
         assert "DECLARATION ORDER" in caplog.text

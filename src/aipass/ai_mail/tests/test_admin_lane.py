@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_admin_lane.py
 # Description: Tests for admin-grant verification + dispatch wiring (FPLAN-0401 Phase 4)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/users/verified_caller.py and the dispatch admin-wiring it feeds."""
@@ -36,13 +36,25 @@ _H_WAKE = "aipass.ai_mail.apps.handlers.dispatch.wake"
 _H_SEND = "aipass.ai_mail.apps.handlers.email.send"
 _H_VERIFIED = "aipass.ai_mail.apps.handlers.users.verified_caller"
 
-_REAL_KEY = Path.home() / ".aipass" / "admin_grant.key"
-# Stat only, never content — captured at import, before any test body runs, so
-# the guard below can prove this suite did not write the real ceremony key.
-_REAL_KEY_AT_IMPORT = (_REAL_KEY.stat().st_mtime_ns, _REAL_KEY.stat().st_size) if _REAL_KEY.exists() else None
 _REFERENCE = "aipass.devpulse.apps.handlers.owner.admin_grant"
 
 _KEY_HEX = "a" * 64  # 32 bytes, fixture only — never written outside tmp_path
+
+
+def _key_stat(key_path: Path):
+    """(mtime_ns, size) of the key file, or None when absent. Stat only, never content."""
+    return (key_path.stat().st_mtime_ns, key_path.stat().st_size) if key_path.exists() else None
+
+
+@pytest.fixture(scope="session", autouse=True)
+def real_key_stat_before():
+    """The real admin grant key's stat, taken before this file's first test and never at import.
+
+    The path is built here, not at module scope, so a home that cannot be read fails
+    one fixture, not the collection of the whole file. The key file is never opened.
+    """
+    key_path = Path.home() / ".aipass" / "admin_grant.key"
+    return key_path, _key_stat(key_path)
 
 
 @pytest.fixture(autouse=True)
@@ -184,16 +196,17 @@ class TestVerifyAdminCaller:
         assert ok is False
         assert "lane dark" in reason.lower()
 
-    def test_real_key_path_is_not_touched_by_this_suite(self):
+    def test_real_key_path_is_not_touched_by_this_suite(self, real_key_stat_before):
         """Guard: this suite must never create OR modify the ceremony key.
 
         Originally this asserted the key did not exist — true until the owner's
         ceremony, and false the moment it happened. The durable form compares
-        the key's stat against the value captured at import: fixtures stay
-        under tmp_path either way, and the guard survives the ceremony.
+        the key's stat against the value the session fixture took before this
+        file's first test: fixtures stay under tmp_path, and the guard survives
+        the ceremony. No value of the key or its stat appears in the message.
         """
-        now = (_REAL_KEY.stat().st_mtime_ns, _REAL_KEY.stat().st_size) if _REAL_KEY.exists() else None
-        assert now == _REAL_KEY_AT_IMPORT, (
+        key_path, before = real_key_stat_before
+        assert _key_stat(key_path) == before, (
             "a test created or modified the real signing key — fixtures must stay under tmp_path"
         )
 

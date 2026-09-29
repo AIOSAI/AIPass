@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_notify.py
 # Description: Tests for the notification feed writer
-# Version: 2.0.1
+# Version: 2.0.2
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/notify.py -- JSONL notification feed writer."""
@@ -85,7 +85,8 @@ def test_ts_is_iso8601_with_timezone_offset(feed):
 
     parsed = datetime.fromisoformat(_lines(feed)[0]["ts"])
     assert parsed.tzinfo is not None
-    assert parsed.utcoffset() is not None
+    # The offset is this machine's local one, stamped at write time.
+    assert parsed.utcoffset() == parsed.astimezone().utcoffset()
 
 
 def test_source_strips_leading_at_sign(feed):

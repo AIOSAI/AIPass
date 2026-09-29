@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_live_contacts_hygiene.py
 # Description: Guard that test/probe fixtures never leak into the live contacts.json
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/paths.py's find_repo_root(), guarding the live contacts.json it locates."""
@@ -69,7 +69,7 @@ class TestNoTmpPathsInLiveContacts:
             if isinstance(info, dict) and str(info.get("inbox", "")).startswith(_TMPDIR)
         ]
 
-        assert not strays, "tmp-path rows found in live contacts.json:\n  " + "\n  ".join(strays)
+        assert strays == [], "tmp-path rows found in live contacts.json:\n  " + "\n  ".join(strays)
 
     def test_the_guard_can_actually_see_the_contacts(self):
         """A guard reading an empty/missing file would pass forever, blind."""

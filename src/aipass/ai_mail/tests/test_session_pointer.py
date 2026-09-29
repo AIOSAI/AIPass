@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_session_pointer.py
 # Description: Tests for the durable per-branch session pointer
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-20
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/dispatch/session_pointer.py -- encoding, round trip, atomicity, resume."""
@@ -69,6 +69,7 @@ def fake_home(tmp_path, monkeypatch):
 def _make_transcript(branch_path: Path, session_id: str, size_bytes: int = 64) -> Path:
     """Create a fake transcript for `session_id` under the (faked) home."""
     target = transcript_file(branch_path, session_id)
+    assert target is not None, "fake_home names the home directory"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"x" * size_bytes)
     return target
@@ -95,7 +96,9 @@ def test_mint_session_id_is_unique():
 
 def test_transcript_dir_encodes_separators_underscores_and_dots(fake_home):
     """/ and _ and . all collapse to '-' -- the rule Claude itself uses."""
-    encoded = transcript_dir("/srv/branches/my_repo/src.pkg").name
+    result = transcript_dir("/srv/branches/my_repo/src.pkg")
+    assert result is not None
+    encoded = result.name
     assert encoded == "-srv-branches-my-repo-src-pkg"
     assert "_" not in encoded
     assert "." not in encoded
@@ -104,12 +107,13 @@ def test_transcript_dir_encodes_separators_underscores_and_dots(fake_home):
 
 def test_transcript_dir_encodes_windows_paths(fake_home):
     """Backslash and drive colon collapse too: C:\\repo\\AIPass -> C--repo-AIPass."""
-    assert transcript_dir("C:\\repo\\AIPass").name == "C--repo-AIPass"
+    result = transcript_dir("C:\\repo\\AIPass")
+    assert result is not None and result.name == "C--repo-AIPass"
 
 
 def test_transcript_dir_lives_under_claude_projects(fake_home, tmp_path):
     result = transcript_dir(str(tmp_path / "some" / "branch"))
-    assert result.parent == fake_home / ".claude" / "projects"
+    assert result is not None and result.parent == fake_home / ".claude" / "projects"
 
 
 def test_transcript_dir_accepts_a_path_object(fake_home, tmp_path):
@@ -120,7 +124,7 @@ def test_transcript_dir_accepts_a_path_object(fake_home, tmp_path):
 def test_transcript_file_appends_the_jsonl_name(fake_home, tmp_path):
     sample = str(tmp_path / "some" / "branch")
     result = transcript_file(sample, "abc-123")
-    assert result.name == "abc-123.jsonl"
+    assert result is not None and result.name == "abc-123.jsonl"
     assert result.parent == transcript_dir(sample)
 
 
@@ -181,7 +185,7 @@ def test_write_pointer_set_at_is_timezone_aware(branch):
 
     write_pointer(branch, "sess-1", "wake")
     data = read_pointer(branch)
-    assert data is not None
+    assert data is not None and data["session_id"] == "sess-1"
     stamp = datetime.fromisoformat(data["set_at"])
     assert stamp.tzinfo is not None
 
@@ -376,7 +380,7 @@ def test_resolve_returns_none_when_pointer_json_is_broken(branch, fake_home):
 
     session_id, reason = resolve_resume_target(branch)
     assert session_id is None
-    assert reason
+    assert reason == f"no usable pointer at {pointer_path(branch)} - falling back to -c"
 
 
 def test_resolve_reason_is_always_populated(branch, fake_home):
@@ -458,7 +462,9 @@ def test_resolve_never_raises_on_a_nonsense_argument():
     """The dispatch hot path survives a caller's mistake."""
     session_id, reason = resolve_resume_target(object())  # type: ignore[arg-type]
     assert session_id is None
-    assert reason
+    # The error type is the interpreter's to choose, so only the form is pinned.
+    assert reason.startswith("pointer unreadable (")
+    assert reason.endswith(" - falling back to -c")
 
 
 def test_resolve_survives_an_unstattable_transcript_dir(branch, fake_home, monkeypatch):
@@ -615,7 +621,9 @@ class TestAnUnnameableHomeDoesNotRaise:
         session_id, reason = resolve_resume_target(branch)
 
         assert session_id is None
-        assert reason, "every verdict lands in a log line, so none may be silent"
+        assert reason.startswith("cannot determine this machine's home directory"), (
+            "every verdict lands in a log line, so none may be silent"
+        )
 
     def test_the_reason_says_home_and_not_transcript_not_found(self, branch, fake_home, monkeypatch):
         """ "I cannot name home" and "there is no transcript" are different facts.

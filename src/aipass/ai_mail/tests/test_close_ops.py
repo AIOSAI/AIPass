@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_close_ops.py
 # Description: Tests for email close operations handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/email/close_ops.py."""
@@ -159,7 +159,7 @@ def test_batch_close_post_ops_central_exception_suppressed(tmp_path: Path):
 
     mod.batch_close_post_ops(branch_path, central_fn, purge_fn)
 
-    purge_fn.assert_called_once()
+    purge_fn.assert_called_once_with(branch_path / ".ai_mail.local")
 
 
 def test_batch_close_post_ops_purge_exception_suppressed(tmp_path: Path):
@@ -172,7 +172,7 @@ def test_batch_close_post_ops_purge_exception_suppressed(tmp_path: Path):
 
     mod.batch_close_post_ops(branch_path, central_fn, purge_fn)
 
-    central_fn.assert_called_once()
+    central_fn.assert_called_once_with()
 
 
 def test_batch_close_post_ops_partial_fns(tmp_path: Path):

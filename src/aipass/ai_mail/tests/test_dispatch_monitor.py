@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_monitor.py
 # Description: Tests for dispatch monitor lifecycle handler
-# Version: 1.1.0
+# Version: 1.1.1
 # Created: 2026-04-02
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/dispatch/dispatch_monitor.py -- startup check, retry loop, bounce, rate limiting."""
@@ -698,8 +698,9 @@ def test_kill_process_terminate_timeout_falls_back_to_sigkill():
 
     _kill_process(mock_proc, "@test")
 
-    mock_proc.terminate.assert_called_once()
-    mock_proc.kill.assert_called_once()
+    mock_proc.terminate.assert_called_once_with()
+    mock_proc.kill.assert_called_once_with()
+    assert [c.kwargs for c in mock_proc.wait.call_args_list] == [{"timeout": 10}, {"timeout": 5}]
 
 
 # --- Max-turns detection tests -----------------------------------------
@@ -1245,6 +1246,22 @@ def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv, tmp_path):
 
 
 # --- Environment variable setup tests ---------------------------------
+
+
+def test_spawn_path_is_joined_with_the_separator_handed_in():
+    """The spawn PATH joins with the host's separator, never a literal colon.
+
+    The other host's separator is handed in, so the Windows answer is pinned on any
+    host; the string is asserted and nothing is started. Red first by the mutant that
+    restores the old literal ":" join (leg 3).
+    """
+    windows_path = "C:\\Windows;C:\\Tools"
+
+    assert mod.prepend_to_path(windows_path, "C:\\repo\\.venv\\bin", sep=";") == (
+        "C:\\repo\\.venv\\bin;C:\\Windows;C:\\Tools"
+    )
+    assert mod.prepend_to_path("/usr/bin", "/repo/.venv/bin", sep=":") == "/repo/.venv/bin:/usr/bin"
+    assert mod.prepend_to_path("", "/repo/.venv/bin", sep=":") == "/repo/.venv/bin"
 
 
 def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
@@ -2130,10 +2147,11 @@ class TestBrokerRealE2E:
         # start_background blocks until the socket listens (raises past 5s), and
         # the secret is written before that: assert the condition, never sleep on it.
         t = broker.start_background()
-        assert sock_path.exists()
-        assert secret_path.read_bytes()
 
         try:
+            # Inside the try: a red here must still stop the broker in the finally.
+            assert sock_path.exists()
+            assert secret_path.stat().st_size > 0
             # Create identified connection (as the launcher would)
             sock = create_identified_connection(sock_path, secret_path, "testbranch")
             broker_fd = sock.fileno()
@@ -3183,6 +3201,7 @@ class TestWakeBackDeclinedByCaller:
         got = self._run_main(monkeypatch, [*argv, "--no-wake-back"], self._builder_status(), tmp_path)
 
         got["wake"].assert_called_once()
+        assert got["wake"].call_args.args == ("@sender",)
         assert "wake_result=success" in self._wake_log(lock_file)
 
 

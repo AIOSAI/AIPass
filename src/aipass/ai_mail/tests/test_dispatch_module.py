@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_dispatch_module.py
 # Description: Tests for dispatch.py orchestrator functions
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/dispatch.py."""
@@ -162,13 +162,12 @@ class TestHandleCommand:
         """'dispatch daemon' delegates to _orchestrate_daemon."""
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
-        monkeypatch.setattr(
-            f"{MOD}._orchestrate_daemon",
-            lambda: True,
-        )
+        daemon = MagicMock(return_value=True)
+        monkeypatch.setattr(f"{MOD}._orchestrate_daemon", daemon)
 
         result = handle_command("dispatch", ["daemon"])
         assert result is True
+        daemon.assert_called_once_with()
 
     def test_dispatch_wake_subcommand(self, monkeypatch):
         """'dispatch wake @branch' delegates to _orchestrate_wake."""
@@ -181,23 +180,24 @@ class TestHandleCommand:
 
     def test_dispatch_at_target(self, monkeypatch):
         """'dispatch @target Subject Body' routes to _orchestrate_dispatch_send."""
-        monkeypatch.setattr(
-            f"{MOD}._orchestrate_dispatch_send",
-            lambda args: True,
-        )
+        send = MagicMock(return_value=True)
+        monkeypatch.setattr(f"{MOD}._orchestrate_dispatch_send", send)
+        argv = ["@branch", "Subject", "Body"]
 
-        result = handle_command("dispatch", ["@branch", "Subject", "Body"])
+        result = handle_command("dispatch", argv)
         assert result is True
+        send.assert_called_once_with(argv)
 
     def test_dispatch_path_target(self, monkeypatch):
         """'dispatch /path Subject Body' routes to _orchestrate_dispatch_send."""
-        monkeypatch.setattr(
-            f"{MOD}._orchestrate_dispatch_send",
-            lambda args: True,
-        )
+        send = MagicMock(return_value=True)
+        monkeypatch.setattr(f"{MOD}._orchestrate_dispatch_send", send)
+        argv = ["/some/path", "Subject", "Body"]
 
-        result = handle_command("dispatch", ["/some/path", "Subject", "Body"])
+        result = handle_command("dispatch", argv)
         assert result is True
+        # The same list handed through, not a path parsed and compared.
+        send.assert_called_once_with(argv)
 
     def test_dispatch_unknown_subcommand(self, monkeypatch):
         """Unknown subcommand prints its own error and still returns True.

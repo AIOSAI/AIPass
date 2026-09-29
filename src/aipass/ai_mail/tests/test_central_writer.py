@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_central_writer.py
 # Description: Tests for central_writer -- branch inbox aggregation and central file writing
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/central_writer.py."""
@@ -150,6 +150,28 @@ def test_find_all_inbox_files_discovers_inboxes(tmp_path, monkeypatch):
     assert len(result) == 2
     names = {p.parent.parent.name for p in result}
     assert names == {"seedgo", "drone"}
+
+
+def test_find_all_inbox_files_never_enters_a_sandbox_or_output_dir(tmp_path, monkeypatch):
+    """A mailbox planted under dropbox, .archive, docs.local, artifacts or system_logs is not counted.
+
+    The repo root itself stands inside a directory named dropbox: the prune judges the
+    names below the root, never the root's own path. Pinned red first (leg 3): the walk
+    counted the dropbox, docs.local, artifacts and system_logs plants.
+    """
+    root = tmp_path / "dropbox" / "repo"
+    monkeypatch.setattr(mod, "_REPO_ROOT", root)
+    live = root / "src" / "aipass" / "live" / ".ai_mail.local"
+    live.mkdir(parents=True)
+    (live / "inbox.json").write_text("{}", encoding="utf-8")
+    for pruned in ("dropbox", ".archive", "docs.local", "artifacts", "system_logs"):
+        planted = root / "src" / "aipass" / "live" / pruned / "planted" / ".ai_mail.local"
+        planted.mkdir(parents=True)
+        (planted / "inbox.json").write_text("{}", encoding="utf-8")
+
+    result = mod.find_all_inbox_files()
+
+    assert [p.parent.parent.name for p in result] == ["live"]
 
 
 # The only route to an unlistable directory is a permission bit: Windows
@@ -466,7 +488,7 @@ def test_find_all_inbox_files_does_not_descend_into_excluded_dirs(tmp_path, monk
     assert len(result) == 1, "only the non-excluded inbox may be returned"
     # Without this the test is BLIND: an implementation that never calls
     # os.walk leaves `visited` empty, and an empty list trespasses nowhere.
-    assert visited, "find_all_inbox_files must walk via os.walk so descent can be pruned"
+    assert Path(visited[0]) == tmp_path, "find_all_inbox_files must walk the root via os.walk so descent can be pruned"
     trespassed = [d for d in visited if any(part in Path(d).parts for part in (".backup", ".archive", "backups"))]
     assert not trespassed, f"walk descended into excluded trees: {trespassed}"
 

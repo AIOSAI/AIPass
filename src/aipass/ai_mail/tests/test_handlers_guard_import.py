@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_handlers_guard_import.py
 # Description: The branch-access guard must import without a readable cwd
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/__init__.py -- the import-time branch guard must not need a filesystem."""
@@ -28,7 +28,7 @@
 # time, and a package already in ``sys.modules`` cannot be imported again.
 
 # The declared pass — what is NOT tested here, and what covers it instead:
-# seedgo: no-test-needed(owed) — _guard_branch_access()'s ACCESS DENIED banner wording: a test is owed
+# seedgo: no-test-needed(shared) — _guard_branch_access()'s Example and guide lines, prose; the refusal is pinned
 
 import ast
 import subprocess
@@ -38,6 +38,7 @@ from pathlib import Path
 
 import pytest
 
+import aipass.ai_mail.apps.handlers as handlers_mod
 from aipass.ai_mail.apps.handlers import MY_BRANCH, _extract_branch_name
 
 
@@ -205,6 +206,26 @@ class TestThePolicyDidNotMoveWithTheMechanism:
 
     def test_an_unrecognisable_path_is_unknown_not_a_branch(self, tmp_path):
         assert _extract_branch_name(str(tmp_path / "nowhere" / "thing.py")) == "unknown"
+
+    def test_an_external_caller_is_refused_with_the_banner_naming_it(self, tmp_path, monkeypatch):
+        """The refusal names the caller's branch, file and import, and the way through (leg 3: was owed).
+
+        The caller is handed in through the guard's own frame walk, so nothing is
+        imported across branches. Its proof is its mutant: the Blocked line dropped.
+        """
+        caller = str(tmp_path / "src" / "aipass" / "devpulse" / "apps" / "thing.py")
+        blocked = "from aipass.ai_mail.apps.handlers.email import send"
+        monkeypatch.setattr(handlers_mod, "_find_real_caller", lambda: (caller, blocked))
+
+        with pytest.raises(ImportError) as refused:
+            handlers_mod._guard_branch_access()
+
+        lines = [line.strip() for line in str(refused.value).splitlines()]
+        assert "ACCESS DENIED: Cross-branch handler import blocked" in lines
+        assert "Caller branch: devpulse" in lines
+        assert "Caller file:   thing.py" in lines
+        assert f"Blocked:       {blocked}" in lines
+        assert f"from {MY_BRANCH}.apps.modules.<module> import <function>" in lines
 
     @pytest.mark.parametrize(
         "caller,allowed",

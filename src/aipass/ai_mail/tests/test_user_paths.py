@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_user_paths.py
 # Description: Tests for absolute mailbox_path resolution in user functions
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-17
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/users/user.py and apps/handlers/paths.py's find_repo_root()."""
@@ -161,7 +161,7 @@ class TestGetUserByEmailPaths:
         registry_path, _ = relative_path_registry
         with patch("aipass.ai_mail.apps.handlers.users.branch_detection.BRANCH_REGISTRY_PATH", registry_path):
             result = get_user_by_email("@trigger")
-            assert result is not None
+            assert result is not None and result["email_address"] == "@trigger"
             # Normalize to forward slashes for consistent counting on all platforms
             path = result["mailbox_path"].replace("\\", "/")
             # Count occurrences of the relative segment

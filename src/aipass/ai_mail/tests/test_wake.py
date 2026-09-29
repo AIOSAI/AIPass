@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_wake.py
 # Description: Tests for wake dispatch handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py and wake_dashboard.py."""
@@ -21,6 +21,7 @@ import threading
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path as _Path
+from unittest.mock import MagicMock
 
 import aipass.ai_mail.apps.handlers.dispatch.wake as wake_mod
 import aipass.ai_mail.apps.handlers.dispatch.wake_dashboard as wake_dashboard_mod
@@ -411,10 +412,12 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_file = lock_dir / ".dispatch.lock"
     lock_data = {"pid": 1234, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: True)
+    alive = MagicMock(return_value=True)
+    monkeypatch.setattr(wake_mod, "_check_pid_alive", alive)
     result = _check_lock(tmp_path)
     assert result is not None
     assert result["pid"] == 1234
+    alive.assert_called_once_with(1234)
 
 
 def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
@@ -424,10 +427,12 @@ def test_check_lock_dead_pid_removes_lock(tmp_path, monkeypatch):
     lock_file = lock_dir / ".dispatch.lock"
     lock_data = {"pid": 99999, "timestamp": "2026-03-29T10:00:00"}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
-    monkeypatch.setattr(wake_mod, "_check_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(wake_mod, "_check_pid_alive", alive)
     result = _check_lock(tmp_path)
     assert result is None
     assert not lock_file.exists()
+    alive.assert_called_once_with(99999)
 
 
 def test_check_lock_stale_old_timestamp(tmp_path, monkeypatch):
@@ -829,7 +834,7 @@ class TestWakeBranchSpawnEnv:
 
         wake_mod.wake_branch("@testbranch", fresh=True)
 
-        assert captured_envs, "Popen was not called"
+        assert len(captured_envs) == 1, "Popen must be called exactly once"
         env = captured_envs[0]
         assert local_bin in env.get("PATH", ""), f"~/.local/bin not in spawn_env PATH: {env.get('PATH', '')}"
 

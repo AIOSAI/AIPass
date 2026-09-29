@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_send_helpers.py
 # Description: Tests for email send handler and send_args dispatch resolution
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/email/send.py and apps/handlers/email/send_args.py."""
@@ -13,7 +13,7 @@
 
 # The declared pass — what is NOT tested here, and what covers it instead:
 # seedgo: no-test-needed(logging) — send_to_single()'s exact console/log wording, only its return value
-# seedgo: no-test-needed(logging) — send_to_single()'s logger.warning prose: a test is owed; payload and fire are here
+# seedgo: no-test-needed(logging) — send_to_single()'s trigger-import warning; its central-update warning is pinned
 # seedgo: no-test-needed(shared) — send_to_single()'s refused path: tests/test_refused_sends.py
 # seedgo: no-test-needed(shared) — send_to_single()'s upsert key: tests/test_upsert.py
 
@@ -23,6 +23,7 @@ import pytest
 from pathlib import PureWindowsPath
 from unittest.mock import patch, MagicMock
 
+import aipass.ai_mail.apps.handlers.email.send as send_mod
 from aipass.ai_mail.apps.handlers.email.send import (
     send_to_single,
     send_to_broadcast,
@@ -100,6 +101,36 @@ def test_send_to_single_happy_path(tmp_path, recorded_bus):
     mock_deliver.assert_called_once()
     mock_log.assert_called_once_with("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})
     assert recorded_bus.fires == [("email_sent", {"to": "@backup", "subject": "Test subject", "auto_execute": False})]
+
+
+def test_send_to_single_a_failed_central_update_is_logged_not_fatal(tmp_path, monkeypatch):
+    """The mail landed, so a failed central update keeps (True, None) and warns naming the recipient.
+
+    Leg 3: was owed. Its proof is its mutant: the recipient dropped from the warning.
+    """
+    logger = MagicMock()
+    monkeypatch.setattr(send_mod, "logger", logger)
+    failure = OSError("central unwritable")
+
+    success, error = send_to_single(
+        to_branch="@backup",
+        subject="Test subject",
+        message="Test body",
+        user_info=_make_user_info(tmp_path),
+        auto_execute=False,
+        no_memory_save=False,
+        reply_to=None,
+        dispatched_to=None,
+        create_email_file_fn=MagicMock(return_value=str(tmp_path / "email_file.json")),
+        load_email_file_fn=MagicMock(return_value={"subject": "Test", "message": "Body"}),
+        deliver_email_to_branch_fn=MagicMock(return_value=(True, "")),
+        on_delivered_callback=MagicMock(),
+        log_operation_fn=MagicMock(),
+        update_central_fn=MagicMock(side_effect=failure),
+    )
+
+    assert (success, error) == (True, None)
+    logger.warning.assert_called_once_with("[send] update_central_fn failed after send to %s: %s", "@backup", failure)
 
 
 def test_send_to_single_load_fails(tmp_path):
@@ -358,8 +389,10 @@ def test_collect_interactive_input_still_prompts_on_a_terminal(monkeypatch):
     # returns after the cancel is pinned rather than tolerated.
     # Driven through sys.stdin (the edge input() reads) rather than builtins.input:
     # both answers consumed proves the recipient and subject prompts both ran.
-    assert terminal.read() == "", "the no-TTY guard must not disable the prompt on a real terminal"
-    assert terminal.tell() == len("1\nSubject\n")
+    # Three prompts read: recipient, subject, and the message prompt that met EOF.
+    # (A tell() taken after read() equalled the script length whatever the product read.)
+    assert terminal.reads == 3, "the no-TTY guard must not disable the prompt on a real terminal"
+    assert terminal.read() == ""
     assert result is None
 
 

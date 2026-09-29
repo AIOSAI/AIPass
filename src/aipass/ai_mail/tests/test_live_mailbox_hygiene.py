@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_live_mailbox_hygiene.py
 # Description: Guard that test fixtures never appear in real citizens' mailboxes
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-16
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/paths.py's find_repo_root(), guarding live mailboxes for fixture leakage."""
@@ -75,7 +75,7 @@ class TestNoFixturesInLiveMailboxes:
                 if FIXTURE_TIMESTAMP.match(str(msg.get("timestamp", ""))):
                     strays.append(f"{Path(inbox).parts[-3]}: {msg.get('id')} {msg.get('subject')!r}")
 
-        assert not strays, "Test fixtures found in live mailboxes:\n  " + "\n  ".join(strays)
+        assert strays == [], "Test fixtures found in live mailboxes:\n  " + "\n  ".join(strays)
 
     def test_the_guard_can_actually_see_the_mailboxes(self):
         """A guard that silently finds nothing to check protects nothing.

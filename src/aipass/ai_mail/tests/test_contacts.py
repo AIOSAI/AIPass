@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_contacts.py
 # Description: Tests for the contacts address book handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-11
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/email/contacts.py."""
@@ -91,9 +91,10 @@ def test_get_contact_strips_at_sign(isolated_contacts, tmp_path):
 
 def test_get_contact_case_insensitive(isolated_contacts, tmp_path):
     """get_contact normalises to lowercase for lookup."""
-    register_contact("devpulse", "AIPass", str(tmp_path / "some" / "inbox.json"))
+    inbox = str(tmp_path / "some" / "inbox.json")
+    register_contact("devpulse", "AIPass", inbox)
     result = get_contact("DEVPULSE")
-    assert result is not None
+    assert result is not None and result["inbox"] == inbox
 
 
 def test_get_contact_not_found(isolated_contacts, tmp_path):

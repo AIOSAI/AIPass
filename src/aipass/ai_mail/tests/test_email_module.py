@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_email_module.py
 # Description: Tests for email.py and email_send.py orchestrator functions
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/email.py and email_send.py."""
@@ -927,7 +927,8 @@ class TestHandleSend:
         # pytest's stdin is not a terminal, so without this the no-TTY guard
         # answers first and this test would pass while never reaching the
         # cancel path it is named for.
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        tty = MagicMock(return_value=True)
+        monkeypatch.setattr("sys.stdin.isatty", tty)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.modules.email_send.parse_send_args",
             lambda args: {"mode": "interactive"},
@@ -949,6 +950,7 @@ class TestHandleSend:
         result = handle_send([])
         assert result is True
         assert any("Cancelled" in p for p in printed)
+        tty.assert_called_once_with()
 
     def test_send_dispatch_fires_trigger(self, monkeypatch, tmp_path):
         """With auto_execute, dispatch trigger is fired after successful send."""
@@ -1721,7 +1723,8 @@ class TestSendInteractiveExtended:
         APLAN-0006). The listing must not print either — output that precedes a
         certain refusal reads as progress toward a send that cannot happen.
         """
-        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        tty = MagicMock(return_value=False)
+        monkeypatch.setattr("sys.stdin.isatty", tty)
         listed: list[str] = []
         monkeypatch.setattr(
             email_send_mod,
@@ -1736,12 +1739,14 @@ class TestSendInteractiveExtended:
         assert result is False
         assert listed == []
         assert any("terminal" in e for e in errors)
+        tty.assert_called_once_with()
 
     def test_send_interactive_complete_path(self, monkeypatch, tmp_path):
         """User provides input successfully, send proceeds."""
         # Same reason as test_send_interactive_mode: the no-TTY guard runs first
         # under pytest, so the terminal has to be pinned to reach the send path.
-        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        tty = MagicMock(return_value=True)
+        monkeypatch.setattr("sys.stdin.isatty", tty)
         monkeypatch.setattr(
             email_send_mod,
             "get_all_branches",
@@ -1776,6 +1781,7 @@ class TestSendInteractiveExtended:
         assert result is True
         assert any("@alpha" in p for p in printed)
         assert any("sent" in p.lower() for p in printed)
+        tty.assert_called_once_with()
 
 
 class TestHandleReplyMultiArg:

@@ -1,11 +1,12 @@
 # =================== AIPass ====================
 # Name: tests/conftest.py
 # Description: Shared pytest fixtures for ai_mail tests - sandbox redirects, console pin, state reset
-# Version: 1.5.0
+# Version: 1.5.1
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # Category: ai_mail/tests
 # CHANGELOG (Max 5 entries):
+#   - v1.5.1 (2026-09-29): sandboxed_central docstring names the live caller, not a retired name
 #   - v1.5.0 (2026-09-27): recorded_bus - no test fires on the real trigger bus
 #   - v1.4.0 (2026-09-27): sandboxed_central - no test writes the live central file
 #   - v1.3.1 (2026-09-27): Template items 20/18 - pinned_console_width, clean_command_state;
@@ -13,7 +14,6 @@
 #   - v1.3.0 (2026-09-03): The json redirect is the AIPASS_TEST_LOG_DIR seam
 #     alone — mock_infrastructure lands each test in its own sandbox and
 #     mock_json_handler retires with the handler it mocked (DPLAN-0325)
-#   - v1.2.0 (2026-08-11): Autouse feed isolation — tests never touch the real notifications.jsonl
 # CODE STANDARDS:
 #   - Error handling: Use error handler system (apps/handlers/error/)
 # =============================================
@@ -70,7 +70,7 @@ def sandboxed_central(tmp_path, monkeypatch) -> None:
     """No test reaches the live central file: update_central scans and writes under tmp_path.
 
     test_message_correlation's mark_as_opened ran the real update_central through
-    _update_central_stats (then _update_dashboard) and rewrote .ai_central/AI_MAIL.central.json from the live
+    inbox_cleanup's central-stats update and rewrote .ai_central/AI_MAIL.central.json from the live
     inboxes on every suite run (found by mtime, 2026-09-27). Redirecting the
     module's four paths, rather than stubbing the function, keeps update_central
     runnable for any test that means to exercise it.

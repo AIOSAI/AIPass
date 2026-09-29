@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: dispatch_monitor.py
 # Description: Agent Lifecycle Monitor
-# Version: 2.5.0
+# Version: 2.5.1
 # Created: 2026-03-02
-# Modified: 2026-09-12
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -770,6 +770,16 @@ def _run_with_startup_check(
             stdout_fh.close()
 
 
+def prepend_to_path(path_value: str, entry: str, sep: str = os.pathsep) -> str:
+    """Return PATH with entry first, joined by the host's separator.
+
+    sep is handed in so a test can give the other host's separator (";" on
+    Windows, ":" on POSIX); callers keep the default. A literal ":" here once
+    broke a spawn PATH on Windows, where ":" follows every drive letter.
+    """
+    return sep.join([entry, path_value]) if path_value else entry
+
+
 def main():
     """
     Usage: dispatch_monitor.py <branch_email> <lock_file> <sender> <stderr_log> [--no-wake-back] -- <claude_args...>
@@ -837,12 +847,12 @@ def main():
     _repo_root = find_repo_root()
     venv_bin = str(_repo_root / ".venv" / "bin")
     if venv_bin not in spawn_env.get("PATH", ""):
-        spawn_env["PATH"] = venv_bin + ":" + spawn_env.get("PATH", "")
+        spawn_env["PATH"] = prepend_to_path(spawn_env.get("PATH", ""), venv_bin)
     # Guarantee ~/.local/bin is on PATH for pip-installed tools (e.g. claude)
     # Background processes (trigger, prax watchdog) may have restricted PATH.
     local_bin = str(Path.home() / ".local" / "bin")
     if local_bin not in spawn_env.get("PATH", ""):
-        spawn_env["PATH"] = local_bin + ":" + spawn_env.get("PATH", "")
+        spawn_env["PATH"] = prepend_to_path(spawn_env.get("PATH", ""), local_bin)
     for key in list(spawn_env.keys()):
         if key.startswith("CLAUDE") or key == "AIPASS_BOT_ID":
             spawn_env.pop(key)

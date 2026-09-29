@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_refused_sends.py
 # Description: Tests for refused-send bookkeeping and the handled-vs-worked routing contract
-# Version: 1.0.2
+# Version: 1.0.3
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/email/create.py, format.py and send.py."""
@@ -237,12 +237,16 @@ class TestSendToBroadcastRefusedBookkeeping:
         )
         return ok, success_count, total, results, created["path"]
 
-    def test_every_recipient_refused_marks_the_record_refused(self, tmp_path):
-        """Zero delivered means the record must not claim a delivery."""
+    def test_every_recipient_refused_marks_the_record_refused(self, tmp_path, recorded_bus):
+        """Zero delivered means the record must not claim a delivery, and no sent event fires.
+
+        Pinned red first (leg 3): the broadcast fired email_broadcast_sent with successful=0.
+        """
         ok, success_count, _, _, path = self._broadcast(tmp_path, [(False, REFUSAL), (False, REFUSAL)])
 
         assert ok is False
         assert success_count == 0
+        assert recorded_bus.fires == []
 
         record = _read(path)
         assert record["status"] == "refused"

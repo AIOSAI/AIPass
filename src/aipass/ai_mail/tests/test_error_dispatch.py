@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_error_dispatch.py
 # Description: Tests for email error dispatch handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-04-25
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/email/error_dispatch.py."""
@@ -230,4 +230,4 @@ def test_on_email_delivered_central_failure_does_not_raise():
 
     on_email_delivered(update_central_fn=update_fn)
 
-    update_fn.assert_called_once()
+    update_fn.assert_called_once_with()

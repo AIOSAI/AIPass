@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_identity_fence.py
 # Description: Tests for the caller identity fence (no branch under caller = refuse)
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-21
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/users/branch_detection.py and the fence it enforces fleetwide."""
@@ -231,7 +231,8 @@ class TestProvenanceLiftsTheOverRefusal:
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "ai_mail")
         monkeypatch.setenv("AIPASS_CALLER_CWD", str(_non_branch_dir(tmp_path)))
         monkeypatch.setenv("AIPASS_CALLER_IDENTITY_SOURCE", "passport")
-        assert detect_branch_from_pwd() is not None
+        info = detect_branch_from_pwd()
+        assert info is not None and info.get("email") == "@ai_mail"
 
     def test_absent_flag_keeps_the_cwd_rule(self, tmp_path, monkeypatch):
         """An older drone, or a caller that is not drone, stamps no flag. The cwd

@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_cross_project_bridge.py
 # Description: Tests for the verified-admin cross-project bridge + reply return path (FPLAN-0401 ph5/5b)
-# Version: 1.1.1
+# Version: 1.1.2
 # Created: 2026-08-12
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/email/delivery.py and the cross-project bridge across wake.py and registry/read.py."""
@@ -666,22 +666,28 @@ class TestBroadcastScope:
     def test_non_admin_broadcast_stays_fleet_only(self, monkeypatch):
         monkeypatch.setattr(reg, "get_resident_branches", lambda: {"@baud": "/x"})
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
-        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: False)
+        verifier = MagicMock(return_value=False)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@flow"]
+        verifier.assert_called_once_with()
 
     def test_verified_admin_broadcast_includes_residents(self, monkeypatch):
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@flow", "name": "FLOW"}])
         monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
-        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: True)
+        verifier = MagicMock(return_value=True)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         emails = [b["email"] for b in es.resolve_broadcast_targets()]
         assert emails == ["@flow", "@baud"], emails
+        verifier.assert_called_once_with()
 
     def test_a_resident_already_in_the_core_registry_is_not_duplicated(self, monkeypatch):
         """One inbox, one copy -- a duplicate would deliver the announcement twice."""
         monkeypatch.setattr(es, "get_all_branches", lambda: [{"email": "@baud", "name": "BAUD"}])
         monkeypatch.setattr(es, "get_resident_branches", lambda: {"@baud": "/p/baud"})
-        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", lambda: True)
+        verifier = MagicMock(return_value=True)
+        monkeypatch.setattr(es.verified_caller, "is_verified_admin_caller", verifier)
         assert [b["email"] for b in es.resolve_broadcast_targets()] == ["@baud"]
+        verifier.assert_called_once_with()
 
     def test_a_refusing_verifier_never_widens(self, monkeypatch):
         """A privilege path that raises is a refusal, never an opening."""

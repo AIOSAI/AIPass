@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_registry_case_sweep.py
 # Description: Registry globs must not widen on a case-insensitive filesystem
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-08-31
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/paths.py's registry glob readers on a case-insensitive filesystem."""
@@ -53,7 +53,6 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import pytest
 
 from aipass.ai_mail.apps.handlers.paths import find_project_root, registries_in
-from aipass.seedgo.apps.handlers.aipass_standards.skip_dirs import SOURCE_SKIP_DIRS
 from aipass.ai_mail.apps.handlers.users import branch_detection as bd
 from aipass.ai_mail.apps.handlers.email.reply import _validate_reply_path
 from aipass.ai_mail.apps.handlers.registry.read import (
@@ -601,7 +600,8 @@ class TestCallerRegistryNeverResolvesToACounter:
         monkeypatch.setattr(bd, "BRANCH_REGISTRY_PATH", tmp_path / "AIPASS_REGISTRY.json")
 
         assert bd._lookup_branch_by_name("impostor") is None
-        assert bd._lookup_branch_by_name("genuine") is not None
+        genuine = bd._lookup_branch_by_name("genuine")
+        assert genuine is not None and genuine["email"] == "@genuine"
 
 
 class TestReplyPathValidationIsNotSatisfiedByACounter:
@@ -691,13 +691,17 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
 
     @staticmethod
     def _sources(root):
-        """Every .py under root, never inside a dropbox, .archive or any other seedgo skip dir.
+        """Every .py under root, never inside a dropbox, .archive or __pycache__.
 
-        Owner ruling: nothing looks into a dropbox. apps/handlers/.archive holds
-        retired .py files today, which the bare rglob read.
+        Written here, not imported: seedgo's handlers guard refuses a caller from
+        another branch. dropbox and .archive are the owner's ruling of 09-27 (a
+        dropbox is a sandbox like .archive); apps/handlers/.archive holds retired
+        .py files today, which the bare rglob read. Names are judged relative to
+        root. Every other directory is walked, tools, docs and logs included.
         """
+        skip = frozenset({"dropbox", ".archive", "__pycache__"})
         for source in root.rglob("*.py"):
-            if not SOURCE_SKIP_DIRS.intersection(source.relative_to(root).parts[:-1]):
+            if not skip.intersection(source.relative_to(root).parts[:-1]):
                 yield source
 
     def _registry_glob_calls(self, root=None):
@@ -756,16 +760,19 @@ class TestNoInlineRegistryGlobSurvivesInTheTree:
         not read; the same glob in live source is. The live file is the control:
         without it an empty walk would pass.
 
-        Mutant: drop the SOURCE_SKIP_DIRS filter in _sources and both planted files
-        come back as offenders.
+        The root stands inside a directory named dropbox, so a filter on the whole
+        path would drop live.py too. The runner cannot serve a test module: this pin
+        stands on red first alone (the filter removed, both plants came back).
         """
+        root = tmp_path / "dropbox" / "root"
+        root.mkdir(parents=True)
         glob_line = 'd.glob("*_REGISTRY.json")\n'
-        (tmp_path / "live.py").write_text(glob_line, encoding="utf-8")
+        (root / "live.py").write_text(glob_line, encoding="utf-8")
         for skipped in ("dropbox", ".archive"):
-            (tmp_path / skipped).mkdir()
-            (tmp_path / skipped / "planted.py").write_text(glob_line, encoding="utf-8")
+            (root / skipped).mkdir()
+            (root / skipped / "planted.py").write_text(glob_line, encoding="utf-8")
 
-        offenders = self._registry_glob_calls(tmp_path)
+        offenders = self._registry_glob_calls(root)
 
         assert [name for name, _line, _arg in offenders] == ["live.py"]
 

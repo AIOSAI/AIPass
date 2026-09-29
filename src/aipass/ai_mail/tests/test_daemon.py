@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: test_daemon.py
 # Description: Tests for dispatch daemon handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2026-03-29
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/dispatch/daemon.py -- config loading, state management, inbox scanning."""
@@ -819,12 +819,14 @@ def test_check_lock_alive_pid(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": datetime.now().isoformat()}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: True)
+    alive = MagicMock(return_value=True)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
     assert result is not None
     assert result["pid"] == 99999
+    alive.assert_called_once_with(99999)
 
 
 def test_check_lock_dead_pid(tmp_path, monkeypatch):
@@ -835,12 +837,14 @@ def test_check_lock_dead_pid(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": datetime.now().isoformat()}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
+    alive.assert_called_once_with(99999)
 
 
 def test_check_lock_stale_over_10min_removed(tmp_path, monkeypatch):
@@ -852,12 +856,14 @@ def test_check_lock_stale_over_10min_removed(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": old_time}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
+    alive.assert_called_once_with(99999)
 
 
 def test_check_lock_stale_under_10min_dead_pid_removed(tmp_path, monkeypatch):
@@ -869,12 +875,14 @@ def test_check_lock_stale_under_10min_dead_pid_removed(tmp_path, monkeypatch):
     lock_data = {"pid": 99999, "timestamp": recent_time}
     lock_file.write_text(json.dumps(lock_data), encoding="utf-8")
 
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
 
     result = _check_lock(tmp_path)
 
     assert result is None
     assert not lock_file.exists()
+    alive.assert_called_once_with(99999)
 
 
 def test_check_lock_corrupt_json_removed(tmp_path):
@@ -1087,7 +1095,8 @@ def test_write_pid_file_retake_denied_once_then_lands(tmp_path, monkeypatch, fak
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
     calls = []
     # real (exists) -> denied (the unlink we just made is still pending) -> real
     monkeypatch.setattr(daemon_mod.os, "open", _scripted_pid_open(pid_file, [None, _denial(pid_file)], calls))
@@ -1095,6 +1104,7 @@ def test_write_pid_file_retake_denied_once_then_lands(tmp_path, monkeypatch, fak
     assert _write_pid_file() is True
     assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
     assert len(calls) == 3
+    alive.assert_called_once_with(999999)
 
 
 def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkeypatch, fake_clock):
@@ -1102,7 +1112,8 @@ def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkey
     pid_file = tmp_path / "daemon.pid"
     pid_file.write_text("999999", encoding="utf-8")
     monkeypatch.setattr(daemon_mod, "DAEMON_PID_FILE", pid_file)
-    monkeypatch.setattr(daemon_mod, "_pid_alive", lambda pid: False)
+    alive = MagicMock(return_value=False)
+    monkeypatch.setattr(daemon_mod, "_pid_alive", alive)
     real_unlink = daemon_mod.Path.unlink
 
     def unlink_denied(self, missing_ok=False):
@@ -1119,6 +1130,7 @@ def test_write_pid_file_stale_unlink_denied_create_waits_it_out(tmp_path, monkey
 
     assert _write_pid_file() is True
     assert int(pid_file.read_text(encoding="utf-8").strip()) == os.getpid()
+    alive.assert_called_once_with(999999)
 
 
 def test_write_pid_file_denial_that_never_clears_raises_at_budget(tmp_path, monkeypatch, fake_clock):
@@ -1538,7 +1550,9 @@ def test_spawn_agent_prompt_includes_reply_id(tmp_path):
     prompt = captured_cmd[prompt_idx]
     assert "drone @ai_mail reply abc12345" in prompt
     assert "required" in prompt.lower()
-    mock_notify.assert_called_once()
+    mock_notify.assert_called_once_with(
+        "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
+    )
 
 
 def test_spawn_agent_prompt_includes_sender(tmp_path):
@@ -1576,7 +1590,9 @@ def test_spawn_agent_prompt_includes_sender(tmp_path):
     prompt_idx = captured_cmd.index("-p") + 1
     prompt = captured_cmd[prompt_idx]
     assert "@devpulse" in prompt
-    mock_notify.assert_called_once()
+    mock_notify.assert_called_once_with(
+        "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
+    )
 
 
 def test_spawn_agent_prompt_fallback_without_id(tmp_path):
@@ -1615,7 +1631,9 @@ def test_spawn_agent_prompt_fallback_without_id(tmp_path):
     prompt = captured_cmd[prompt_idx]
     assert "reply <id>" in prompt
     assert "required" in prompt.lower()
-    mock_notify.assert_called_once()
+    mock_notify.assert_called_once_with(
+        "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
+    )
 
 
 # ---- run_daemon tests -------------------------------------------

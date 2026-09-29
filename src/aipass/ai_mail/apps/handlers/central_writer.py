@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: central_writer.py
 # Description: AI_MAIL Central File Writer
-# Version: 1.1.0
+# Version: 1.2.0
 # Created: 2025-11-27
-# Modified: 2026-09-25
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -66,7 +66,12 @@ CENTRAL_FILE = AI_CENTRAL_DIR / "AI_MAIL.central.json"
 # It was also the only reason `/backups/` behaved differently on Windows —
 # that check was a literal forward-slash match, so the same tree counted on
 # POSIX and did not on Windows. Names have no separators, so both agree now.
-EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups"})
+#
+# dropbox and .archive: the owner's ruling of 09-27 (20:37, 20:42) - a dropbox is
+# a sandbox like .archive, nothing looks into it. docs.local, artifacts and
+# system_logs are output directories: no mailbox lives in one (read 09-29, ai_mail
+# leg 3). Never seedgo's skip list: it names .ai_mail.local, which this walk finds.
+EXCLUDED_DIR_NAMES = frozenset({".backup", ".archive", "backups", "dropbox", "docs.local", "artifacts", "system_logs"})
 BRANCH_REGISTRY = _REPO_ROOT / "AIPASS_REGISTRY.json"
 
 
