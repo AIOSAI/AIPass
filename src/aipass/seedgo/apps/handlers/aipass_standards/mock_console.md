@@ -83,6 +83,39 @@ spelling. The one instance is seedgo's own `_Recorder`.
 
 ---
 
+## Pinning a colour or a style without a mocked console
+
+`capsys` reads plain text: the style is gone before the test sees it. The old habit pinned
+it through a mock, `print.assert_called_with("[red]Errors: 15[/red]")`. Do not put a
+console in the product's place for it, not a Mock and not a `Console(file=buf)`. Turn on
+the **real console's own recording** and read the style back per character:
+
+```python
+from rich.color import Color
+from rich.text import Text
+
+def test_errors_line_is_red(capsys, monkeypatch):
+    console = module.console                        # the product's own console object
+    monkeypatch.setattr(console, "record", True)    # Rich's switch; restored after the test
+    console.export_text(clear=True)
+    module.print_summary(result)
+    lines = [Text.from_ansi(l) for l in console.export_text(styles=True, clear=True).splitlines()]
+    line = next(l for l in lines if l.plain == "  Errors: 15  Warnings: 3")
+    start = line.plain.index("Errors: 15")
+    colours = {line.get_style_at_offset(console, i).color.number for i in range(start, start + 10)}
+    assert colours == {Color.parse("red").number}
+```
+
+The product still prints to its real channel, so `capsys` asserts the text in the same test.
+Compare the colour **number** from `Color.parse`, never an ANSI string: Rich's highlighter
+adds its own styles to numbers and quotes, and the ANSI form changes with them.
+`Text.from_ansi` and `get_style_at_offset` are public Rich API and answer the same on every
+platform. Measured on seedgo's `test_diagnostics_audit.py` (fleet green leg 5): a colour
+mutant that keeps the glyph and changes the colour is killed on both the errors line and the
+glyph.
+
+---
+
 ## Never convicted, each for a measured reason
 
 - **`capsys` and `capfd`.** 79 of the 580 files already read the channel. They are the

@@ -3,7 +3,7 @@
 # Description: Unit tests for the diagnostics_audit module
 # Version: 1.2.0
 # Created: 2026-03-24
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/diagnostics_audit.py."""
@@ -13,6 +13,9 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+from rich.color import Color
+from rich.text import Text
 
 from aipass.seedgo.apps.modules import diagnostics_audit
 
@@ -34,6 +37,35 @@ def _console_lines(capsys, function_name: str, *args):
     """
     result = getattr(diagnostics_audit, function_name)(*args)
     return result, capsys.readouterr().out.splitlines()
+
+
+@pytest.fixture
+def recording(monkeypatch):
+    """The product's own console, recording every segment it prints with its style.
+
+    No console is put in the product's place: ``record`` is the real console's
+    own switch, so the channel capsys reads is unchanged. What the recording
+    adds is the style plain text loses (seedgo, fleet green leg 5).
+
+    Returns:
+        A callable answering the recorded lines as ``rich.text.Text``, styles kept.
+    """
+    console = diagnostics_audit.console
+    monkeypatch.setattr(console, "record", True)
+    console.export_text(clear=True)
+    return lambda: [Text.from_ansi(line) for line in console.export_text(styles=True, clear=True).splitlines()]
+
+
+def colours_of(line: Text, phrase: str) -> set:
+    """The colour numbers every character of ``phrase`` carries in ``line``."""
+    start = line.plain.index(phrase)
+    styles = (line.get_style_at_offset(diagnostics_audit.console, i) for i in range(start, start + len(phrase)))
+    return {style.color.number if style.color else None for style in styles}
+
+
+def colour(name: str) -> set:
+    """What :func:`colours_of` answers for a phrase wholly in one named colour."""
+    return {Color.parse(name).number}
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +219,13 @@ def test_print_help_runs(capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_print_branch_diagnostics_clean(capsys):
+def test_print_branch_diagnostics_clean(capsys, recording):
     """Zero errors renders the green tick and the file tally, and no top-files block.
 
     Mutant: zero errors gets the yellow warning sign instead of the tick — killed.
+    The colour is read off the real console's recording, since capsys holds
+    the plain text only (seedgo, fleet green leg 5). Mutant: the zero case's
+    colour "green" -> "yellow", glyph kept — killed.
     """
     result = {
         "branch": "TEST",
@@ -207,12 +242,18 @@ def test_print_branch_diagnostics_clean(capsys):
     assert "  Files: 5 analyzed, 0 with errors" in lines
     assert "  Errors: 0  Warnings: 0" in lines
     assert "  Top files with errors:" not in lines
+    recorded = recording()
+    errors_line = next(line for line in recorded if line.plain == "  Errors: 0  Warnings: 0")
+    assert colours_of(errors_line, "Errors: 0") == colour("green")
+    assert colours_of(next(line for line in recorded if line.plain == "✓ TEST"), "✓") == colour("green")
 
 
-def test_print_branch_diagnostics_with_errors(capsys):
+def test_print_branch_diagnostics_with_errors(capsys, recording):
     """15 errors renders the red cross, and the offending file with its first lines.
 
     Mutant: ten or more errors gets the yellow warning sign instead of the cross — killed.
+    The colour is read off the real console's recording (seedgo, fleet green
+    leg 5). Mutant: the ten-or-more case's colour "red" -> "yellow", glyph kept — killed.
     """
     result = {
         "branch": "TEST",
@@ -241,6 +282,10 @@ def test_print_branch_diagnostics_with_errors(capsys):
     assert "    • /some/path/test.py (5 errors)" in lines
     assert "      L10: Type mismatch" in lines
     assert "      L20: Undefined variable 'x'" in lines
+    recorded = recording()
+    errors_line = next(line for line in recorded if line.plain == "  Errors: 15  Warnings: 3")
+    assert colours_of(errors_line, "Errors: 15") == colour("red")
+    assert colours_of(next(line for line in recorded if line.plain == "✗ TEST"), "✗") == colour("red")
 
 
 def test_print_system_summary_empty(capsys):

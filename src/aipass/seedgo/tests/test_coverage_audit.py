@@ -3,7 +3,7 @@
 # Description: Unit tests for audit_display.py and branch_audit.py line coverage
 # Version: 1.3.0
 # Created: 2026-04-26
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/audit/audit_display.py and apps/handlers/audit/branch_audit.py."""
@@ -383,22 +383,22 @@ class TestRenderInfoLines:
         out = _summary(capsys, {"naming": 100}, info_lines=[{"standard": "json_structure", "message": ""}])
         assert "ⓘ" not in out
 
-    def test_info_lines_rendered(self):
-        """Each info line renders once, dimmed."""
-        mock_con = MagicMock()
-        audit_display._render_info_lines(
-            {
-                "info_lines": [
-                    {"standard": "json_structure", "message": "custom_config: cadence_config.json"},
-                    {"standard": "json_structure", "message": "second line"},
-                ]
-            },
-            mock_con,
+    def test_info_lines_rendered(self, capsys):
+        """Each info line renders once, through the branch summary a user reaches.
+
+        It called the private renderer on a mocked console (seedgo, fleet green
+        leg 5). Mutant: the info line printed twice — killed.
+        """
+        out = _summary(
+            capsys,
+            {"naming": 100},
+            info_lines=[
+                {"standard": "json_structure", "message": "custom_config: cadence_config.json"},
+                {"standard": "json_structure", "message": "second line"},
+            ],
         )
-        calls = [str(c) for c in mock_con.print.call_args_list]
-        assert len(calls) == 2
-        assert any("cadence_config.json" in c for c in calls)
-        assert all("[dim]" in c for c in calls)
+        lines = out.splitlines()
+        assert [line for line in lines if "ⓘ" in line] == ["  ⓘ custom_config: cadence_config.json", "  ⓘ second line"]
 
     def test_rendered_at_full_score(self, capsys):
         """A 100% branch still shows its info lines. Mutant: info lines gated on avg < 100 in apps/handlers/audit/audit_display.py — killed."""

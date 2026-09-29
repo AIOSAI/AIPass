@@ -3,7 +3,7 @@
 # Description: Template v1 model — readme_update module, readme_generator and readme_ops
 # Version: 2.3.0
 # Created: 2026-09-20
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/readme_update.py and the handlers it drives."""
@@ -64,6 +64,28 @@ def registered(branch, tmp_path, monkeypatch):
     )
     monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
     return branch
+
+
+@pytest.fixture
+def unreadable_registry(branch, tmp_path, monkeypatch):
+    """A registry this test built that is not JSON, and the reason the interpreter gives for it."""
+    registry = tmp_path / "AIPASS_REGISTRY.json"
+    registry.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(registry_scan, "find_registry", lambda: registry)
+    with pytest.raises(json.JSONDecodeError) as reason:
+        json.loads("{not json")
+    return str(reason.value)
+
+
+@pytest.fixture
+def broken_generator(tmp_path, monkeypatch):
+    """A generator file that cannot be compiled, and the reason the interpreter gives for it."""
+    generator = tmp_path / "readme_generator.py"
+    generator.write_text("def (:\n", encoding="utf-8")
+    monkeypatch.setattr(readme_ops, "GENERATOR_PATH", generator)
+    with pytest.raises(SyntaxError) as reason:
+        compile("def (:\n", str(generator), "exec")
+    return str(reason.value)
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +215,24 @@ class TestUpdateRun:
         readme_update.handle_command("readme", ["update", "@nope_xyz"])
 
         assert "Branch '@nope_xyz' not found in registry" in capsys.readouterr().err
+
+    def test_an_unreadable_registry_is_named_on_stderr_not_called_an_unknown_branch(self, capsys, unreadable_registry):
+        """An unreadable registry read as "not found" (seedgo, fleet green leg 5)."""
+        readme_update.handle_command("readme", ["update", "@made_up"])
+
+        err = capsys.readouterr().err.splitlines()
+        assert [line for line in err if line.endswith(f"Registry unreadable: {unreadable_registry}")] != []
+        assert not [line for line in err if "not found in registry" in line]
+
+    def test_a_generator_that_cannot_load_is_named_with_its_reason(self, capsys, registered, broken_generator):
+        """The load failure answered None and the reason was dropped (seedgo, fleet green leg 5)."""
+        before = (registered / "README.md").read_text(encoding="utf-8")
+
+        readme_update.handle_command("readme", ["update", "@made_up"])
+
+        err = capsys.readouterr().err.splitlines()
+        assert [line for line in err if line.endswith(f"Failed to load README generator: {broken_generator}")] != []
+        assert (registered / "README.md").read_text(encoding="utf-8") == before
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +455,19 @@ class TestTargetResolution:
 
         assert error is None and len(branches) == 1
         assert branches[0]["path"] == str(registered)
+
+    def test_an_unreadable_registry_is_its_own_error_for_one_branch_and_for_all(self, unreadable_registry):
+        """It answered not_found and no_branches, the answers of a readable registry (leg 5)."""
+        expected = ([], f"unreadable_registry:{unreadable_registry}")
+        assert readme_ops.resolve_targets(["@made_up"]) == expected
+        assert readme_ops.resolve_targets(["@all"]) == expected
+
+    def test_a_generator_that_cannot_load_raises_its_own_error(self, broken_generator):
+        """It answered None, the reason logged at info level only (seedgo, fleet green leg 5)."""
+        with pytest.raises(SyntaxError) as raised:
+            readme_ops.load_generator()
+
+        assert str(raised.value) == broken_generator
 
     def test_the_generator_loads_from_beside_the_ops_handler(self):
         """load_generator resolves its own neighbour; a move breaks the update silently."""

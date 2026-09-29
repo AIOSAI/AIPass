@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: readme_update.py
 # Description: README Auto-Update Module
-# Version: 1.0.0
+# Version: 1.1.0
 # Created: 2026-03-05
-# Modified: 2026-03-05
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -133,7 +133,12 @@ def _handle_update(args: List[str]) -> None:
         display_error("readme_ops handler not available")
         console.print("[dim]Handler is in .sorting_unprocessed/ — needs migration to handlers/[/dim]")
         return
-    generator = load_generator()
+    try:
+        generator = load_generator()
+    except Exception as exc:
+        logger.error(f"README generator failed to load: {exc}")
+        display_error(f"Failed to load README generator: {exc}")
+        return
     if not generator:
         display_error("Failed to load README generator")
         return
@@ -183,7 +188,12 @@ def _handle_check(args: List[str]) -> None:
         display_error("readme_ops handler not available")
         console.print("[dim]Handler is in .sorting_unprocessed/ — needs migration to handlers/[/dim]")
         return
-    generator = load_generator()
+    try:
+        generator = load_generator()
+    except Exception as exc:
+        logger.error(f"README generator failed to load: {exc}")
+        display_error(f"Failed to load README generator: {exc}")
+        return
     if not generator:
         display_error("Failed to load README generator")
         return
@@ -228,6 +238,8 @@ def _print_target_error(err_code: str) -> None:
     elif err_code.startswith("not_found:"):
         target = err_code.split(":", 1)[1]
         display_error(f"Branch '{target}' not found in registry")
+    elif err_code.startswith("unreadable_registry:"):
+        display_error(f"Registry unreadable: {err_code.split(':', 1)[1]}")
 
 
 def _print_result(result: dict, is_check: bool = False) -> None:
