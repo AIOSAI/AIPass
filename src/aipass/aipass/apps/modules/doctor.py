@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: doctor.py
 # Description: System health aggregation — aipass doctor command
-# Version: 1.1.5
+# Version: 1.1.6
 # Created: 2026-04-16
 # Modified: 2026-09-29
 # =============================================
@@ -590,7 +590,7 @@ def check_provider_manifest(
             )
 
     # --- Settings scalars the manifest names (DPLAN-0347) ---
-    settings_rows, missing_settings = check_settings_scalars(manifest)
+    settings_rows, missing_settings = check_settings_scalars(manifest, settings_path)
     results.extend(CheckResult(*row) for row in settings_rows)
 
     # --- Interactive auto-wire prompt / --fix auto-accept ---
@@ -608,8 +608,8 @@ def check_provider_manifest(
                 manifest_path, missing_hooks, missing_env, missing_deny, missing_ask, missing_settings
             )
 
-        if wired:
-            return check_provider_manifest(interactive=False, fix=False)
+        if wired:  # the re-read after a wire reads the same file, on the same platform
+            return check_provider_manifest(interactive=False, fix=False, settings_path=settings_path, os_name=os_name)
 
     return results
 

@@ -1050,16 +1050,22 @@ class TestClonedBranchIsNamed:
             return _sp.CompletedProcess(cmd, 0, stdout=branch_stdout, stderr="")
 
         printed = []
+        asked = []
+
+        def which(name):
+            asked.append(name)
+            return str(tmp_path / "bin" / name)
+
         with (
             patch("subprocess.run", side_effect=fake_run),
-            patch("shutil.which", return_value="/usr/bin/git"),
             patch.object(
                 _install.console,
                 "print",
                 side_effect=lambda *a, **k: printed.append(" ".join(str(x) for x in a)),
             ),
         ):
-            ok = _install._clone_repo(home, dry_run=False)
+            ok = _install._clone_repo(home, dry_run=False, which=which)
+        assert asked == ["git"]  # the clone asks the seam for git once, and nothing else
         return ok, " ".join(printed), calls
 
     def test_prints_the_branch_that_landed(self, tmp_path) -> None:
@@ -1088,10 +1094,9 @@ class TestClonedBranchIsNamed:
 
         with (
             patch("subprocess.run", side_effect=fake_run),
-            patch("shutil.which", return_value="/usr/bin/git"),
             patch.object(_install.console, "print"),
         ):
-            assert _install._clone_repo(home, dry_run=False) is True
+            assert _install._clone_repo(home, dry_run=False, which=lambda name: str(tmp_path / "bin" / name)) is True
 
     def test_failed_clone_still_returns_false(self, tmp_path) -> None:
         """The added step must not mask a real clone failure."""

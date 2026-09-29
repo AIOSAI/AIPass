@@ -32,7 +32,7 @@ from aipass.aipass.apps.handlers.sandbox_check.sandbox_checker import (
     is_linux,
 )
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
-from aipass.aipass.apps.modules.doctor import _check_sandbox
+from aipass.aipass.apps.modules.doctor import run_doctor
 
 
 # =============================================================================
@@ -513,6 +513,41 @@ def _stub_doctor_json():
         yield mock
 
 
+_DOCTOR = "aipass.aipass.apps.modules.doctor"
+_OTHER_GROUPS = (
+    "_check_system",
+    "check_identity",
+    "_check_services",
+    "_check_community",
+    "_check_structure",
+    "_check_scaffold",
+)
+
+
+def _sandbox_via_doctor() -> list:
+    """The Sandbox group as run_doctor prints it (leg 6: the public door, not the private name).
+
+    The six other groups are stubbed where doctor resolves them, and _print_doctor_groups
+    is replaced by a recorder, so only the sandbox checks run and nothing is printed.
+    """
+    printed: dict = {}
+
+    def record(groups: dict) -> tuple[int, int, int]:
+        printed.update(groups)
+        return 0, 0, 0
+
+    with patch(f"{_DOCTOR}._print_doctor_groups", side_effect=record):
+        stubs = [patch(f"{_DOCTOR}.{name}", return_value=[]) for name in _OTHER_GROUPS]
+        for stub in stubs:
+            stub.start()
+        try:
+            run_doctor()
+        finally:
+            for stub in stubs:
+                stub.stop()
+    return printed["Sandbox"]
+
+
 def _platform_is_linux(monkeypatch, answer: bool) -> list[str]:
     """doctor's is_linux answers *answer*; the returned list records each time doctor asked."""
     asked: list[str] = []
@@ -531,7 +566,7 @@ class TestCheckSandboxDoctor:
 
     def test_non_linux_one_info_line(self, monkeypatch):
         asked = _platform_is_linux(monkeypatch, False)
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         assert len(results) == 1
         assert "Linux-only" in results[0].detail
@@ -562,7 +597,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         # THE FLOOR (v5 unentered_assert, 2026-09-08). Six rows measured from
         # the shell the same day with every prereq stubbed absent; an empty
@@ -596,7 +631,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         fail_results = [r for r in results if r.glyph == GLYPH_FAIL]
         assert len(fail_results) >= 4, f"Flag ON + missing prereqs should produce FAILs, got {len(fail_results)}"
@@ -630,7 +665,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: tmp_path / "fake")
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         # THE FLOOR (v5 unentered_assert, 2026-09-08). Seven rows measured from
         # the shell the same day with every prereq stubbed present - one more
@@ -664,7 +699,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         labels = [r.label for r in results]
         assert "bwrap functional" not in labels
@@ -697,7 +732,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         labels = [r.label for r in results]
         assert "bwrap functional" in labels
@@ -730,7 +765,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         func_result = [r for r in results if r.label == "bwrap functional"][0]
         assert "apparmor_restrict_unprivileged_userns=1" in func_result.detail
@@ -759,7 +794,7 @@ class TestCheckSandboxDoctor:
         )
         monkeypatch.setattr("aipass.aipass.apps.modules.doctor.find_project_root", lambda p: None)
 
-        results = _check_sandbox()
+        results = _sandbox_via_doctor()
         assert asked == ["is_linux"]
         missing_results = [r for r in results if r.glyph == GLYPH_WARN]
         # THE FLOOR AND THE ESCAPE, BOTH (v5 unentered_assert + assertion_shape,

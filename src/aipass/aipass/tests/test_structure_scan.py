@@ -30,13 +30,47 @@ from aipass.aipass.apps.handlers.structure_scan.structure_scanner import (
     scan_agents,
 )
 from aipass.aipass.apps.handlers.ui.progress import GLYPH_FAIL, GLYPH_PASS, GLYPH_WARN
-from aipass.aipass.apps.modules.doctor import _check_structure
+from aipass.aipass.apps.modules.doctor import run_doctor
 from aipass.aipass.shared.registry_discovery import find_registry
 
 
 # =============================================================================
 # Helpers
 # =============================================================================
+
+_DOCTOR = "aipass.aipass.apps.modules.doctor"
+_OTHER_GROUPS = (
+    "_check_system",
+    "check_identity",
+    "_check_services",
+    "_check_community",
+    "_check_scaffold",
+    "_check_sandbox",
+)
+
+
+def _structure_via_doctor() -> list:
+    """The Structure group as run_doctor prints it (leg 6: the public door, not the private name).
+
+    The six other groups are stubbed where doctor resolves them, and _print_doctor_groups
+    is replaced by a recorder, so only the structure scan runs and nothing is printed.
+    """
+    printed: dict = {}
+
+    def record(groups: dict) -> tuple[int, int, int]:
+        printed.update(groups)
+        return 0, 0, 0
+
+    with patch(f"{_DOCTOR}._print_doctor_groups", side_effect=record):
+        stubs = [patch(f"{_DOCTOR}.{name}", return_value=[]) for name in _OTHER_GROUPS]
+        for stub in stubs:
+            stub.start()
+        try:
+            run_doctor()
+        finally:
+            for stub in stubs:
+                stub.stop()
+    return printed["Structure"]
 
 
 def _make_agent(tmp_path: Path, name: str, registry_id: str = "uuid-1", subdir: str = "") -> Path:
@@ -686,7 +720,7 @@ class TestCheckStructureIntegration:
             "aipass.aipass.apps.modules.doctor.find_project_root",
             return_value=None,
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         assert len(results) == 1
         assert results[0].glyph == GLYPH_WARN
         assert "project root" in results[0].label
@@ -700,7 +734,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         glyphs = {r.glyph for r in results}
         assert GLYPH_FAIL not in glyphs
         assert GLYPH_WARN not in glyphs
@@ -714,7 +748,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=None),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         rows = [(r.glyph, r.detail) for r in results if r.label == "package names"]
         return rows, [r.label for r in results if r.label.startswith("placement")]
 
@@ -752,7 +786,7 @@ class TestCheckStructureIntegration:
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         (tmp_path / ".chroma").mkdir()
         with patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path):
-            results = _check_structure()
+            results = _structure_via_doctor()
         root_results = [r for r in results if "root:" in r.label]
         assert len(root_results) >= 1
         assert root_results[0].glyph == GLYPH_WARN
@@ -767,7 +801,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         venv_results = [r for r in results if r.label == "root: .venv"]
         assert len(venv_results) == 1
         assert venv_results[0].glyph == GLYPH_PASS
@@ -779,7 +813,7 @@ class TestCheckStructureIntegration:
         _make_registry(tmp_path, [])
         (tmp_path / "pyproject.toml").write_text("[project]", encoding="utf-8")
         with patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path):
-            results = _check_structure()
+            results = _structure_via_doctor()
         pollution_results = [r for r in results if "pollution" in r.label]
         assert len(pollution_results) == 1
         assert pollution_results[0].glyph == GLYPH_FAIL
@@ -796,7 +830,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
         assert len(fence_results) == 1
         assert fence_results[0].glyph == GLYPH_WARN
@@ -827,7 +861,7 @@ class TestCheckStructureIntegration:
             patch("aipass.aipass.apps.modules.doctor.find_project_root", return_value=tmp_path),
             patch("aipass.aipass.apps.modules.doctor._detect_aipass_home", return_value=str(tmp_path)),
         ):
-            results = _check_structure()
+            results = _structure_via_doctor()
         fence_results = [r for r in results if r.label.startswith("CLAUDE.md fence")]
         assert len(fence_results) == 1
         assert fence_results[0].glyph == GLYPH_PASS

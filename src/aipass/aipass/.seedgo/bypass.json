@@ -13,7 +13,7 @@
     {
       "file": "apps/handlers/cross_os/doctor_rows.py",
       "standard": "json_structure",
-      "reason": "Builds the rows of `aipass doctor --cross-os` from answers other handlers give and returns them; it opens no file and writes no JSON. The run is logged once where the command runs (doctor.handle_command, doctor_cross_os), and gap_registry and preflight log their own reads. Importing json_handler here would be for the checker alone. Split out of doctor.py 2026-09-29 (fleet green leg 5, aipass's decision)."
+      "reason": "Builds the rows of `aipass doctor --cross-os` from answers other handlers give and returns them; it opens no file and writes no JSON. The run is logged once where the command runs (doctor.handle_command, doctor_cross_os), gap_registry logs its own read, and preflight logs the e2e run (its three light probes log only a failure to run). Importing json_handler here would be for the checker alone. Split out of doctor.py 2026-09-29 (fleet green leg 5, aipass's decision); kept here, not moved into preflight.py, in leg 6 (aipass's decision): preflight runs probes and prints nothing, the rows need the gap registry and the screen glyphs, and there the checker would pass only on preflight's unrelated e2e log call. Devpulse's exception, compass 495."
     },
     {
       "file": "apps/modules/init_flow.py",

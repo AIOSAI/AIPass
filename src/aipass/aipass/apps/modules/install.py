@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: install.py
 # Description: aipass install — one-command PyPI bootstrap (clone + setup + handoff)
-# Version: 1.2.4
+# Version: 1.2.5
 # Created: 2026-07-05
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -298,15 +298,22 @@ def _announce_cloned_branch(home: Path) -> None:
     console.print(f"  [dim]branch:[/dim] [cyan]{branch}[/cyan] [dim](the repo default)[/dim]")
 
 
-def _clone_repo(home: Path, dry_run: bool) -> bool:
-    """git clone the public AIPass repo into `home`. Returns True on success."""
+def _clone_repo(home: Path, dry_run: bool, which: Callable[[str], str | None] | None = None) -> bool:
+    """git clone the public AIPass repo into `home`. Returns True on success.
+
+    *which* is ``shutil.which`` when None, resolved at call time. A seam, and the reason
+    is the test: test_install's clone tests answer "git is on PATH" here instead of
+    patching shutil for the whole process (fleet green leg 6). No product caller hands it.
+    """
+    if which is None:
+        which = shutil.which
     if dry_run:
         console.print(f"[yellow]\\[dry-run][/yellow] would run: git clone --depth 1 {REPO_URL} {home}")
         return True
     if home.exists() and any(home.iterdir()):
         warning(f"{home} exists and is not empty — pass an empty --path, or remove it first.")
         return False
-    if shutil.which("git") is None:
+    if which("git") is None:
         warning("git not found — the installer needs git to fetch AIPass. Install git and retry.")
         return False
     home.parent.mkdir(parents=True, exist_ok=True)
