@@ -319,7 +319,7 @@ class TestRefusedRecordIsVisible:
         assert "REFUSED" in row
         assert "no reason recorded" in row
 
-    def test_sent_listing_orders_by_mtime_not_filename(self, tmp_path, monkeypatch):
+    def test_sent_listing_orders_by_mtime_not_filename(self, tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """The newest send tops the listing whichever naming scheme wrote it.
 
         create.py writes "<YYYYMMDD_HHMMSS>_<subject>.json" and reply.py writes
@@ -342,15 +342,11 @@ class TestRefusedRecordIsVisible:
         os.utime(old, (1_000_000, 1_000_000))
         os.utime(new, (2_000_000, 2_000_000))
 
-        printed: list[str] = []
-        mock_console = MagicMock()
-        mock_console.print = lambda msg="", **kw: printed.append(str(msg))
-        monkeypatch.setattr(email_mod, "console", mock_console)
         monkeypatch.setattr(email_mod, "_resolve_branch_path", lambda: tmp_path)
 
         assert email_mod.handle_sent([]) is True
 
-        body = "\n".join(printed)
+        body = capsys.readouterr().out
         assert body.index("NEW REFUSAL") < body.index("OLD REPLY")
 
 

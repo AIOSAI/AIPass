@@ -341,9 +341,11 @@ def test_kill_switch_uses_default_path_when_key_missing(tmp_path, monkeypatch):
 def test_get_registered_branches_valid(tmp_path):
     """Returns branch list from registry file."""
     registry = tmp_path / "AIPASS_REGISTRY.json"
+    flow_path = str(tmp_path / "flow")
+    backup_path = str(tmp_path / "backup")
     branches = [
-        {"email": "@flow", "path": "/home/user/flow"},
-        {"email": "@backup", "path": "/home/user/backup"},
+        {"email": "@flow", "path": flow_path},
+        {"email": "@backup", "path": backup_path},
     ]
     registry.write_text(json.dumps({"branches": branches}), encoding="utf-8")
 
@@ -352,9 +354,9 @@ def test_get_registered_branches_valid(tmp_path):
     assert isinstance(result, list)
     assert len(result) == 2
     assert result[0]["email"] == "@flow"
-    assert result[0]["path"] == "/home/user/flow"
+    assert result[0]["path"] == flow_path
     assert result[1]["email"] == "@backup"
-    assert result[1]["path"] == "/home/user/backup"
+    assert result[1]["path"] == backup_path
 
 
 def test_get_registered_branches_no_file():
@@ -1394,7 +1396,7 @@ def test_spawn_agent_success(tmp_path):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
@@ -1402,6 +1404,9 @@ def test_spawn_agent_success(tmp_path):
     assert result is True
     assert state["daily_counts"]["@testbranch"] == 1
     assert state["session_cycles"][str(branch_path)] == 1
+    # log_dispatch writes the live dispatch log, so the patch stays and is asserted (ai_mail, leg 5)
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
     mock_notify.assert_called_once_with(
         "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
     )
@@ -1422,11 +1427,12 @@ def test_spawn_agent_exception(tmp_path):
             "aipass.ai_mail.apps.handlers.dispatch.daemon.subprocess.Popen",
             side_effect=OSError("command not found"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
     assert result is False
+    mock_log_dispatch.assert_called_once_with("@testbranch", None, "failed", error_msg="command not found")
 
 
 def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
@@ -1460,7 +1466,7 @@ def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
@@ -1472,6 +1478,8 @@ def test_spawn_agent_strips_claude_env_vars(tmp_path, monkeypatch):
     assert captured_env.get("AIPASS_SPAWNED") == "1"
     assert captured_env.get("AIPASS_SESSION_TYPE") == "daemon"
     mock_notify.assert_called_once()
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
 
 
 def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
@@ -1501,7 +1509,7 @@ def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
@@ -1511,6 +1519,8 @@ def test_spawn_agent_claude_cmd_includes_model_flag(tmp_path):
     assert "--model" in monitor_cmd
     model_idx = monitor_cmd.index("--model")
     assert monitor_cmd[model_idx + 1] == daemon_mod.DEFAULT_MODEL
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
     mock_notify.assert_called_once()
 
 
@@ -1541,7 +1551,7 @@ def test_spawn_agent_prompt_includes_reply_id(tmp_path):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         spawn_agent(branch_path, "@testbranch", message, config, state)
@@ -1549,6 +1559,8 @@ def test_spawn_agent_prompt_includes_reply_id(tmp_path):
     prompt_idx = captured_cmd.index("-p") + 1
     prompt = captured_cmd[prompt_idx]
     assert "drone @ai_mail reply abc12345" in prompt
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
     assert "required" in prompt.lower()
     mock_notify.assert_called_once_with(
         "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
@@ -1582,7 +1594,7 @@ def test_spawn_agent_prompt_includes_sender(tmp_path):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         spawn_agent(branch_path, "@testbranch", message, config, state)
@@ -1590,6 +1602,8 @@ def test_spawn_agent_prompt_includes_sender(tmp_path):
     prompt_idx = captured_cmd.index("-p") + 1
     prompt = captured_cmd[prompt_idx]
     assert "@devpulse" in prompt
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
     mock_notify.assert_called_once_with(
         "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
     )
@@ -1622,7 +1636,7 @@ def test_spawn_agent_prompt_fallback_without_id(tmp_path):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         spawn_agent(branch_path, "@testbranch", message, config, state)
@@ -1630,6 +1644,8 @@ def test_spawn_agent_prompt_fallback_without_id(tmp_path):
     prompt_idx = captured_cmd.index("-p") + 1
     prompt = captured_cmd[prompt_idx]
     assert "reply <id>" in prompt
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
     assert "required" in prompt.lower()
     mock_notify.assert_called_once_with(
         "Daemon → @testbranch", 'Task from @devpulse: "Test task"', source="testbranch", kind="dispatch"
@@ -1660,7 +1676,7 @@ def test_run_daemon_kill_switch_pauses(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._write_pid_file",
             return_value=True,
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._remove_pid_file"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._remove_pid_file") as mock_remove_pid,
         patch(
             "aipass.ai_mail.apps.handlers.dispatch.daemon.load_config",
             return_value={
@@ -1675,7 +1691,7 @@ def test_run_daemon_kill_switch_pauses(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon.is_kill_switch_active",
             side_effect=fake_is_kill_switch,
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.time.sleep"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.time.sleep") as mock_sleep,
         patch(
             "aipass.ai_mail.apps.handlers.dispatch.daemon.os.waitpid",
             side_effect=ChildProcessError,
@@ -1684,6 +1700,9 @@ def test_run_daemon_kill_switch_pauses(tmp_path, monkeypatch):
         run_daemon()
 
     assert call_count["n"] >= 2
+    # The paused loop waits before re-checking, and shutdown still cleans its pid file (ai_mail, leg 5)
+    assert mock_sleep.called
+    mock_remove_pid.assert_called_once_with()
 
 
 def test_run_daemon_shutdown_exits_loop(tmp_path, monkeypatch):
@@ -1697,7 +1716,7 @@ def test_run_daemon_shutdown_exits_loop(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._write_pid_file",
             return_value=True,
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._remove_pid_file"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon._remove_pid_file") as mock_remove_pid,
         patch(
             "aipass.ai_mail.apps.handlers.dispatch.daemon.load_config",
             return_value={
@@ -1716,6 +1735,7 @@ def test_run_daemon_shutdown_exits_loop(tmp_path, monkeypatch):
         run_daemon()
 
     mock_poll.assert_not_called()
+    mock_remove_pid.assert_called_once_with()
 
 
 def test_run_daemon_write_pid_failure_returns_early(tmp_path, monkeypatch):
@@ -2044,13 +2064,15 @@ def test_spawn_agent_allows_registered_auto_execute(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
     assert result is True
     mock_notify.assert_called_once()
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
 
 
 def test_spawn_agent_no_auth_check_without_auto_execute(tmp_path, monkeypatch):
@@ -2080,13 +2102,15 @@ def test_spawn_agent_no_auth_check_without_auto_execute(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon._acquire_lock",
             return_value=(True, "Lock acquired"),
         ),
-        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch"),
+        patch("aipass.ai_mail.apps.handlers.dispatch.daemon.log_dispatch") as mock_log_dispatch,
         patch("aipass.ai_mail.apps.handlers.notify.send_notification") as mock_notify,
     ):
         result = spawn_agent(branch_path, "@testbranch", message, config, state)
 
     assert result is True
     mock_notify.assert_called_once()
+    mock_log_dispatch.assert_called_once()
+    assert mock_log_dispatch.call_args.args[0::2] == ("@testbranch", "spawned")
 
 
 # ---- _write_pid_file atomic tests (DPLAN-0159 S5) ----------------

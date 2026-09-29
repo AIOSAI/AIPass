@@ -455,9 +455,10 @@ def test_main_third_attempt_fresh(monkeypatch, main_argv, tmp_path):
         calls.append(cmd)
         return (1, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", track_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         mod,
@@ -483,6 +484,7 @@ def test_main_third_attempt_fresh(monkeypatch, main_argv, tmp_path):
     assert "-c" in calls[1]
     # Attempt 3 should NOT have -c (fresh)
     assert "-c" not in calls[2]
+    bounce.assert_called_once()
 
 
 def test_main_all_three_fail_sends_bounce(monkeypatch, main_argv, tmp_path, recorded_bus):
@@ -544,9 +546,10 @@ def test_main_rate_limit_delay(monkeypatch, main_argv, tmp_path):
     mock_time.strftime = time.strftime
     mock_time.sleep = MagicMock()
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=True))
     monkeypatch.setattr(mod, "time", mock_time)
     monkeypatch.setattr(mod, "RATE_LIMIT_DELAY", 30)
@@ -561,6 +564,7 @@ def test_main_rate_limit_delay(monkeypatch, main_argv, tmp_path):
     assert exc_info.value.code == 0
     # Verify rate limit delay was used (30s, not 5s)
     mock_time.sleep.assert_called_with(30)
+    bounce.assert_not_called()
 
 
 # --- _send_bounce tests -----------------------------------------------
@@ -642,9 +646,10 @@ def test_notification_uses_at_branch_format(monkeypatch, main_argv, tmp_path, re
     argv, lock_file, stderr_log = main_argv
 
     monkeypatch.setenv("AIPASS_DISPATCH_ID", "dsp-notify")
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -661,6 +666,7 @@ def test_notification_uses_at_branch_format(monkeypatch, main_argv, tmp_path, re
         main()
 
     mock_notify.assert_called_once()
+    bounce.assert_not_called()
     title = mock_notify.call_args[0][0]
     assert title.startswith("@test_branch")
     assert "completed" in title
@@ -723,9 +729,10 @@ def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path,
         stdout_log.write_text('{"stop_reason":"max_turns"}', encoding="utf-8")
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -743,6 +750,7 @@ def test_max_turns_changes_notification_status(monkeypatch, main_argv, tmp_path,
 
     assert exc_info.value.code == 0  # Claude exited 0
     mock_notify.assert_called_once()
+    bounce.assert_not_called()
     title = mock_notify.call_args[0][0]
     assert "MAX TURNS" in title  # But notification shows max turns
     assert recorded_bus.events() == ["dispatch_completed"]
@@ -770,9 +778,10 @@ def test_stderr_rotation_on_large_file(tmp_path, monkeypatch):
         "claude",
     ]
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -794,6 +803,7 @@ def test_stderr_rotation_on_large_file(tmp_path, monkeypatch):
     rotated = tmp_path / "stderr.log.1"
     assert rotated.exists()
     assert rotated.stat().st_size >= 520_000
+    bounce.assert_not_called()
 
 
 def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
@@ -823,9 +833,10 @@ def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
         "claude",
     ]
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -837,6 +848,7 @@ def test_stdout_rotation_on_large_file(tmp_path, monkeypatch):
 
     rotated = logs_dir / "dispatch_stdout.log.1"
     assert rotated.exists()
+    bounce.assert_not_called()
 
 
 # --- Lock file cleanup tests ------------------------------------------
@@ -846,9 +858,10 @@ def test_lock_cleanup_on_success(monkeypatch, main_argv, tmp_path):
     """Lock is deleted on successful exit."""
     argv, lock_file, stderr_log = main_argv
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -859,15 +872,17 @@ def test_lock_cleanup_on_success(monkeypatch, main_argv, tmp_path):
         main()
 
     assert not lock_file.exists()
+    bounce.assert_not_called()
 
 
 def test_lock_cleanup_on_failure(monkeypatch, main_argv, tmp_path):
     """Lock is deleted even after all attempts fail (bounce path)."""
     argv, lock_file, stderr_log = main_argv
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (1, False), (1, False)]))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         mod,
@@ -887,6 +902,9 @@ def test_lock_cleanup_on_failure(monkeypatch, main_argv, tmp_path):
         main()
 
     assert not lock_file.exists()
+    # The bounce is handed the lock path while the lock still exists — cleanup follows it
+    bounce.assert_called_once()
+    assert bounce.call_args.args[3] == str(lock_file)
 
 
 # --- _rotate_attempt_stdout tests --------------------------------------
@@ -1061,9 +1079,10 @@ def test_main_attempt_exit_lines_in_stderr(monkeypatch, main_argv, tmp_path):
     """Each attempt's exit code lands in the dispatch stderr log itself."""
     argv, lock_file, stderr_log = main_argv
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(-3, True), (1, False), (0, False)]))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
     monkeypatch.setattr(
@@ -1078,6 +1097,7 @@ def test_main_attempt_exit_lines_in_stderr(monkeypatch, main_argv, tmp_path):
     assert "--- Attempt 1/3 exited: code=-3 (startup timeout) ---" in content
     assert "--- Attempt 2/3 exited: code=1 ---" in content
     assert "--- Attempt 3/3 exited: code=0 ---" in content
+    bounce.assert_not_called()
 
 
 def test_main_failed_attempt_stdout_preserved(monkeypatch, main_argv, tmp_path):
@@ -1092,9 +1112,10 @@ def test_main_failed_attempt_stdout_preserved(monkeypatch, main_argv, tmp_path):
         Path(stdout_log).write_text(f'{{"is_error": true, "attempt": {call_count["n"]}}}', encoding="utf-8")
         return (1, False) if call_count["n"] == 1 else (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
     monkeypatch.setattr(
@@ -1109,6 +1130,7 @@ def test_main_failed_attempt_stdout_preserved(monkeypatch, main_argv, tmp_path):
     assert preserved.exists()
     assert '"attempt": 1' in preserved.read_text(encoding="utf-8")
     assert '"attempt": 2' in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
+    bounce.assert_not_called()
 
 
 def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
@@ -1118,9 +1140,10 @@ def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
     stale = logs_dir / "dispatch_stdout.attempt-2.log"
     stale.write_text("previous run", encoding="utf-8")
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1132,6 +1155,7 @@ def test_main_stale_attempt_files_shifted(monkeypatch, main_argv, tmp_path):
 
     assert not stale.exists()
     assert (logs_dir / "dispatch_stdout.attempt-2.log.1").read_text(encoding="utf-8") == "previous run"
+    bounce.assert_not_called()
 
 
 def test_main_bounce_includes_result_json(monkeypatch, main_argv, tmp_path):
@@ -1229,9 +1253,10 @@ def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv, tmp_path):
         lock_file.write_text(json.dumps({"pid": 999999999}), encoding="utf-8")
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1243,6 +1268,7 @@ def test_main_lock_left_for_successor_monitor(monkeypatch, main_argv, tmp_path):
 
     assert lock_file.exists()
     assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == 999999999
+    bounce.assert_not_called()
 
 
 # --- Environment variable setup tests ---------------------------------
@@ -1260,8 +1286,8 @@ def test_spawn_path_is_joined_with_the_separator_handed_in():
     assert mod.prepend_to_path(windows_path, "C:\\repo\\.venv\\bin", sep=";") == (
         "C:\\repo\\.venv\\bin;C:\\Windows;C:\\Tools"
     )
-    assert mod.prepend_to_path("/usr/bin", "/repo/.venv/bin", sep=":") == "/repo/.venv/bin:/usr/bin"
-    assert mod.prepend_to_path("", "/repo/.venv/bin", sep=":") == "/repo/.venv/bin"
+    assert mod.prepend_to_path("usr_bin", "venv_bin", sep=":") == "venv_bin:usr_bin"
+    assert mod.prepend_to_path("", "venv_bin", sep=":") == "venv_bin"
 
 
 def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
@@ -1274,9 +1300,10 @@ def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
         captured_env.update(env)
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
 
     fake_repo = tmp_path / "repo"
@@ -1294,6 +1321,7 @@ def test_env_vars_set_correctly(monkeypatch, main_argv, tmp_path):
     with pytest.raises(SystemExit):
         main()
 
+    bounce.assert_not_called()
     assert captured_env["AIPASS_SPAWNED"] == "1"
     assert captured_env["AIPASS_SESSION_TYPE"] == "dispatched"
     assert captured_env["AIPASS_BRANCH_NAME"] == "test_branch"
@@ -1328,9 +1356,10 @@ def test_auto_compact_window_pinned_to_350k(monkeypatch, main_argv, tmp_path):
         captured_env.update(env)
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1344,6 +1373,7 @@ def test_auto_compact_window_pinned_to_350k(monkeypatch, main_argv, tmp_path):
         main()
 
     assert captured_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "350000"
+    bounce.assert_not_called()
 
 
 # === Additional tests (added 2026-04-03) ===================================
@@ -1376,9 +1406,10 @@ def test_main_max_turns_detected(monkeypatch, main_argv, tmp_path):
         Path(stdout_log_path).write_text('{"stop_reason":"max_turns"}', encoding="utf-8")
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1398,6 +1429,7 @@ def test_main_max_turns_detected(monkeypatch, main_argv, tmp_path):
     mock_notify.assert_called_once()
     title = mock_notify.call_args[0][0]
     assert "MAX TURNS HIT" in title
+    bounce.assert_not_called()
 
 
 # --- Log rotation tests (named per spec) -----------------------------------
@@ -1427,9 +1459,10 @@ def test_stderr_rotation(tmp_path, monkeypatch):
         "claude",
     ]
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1442,6 +1475,7 @@ def test_stderr_rotation(tmp_path, monkeypatch):
     rotated = tmp_path / "stderr.log.1"
     assert rotated.exists()
     assert rotated.stat().st_size >= 520_000
+    bounce.assert_not_called()
 
 
 # Retired under compass 443 (2026-09-27), each a line-for-line copy of its survivor:
@@ -1464,9 +1498,10 @@ def test_env_vars_setup(monkeypatch, main_argv, tmp_path):
         captured_env.update(env)
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
 
     fake_repo = tmp_path / "repo"
@@ -1485,6 +1520,7 @@ def test_env_vars_setup(monkeypatch, main_argv, tmp_path):
     with pytest.raises(SystemExit):
         main()
 
+    bounce.assert_not_called()
     assert captured_env["AIPASS_SPAWNED"] == "1"
     assert captured_env["AIPASS_SESSION_TYPE"] == "dispatched"
     assert captured_env["AIPASS_BRANCH_NAME"] == "test_branch"
@@ -1642,7 +1678,8 @@ class TestFlagOffOldPath:
 
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1655,6 +1692,7 @@ class TestFlagOffOldPath:
         assert exc_info.value.code == 0
         assert len(captured_cmds) == 1
         assert captured_cmds[0] == ["claude", "-c", "--model", "opus"]
+        bounce.assert_not_called()
 
     def test_flag_off_wrap_never_called(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
@@ -1670,7 +1708,8 @@ class TestFlagOffOldPath:
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_wrap_for_sandbox", tracking_wrap)
         monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1681,6 +1720,7 @@ class TestFlagOffOldPath:
             main()
 
         assert wrap_calls == []
+        bounce.assert_not_called()
 
 
 class TestFlagOnSandboxPath:
@@ -1698,7 +1738,8 @@ class TestFlagOnSandboxPath:
 
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1721,6 +1762,7 @@ class TestFlagOnSandboxPath:
         assert captured_cmds[0][0] == "/bin/bash"
         assert captured_cmds[0][1] == "-c"
         assert "bwrap --sandbox" in captured_cmds[0][2]
+        bounce.assert_not_called()
 
     def test_wrap_calls_building_blocks(self, monkeypatch, tmp_path):
         call_log = []
@@ -1774,7 +1816,8 @@ class TestBrokenSandboxFailsLoud:
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
         monkeypatch.setattr(mod, "_wrap_for_sandbox", broken_wrap)
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1786,6 +1829,8 @@ class TestBrokenSandboxFailsLoud:
 
         assert run_calls == []
         assert exc_info.value.code != 0
+        # An aborted spawn still tells the sender, once
+        bounce.assert_called_once()
 
     def test_sandbox_failure_sends_bounce(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
@@ -1837,7 +1882,8 @@ class TestBrokenSandboxFailsLoud:
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
         monkeypatch.setattr(mod, "_wrap_for_sandbox", counting_broken_wrap)
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1849,6 +1895,7 @@ class TestBrokenSandboxFailsLoud:
 
         assert wrap_calls[0] == 1
         assert run_calls == []
+        bounce.assert_called_once()
 
 
 # --- Broker-fd handshake tests (Phase 6b FPLAN-0250) -------------------------
@@ -1870,7 +1917,8 @@ class TestFlagOffNoBroker:
         monkeypatch.setattr(mod, "_connect_broker", tracking_connect)
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1882,6 +1930,7 @@ class TestFlagOffNoBroker:
 
         assert exc_info.value.code == 0
         assert connect_calls == []
+        bounce.assert_not_called()
 
     def test_flag_off_no_broker_fd_in_env(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
@@ -1895,7 +1944,8 @@ class TestFlagOffNoBroker:
 
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", capture_run)
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1906,6 +1956,7 @@ class TestFlagOffNoBroker:
             main()
 
         assert "AIPASS_BROKER_FD" not in captured_env
+        bounce.assert_not_called()
 
 
 class TestBrokerDownFailsLoud:
@@ -1933,7 +1984,8 @@ class TestBrokerDownFailsLoud:
             "_connect_broker",
             MagicMock(side_effect=OSError("broker socket not found")),
         )
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1945,6 +1997,8 @@ class TestBrokerDownFailsLoud:
 
         assert run_calls == []
         assert exc_info.value.code != 0
+        # An aborted spawn still tells the sender, once
+        bounce.assert_called_once()
 
     def test_broker_bad_hmac_aborts(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
@@ -1968,7 +2022,8 @@ class TestBrokerDownFailsLoud:
             "_connect_broker",
             MagicMock(side_effect=RuntimeError("Broker identify failed: bad HMAC")),
         )
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -1980,6 +2035,8 @@ class TestBrokerDownFailsLoud:
 
         assert run_calls == []
         assert exc_info.value.code != 0
+        # An aborted spawn still tells the sender, once
+        bounce.assert_called_once()
 
     def test_broker_failure_sends_bounce(self, monkeypatch, main_argv, tmp_path):
         argv, lock_file, stderr_log = main_argv
@@ -2037,7 +2094,8 @@ class TestBrokerFdHandshake:
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(mod, "_connect_broker", MagicMock(return_value=mock_sock))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -2050,6 +2108,7 @@ class TestBrokerFdHandshake:
         assert exc_info.value.code == 0
         assert captured_env.get("AIPASS_BROKER_FD") == "42"
         assert captured_pass_fds == [(42,)]
+        bounce.assert_not_called()
         mock_sock.close.assert_called_once()
 
     def test_parent_closes_socket_after_spawn(self, monkeypatch, main_argv, tmp_path):
@@ -2067,7 +2126,8 @@ class TestBrokerFdHandshake:
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(mod, "_connect_broker", MagicMock(return_value=mock_sock))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -2078,6 +2138,7 @@ class TestBrokerFdHandshake:
             main()
 
         mock_sock.close.assert_called_once()
+        bounce.assert_not_called()
 
     def test_broker_fd_cleaned_from_env_after_spawn(self, monkeypatch, main_argv, tmp_path):
         """After spawn+close, AIPASS_BROKER_FD removed from spawn_env."""
@@ -2101,7 +2162,8 @@ class TestBrokerFdHandshake:
             lambda cmd, bp: ["/bin/bash", "-c", "bwrap " + " ".join(cmd)],
         )
         monkeypatch.setattr(mod, "_connect_broker", MagicMock(return_value=mock_sock))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        bounce = MagicMock()
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
@@ -2113,6 +2175,7 @@ class TestBrokerFdHandshake:
 
         # During the run, env had the FD
         assert env_snapshots[0]["AIPASS_BROKER_FD"] == "10"
+        bounce.assert_not_called()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="AF_UNIX broker daemon is Linux-only")
@@ -2230,32 +2293,45 @@ class TestWakeSender:
     """_wake_sender guards and wake-back dispatch."""
 
     def test_skips_empty_sender(self, monkeypatch, tmp_path):
-        """Empty sender returns skipped_sender."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """Empty sender returns skipped_sender and logs why."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         result = _wake_sender("", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "skipped_sender"
+        log.info.assert_called_once_with("[monitor] Wake-back skipped — no sender")
 
     def test_skips_whitespace_sender(self, monkeypatch, tmp_path):
-        """Whitespace-only sender returns skipped_sender."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """Whitespace-only sender returns skipped_sender and logs why."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         result = _wake_sender("   ", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "skipped_sender"
+        log.info.assert_called_once_with("[monitor] Wake-back skipped — no sender")
 
     def test_skips_self_wake(self, monkeypatch, tmp_path):
-        """Sender equal to completed agent returns skipped_self."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """Sender equal to completed agent returns skipped_self and names the sender."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         result = _wake_sender("@trigger", "@trigger", 0, str(tmp_path / "fake.lock"))
         assert result == "skipped_self"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back skipped — sender %s is the completed agent (self-wake)", "@trigger"
+        )
 
     def test_skips_self_wake_case_insensitive(self, monkeypatch, tmp_path):
-        """Self-wake guard is case-insensitive."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """Self-wake guard is case-insensitive; the log keeps the sender as written."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         result = _wake_sender("Trigger", "@TRIGGER", 0, str(tmp_path / "fake.lock"))
         assert result == "skipped_self"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back skipped — sender %s is the completed agent (self-wake)", "Trigger"
+        )
 
     def test_wake_back_carries_empty_sender(self, monkeypatch, tmp_path):
         """Wake-back session carries empty sender to terminate the chain."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
         mock_status = MagicMock()
         mock_status.summary = "ok"
@@ -2269,10 +2345,14 @@ class TestWakeSender:
         assert mock_wake.call_args.args == ("@prax",)
         assert kwargs["auto"] is True
         assert kwargs["sender"] == ""
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@trigger", 0
+        )
 
     def test_any_citizen_reaches_wake_branch(self, monkeypatch, tmp_path):
         """Any citizen sender reaches wake_branch."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
         mock_status = MagicMock()
         mock_status.summary = "ok"
@@ -2284,24 +2364,36 @@ class TestWakeSender:
         result = _wake_sender("@prax", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "success"
         mock_wake.assert_called_once()
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@target", 0
+        )
 
     def test_depth_cap_blocks(self, monkeypatch, tmp_path):
-        """AIPASS_WAKE_DEPTH >= MAX_WAKE_DEPTH returns blocked_depth."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """AIPASS_WAKE_DEPTH >= MAX_WAKE_DEPTH returns blocked_depth and warns with both numbers."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.setenv("AIPASS_WAKE_DEPTH", str(MAX_WAKE_DEPTH))
         result = _wake_sender("@prax", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "blocked_depth"
+        log.warning.assert_called_once_with(
+            "[monitor] Wake-back skipped — depth %d >= max %d", MAX_WAKE_DEPTH, MAX_WAKE_DEPTH
+        )
 
     def test_depth_cap_over_max_blocks(self, monkeypatch, tmp_path):
-        """Depth above max also blocks."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """Depth above max also blocks, and the warning carries the depth read."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.setenv("AIPASS_WAKE_DEPTH", str(MAX_WAKE_DEPTH + 5))
         result = _wake_sender("@prax", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "blocked_depth"
+        log.warning.assert_called_once_with(
+            "[monitor] Wake-back skipped — depth %d >= max %d", MAX_WAKE_DEPTH + 5, MAX_WAKE_DEPTH
+        )
 
     def test_success_on_wake(self, monkeypatch, tmp_path):
         """Successful wake_branch call returns success."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
 
         mock_status = MagicMock()
@@ -2318,12 +2410,16 @@ class TestWakeSender:
         assert mock_wake.call_args.args == ("@trigger",)
         assert kwargs["auto"] is True
         assert kwargs["sender"] == ""
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@trigger", "@target", 0
+        )
 
     def test_wake_back_message_names_completed_target(self, monkeypatch, tmp_path):
         """Wake-back custom_message names the completed target and exit code,
         not the generic mail-check prompt — the woken lead was told nothing
         about which target finished (@daemon, 077cd1cf)."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
 
         mock_status = MagicMock()
@@ -2338,10 +2434,14 @@ class TestWakeSender:
         _, kwargs = mock_wake.call_args
         assert "@target" in kwargs["custom_message"]
         assert "1" in kwargs["custom_message"]
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@target", 1
+        )
 
     def test_blocked_locked_on_lock_failure(self, monkeypatch, tmp_path):
         """wake_branch failing with lock-related message returns blocked_locked."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
 
         mock_status = MagicMock()
@@ -2354,10 +2454,14 @@ class TestWakeSender:
 
         result = _wake_sender("@prax", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "blocked_locked"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back blocked — sender %s has active lock: %s", "@prax", "lock: Active agent (PID 1234)"
+        )
 
     def test_blocked_occupied_on_interactive(self, monkeypatch, tmp_path):
         """wake_branch failing with occupancy message returns blocked_occupied."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
 
         mock_status = MagicMock()
@@ -2370,23 +2474,32 @@ class TestWakeSender:
 
         result = _wake_sender("@trigger", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "blocked_occupied"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back blocked — sender %s has interactive session: %s",
+            "@trigger",
+            "blocked: Cannot spawn — interactive session running",
+        )
 
     def test_failed_on_exception(self, monkeypatch, tmp_path):
-        """Exception during wake returns failed."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """Exception during wake returns failed and warns with the error."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
+        boom = RuntimeError("broken")
 
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
-            MagicMock(side_effect=RuntimeError("broken")),
+            MagicMock(side_effect=boom),
         )
 
         result = _wake_sender("@prax", "@target", 0, str(tmp_path / "fake.lock"))
         assert result == "failed"
+        log.warning.assert_called_once_with("[monitor] Wake-back failed for %s: %s", "@prax", boom)
 
     def test_depth_incremented_before_wake(self, monkeypatch, tmp_path):
         """AIPASS_WAKE_DEPTH is incremented before calling wake_branch."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.setenv("AIPASS_WAKE_DEPTH", "1")
 
         captured_depth = []
@@ -2404,10 +2517,14 @@ class TestWakeSender:
 
         _wake_sender("@trigger", "@target", 0, str(tmp_path / "fake.lock"))
         assert captured_depth == ["2"]
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@trigger", "@target", 0
+        )
 
     def test_wake_called_on_failure_exit(self, monkeypatch, tmp_path):
         """Wake fires on non-zero exit code too."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         monkeypatch.delenv("AIPASS_WAKE_DEPTH", raising=False)
 
         mock_status = MagicMock()
@@ -2421,6 +2538,9 @@ class TestWakeSender:
         result = _wake_sender("@prax", "@target", 1, str(tmp_path / "fake.lock"))
         assert result == "success"
         mock_wake.assert_called_once()
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@target", 1
+        )
 
 
 class TestLogWakeResult:
@@ -2494,12 +2614,14 @@ class TestWakeBackIntegration:
             wake_calls.append((sender, branch_email, exit_code))
             return "success"
 
+        bounce = MagicMock()
+        log_result = MagicMock()
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(mod, "_wake_sender", track_wake)
-        monkeypatch.setattr(mod, "_log_wake_result", MagicMock())
+        monkeypatch.setattr(mod, "_log_wake_result", log_result)
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.paths.find_repo_root",
             MagicMock(return_value=tmp_path / "repo"),
@@ -2511,6 +2633,8 @@ class TestWakeBackIntegration:
         assert exc_info.value.code == 0
         assert len(wake_calls) == 1
         assert wake_calls[0] == ("@sender", "@test_branch", 0)
+        bounce.assert_not_called()
+        log_result.assert_called_once_with("@test_branch", "@sender", 0, "success", str(lock_file))
 
     def test_wake_called_on_failure(self, monkeypatch, main_argv, tmp_path):
         """_wake_sender called after all attempts fail (in addition to bounce)."""
@@ -2528,7 +2652,8 @@ class TestWakeBackIntegration:
         monkeypatch.setattr(mod, "_send_bounce", mock_bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(mod, "_wake_sender", track_wake)
-        monkeypatch.setattr(mod, "_log_wake_result", MagicMock())
+        log_result = MagicMock()
+        monkeypatch.setattr(mod, "_log_wake_result", log_result)
         monkeypatch.setattr(
             mod,
             "time",
@@ -2545,16 +2670,18 @@ class TestWakeBackIntegration:
         mock_bounce.assert_called_once()
         assert len(wake_calls) == 1
         assert wake_calls[0][2] != 0
+        log_result.assert_called_once_with("@test_branch", "@sender", wake_calls[0][2], "success", str(lock_file))
 
     def test_log_wake_result_called(self, monkeypatch, main_argv, tmp_path):
         """_log_wake_result called with wake result after main completes."""
         argv, lock_file, stderr_log = main_argv
 
         log_calls = []
+        bounce = MagicMock()
 
         monkeypatch.setattr("sys.argv", argv)
         monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(return_value=(0, False)))
-        monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+        monkeypatch.setattr(mod, "_send_bounce", bounce)
         monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
         monkeypatch.setattr(mod, "_wake_sender", MagicMock(return_value="success"))
         monkeypatch.setattr(mod, "_log_wake_result", lambda *a: log_calls.append(a))
@@ -2572,6 +2699,7 @@ class TestWakeBackIntegration:
         assert sender == "@sender"
         assert exit_code == 0
         assert result == "success"
+        bounce.assert_not_called()
 
 
 # --- Fix 1: per-attempt stdout preservation ---------------------------
@@ -2613,9 +2741,10 @@ def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
         Path(stdout_path).write_text(f'{{"result": "attempt-{calls["n"]}-failure"}}', encoding="utf-8")
         return (1, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
     monkeypatch.setattr(
@@ -2630,6 +2759,9 @@ def test_stdout_preserved_across_retries(monkeypatch, main_argv, tmp_path):
     assert "attempt-2-failure" in (logs_dir / "dispatch_stdout.attempt-2.log").read_text(encoding="utf-8")
     # Final (3rd) attempt's stdout is left in place, unrotated, for post-processing
     assert "attempt-3-failure" in (logs_dir / "dispatch_stdout.log").read_text(encoding="utf-8")
+    # The bounce names the last attempt's result, read from the unrotated log
+    bounce.assert_called_once()
+    assert "attempt-3-failure" in bounce.call_args.args[1]
 
 
 # --- Fix 2: per-attempt exit codes in the branch-local stderr log -----
@@ -2639,9 +2771,10 @@ def test_per_attempt_exit_code_written_to_stderr_log(monkeypatch, main_argv, tmp
     """Each attempt's exit code lands in dispatch_stderr.log itself, not just prax."""
     argv, lock_file, stderr_log = main_argv
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(1, False), (0, False)]))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
     monkeypatch.setattr(
@@ -2655,15 +2788,17 @@ def test_per_attempt_exit_code_written_to_stderr_log(monkeypatch, main_argv, tmp
     content = Path(stderr_log).read_text(encoding="utf-8")
     assert "Attempt 1/3 exited: code=1" in content
     assert "Attempt 2/3 exited: code=0" in content
+    bounce.assert_not_called()
 
 
 def test_per_attempt_startup_timeout_noted_in_stderr_log(monkeypatch, main_argv, tmp_path):
     """A startup-timeout attempt is distinguished from a plain exit code in the log."""
     argv, lock_file, stderr_log = main_argv
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", MagicMock(side_effect=[(-3, True), (0, False)]))
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(mod, "time", MagicMock(time=time.time, strftime=time.strftime, sleep=MagicMock()))
     monkeypatch.setattr(
@@ -2676,6 +2811,7 @@ def test_per_attempt_startup_timeout_noted_in_stderr_log(monkeypatch, main_argv,
 
     content = Path(stderr_log).read_text(encoding="utf-8")
     assert "Attempt 1/3 exited: code=-3 (startup timeout)" in content
+    bounce.assert_not_called()
 
 
 # --- Fix 3: parsed stdout result JSON reaches the bounce reason -------
@@ -2785,9 +2921,10 @@ def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
         lock_file.write_text(json.dumps({"pid": successor_pid}), encoding="utf-8")
         return (0, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(
         "aipass.ai_mail.apps.handlers.paths.find_repo_root",
         MagicMock(return_value=tmp_path / "repo"),
@@ -2798,6 +2935,7 @@ def test_main_does_not_steal_successor_lock(monkeypatch, main_argv, tmp_path):
 
     assert lock_file.exists()
     assert json.loads(lock_file.read_text(encoding="utf-8"))["pid"] == successor_pid
+    bounce.assert_not_called()
 
 
 # --- Fix 5: orphaned background tasks are not a silent success --------
@@ -2916,13 +3054,17 @@ class TestWakeBackManagerHonesty:
         manager is no longer merely skipped, it is mailed. "Skipped" was the
         honest tag for a silent drop and is the wrong word for a delivery.
         """
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
         monkeypatch.setattr(
             mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
         )
         result = _wake_sender("@devpulse", "@ai_mail", 0, str(tmp_path / "fake.lock"))
         assert result == "mailed_manager"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back mailed to manager %s (%s exit %d)", "@devpulse", "@ai_mail", 0
+        )
 
     def test_manager_wake_back_never_claims_woken(self, monkeypatch, tmp_path):
         """No log line may assert the manager was woken — it says MAILED instead."""
@@ -2941,23 +3083,31 @@ class TestWakeBackManagerHonesty:
 
     def test_daemon_bypassed_manager_still_reports_success(self, monkeypatch, tmp_path):
         """The @daemon self-wake exception records manager as ok — that IS a real wake."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         status = DispatchStatus()
         status.ok("manager", "@devpulse manager gate bypassed — daemon-scheduled self-wake")
         status.ok("spawn", "agent started")
         self._patch_wake(monkeypatch, status, True)
         result = _wake_sender("@devpulse", "@ai_mail", 0, str(tmp_path / "fake.lock"))
         assert result == "success"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@devpulse", "@ai_mail", 0
+        )
 
     def test_builder_sender_unaffected(self, monkeypatch, tmp_path):
         """A normal citizen has no manager step and still reports success."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         status = DispatchStatus()
         status.ok("resolve", "@prax → /repo/src/aipass/prax")
         status.ok("spawn", "agent started")
         self._patch_wake(monkeypatch, status, True)
         result = _wake_sender("@prax", "@ai_mail", 0, str(tmp_path / "fake.lock"))
         assert result == "success"
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@ai_mail", 0
+        )
 
     def test_manager_sender_is_mailed_not_silently_dropped(self, monkeypatch, tmp_path):
         """P0: a manager was TOLD it would be woken and then silently was not.
@@ -2969,7 +3119,8 @@ class TestWakeBackManagerHonesty:
         skipped_manager lines in canary's dispatch_wake.log, and @devpulse confirmed
         it live twice tonight (@ai_mail and @drone back to back).
         """
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
         sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
         monkeypatch.setattr(mod.subprocess, "run", sent)
@@ -2981,12 +3132,14 @@ class TestWakeBackManagerHonesty:
         argv = sent.call_args.args[0]
         assert argv[:3] == ["drone", "@ai_mail", "send"]
         assert argv[3] == "@devpulse"
+        log.warning.assert_not_called()
 
     def test_manager_mail_names_target_and_exit_code(self, monkeypatch, tmp_path):
         """The mail must carry what the dropped wake-back carried: WHICH target
         finished and how. A manager cannot verify or hand off the next phase
         without it (@daemon, 077cd1cf)."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
         sent = MagicMock(return_value=MagicMock(returncode=0, stdout="", stderr=""))
         monkeypatch.setattr(mod.subprocess, "run", sent)
@@ -2996,11 +3149,15 @@ class TestWakeBackManagerHonesty:
         body = " ".join(sent.call_args.args[0][4:])
         assert "@ai_mail" in body
         assert "3" in body
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back mailed to manager %s (%s exit %d)", "@devpulse", "@ai_mail", 3
+        )
 
     def test_manager_mail_failure_is_not_reported_as_delivered(self, monkeypatch, tmp_path):
         """If the send fails the manager still learns nothing — that must not wear
         the same tag as a delivered mail. Same lesson as the gate's True."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         self._patch_wake(monkeypatch, self._manager_gate_status(), True)
         monkeypatch.setattr(
             mod.subprocess, "run", MagicMock(return_value=MagicMock(returncode=1, stdout="", stderr="boom"))
@@ -3008,11 +3165,15 @@ class TestWakeBackManagerHonesty:
 
         result = _wake_sender("@devpulse", "@ai_mail", 0, str(tmp_path / "fake.lock"))
         assert result == "failed_manager_mail"
+        log.warning.assert_called_once_with(
+            "[monitor] Wake-back mail to manager %s FAILED (exit %d): %s", "@devpulse", 1, "boom"
+        )
 
     def test_non_manager_wake_back_sends_no_mail(self, monkeypatch, tmp_path):
         """An ordinary citizen is woken, not mailed. The mail exists only because
         the wake cannot happen — adding it everywhere would double every wake-back."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         status = DispatchStatus()
         status.ok("resolve", "@prax → /repo/src/aipass/prax")
         status.ok("spawn", "agent started")
@@ -3023,10 +3184,14 @@ class TestWakeBackManagerHonesty:
         result = _wake_sender("@prax", "@ai_mail", 0, str(tmp_path / "fake.lock"))
         assert result == "success"
         assert not sent.called
+        log.info.assert_called_once_with(
+            "[monitor] Wake-back: %s woken after %s completed (exit %d)", "@prax", "@ai_mail", 0
+        )
 
     def test_skipped_manager_reaches_the_wake_log(self, monkeypatch, tmp_path):
-        """The honest tag is what lands in dispatch_wake.log."""
-        monkeypatch.setattr(mod, "logger", MagicMock())
+        """The honest tag is what lands in dispatch_wake.log, and a good write logs no failure."""
+        log = MagicMock()
+        monkeypatch.setattr(mod, "logger", log)
         lock_file = tmp_path / ".ai_mail.local" / ".dispatch.lock"
         lock_file.parent.mkdir(parents=True)
         lock_file.write_text("{}", encoding="utf-8")
@@ -3035,6 +3200,7 @@ class TestWakeBackManagerHonesty:
 
         written = (tmp_path / "logs" / "dispatch_wake.log").read_text(encoding="utf-8")
         assert "wake_result=skipped_manager" in written
+        log.info.assert_not_called()
         assert "sender=@devpulse" in written
 
 
@@ -3595,9 +3761,10 @@ def test_main_third_attempt_is_fresh_for_a_resumed_dispatch(monkeypatch, main_ar
         calls.append(list(cmd))
         return (1, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", track_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         mod,
@@ -3616,6 +3783,8 @@ def test_main_third_attempt_is_fresh_for_a_resumed_dispatch(monkeypatch, main_ar
     assert "--resume" in calls[0] and "--resume" in calls[1]
     assert "--resume" not in calls[2]
     assert "--session-id" in calls[2]
+    bounce.assert_called_once()
+    assert bounce.call_args.args[0] == "@test_branch"
 
 
 def _run_main_capturing_pointer(monkeypatch, argv, landed_session, tmp_path):
@@ -3678,9 +3847,10 @@ def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, poin
         Path(stdout_log).write_text(json.dumps({"session_id": "bad-session"}), encoding="utf-8")
         return (1, False)
 
+    bounce = MagicMock()
     monkeypatch.setattr("sys.argv", argv)
     monkeypatch.setattr(mod, "_run_with_startup_check", fake_run)
-    monkeypatch.setattr(mod, "_send_bounce", MagicMock())
+    monkeypatch.setattr(mod, "_send_bounce", bounce)
     monkeypatch.setattr(mod, "_check_rate_limited", MagicMock(return_value=False))
     monkeypatch.setattr(
         mod,
@@ -3702,3 +3872,5 @@ def test_main_does_not_reconcile_after_a_failed_run(monkeypatch, main_argv, poin
     assert pointer is not None
     assert pointer["session_id"] != "bad-session", pointer
     assert pointer["set_by"] == "monitor-retry-fresh", pointer
+    bounce.assert_called_once()
+    assert bounce.call_args.args[0] == "@test_branch"

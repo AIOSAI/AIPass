@@ -3,7 +3,7 @@
 # Description: Tests for FPLAN-0190 Task B — manual wake blocklist
 # Version: 1.0.1
 # Created: 2026-04-20
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/dispatch/wake.py -- manual wake blocklist (FPLAN-0190 Task B)."""
@@ -76,7 +76,6 @@ class TestOrchestrateWakeBlocklist:
                 "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
                 return_value=wake_return,
             ),
-            patch("aipass.ai_mail.apps.modules.dispatch.console"),
             patch("aipass.ai_mail.apps.modules.dispatch.error") as mock_error,
         ):
             result = dispatch_mod._orchestrate_wake(args)
@@ -88,12 +87,17 @@ class TestOrchestrateWakeBlocklist:
         assert result is True
 
     def test_blocked_calls_error(self):
-        """Blocked wake prints a directive error mentioning 'protected' and 'dispatch'."""
+        """Blocked wake prints a directive error naming the target and the dispatch route.
+
+        The whole message is pinned, so the target and the command it hands back are
+        read in place. Killed by the mutant that drops the target from the dispatch
+        command (leg 5).
+        """
         result, mock_error = self._call_orchestrate_wake(["@devpulse"])
-        mock_error.assert_called_once()
-        msg = mock_error.call_args[0][0]
-        assert "protected" in msg
-        assert "dispatch" in msg
+        mock_error.assert_called_once_with(
+            "target @devpulse is protected from manual wake. "
+            'Use \'drone @ai_mail dispatch @devpulse "Subject" "Body"\' to send work instead.'
+        )
 
     def test_allowed_target_does_not_error(self):
         """Non-blocked target proceeds without an error message."""

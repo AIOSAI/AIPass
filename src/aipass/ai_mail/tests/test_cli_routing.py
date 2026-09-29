@@ -3,7 +3,7 @@
 # Description: Tests for CLI routing and help display
 # Version: 1.0.1
 # Created: 2026-03-27
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/ai_mail.py's CLI routing: print_help, print_introspection, route_command, main."""
@@ -17,7 +17,6 @@ import json
 import sys
 
 import pytest
-from io import StringIO
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -92,12 +91,12 @@ def _caller_stands_in_a_branch(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _mock_infrastructure(monkeypatch):
-    """Mock console output and logger to prevent real I/O."""
-    mock_console = MagicMock()
-    monkeypatch.setattr(ai_mail_mod, "console", mock_console)
+    """Replace error() and the logger, so no failure flag or live log is written.
+
+    The console stays real: its output goes to stdout, where capsys reads it.
+    """
     monkeypatch.setattr(ai_mail_mod, "error", MagicMock())
     monkeypatch.setattr(ai_mail_mod, "logger", MagicMock())
-    yield mock_console
 
 
 @pytest.fixture
@@ -121,32 +120,37 @@ def fake_module_handled():
 # ---- print_help tests -----------------------------------------------
 
 
-def test_print_help_outputs(_mock_infrastructure):
+def test_print_help_outputs(capsys: pytest.CaptureFixture[str]):
     """print_help names every command it claims to document.
 
-    This asked for ``capsys`` and never read it, and then had no oracle at all —
-    two flags on one unit. Both come from the same fact: this file's autouse
-    ``_mock_infrastructure`` replaces ``console`` with a MagicMock, so nothing
-    reaches stdout and capsys is structurally blind here. The honest oracle is
-    the mock's own call args, which is what the fixture yields it for.
+    The real console prints and capsys reads stdout, so the oracle is what a
+    user reads: each verb opens its own rendered line, markup gone. Until leg 5
+    the autouse fixture put a MagicMock where the product looks for its console
+    and this read the mock's call args, which pass on markup Rich cannot render.
 
     The verbs are read off print_help's own COMMANDS block, so a command that is
     implemented and undocumented still passes — this pins the help against
     itself rotting, not against the router.
+
+    It also carries the claim of the retired test_output_capture_with_stringio,
+    "Verify StringIO can capture command output for testing": command output is
+    captured here, at the console the product prints through. That test wrote to
+    a StringIO and read it back, reaching no aipass code; it was retired in
+    ai_mail's leg 5 as a test of the standard library.
     """
     print_help()
 
-    printed = " ".join(str(call.args[0]) for call in _mock_infrastructure.print.call_args_list if call.args)
+    lines = capsys.readouterr().out.splitlines()
 
-    assert "COMMANDS:" in printed
+    assert "COMMANDS:" in lines
     for verb in ("dispatch", "email", "inbox", "view", "reply", "close", "sent", "contacts"):
-        assert f"[cyan]{verb}[/cyan]" in printed, f"{verb} is missing from the help output"
+        assert any(line.startswith(f"  {verb} ") for line in lines), f"{verb} is missing from the help output"
 
 
 # ---- print_introspection tests ---------------------------------------
 
 
-def test_print_introspection_runs(_mock_infrastructure):
+def test_print_introspection_runs(capsys: pytest.CaptureFixture[str]):
     """print_introspection reports the count discover_modules actually returned.
 
     Had no oracle: it called the function and let "did not raise" stand in for
@@ -157,9 +161,9 @@ def test_print_introspection_runs(_mock_infrastructure):
     with patch.object(ai_mail_mod, "discover_modules", return_value=[]):
         print_introspection()
 
-    printed = " ".join(str(call.args[0]) for call in _mock_infrastructure.print.call_args_list if call.args)
+    lines = capsys.readouterr().out.splitlines()
 
-    assert "Discovered Modules:[/yellow] 0" in printed, printed
+    assert "Discovered Modules: 0" in lines, lines
 
 
 # ---- discover_modules tests ------------------------------------------
@@ -191,6 +195,7 @@ def test_route_known_command_returns_true(fake_module_handled):
     """Known command routed to module returns True (assert result is True)."""
     result = route_command("email", ["@test", "hi"], [fake_module_handled])
     assert result is True
+    fake_module_handled.handle_command.assert_called_once_with("email", ["@test", "hi"])
 
 
 def test_route_unknown_command_returns_false(fake_module):
@@ -257,16 +262,6 @@ def test_main_version_flag(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["ai_mail", "--version"])
     result = main()
     assert result == 0
-
-
-# ---- Output capture with StringIO -----------------------------------
-
-
-def test_output_capture_with_stringio():
-    """Verify StringIO can capture command output for testing."""
-    buf = StringIO()
-    buf.write("test output")
-    assert "test output" in buf.getvalue()
 
 
 # ---- exit-code honesty ----------------------------------------------

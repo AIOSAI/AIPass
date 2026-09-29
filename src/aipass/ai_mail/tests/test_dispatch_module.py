@@ -140,6 +140,7 @@ class TestHandleCommand:
 
         result = handle_command("dispatch", ["-h"])
         assert result is True
+        assert "COMMANDS" in " ".join(printed)
 
     def test_dispatch_help_word(self, monkeypatch):
         """'dispatch help' prints help and returns True."""
@@ -148,15 +149,17 @@ class TestHandleCommand:
 
         result = handle_command("dispatch", ["help"])
         assert result is True
+        assert "COMMANDS" in " ".join(printed)
 
     def test_dispatch_status_subcommand(self, monkeypatch):
-        """'dispatch status' delegates to _orchestrate_status."""
+        """'dispatch status' delegates to _orchestrate_status, which reads the empty log."""
         monkeypatch.setattr(f"{MOD}.load_dispatch_log", lambda: [])
         printed: list[str] = []
         monkeypatch.setattr(f"{MOD}.console", _mock_console(printed))
 
         result = handle_command("dispatch", ["status"])
         assert result is True
+        assert "No dispatches recorded yet." in " ".join(printed)
 
     def test_dispatch_daemon_subcommand(self, monkeypatch):
         """'dispatch daemon' delegates to _orchestrate_daemon."""
@@ -177,6 +180,7 @@ class TestHandleCommand:
         # No further args -> shows help
         result = handle_command("dispatch", ["wake"])
         assert result is True
+        assert "Usage: dispatch wake @branch" in " ".join(printed)
 
     def test_dispatch_at_target(self, monkeypatch):
         """'dispatch @target Subject Body' routes to _orchestrate_dispatch_send."""
@@ -1155,10 +1159,9 @@ class TestWakeBackPromiseMatchesDelivery:
     actually happen. A manager is never woken — it is mailed."""
 
     def _run(self, monkeypatch, sender_is_manager):
-        printed = []
+        """Stub the wake and the manager verdict; the real console prints to stdout."""
         status = DispatchStatus()
         status.ok("spawn", "agent started")
-        monkeypatch.setattr(dmod, "console", MagicMock(print=lambda m, **k: printed.append(str(m))))
         monkeypatch.setattr(
             "aipass.ai_mail.apps.handlers.dispatch.wake.wake_branch",
             MagicMock(return_value=(status, True)),
@@ -1167,22 +1170,27 @@ class TestWakeBackPromiseMatchesDelivery:
             "aipass.ai_mail.apps.handlers.dispatch.wake.is_manager",
             MagicMock(return_value=sender_is_manager),
         )
-        return printed, dmod
+        return dmod
 
-    def test_manager_sender_is_promised_mail_not_a_wake(self, monkeypatch):
+    def test_manager_sender_is_promised_mail_not_a_wake(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
         """@devpulse was told 'sender will be woken' three times on 2026-08-21
-        and was not woken any of them. Managers get mail; the promise must say mail."""
-        printed, dmod = self._run(monkeypatch, sender_is_manager=True)
+        and was not woken any of them. Managers get mail; the promise must say mail.
+
+        Read from stdout with the wrapped lines joined, so a promise Rich breaks
+        across two lines is still seen whole.
+        """
+        dmod = self._run(monkeypatch, sender_is_manager=True)
         dmod._announce_wake_back("@canary", "@devpulse")
-        line = " ".join(printed).lower()
+        line = " ".join(capsys.readouterr().out.split()).lower()
         assert "mailed" in line
         assert "will be woken" not in line
 
-    def test_ordinary_sender_is_still_promised_a_wake(self, monkeypatch):
-        printed, dmod = self._run(monkeypatch, sender_is_manager=False)
+    def test_ordinary_sender_is_still_promised_a_wake(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
+        """A sender who is not a manager is still promised the wake, read from stdout."""
+        dmod = self._run(monkeypatch, sender_is_manager=False)
         dmod._announce_wake_back("@canary", "@prax")
-        line = " ".join(printed).lower()
-        assert "woken" in line
+        line = " ".join(capsys.readouterr().out.split()).lower()
+        assert "sender will be woken when @canary completes" in line
 
 
 # ===========================================================================
@@ -1209,7 +1217,6 @@ class TestBothVerbsAgreeAtTheManagerGate:
         monkeypatch.setattr(f"{_H_WAKE}.resolve_branch", lambda email, admin=False: (branch, "@mgr"))
         monkeypatch.setattr(f"{_H_WAKE}._clean_zombies", lambda: 0)
         monkeypatch.setattr(f"{_H_WAKE}._check_lock", lambda path: {"pid": 4242, "timestamp": "held"})
-        monkeypatch.setattr(f"{MOD}.console", MagicMock())
         monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
         monkeypatch.delenv("AIPASS_CALLER_CWD", raising=False)
 

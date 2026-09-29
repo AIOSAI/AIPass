@@ -252,8 +252,7 @@ class TestDispatchSendAdminWiring:
 
     @pytest.fixture(autouse=True)
     def _quiet(self, monkeypatch):
-        """Silence module output; tests that read it install their own console."""
-        monkeypatch.setattr(f"{MOD}.console", MagicMock())
+        """Replace error(); the real console prints to stdout, where capsys reads it."""
         monkeypatch.setattr(f"{MOD}.error", lambda msg: None)
 
     def test_verified_admin_threads_admin_true(self, monkeypatch):
@@ -304,13 +303,9 @@ class TestDispatchSendAdminWiring:
 
         verifier.assert_not_called()
 
-    def test_lane_dark_reason_is_reported_to_the_holder(self, monkeypatch):
-        """Pre-ceremony devpulse must SEE why the lane did not open."""
+    def test_lane_dark_reason_is_reported_to_the_holder(self, monkeypatch, capsys: pytest.CaptureFixture[str]):
+        """Pre-ceremony devpulse must SEE why the lane did not open, read from stdout."""
         monkeypatch.setenv("AIPASS_CALLER_BRANCH", "devpulse")
-        printed: list[str] = []
-        console = MagicMock()
-        console.print = lambda msg="", **kw: printed.append(str(msg))
-        monkeypatch.setattr(f"{MOD}.console", console)
 
         calls: list = []
         with _send_patches(
@@ -324,7 +319,8 @@ class TestDispatchSendAdminWiring:
             _orchestrate_dispatch_send(["@target", "Subject", "Body"])
 
         assert calls[0]["admin"] is False
-        assert any("lane dark" in line.lower() for line in printed), printed
+        out = " ".join(capsys.readouterr().out.split())
+        assert "lane dark until ceremony" in out, out
 
     def test_dispatch_survives_a_verifier_that_raises(self, monkeypatch):
         """A privilege path that explodes must not take the mail down with it."""
