@@ -3,7 +3,7 @@
 # Description: Tests for token provenance, revocation time and live/dormant telemetry
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/host/tokens.py, the token store's accountability fields and its lock."""
@@ -713,23 +713,30 @@ class TestTheListingSaysWhatTheStoreNowKnows:
         assert "last used 20" in printed
         assert "never used" not in printed
 
+    @pytest.mark.parametrize(
+        ("stamp", "provenance"),
+        [
+            ("not-a-time", "minted by unknown · last used not-a-time"),
+            (None, "minted by unknown · never used"),
+            ("2026-09-28T05:41:07.123456", "minted by unknown · last used 2026-09-28 05:41"),
+        ],
+        ids=["hand-edited", "never-presented", "presented"],
+    )
     def test_an_unparseable_stamp_is_shown_raw_and_never_as_nothing(
-        self, store: Path, capsys: pytest.CaptureFixture
+        self, store: Path, capsys: pytest.CaptureFixture, stamp: str | None, provenance: str
     ) -> None:
         """
         A stamp that renders as an empty string reads as 'absent'.
 
         Hand-edited stores exist. Showing the odd value is how someone notices;
-        showing nothing is how it stays wrong.
+        showing nothing is how it stays wrong. One rendering per case, so a red
+        names the rendering that broke (api, fleet green leg 4).
         """
-        host_tokens.issue_token("hand-edited", scope="read")
-        host_tokens.issue_token("never-presented", scope="read")
-        host_tokens.issue_token("presented", scope="read")
+        host_tokens.issue_token("one-token", scope="read")
         records = host_tokens.load_tokens()
-        stamps = {"hand-edited": "not-a-time", "never-presented": None, "presented": "2026-09-28T05:41:07.123456"}
         for stored in records:
             stored["minted_by"] = ""
-            stored["last_used"] = stamps[stored["label"]]
+            stored["last_used"] = stamp
         host_tokens.save_tokens(records)
         capsys.readouterr()
 
@@ -737,9 +744,7 @@ class TestTheListingSaysWhatTheStoreNowKnows:
         # provenance line with anything around it. Mutants: the unknown-minter word,
         # 'never used', and the stamp format each changed.
         lines = {line.strip() for line in self._listing(capsys).splitlines()}
-        assert "minted by unknown · last used not-a-time" in lines
-        assert "minted by unknown · never used" in lines
-        assert "minted by unknown · last used 2026-09-28 05:41" in lines
+        assert provenance in lines
 
 
 def test_the_reserved_comment_is_gone(store: Any) -> None:

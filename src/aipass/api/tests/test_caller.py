@@ -3,7 +3,7 @@
 # Description: Tests for OpenRouter caller detection handler
 # Version: 1.0.0
 # Created: 2026-04-03
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py's detect_caller_category()."""
@@ -19,10 +19,6 @@
 # seedgo: no-test-needed(covered) — get_caller_info() and detect_caller_from_stack(), tests/test_caller_detection.py
 # seedgo: no-test-needed(constant) — MODULE_NAME and MODULE_VERSION's display strings
 
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-
-
 from aipass.api.apps.handlers.openrouter.caller import detect_caller_category
 
 
@@ -32,7 +28,11 @@ from aipass.api.apps.handlers.openrouter.caller import detect_caller_category
 
 
 class TestDetectCallerCategory:
-    """Tests for caller.detect_caller_category()."""
+    """Tests for caller.detect_caller_category().
+
+    test_exception_returns_unknown was retired with the try it pinned: it fed a
+    Path whose parts raise, an input no caller can make (api, fleet green leg 4).
+    """
 
     def test_flow_path_returns_flow(self, tmp_path):
         """Path containing 'flow' part should return 'flow'."""
@@ -73,15 +73,3 @@ class TestDetectCallerCategory:
         """Deeply nested path with 'flow' should still return 'flow'."""
         path = tmp_path / "a" / "b" / "c" / "d" / "flow" / "e" / "f" / "g" / "handler.py"
         assert detect_caller_category(path) == "flow"
-
-    @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
-    def test_exception_returns_unknown(self, mock_logger):
-        """If an exception occurs, should return 'unknown' and log error."""
-        bad_path = MagicMock(spec=Path)
-        bad_path.parts = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
-        type(bad_path).parts = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
-
-        result = detect_caller_category(bad_path)
-
-        assert result == "unknown"
-        mock_logger.error.assert_called_once()

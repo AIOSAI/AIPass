@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: caller.py
 # Description: OpenRouter Caller Detection Handler
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2025-11-16
-# Modified: 2025-11-16
+# Modified: 2026-09-29
 # =============================================
 
 """
@@ -92,19 +92,18 @@ def detect_caller_from_stack() -> Tuple[Optional[str], Optional[Path]]:
 
 
 def detect_caller_category(caller_path: Path) -> str:
-    """Categorize caller based on file path."""
-    try:
-        path_parts = caller_path.parts
+    """Categorize caller based on file path.
 
-        if "flow" in path_parts:
-            return "flow"
-        elif "prax" in path_parts:
-            return "prax"
-        else:
-            return "unknown"
+    No try: a Path cannot raise from its parts, so the catch guarded nothing
+    (api, fleet green leg 4).
+    """
+    path_parts = caller_path.parts
 
-    except Exception as e:
-        logger.error(f"Failed to detect category for {caller_path}: {e}")
+    if "flow" in path_parts:
+        return "flow"
+    elif "prax" in path_parts:
+        return "prax"
+    else:
         return "unknown"
 
 

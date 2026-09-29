@@ -3,7 +3,7 @@
 # Description: Shared pytest fixtures for api tests
 # Version: 2.1.0
 # Created: 2026-03-05
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # Category: api/tests
 #
 # CHANGELOG (Max 5 entries):
@@ -184,7 +184,11 @@ def mock_logger() -> MagicMock:
 @pytest.fixture(autouse=True, scope="session")
 def pinned_console_width() -> None:
     """Rich sizes an unpinned console on every print: 80 on POSIX and 79 on Windows
-    under pytest's capture, the terminal's width under -s, COLUMNS when exported."""
+    under pytest's capture, the terminal's width under -s, COLUMNS when exported.
+
+    The row asserts of test_openrouter_client and test_google_client are green
+    because of this pin: at 80 columns Rich wraps or cuts the rows they read
+    whole (api, fleet green leg 4)."""
     for console in (display.CONSOLE, display.err_console):
         console.width = 200
 

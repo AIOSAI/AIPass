@@ -3,7 +3,7 @@
 # Description: The parked directory contributes no tests, and can be proven to
 # Version: 1.0.0
 # Created: 2026-08-19
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for tests/parked/conftest.py, the barrier that keeps the park out of collection."""
@@ -83,6 +83,11 @@ class TestTheParkStaysParked:
         barrier still answers zero — so the guarantee is about the barrier, not
         about today's names. The copy lives under tmp_path: the real park is
         read, never written (api, fleet green leg 3).
+
+        What no test sees now: a setting above tests/parked (an ini, a parent
+        conftest or a flag of the real run) that defeats the barrier, since the
+        copy runs outside the real tree and today's parked names are not
+        test_-named (api, fleet green leg 4).
         """
         park = tmp_path / "parked"
         park.mkdir()

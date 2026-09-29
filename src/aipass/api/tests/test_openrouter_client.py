@@ -3,7 +3,7 @@
 # Description: Tests for OpenRouter client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/openrouter_client.py and create_client in apps/handlers/openrouter/client.py."""
@@ -224,6 +224,29 @@ def test_test_connection_api_failure(mock_header, mock_keys, mock_models, mock_e
     mock_success.assert_not_called()
 
 
+@patch(f"{_MOD}.success")
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
+@patch(f"{_MOD}.header")
+def test_test_connection_an_endpoint_with_no_models_is_a_success(
+    mock_header, mock_keys, mock_models, mock_error, mock_success
+):
+    """An empty model list is an answer: connection successful with 0 models, no error.
+
+    Green from its first run; its proof is the mutant reporting a failure for an
+    empty list (api, fleet green leg 4).
+    """
+    mock_keys.get_api_key.return_value = "FAKE-sk-or-testkey"
+    mock_models.ModelsUnavailable = _MODELS_UNAVAILABLE
+    mock_models.fetch_models_from_api.return_value = []
+
+    openrouter_client.test_connection()
+
+    mock_success.assert_called_once_with("Connection successful — 0 models available")
+    mock_error.assert_not_called()
+
+
 # =============================================
 # list_models
 # =============================================
@@ -374,8 +397,10 @@ def test_check_status_no_key(mock_header, mock_keys, mock_client, capsys):
     openrouter_client.check_status()
 
     out, err = capsys.readouterr()
-    both = out + err
-    assert "API key not configured" in both
+    # cli's warning() writes to stderr: pinned there, whole, and absent from stdout
+    # (api, fleet green leg 4 - either stream used to pass).
+    assert err.splitlines() == ["⚠️  API key not configured"]
+    assert "API key not configured" not in out
     assert "Reason:          OPENROUTER_API_KEY not set" in out
     assert "Key configured" not in out
 
@@ -533,6 +558,29 @@ def test_list_models_fetch_failure(mock_header, mock_keys, mock_models, mock_err
 
     mock_models.fetch_models_from_api.assert_called_once_with("FAKE-sk-or-test")
     mock_error.assert_called_once_with("Failed to fetch models — status 503")
+
+
+@patch(f"{_MOD}.success")
+@patch(f"{_MOD}.error")
+@patch(f"{_MOD}.models", autospec=True)
+@patch(f"{_MOD}.keys", autospec=True)
+@patch(f"{_MOD}.header")
+def test_list_models_an_endpoint_with_no_models_is_found_zero(
+    mock_header, mock_keys, mock_models, mock_error, mock_success
+):
+    """An empty model list is listed as found 0 models, never as a failure.
+
+    Green from its first run; its proof is the mutant reporting a failure for an
+    empty list (api, fleet green leg 4).
+    """
+    mock_keys.get_api_key.return_value = "FAKE-sk-or-test"
+    mock_models.ModelsUnavailable = _MODELS_UNAVAILABLE
+    mock_models.fetch_models_from_api.return_value = []
+
+    openrouter_client.list_models([])
+
+    mock_success.assert_called_once_with("Found 0 models")
+    mock_error.assert_not_called()
 
 
 # =============================================

@@ -3,7 +3,7 @@
 # Description: Tests for caller auto-provisioning handler
 # Version: 1.0.0
 # Created: 2026-03-20
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/openrouter/provision.py, caller auto-provisioning."""
@@ -177,22 +177,48 @@ def test_ensure_caller_config_returns_existing(mock_detect, tmp_path: Path):
 
 
 @patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")
-def test_a_config_that_cannot_be_read_is_never_regenerated_over(mock_detect, tmp_path: Path):
-    """A read error that is not a parse error used to read as 'corrupted, regenerating'.
-    Mutant that reddens it: read_json answering None for every error again (api, fleet green leg 3)."""
-    json_folder = tmp_path / "caller_json"
-    config_path = json_folder / "openrouter_config.json"
-    config_path.mkdir(parents=True)
-    mock_detect.return_value = ("test_caller", json_folder)
-    # The platform names its own error for opening a directory; ask it rather than assume one.
-    with pytest.raises(OSError) as platform:
-        config_path.open(encoding="utf-8")
+def test_a_config_that_cannot_be_read_is_never_regenerated_over(mock_detect, tmp_path: Path, monkeypatch):
+    """A read error that is not a parse error is never answered by regenerating.
 
+    The folder is writable and the config a real file, so a regeneration would
+    succeed here; only the reader fails, through a stand-in raising the error it
+    is handed (api, fleet green leg 4). Mutants that redden it: read_json answering
+    None for every error, and the caller's catch widened to the read error.
+    """
+    json_folder = tmp_path / "caller_json"
+    json_folder.mkdir()
+    config_path = json_folder / "openrouter_config.json"
+    config_path.write_text('{"module_name": "kept"}', encoding="utf-8")
+    mock_detect.return_value = ("test_caller", json_folder)
+    # read_json on a directory raises what the platform raises; ask it rather than assume one.
+    unreadable = tmp_path / "unreadable_dir"
+    unreadable.mkdir()
+    with pytest.raises(OSError) as platform:
+        unreadable.open(encoding="utf-8")
     with pytest.raises(type(platform.value)):
-        read_json(config_path)
+        read_json(unreadable)
+
+    def reader_that_fails(path: Path) -> None:
+        raise OSError("stand-in read error")
+
+    monkeypatch.setattr("aipass.api.apps.handlers.openrouter.provision.read_json", reader_that_fails)
+
     assert ensure_caller_config("test_caller") == {}
-    assert not (json_folder / "openrouter_data.json").exists(), "an unreadable config must not trigger regeneration"
-    assert config_path.is_dir()
+    assert sorted(p.name for p in json_folder.iterdir()) == ["openrouter_config.json"], "nothing was regenerated"
+    assert config_path.read_text(encoding="utf-8") == '{"module_name": "kept"}'
+
+
+def test_read_json_raises_on_a_file_that_does_not_parse(tmp_path: Path):
+    """A parse error raises, never None: None is the absent file's answer only.
+
+    Green from its first run; its proof is the mutant of read_json answering None
+    for a parse error, which the caller's own tests cannot see (api, fleet green leg 4).
+    """
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        read_json(broken)
 
 
 @patch("aipass.api.apps.handlers.openrouter.provision.detect_caller_from_stack")

@@ -3,7 +3,7 @@
 # Description: Tests for the host API read lane — feed cursor, file fence, diff
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/host/feed.py, reads.py and git_reads.py, and their /v1 routes."""
@@ -379,22 +379,33 @@ class TestFeedRobustness:
 
 
 class TestFence:
-    """A remote caller must never choose what gets read."""
+    """A remote caller must never choose what gets read.
+
+    Asked through read_file, the public verb that stands the fence (api, fleet
+    green leg 4). read_file has refusals of its own, so each case pins the
+    message of the gate it aims at, not only the type.
+    """
 
     def test_absolute_path_refused(self, fake_repo: dict) -> None:
         """An absolute name is the exact thing the fence exists to reject."""
-        with pytest.raises(host_reads.ReadRefused):
-            host_reads._fence(fake_repo["branch"], "/etc/passwd")
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "/etc/passwd")
+
+        assert str(exc.value) == "File must be relative to the root, not an absolute path"
 
     def test_parent_traversal_refused(self, fake_repo: dict) -> None:
         """'..' never survives, checked before the filesystem is touched."""
-        with pytest.raises(host_reads.ReadRefused):
-            host_reads._fence(fake_repo["branch"], "../../secret.txt")
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "../../secret.txt")
+
+        assert str(exc.value) == "File name may not contain '..'"
 
     def test_nested_traversal_refused(self, fake_repo: dict) -> None:
         """A '..' buried mid-path is the same attack with better manners."""
-        with pytest.raises(host_reads.ReadRefused):
-            host_reads._fence(fake_repo["branch"], "nested/../../secret.txt")
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "nested/../../secret.txt")
+
+        assert str(exc.value) == "File name may not contain '..'"
 
     def test_symlink_escape_refused(self, fake_repo: dict) -> None:
         """The post-resolution check — the only gate that sees a symlink out."""
@@ -405,25 +416,29 @@ class TestFence:
         link.symlink_to(fake_repo["root"] / "secret.txt")
 
         with pytest.raises(host_reads.ReadRefused) as exc:
-            host_reads._fence(fake_repo["branch"], "escape.txt")
+            host_reads.read_file("demo", "escape.txt")
 
-        assert "outside" in str(exc.value).lower()
+        assert str(exc.value) == "File resolves outside the root"
 
     def test_empty_name_refused(self, fake_repo: dict) -> None:
         """An empty name is a bug, not a directory listing."""
-        with pytest.raises(host_reads.ReadRefused):
-            host_reads._fence(fake_repo["branch"], "   ")
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "   ")
+
+        assert str(exc.value) == "A file name is required"
 
     def test_missing_file_refused(self, fake_repo: dict) -> None:
         """A name that resolves nowhere is refused, not returned empty."""
-        with pytest.raises(host_reads.ReadRefused):
-            host_reads._fence(fake_repo["branch"], "nope.txt")
+        with pytest.raises(host_reads.ReadRefused) as exc:
+            host_reads.read_file("demo", "nope.txt")
+
+        assert str(exc.value) == "No such file: 'nope.txt'"
 
     def test_legitimate_nested_file_accepted(self, fake_repo: dict) -> None:
         """Ordinary reads still work — the fence is not a wall."""
-        resolved = host_reads._fence(fake_repo["branch"], "nested/deep.txt")
+        result = host_reads.read_file("demo", "nested/deep.txt")
 
-        assert resolved.name == "deep.txt"
+        assert result["content"] == "deep"
 
 
 class TestResolveBranchRoot:
@@ -2667,6 +2682,10 @@ class TestPerFileDiff:
         line per pass copied it once per line, so a diff at the size limit took
         85s alone (api, fleet green leg 3). One join per block, whatever its length.
         Mutant that reddens it: a join per line (the quadratic shape with the seam kept).
+        WHAT IT CANNOT SEE: it counts joins, not copies. A block list copied once
+        per line (blocks[-1] = blocks[-1] + [line]) joins once and passes while
+        as quadratic as the string was; with no clock and no threshold nothing
+        here observes that copy (api, fleet green leg 4).
         """
         joins = []
 

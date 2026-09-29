@@ -3,7 +3,7 @@
 # Description: Tests for caller detection internals (uncovered functions)
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/openrouter/caller.py, its internal detection functions."""
@@ -32,6 +32,18 @@ from aipass.api.apps.handlers.openrouter.caller import (
     detect_caller_from_stack,
     get_caller_info,
 )
+
+
+class _PartsWhoseIndexFails(tuple):
+    """Path parts whose index() raises and which hold no branch name.
+
+    Only index() fails, as the fallback tests' docstrings say: the fallback then
+    categorises the same path, and detect_caller_category no longer carries a try
+    for parts that raise, an input no caller can make (api, fleet green leg 4).
+    """
+
+    def index(self, *args: object) -> int:
+        raise ValueError("bad")
 
 
 # =============================================
@@ -67,7 +79,7 @@ class TestDetectFlowCaller:
     def test_exception_returns_fallback(self, _mock_logger: MagicMock) -> None:
         """If parts.index raises, should fall back to _create_fallback_info."""
         bad_path = MagicMock(spec=Path)
-        type(bad_path).parts = property(lambda self: (_ for _ in ()).throw(ValueError("bad")))
+        type(bad_path).parts = property(lambda self: _PartsWhoseIndexFails(("x",)))
         bad_path.stem = "broken"
 
         result = _detect_flow_caller(bad_path)
@@ -106,9 +118,9 @@ class TestDetectPraxCaller:
 
     @patch("aipass.api.apps.handlers.openrouter.caller.logger", autospec=True)
     def test_exception_returns_fallback(self, _mock_logger: MagicMock) -> None:
-        """If an exception occurs, should fall back."""
+        """If parts.index raises, should fall back."""
         bad_path = MagicMock(spec=Path)
-        type(bad_path).parts = property(lambda self: (_ for _ in ()).throw(ValueError("bad")))
+        type(bad_path).parts = property(lambda self: _PartsWhoseIndexFails(("x",)))
         bad_path.stem = "broken"
 
         result = _detect_prax_caller(bad_path)

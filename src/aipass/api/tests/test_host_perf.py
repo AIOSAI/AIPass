@@ -3,7 +3,7 @@
 # Description: Tests for the host API's cost doctrine — threadpool, cache, pin
 # Version: 1.0.0
 # Created: 2026-08-18
-# Modified: 2026-09-27
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/host/server.py's cost doctrine: threadpool routes, the fleet cache, the pump cap."""
@@ -530,8 +530,6 @@ class TestTheSnapshotIsCoalesced:
             return _completed(0, json.dumps(ENVELOPE))
 
         monkeypatch.setattr(host_fleet.subprocess, "run", _run)
-        monkeypatch.setattr(host_fleet, "logger", MagicMock())
-        monkeypatch.setattr(host_fleet, "json_handler", MagicMock())
 
         answers: list = []
 
@@ -570,8 +568,6 @@ class TestTheSnapshotIsCoalesced:
         """
         outcomes = [_completed(2, "", "nope"), _completed(0, json.dumps(ENVELOPE))]
         monkeypatch.setattr(host_fleet.subprocess, "run", lambda *a, **k: outcomes.pop(0))
-        monkeypatch.setattr(host_fleet, "logger", MagicMock())
-        monkeypatch.setattr(host_fleet, "json_handler", MagicMock())
 
         with pytest.raises(host_fleet.FleetUnavailable):
             host_fleet.read_snapshot()
@@ -625,8 +621,6 @@ class TestTheSnapshotIsCoalesced:
             return _completed(0, json.dumps(ENVELOPE))
 
         monkeypatch.setattr(host_fleet.subprocess, "run", _run)
-        monkeypatch.setattr(host_fleet, "logger", MagicMock())
-        monkeypatch.setattr(host_fleet, "json_handler", MagicMock())
 
         host_fleet.read_snapshot()
         host_fleet.end_room("api", "AIPASS")
@@ -714,10 +708,8 @@ class TestTheRegistryIsPinnedAtBoot:
         order: list = []
 
         monkeypatch.setattr(host_server.host_config, "load_config", lambda: {"host": "127.0.0.1", "port": 8787})
-        monkeypatch.setattr(host_server.host_config, "validate_bind", lambda host, port: None)
         monkeypatch.setattr(host_server.host_config, "pin_registry", lambda: order.append("pinned"))
         monkeypatch.setattr(host_server, "create_app", lambda: order.append("app") or MagicMock())
-        monkeypatch.setattr(host_server, "json_handler", MagicMock())
 
         uvicorn = MagicMock()
         uvicorn.run = lambda *args, **kwargs: order.append("served")
@@ -889,16 +881,24 @@ class TestThePumpPoolIsBoundedOutLoud:
         refuses every terminal from then on while pumping precisely none — a
         leak that only ever shows up on the worst day.
         """
+        sized: list = []
+        closed: list = []
         monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
-        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (-1, -1)))
-        monkeypatch.setattr(host_attach, "set_winsize", lambda *a, **k: None)
-        monkeypatch.setattr(host_attach.os, "close", lambda _fd: None)
+        monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (-7, -8)))
+        monkeypatch.setattr(host_attach, "set_winsize", lambda *a: sized.append(a))
+        monkeypatch.setattr(host_attach.os, "close", closed.append)
         monkeypatch.setattr(host_attach.subprocess, "Popen", MagicMock(side_effect=OSError("no")))
 
         with patch.object(host_attach, "logger", MagicMock()):
             with pytest.raises(host_attach.AttachUnavailable):
                 host_attach._spawn_pty(["true"], None, "baud-api")
 
+        # The stand-in descriptors are observed, not discarded (api, fleet green
+        # leg 4): the master was sized, and both ends were handed back. A set,
+        # because the slave is closed in the except AND again in the finally -
+        # a double close reported to devpulse, not pinned here.
+        assert sized == [(-7, host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)]
+        assert set(closed) == {-7, -8}
         # The slot came back: a fresh reservation succeeds where the cap is one.
         host_attach._reserve_session("baud-next")
 

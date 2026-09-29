@@ -3,7 +3,7 @@
 # Description: Tests for bridge contract registry module
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/bridge.py, the contract registry."""
@@ -34,6 +34,24 @@ from aipass.api.apps.modules.bridge import (
     register,
     resolve,
 )
+from aipass.api.apps.modules import bridge as bridge_module
+
+
+def _spy_on_header(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Record the titles bridge hands to header at api's own border, calling the real header.
+
+    The assert reads what api hands over, never cli's private trigger, so a change
+    inside cli does not turn a test of api red (api, fleet green leg 4).
+    """
+    titles: list = []
+    real_header = bridge_module.header
+
+    def recording_header(title: str, *args: Any, **kwargs: Any) -> Any:
+        titles.append(title)
+        return real_header(title, *args, **kwargs)
+
+    monkeypatch.setattr(bridge_module, "header", recording_header)
+    return titles
 
 
 @pytest.fixture(autouse=True)
@@ -112,29 +130,32 @@ class TestClear:
 class TestPrintIntrospection:
     """Verifies introspection output for empty and populated registries."""
 
-    def test_with_contracts(self, capsys: pytest.CaptureFixture[str], header_fires_nowhere: Any) -> None:
+    def test_with_contracts(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
         """Introspection prints registered contract names.
-        The title goes through cli's header, which alone fires cli_header_displayed (api, fleet green leg 3).
+        The title is handed to cli's header at api's border (api, fleet green leg 4).
         Mutant that reddens it: header replaced by a plain print of the same title."""
         register("search", lambda: None)
         register("memory", lambda: None)
+        titles = _spy_on_header(monkeypatch)
 
         print_introspection()
 
         out = capsys.readouterr().out
-        header_fires_nowhere.fire.assert_called_once_with("cli_header_displayed", title="Bridge — Contract Registry")
+        assert titles == ["Bridge — Contract Registry"]
         assert "Bridge — Contract Registry" in out
         assert "Registered contracts:" in out
         assert "• memory" in out
         assert "• search" in out
         assert "No contracts registered." not in out
 
-    def test_without_contracts(self, capsys: pytest.CaptureFixture[str], header_fires_nowhere: Any) -> None:
+    def test_without_contracts(self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
         """Introspection on empty registry says it holds no contracts."""
+        titles = _spy_on_header(monkeypatch)
+
         print_introspection()
 
         out = capsys.readouterr().out
-        header_fires_nowhere.fire.assert_called_once_with("cli_header_displayed", title="Bridge — Contract Registry")
+        assert titles == ["Bridge — Contract Registry"]
         assert "Bridge — Contract Registry" in out
         assert "No contracts registered." in out
         assert "Registered contracts:" not in out

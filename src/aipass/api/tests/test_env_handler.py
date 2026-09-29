@@ -3,7 +3,7 @@
 # Description: Tests for .env template creation handler
 # Version: 1.0.0
 # Created: 2026-05-12
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/auth/env.py -- .env template creation, and keys.py's no-key diagnosis."""
@@ -86,12 +86,13 @@ class TestCreateEnvTemplate:
         dir_mode = stat.S_IMODE(os.stat(secrets_dir).st_mode)
         assert dir_mode == 0o700
 
-    def test_handles_write_failure(self, tmp_path: Path) -> None:
-        """A write the platform refuses returns False.
+    def test_handles_a_parent_directory_that_cannot_be_made(self, tmp_path: Path) -> None:
+        """A mkdir the platform refuses returns False.
 
         api, fleet green leg 3: the failure is real, not a patched builtins.open -
         the parent of the target is a regular file, so the platform itself
-        refuses to build the directory the template would land in.
+        refuses to build the directory the template would land in. This is the
+        mkdir step; the open step has its own case below (api, fleet green leg 4).
         """
         blocker = tmp_path / "secrets"
         blocker.write_text("not a directory\n", encoding="utf-8")
@@ -101,6 +102,21 @@ class TestCreateEnvTemplate:
 
         assert result is False
         assert blocker.read_text(encoding="utf-8") == "not a directory\n"
+
+    def test_handles_a_file_that_cannot_be_opened(self, tmp_path: Path) -> None:
+        """An open that fails after the directory is made returns False and writes nothing.
+
+        The name holds a NUL byte, which Python itself refuses to open on every
+        platform before the disk is touched: the error is Python's, not the file
+        system's (api, fleet green leg 4).
+        """
+        secrets_dir = tmp_path / "secrets"
+        target = secrets_dir / ".env\x00"
+
+        result = create_env_template(provider="openrouter", target_path=target)
+
+        assert result is False
+        assert list(secrets_dir.iterdir()) == []
 
 
 class TestDiagnoseKeySuggestsRealCommand:

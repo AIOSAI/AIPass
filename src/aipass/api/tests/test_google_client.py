@@ -3,7 +3,7 @@
 # Description: Tests for Google API client module
 # Version: 1.0.0
 # Created: 2026-03-24
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/modules/google_client.py and the apps/handlers/google/auth.py it drives."""
@@ -74,26 +74,6 @@ def test_handle_command_returns_false_non_google_provider(
     result = google_client.handle_command("validate", ["openrouter"])
     assert result is False
     assert capsys.readouterr().out == ""
-
-
-@patch(f"{_MOD}.google_auth", autospec=True)
-@patch(f"{_MOD}.google_factory", autospec=True)
-@patch(f"{_MOD}.google_retry", autospec=True)
-@patch(f"{_MOD}.json_handler", autospec=True)
-@patch(f"{_MOD}.header")
-@patch(f"{_MOD}.success")
-@patch(f"{_MOD}.error")
-@patch(f"{_MOD}.warning")
-def test_handle_command_routes_validate_google(_warn, _err, _succ, _hdr, mock_json, _retry, _factory, mock_auth):
-    """handle_command routes 'validate' with ['google'] to _cmd_validate."""
-    mock_auth.is_available.return_value = True
-    mock_auth.CLIENT_SECRET_PATH.exists.return_value = True
-    mock_auth.validate_credentials.return_value = True
-
-    result = google_client.handle_command("validate", ["google"])
-
-    assert result is True
-    mock_auth.validate_credentials.assert_called_once()
 
 
 @patch(f"{_MOD}.google_auth", autospec=True)
@@ -565,6 +545,8 @@ def test_cmd_validate_valid_creds(_warn, _err, mock_succ, _hdr, mock_json, _retr
 
     assert google_client.handle_command("validate", ["google"]) is True
 
+    # Took over from the retired test_handle_command_routes_validate_google (api, fleet green leg 4).
+    mock_auth.validate_credentials.assert_called_once_with()
     mock_succ.assert_called_once_with("Google credentials are valid")
     mock_json.log_operation.assert_called_once_with("google_validate", {"status": "valid"})
     _err.assert_not_called()
