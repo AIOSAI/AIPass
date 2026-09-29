@@ -190,7 +190,7 @@ def test_load_config_full_file(tmp_path):
     """Complete config file is returned with all user values."""
     config_file = tmp_path / "safety_config.json"
     full_config = {
-        "kill_switch_path": "/tmp/test_pause",
+        "kill_switch_path": str(tmp_path / "test_pause"),
         "poll_interval_seconds": 120,
         "max_depth": 2,
         "max_turns_per_wake": 50,
@@ -212,7 +212,7 @@ def test_load_config_full_file(tmp_path):
     assert result["cold_start_prompt"] == "Custom cold start"
     assert result["wake_prompt"] == "Custom wake"
     assert result["autonomous_branches"] == ["@flow", "@backup"]
-    assert result["kill_switch_path"] == "/tmp/test_pause"
+    assert result["kill_switch_path"] == str(tmp_path / "test_pause")
 
 
 def test_load_config_corrupt_json(tmp_path):
@@ -1665,7 +1665,7 @@ def test_run_daemon_kill_switch_pauses(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon.load_config",
             return_value={
                 "poll_interval_seconds": 0,
-                "kill_switch_path": "/tmp/nope",
+                "kill_switch_path": str(tmp_path / "nope"),
                 "max_turns_per_wake": 10,
                 "max_dispatches_per_branch_per_day": 5,
                 "autonomous_branches": [],
@@ -1702,7 +1702,7 @@ def test_run_daemon_shutdown_exits_loop(tmp_path, monkeypatch):
             "aipass.ai_mail.apps.handlers.dispatch.daemon.load_config",
             return_value={
                 "poll_interval_seconds": 0,
-                "kill_switch_path": "/tmp/nope",
+                "kill_switch_path": str(tmp_path / "nope"),
                 "max_turns_per_wake": 10,
                 "max_dispatches_per_branch_per_day": 5,
                 "autonomous_branches": [],
