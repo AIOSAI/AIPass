@@ -3,7 +3,7 @@
 # Description: Tests for the host API attach lane — a real PTY running a tmux client
 # Version: 1.0.0
 # Created: 2026-08-14
-# Modified: 2026-09-28
+# Modified: 2026-09-29
 # =============================================
 
 """Tests for apps/handlers/host/attach.py and the WS /v1/room/attach route in apps/handlers/host/server.py."""
@@ -100,14 +100,21 @@ def quiet():
 FD_DIR = "/dev/fd"
 
 
-def _open_descriptors() -> int:
+def _open_descriptors(listdir: Any = None) -> int:
     """
     Count the descriptors this process holds open.
+
+    Args:
+        listdir: What lists the directory; None means os.listdir, resolved at
+            call time. Handed in by the no-/proc census case, so that case
+            manufactures its host without replacing os.listdir for the whole
+            process (api, fleet green leg 5).
 
     Returns:
         The number of open descriptors, the listing's own handle included.
     """
-    return len(os.listdir(FD_DIR))
+    lister = listdir if listdir is not None else os.listdir
+    return len(lister(FD_DIR))
 
 
 fd_census_required = pytest.mark.skipif(
@@ -772,7 +779,7 @@ class TestTheRoomCanActuallyHearAResize:
 
         login_tty.assert_called_once_with(0)
 
-    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any, monkeypatch: Any) -> None:
+    def test_a_real_child_ends_up_owning_the_terminal(self, quiet: Any, tmux_preflight: Any) -> None:
         """
         The property itself, on a real process rather than a mock.
 
@@ -789,22 +796,21 @@ class TestTheRoomCanActuallyHearAResize:
         a read taken after the subject died was green here for a reason that has
         nothing to do with the property under test. The stand-in refuses once
         the session is closed, exactly as the runner does, so moving either read
-        back below the hangup goes red on this box too.
+        back below the hangup goes red on this box too. The test calls the
+        stand-in by name rather than replacing os.getpgid for the process: the
+        product never reads a pgid, so only this read needs the macOS answer
+        (api, fleet green leg 5).
         """
         with patch.object(host_attach, "attach_command", lambda branch, scope="": ["cat"]):
             session = host_attach.open_attach("api")
 
-        real_getpgid = os.getpgid
-
         def macos_getpgid(pid: int) -> int:
             if session.closed:
                 raise ProcessLookupError(errno.ESRCH, "No such process")
-            return real_getpgid(pid)
-
-        monkeypatch.setattr(os, "getpgid", macos_getpgid)
+            return os.getpgid(pid)
 
         try:
-            child_group = os.getpgid(session.process.pid)
+            child_group = macos_getpgid(session.process.pid)
             # Polled on the real condition: the child's exec claims the
             # terminal, and until it has the foreground is still ours.
             deadline = time.monotonic() + 5
@@ -1068,7 +1074,7 @@ class TestOpeningAnAttach:
         assert _open_descriptors() <= before + 1
 
     @fd_census_required
-    def test_the_descriptor_census_counts_this_process_without_proc(self, monkeypatch: Any) -> None:
+    def test_the_descriptor_census_counts_this_process_without_proc(self) -> None:
         """
         The instrument above, measured on a host that has no /proc.
 
@@ -1090,12 +1096,10 @@ class TestOpeningAnAttach:
                 raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(path))
             return real_listdir(path, *args, **kwargs)
 
-        monkeypatch.setattr(os, "listdir", no_proc)
-
-        before = _open_descriptors()
+        before = _open_descriptors(no_proc)
         holder = open(os.devnull, "rb")
         try:
-            assert _open_descriptors() == before + 1, "the census does not see this process's own descriptors"
+            assert _open_descriptors(no_proc) == before + 1, "the census does not see this process's own descriptors"
         finally:
             holder.close()
 

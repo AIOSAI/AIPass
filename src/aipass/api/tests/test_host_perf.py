@@ -886,19 +886,18 @@ class TestThePumpPoolIsBoundedOutLoud:
         monkeypatch.setattr(host_attach, "_PUMP_SLOTS", threading.BoundedSemaphore(1))
         monkeypatch.setattr(host_attach, "pty", SimpleNamespace(openpty=lambda: (-7, -8)))
         monkeypatch.setattr(host_attach, "set_winsize", lambda *a: sized.append(a))
-        monkeypatch.setattr(host_attach.os, "close", closed.append)
         monkeypatch.setattr(host_attach.subprocess, "Popen", MagicMock(side_effect=OSError("no")))
 
         with patch.object(host_attach, "logger", MagicMock()):
             with pytest.raises(host_attach.AttachUnavailable):
-                host_attach._spawn_pty(["true"], None, "baud-api")
+                host_attach._spawn_pty(["true"], None, "baud-api", close_fd=closed.append)
 
         # The stand-in descriptors are observed, not discarded (api, fleet green
-        # leg 4): the master was sized, and both ends were handed back. A set,
-        # because the slave is closed in the except AND again in the finally -
-        # a double close reported to devpulse, not pinned here.
+        # leg 4): the master was sized, and each end was handed back exactly
+        # once. A list in the order of the closes, not a set: a set hid the
+        # slave's second close in the finally (api, fleet green leg 5).
         assert sized == [(-7, host_attach.DEFAULT_COLS, host_attach.DEFAULT_ROWS)]
-        assert set(closed) == {-7, -8}
+        assert closed == [-7, -8]
         # The slot came back: a fresh reservation succeeds where the cap is one.
         host_attach._reserve_session("baud-next")
 

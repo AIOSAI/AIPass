@@ -1,7 +1,7 @@
 # =================== AIPass ====================
 # Name: caller.py
 # Description: OpenRouter Caller Detection Handler
-# Version: 1.0.1
+# Version: 1.0.2
 # Created: 2025-11-16
 # Modified: 2026-09-29
 # =============================================
@@ -55,6 +55,14 @@ def get_caller_info() -> Optional[Dict[str, Any]]:
 
     Returns dict with: caller_name, caller_path, json_folder, category, detection_method
     Returns None if detection fails.
+
+    A failure answers the same None as no caller found, on purpose (api, fleet
+    green leg 5). Every caller does the right thing for a failure with that
+    None: client.get_response names the caller 'unknown' and sends the request,
+    and provision.ensure_caller_config answers {} (its own outer catch answers
+    {} as well). A raise, or a catch narrowed to a named list, would let an
+    error end client.get_response before its request is sent. What tells the
+    two apart is the error line logged here.
     """
     try:
         stack = inspect.stack()

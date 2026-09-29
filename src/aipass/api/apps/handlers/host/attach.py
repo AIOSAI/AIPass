@@ -1,9 +1,9 @@
 # =================== AIPass ====================
 # Name: attach.py
 # Description: Host API Attach Handler — a real PTY running a tmux client, for the phone
-# Version: 1.0.0
+# Version: 1.0.1
 # Created: 2026-08-14
-# Modified: 2026-08-14
+# Modified: 2026-09-29
 # =============================================
 # pyright: reportOptionalMemberAccess=false
 # The suppression covers the POSIX-only placeholders: on Windows fcntl/pty/
@@ -766,7 +766,7 @@ def open_monitor(target: str = "", cwd: Optional[Path] = None) -> AttachSession:
     return AttachSession(process, master, cleaned or GLOBAL_WATCH_LABEL, label, read_only=True)
 
 
-def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
+def _spawn_pty(command: List[str], cwd: Optional[Path], room: str, close_fd: Any = None) -> tuple:
     """
     Spawn `command` as the child of a fresh PTY. The shared mechanics of every
     lane that ends in a live terminal — attach, shell, and watch differ only
@@ -776,14 +776,21 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
         command: The argv to run.
         cwd: Directory the child starts in; None inherits the server's.
         room: What to call this session in logs and error sentences.
+        close_fd: What closes a descriptor, called with the descriptor. None
+            (every product caller) means os.close, resolved at call time. A
+            seam for the tests alone (api, fleet green leg 5): test_host_perf's
+            failed-spawn pin records the closes in order through it, rather
+            than replacing os.close for the whole process.
 
     Returns:
         (process, master descriptor).
 
     Raises:
         AttachUnavailable: The spawn itself failed; both descriptors are
-            closed before the error leaves.
+            closed, each exactly once, before the error leaves.
     """
+    closer = close_fd if close_fd is not None else os.close
+
     # Before anything is spawned: a terminal this server cannot pump must be
     # refused, not opened. Held from here until the session hangs up.
     _reserve_session(room)
@@ -822,8 +829,7 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
             env=_child_env(),
         )
     except OSError as e:
-        os.close(master)
-        os.close(slave)
+        closer(master)
         # No session will ever be built to own this reservation, so it goes back
         # here. Without this, a machine that fails to spawn PUMP_WORKERS times
         # refuses every terminal afterwards while pumping none.
@@ -833,11 +839,12 @@ def _spawn_pty(command: List[str], cwd: Optional[Path], room: str) -> tuple:
     finally:
         # The child holds its own copy; keeping ours open would mean the master
         # never reports EOF when the client exits, and the pump would hang
-        # forever on a room that is already gone.
-        try:
-            os.close(slave)
-        except OSError as e:
-            logger.debug("[host_api] slave descriptor for %s was already closed: %s", room, e)
+        # forever on a room that is already gone. Closed HERE ALONE, on every
+        # path (api, fleet green leg 5): the except used to close it too, and the
+        # second close, caught and logged at debug, could land on a descriptor
+        # number another thread had just been handed. Nothing closes the slave
+        # before this line now, so that catch is gone with it.
+        closer(slave)
 
     return process, master
 
